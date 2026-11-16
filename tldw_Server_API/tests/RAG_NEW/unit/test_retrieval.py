@@ -76,6 +76,59 @@ class TestRetrievalConfig:
 
 @pytest.mark.unit
 class TestMediaDBRetriever:
+    @pytest.mark.parametrize("query", [
+        "title:missing", "TITLE : missing", "content: missing", "content :missing",
+        "chunk_text:missing", "chunk_text : missing", "unknownfield:missing",
+        '"exact phrase"', "Rowan AND missing", "Rowan OR missing", "Rowan NOT missing",
+        "NEAR(Rowan missing)", "Rowan*", "^Rowan", "(Rowan missing)",
+    ])
+    def test_explicit_fts_intent_preserves_scopes_and_operators(self, query):
+        assert retr_mod._has_explicit_fts_syntax(query)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fts_level", ["media", "chunk"])
+    async def test_natural_question_colon_reaches_bounded_fallback(self, tmp_path, fts_level):
+        db = _create_media_db(tmp_path)
+        content = "Rowan Observatory telescope Selene, Friday tours at18:00, dome17:30 and east gate."
+        try:
+            media_id, _, _ = db.add_media_with_keywords(
+                title="Rowan source", media_type="document", content=content, keywords=[],
+                chunks=[{"text": content, "start_char": 0, "end_char": len(content), "chunk_type": "text"}],
+            )
+            retriever = MediaDBRetriever(str(db.db_path), config=RetrievalConfig(
+                use_fts=True, use_vector=False, fts_level=fts_level), media_db=db)
+            documents = await retriever.retrieve(
+                "Rowan Observatory: identify the telescope, Friday tour time, dome opening time and visitor entrance.",
+                allowed_media_ids=[media_id],
+            )
+            expected = f"Rowan source\n{content}" if fts_level == "media" else content
+            assert [document.content for document in documents] == [expected]
+        finally:
+            db.close_connection()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fts_level", ["media", "chunk"])
+    @pytest.mark.parametrize("query", ["scoped", '"Missing Rowan"', "Rowan AND missing", "Rowan NOT Rowan"])
+    async def test_explicit_fts_miss_does_not_become_natural_term_search(self, tmp_path, fts_level, query):
+        db = _create_media_db(tmp_path)
+        content = "Rowan Observatory telescope Selene."
+        try:
+            media_id, _, _ = db.add_media_with_keywords(
+                title="Rowan source", media_type="document", content=content, keywords=[],
+                chunks=[{"text": content, "start_char": 0, "end_char": len(content), "chunk_type": "text"}],
+            )
+            retriever = MediaDBRetriever(str(db.db_path), config=RetrievalConfig(
+                use_fts=True, use_vector=False, fts_level=fts_level), media_db=db)
+            if query == "scoped":
+                column = "content" if fts_level == "media" else "chunk_text"
+                query = f"{column}:missing Rowan"
+            assert await retriever.retrieve(query, allowed_media_ids=[media_id]) == []
+            control = await retriever.retrieve("Rowan", allowed_media_ids=[media_id])
+            expected = f"Rowan source\n{content}" if fts_level == "media" else content
+            assert [document.content for document in control] == [expected]
+        finally:
+            db.close_connection()
+
     def test_postgres_natural_fallback_uses_original_terms_for_english_stemming(self, monkeypatch):
         retriever = MediaDBRetriever.__new__(MediaDBRetriever)
         retriever.media_db = SimpleNamespace(backend_type=BackendType.POSTGRESQL)

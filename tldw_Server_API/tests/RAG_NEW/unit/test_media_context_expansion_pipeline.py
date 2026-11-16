@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -135,19 +136,29 @@ async def test_expanded_text_passes_injection_policy_and_security_filters(expans
     assert "private@example.test" not in repr(result)
 
 
-async def test_context_expansion_obeys_complete_request_deadline(expansion_pipeline, monkeypatch):
+@pytest.mark.parametrize("blocking_setup", [False, True])
+async def test_context_expansion_obeys_complete_request_deadline(expansion_pipeline, monkeypatch, blocking_setup):
+    started = asyncio.Event()
     cancelled = asyncio.Event()
 
+    async def blocking_preparation(query):
+        # Cold synchronous setup can exhaust the deadline before retrieval yields.
+        if blocking_setup:
+            time.sleep(0.02)
+        return query
+
     async def slow_expansion(*args, **kwargs):
+        started.set()
         try:
-            await asyncio.sleep(60)
+            await asyncio.sleep(0.1)
         finally:
             cancelled.set()
 
     monkeypatch.setattr(pipeline, "expand_media_context", slow_expansion)
+    monkeypatch.setattr(pipeline, "spell_check_query", blocking_preparation)
     with pytest.raises(TimeoutError):
-        await run_pipeline(enable_parent_expansion=True, timeout_seconds=0.05)
-    assert cancelled.is_set()
+        await run_pipeline(enable_parent_expansion=True, spell_check=True, timeout_seconds=0.01)
+    assert not started.is_set() or cancelled.is_set()
 
 
 async def test_failed_parent_read_does_not_return_unfiltered_evidence(expansion_pipeline, monkeypatch):

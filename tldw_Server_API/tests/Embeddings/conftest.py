@@ -18,6 +18,28 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.main import app
 
 
+@pytest.fixture
+def local_hf_tokenizer_lookups(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Tokenize mocked local inference inputs without downloading model assets."""
+    from tokenizers import Tokenizer, models
+    from transformers import PreTrainedTokenizerFast
+
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=Tokenizer(models.BPE(vocab={chr(i): i for i in range(128)}, merges=[])),
+        model_max_length=512,
+    )
+    lookups: list[str] = []
+
+    def load(model_name: str, _cache_dir: str, _revision: str | None, _trust_remote_code: bool) -> PreTrainedTokenizerFast:
+        lookups.append(model_name)
+        return tokenizer
+
+    monkeypatch.setattr(Embeddings_Create, "_load_hf_input_tokenizer", load)
+    return lookups
+
+
 @pytest.fixture(autouse=True)
 def healthy_provider_override_snapshot():
     """Keep non-lifespan embedding tests on a deterministic healthy snapshot."""

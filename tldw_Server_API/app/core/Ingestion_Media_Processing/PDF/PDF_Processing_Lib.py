@@ -520,6 +520,17 @@ def _extract_pdf_with_parser(
     return content
 
 
+def _parser_page_number(metadata: Any) -> int | None:
+    """Read documented one-based page keys without guessing on conflicting metadata."""
+    if not isinstance(metadata, dict):
+        return None
+    # PyMuPDF4LLM <2 uses page; its 2.x grounding API uses page_number.
+    numbers = [metadata[key] for key in ("page", "page_number") if key in metadata]
+    if not numbers or any(type(number) is not int or number < 1 for number in numbers):
+        return None
+    return numbers[0] if all(number == numbers[0] for number in numbers) else None
+
+
 def process_pdf(
     file_input: Union[str, bytes, Path], # Can be path, bytes, or Path object
     filename: str, # Original filename for reference and metadata fallback
@@ -691,7 +702,7 @@ def process_pdf(
                     page_text = normalize_pdf_text_for_storage(page["text"])
                     normalized_pages.append(page_text)
                     extracted_page_map.append({
-                        "page_number": page["metadata"]["page"],
+                        "page_number": _parser_page_number(page.get("metadata")),
                         "start_char": offset,
                         "end_char": offset + len(page_text),
                     })
@@ -943,6 +954,8 @@ def process_pdf(
                 page_count = doc.page_count
                 if extracted_page_map and doc.get_page_labels():
                     for page_entry in extracted_page_map:
+                        if page_entry["page_number"] is None or not 1 <= page_entry["page_number"] <= page_count:
+                            continue
                         label = doc[page_entry["page_number"] - 1].get_label()
                         if label:
                             page_entry["printed_page_label"] = label

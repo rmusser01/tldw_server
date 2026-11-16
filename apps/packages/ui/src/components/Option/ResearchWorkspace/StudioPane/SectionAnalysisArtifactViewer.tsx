@@ -1,4 +1,5 @@
 import React from "react"
+import { ArtifactRunIdentity } from "./ArtifactRunIdentity"
 import { SectionArtifactReviewPanel, type SaveSectionArtifactReview } from "./SectionArtifactReviewPanel"
 import { getSectionReviewTarget } from "@/utils/section-artifact-review"
 import { Link } from "react-router-dom"
@@ -6,6 +7,7 @@ import { useTranslation } from "react-i18next"
 import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
 import { buildDocumentPagePath } from "@/routes/route-paths"
 import type { GeneratedArtifact, WorkspaceSource } from "@/types/workspace"
+import { useWorkspaceStore } from "@/store/workspace"
 import { TraceableArtifactDetail, hasTraceableArtifactMetadata } from "./TraceableArtifactDetail"
 
 type Section = Record<string, unknown> & { title: string; status: string }
@@ -25,6 +27,24 @@ export const getSectionAnalysis = (artifact: GeneratedArtifact): SectionAnalysis
       !candidate.sections.every(section => record(section) &&
         typeof section.title === "string" && typeof section.status === "string")) return null
   return candidate as SectionAnalysis
+}
+
+/** Follow the existing saved-checkpoint stream without adding requests or authority. */
+export const CurrentSectionAnalysisArtifactViewer: React.FC<{
+  artifactId: string
+  workspaceId: string | null
+  isCurrent: () => boolean
+  onSaveReview: SaveSectionArtifactReview
+}> = ({ artifactId, workspaceId, isCurrent, onSaveReview }) => {
+  const { t } = useTranslation("playground")
+  const artifact = useWorkspaceStore(state => state.workspaceId === workspaceId
+    ? state.generatedArtifacts.find(item => item.id === artifactId) : undefined)
+  const sources = useWorkspaceStore(state => state.sources)
+  const analysis = artifact && getSectionAnalysis(artifact)
+  if (!isCurrent() || !artifact || !analysis)
+    return <p role="status">{t("studio.sectionReader.unavailable", "This output is no longer available in the current workspace.")}</p>
+  return <SectionAnalysisArtifactViewer key={`${workspaceId}:${artifactId}`} artifact={artifact} analysis={analysis} sources={sources}
+    onSaveReview={artifact.workspaceArtifactId && artifact.status !== "generating" ? onSaveReview : undefined} />
 }
 
 const PageLinks: React.FC<{ mediaId: unknown; spans: unknown; range?: boolean }> = ({ mediaId, spans, range }) => {
@@ -56,7 +76,9 @@ export const SectionAnalysisArtifactViewer: React.FC<{
   onSaveReview?: SaveSectionArtifactReview
 }> = ({ artifact, analysis, sources, onSaveReview }) => {
   const { t } = useTranslation("playground")
-  const [reviewArtifact, setReviewArtifact] = React.useState(artifact)
+  const [savedReview, setSavedReview] = React.useState<{ original: GeneratedArtifact; saved: GeneratedArtifact }>()
+  const reviewArtifact = savedReview?.original === artifact ? savedReview.saved : artifact
+  const generating = artifact.status === "generating"
   const selectorId = React.useId()
   const [selection, setSelection] = React.useState("overview")
   const [evidenceOpen, setEvidenceOpen] = React.useState(false)
@@ -73,12 +95,15 @@ export const SectionAnalysisArtifactViewer: React.FC<{
 
   return <div className="max-h-[70vh] space-y-4 overflow-y-auto text-text">
     <div className="space-y-2">
+      <ArtifactRunIdentity artifact={artifact} />
       <p className="text-sm font-medium">{`${completed} ${t("studio.sectionReader.of", "of")} ${analysis.sections.length} ${t("studio.sectionReader.completed", "sections completed")}`}</p>
       <p className="text-xs text-text-muted">{t("studio.sectionReader.scope", "Only the selected sections are covered. Document proposals are not evidence of enacted policy.")}</p>
-      {completed !== analysis.sections.length && <p className="text-sm text-warning">{t("studio.sectionReader.partial", "Partial coverage: failed or unread sections are excluded from the overview.")}</p>}
+      {generating && <p role="status" className="text-sm text-text-muted">{t("studio.sectionReader.generating", "Generation continues. Completed chapters update here. Review changes can be saved after generation finishes.")}</p>}
+      {!generating && completed !== analysis.sections.length && <p className="text-sm text-warning">{t("studio.sectionReader.partial", "Partial coverage: failed or unread sections are excluded from the overview.")}</p>}
       {text(analysis.stopped_error) && <p className="text-sm text-error">{text(analysis.stopped_error)}</p>}
       {!section && text(analysis.synthesis_error) && <p className="text-sm text-error">{text(analysis.synthesis_error)}</p>}
       {!section && summary && text(analysis.synthesis_error) && <p className="text-sm text-text-muted">{t("studio.sectionReader.retainedOverview", "The overview below is from an earlier attempt. Completed chapters and evidence remain available.")}</p>}
+      {!section && summary && generating && <p className="text-sm text-text-muted">{t("studio.sectionReader.runningOverview", "This saved overview may change while generation continues.")}</p>}
       <label htmlFor={selectorId} className="block text-sm font-medium">{t("studio.sectionReader.selector", "Chapter or section")}</label>
       <select id={selectorId} value={selection} onChange={event => {
         setSelection(event.target.value)
@@ -100,8 +125,14 @@ export const SectionAnalysisArtifactViewer: React.FC<{
         {text(section.error) && <p className="text-error">{text(section.error)}</p>}
       </div>}
       {summary ? <MarkdownPreview content={summary} size="base" /> : <p className="text-sm text-text-muted">
-        {section ? t("studio.sectionReader.noSummary", "This section has no completed summary yet. Saved evidence remains available below.") :
-          t("studio.sectionReader.noOverview", "Overview is not available yet.")}
+        {section ? section.status === "unread"
+          ? t("studio.sectionReader.unreadSection", "This section has not been processed yet.")
+          : section.status === "generating"
+            ? t("studio.sectionReader.generatingSection", "This section is still being processed. Saved evidence remains available below.")
+            : t("studio.sectionReader.noSummary", "This section has no completed summary yet. Saved evidence remains available below.")
+          : generating
+            ? t("studio.sectionReader.pendingOverview", "The overview is pending while generation continues. Choose a completed chapter to read now.")
+            : t("studio.sectionReader.noOverview", "Overview is not available yet.")}
       </p>}
       {section && <div className="border-t border-border pt-3">
         <button type="button" aria-expanded={evidenceOpen} onClick={() => setEvidenceOpen(open => !open)}
@@ -122,7 +153,8 @@ export const SectionAnalysisArtifactViewer: React.FC<{
       </div>}
     </section>
 
-    {reviewTarget && <SectionArtifactReviewPanel artifact={reviewArtifact} target={reviewTarget} onSave={onSaveReview} onSaved={setReviewArtifact} />}
+    {reviewTarget && <SectionArtifactReviewPanel artifact={reviewArtifact} target={reviewTarget}
+      onSave={generating ? undefined : onSaveReview} onSaved={saved => setSavedReview({ original: artifact, saved })} />}
 
     {hasTraceableArtifactMetadata(reviewArtifact) && <div className="border-t border-border pt-3">
       <button type="button" aria-expanded={technicalOpen} onClick={() => setTechnicalOpen(open => !open)}

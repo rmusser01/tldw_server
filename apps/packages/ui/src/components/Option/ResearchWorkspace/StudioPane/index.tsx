@@ -1,5 +1,6 @@
 import { SectionScopePicker } from "./SectionScopePicker"
-import { getSectionAnalysis, SectionAnalysisArtifactViewer } from "./SectionAnalysisArtifactViewer"
+import { ArtifactRunIdentity, LongDocumentWaitingGuidance } from "./ArtifactRunIdentity"
+import { getSectionAnalysis, CurrentSectionAnalysisArtifactViewer } from "./SectionAnalysisArtifactViewer"
 import { getSectionArtifactErrorMessage } from "@/utils/section-artifact-status"
 import type { ResearchWorkspaceSectionSelection } from "@/services/tldw/domains/workspace-api"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
@@ -1570,7 +1571,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     const isCurrent = () => {
       const current = useWorkspaceStore.getState().generatedArtifacts.find(entry => entry.id === artifact.id)
       return Boolean(editorIsCurrent() && !controller.signal.aborted && !scope?.scopeInvalidatedSignal.aborted &&
-        current && sameWorkspaceArtifactPayload(workspaceArtifactDraftPayload(current), originalPayload))
+        artifact.status !== "generating" && current && current.status !== "generating" &&
+        sameWorkspaceArtifactPayload(workspaceArtifactDraftPayload(current), originalPayload))
     }
     try {
       if (!workspaceId || !isCurrent()) throw new Error("The output or workspace changed. Your review draft is retained.")
@@ -1826,11 +1828,10 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     if (sectionAnalysis) {
       const editor = createEditorGuard()
       const modal = artifactModal.info({
-        title: artifact.title,
+        title: <span className="text-text">{artifact.title}</span>,
         afterClose: editor.afterClose,
-        content: <SectionAnalysisArtifactViewer artifact={artifact} analysis={sectionAnalysis} sources={workspaceSources}
-          onSaveReview={artifact.workspaceArtifactId && artifact.status !== "generating"
-            ? (original, patch) => saveArtifactReview(original, patch, editor.isCurrent) : undefined} />,
+        content: <CurrentSectionAnalysisArtifactViewer artifactId={artifact.id} workspaceId={workspaceId}
+          isCurrent={editor.isCurrent} onSaveReview={(original, patch) => saveArtifactReview(original, patch, editor.isCurrent)} />,
         ...responsiveModalProps(960)
       })
       editor.attach(modal)
@@ -2299,9 +2300,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               {generatingSectionOutput ? (
-                <p className="text-[11px] text-text-muted">
-                  {t("playground:studio.longDocumentDuration", "Long documents can take several minutes. Progress is saved after each portion.")}
-                </p>
+                <LongDocumentWaitingGuidance />
               ) : <>
               <p className="text-[11px] text-text-muted">
                 {t(
@@ -2347,6 +2346,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
           <summary className="cursor-pointer text-sm font-medium">Review sections for summaries and comparisons</summary>
           <p className="my-2 text-xs text-text-muted">Choose chapters or opposing contributions from the existing source outline. Selected sections set the scope for Summary, Report, Brief and Compare. With no section selection, Summary covers all selected source text.</p>
           <p className="mb-2 text-xs">{selectedSections.length} sections selected. Check boundaries in the preview before generating.</p>
+          <LongDocumentWaitingGuidance />
           <div className="space-y-2">{sectionScopeOpen && selectedSources.map(source => <SectionScopePicker key={source.id} source={source}
             selections={selectedSections} onChange={changeSectionSelection} disabled={isGeneratingOutput} />)}</div>
         </details>}
@@ -3035,17 +3035,23 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                   "playground:studio.retryFailedOutput",
                   "Retry"
                 )
-                const canViewRetainedSections = artifact.status === "failed" &&
-                  Boolean(artifact.content && getSectionAnalysis(artifact))
+                const sectionAnalysis = getSectionAnalysis(artifact)
+                const canViewCompletedChapters = artifact.status === "generating" &&
+                  Boolean(sectionAnalysis?.sections.some(section => section.status === "completed" &&
+                    typeof section.content === "string" && section.content.trim()))
+                const canViewRetainedSections = canViewCompletedChapters || (artifact.status === "failed" &&
+                  Boolean(artifact.content && sectionAnalysis))
                 const artifactErrorMessage = getSectionArtifactErrorMessage(artifact)
-                const viewAction = (artifact.content || artifact.audioUrl || hasTraceableArtifactMetadata(artifact)) && (
-                  <Tooltip title={t("common:view", "View")}>
+                const viewLabel = canViewCompletedChapters
+                  ? t("playground:studio.viewCompletedChapters", "View completed chapters") : t("common:view", "View")
+                const viewAction = (canViewCompletedChapters || artifact.content || artifact.audioUrl || hasTraceableArtifactMetadata(artifact)) && (
+                  <Tooltip title={viewLabel}>
                     <button
                       type="button"
                       onClick={() => handleViewArtifact(artifact)}
                       onKeyDown={handleIconButtonKeyDown}
                       className="rounded p-1 text-text-muted hover:bg-surface2 hover:text-text"
-                      aria-label={t("common:view", "View")}
+                      aria-label={viewLabel}
                     >
                       <Eye className="h-4 w-4" />
                     </button>
@@ -3114,9 +3120,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                             />
                           )}
                         </div>
-                        <p className="text-xs text-text-muted">
+                        {sectionJob || getSectionAnalysis(artifact) ? <ArtifactRunIdentity artifact={artifact} /> : <p className="text-xs text-text-muted">
                           {artifact.createdAt.toLocaleString()}
-                        </p>
+                        </p>}
                         {(usageTokens !== undefined || usageCost !== undefined || sectionJob) && (
                           <p className="text-[11px] text-text-muted">
                             {usageTokens === undefined

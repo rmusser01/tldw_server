@@ -2167,6 +2167,7 @@ async def test_key_only_remote_fallback_uses_same_adapter_default_base(
 @pytest.mark.asyncio
 async def test_concurrent_keyless_local_and_key_only_remote_hf_do_not_exchange_modes(
     monkeypatch,
+    local_hf_tokenizer_lookups,
 ):
     """A local keyless call and remote keyed call retain independent execution modes."""
     import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as mod
@@ -2249,6 +2250,7 @@ async def test_concurrent_keyless_local_and_key_only_remote_hf_do_not_exchange_m
         "https://api-inference.huggingface.co/models/org/remote-model"
     )
     assert remote_calls[0]["headers"]["Authorization"] == "Bearer remote-key"
+    assert local_hf_tokenizer_lookups == ["org/local-model"]
 
 
 @pytest.mark.unit

@@ -313,7 +313,15 @@ _MEDIA_NAMED_CHAPTER_RE = re.compile(r"\b((?:[A-Z][a-z]+\s+){2,5}[A-Z][a-z]+)\s+
 
 def _has_explicit_fts_syntax(query: str) -> bool:
     """Keep deliberate phrases, operators, scopes and prefixes strict."""
-    return bool(re.search(r'["*:()^]|\b(?:AND|OR|NOT|NEAR)\b', query))
+    if re.search(r'["*()^]|\b(?:AND|OR|NOT|NEAR)\b', query):
+        return True
+    # Natural questions use colons too. Preserve actual Media FTS scopes with
+    # optional whitespace and compact unknown scopes without broadening them.
+    return bool(re.search(
+        r"\b(?:title|content|chunk_text)\s*:|\b[A-Za-z_][A-Za-z0-9_]*:\S",
+        query,
+        re.IGNORECASE,
+    ))
 
 
 def _derive_bounded_media_term_query(query: Optional[str], *, max_terms: int = 3) -> Optional[str]:

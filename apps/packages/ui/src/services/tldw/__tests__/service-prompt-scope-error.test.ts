@@ -21,6 +21,22 @@ describe("B09 scoped analysis versions", () => {
 })
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/media/7/outline", "GET", true],
+    ["/api/v1/media/7/navigation?include_generated_fallback=false", "GET", true],
+    ["/api/v1/media/7/outline", "POST", false],
+    ["/api/v1/media/7/navigation", "DELETE", false],
+    ["/api/v1/media/7/navigation/generated_toc%3A18/content?format=auto", "GET", true],
+    ["/api/v1/media/7/navigation/other/content", "POST", false],
+    ["/api/v1/media/7/navigation/other/content/extra", "GET", false],
+    ["/api/v1/media/7/navigation/a%2fb/content", "GET", false],
+    ["/api/v1/media/0/navigation", "GET", false],
+    ["/api/v1/media/7%2fother/outline", "GET", false],
+    ["https://other.test/api/v1/media/7/navigation", "GET", false]
+  ])("bounds captured document Contents %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+  it.each([
     ["/api/v1/chatbooks/export", "POST"],
     ["/api/v1/chatbooks/export/jobs/export-1", "GET"],
     ["/api/v1/chatbooks/download/export-1", "GET"],

@@ -2929,7 +2929,9 @@ async def unified_rag_pipeline(
     # --- Internal helpers (defined early so downstream phases can use them) ---
     async def _with_timeout(coro, timeout: Optional[float]):
         if timeout and timeout > 0:
-            return await asyncio.wait_for(coro, timeout=timeout)
+            # Keep the outer request cancellation in this task on Python 3.11.
+            async with asyncio.timeout(timeout):
+                return await coro
         return await coro
 
     async def _resilient_call(
@@ -5234,7 +5236,7 @@ async def unified_rag_pipeline(
                 result.errors.append(f"Gap analysis failed: {e}")
 
         # ========== BOUNDED MEDIA CONTEXT ==========
-        verify_vector_locations = any(doc.metadata.get("retrieval_method") == "vector" for doc in result.documents)
+        verify_vector_locations = any(_document_metadata(doc).get("retrieval_method") == "vector" for doc in result.documents)
         if result.documents and (enable_parent_expansion or include_sibling_chunks or verify_vector_locations):
             context_start = time.time()
             context_seeds = result.documents

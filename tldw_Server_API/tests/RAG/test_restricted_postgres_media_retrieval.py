@@ -546,6 +546,7 @@ async def test_selected_media_retains_distinct_facets_after_strict_fts_miss(
     assert actual_ids == {str(mid) for mid in selected}  # nosec B101 -- Real selected-evidence retrieval boundary.
     with scoped_context(user_id=1, is_admin=False):
         unscoped = await retriever.retrieve(question)
-    assert {str(document.metadata.get("media_id", document.id)) for document in unscoped} == {str(selected[0])}  # nosec B101 -- Keep the unscoped three-term fallback contract.
+    expected_unscoped = selected if fts_level == "chunk" else selected[:1]
+    assert {str(document.metadata.get("media_id", document.id)) for document in unscoped} == {str(mid) for mid in expected_unscoped}  # nosec B101 -- Chunk fallback uses eight terms; media fallback uses three.
     with scoped_context(user_id=2, is_admin=False):
         assert await retriever.retrieve(question, allowed_media_ids=selected) == []  # nosec B101 -- Foreign-owner denial is required.

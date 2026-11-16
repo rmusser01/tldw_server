@@ -95,6 +95,10 @@ async def test_variant_deadline_reports_partial_search_and_preserves_cancellatio
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+    elif not decomposition:
+        # The request-wide deadline supersedes a partial expansion result.
+        with pytest.raises(TimeoutError):
+            await task
     else:
         result = await task
         assert result.metadata["source_status"]["characters"] == {

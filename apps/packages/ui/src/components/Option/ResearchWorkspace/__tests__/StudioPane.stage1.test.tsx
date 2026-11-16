@@ -1,7 +1,7 @@
 import React from "react"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { Modal } from "antd"
+import { ConfigProvider, Modal } from "antd"
 import { HashRouter, MemoryRouter } from "react-router-dom"
 import type { AudioGenerationSettings, GeneratedArtifact, WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
@@ -35,6 +35,7 @@ const {
   messageOptionStoreState,
   chatModelSettingsStoreState,
   baseAudioSettings,
+  workspaceNotifications,
   workspaceStoreState
 } = vi.hoisted(() => {
   const addArtifact = vi.fn()
@@ -79,6 +80,7 @@ const {
     }
   ]
   const storeState = {
+    workspaceId: null as string | null,
     selectedSourceIds: ["source-1"],
     selectedSourceFolderIds: [] as string[],
     sources: defaultSources,
@@ -159,7 +161,8 @@ const {
     messageOptionStoreState: messageOptionState,
     chatModelSettingsStoreState: chatModelSettingsState,
     baseAudioSettings: defaultAudioSettings,
-    workspaceStoreState: storeState
+    workspaceStoreState: storeState,
+    workspaceNotifications: { version: 0, listeners: new Set<() => void>() }
   }
 })
 
@@ -269,7 +272,13 @@ vi.mock("@/store/workspace", () => ({
   hasResearchWorkspaceMigrationTombstone: () => false,
   useWorkspaceStore: Object.assign((
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState), { getState: () => workspaceStoreState })
+  ) => {
+    React.useSyncExternalStore(listener => {
+      workspaceNotifications.listeners.add(listener)
+      return () => { workspaceNotifications.listeners.delete(listener) }
+    }, () => workspaceNotifications.version)
+    return selector(workspaceStoreState)
+  }, { getState: () => workspaceStoreState })
 }))
 
 vi.mock("antd", async () => {
@@ -386,6 +395,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     }
 
     workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.workspaceId = null
     workspaceStoreState.selectedSourceFolderIds = []
     workspaceStoreState.sources = [
       {
@@ -2436,14 +2446,90 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(dialog.getByRole("link", { name: "Printed 1 · PDF 34" })).toHaveAttribute("href", "#/document-workspace?open=42&page=34")
   })
 
-  it("keeps in-flight section outputs and failed legacy outputs out of the reader", () => {
+  it("keeps zero-completed running outputs and failed legacy outputs out of the reader", () => {
+    const pending = sectionReaderArtifact()
+    const analysis = pending.data!.sectionAnalysis as { sections: Array<{ status: string }> }
+    analysis.sections.forEach(section => { section.status = "unread" })
     workspaceStoreState.generatedArtifacts = [
-      { ...sectionReaderArtifact(), status: "generating" },
+      { ...pending, status: "generating" },
       { id: "failed-legacy", type: "summary", title: "Failed legacy", status: "failed", content: "Incomplete text", createdAt: new Date() }
     ]
     renderStudioPane()
     expandGeneratedOutputsSection()
     expect(screen.queryByRole("button", { name: "View" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "View completed chapters" })).not.toBeInTheDocument()
+  })
+
+  it("reads saved chapters during generation and follows checkpoints without losing selection", async () => {
+    const artifact = { ...sectionReaderArtifact(), status: "generating" as const,
+      workspaceArtifactId: "canonical-summary", workspaceArtifactVersion: 4 }
+    const analysis = artifact.data!.sectionAnalysis as { synthesis?: string; sections: Array<{ status: string; content?: string }> }
+    delete analysis.synthesis
+    analysis.sections.slice(1).forEach(section => { section.status = "unread"; delete section.content })
+    const original = JSON.stringify(artifact)
+    workspaceStoreState.workspaceId = "reading-workspace"
+    workspaceStoreState.generatedArtifacts = [artifact]
+    render(<MemoryRouter><StudioPane /></MemoryRouter>)
+    expandGeneratedOutputsSection()
+    fireEvent.click(screen.getByRole("button", { name: "View completed chapters" }))
+    const dialog = within(await screen.findByRole("dialog"))
+    expect(dialog.getByText(/overview is pending while generation continues/i)).toBeInTheDocument()
+    const selector = dialog.getByRole("combobox", { name: "Chapter or section" })
+    fireEvent.change(selector, { target: { value: "0" } })
+    fireEvent.click(dialog.getByRole("button", { name: /Show evidence/ }))
+    expect(dialog.getByText("Readable summary for chapter 1.")).toBeInTheDocument()
+    expect(dialog.getByRole("button", { name: "Save review" })).toBeDisabled()
+    const next = { ...artifact, workspaceArtifactVersion: 5, data: { sectionAnalysis: { ...analysis,
+      sections: analysis.sections.map((section, index) => index === 1
+        ? { ...section, status: "completed", content: "New checkpoint chapter two." } : section) } } }
+    act(() => {
+      workspaceStoreState.generatedArtifacts = [next]
+      workspaceNotifications.version++
+      workspaceNotifications.listeners.forEach(listener => listener())
+    })
+    expect(selector).toHaveValue("0")
+    expect(dialog.getByText("Exact source quote 1")).toBeInTheDocument()
+    expect(dialog.getByText("2 of 30 sections completed")).toBeInTheDocument()
+    fireEvent.change(selector, { target: { value: "1" } })
+    expect(dialog.getByText("New checkpoint chapter two.")).toBeInTheDocument()
+    expect(dialog.getByRole("button", { name: "Save review" })).toBeDisabled()
+    act(() => {
+      workspaceStoreState.generatedArtifacts = [{ ...next, status: "failed", workspaceArtifactVersion: 6 }]
+      workspaceNotifications.version++
+      workspaceNotifications.listeners.forEach(listener => listener())
+    })
+    expect(selector).toHaveValue("1")
+    expect(dialog.getByRole("button", { name: "Save review" })).toBeEnabled()
+    expect(dialog.queryByText(/Generation continues\. Completed chapters update here/)).not.toBeInTheDocument()
+    fireEvent.change(selector, { target: { value: "2" } })
+    expect(dialog.getByText("This section has not been processed yet.")).toBeInTheDocument()
+    act(() => {
+      workspaceStoreState.generatedArtifacts = []
+      workspaceNotifications.version++
+      workspaceNotifications.listeners.forEach(listener => listener())
+    })
+    expect(dialog.queryByRole("combobox", { name: "Chapter or section" })).not.toBeInTheDocument()
+    expect(dialog.getByText("This output is no longer available in the current workspace.")).toBeInTheDocument()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+    expect(mockGenerateResearchWorkspaceArtifact).not.toHaveBeenCalled()
+    expect(JSON.stringify(artifact)).toBe(original)
+  })
+
+  it.each(["account", "workspace"])("retires a running chapter reader on %s change", async boundary => {
+    const artifact = { ...sectionReaderArtifact(), status: "generating" as const }
+    workspaceStoreState.workspaceId = "reading-workspace"
+    workspaceStoreState.generatedArtifacts = [artifact]
+    const view = render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><StudioPane /></MemoryRouter></ConfigProvider>)
+    expandGeneratedOutputsSection()
+    fireEvent.click(screen.getByRole("button", { name: "View completed chapters" }))
+    const dialog = within(await screen.findByRole("dialog"))
+    fireEvent.change(dialog.getByRole("combobox", { name: "Chapter or section" }), { target: { value: "0" } })
+    expect(dialog.getByText("Readable summary for chapter 1.")).toBeInTheDocument()
+    if (boundary === "account") act(() => { window.dispatchEvent(new Event("tldw:auth-principal-changed")) })
+    else workspaceStoreState.workspaceId = "other-workspace"
+    view.rerender(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><StudioPane /></MemoryRouter></ConfigProvider>)
+    await waitFor(() => expect(screen.queryByText("Readable summary for chapter 1.")).not.toBeInTheDocument())
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
   })
 
   it.each([undefined, { schemaVersion: 2, sections: [] }, { schemaVersion: 1, sections: [null] }])("keeps legacy or unsupported section payloads in their existing viewer: %j", async sectionAnalysis => {
@@ -2774,7 +2860,8 @@ it('shows long-document timing for a saved section job instead of a per-file est
     workspaceArtifactId: 'saved-output', producerMetadata: { origin: 'research_workspace_output_job', job_id: 9 }
   }];
   renderStudioPane();
-  expect(screen.getByText('Long documents can take several minutes. Progress is saved after each portion.')).toBeInTheDocument();
+  expect(screen.getAllByText('In observed 922-page, 30-chapter runs, generation took 52–62 minutes.')).not.toHaveLength(0);
+  expect(screen.getAllByText(/This is not an estimate for this run/)).not.toHaveLength(0);
   expect(screen.queryByText(/Usually takes 10/)).not.toBeInTheDocument();
   expect(screen.queryByText(/~\d+s for/)).not.toBeInTheDocument();
 });

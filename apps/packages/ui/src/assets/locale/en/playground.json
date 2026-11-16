@@ -1159,7 +1159,34 @@
     "messagePlaceholderCompare": "Send to {{count}} models..."
   },
   "studio": {
-    "loadingOutputViewer": "Loading output viewer..."
+    "loadingOutputViewer": "Loading output viewer...",
+    "viewCompletedChapters": "View completed chapters",
+    "outputIdentity": {
+      "imported": "Imported output",
+      "model": "Recorded model: {{model}}",
+      "modelMissing": "Model not recorded",
+      "provider": "Provider: {{provider}}",
+      "providerMissing": "Provider not recorded",
+      "created": "Created",
+      "createdMissing": "Creation time not recorded",
+      "scopeMissing": "Section scope not recorded",
+      "sections_one": "{{count}} selected section",
+      "sections_other": "{{count}} selected sections"
+    },
+    "longDocumentWaiting": {
+      "example": "In observed 922-page, 30-chapter runs, generation took 52–62 minutes.",
+      "variation": "This is not an estimate for this run. Duration varies with document length, selected sections, model and settings. Progress is saved after each portion.",
+      "readCompleted": "Read completed chapters while the remaining sections are being generated.",
+      "usage": "Token usage and cost are unavailable for these saved jobs."
+    },
+    "sectionReader": {
+      "generating": "Generation continues. Completed chapters update here. Review changes can be saved after generation finishes.",
+      "pendingOverview": "The overview is pending while generation continues. Choose a completed chapter to read now.",
+      "runningOverview": "This saved overview may change while generation continues.",
+      "unreadSection": "This section has not been processed yet.",
+      "generatingSection": "This section is still being processed. Saved evidence remains available below.",
+      "unavailable": "This output is no longer available in the current workspace."
+    }
   },
   "debug": {
     "title": "Debug Panel",

@@ -4,7 +4,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib 
     normalize_pdf_text_for_storage,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -12,6 +11,7 @@ def test_native_pdf_page_map_matches_normalized_text_and_blank_pages(tmp_path):
     import hashlib
 
     import pymupdf
+
     from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib import process_pdf
 
     path = tmp_path / "pages.pdf"
@@ -32,8 +32,10 @@ def test_native_pdf_page_map_matches_normalized_text_and_blank_pages(tmp_path):
     assert result["metadata"]["page_map_content_hash"] == hashlib.sha256(result["content"].encode()).hexdigest()
 
 
-def test_pdf_page_map_uses_normalized_unicode_offsets_without_inventing_labels(tmp_path, monkeypatch):
+@pytest.mark.parametrize("page_keys", [("page",), ("page_number",), ("page", "page_number")])
+def test_pdf_page_map_uses_normalized_unicode_offsets_without_inventing_labels(tmp_path, monkeypatch, page_keys):
     import pymupdf
+
     from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF import PDF_Processing_Lib as pdf
 
     path = tmp_path / "unicode.pdf"
@@ -45,8 +47,8 @@ def test_pdf_page_map_uses_normalized_unicode_offsets_without_inventing_labels(t
         pdf.pymupdf4llm,
         "to_markdown",
         lambda *args, **kwargs: [
-            {"metadata": {"page": 1}, "text": "Café 😀\ncontinues here."},
-            {"metadata": {"page": 2}, "text": "東京\n文章。"},
+            {"metadata": dict.fromkeys(page_keys, 1), "text": "Café 😀\ncontinues here."},
+            {"metadata": dict.fromkeys(page_keys, 2), "text": "東京\n文章。"},
         ],
     )
     result = pdf.process_pdf(path, path.name, perform_chunking=False)
@@ -56,9 +58,43 @@ def test_pdf_page_map_uses_normalized_unicode_offsets_without_inventing_labels(t
     assert all("printed_page_label" not in entry for entry in page_map)
 
 
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {}, None, {"page_number": None}, {"page_number": True}, {"page_number": 0},
+        {"page_number": "1"}, {"page_number": 2}, {"page": 0},
+        {"page": 1, "page_number": 2}, {"page": 1, "page_number": None},
+        {"page": True, "page_number": 1},
+    ],
+)
+def test_invalid_parser_page_identity_preserves_text_without_provenance(tmp_path, monkeypatch, metadata):
+    import pymupdf
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF import PDF_Processing_Lib as pdf
+
+    path = tmp_path / "invalid-page.pdf"
+    with pymupdf.open() as doc:
+        doc.new_page()
+        doc.set_page_labels([{"startpage": 0, "prefix": "", "style": "r", "firstpagenum": 1}])
+        doc.save(path)
+    monkeypatch.setattr(
+        pdf.pymupdf4llm, "to_markdown",
+        lambda *args, **kwargs: [{"metadata": metadata, "text": "Café 😀\ncontinues here."}],
+    )
+
+    result = pdf.process_pdf(path, path.name, perform_chunking=False)
+
+    assert result["content"] == "Café 😀 continues here."
+    assert result["metadata"]["page_count"] == 1
+    assert "page_map" not in result["metadata"]
+    assert "page_map_content_hash" not in result["metadata"]
+
+
 def test_ocr_replacement_does_not_keep_native_page_map(tmp_path, monkeypatch):
     from types import SimpleNamespace
+
     import pymupdf
+
     from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF import PDF_Processing_Lib as pdf
 
     path = tmp_path / "ocr.pdf"

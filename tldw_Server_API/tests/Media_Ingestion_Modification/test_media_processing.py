@@ -715,26 +715,33 @@ class TestProcessAudios:
     def test_process_audio_url_success_no_analysis_no_chunking(self, client, dummy_headers, controlled_transcription, monkeypatch):
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files
 
+        audio_url = "https://example.com/controlled-audio.mp3"
+        downloaded_paths = []
+
         def fake_download(*, url, dest, **kwargs):
-            assert url == VALID_AUDIO_URL
+            assert url == audio_url
+            assert kwargs["require_content_type"] == "audio/"
+            downloaded_paths.append(Path(dest))
             Path(dest).write_bytes(b"ID3" + b"\x00" * 512)
 
         monkeypatch.setattr(Audio_Files, "http_download", fake_download)
 
         form_data = {
-            "urls": [VALID_AUDIO_URL],
+            "urls": [audio_url],
             "perform_analysis": "false",
             "perform_chunking": "false"
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
 
         controlled_transcription.assert_called_once()
+        assert len(downloaded_paths) == 1
+        assert Path(controlled_transcription.call_args.kwargs["audio_input"]).parent == downloaded_paths[0].parent
 
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success", check_db_fields=True)
         assert result["media_type"] == "audio"
-        assert result["input_ref"] == VALID_AUDIO_URL
+        assert result["input_ref"] == audio_url
         # Expect content because transcription should still happen
         assert result["content"] is not None # Might be empty if transcription fails silently, but shouldn't be None
         assert isinstance(result["content"], str)
