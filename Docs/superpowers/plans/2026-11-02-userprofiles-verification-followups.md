@@ -691,3 +691,17 @@ to be enabled and no longer loading before clicking it. The late receipt,
 single POST, artifact identity, and version assertions remain. All 79 tests
 in the file passed locally; this does not replace fresh required CI.
 No runtime, timeout, workflow, or policy changes; no new ADR required.
+
+## November 15 Joyride Teardown Integration
+
+Current dev merged #3473 with an overlapping real-Joyride test teardown.
+The rebase retains upstream async React cleanup and cancellation of tracked
+animation frames, together with the PR's real timeout and microtask drain.
+Canceling all timeouts would undo the existing timer-drain regression, so
+only animation frames are canceled; owned timeout callbacks settle while
+jsdom is still live. Test cleanup still restores mocks in a finally block.
+
+Without frame cancellation the added assertion failed for the recorded
+frame even though the existing nested timers completed. With both behaviors
+present, all six real-Joyride tests passed. No runtime or timing-policy
+change; no new ADR. Fresh required CI and a verified merge still apply.
