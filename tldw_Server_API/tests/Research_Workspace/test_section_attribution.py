@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import importlib
+import json
 
 import pytest
 from hypothesis import given
@@ -157,6 +158,34 @@ def test_renderer_limits_context_to_the_actual_processing_range():
     rendered = module().render_attribution_context(contexts, start, start + 20)
     assert "Bert Sample" in rendered and "Ada Example" not in rendered
     assert module().render_attribution_context(contexts, len(source), len(source) + 20) == ""
+
+
+def test_prompt_context_omits_opaque_identity_but_saved_provenance_and_quotes_remain_exact():
+    section, snapshot = fixture(children=False)
+    section["source_id"] = "11111111-2222-4333-8444-555555555555"
+    section["navigation_version"] = snapshot["navigation_version"] = "opaque-navigation-version"
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    before = copy.deepcopy(contexts)
+    rendered = module().render_attribution_context(contexts)
+    projected = json.loads(rendered.rsplit("\n", 1)[-1])
+    assert section["source_id"] not in rendered
+    assert "opaque-navigation-version" not in rendered
+    for saved, prompt_context in zip(contexts, projected, strict=True):
+        assert not {"source_id", "media_id", "node_id", "navigation_version", "page_spans"}.intersection(prompt_context)
+        assert prompt_context["heading_quote"] == saved["heading_quote"]
+        assert (prompt_context["start_char"], prompt_context["end_char"]) == (saved["start_char"], saved["end_char"])
+        assert (prompt_context["heading_start_char"], prompt_context["heading_end_char"]) == (saved["heading_start_char"], saved["heading_end_char"])
+    assert contexts == before
+    assert contexts[0]["source_id"] == section["source_id"]
+
+
+def test_heading_prompt_distinguishes_attribution_from_claim_evidence():
+    section, snapshot = fixture(children=False)
+    rendered = module().render_attribution_context(module().build_section_attribution_contexts(section, snapshot))
+    assert "attribution only" in rendered
+    assert "not summary or claim evidence" in rendered
+    assert "not citable passages" in rendered
+    assert "current numbered SOURCE passages" in rendered
 
 
 def test_later_child_keeps_main_byline_only_before_child_start():

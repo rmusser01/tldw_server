@@ -7,7 +7,7 @@ const record = (value: unknown): value is Record<string, unknown> =>
 
 /** Refine the old generic warning without replacing specific errors or changing saved evidence. */
 export const getSectionArtifactErrorMessage = (artifact: GeneratedArtifact): string | undefined => {
-  if (artifact.status !== "failed" || artifact.errorMessage !== INCOMPLETE_SECTIONS_MESSAGE ||
+  if (artifact.status !== "failed" || (artifact.errorMessage && artifact.errorMessage !== INCOMPLETE_SECTIONS_MESSAGE) ||
       artifact.producerMetadata?.error) return artifact.errorMessage
 
   const client = artifact.versionMetadata?.workspaceClient

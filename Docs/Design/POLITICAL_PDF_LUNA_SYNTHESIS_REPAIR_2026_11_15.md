@@ -10,6 +10,8 @@ The attribution failure is reproducible from saved chapter text. Fixed 24,000-ch
 
 Keep original batch boundaries, source bytes, exact evidence spans and checkpoint source/navigation guards. Give synthesis explicit ordered processing portions and verified heading context; state that a processing boundary never establishes a new contributor. Original drafts and reviewer overlays remain separate. New live output must not overwrite the failed original.
 
+The first fresh full run exposed a further prompt ambiguity: one DHS portion cited the workspace source UUID from heading metadata for a heading-only claim. Retain complete provenance in saved contexts, but render only fields needed to interpret attribution and ranges. Explicitly restrict summary/claim evidence to the current numbered SOURCE passages, list their exact P IDs, and state that heading excerpts are attribution hints rather than additional citable passages. Structured failure diagnostics must report the supplied P-ID vocabulary and actual rejected values, with the same bounds and privacy protections. Preserve the first failed run; any deliberate checkpoint retry is separate evidence and processes only failed work.
+
 The output card must distinguish an overview-only failure from incomplete sections, including previously cached generic errors. Preserve specific checkpoint, permission, provider and save errors.
 
 ## Scope and ownership

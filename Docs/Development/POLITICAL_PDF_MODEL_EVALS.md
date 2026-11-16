@@ -87,6 +87,8 @@ Every poll retains its full response, so large artifacts and long jobs can consu
 
 Terminal summary results, including failures and partial evidence, are retained on resume. The runner rejects `--retry-operation` for a known summary job, whether running or terminal. Resume its recorded job or use a new run directory for a new intentional generation.
 
+To review or export CLI-created outputs in an already-open browser, choose **Workspaces → Manage server Workspaces → Open** for the same workspace. This reopens its canonical server state. A reload of the generic Research Workspace page can retain its older local artifact list, and Complete Pack exports that local list. Resolve any unsaved-work warning before reopening; verify that the new output is visible before exporting.
+
 ## Resume and explicit retries
 
 ```bash

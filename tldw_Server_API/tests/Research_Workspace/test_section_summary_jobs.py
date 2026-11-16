@@ -1477,3 +1477,62 @@ def test_extraction_rejects_invalid_absolute_source_start(source_start):
 
     with pytest.raises(ValueError, match="nonnegative integer"):
         build_section_extraction_prompt("Policy", "Summarize", "Source", source_start=source_start)
+
+
+def test_contextual_extraction_lists_only_current_passage_ids_as_claim_evidence():
+    from tldw_Server_API.app.core.Research_Workspace.section_summaries import build_section_extraction_prompt
+
+    context = 'SOURCE HEADING CONTEXT: source_id="11111111-2222-4333-8444-555555555555", node_id="chapter", heading="Author"'
+    source = "A source claim mentions P999 as text. " * 40
+    default, plain_passages = build_section_extraction_prompt("Policy", "Summarize", source)
+    prompt, passages = build_section_extraction_prompt("Policy", "Summarize", source, attribution_context=context, source_start=24000)
+    assert passages == plain_passages
+    allowed = json.loads(prompt.split("ALLOWED SOURCE PASSAGE IDS: ")[1].split("\n")[0])
+    assert allowed == [p["id"] for p in passages]
+    assert "P999" not in allowed and "11111111-2222-4333-8444-555555555555" not in allowed
+    assert "context, source, or node IDs" in prompt and "attribution only" in prompt
+    assert "ALLOWED SOURCE PASSAGE IDS: " not in default
+    assert default == build_section_extraction_prompt("Policy", "Summarize", source, attribution_context="")[0]
+
+
+@pytest.mark.asyncio
+async def test_extraction_failure_diagnostics_report_parsed_uuid_ids_and_actual_passage_vocabulary(monkeypatch):
+    import hashlib
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    source = "x" * 1500
+    _, passages = mod.build_section_extraction_prompt("Policy", "Summarize", source)
+    uuid = "11111111-2222-4333-8444-555555555555"
+    unknown_ids = [uuid, "P999"] + [f"context-id-{i}" for i in range(10)] + ["z" * 100]
+    body = {"summary": "PRIVATE EXTRACTION contains unselected E99.1.1 " + "x" * 2500,
+            "evidence": [{"claim": "Valid source claim", "source_span_ids": ["P1"]}]
+            + [{"claim": "Unsupported context claim", "source_span_ids": [value]} for value in unknown_ids]}
+    raw = json.dumps(body)
+    provider = AsyncMock(return_value={"choices": [{"finish_reason": "stop", "message": {"content": raw}}]})
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": source, "navigation_version": "v1", "nodes": [], "page_map": [],
+    }))
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", provider)
+    logs = []
+    monkeypatch.setattr(mod.logger, "warning", lambda message, *values: logs.append((message, values)))
+    options = args(request().settings.model_copy(update={"sections": []}))
+    for _ in range(7):
+        await mod.process_section_summary(**options)
+    row = options["workspace_db"].row
+    analysis = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    first = analysis["generation_failures"][0]
+    assert first["allowed_id_count"] == len(passages)
+    assert first["unknown_id_count"] == len(unknown_ids)
+    assert first["unknown_ids"] == [value[:64] for value in sorted(unknown_ids)[:8]]
+    assert uuid in first["unknown_ids"] and "E99.1.1" not in first["unknown_ids"]
+    assert first["unknown_ids_truncated"] is True
+    assert first["response_sha256"] == hashlib.sha256(raw.encode()).hexdigest()
+    assert first["response_preview"] == raw[:2048] and first["response_preview_truncated"] is True
+    assert first["error_code"] == "unknown_source_span" and first["stage"] == "extraction"
+    assert (first["section_index"], first["portion_index"]) == (1, 1)
+    assert len(analysis["generation_failures"]) == 5 and analysis["generation_failures_omitted"] == 2
+    assert row["status"] == "failed" and analysis["sections"][0]["batches"][0]["status"] == "failed"
+    assert "PRIVATE EXTRACTION" not in row["content"] and "PRIVATE EXTRACTION" not in repr(logs)
+    assert provider.await_count == 7

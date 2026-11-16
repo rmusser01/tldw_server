@@ -2295,10 +2295,10 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(dialog.getByText("This section has no completed summary yet. Saved evidence remains available below.")).toBeInTheDocument()
   })
 
-  it.each([false, true])("corrects a cached incomplete-sections warning when only the overview failed, restored metadata %s", (restored) => {
+  it.each([[false, false], [true, false], [true, true]])("shows an overview-only warning with restored metadata %s and missing error %s", (restored, missingError) => {
     const artifact = sectionReaderArtifact()
     artifact.status = "failed"
-    artifact.errorMessage = "Some sections are incomplete. Retry to continue from saved portions."
+    artifact.errorMessage = missingError ? undefined : "Some sections are incomplete. Retry to continue from saved portions."
     const analysis = artifact.data!.sectionAnalysis as Record<string, unknown>
     delete analysis.synthesis
     analysis.synthesis_error = "The overview cited unavailable evidence."
@@ -2311,7 +2311,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     renderStudioPane()
     expandGeneratedOutputsSection()
     expect(screen.getByText("All selected sections are complete. The overview could not be completed. Retry to rebuild the overview from saved evidence.")).toBeInTheDocument()
-    expect(screen.queryByText(artifact.errorMessage)).not.toBeInTheDocument()
+    if (artifact.errorMessage) expect(screen.queryByText(artifact.errorMessage)).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "View" })).toBeEnabled()
     expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled()
     expect(JSON.stringify(artifact)).toBe(before)
