@@ -2262,6 +2262,49 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(workspaceStoreState.generatedArtifacts[0].content).toBe("RAW_FULL_EXPORT_WITH_ALL_EVIDENCE")
   })
 
+  it.each(["slow completion", "deadline", "account change"])("keeps the reader's full-artifact save budget and draft through %s", async outcome => {
+    const prompts = await import("@/services/service-prompts")
+    const persistence = await import("@/services/workspace-artifact-persistence")
+    vi.spyOn(prompts, "loadServicePromptSnapshot").mockImplementation(async (_ids, options) => ({
+      scopeKey: "reader-owner", requestScope: { config: { serverUrl: "https://owned.test" }, userId: "alice" },
+      scopeSignal: options!.signal!, scopeInvalidatedSignal: options!.signal!, release: vi.fn(), definitions: {}, capability: "unchecked"
+    }))
+    const save = vi.spyOn(persistence, "persistWorkspaceArtifactReview").mockImplementation((current, patch, options) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (!options.isCurrent() || options.deadline! <= performance.now()) reject(new Error("Save retired; review draft retained."))
+        else resolve({ ...current, ...patch, workspaceArtifactVersion: 2 })
+      }, outcome === "deadline" ? 180_000 : 20_000)
+      options.scope.scopeSignal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("Save retired; review draft retained.")) }, { once: true })
+    }))
+    const artifact = { ...sectionReaderArtifact(), workspaceArtifactId: "canonical-summary", workspaceArtifactVersion: 1 }
+    workspaceStoreState.workspaceId = "reader-workspace"
+    const dialog = await openReader(artifact)
+    fireEvent.change(dialog.getByLabelText("Reason or review note"), { target: { value: "Retain this source review" } })
+    const original = JSON.stringify(artifact)
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(dialog.getByRole("button", { name: "Save review" }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(save).toHaveBeenCalledOnce()
+      if (outcome === "slow completion") {
+        await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+        expect(dialog.getByText("Review saved. The original draft is retained.")).toBeInTheDocument()
+        expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(artifact.id, "completed", expect.objectContaining({ workspaceArtifactVersion: 2 }))
+      } else {
+        await act(async () => { await vi.advanceTimersByTimeAsync(outcome === "deadline" ? 119_999 : 12_000) })
+        expect(dialog.getByRole("button", { name: "Saving review…" })).toBeDisabled()
+        await act(async () => {
+          if (outcome === "account change") window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+          else await vi.advanceTimersByTimeAsync(2)
+        })
+        expect(dialog.getByRole("alert")).toHaveTextContent("review draft retained")
+        expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
+        expect(dialog.getByLabelText("Reason or review note")).toHaveValue("Retain this source review")
+      }
+      expect(JSON.stringify(artifact)).toBe(original)
+    } finally { vi.useRealTimers() }
+  })
+
   it("offers checks-only recovery for a completed canonical section output with missing checks", () => {
     const artifact = { ...sectionReaderArtifact(), workspaceArtifactId: "canonical-summary", workspaceArtifactVersion: 1,
       producerMetadata: { origin: "research_workspace_output_job", job_id: 41, source_ids: ["source-1"] }, reviewStatus: "accepted" as const }

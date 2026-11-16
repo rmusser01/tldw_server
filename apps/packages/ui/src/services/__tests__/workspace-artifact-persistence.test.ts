@@ -9,6 +9,7 @@ import {
 } from '@/store/workspace-artifact-codec';
 import { mapServerArtifactToLocal, hydrateWorkspaceFromServer } from '@/store/workspace-api';
 import { isServicePromptRequestPath } from '@/services/tldw/service-prompt-scope-error';
+import { tldwRequest } from '@/services/tldw/request-core';
 
 const io = vi.hoisted(() => ({ request: vi.fn(), migrated: true }));
 vi.mock('@/services/background-proxy', () => ({ bgRequest: io.request }));
@@ -357,6 +358,73 @@ describe("section reviewer metadata saves", () => {
 
 
 describe("cold artifact review authority", () => {
+  it.each(["slow reads", "slow write headers", "slow write body", "deadline", "account cancellation", "workspace change"])(
+    "retains the exact review save boundary with %s", async outcome => {
+      vi.useFakeTimers();
+      const { controller, options } = lease();
+      let current = true;
+      options.isCurrent = () => current;
+      let stored = row();
+      const original = structuredClone(stored);
+      const cold = mapServerArtifactToLocal(stored);
+      const wait = (ms: number, signal?: AbortSignal | null) => new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, ms);
+        signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
+      });
+      io.request.mockImplementation(async input => {
+        const response = await tldwRequest(input, {
+          getConfig: async () => ({ serverUrl: "https://owned.test", authMode: "single-user", apiKey: "test-key" }),
+          fetchFn: async (_url, init) => {
+            if (input.method === "PUT" && outcome === "slow write headers") await wait(20_000, init?.signal);
+            if (input.method === "PUT") stored = { ...stored, ...JSON.parse(String(init?.body)), version: stored.version + 1 };
+            const data = input.method === "GET" ? [stored] : stored;
+            const response = Response.json(data);
+            vi.spyOn(response, "json").mockImplementation(async () => {
+              if (outcome === "deadline") await wait(180_000, init?.signal);
+              else if (outcome === "slow reads" || outcome === "account cancellation" || outcome === "workspace change" ||
+                (outcome === "slow write body" && input.method === "PUT")) await wait(20_000, init?.signal);
+              return data;
+            });
+            return response;
+          },
+        });
+        if (!response.ok) throw Object.assign(new Error(response.error), { code: response.code });
+        return response.data;
+      });
+      const pending = persistWorkspaceArtifactReview(cold, { reviewStatus: "needs_revision", reviewMetadata: { reason: "Exact retained review" } }, options)
+        .then(value => ({ value }), error => ({ error }));
+      let settled = false;
+      void pending.then(() => { settled = true; });
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        if (outcome.startsWith("slow")) {
+          await vi.advanceTimersByTimeAsync(60_000);
+          expect(await pending).toMatchObject({ value: { reviewStatus: "needs_revision", reviewMetadata: { reason: "Exact retained review" }, workspaceArtifactVersion: 2 } });
+          const writes = io.request.mock.calls.map(([input]) => input).filter(input => input.method === "PUT");
+          expect(writes).toHaveLength(1);
+          expect(writes[0].body).toEqual({ review_state: "needs_revision", review_metadata: { reason: "Exact retained review" }, version: 1 });
+        } else {
+          await vi.advanceTimersByTimeAsync(outcome === "deadline" ? 119_999 : 12_000);
+          expect(settled).toBe(false);
+          if (outcome === "account cancellation") controller.abort();
+          if (outcome === "workspace change") current = false;
+          await vi.advanceTimersByTimeAsync(outcome === "workspace change" ? 8000 : 2);
+          const result = await pending;
+          expect(result).toHaveProperty("error");
+          if ("error" in result) expect(result.error).toMatchObject(outcome === "deadline" ? { code: "REQUEST_TIMEOUT" } : outcome === "account cancellation" ? { code: "REQUEST_ABORTED" } : { status: 412, details: { detail: { code: "request_config_scope_changed" } } });
+          expect(io.request.mock.calls.some(([input]) => input.method === "PUT")).toBe(false);
+        }
+        expect(stored.content).toBe(original.content);
+        expect(stored.version_metadata).toEqual(original.version_metadata);
+        expect(cold.reviewMetadata).toEqual(mapServerArtifactToLocal(original).reviewMetadata);
+      } finally {
+        controller.abort();
+        await pending;
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("revalidates a cold canonical artifact before saving review metadata", async () => {
     const first = { ...artifact(), workspaceArtifactId: "draft-owned", workspaceArtifactVersion: 1 };
     const cold = JSON.parse(JSON.stringify(mapServerArtifactToLocal(row(first))));

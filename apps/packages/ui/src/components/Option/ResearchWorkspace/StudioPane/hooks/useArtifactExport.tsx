@@ -1,7 +1,7 @@
 import { hasWorkspaceArtifactOriginEvidence } from "@/store/workspace-artifact-codec"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
-import { persistWorkspaceArtifact } from "@/services/workspace-artifact-persistence"
+import { persistWorkspaceArtifact, WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS } from "@/services/workspace-artifact-persistence"
 import { useWorkspaceStore } from "@/store/workspace"
 import React from "react"
 import { Button, Modal } from "antd"
@@ -173,8 +173,8 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
     artifact: GeneratedArtifact, removed: boolean, allowAbsent = false,
   ) => {
     if (!workspaceId) throw new Error("Select the original workspace before changing this output.")
-    const deadline = performance.now() + 15000
-    const scope = await loadServicePromptSnapshot([], { signal: AbortSignal.timeout(15000) })
+    const deadline = performance.now() + WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS
+    const scope = await loadServicePromptSnapshot([], { signal: AbortSignal.timeout(WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS) })
     const isCurrent = () => mounted.current && useWorkspaceStore.getState().workspaceId === workspaceId &&
       (allowAbsent ? !useWorkspaceStore.getState().generatedArtifacts.some(item => item.id === artifact.id)
         : useWorkspaceStore.getState().generatedArtifacts.find(item => item.id === artifact.id) === artifact)

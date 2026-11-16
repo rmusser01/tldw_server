@@ -18,6 +18,9 @@ import {
 } from '@/store/workspace-artifact-codec';
 import type { GeneratedArtifact } from '@/types/workspace';
 
+// Canonical saves read full evidence reports before writing; share one bounded operation budget.
+export const WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS = 120_000;
+
 export type WorkspaceArtifactSaveScope = {
   workspaceId: string;
   scope: ServicePromptSnapshot;
@@ -45,7 +48,7 @@ export const persistWorkspaceArtifact = async (
   options: WorkspaceArtifactSaveScope
 ): Promise<GeneratedArtifact> => {
   const { workspaceId, scope, isCurrent } = options;
-  const deadline = options.deadline ?? performance.now() + 15000;
+  const deadline = options.deadline ?? performance.now() + WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS;
   const signal = AbortSignal.any([
     scope.scopeSignal,
     scope.scopeInvalidatedSignal,
@@ -55,7 +58,7 @@ export const persistWorkspaceArtifact = async (
     if (scope.scopeSignal.aborted || scope.scopeInvalidatedSignal.aborted || !isCurrent())
       throw createServicePromptScopeChangedError();
     if (signal.aborted || performance.now() >= deadline)
-      throw new DOMException('Saving the draft exceeded 15 seconds. Retry saving.', 'TimeoutError');
+      throw new DOMException('Saving the draft timed out. Your draft is retained; retry saving.', 'TimeoutError');
   };
   assertCurrent();
   if (options.reviewChangeOnly && options.updateOnly)
@@ -231,7 +234,7 @@ export const persistWorkspaceArtifactReview = async (
   options: WorkspaceArtifactSaveScope
 ): Promise<GeneratedArtifact> => {
   const { scope, workspaceId } = options;
-  const deadline = options.deadline ?? performance.now() + 15000;
+  const deadline = options.deadline ?? performance.now() + WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS;
   const assertCurrent = () => {
     if (!options.isCurrent() || scope.scopeSignal.aborted || scope.scopeInvalidatedSignal.aborted)
       throw createServicePromptScopeChangedError();

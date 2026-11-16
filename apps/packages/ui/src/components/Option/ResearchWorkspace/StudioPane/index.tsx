@@ -52,7 +52,7 @@ import {
   Switch
 } from "antd"
 import { useMobile } from "@/hooks/useMediaQuery"
-import { persistWorkspaceArtifact, persistWorkspaceArtifactReview, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
+import { persistWorkspaceArtifact, persistWorkspaceArtifactReview, hasCanonicalArtifactWorkspace, WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS } from "@/services/workspace-artifact-persistence"
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
 import { hasWorkspaceArtifactOrigin, sameWorkspaceArtifactPayload, workspaceArtifactDraftPayload } from "@/store/workspace-artifact-codec"
 import { hasResearchWorkspaceMigrationTombstone, useWorkspaceStore } from "@/store/workspace"
@@ -1523,8 +1523,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     artifact: GeneratedArtifact, patch: Partial<GeneratedArtifact>, editorIsCurrent: () => boolean
   ) => {
     const controller = new AbortController()
-    const deadline = performance.now() + 15000
-    const timeout = setTimeout(() => controller.abort(), 15000)
+    const deadline = performance.now() + WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS
+    const timeout = setTimeout(() => controller.abort(), WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS)
     const stopWatching = watchChatAccountChanges(invalidated => {
       if (invalidated) controller.abort()
     })
@@ -1564,8 +1564,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     editorIsCurrent: () => boolean
   ): Promise<GeneratedArtifact> => {
     const controller = new AbortController()
-    const deadline = performance.now() + 15000
-    const timeout = setTimeout(() => controller.abort(), 15000)
+    const deadline = performance.now() + WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS
+    const timeout = setTimeout(() => controller.abort(), WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS)
     const stopWatching = watchChatAccountChanges(invalidated => { if (invalidated) controller.abort() })
     let scope: ServicePromptSnapshot | undefined
     const originalPayload = workspaceArtifactDraftPayload(artifact)

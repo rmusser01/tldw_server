@@ -7,7 +7,8 @@ import type { GeneratedArtifact, WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
 import { createGroundedClaimVerification } from "./studio-test-fixtures"
 const editIO = vi.hoisted(() => ({ save: vi.fn(), release: vi.fn() }))
-vi.mock("@/services/workspace-artifact-persistence", () => ({
+vi.mock("@/services/workspace-artifact-persistence", async original => ({
+  WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS: (await original<typeof import("@/services/workspace-artifact-persistence")>()).WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS,
   persistWorkspaceArtifact: editIO.save, hasCanonicalArtifactWorkspace: () => false,
 }))
 vi.mock("@/services/service-prompts", () => ({
