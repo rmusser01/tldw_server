@@ -1361,8 +1361,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   >([])
   const [composerModels, setComposerModels] =
     React.useState<ChatComposerModel[]>([])
+  const [startupModelsLoading, setStartupModelsLoading] = React.useState(true)
+  const [menuModelsLoading, setMenuModelsLoading] = React.useState(false)
+  const [reconnectModelsLoading, setReconnectModelsLoading] = React.useState(false)
   const slashCommandsFetchedRef = React.useRef(false)
-  const modelsFetchedRef = React.useRef(false)
   const workspaceSessionRef = React.useRef<string | null>(null)
   const chatMessageItemRefs = React.useRef<Record<string, HTMLDivElement | null>>(
     {}
@@ -1813,18 +1815,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     }
   }, [hasQueryableSelectedSources, showAdvancedRagSettings])
 
-  const applyComposerModels = React.useCallback(
-    (models: ChatComposerModel[]) => {
-      modelsFetchedRef.current = models.length > 0
-      setComposerModels(models)
-    },
-    []
-  )
-
   React.useEffect(() => {
-    if (modelsFetchedRef.current) return
-    modelsFetchedRef.current = true
-
     let isMounted = true
     void fetchChatModels({ returnEmpty: true })
       .then((models) => {
@@ -1835,11 +1826,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         if (!isMounted) return
         setComposerModels([])
       })
+      .finally(() => {
+        if (isMounted) setStartupModelsLoading(false)
+      })
 
     return () => {
       isMounted = false
     }
-  }, [applyComposerModels])
+  }, [])
 
   React.useEffect(() => {
     selectedSourceIdsRef.current = selectedSourceIds
@@ -2865,16 +2859,17 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
     setSubmitError(null)
     await checkConnectionOnce()
-    modelsFetchedRef.current = false
+    setReconnectModelsLoading(true)
     try {
       const models = await fetchChatModels({
         returnEmpty: true,
         forceRefresh: true
       })
-      applyComposerModels(models)
+      setComposerModels(models)
     } catch {
-      modelsFetchedRef.current = false
       setComposerModels([])
+    } finally {
+      setReconnectModelsLoading(false)
     }
   }
 
@@ -3163,13 +3158,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     composerModels,
     selectedModel,
     setSelectedModel: handleModelSelect,
-    navigate: navigateTo
+    navigate: navigateTo,
+    modelsLoading: startupModelsLoading || menuModelsLoading || reconnectModelsLoading
   })
 
   React.useEffect(() => {
     if (!modelDropdownOpen || composerModels.length > 0) return
 
     let isMounted = true
+    setMenuModelsLoading(true)
     void fetchChatModels({ returnEmpty: true, forceRefresh: true })
       .then((models) => {
         if (!isMounted) return
@@ -3179,9 +3176,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         if (!isMounted) return
         setComposerModels([])
       })
+      .finally(() => {
+        if (isMounted) setMenuModelsLoading(false)
+      })
 
     return () => {
       isMounted = false
+      setMenuModelsLoading(false)
     }
   }, [composerModels.length, modelDropdownOpen])
 

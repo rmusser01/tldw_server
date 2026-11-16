@@ -782,7 +782,7 @@ const prepareOwnedMirror = async (legacyParent = false, cited = false, nullLocal
       : request.path.startsWith("/api/v1/chats/verified-chat?")
         ? Promise.resolve({ id: "verified-chat", scope_type: "workspace", workspace_id: TARGET, deleted: false })
         : reply(request));
-  return { historyId, messages, save };
+  return { historyId, messages, save, serverMessages };
 };
 
 it("opens the producer's acknowledged Workspace mirror after cold persistence without changing its session or rows", async () => {
@@ -893,6 +893,91 @@ it("retains the verified two-message mirror's legacy linear parent without inven
   expect(boundary.request.mock.calls.every(([row]) => !row.method || row.method === "GET")).toBe(true);
 });
 
+
+const prepareMissingAssistantAcknowledgment = async (duplicate = false) => {
+  const { historyId, messages: first, save, serverMessages } = await prepareOwnedMirror(false, true);
+  serverMessages.push(
+    { id: "server-user-2", role: "user", content: "Follow-up question", parent_message_id: null,
+      created_at: "2026-10-31T00:00:02Z", version: 1 },
+    { id: "server-answer-2", role: "assistant", sender: "assistant", content: "Follow-up answer", parent_message_id: "server-user-2",
+      created_at: "2026-10-31T00:00:03Z", version: 1 },
+  );
+  const canonical = mapServerChatMessagesToPlaygroundMessages({ serverMessages, assistantName: "AI", characterId: null });
+  const messages = [...first, ...canonical.slice(2).map((row, index) => ({ ...row,
+    id: index ? "local-answer-2" : "local-user-2", parentMessageId: index ? "local-user-2" : null,
+  }))];
+  const { reconcileServerChatMirror } = await import("@/db/dexie/server-chat-mirror");
+  await reconcileServerChatMirror({ historyId, chatId: "verified-chat",
+    ownerKey: String(mirror.histories.get(historyId)!.server_scope_key), messages, localMessages: messages });
+  const cached = messages.map(row => row.id === "local-answer-2" ? { ...row, serverMessageId: undefined } : row);
+  if (duplicate) cached.splice(2, 0, canonical[3]);
+  const { deriveHistoryFromMessages } = await import("@/store/workspace");
+  save(TARGET, { messages: cached, history: deriveHistoryFromMessages(cached), historyId, serverChatId: "verified-chat" });
+  const request = boundary.request.getMockImplementation()!;
+  boundary.request.mockImplementation(args => args.path.startsWith("/api/v1/chats/verified-chat/messages")
+    ? Promise.resolve({ messages: serverMessages, total: serverMessages.length }) : request(args));
+  return { historyId, messages, cached, serverMessages };
+};
+
+it.each(["none", "canonical-id", "same-local-id"])("recovers the exact scoped mirror acknowledgment after a second turn (duplicate %s)", async duplicate => {
+  const { historyId, messages } = await prepareMissingAssistantAcknowledgment(duplicate !== "none");
+  if (duplicate === "same-local-id") {
+    const session = structuredClone(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!);
+    session.messages[2].id = "local-answer-2";
+    useWorkspaceStore.getState().saveWorkspaceChatSession(TARGET, session);
+  }
+  const rows = structuredClone([...mirror.messages]);
+  await flushWorkspacePersistence();
+  await useWorkspaceStore.persist.rehydrate();
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByTestId("opened-sources");
+  const restored = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!;
+  const identities = new Map(messages.map(row => [row.id, row.serverMessageId]));
+  expect(restored.messages).toEqual(messages.map(row => ({ ...row,
+    parentMessageId: identities.get(row.parentMessageId!) || row.parentMessageId })));
+  expect(restored.history).toEqual(messages.map(row => ({ role: row.isBot ? "assistant" : "user", content: row.message })));
+  expect(restored.historyId).toBe(historyId);
+  expect([...mirror.messages]).toEqual(rows);
+  expect(boundary.request.mock.calls.every(([row]) => !row.method || row.method === "GET")).toBe(true);
+});
+
+it("resolves a child's parent before dropping a verified duplicate's local alias", async () => {
+  const { serverMessages } = await prepareMissingAssistantAcknowledgment();
+  serverMessages[2].parent_message_id = "server-answer";
+  mirror.messages.get("local-user-2")!.parent_message_id = "server-answer";
+  const session = structuredClone(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!);
+  session.messages[2].parentMessageId = "duplicate-answer-alias";
+  session.messages.splice(2, 0, { ...session.messages[1], id: "duplicate-answer-alias" });
+  const { deriveHistoryFromMessages } = await import("@/store/workspace");
+  session.history = deriveHistoryFromMessages(session.messages);
+  useWorkspaceStore.getState().saveWorkspaceChatSession(TARGET, session);
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByTestId("opened-sources");
+  const restored = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!;
+  expect(restored.messages).toHaveLength(4);
+  expect(restored.messages[2].parentMessageId).toBe("server-answer");
+  expect(restored.messages.some(row => row.id === "duplicate-answer-alias")).toBe(false);
+});
+
+it.each(["edited-answer", "edited-duplicate", "changed-parent", "unknown-local-id", "conflicting-ack", "missing-mirror-ack", "hidden-history"])(
+  "keeps cached work when acknowledgment recovery cannot prove %s", async kind => {
+    await prepareMissingAssistantAcknowledgment(true);
+    const session = structuredClone(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!);
+    const answer = session.messages.find(row => row.id === "local-answer-2")!;
+    if (kind === "edited-answer") answer.message = "Keep my edit";
+    if (kind === "edited-duplicate") session.messages[2].message = "Keep duplicate edit";
+    if (kind === "changed-parent") answer.parentMessageId = "local-user";
+    if (kind === "unknown-local-id") answer.id = "unverified-local";
+    if (kind === "conflicting-ack") answer.serverMessageId = "other-server";
+    if (kind === "missing-mirror-ack") delete mirror.messages.get("local-answer-2")!.serverMessageId;
+    if (kind === "hidden-history") session.history.push({ role: "system", content: "Keep private instructions" });
+    useWorkspaceStore.getState().saveWorkspaceChatSession(TARGET, session);
+    const before = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+    await mount("/research-workspace?source_workspace_id=" + TARGET);
+    await screen.findByRole("alert");
+    expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
+    expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(before);
+  });
 
 it("verifies the producer's citation projection while retaining its exact display metadata", async () => {
   await prepareOwnedMirror(false, true);

@@ -148,6 +148,53 @@ const cachedMessagesMatchCanonical = (cached: Message[], canonical: Message[], r
   }
 };
 
+/** Recover a lost cache ACK through its exact owned mirror row, never equal text. */
+const recoverCachedMirrorAcknowledgments = (
+  cached: Message[], mirror: Message[], canonical: Message[],
+): Message[] | null => {
+  if (!cachedMessagesMatchCanonical(mirror, canonical)) return null;
+  const canonicalIds = new Set(canonical.map(row => row.serverMessageId!));
+  const mirrorById = new Map(mirror.map(row => [row.id, row]));
+  const localIds = new Map<string, string>();
+  const groups = new Map<string, Message[]>();
+  for (const row of cached) {
+    if (!row.id) return null;
+    const acknowledged = mirrorById.get(row.id)?.serverMessageId;
+    const id = row.serverMessageId || (canonicalIds.has(row.id) ? row.id : acknowledged);
+    if (!id || !canonicalIds.has(id) || (acknowledged && acknowledged !== id) ||
+        (localIds.has(row.id) && localIds.get(row.id) !== id)) return null;
+    localIds.set(row.id, id);
+    groups.set(id, [...(groups.get(id) || []), { ...row, serverMessageId: id }]);
+  }
+  if (groups.size !== canonical.length) return null;
+  const normalizeParent = (row: Message): Message | null => {
+    if (row.parentMessageId == null) return row;
+    const parent = row.parentMessageId;
+    const ids = new Set([localIds.get(parent), canonicalIds.has(parent) ? parent : undefined].filter(Boolean));
+    return ids.size === 1 ? { ...row, parentMessageId: [...ids][0] } : null;
+  };
+  const preferred = canonical.map(row => {
+    const copies = groups.get(row.serverMessageId!)!;
+    return copies.find(copy => mirrorById.get(copy.id)?.serverMessageId === row.serverMessageId) || copies[0];
+  });
+  const projected = preferred.map(normalizeParent);
+  if (projected.some(row => !row)) return null;
+  // Validate every copy before collapsing a hydration duplicate. A changed draft
+  // or citation blocks the entire repair, even when another copy is canonical.
+  for (let index = 0; index < canonical.length; index++) {
+    for (const copy of groups.get(canonical[index].serverMessageId!)!) {
+      const normalized = normalizeParent(copy);
+      if (!normalized) return null;
+      const candidate = [...projected] as Message[];
+      candidate[index] = normalized;
+      if (!cachedMessagesMatchCanonical(candidate, canonical)) return null;
+    }
+  }
+  // Parents may name an alias just collapsed above. Keep the validated canonical
+  // parent identity so no surviving child points at a removed local copy.
+  return projected as Message[];
+};
+
 /** Restore an owned target or the latest migration while its captured account lease remains live. */
 export const restoreMigratedResearchWorkspace = async (options: {
   workspaceId?: string;
@@ -503,6 +550,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
       }
     }
     let verifiedCachedChat: CachedWorkspaceChat | undefined;
+    let recoveredCachedMessages: Message[] | null = null;
     const mirrorBinding = chatReference?.serverChatId && cachedChat?.historyId ? {
       historyId: cachedChat.historyId, chatId: chatReference.serverChatId,
       ownerKey: serverChatMirrorOwnerKey(scope), workspaceId,
@@ -536,6 +584,15 @@ export const restoreMigratedResearchWorkspace = async (options: {
           (cachedChat.history.length === 0 ||
             canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(canonical))))
         verifiedCachedChat = cachedSelection!;
+      if (!verifiedCachedChat && mirrorMessages && mirror!.rows.length === mirrorMessages.length) {
+        const recovered = recoverCachedMirrorAcknowledgments(cachedChat.messages, mirrorMessages, canonical);
+        if (recovered && (cachedChat.history.length === 0 ||
+            canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(canonical)) ||
+            canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(cachedChat.messages)))) {
+          recoveredCachedMessages = recovered;
+          verifiedCachedChat = cachedSelection!;
+        }
+      }
     }
     if (provisional && verifiedCachedChat) {
       snapshot.workspaceChatReferenceId = provisional.referenceId;
@@ -546,6 +603,8 @@ export const restoreMigratedResearchWorkspace = async (options: {
         throw new Error("Workspace Chat mirror changed during restoration");
       // Keep its exact local settings association and optimistic display data.
       chatSession = { ...cachedChat!, historyId: mirror.header.id };
+      if (recoveredCachedMessages) chatSession = { ...chatSession,
+        messages: recoveredCachedMessages, history: deriveHistoryFromMessages(recoveredCachedMessages) };
     }
     assertCurrent();
     const relevantReceipts = (rows: MigrationReceipt[]) => rows

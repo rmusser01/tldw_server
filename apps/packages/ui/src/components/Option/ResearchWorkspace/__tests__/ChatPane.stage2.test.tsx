@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { StrictMode } from "react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
@@ -603,6 +604,61 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith(
       "anthropic:anthropic/claude-3-5-sonnet"
     )
+  })
+
+  it.each([false, true])("shows loading until the startup catalog settles (StrictMode=%s)", async (strict) => {
+    let resolveModels!: (models: Array<{ model: string; provider: string }>) => void
+    const pendingModels = new Promise<Array<{ model: string; provider: string }>>(resolve => {
+      resolveModels = resolve
+    })
+    hoistedMocks.fetchChatModels.mockReturnValue(pendingModels)
+
+    render(strict ? <StrictMode>{renderChatPaneNode()}</StrictMode> : renderChatPaneNode())
+    fireEvent.click(screen.getByTestId("model-selector"))
+
+    expect(await screen.findByTestId("model-loading")).toBeInTheDocument()
+    expect(screen.queryByText("No models available. Connect your server in Settings.")).not.toBeInTheDocument()
+
+    await act(async () => resolveModels([{ model: "deepseek-flash", provider: "deepseek" }]))
+    expect(await screen.findByText("deepseek-flash")).toBeInTheDocument()
+    expect(screen.queryByTestId("model-loading")).not.toBeInTheDocument()
+  })
+
+  it.each(["empty", "failed"])("shows loading during an empty catalog refresh until it settles %s", async (outcome) => {
+    let resolveModels!: (models: []) => void
+    let rejectModels!: (error: Error) => void
+    const pendingModels = new Promise<[]>((resolve, reject) => {
+      resolveModels = resolve
+      rejectModels = reject
+    })
+    hoistedMocks.fetchChatModels.mockResolvedValueOnce([]).mockReturnValue(pendingModels)
+
+    renderChatPane()
+    await act(async () => {})
+    fireEvent.click(screen.getByTestId("model-selector"))
+
+    expect(await screen.findByTestId("model-loading")).toBeInTheDocument()
+    expect(screen.queryByText("No models available. Connect your server in Settings.")).not.toBeInTheDocument()
+
+    await act(async () => {
+      if (outcome === "empty") resolveModels([])
+      else rejectModels(new Error("Model discovery unavailable"))
+    })
+    expect(await screen.findByText("No models available. Connect your server in Settings.")).toBeInTheDocument()
+    expect(screen.queryByTestId("model-loading")).not.toBeInTheDocument()
+  })
+
+  it("retains the settled startup catalog through StrictMode effect replay", async () => {
+    const models = [{ model: "deepseek-flash", provider: "deepseek" }]
+    hoistedMocks.fetchChatModels.mockImplementation((options) =>
+      options?.forceRefresh ? new Promise(() => {}) : Promise.resolve(models)
+    )
+
+    render(<StrictMode>{renderChatPaneNode()}</StrictMode>)
+    await act(async () => {})
+    fireEvent.click(screen.getByTestId("model-selector"))
+
+    expect(await screen.findByText("deepseek-flash")).toBeInTheDocument()
   })
 
   it("keeps the model selector usable with settings fallback when no models load", async () => {
