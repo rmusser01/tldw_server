@@ -3,6 +3,7 @@ import { useWorkspaceStore, workspacePersistWriterInternals } from '../workspace
 import { bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin, hasWorkspaceArtifactOriginEvidence } from '../workspace-artifact-codec'
 import type { GeneratedArtifact } from '@/types/workspace'
 import { bindImportedWorkspaceChat } from '@/utils/workspace-chat-import'
+import { prepareLegacyWorkspaceImport } from '../workspace-import-authority'
 
 const artifact = (): GeneratedArtifact => ({
   id: 'old-local', workspaceArtifactId: 'old-canonical', workspaceArtifactVersion: 9,
@@ -27,6 +28,32 @@ const bundleWith = (rows: GeneratedArtifact[]) => {
 }
 
 describe('workspace import authority', () => {
+  it('normalizes nested historical JSON values while remapping sources without mutating the original bundle', () => {
+    const source = useWorkspaceStore.getState().addSource({ mediaId: 17, title: 'Book', type: 'pdf' })
+    const bundle = bundleWith([artifact()])
+    const capturedAt = new Date('2026-11-15T12:00:00.000Z')
+    const historical = { source_id: source.id, source_ids: [source.id], capturedAt, omitted: undefined }
+    bundle.workspace.snapshot.generatedArtifacts[0].data = { historical }
+    let sequence = 0
+
+    const imported = prepareLegacyWorkspaceImport(
+      bundle, { id: 'imported', name: 'Imported', tag: 'workspace:imported' },
+      () => `imported-${++sequence}`
+    )
+
+    const importedSourceId = imported.workspace.snapshot.sources[0].id
+    expect(importedSourceId).not.toBe(source.id)
+    expect(imported.workspace.snapshot.generatedArtifacts[0].data).toEqual({
+      historical: { source_id: importedSourceId, source_ids: [importedSourceId], capturedAt: '2026-11-15T12:00:00.000Z' }
+    })
+    expect(imported.workspace.snapshot.generatedArtifacts[0].data?.historical).not.toHaveProperty('omitted')
+    expect(bundle.workspace.snapshot.sources[0].id).toBe(source.id)
+    expect(bundle.workspace.snapshot.generatedArtifacts[0].data?.historical).toBe(historical)
+    expect(historical).toEqual({ source_id: source.id, source_ids: [source.id], capturedAt, omitted: undefined })
+    expect(historical.capturedAt).toBe(capturedAt)
+    expect(Object.hasOwn(historical, 'omitted')).toBe(true)
+  })
+
   it('imports snapshots as fresh local drafts while preserving evidence, review and historical producer', () => {
     const original = bindWorkspaceArtifactOrigin(artifact(), 'old-account', useWorkspaceStore.getState().workspaceId)
     const bundle = bundleWith([original])

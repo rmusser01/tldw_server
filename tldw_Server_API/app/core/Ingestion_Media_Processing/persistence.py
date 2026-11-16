@@ -5686,6 +5686,45 @@ def is_bodyless_parsed_email(result: dict[str, Any]) -> bool:
     )
 
 
+def _build_document_chunk_rows(
+    flat_chunks: list[dict[str, Any]], chunker: Any, safe_metadata: dict[str, Any], content: str,
+) -> list[dict[str, Any]]:
+    """Project document chunks into SQL rows with their verified page provenance."""
+    from tldw_Server_API.app.core.Media.page_provenance import (
+        page_map_for_content,
+        page_spans_for_range,
+    )
+
+    chunks_for_sql: list[dict[str, Any]] = []
+    page_map = page_map_for_content(safe_metadata, content)
+    for item in flat_chunks:
+        meta = item.get("metadata") or {}
+        chunk_type = (
+            chunker.normalize_chunk_type(meta.get("chunk_type") or meta.get("paragraph_kind")) or "text"
+        )
+        small_meta: dict[str, Any] = {}
+        if meta.get("ancestry_titles"):
+            small_meta["ancestry_titles"] = meta.get("ancestry_titles")
+        if meta.get("section_path"):
+            small_meta["section_path"] = meta.get("section_path")
+        page_spans = page_spans_for_range(
+            page_map, meta.get("start_offset"), meta.get("end_offset"),
+        )
+        if page_spans:
+            small_meta["page_number"] = page_spans[0]["page_number"]
+            small_meta["page_spans"] = page_spans
+        chunks_for_sql.append(
+            {
+                "text": item.get("text", ""),
+                "start_char": meta.get("start_offset"),
+                "end_char": meta.get("end_offset"),
+                "chunk_type": chunk_type,
+                "metadata": small_meta,
+            }
+        )
+    return chunks_for_sql
+
+
 async def persist_doc_item_and_children(
     *,
     final_result: dict[str, Any],
@@ -5870,38 +5909,7 @@ async def persist_doc_item_and_children(
                         max_size=opts.get("max_size") or 500,
                         overlap=opts.get("overlap") or 50,
                     )
-                    chunks_for_sql = []
-                    from tldw_Server_API.app.core.Media.page_provenance import (
-                        page_map_for_content,
-                        page_spans_for_range,
-                    )
-
-                    page_map = page_map_for_content(safe_meta, content_for_db)
-                    for item in flat_chunks:
-                        meta = item.get("metadata") or {}
-                        chunk_type = (
-                            chunker.normalize_chunk_type(meta.get("chunk_type") or meta.get("paragraph_kind")) or "text"
-                        )
-                        small_meta: dict[str, Any] = {}
-                        if meta.get("ancestry_titles"):
-                            small_meta["ancestry_titles"] = meta.get("ancestry_titles")
-                        if meta.get("section_path"):
-                            small_meta["section_path"] = meta.get("section_path")
-                        page_spans = page_spans_for_range(
-                            page_map, meta.get("start_offset"), meta.get("end_offset"),
-                        )
-                        if page_spans:
-                            small_meta["page_number"] = page_spans[0]["page_number"]
-                            small_meta["page_spans"] = page_spans
-                        chunks_for_sql.append(
-                            {
-                                "text": item.get("text", ""),
-                                "start_char": meta.get("start_offset"),
-                                "end_char": meta.get("end_offset"),
-                                "chunk_type": chunk_type,
-                                "metadata": small_meta,
-                            }
-                        )
+                    chunks_for_sql = _build_document_chunk_rows(flat_chunks, chunker, safe_meta, content_for_db)
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 chunks_for_sql = None
 

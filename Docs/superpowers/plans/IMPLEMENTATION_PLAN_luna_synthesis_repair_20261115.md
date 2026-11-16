@@ -21,12 +21,12 @@
 **Goal:** Generate a separate full chapter output and rerun the frozen QA matrix.
 **Success Criteria:** Preserve immutable first responses and failures; verify exact evidence and review selected authors/claims in source; no semantic pass inferred from structural success.
 **Tests:** Existing CLI source/retrieval/QA/summary stages, actual Jobs checkpoint/readback, targeted source audit and review/reload.
-**Status:** In Progress
+**Status:** Complete — fresh Job 46 completes 30 chapters/117 portions/overview; all structural checks and actual review/export/restore pass. Source review retains Financial note-53 attribution and citation-support findings; human acceptance remains pending. The unchanged 26 QA prompts/passages are verified against final generation code.
 
 ## Stage 4: Publish and inspect CI
 **Goal:** Update report, tasks and draft PR against dev with the tested final state.
 **Success Criteria:** Tests/security/publication checks pass; new head and current CI inspected; unresolved external or human acceptance limits explicit.
 **Tests:** Task format/IDs, secret/diff checks, relevant pre-commit hooks, GitHub checks.
-**Status:** In Progress — qualified repairs pushed; a demonstrated Node 20 frontend test failure is fixed and qualified locally, with current-head CI and final evidence publication pending.
+**Status:** In Progress — final evidence is preserved; hosted CI confirms the Node 20 hashing repair and exposes stale downstream test expectations plus test-quality/line-location ratchets. Consumer tests, bounded PGDG retries and behavior-preserving function extractions are qualified with independent review. Summary requests/checkpoints have exact fixed-seed parity (628 requests, 797 checkpoints); no prompts or paid retries change. Publication and new-head hosted CI observation remain.
 
 Remove this task-owned plan when all stages are complete; retain design and result evidence.

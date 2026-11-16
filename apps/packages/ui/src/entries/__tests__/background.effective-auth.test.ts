@@ -2827,6 +2827,7 @@ describe("background effective extension auth", () => {
     ["/api/v1/media/71/versions?include_content=true", "GET"],
     ["/api/v1/media/71/versions?include_content=true&limit=10&page=2", "GET"],
     ["/api/v1/media/71/versions/7?include_content=true", "GET"],
+    ["/api/v1/workspaces/ws/sources", "POST"],
     ["/api/v1/workspaces/workspace%20with%20spaces/sources", "GET"],
     [
       "/api/v1/workspaces/ws/sources/web-clipper%3A925871f6-30fa-470b-a2c4-2272051f2373/preview?version_number=7",
@@ -2854,7 +2855,9 @@ describe("background effective extension auth", () => {
         method === "POST"
           ? path === "/api/v1/media/71/versions"
             ? { content: "New version text" }
-            : { urls: ["https://example.com/story"], credential_free: true }
+            : path === "/api/v1/workspaces/ws/sources"
+              ? { id: "source-71", media_id: 71, title: "Article", source_type: "html" }
+              : { urls: ["https://example.com/story"], credential_free: true }
           : undefined
       const fetchSpy = vi.fn(
         async (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -2898,7 +2901,7 @@ describe("background effective extension auth", () => {
     ["/api/v1/media/71/versions/0", "GET"],
     ["/api/v1/media/71/versions/advanced", "GET"],
     ["/api/v1/media/71/versions/7/metadata", "GET"],
-    ["/api/v1/workspaces/ws/sources", "POST"],
+    ["/api/v1/workspaces/ws/sources", "PUT"],
     ["/api/v1/workspaces/ws/sources/src/preview", "DELETE"],
     ["/api/v1/workspaces/ws/sources/status", "GET"],
     ["/api/v1/workspaces/ws/sources/src/preview/extra", "GET"],

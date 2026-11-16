@@ -13,6 +13,7 @@ from hypothesis import settings as hypothesis_settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
 from tldw_Server_API.app.core.exceptions import ResearchWorkspaceOutputJobError
 from tldw_Server_API.app.core.Research_Workspace.research_workspace_outputs import ResearchWorkspaceOutputSubmitRequest
 
@@ -42,6 +43,7 @@ def test_comparison_rejects_single_section():
 class Workspace:
     def __init__(self):
         self.row = {"id": "summary-1", "version": 1, "version_metadata": {}}
+        self.write_versions = []
 
     def list_workspace_sources(self, workspace_id):
         return [{"id": "source", "media_id": 1, "title": "Collected essays"}]
@@ -50,7 +52,9 @@ class Workspace:
         return copy.deepcopy(self.row)
 
     def update_workspace_artifact(self, workspace_id, artifact_id, updates, *, expected_version):
-        assert expected_version == self.row["version"]
+        if expected_version != self.row["version"]:
+            raise ConflictError("Artifact version mismatch", entity="workspace_artifacts", entity_id=artifact_id)
+        self.write_versions.append(expected_version)
         self.row.update(copy.deepcopy(updates))
         self.row["version"] += 1
         return copy.deepcopy(self.row)
@@ -150,6 +154,7 @@ async def test_failed_batch_resume_preserves_full_ranges_and_coverage(monkeypatc
     assert sum("Author A" in prompt.split("SOURCE:\n", 1)[1] for prompt in seen if "SOURCE:\n" in prompt) == completed_calls
     assert "Coverage: 1 of 1 selected sections" in row["content"]
     assert "PDF page unavailable" in row["content"]
+    assert options["workspace_db"].write_versions == list(range(1, row["version"]))
 
 
 @pytest.mark.asyncio

@@ -476,6 +476,50 @@ from pathlib import Path
 
 # ... other imports ...
 
+def _extract_pdf_with_parser(
+    path: str, parser: str, filename: str, result: dict[str, Any],
+) -> Any:
+    """Dispatch PDF text extraction while recording the existing parser fallbacks."""
+    logging.info(f"Attempting text extraction for {filename} using parser: {parser} on path: {path}")
+    if parser == "pymupdf4llm":
+        # Now correctly called with a path
+        content = pymupdf4llm_parse_pdf(path, page_chunks=True)
+    elif parser == "pymupdf":
+        content = extract_text_and_format_from_pdf(path, page_chunks=True)
+    elif parser == "docling":
+        DOCLING_AVAILABLE = importlib.util.find_spec("docling.document_converter") is not None
+        if not DOCLING_AVAILABLE:
+            raise ImportError("Docling parser selected, but library is not installed.")
+        # Docling currently pulls torch-backed layout models. Avoid
+        # running docling when torch is missing or clearly stubbed.
+        if not _is_usable_torch_module_for_docling():
+            logging.info(
+                "Docling parser requested but torch is unavailable/stubbed; "
+                "falling back to pymupdf4llm for %s",
+                filename,
+            )
+            result["parser_used"] = "pymupdf4llm"
+            content = pymupdf4llm_parse_pdf(path, page_chunks=True)
+        else:
+            try:
+                content = docling_parse_pdf(path)
+            except _PDF_NONCRITICAL_EXCEPTIONS as docling_exc:
+                logging.warning(
+                    "Docling parser failed for %s (%s); falling back to pymupdf4llm",
+                    filename,
+                    docling_exc,
+                )
+                result["parser_used"] = "pymupdf4llm"
+                content = pymupdf4llm_parse_pdf(path, page_chunks=True)
+    else:
+        # This case should ideally be caught by Pydantic validation in the endpoint
+        logging.warning(f"Unsupported PDF parser specified: {parser}. Attempting fallback to pymupdf4llm.")
+        result["warnings"].append(f"Unsupported parser '{parser}', fallback to 'pymupdf4llm'")
+        result["parser_used"] = "pymupdf4llm"
+        content = pymupdf4llm_parse_pdf(path, page_chunks=True)
+    return content
+
+
 def process_pdf(
     file_input: Union[str, bytes, Path], # Can be path, bytes, or Path object
     filename: str, # Original filename for reference and metadata fallback
@@ -638,43 +682,7 @@ def process_pdf(
              raise RuntimeError("Internal logic error: path_for_processing not set")
 
         try:
-            logging.info(f"Attempting text extraction for {filename} using parser: {parser} on path: {path_for_processing}")
-            if parser == "pymupdf4llm":
-                # Now correctly called with a path
-                content = pymupdf4llm_parse_pdf(path_for_processing, page_chunks=True)
-            elif parser == "pymupdf":
-                 content = extract_text_and_format_from_pdf(path_for_processing, page_chunks=True)
-            elif parser == "docling":
-                DOCLING_AVAILABLE = importlib.util.find_spec("docling.document_converter") is not None
-                if not DOCLING_AVAILABLE:
-                    raise ImportError("Docling parser selected, but library is not installed.")
-                # Docling currently pulls torch-backed layout models. Avoid
-                # running docling when torch is missing or clearly stubbed.
-                if not _is_usable_torch_module_for_docling():
-                    logging.info(
-                        "Docling parser requested but torch is unavailable/stubbed; "
-                        "falling back to pymupdf4llm for %s",
-                        filename,
-                    )
-                    result["parser_used"] = "pymupdf4llm"
-                    content = pymupdf4llm_parse_pdf(path_for_processing, page_chunks=True)
-                else:
-                    try:
-                        content = docling_parse_pdf(path_for_processing)
-                    except _PDF_NONCRITICAL_EXCEPTIONS as docling_exc:
-                        logging.warning(
-                            "Docling parser failed for %s (%s); falling back to pymupdf4llm",
-                            filename,
-                            docling_exc,
-                        )
-                        result["parser_used"] = "pymupdf4llm"
-                        content = pymupdf4llm_parse_pdf(path_for_processing, page_chunks=True)
-            else:
-                # This case should ideally be caught by Pydantic validation in the endpoint
-                logging.warning(f"Unsupported PDF parser specified: {parser}. Attempting fallback to pymupdf4llm.")
-                result["warnings"].append(f"Unsupported parser '{parser}', fallback to 'pymupdf4llm'")
-                result["parser_used"] = "pymupdf4llm"
-                content = pymupdf4llm_parse_pdf(path_for_processing, page_chunks=True)
+            content = _extract_pdf_with_parser(path_for_processing, parser, filename, result)
 
             if isinstance(content, list):
                 normalized_pages = []

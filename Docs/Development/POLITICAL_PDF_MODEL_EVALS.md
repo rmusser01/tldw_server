@@ -64,6 +64,8 @@ python Helper_Scripts/Evals/run_political_pdf_eval.py report \
 
 Use a fixed, preferably clean checkout for comparable runs. `manifest.json` freezes resolved configuration, source/fixture hashes, selected cases and Git `HEAD`; the Git SHA does not fingerprint uncommitted edits. `resume` refuses changed configuration, paths, source, fixture or revision. Use a new run directory for a changed matrix or code revision, preserving the old run.
 
+The recorded revision describes the runner checkout; it does not attest an already-running API or Jobs worker. Start the application and relevant workers from the intended revision before a live comparison, keep their code fixed through the run, and record a separate deployment/image identity when applicable. Restarting only the CLI does not reload a worker's imported code.
+
 ## Summaries and existing jobs
 
 For `--stages summary`, set `workspace_id` and explicit `summary.sections`. Each section requires the workspace `source_id`, navigation `node_id` and `navigation_version` from the owned source. Do not infer these identities from titles. The sample leaves the workspace and selected sections empty so it cannot guess a summary scope.

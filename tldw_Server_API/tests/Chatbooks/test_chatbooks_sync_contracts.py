@@ -122,12 +122,56 @@ def test_continue_export_rejects_async_mode_before_service_call(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("service_result", "expected_receipt"),
+    [
+        (
+            {
+                "imported_items": {"note": 1},
+                "warnings": ["renamed note"],
+                "id_maps": {"media": {}, "notes": {"old": "new"}},
+                "inventory_summary": {"restorable": {"notes": 1}},
+                "skipped_non_restorable": {"remote_references": 2},
+            },
+            {
+                "imported_items": {"note": 1},
+                "warnings": ["renamed note"],
+                "id_maps": {"media": {}, "notes": {"old": "new"}},
+                "inventory_summary": {"restorable": {"notes": 1}},
+                "skipped_non_restorable": {"remote_references": 2},
+            },
+        ),
+        (
+            ["legacy import warning"],
+            {
+                "imported_items": {},
+                "warnings": ["legacy import warning"],
+                "id_maps": None,
+                "inventory_summary": None,
+                "skipped_non_restorable": None,
+            },
+        ),
+        (
+            None,
+            {
+                "imported_items": {},
+                "warnings": [],
+                "id_maps": None,
+                "inventory_summary": None,
+                "skipped_non_restorable": None,
+            },
+        ),
+    ],
+    ids=["structured-receipt", "legacy-warnings", "empty-legacy-result"],
+)
 def test_sync_import_endpoint_returns_imported_items_and_warnings(
     client_override: TestClient,
     monkeypatch,
+    service_result,
+    expected_receipt,
 ):
     async def _fake_import_chatbook(*_args, **_kwargs):
-        return True, "Import completed", {"imported_items": {"note": 1}, "warnings": ["renamed note"], "id_maps": {"media": {}, "notes": {"old": "new"}}}
+        return True, "Import completed", service_result
 
     monkeypatch.setattr(ChatbookService, "import_chatbook", _fake_import_chatbook)
     upload_bytes, filename = _make_import_upload()
@@ -143,13 +187,9 @@ def test_sync_import_endpoint_returns_imported_items_and_warnings(
         "message": "Import completed",
         "source_format": "chatbook",
         "job_id": None,
-        "imported_items": {"note": 1},
         "openwebui_result": None,
         "openwebui_db_result": None,
-        "warnings": ["renamed note"],
-        "inventory_summary": None,
-        "skipped_non_restorable": None,
-        "id_maps": {"media": {}, "notes": {"old": "new"}},
+        **expected_receipt,
     }
 
 

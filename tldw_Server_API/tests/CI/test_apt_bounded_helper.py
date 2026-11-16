@@ -1,9 +1,13 @@
 """Behavior of .github/actions/apt-bounded.sh: a stalled apt-get is cut off and retried (TASK-13415)."""
 
 import shutil
+import socket
+import struct
 import subprocess
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -185,3 +189,121 @@ def test_requested_pg_tools_are_selected_despite_existing_readiness_client(tmp_p
     else:
         assert result.returncode != 0  # nosec B101 - Refuse shell syntax in the requested major.
         assert not github_path.exists()  # nosec B101 - Rejected input cannot change downstream PATH.
+
+
+@pytest.mark.parametrize("mode", ["reset-once", "reset-always", "preinstalled"])
+def test_pgdg_key_fetch_retries_resets_before_enrolling_source(tmp_path: Path, mode: str) -> None:
+    """Run real curl: a reset may recover, but failed key fetches cannot enroll apt."""
+    curl = shutil.which("curl")
+    if curl is None:
+        pytest.skip("curl is required to exercise the Linux PostgreSQL client installer")
+    key = b"isolated PGDG public key fixture\n"
+    requests = []
+
+    class KeyHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(self.path)
+            if mode != "reset-once" or len(requests) == 1:
+                # Abort an established transfer with TCP RST, the hosted curl56 failure.
+                linger_format = "hh" if sys.platform == "win32" else "ii"
+                self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack(linger_format, 1, 0))
+                self.connection.close()
+                self.close_connection = True
+                return
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(key)))
+            self.end_headers()
+            self.wfile.write(key)
+
+        def log_message(self, *args):
+            pass
+
+    action = yaml.safe_load((HELPER.parent / "wait-for-postgres/action.yml").read_text())
+    script = next(step["run"] for step in action["runs"]["steps"] if step["name"] == "Select versioned client (Linux)")
+    client_root = tmp_path / "postgresql"
+    client_bin = client_root / "18/bin"
+    key_dir = tmp_path / "pgdg"
+    source_list = tmp_path / "pgdg.list"
+    apt_calls = tmp_path / "apt-calls"
+    github_path = tmp_path / "github-path"
+    os_release = tmp_path / "os-release"
+    os_release.write_text("VERSION_CODENAME=fixture\n", encoding="utf-8")
+    tool_body = "#!/bin/sh\necho PostgreSQL 18\n"
+    if mode == "preinstalled":
+        client_bin.mkdir(parents=True)
+        for name in ("pg_dump", "pg_restore"):
+            tool = client_bin / name
+            tool.write_text(tool_body, encoding="utf-8")
+            tool.chmod(0o755)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stubs = {
+        "sudo": '#!/bin/bash\nexec "$@"\n',
+        "apt-get": """#!/bin/bash
+printf '%s\\n' "$1" >> "$APT_STUB_CALLS"
+if [ "$1" = install ]; then
+  mkdir -p "$CLIENT_FIXTURE_BIN"
+  for name in pg_dump pg_restore; do
+    printf '#!/bin/sh\\necho PostgreSQL 18\\n' > "$CLIENT_FIXTURE_BIN/$name"
+    chmod +x "$CLIENT_FIXTURE_BIN/$name"
+  done
+fi
+""",
+    }
+    if shutil.which("timeout") is None:
+        stubs["timeout"] = _TIMEOUT_SHIM
+    for name, body in stubs.items():
+        stub = bin_dir / name
+        stub.write_text(body, encoding="utf-8")
+        stub.chmod(0o755)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), KeyHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        script = script.replace("/usr/lib/postgresql", str(client_root))
+        script = script.replace("/usr/share/postgresql-common/pgdg", str(key_dir))
+        script = script.replace("/etc/apt/sources.list.d/pgdg.list", str(source_list))
+        script = script.replace("/etc/os-release", str(os_release))
+        script = script.replace("${{ github.action_path }}/../apt-bounded.sh", str(HELPER))
+        script = script.replace(
+            "https://www.postgresql.org/media/keys/ACCC4CF8.asc",
+            f"http://127.0.0.1:{server.server_port}/key.asc",
+        )
+        result = subprocess.run(  # nosec B603 - Trusted action; all writes/commands target isolated fixtures.
+            ["/bin/bash", "-e", "-o", "pipefail", "-c", script],
+            env={
+                "PATH": f"{bin_dir}:{Path(curl).parent}:/usr/bin:/bin",
+                "CURL_HOME": str(tmp_path),
+                "PG_CLIENT_VERSION": "18",
+                "GITHUB_PATH": str(github_path),
+                "APT_STUB_CALLS": str(apt_calls),
+                "CLIENT_FIXTURE_BIN": str(client_bin),
+            },
+            capture_output=True, text=True, timeout=20,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    if mode == "reset-always":
+        assert result.returncode == 56, result.stdout + result.stderr
+        assert requests == ["/key.asc"] * 3
+        assert not source_list.exists()
+        assert not apt_calls.exists()
+        assert not github_path.exists()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert github_path.read_text().strip() == str(client_bin)
+        if mode == "reset-once":
+            assert requests == ["/key.asc"] * 2
+            assert (key_dir / "apt.postgresql.org.asc").read_bytes() == key
+            assert source_list.read_text() == (
+                f"deb [signed-by={key_dir}/apt.postgresql.org.asc] "
+                "https://apt.postgresql.org/pub/repos/apt fixture-pgdg main\n"
+            )
+            assert apt_calls.read_text().splitlines() == ["update", "install"]
+        else:
+            assert requests == []
+            assert not source_list.exists()
+            assert not apt_calls.exists()

@@ -41,3 +41,19 @@ Red-first tests cover late single-author continuation, real author changes withi
 ## ADR assessment
 
 ADR required: no. ADR-003 (Jobs), ADR-007 (Workspace), ADR-015 (Evaluations), ADR-025 (provider gateway) and ADR-065 (provenance) retain their owners and authority. Additive diagnostics remain in existing owner-scoped artifact metadata; there is no new store, provider bypass or review authority. Human labels and VIP acceptance remain separate from agent verification.
+
+## CI function-size qualification
+
+TASK-15505.8 also covers demonstrated function-size ratchet failures after Job 46. Keep the completed live run pinned to its recorded `f6450e69f0` runtime. The following extractions must preserve behavior; they do not constitute another semantic repair or a fresh model evaluation.
+
+- Keep summary orchestration, cancellation, diagnostic ownership and checkpoint ordering in `process_section_summary`. Extract cohesive selection/fingerprint preparation, provider-request construction, evidence decoding, bounded synthesis and checkpoint-payload construction as small private helpers where needed. Preserve every prompt byte, provider option, evidence ID, source range, exception boundary and failure-retention rule. Verify baseline/refactored request and artifact parity in addition to the connected summary tests.
+- In `process_pdf`, move only the existing parser-selection/fallback block into a private helper. Preserve parser identity, warnings and exception handling; page normalization, OCR and content/page-map hashing keep their current order.
+- In `persist_doc_item_and_children`, move flat-chunk-to-row projection into a private helper, retaining exact offsets, text, ancestry, page spans and the caller's fallback handling.
+- In `import_chatbook`, move synchronous successful-import response projection beside the existing endpoint response helpers. Retain all source-format branches, fallback warnings and receipt fields. Upload validation, quotas, service invocation, audit timing, asynchronous/failure handling and cleanup remain in the route.
+
+Use existing characterization tests before and after extraction, add missing boundary coverage, run the actual size/quality/tenant/singleton ratchets and touched-scope lint/Bandit, and obtain independent review. Remove only the proven-obsolete navigation getter baseline entry; do not increase any size or quality allowance. No live worker restart or paid generation is required for a verified behavior-preserving extraction.
+
+ADR assessment: no new ADR. These are private helper boundaries within the existing Jobs, ingestion and Chatbooks owners. They add no API/schema, persistence authority, queue, dependency or review authority.
+
+
+CI refactor qualification: summary orchestration is 288 lines with five private helpers. The original `f6450e69f0` source and refactor produce identical fixed-seed traces across 73 cases/170 invocations: 628 requests, 797 checkpoints, 571 progress events, final artifacts and exceptions. All 239 connected backend checks pass; independent AST/control-flow review is clear. No new runtime, prompt or provider behavior is introduced. PDF/ingestion and Chatbook helper extractions independently preserve their existing statements and failure/cleanup boundaries; obsolete ratchet entries are removed without increasing allowances.

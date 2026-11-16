@@ -17,7 +17,6 @@
   "tldw_Server_API.app.api.v1.endpoints.character_messages:get_chat_messages": {"lines": 373, "params": 15, "reason": null},
   "tldw_Server_API.app.api.v1.endpoints.chat:create_chat_completion": {"lines": 2908, "params": 14, "reason": "a request whose provider runs on the user's own key skips the hosted plan's pre-check and names its provider to enforce_llm_quota, and a 402 refused at the call passes the HTTP error handler (BYOK quota exemption, owner decision 2026-10-26, TASK-13955)"},
   "tldw_Server_API.app.api.v1.endpoints.chat_documents:generate_document": {"lines": 466, "params": 5, "reason": null},
-  "tldw_Server_API.app.api.v1.endpoints.chatbooks:import_chatbook": {"lines": 303, "params": 16, "reason": null},
   "tldw_Server_API.app.api.v1.endpoints.chunking:process_text_for_chunking_json": {"lines": 544, "params": 4, "reason": null},
   "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced:_create_embedding_legacy": {"lines": 675, "params": 6, "reason": null},
   "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced:create_embeddings_with_circuit_breaker": {"lines": 347, "params": 6, "reason": null},

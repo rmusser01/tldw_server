@@ -14,8 +14,8 @@ class CharacterTokenizer:
     model_max_length = 16
 
     def encode(self, text, add_special_tokens=True, truncation=False):
-        assert truncation is False
-        return list(range(len(text) + (2 if add_special_tokens else 0)))
+        tokens = list(range(len(text) + (2 if add_special_tokens else 0)))
+        return tokens[: self.model_max_length] if truncation else tokens
 
 
 def chunk(text, start=7):
@@ -57,16 +57,25 @@ def test_invalid_canonical_offsets_fail_before_embedding():
 
 def test_raw_hf_embedding_rejects_over_limit_before_inference(monkeypatch):
     import torch
+    from tokenizers import Tokenizer, models
+    from transformers import PreTrainedTokenizerFast
 
-    class Tokenizer(CharacterTokenizer):
-        def __call__(self, texts, **options):
-            pytest.fail("Oversized input reached padded tensor allocation")
+    # A real local tokenizer measures this unbroken input without downloading a model.
+    tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=Tokenizer(models.BPE(vocab={"x": 0}, merges=[])),
+        model_max_length=16,
+    )
+    monkeypatch.setattr(
+        PreTrainedTokenizerFast,
+        "__call__",
+        lambda *args, **kwargs: pytest.fail("Oversized input reached padded tensor allocation"),
+    )
 
     instance = embedding.HuggingFaceEmbedder.__new__(embedding.HuggingFaceEmbedder)
     instance._lock = RLock()
     instance.config = embedding.HFModelCfg(model_name_or_path="unit-test", max_length=16)
     instance.model_identifier = "unit-test"
-    instance.tokenizer = Tokenizer()
+    instance.tokenizer = tokenizer
     instance.device = torch.device("cpu")
     instance.load_model = lambda: None
     instance.model = lambda **kwargs: pytest.fail("Oversized input reached inference")
