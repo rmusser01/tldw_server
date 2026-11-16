@@ -453,7 +453,8 @@ export const NotesDockPanel: React.FC = () => {
         } else {
           response = await bgRequest<NotesSearchResponse>({
             ...ownedRequest,
-            path: "/api/v1/notes/?page=1&results_per_page=20&include_keywords=true" as AllowedPath,
+            // The notes API pages by limit/offset and ignores page/results_per_page (#3149).
+            path: "/api/v1/notes/?limit=20&offset=0&include_keywords=true" as AllowedPath,
             method: "GET"
           })
         }
