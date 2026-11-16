@@ -1583,3 +1583,49 @@ async def test_synthesis_does_not_turn_unassigned_endnotes_into_another_contribu
     analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
     assert options["workspace_db"].row["status"] == "complete"
     assert all(evidence["author"] == "" for section in analysis["sections"] for batch in section["batches"] for evidence in batch["evidence"])
+
+
+@pytest.mark.asyncio
+async def test_collective_authorship_caveat_reaches_reduction_and_final_synthesis(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    caveat = "I wrote only a small portion. No views should be attributed to any single contributor."
+    source = "# Policy\n\n**Avery Example**\n\n" + "Source. " * 6000 + "\n\nAUTHOR'S NOTE: " + caveat
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": source, "navigation_version": "v1", "page_map": [], "nodes": [
+            {"id": "dsi:1", "title": "Policy", "level": 1, "target_type": "char_range", "target_start": 0, "target_end": len(source)},
+        ],
+    }))
+    calls = []
+
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        prompt = kwargs["messages_payload"][0]["content"]
+        if "SOURCE:" in prompt:
+            claim = caveat if caveat in prompt.split("SOURCE:", 1)[1] else "The chapter proposes a policy."
+            content = json.dumps({"summary": "Main point. " * 1500, "evidence": [{"claim": claim, "source_span_ids": ["P1"]}]})
+        else:
+            allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+            content = (caveat if caveat in prompt else "Chapter policy.") + f" [{allowed[0]}]"
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings)
+    await mod.process_section_summary(**options)
+    synthesis = [c for c in calls if "SOURCE:" not in c["messages_payload"][0]["content"]]
+    reductions = [c for c in synthesis if "intermediate compression step" in c["system_message"]]
+    finals = [c for c in synthesis if c not in reductions]
+    assert reductions and any(caveat in c["messages_payload"][0]["content"] for c in reductions)
+    assert len(finals) == 2 and all(caveat in c["messages_payload"][0]["content"] for c in finals)
+    for call in synthesis:
+        system = call["system_message"]
+        assert "explicit collective-authorship or disavowal caveats" in system
+        assert "byline does not authorize assigning all proposals to that individual" in system
+        assert "chapter-level wording" in system and "Keep the caveat visible" in system
+    assert all("collective-authorship" not in c["system_message"] for c in calls if c not in synthesis)
+    assert "collective-authorship" not in mod.build_section_extraction_prompt("Policy", "Summarize", source)[0]
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert options["workspace_db"].row["status"] == "complete"
+    assert all(e["author"] == "" for s in analysis["sections"] for b in s["batches"] for e in b["evidence"])

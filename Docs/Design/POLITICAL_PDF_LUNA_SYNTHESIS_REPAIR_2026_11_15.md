@@ -14,6 +14,8 @@ The first fresh full run exposed a further prompt ambiguity: one DHS portion cit
 
 Broader source review also found a distinct synthesis error: Agriculture's substantive endnote commentary became a separate unnamed contribution, although extraction had made no such claim. DOJ added a similar unsupported authorship limitation. Both exact ENDNOTES boundaries are correct. Keep the conservative reference guard; missing author metadata is not proof of another contributor or grounds to deny the chapter byline. Clarify this in nonstructured synthesis, including reduction steps, and describe source-supported endnote commentary without inventing author divisions. Do not alter extraction, add author heuristics or silently rewrite completed drafts. Qualify this with a separate fresh Agriculture chapter run and explicit review corrections; retain the original full-run findings.
 
+DHS also explicitly disclaims assigning all views to any single contributor, despite its named byline. Synthesis must retain collective-authorship/disavowal caveats and use chapter-level wording where the source requires it. A recovered checkpoint deliberately preserves completed drafts, so it cannot establish that newly changed synthesis instructions repair those old chapters. After focused Agriculture/DOJ qualification, run all 30 chapters fresh on the final instructions; keep the earlier complete-but-semantically-flawed recovery separate.
+
 The output card must distinguish an overview-only failure from incomplete sections, including previously cached generic errors. Preserve specific checkpoint, permission, provider and save errors.
 
 ## Scope and ownership

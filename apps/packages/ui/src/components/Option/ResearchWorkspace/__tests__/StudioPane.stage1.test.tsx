@@ -2317,6 +2317,49 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(JSON.stringify(artifact)).toBe(before)
   })
 
+  it.each(["failed", "unread", "generating"])("warns about restored incomplete sections with a %s section and no client error", (status) => {
+    const artifact = sectionReaderArtifact()
+    artifact.status = "failed"
+    const analysis = artifact.data!.sectionAnalysis as { sections: Array<{ status: string }> }
+    analysis.sections[4].status = status
+    artifact.versionMetadata = { workspaceClient: { schemaVersion: 1, data: artifact.data } }
+    artifact.data = undefined
+    const before = JSON.stringify(artifact)
+    workspaceStoreState.generatedArtifacts = [artifact]
+    renderStudioPane()
+    expandGeneratedOutputsSection()
+    expect(screen.getByText("Some sections are incomplete. Retry to continue from saved portions.")).toBeInTheDocument()
+    expect(screen.queryByText(/All selected sections are complete/)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled()
+    expect(JSON.stringify(artifact)).toBe(before)
+  })
+
+  it.each(["completed", "empty", "malformed", "unknown-status", "stopped-error", "stopped-code", "checkpoint", "provider-code", "permission-code"])(
+    "does not manufacture a restored incomplete-sections warning for %s", (condition) => {
+      const artifact = sectionReaderArtifact()
+      artifact.status = "failed"
+      const analysis = artifact.data!.sectionAnalysis as Record<string, unknown>
+      ;(analysis.sections as Array<{ status: string }>)[4].status = "failed"
+      if (condition === "completed") (analysis.sections as Array<{ status: string }>)[4].status = "completed"
+      if (condition === "empty") analysis.sections = []
+      if (condition === "malformed") analysis.sections = [{ status: "failed" }]
+      if (condition === "unknown-status") (analysis.sections as Array<{ status: string }>)[4].status = "unknown"
+      if (condition === "stopped-error") analysis.stopped_error = "Source could not be read."
+      if (condition === "stopped-code") analysis.stopped_error_code = "section_checkpoint_changed"
+      if (condition === "checkpoint") artifact.producerMetadata = { error: "section_checkpoint_changed" }
+      if (condition === "provider-code") artifact.producerMetadata = { error: "provider_auth_failed" }
+      if (condition === "permission-code") artifact.producerMetadata = { error: "workspace_sources_not_found" }
+      artifact.versionMetadata = { workspaceClient: { schemaVersion: 1, data: artifact.data } }
+      artifact.data = undefined
+      workspaceStoreState.generatedArtifacts = [artifact]
+      renderStudioPane()
+      expandGeneratedOutputsSection()
+      expect(screen.queryByText("Some sections are incomplete. Retry to continue from saved portions.")).not.toBeInTheDocument()
+      expect(screen.queryByText(/All selected sections are complete/)).not.toBeInTheDocument()
+    }
+  )
+
   it.each(["unfinished", "empty", "malformed", "missing-synthesis-error", "stopped-error", "stopped-code", "checkpoint", "permission", "save", "provider", "provider-code", "permission-code"])(
     "preserves the output warning for %s instead of claiming overview-only failure", (failure) => {
       const artifact = sectionReaderArtifact()

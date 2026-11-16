@@ -459,7 +459,9 @@ async def process_section_summary(
                             "Missing or empty author labels and reference-only ranges are not evidence of another contributor "
                             "and are not grounds to deny the chapter byline. Describe source-supported substantive commentary "
                             "in endnotes as chapter endnotes, without forcing an author assignment. "
-                            "Keep actual quoted or cited voices distinct."
+                            "Keep actual quoted or cited voices distinct. "
+                            "Respect explicit collective-authorship or disavowal caveats: a byline does not authorize assigning all proposals to that individual. "
+                            "Where the source disclaims single-contributor views, use chapter-level wording. Keep the caveat visible."
                         )
                     )
                     + (

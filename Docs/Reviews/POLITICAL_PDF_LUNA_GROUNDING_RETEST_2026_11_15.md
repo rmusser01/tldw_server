@@ -54,6 +54,18 @@ Rolling source audit confirms repaired contributor continuity in the first four 
 
 The wider review also finds an endnote-specific attribution error. Agriculture labels substantive commentary in notes 97–98 a “Separate unnamed contribution” and says it should not be attributed to Daren Bakst. Canonical source verifies the saved ENDNOTES boundary at character 926,030 and all three exact quoted spans; there is no second contributor heading. The extraction summary does not invent a separate author; the unsupported division first appears in the persisted chapter synthesis. DOJ similarly turns unassigned endnote evidence into an unsupported authorship limitation. The synthesis-only clarification passes 205 connected backend tests, with Ruff/Bandit and independent review clear; a separate fresh Agriculture retest remains pending. The tests verify instruction delivery and unchanged conservative author normalization, not semantic model success. This does not justify automatically assigning all reference material to a chapter author, nor does it erase the original generated drafts.
 
+## Focused retest and checkpoint recovery
+
+Fresh Job 42 at `273f13561e` completes Agriculture and DOJ, all 11 portions, and their combined overview in 301.572 seconds. All selected-scope, exact-span and readback checks pass. The new chapters and overview describe substantive endnotes without inventing another contributor or denying the chapter byline. The reference author fields remain empty, so this improvement does not come from assigning unsupported names. Agriculture's 98 evidence quotes and DOJ's 114 match the canonical source exactly. Citation undercoverage remains a separate limitation.
+
+Actual browser Retry submits Job 43 once with the original 30-section/model settings. A local browser evidence-save step failed after submission; browser metadata and read-only API reconciliation identified Job 43 without another POST. The separate CLI run adopts that verified job. Recovery completes all 30 chapters and 117 portions, with exact spans, scope and canonical readback passing. All 116 previously completed batch dictionaries and 29 chapter contents remain byte-identical, and the original failure diagnostic is unchanged.
+
+That preservation also retains the earlier Agriculture error, which the regenerated overview repeats. The 98 cited overview IDs are valid, but their validity does not make the separate-unnamed-author claim true. This recovery demonstrates retry safety, not corrected whole-book semantic quality. Its old chapter drafts are not silently replaced by Job 42's focused output.
+
+DHS recovery exposes a further attribution qualification: its byline names Ken Cuccinelli, but the exact source note (`E5.4.29`) says no views should be attributed to a single contributor. The recovered prose includes that caveat while also repeatedly attributing proposals to him. The final synthesis-only guidance respects such collective-authorship caveats and uses chapter-level wording. It passes 206 connected backend tests, with Ruff/Bandit clean. The restored partial-card warning also passes 186 connected frontend tests, full types, pre-commit and independent review; the actual browser now distinguishes this incomplete-section case from the old overview-only failure.
+
+A final fresh 30-chapter run on the completed instructions is required before claiming a corrected whole-book generation result. Original Job 41, focused Job 42 and recovery Job 43 remain separate evidence. No human labels or acceptance decisions have been supplied.
+
 ## Nielsen Norman Group issue follow-up
 
 These entries continue the heuristic IDs and severity scale in the first Luna report.
