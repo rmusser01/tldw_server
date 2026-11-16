@@ -1991,6 +1991,67 @@ describe("WorkspaceHeader workspace browser modal", () => {
     }
   })
 
+  it("offers an explicit guarded route for an already restored pack without adopting over current work", async () => {
+    const router = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
+    const { useWorkspaceStore: realStore, workspacePersistWriterInternals } =
+      await vi.importActual<typeof import("@/store/workspace")>("@/store/workspace")
+    const previous = realStore.getState()
+    realStore.getState().initializeWorkspace("Current research")
+    realStore.getState().setCurrentNote({ title: "Unsaved note", content: "Keep this draft", isDirty: true })
+    const currentId = realStore.getState().workspaceId
+    realStore.getState().saveWorkspaceChatSession(currentId, { messages: [{ id: "local-message", isBot: false, name: "You", message: "Keep this conversation", sources: [] }], history: [{ role: "user", content: "Keep this conversation" }], historyId: null, serverChatId: null })
+    const chat = realStore.getState().getWorkspaceChatSession(currentId)
+    mockSaveCurrentWorkspace.mockImplementation(realStore.getState().saveCurrentWorkspace)
+    packMocks.parse.mockResolvedValue({ bundle: mockExportWorkspaceBundle(), fingerprint: "verified" })
+    packMocks.restore.mockResolvedValue({ alreadyRestored: true, identity: { id: "existing-destination", name: "Previously restored", tag: "workspace:existing-destination" } })
+    const RoutedHeader = () => {
+      const navigate = router.useNavigate(), location = router.useLocation()
+      mockNavigate.mockImplementation(navigate)
+      return <><output data-testid="import-route">{location.pathname + location.search}</output><WorkspaceHeader leftPaneOpen rightPaneOpen onToggleLeftPane={vi.fn()} onToggleRightPane={vi.fn()} /></>
+    }
+    try {
+      render(<router.MemoryRouter initialEntries={["/research-workspace?source_workspace_id=current&source_artifact_id=old-output"]}><RoutedHeader /></router.MemoryRouter>)
+      fireEvent.change(screen.getByTestId("workspace-import-input"), { target: { files: [new File(["zip"], "pack.zip")] } })
+      const open = await screen.findByRole("button", { name: "Open restored workspace" })
+      await waitFor(() => expect(acpPersistence.scope.release).toHaveBeenCalled())
+      expect(within(screen.getByRole("dialog", { name: "Research pack transfer" })).getByRole("status")).toHaveTextContent("This pack is already restored as Previously restored. Your current drafts and the restored workspace are unchanged.")
+      expect(screen.queryByText(/Keep this tab open/)).not.toBeInTheDocument()
+      expect(mockNavigate).not.toHaveBeenCalled()
+      expect(mockImportWorkspaceBundle).not.toHaveBeenCalled()
+      fireEvent.click(open)
+      expect(screen.getByTestId("import-route")).toHaveTextContent("/research-workspace?source_workspace_id=existing-destination")
+      expect(screen.getByTestId("import-route").textContent).not.toContain("old-output")
+      expect(mockSaveCurrentWorkspace).toHaveBeenCalledOnce()
+      expect(mockSwitchWorkspace).not.toHaveBeenCalled()
+      expect(realStore.getState().workspaceId).toBe(currentId)
+      expect(realStore.getState().currentNote).toMatchObject({ content: "Keep this draft", isDirty: true })
+      expect(realStore.getState().getWorkspaceChatSession(currentId)).toEqual(chat)
+      expect(screen.queryByRole("button", { name: "Open restored workspace" })).not.toBeInTheDocument()
+    } finally {
+      mockNavigate.mockReset()
+      mockSaveCurrentWorkspace.mockReset()
+      workspacePersistWriterInternals.cancelPendingWrite()
+      realStore.setState(previous, true)
+      workspacePersistWriterInternals.cancelPendingWrite()
+    }
+  })
+
+  it.each(["account", "workspace"])("retires the restored-workspace action when the %s changes", async changed => {
+    packMocks.parse.mockResolvedValue({ bundle: mockExportWorkspaceBundle(), fingerprint: "verified" })
+    packMocks.restore.mockResolvedValue({ alreadyRestored: true, identity: { id: "existing-destination", name: "Restored", tag: "workspace:existing-destination" } })
+    const view = renderAcpHeader()
+    fireEvent.change(screen.getByTestId("workspace-import-input"), { target: { files: [new File(["zip"], "pack.zip")] } })
+    await screen.findByRole("button", { name: "Open restored workspace" })
+    if (changed === "account") fireEvent(window, new Event("tldw:auth-principal-changed"))
+    else {
+      mockStoreState.workspaceId = "workspace-beta"
+      view.rerender(<WorkspaceHeader leftPaneOpen rightPaneOpen onToggleLeftPane={vi.fn()} onToggleRightPane={vi.fn()} />)
+    }
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Open restored workspace" })).not.toBeInTheDocument())
+    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(mockImportWorkspaceBundle).not.toHaveBeenCalled()
+  })
+
   it.each(["restore failed", "adoption refused", "account changed"])("keeps the requested route when %s", async outcome => {
     const controller = new AbortController()
     acpPersistence.scope = { ...acpPersistence.scope, scopeInvalidatedSignal: controller.signal }

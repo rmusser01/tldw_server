@@ -71,6 +71,37 @@ describe("saved citation support findings", () => {
     expect(readClaimVerification(value, `${text} Changed.`)).toBeNull()
   })
 
+  it.each(["text_or_unit_limit", "cited_evidence_limit", "report_size_limit"])("does not offer unchanged-input retry for %s in any output scope", reason => {
+    const limited = { ...report(), verdict: "unverified", coverage: { total: 1, evaluated: 0, supported: 0, uncovered: 1, complete: false },
+      findings: [{ ...report().findings[0], status: "not_checked", reason }] }
+    for (const scope of ["chapter", "batch", "overview"]) {
+      const analysis = { schemaVersion: 1, synthesis: text, synthesis_verification: report(), sections: [{ status: "completed", content: text,
+        claim_verification: report(), batches: [{ verification_text: text, claim_verification: report() }] }] }
+      if (scope === "chapter") analysis.sections[0].claim_verification = limited
+      if (scope === "batch") analysis.sections[0].batches[0].claim_verification = limited
+      if (scope === "overview") analysis.synthesis_verification = limited
+      const before = JSON.stringify(analysis)
+      expect(hasUnfinishedSectionChecks(analysis)).toBe(false)
+      expect(verificationPresentation(limited, text).status).toBe("unverified")
+      expect(JSON.stringify(analysis)).toBe(before)
+      analysis.sections[0].content += " Changed."
+      expect(hasUnfinishedSectionChecks(analysis)).toBe(true)
+    }
+  })
+
+  it.each(["judge_unavailable", "judge_timeout", "judge_failed", "judge_provider_failed", "judge_response_invalid",
+    "judge_completion_unconfirmed", "verification_deadline", "citation_source_unavailable", "future_unknown_limit"])(
+    "keeps %s retryable alongside a hard limit", reason => {
+      const limited = { ...report(), verdict: "unverified", coverage: { total: 1, evaluated: 0, supported: 0, uncovered: 1, complete: false },
+        findings: [{ ...report().findings[0], status: "not_checked", reason: "cited_evidence_limit" }] }
+      const unfinished = { ...limited, findings: [{ ...limited.findings[0], reason }] }
+      const analysis = { schemaVersion: 1, synthesis: text, synthesis_verification: report(), sections: [{ status: "completed", content: text,
+        claim_verification: unfinished, batches: [{ verification_text: text, claim_verification: limited }] }] }
+      expect(hasUnfinishedSectionChecks(analysis)).toBe(true)
+      unfinished.findings[0].status = "error"
+      expect(hasUnfinishedSectionChecks(analysis)).toBe(true)
+    })
+
   it.each([undefined, { version: 2 }, { ...report(), findings: [null] }])("does not treat missing or malformed reports as support: %j", value => {
     expect(verificationPresentation(value, text).status).toBe("unverified")
   })

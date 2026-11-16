@@ -386,7 +386,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }, [])
   const [shareDialogOpen, setShareDialogOpen] = React.useState(false)
   const [importDialogOpen, setImportDialogOpen] = React.useState(false)
-  const [packTransfer, setPackTransfer] = React.useState<{ message: string; failed?: boolean } | null>(null)
+  const [packTransfer, setPackTransfer] = React.useState<{ message: string; failed?: boolean; restoredWorkspaceId?: string } | null>(null)
   const packOperationRef = React.useRef<AbortController | null>(null)
   const [bannerModalOpen, setBannerModalOpen] = React.useState(false)
   const [bannerTitleDraft, setBannerTitleDraft] = React.useState("")
@@ -1801,7 +1801,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     )
   }
 
-  const runPackTransfer = async (work: (scope: ServicePromptSnapshot, isCurrent: () => boolean, onProgress: (text: string) => void) => Promise<void>) => {
+  const runPackTransfer = async (work: (scope: ServicePromptSnapshot, isCurrent: () => boolean, onProgress: (text: string) => void) => Promise<"keep-notice" | void>) => {
     if (packOperationRef.current) return
     const controller = new AbortController()
     packOperationRef.current = controller
@@ -1812,8 +1812,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     try {
       scope = await loadServicePromptSnapshot([], { signal: controller.signal })
       if (!isCurrent() || scope.scopeSignal.aborted || scope.scopeInvalidatedSignal.aborted) return
-      await work(scope, isCurrent, text => { if (isCurrent()) setPackTransfer({ message: text }) })
-      if (isCurrent()) setPackTransfer(null)
+      const result = await work(scope, isCurrent, text => { if (isCurrent()) setPackTransfer({ message: text }) })
+      if (isCurrent() && result !== "keep-notice") setPackTransfer(null)
     } catch (error) {
       if (isCurrent()) setPackTransfer({ failed: true, message: error instanceof Error ? error.message : "Workspace transfer failed. The current workspace has not changed." })
     } finally {
@@ -1969,6 +1969,15 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         ? await restoreWorkspaceResearchPack(pack, { scope, isCurrent, onProgress })
         : await restoreLegacyWorkspaceBundle(bundle, { scope, isCurrent, onProgress })
       if (!isCurrent() || scope.scopeSignal.aborted || scope.scopeInvalidatedSignal.aborted) return
+      if ("alreadyRestored" in result) {
+        setImportDialogOpen(false)
+        setPackTransfer({ restoredWorkspaceId: result.identity.id, message: t(
+          "playground:workspace.importAlreadyRestored",
+          "This pack is already restored as {{name}}. Your current drafts and the restored workspace are unchanged.",
+          { name: result.identity.name }
+        ) })
+        return "keep-notice"
+      }
       const importedWorkspaceId = importWorkspaceBundle(result.bundle, { identity: result.identity, verifiedCanonicalScopeKey: scope.scopeKey })
       if (!importedWorkspaceId) throw new Error("The restored workspace could not be opened. Its server records and restore receipt are retained; the current workspace has not changed.")
       messageApi.success(t("playground:workspace.importSuccessNamed", "Workspace imported: {{name}}", { name: result.bundle.workspace.name }))
@@ -2872,11 +2881,15 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         </div>
       </Modal>
 
-      <Modal title="Research pack transfer" open={packTransfer !== null} footer={null}
+      {packTransfer && <Modal title="Research pack transfer" open footer={null}
         onCancel={() => { packOperationRef.current?.abort(); packOperationRef.current = null; setPackTransfer(null) }}>
         <p role={packTransfer?.failed ? "alert" : "status"} className="text-text">{packTransfer?.message}</p>
-        {!packTransfer?.failed && <p className="mt-3 text-sm text-text-muted">Keep this tab open. Closing this dialog stops waiting; a submitted server import continues. Reopen the same file to check its saved receipt.</p>}
-      </Modal>
+        {packTransfer?.restoredWorkspaceId ? <Button className="mt-3" onClick={() => {
+          saveCurrentWorkspace()
+          setPackTransfer(null)
+          navigate(buildResearchWorkspaceReturnPath({ sourceWorkspaceId: packTransfer.restoredWorkspaceId }))
+        }}>{t("playground:workspace.openRestoredWorkspace", "Open restored workspace")}</Button> : !packTransfer?.failed && <p className="mt-3 text-sm text-text-muted">Keep this tab open. Closing this dialog stops waiting; a submitted server import continues. Reopen the same file to check its saved receipt.</p>}
+      </Modal>}
 
       <input
         ref={importFileInputRef}

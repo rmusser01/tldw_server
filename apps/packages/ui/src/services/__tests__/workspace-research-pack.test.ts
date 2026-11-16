@@ -4,6 +4,7 @@ import { portableFixture } from "@/utils/__tests__/fixtures/portable-workspace"
 import type { ServicePromptSnapshot } from "../service-prompts"
 import type { CompleteResearchPack } from "@/utils/workspace-research-pack"
 import { isServicePromptRequestPath } from "../tldw/service-prompt-scope-error"
+import { servicePromptAuthorityKey } from "../tldw/domains/service-prompts"
 
 const mocks = vi.hoisted(() => ({ request: vi.fn(), chatImport: vi.fn(), chatMessages: vi.fn(), upload: vi.fn(), export: vi.fn(), download: vi.fn(), build: vi.fn(), persist: vi.fn(), current: true }))
 vi.mock("@/services/background-proxy", () => {
@@ -123,6 +124,35 @@ describe("scoped complete research pack orchestration", () => {
     expect(sessionStorage.getItem(sessionStorage.key(0)!)).not.toContain("never-export-this-secret")
   })
 
+  it.each(["ready", "missing", "different identity", "different context", "deleted", "archived", "workspace changed", "account changed"])("checks a ready receipt read-only: %s", async outcome => {
+    const archive = pack()
+    const original = JSON.stringify(archive)
+    const identity = { id: "restored-workspace", name: "Original import name", tag: "workspace:restored-workspace" }
+    const key = `tldw:research-pack-import:v1:${servicePromptAuthorityKey(scope.requestScope)}:${archive.fingerprint}`
+    const receipt = JSON.stringify({ version: 1, fingerprint: archive.fingerprint, identity, phase: "ready", jobId: "import-1", maps: { media: { "1": 42 }, notes: { "note-old": "note-new" } } })
+    sessionStorage.setItem(key, receipt)
+    const invalidation = new AbortController()
+    const operation = { ...options(), scope: { ...scope, scopeInvalidatedSignal: invalidation.signal } }
+    mocks.request.mockImplementation(async () => {
+      if (outcome === "missing") throw new Error("Workspace not found")
+      if (outcome === "workspace changed") mocks.current = false
+      if (outcome === "account changed") invalidation.abort()
+      return { workspace_id: outcome === "different context" ? "other-workspace" : identity.id, workspace: { id: outcome === "different identity" ? "other-workspace" : identity.id, name: "Renamed restored workspace", deleted: outcome === "deleted", archived: outcome === "archived" } }
+    })
+
+    if (outcome === "ready") {
+      await expect(restoreWorkspaceResearchPack(archive, operation)).resolves.toEqual({ alreadyRestored: true, identity: { ...identity, name: "Renamed restored workspace" } })
+    } else {
+      await expect(restoreWorkspaceResearchPack(archive, operation)).rejects.toThrow(/not found|identity|unavailable|changed/i)
+    }
+    expect(mocks.request).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: "/api/v1/workspaces/restored-workspace/context", method: "GET", servicePromptConfig: expect.objectContaining({ expectedUserId: "owner" }) }))
+    expect(mocks.upload).not.toHaveBeenCalled()
+    expect(mocks.persist).not.toHaveBeenCalled()
+    expect(mocks.chatImport).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem(key)).toBe(receipt)
+    expect(JSON.stringify(archive)).toBe(original)
+  })
+
   it("does not write after the account changes while an import status request is pending", async () => {
     mocks.request.mockImplementation(async () => { mocks.current = false; return { status: "completed", id_maps: { media: { "1": 42 }, notes: { "note-old": "note-new" } } } })
     await expect(restoreWorkspaceResearchPack(pack(), options())).rejects.toThrow(/changed|current/i)
@@ -145,6 +175,7 @@ describe("scoped complete research pack orchestration", () => {
       return { id: request.path.split("/").pop() }
     })
     const restored = await restoreWorkspaceResearchPack(pack(), options())
+    if (!("bundle" in restored)) throw new Error("A first restore must return its verified bundle")
     expect(restored.bundle.workspace.snapshot.sources[0].mediaId).toBe(42)
     expect(restored.bundle.workspace.snapshot.currentNote).toMatchObject({ id: "note-new", version: 2, isDirty: true })
     expect(restored.bundle.workspace.snapshot.generatedArtifacts[0].workspaceArtifactVersion).toBe(1)

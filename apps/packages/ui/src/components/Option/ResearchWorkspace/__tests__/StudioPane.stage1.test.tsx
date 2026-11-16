@@ -7,6 +7,7 @@ import type { AudioGenerationSettings, GeneratedArtifact, WorkspaceSource } from
 import { StudioPane } from "../StudioPane"
 import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
 import { createGroundedClaimVerification } from "./studio-test-fixtures"
+import { claimTextHash } from "@/utils/claim-verification"
 
 const {
   mockAddArtifact,
@@ -2268,6 +2269,27 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     const before = JSON.stringify(artifact)
     renderStudioPane()
     expect(screen.getByRole("button", { name: "Retry citation checks" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "View" })).toBeEnabled()
+    expect(JSON.stringify(artifact)).toBe(before)
+  })
+
+  it.each(["cited_evidence_limit", "judge_timeout"])("offers only recoverable completed-output checks for %s", reason => {
+    const text = "Proposal [E1.1.1]."
+    const checked = { version: 1, text_sha256: claimTextHash(text), verdict: "supported", provider: "openai", model: "test-model",
+      coverage: { total: 1, evaluated: 1, supported: 1, uncovered: 0, complete: true },
+      findings: [{ id: "C1", text, start: 0, end: text.length, evidence_ids: ["E1.1.1"], status: "supported", reason: "Supported." }],
+      evidence: { "E1.1.1": { text_sha256: "a".repeat(64) } }, limits: {}, context: {} }
+    const unfinished = { ...checked, verdict: "unverified", coverage: { total: 1, evaluated: 0, supported: 0, uncovered: 1, complete: false },
+      findings: [{ ...checked.findings[0], status: "not_checked", reason }] }
+    const artifact = { ...sectionReaderArtifact(), workspaceArtifactId: "canonical-summary", workspaceArtifactVersion: 1,
+      producerMetadata: { origin: "research_workspace_output_job", job_id: 49, source_ids: ["source-1"] },
+      data: { sectionAnalysis: { schemaVersion: 1, synthesis: text, synthesis_verification: checked,
+        sections: [{ title: "Chapter", status: "completed", content: text, claim_verification: checked,
+          batches: [{ status: "completed", verification_text: text, claim_verification: unfinished }] }] } } }
+    workspaceStoreState.generatedArtifacts = [artifact]
+    const before = JSON.stringify(artifact)
+    renderStudioPane()
+    expect(Boolean(screen.queryByRole("button", { name: "Retry citation checks" }))).toBe(reason === "judge_timeout")
     expect(screen.getByRole("button", { name: "View" })).toBeEnabled()
     expect(JSON.stringify(artifact)).toBe(before)
   })

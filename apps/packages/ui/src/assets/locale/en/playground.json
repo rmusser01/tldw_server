@@ -1117,6 +1117,8 @@
     "tips": "Quick Tips"
   },
   "workspace": {
+    "importAlreadyRestored": "This pack is already restored as {{name}}. Your current drafts and the restored workspace are unchanged.",
+    "openRestoredWorkspace": "Open restored workspace",
     "title": "Model Playground",
     "subtitle": "Developer chat with compare mode and full controls",
     "toggleDebug": "Toggle debug panel",

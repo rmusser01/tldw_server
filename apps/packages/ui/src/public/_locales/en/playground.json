@@ -5090,5 +5090,11 @@
   },
   "claims_reason_report_size_limit": {
     "message": "The citation report exceeded its size limit. The draft is retained, but its citation support has not been verified."
+  },
+  "workspace_importAlreadyRestored": {
+    "message": "This pack is already restored as {{name}}. Your current drafts and the restored workspace are unchanged."
+  },
+  "workspace_openRestoredWorkspace": {
+    "message": "Open restored workspace"
   }
 }

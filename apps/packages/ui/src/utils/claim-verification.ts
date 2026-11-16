@@ -107,15 +107,17 @@ export const CLAIM_CHECK_REASONS: Record<string, string> = {
 }
 export const claimCheckReason = (reason: string): string => CLAIM_CHECK_REASONS[reason] || reason
 
-/** Retry missing checks, not a completed judgment that requires a person to revise the draft. */
+const INPUT_LIMIT_REASONS = new Set(["text_or_unit_limit", "cited_evidence_limit", "report_size_limit"])
+
+/** Retry recoverable checks; unchanged input limits and completed judgments require review. */
 export function hasUnfinishedSectionChecks(value: unknown): boolean {
   if (!record(value) || value.schemaVersion !== 1 || !Array.isArray(value.sections) || !value.sections.length ||
     !value.sections.every(section => record(section) && section.status === "completed" && typeof section.content === "string" && section.content.trim())) return false
   const unfinished = (reportValue: unknown, text: string) => {
     const report = readClaimVerification(reportValue, text)
     return !report || report.findings.length === 0 || report.findings.length !== report.coverage.total ||
-      report.findings.some(finding => ["not_checked", "error"].includes(finding.status)) ||
-      (!report.coverage.complete && !report.findings.some(finding => ["unsupported", "contradicted", "uncited"].includes(finding.status)))
+      report.findings.some(finding => finding.status === "error" ||
+        (finding.status === "not_checked" && !INPUT_LIMIT_REASONS.has(finding.reason)))
   }
   if (typeof value.synthesis === "string" && value.synthesis.trim() && unfinished(value.synthesis_verification, value.synthesis)) return true
   return value.sections.some(section => unfinished(section.claim_verification, section.content) ||

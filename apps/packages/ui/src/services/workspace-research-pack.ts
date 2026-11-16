@@ -139,13 +139,24 @@ const readReceipt = (key: string, pack: CompleteResearchPack): ImportReceipt | n
   return value as ImportReceipt
 }
 
-export const restoreWorkspaceResearchPack = async (pack: CompleteResearchPack, options: PackOperation): Promise<{ bundle: WorkspaceExportBundle; identity: PortableWorkspaceIdentity }> => {
+export const restoreWorkspaceResearchPack = async (pack: CompleteResearchPack, options: PackOperation): Promise<
+  { bundle: WorkspaceExportBundle; identity: PortableWorkspaceIdentity } |
+  { alreadyRestored: true; identity: PortableWorkspaceIdentity }
+> => {
   assertCurrent(options)
   if (pack.chatbook.byteLength > 100 * 1024 * 1024) throw new Error("The embedded source backup exceeds the server's 100 MiB Chatbook upload limit. Split the workspace into smaller research packs.")
   await buildWorkspaceChatImport(validateLinkedInventory(pack.bundle, pack.notes, { id: pack.manifest.sourceWorkspaceId, name: pack.bundle.workspace.name, tag: pack.bundle.workspace.tag }), pack.manifest.sourceWorkspaceId)
   assertCurrent(options)
   const key = receiptKey(pack, options)
   let receipt = readReceipt(key, pack)
+  if (receipt?.phase === "ready") {
+    // A receipt is a locator, not authority to reopen or overwrite saved work.
+    const context = await request<Record<string, unknown>>(options, { path: `/api/v1/workspaces/${encodeURIComponent(receipt.identity.id)}/context`, method: "GET" })
+    const workspace = record(context) && record(context.workspace) ? context.workspace : null
+    if (!workspace || context.workspace_id !== receipt.identity.id || workspace.id !== receipt.identity.id || workspace.deleted !== false || workspace.archived !== false)
+      throw new Error("The restored workspace identity is unavailable. Its receipt is retained; the current workspace has not changed.")
+    return { alreadyRestored: true, identity: { ...receipt.identity, name: typeof workspace.name === "string" && workspace.name.trim() ? workspace.name : receipt.identity.name } }
+  }
   if (!receipt) {
     const id = crypto.randomUUID()
     receipt = { version: 1, fingerprint: pack.fingerprint, identity: { id, name: `${pack.bundle.workspace.name} (Imported)`, tag: `workspace:${id}` }, phase: "submitting" }

@@ -47,6 +47,7 @@ import {
 import { isServicePromptRequestPath } from "@/services/tldw/service-prompt-scope-error";
 import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
 import { loadServicePromptSnapshot } from "@/services/service-prompts";
+import { tldwRequest } from "@/services/tldw/request-core";
 
 const receiptKey = "tldw:research-workspace:migration:tombstone:original";
 const context = () => ({
@@ -129,6 +130,62 @@ beforeEach(() => {
 });
 
 describe("migrated Research Workspace restoration", () => {
+
+  it.each(["slow body", "deadline", "account cancellation"])(
+    "bounds a full artifact response while preserving %s behavior", async outcome => {
+      vi.useFakeTimers();
+      const originalRequest = boundary.request.getMockImplementation()!;
+      const apply = vi.fn();
+      const artifacts = [{ id: "saved-report", workspace_id: "original", artifact_type: "summary",
+        title: "Saved report", status: "completed", content: "Exact saved evidence", version: 1 }];
+      let bodyStarted = false;
+      boundary.request.mockImplementation(async input => {
+        if (!input.path.endsWith("/artifacts")) return originalRequest(input);
+        const response = await tldwRequest(input, {
+          getConfig: async () => ({ ...boundary.config, authMode: "single-user", apiKey: "test-key" }),
+          fetchFn: async (_url, init) => {
+            const response = Response.json(artifacts);
+            vi.spyOn(response, "json").mockImplementation(() => new Promise((resolve, reject) => {
+              bodyStarted = true;
+              const timer = setTimeout(() => resolve(artifacts), outcome === "slow body" ? 15_000 : 180_000);
+              init?.signal?.addEventListener("abort", () => {
+                clearTimeout(timer);
+                reject(new DOMException("Body read aborted", "AbortError"));
+              }, { once: true });
+            }));
+            return response;
+          },
+        });
+        if (!response.ok) throw Object.assign(new Error(response.error), { code: response.code });
+        return response.data;
+      });
+      const pending = restore(apply).then(value => ({ value }), error => ({ error }));
+      let settled = false;
+      void pending.then(() => { settled = true; });
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(bodyStarted).toBe(true);
+        if (outcome === "slow body") {
+          await vi.advanceTimersByTimeAsync(15_000);
+          expect(await pending).toEqual({ value: true });
+          expect(apply).toHaveBeenCalledWith(expect.objectContaining({ generatedArtifacts: [expect.objectContaining({
+            id: "saved-report", content: "Exact saved evidence", workspaceArtifactVersion: 1,
+          })] }), undefined, undefined);
+        } else {
+          await vi.advanceTimersByTimeAsync(outcome === "deadline" ? 119_999 : 12_000);
+          expect(settled).toBe(false);
+          if (outcome === "account cancellation") boundary.controller.abort();
+          else await vi.advanceTimersByTimeAsync(2);
+          expect(await pending).toMatchObject({ error: { code: outcome === "deadline" ? "REQUEST_TIMEOUT" : "REQUEST_ABORTED" } });
+          expect(apply).not.toHaveBeenCalled();
+        }
+      } finally {
+        boundary.controller.abort();
+        await pending;
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("retains a newly imported report through a tombstoned cold restore", async () => {
     const originalRequest = boundary.request.getMockImplementation()!;

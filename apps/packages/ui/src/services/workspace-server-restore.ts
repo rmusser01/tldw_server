@@ -298,6 +298,8 @@ export const restoreMigratedResearchWorkspace = async (options: {
       bgRequest<WorkspaceArtifactApiResponse[]>({
         ...request,
         path: `${path}/artifacts`,
+        // Full evidence reports can be large; match the pack read budget per headers/body phase.
+        timeoutMs: 120_000,
       }),
       bgRequest<WorkspaceNoteApiResponse[]>({
         ...request,
