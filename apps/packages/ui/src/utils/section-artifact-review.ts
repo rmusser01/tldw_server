@@ -81,10 +81,12 @@ export const buildSectionReviewPatch = (artifact: GeneratedArtifact, target: Sec
 }
 
 /** Export the unchanged draft plus clearly separated reviewer amendments. */
-export const renderSectionReviewExport = (artifact: GeneratedArtifact): string => {
+export const renderSectionReviewExport = (artifact: GeneratedArtifact, targetId?: string): string => {
+  const reviewEntries = entries(artifact).filter(entry => targetId === undefined || entry.targetId === targetId)
+  if (targetId !== undefined && !reviewEntries.length) return ""
   const lines = [artifact.content ?? "", "\n# Reviewer corrections", `Review status: ${artifact.reviewStatus ?? "draft"}.`,
     "The model draft and source evidence above are unchanged. Review status records a reviewer decision, not automatic verification."]
-  for (const entry of entries(artifact)) {
+  for (const entry of reviewEntries) {
     const selection = entry.targetId === "overview" ? "overview" : entry.targetId.replace(/^section:/, "")
     const target = getSectionReviewTarget(artifact, selection)
     lines.push(`## ${entry.title}`, `Saved: ${entry.savedAt}; original target fingerprint: ${entry.targetFingerprint}.`)

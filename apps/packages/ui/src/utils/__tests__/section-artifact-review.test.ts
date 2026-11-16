@@ -11,6 +11,22 @@ const artifact = (): GeneratedArtifact => ({
 })
 
 describe("source-bound artifact review", () => {
+  it("filters a standalone target without changing the full review export or original fingerprints", () => {
+    let reviewed = artifact()
+    reviewed = { ...reviewed, ...buildSectionReviewPatch(reviewed, getSectionReviewTarget(reviewed, "overview")!, { status: "needs_revision", correction: "Overview-only note", reason: "Overview reason" }) }
+    reviewed = { ...reviewed, ...buildSectionReviewPatch(reviewed, getSectionReviewTarget(reviewed, "0")!, { status: "needs_revision", correction: "Chapter-only note", reason: "Partial agent review; human acceptance unset." }) }
+    const before = JSON.stringify(reviewed)
+    const chapter = renderSectionReviewExport({ ...reviewed, content: "" }, "section:0")
+    expect(chapter).toContain("Chapter-only note")
+    expect(chapter).toContain("human acceptance unset")
+    expect(chapter).not.toContain("Overview-only note")
+    expect(chapter).not.toContain("Original target changed")
+    expect(renderSectionReviewExport(reviewed)).toContain("Overview-only note")
+    expect(renderSectionReviewExport(reviewed)).toContain("Chapter-only note")
+    expect(renderSectionReviewExport(reviewed, "section:1")).toBe("")
+    expect(JSON.stringify(reviewed)).toBe(before)
+  })
+
   it("retains the raw output and evidence while saving a separately identified correction", () => {
     const original = artifact(); const before = structuredClone(original)
     const target = getSectionReviewTarget(original, "overview")!

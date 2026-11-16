@@ -8,6 +8,7 @@ import { parseWorkspaceImportFile } from "@/store/workspace-bundle"
 import { projectWorkspaceRagSources, restoreWorkspaceRagSources } from "../workspace-rag-sources"
 import { claimTextHash } from "../claim-verification"
 import { remapPortableWorkspace } from "../workspace-reference-remap"
+import { buildSectionReviewPatch, getSectionReviewTarget } from "../section-artifact-review"
 
 const pdf = Uint8Array.from(new TextEncoder().encode("%PDF-1.7 exact original bytes"))
 const digest = webcrypto.subtle.digest.bind(webcrypto.subtle)
@@ -206,6 +207,51 @@ describe("complete research pack archive", () => {
     expect(html).toContain("Reviewer corrections")
     expect(html).toContain("Review note: Source check")
     expect(await zip.file("offline/reports/artifact-1.md")!.async("string")).toContain("Reviewed correction")
+  })
+
+  it.each(["current", "stale", "unreviewed"])("shows only the matching saved overlay in a %s standalone chapter", async state => {
+    const bundle = portableFixture()
+    const artifact = bundle.workspace.snapshot.generatedArtifacts[0]
+    const analysis = artifact.data!.sectionAnalysis as { synthesis?: string; sections: Array<{ content: string; title: string; node_id: string; claim_verification?: unknown }> }
+    analysis.synthesis = "Original overview"
+    analysis.sections.push({ ...structuredClone(analysis.sections[0]), title: "Sibling chapter", node_id: "sibling-node" })
+    const checkedText = analysis.sections[0].content
+    analysis.sections[0].claim_verification = { version: 1, text_sha256: claimTextHash(checkedText), verdict: "unverified", provider: "openai", model: "saved-model",
+      coverage: { total: 1, evaluated: 0, supported: 0, uncovered: 1, complete: false },
+      findings: [{ id: "C1", text: checkedText, start: 0, end: checkedText.length, evidence_ids: [], status: "not_checked", reason: "provider_unavailable" }],
+      evidence: {}, limits: {}, context: {} }
+    artifact.reviewMetadata = {}
+    if (state !== "unreviewed") Object.assign(artifact, buildSectionReviewPatch(artifact, getSectionReviewTarget(artifact, "0")!, {
+      status: "needs_revision", correction: 'Partial agent-proposed <script>alert("review")</script> correction', reason: "Source reviewed; human acceptance remains unset."
+    }))
+    Object.assign(artifact, buildSectionReviewPatch(artifact, getSectionReviewTarget(artifact, "1")!, { status: "needs_revision", correction: "Sibling correction only", reason: "Sibling review" }))
+    Object.assign(artifact, buildSectionReviewPatch(artifact, getSectionReviewTarget(artifact, "overview")!, { status: "needs_revision", correction: "Overview correction only", reason: "Overview review" }))
+    if (state === "stale") analysis.sections[0].content = "New generated text after the saved correction"
+    const original = JSON.stringify(bundle)
+    const blob = await buildCompleteResearchPack({ bundle, chatbook: await chatbook(), notes: [bundle.workspace.snapshot.currentNote], sourceWorkspaceId: "old" })
+    const zip = await JSZip.loadAsync(await readBlobBytes(blob))
+    const doc = new DOMParser().parseFromString(await zip.file("offline/reports/artifact-1-section-1.html")!.async("string"), "text/html")
+    expect(doc.body.textContent).toContain(analysis.sections[0].content)
+    expect(doc.body.textContent).toContain("Exact quote")
+    expect(doc.body.textContent).not.toContain("Sibling correction only")
+    expect(doc.body.textContent).not.toContain("Overview correction only")
+    expect(doc.querySelector("script")).toBeNull()
+    if (state === "unreviewed") expect(doc.body.textContent).not.toContain("Reviewer corrections")
+    else {
+      expect(doc.body.textContent).toContain("Reviewer corrections")
+      expect(doc.body.textContent).toContain('Partial agent-proposed <script>alert("review")</script> correction')
+      expect(doc.body.textContent).toContain("human acceptance remains unset")
+      expect(doc.body.textContent).toContain("Review status: needs_revision")
+      expect(doc.body.textContent?.includes("Original target changed")).toBe(state === "stale")
+    }
+    const overview = await zip.file("offline/reports/artifact-1.html")!.async("string")
+    expect(overview).toContain("Sibling correction only")
+    expect(overview).toContain("Overview correction only")
+    const retained = JSON.parse(await zip.file("workspace.json")!.async("string")).workspace.snapshot.generatedArtifacts[0]
+    expect(JSON.stringify(retained.data)).toBe(JSON.stringify(artifact.data))
+    expect(JSON.stringify(retained.reviewMetadata)).toBe(JSON.stringify(artifact.reviewMetadata))
+    expect(retained.content).toBe(artifact.content)
+    expect(JSON.stringify(bundle)).toBe(original)
   })
 
   it("rejects an embedded Chatbook with unselected content even when outer hashes match", async () => {
