@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import html
 import inspect
 import json as _json
 import os
@@ -84,12 +85,14 @@ from tldw_Server_API.app.core.Chat.history_selection import (
     HistorySelectionSnapshotV1,
     reply_action_refusal,
 )
+from tldw_Server_API.app.core.Chat.knowledge_save import split_reasoning_text, strip_reasoning_blocks
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.Chat.moderation_pipeline import (
     OutputModerationRuntime,
     apply_output_safety_to_choices,
 )
 from tldw_Server_API.app.core.Chat.persistence_service import (
+    NativeStreamPersistence,
     build_assistant_message_payload,
     save_assistant_message,
     save_tool_messages,
@@ -2992,6 +2995,14 @@ def _format_selected_history_messages(
             },
             extra,
         )
+        if role == "assistant":
+            answer = strip_reasoning_blocks(text)
+            if not answer.strip() and answer != text and not item["images"]:
+                if not (item.get("tool_calls") or extra.get("function_call")):
+                    continue
+                text = None
+            else:
+                text = answer
         image_details = _saved_image_details(extra, len(item["images"]))
         if text and role != "tool" and (role != "user" or replace_user_placeholders):
             text = replace_placeholders(text, character_card.get("name", "Char"), user_name)
@@ -3026,6 +3037,20 @@ def _format_selected_history_messages(
             entry["name"] = extra.get("sender_name") or extra.get("tool_name")
         output.append(entry)
     return output
+
+
+def _normalize_history_overlap_content(value: Any, *, assistant: bool) -> Any:
+    """Normalize text parts for comparing the saved and submitted history."""
+    if isinstance(value, str):
+        value = [{"type": "text", "text": value}]
+    if assistant and isinstance(value, list):
+        return [
+            {**part, "text": strip_reasoning_blocks(part["text"])}
+            if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str)
+            else part
+            for part in value
+        ]
+    return value
 
 
 async def build_context_and_messages(
@@ -3423,6 +3448,8 @@ async def build_context_and_messages(
                 continue
             char_name_hist = character_card.get("name", "Char") if character_card else "Char"
             text_content = _saved_image_text(db_msg, metadata.get("extra") if isinstance(metadata, dict) else None)
+            if role == "assistant":
+                text_content = strip_reasoning_blocks(text_content)
             raw_user_text = text_content
             # Normal/persona Retry compares and sends the literal saved user input.
             preserve_literal_retry = reuse_saved_turn and role == "user" and (is_owned_neutral_conversation or is_existing_persona_conversation)
@@ -3466,12 +3493,12 @@ async def build_context_and_messages(
                         db_msg.get("id"),
                         exception_summary(e),
                     )
-            if msg_parts:
+            if msg_parts or (role == "assistant" and (tool_calls_meta or function_call_meta)):
                 hist_entry = {"role": role}
                 if role == "tool" and len(msg_parts) == 1 and msg_parts[0].get("type") == "text":
                     hist_entry["content"] = msg_parts[0].get("text", "")
                 else:
-                    hist_entry["content"] = msg_parts
+                    hist_entry["content"] = msg_parts or None
                 if role == "assistant":
                     name_source = stored_name or (character_card.get("name") if character_card else None)
                     if name_source:
@@ -3617,17 +3644,10 @@ async def build_context_and_messages(
             msg.get("role") in {"assistant", "tool"} for msg in request_messages
         )
         all_user_roles = all(msg.get("role") == "user" for msg in request_messages)
-        def _normalize_content(value: Any) -> Any:
-            if isinstance(value, str):
-                return [{"type": "text", "text": value}]
-            if isinstance(value, list):
-                return value
-            return value
-
         def _msg_sig(msg: dict[str, Any]) -> str:
             payload = {
                 "role": msg.get("role"),
-                "content": (_retry_content_components(retry_history_content.get(id(msg), msg.get("content"))) if reuse_saved_turn and msg.get("role") == "user" else _normalize_content(msg.get("content"))),
+                "content": (_retry_content_components(retry_history_content.get(id(msg), msg.get("content"))) if reuse_saved_turn and msg.get("role") == "user" else _normalize_history_overlap_content(msg.get("content"), assistant=msg.get("role") == "assistant")),
                 "tool_calls": msg.get("tool_calls"),
                 "function_call": msg.get("function_call"),
                 "tool_call_id": msg.get("tool_call_id"),
@@ -4242,7 +4262,7 @@ async def execute_streaming_call(
     continuation_metadata: dict[str, Any] | None = None,
     queue_request_id: str | None = None,
     provider_factory_timeout: float | None = None,
-    history_persistence_ack: bool = False,
+    native_persistence: NativeStreamPersistence | None = None,
     forward_usage_chunk: bool = False,
 ) -> StreamingResponse:
     """Execute a streaming LLM call with queue, failover, moderation, and persistence.
@@ -4871,7 +4891,9 @@ async def execute_streaming_call(
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         loop_compat_enabled = False
 
-    async def _apply_stream_output_policies(full_reply: str) -> tuple[str | None, bool]:
+    async def _apply_stream_output_policies(
+        full_reply: str, *, enforce_resolved_action: bool = False
+    ) -> tuple[str | None, bool]:
         """Run self-monitoring and output moderation on a reply before it is saved.
 
         Shared by complete and partial settlement so both store the same text.
@@ -4955,12 +4977,11 @@ async def execute_streaming_call(
                         _, sample = moderation.check_text(full_reply, eff_policy, "output")
                     except _CHAT_NONCRITICAL_EXCEPTIONS:
                         sample = None
-                if action is None:
-                    flagged, sample = moderation.check_text(full_reply, eff_policy, "output")
-                    if flagged:
-                        action = eff_policy.output_action
-                        if action == "redact":
-                            moderation.redact_text(full_reply, eff_policy)
+                if action is None or enforce_resolved_action:
+                    if action is None:
+                        flagged, sample = moderation.check_text(full_reply, eff_policy, "output")
+                        if flagged:
+                            action = eff_policy.output_action
 
                     if action == "block":
                         if not stream_mod_state["block_logged"]:
@@ -5078,7 +5099,24 @@ async def execute_streaming_call(
     # selection, where the server owns settlement. Other save_to_db clients
     # retry an unanswered turn with tldw_retry_failed_turn, and that contract
     # needs the failed turn to have no saved reply.
-    keep_partial_replies = bool(should_persist and history_persistence_ack)
+    keep_partial_replies = bool(should_persist and native_persistence)
+
+    async def _prepare_saved_stream_reply(full_reply: str) -> tuple[str | None, bool]:
+        """Apply save policies to answer and thinking without checking synthetic tags."""
+        if native_persistence != "retain_reasoning" or not keep_partial_replies or structured_request_context is not None:
+            return await _apply_stream_output_policies(full_reply)
+        answer, thinking = split_reasoning_text(full_reply)
+        approved_answer, blocked = await _apply_stream_output_policies(answer)
+        if blocked or approved_answer != answer:
+            return approved_answer, blocked
+        if thinking:
+            thinking = html.unescape(thinking)
+            approved_thinking, thinking_blocked = await _apply_stream_output_policies(
+                thinking, enforce_resolved_action=True
+            )
+            if thinking_blocked or approved_thinking != thinking:
+                return answer, False
+        return full_reply, False
 
     async def partial_save_callback(full_reply: str, *, generation: dict[str, Any]) -> str | None:
         """Keep an unfinished reply after a disconnect, stop or provider failure (D7 S3-1).
@@ -5091,7 +5129,7 @@ async def execute_streaming_call(
             return None
         if stream_mod_state.get("pending_stop_error") is not None:
             return None
-        full_reply_to_save, post_stream_blocked = await _apply_stream_output_policies(full_reply)
+        full_reply_to_save, post_stream_blocked = await _prepare_saved_stream_reply(full_reply)
         if post_stream_blocked or not isinstance(full_reply_to_save, str) or not full_reply_to_save.strip():
             return None
         message_payload = build_assistant_message_payload(
@@ -5148,7 +5186,7 @@ async def execute_streaming_call(
         saved_message_id: str | None = None
         tool_execution_payload: list[dict[str, Any]] | None = None
         structured_events: list[dict[str, Any]] = []
-        full_reply_to_save, post_stream_blocked = await _apply_stream_output_policies(full_reply)
+        full_reply_to_save, post_stream_blocked = await _prepare_saved_stream_reply(full_reply)
 
         if structured_request_context is not None:
             try:
@@ -5176,7 +5214,7 @@ async def execute_streaming_call(
 
         if callable(on_stream_full_reply):
             try:
-                maybe_result = on_stream_full_reply(str(full_reply or ""))
+                maybe_result = on_stream_full_reply(strip_reasoning_blocks(full_reply))
                 if hasattr(maybe_result, "__await__"):
                     await maybe_result  # type: ignore[misc]
             except _CHAT_NONCRITICAL_EXCEPTIONS as stream_callback_err:
@@ -5630,8 +5668,11 @@ async def execute_streaming_call(
                     system_message_id=system_message_id,
                     user_message_id=user_message_id,
                     continuation_metadata=normalized_continuation_metadata,
-                    history_persistence_ack=history_persistence_ack or None,
+                    history_persistence_ack=bool(native_persistence) or None,
                     forward_usage_chunk=forward_usage_chunk,
+                    retain_reasoning=(
+                        native_persistence == "retain_reasoning" and keep_partial_replies and structured_request_context is None
+                    ) or None,
                 ),
                 stream_factory=create_streaming_response_with_timeout,
             )

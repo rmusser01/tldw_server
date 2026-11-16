@@ -458,7 +458,8 @@ vi.mock("@/utils/generate-history", () => ({
   generateHistory: () => []
 }))
 
-vi.mock("@/libs/reasoning", () => ({
+vi.mock("@/libs/reasoning", async importOriginal => ({
+  ...await importOriginal<typeof import("@/libs/reasoning")>(),
   isReasoningEnded: () => false,
   isReasoningStarted: () => false,
   mergeReasoningContent: (value: string) => value,

@@ -33,6 +33,7 @@ class StreamingPipelineRequest:
     user_message_id: str | None = None
     partial_save_callback: Callable[..., Any] | None = None
     forward_usage_chunk: bool | None = None
+    retain_reasoning: bool | None = None
 
 
 def create_chat_streaming_response(
@@ -60,6 +61,7 @@ def create_chat_streaming_response(
         "history_persistence_ack": request.history_persistence_ack,
         "partial_save_callback": request.partial_save_callback,
         "forward_usage_chunk": request.forward_usage_chunk,
+        "retain_reasoning": request.retain_reasoning,
     }
     factory_kwargs.update(
         {

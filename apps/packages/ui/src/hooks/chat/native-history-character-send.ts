@@ -772,8 +772,12 @@ export const sendNativeHistoryCharacter = async (
       if (!preparingIsCurrent()) throw new Error("stale_selection")
       dispatched = true
       // The transport sets stream=true. Never give it the frozen provenance object.
+      const payload = structuredClone(prepared.payload) as ChatCompletionRequest
       const wire = {
-        ...(structuredClone(prepared.payload) as ChatCompletionRequest),
+        ...payload,
+        ...(capture.native_completion_v1?.reasoning_history_supported === true
+          ? { metadata: { ...payload.metadata, tldw_retain_reasoning_history_v1: true } }
+          : {}),
         ...(existing ? { tldw_history_server_existing_input_v1: structuredClone(selection) } : {
         tldw_history_selection_v1: structuredClone(selection),
         tldw_history_branch: historyBranch,
