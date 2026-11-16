@@ -512,9 +512,10 @@ class Runner:
                     raise UnsafeResume("Adopted job does not match configured provider/model/selected sections")
             if result["status"] in {"completed", "failed", "cancelled"}:
                 break
-            if time.monotonic() >= deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 return polled
-            time.sleep(2)
+            time.sleep(min(15, remaining))
         artifact = result.get("artifact") or {}
         readback = self.request(f"summary:{model['key']}:readback", "summary_readback", "GET", f"/api/v1/workspaces/{workspace}/artifacts", metadata={"model_key": model["key"]})
         saved = self.body(readback)

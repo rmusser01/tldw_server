@@ -300,6 +300,39 @@ def test_summary_pending_status_is_journaled_without_a_success_claim(runner_modu
         assert run.events[-1]["outcome"] == "pending"
 
 
+@pytest.mark.parametrize("wait_seconds,expected_sleeps", [(20, [15, 5]), (4, [4])])
+def test_summary_poll_cadence_is_bounded_by_deadline_and_resume_keeps_job(
+    runner_module, config_file, tmp_path, monkeypatch, wait_seconds, expected_sleeps
+):
+    config = json.loads(config_file.read_text())
+    config["summary"]["wait_seconds"] = wait_seconds
+    config_file.write_text(json.dumps(config))
+    elapsed, sleeps, methods = [0], [], []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        elapsed[0] += seconds
+
+    def server(**kwargs):
+        methods.append(kwargs["method"])
+        if kwargs["method"] == "POST":
+            return httpx.Response(202, json={"job_id": 12, "artifact_id": "summary-1", "status": "queued"})
+        assert kwargs["url"].endswith("/outputs/12")
+        return httpx.Response(200, json={"job_id": 12, "artifact_id": "summary-1", "status": "processing"})
+
+    monkeypatch.setattr(runner_module.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(runner_module.time, "sleep", sleep)
+    plan, directory = runner_module.load_plan(config_file), tmp_path / "run"
+    for resume in (False, True):
+        with runner_module.Runner(plan, directory, fetch=server, resume=resume) as run:
+            result = run.summarize(run.config["models"][0])
+            assert result["outcome"] == "pending"
+    assert sleeps == expected_sleeps * 2
+    assert elapsed[0] == wait_seconds * 2
+    assert methods.count("POST") == 1
+    assert methods.count("GET") == (len(expected_sleeps) + 1) * 2
+
+
 def test_summary_exact_spans_detect_tampered_quotes_and_missing_coverage(runner_module):
     section = {"node_id": "chapter", "media_id": 7, "start_char": 10, "end_char": 16, "status": "completed", "batches": [
         {"start_char": 10, "end_char": 16, "status": "completed", "evidence": [{"start_char": 10, "end_char": 16, "quote": "Source"}]}]}

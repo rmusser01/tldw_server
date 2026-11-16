@@ -79,7 +79,7 @@ Set summary configuration **before** creating `run-a`, even if the first invocat
 
 Without adoption, each configured model submits a distinct output job. To inspect an existing job instead, set `summary.job_ids` to a mapping from a configured model key to its positive existing job ID before planning. The runner verifies the artifact type and configured provider/model/settings/section scope, then polls and reads back the artifact without a new submission. An incompatible job is rejected.
 
-`summary.wait_seconds` defaults to `3600` and accepts integers from `1` to `86400`. Polling occurs every two seconds. Reaching the wait deadline records `pending` and returns a nonzero exit; it does not cancel the server job. Resume with the same config to continue polling its saved ID without another POST.
+`summary.wait_seconds` defaults to `3600` and accepts integers from `1` to `86400`. Polls wait up to 15 seconds, bounded by the remaining wait time. Reaching the wait deadline records `pending` and returns a nonzero exit; it does not cancel the server job. Resume with the same config to continue polling its saved ID without another POST.
 
 Terminal summary results, including failures and partial evidence, are retained on resume. The runner rejects `--retry-operation` for a known summary job, whether running or terminal. Resume its recorded job or use a new run directory for a new intentional generation.
 
