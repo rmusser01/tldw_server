@@ -1749,3 +1749,97 @@ async def test_late_literal_author_note_reaches_early_extraction_and_name_droppi
     assert source[saved_note["start_char"]:saved_note["end_char"]] == saved_note["quote"]
     assert note in saved_note["quote"] and saved_note["start_char"] >= 48_000
     assert options["workspace_db"].row["status"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_overview_reductions_retain_exact_scoped_notes_without_authorizing_other_group_ids(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    notes = ["AUTHOR’S NOTE: The author alone is responsible; no views belong to any other individual. E3.1.1 is source text.",
+             "AUTHOR’S NOTE: Excluded failed section.",
+             "AUTHOR’S NOTE: No policy view belongs to any individual contributor or the author."]
+    source, nodes = "", []
+    for index, note in enumerate(notes, 1):
+        start = len(source)
+        source += f"# Policy {index}\n\n**Writer {index}**\n\nPolicy body.\n\n{note}\n"
+        nodes.append({"id": f"dsi:{index}", "title": f"Policy {index}", "level": 1,
+                      "target_type": "char_range", "target_start": start, "target_end": len(source)})
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": source, "navigation_version": "v1", "page_map": [], "nodes": nodes,
+    }))
+    calls = []
+
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        prompt = kwargs["messages_payload"][0]["content"]
+        if "SOURCE:" in prompt:
+            content = json.dumps({"summary": "Policy.", "evidence": [{
+                "claim": "A proposal", "source_span_ids": ["P99" if notes[1] in prompt else "P1"],
+            }]})
+        else:
+            allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+            prefix = "A chapter policy. " * 800 if prompt.startswith("Summarize all portions") else "Compressed without names or notes. "
+            content = prefix + " ".join(f"[{value}]" for value in allowed)
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    settings = request().settings
+    settings.sections.extend(settings.sections[0].model_copy(update={"node_id": f"dsi:{index}"}) for index in (2, 3))
+    options = args(settings)
+    await mod.process_section_summary(**options)
+    reductions = [c for c in calls if "intermediate compression step" in c["system_message"]]
+    overview = next(c for c in calls if c["messages_payload"][0]["content"].startswith("Synthesize the completed"))
+    assert reductions
+    for call in [*reductions, overview]:
+        prompt = call["messages_payload"][0]["content"]
+        assert notes[0] in prompt and notes[2] in prompt and notes[1] not in prompt
+        assert "Section 1: Policy 1" in prompt and "Section 3: Policy 3" in prompt
+        assert prompt.count("SOURCE AUTHOR NOTES") == 1
+    first_allowed = json.loads(reductions[0]["messages_payload"][0]["content"].split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+    assert first_allowed == ["E1.1.1"]
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert [s["status"] for s in analysis["sections"]] == ["completed", "failed", "completed"]
+    assert analysis["synthesis"] and options["workspace_db"].row["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_oversized_overview_author_notes_fail_actionably_and_keep_completed_chapters(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    source, nodes = "", []
+    for index in range(1, 23):
+        start = len(source)
+        source += f"# Policy {index}\n\n**Writer {index}**\n\nPolicy body.\n\nAUTHOR’S NOTE: " + "x" * 850 + "\n"
+        nodes.append({"id": f"dsi:{index}", "title": f"Policy {index}", "level": 1,
+                      "target_type": "char_range", "target_start": start, "target_end": len(source)})
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": source, "navigation_version": "v1", "page_map": [], "nodes": nodes,
+    }))
+    calls = []
+
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        prompt = kwargs["messages_payload"][0]["content"]
+        if "SOURCE:" in prompt:
+            content = json.dumps({"summary": "Policy.", "evidence": [{"claim": "A proposal", "source_span_ids": ["P1"]}]})
+        else:
+            allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+            content = "A chapter policy. " + " ".join(f"[{value}]" for value in allowed)
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    settings = request().settings
+    settings.sections.extend(settings.sections[0].model_copy(update={"node_id": f"dsi:{index}"}) for index in range(2, 23))
+    options = args(settings)
+    result = await mod.process_section_summary(**options)
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert result["partial"] and options["workspace_db"].row["status"] == "failed"
+    assert all(s["status"] == "completed" and s["content"] and s["batches"][0]["evidence"] for s in analysis["sections"])
+    assert analysis["synthesis_error_code"] == "author_note_context_too_large"
+    assert "fewer sections" in analysis["synthesis_error"] and "saved chapters remain" in analysis["synthesis_error"]
+    assert not any(c["messages_payload"][0]["content"].startswith("Synthesize the completed") for c in calls)
+    assert not analysis.get("generation_failures")

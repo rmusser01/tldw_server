@@ -370,3 +370,45 @@ def test_author_note_excerpt_is_bounded_and_exact_with_original_offsets(suffix):
         if note["end_char"] < section["end_char"]:
             assert note["truncated"]
     assert len(module().render_attribution_context(contexts)) <= 16_000
+
+
+@pytest.mark.parametrize("incomplete_status", ["failed", "generating", "unread"])
+def test_overview_notes_keep_completed_selection_ordinals_and_distinct_contributions(incomplete_status):
+    sections = []
+    for title, status, contribution, quote in [
+        ("Joint chapter", "completed", "Joint chapter", "AUTHORS’ NOTE: The authors alone are responsible.\n"),
+        ("Missing chapter", incomplete_status, "Missing chapter", "AUTHOR’S NOTE: Excluded failed text."),
+        ("Opposing chapter", "completed", "Distinct contribution", "AUTHOR’S NOTE: No view belongs to any individual.\n"),
+    ]:
+        sections.append({"title": title, "status": status, "attribution_contexts": [{
+            "type": "heading", "title": contribution, "source_id": "opaque-source", "node_id": "opaque-node",
+            "author_notes": [{"start_char": 100, "end_char": 100 + len(quote), "quote": quote, "truncated": False}],
+        }]})
+    sections[2]["attribution_contexts"].append({"type": "heading", "title": "Other contribution", "author_notes": [
+        {"start_char": 300, "end_char": 346, "quote": "AUTHOR’S NOTE: Thanks to several collaborators.", "truncated": True},
+    ]})
+    before = copy.deepcopy(sections)
+    rendered = module().render_overview_author_notes(sections)
+    assert "Section 1: Joint chapter" in rendered
+    assert "Section 3: Opposing chapter" in rendered and "Distinct contribution" in rendered
+    assert "Contribution: Other contribution\n[Source excerpt truncated]\nAUTHOR’S NOTE: Thanks to several collaborators." in rendered
+    assert "Missing chapter" not in rendered and "Excluded failed text" not in rendered
+    assert "opaque-source" not in rendered and "opaque-node" not in rendered
+    assert all(c["attribution_contexts"][0]["author_notes"][0]["quote"] in rendered for c in (sections[0], sections[2]))
+    assert "not claim or citation evidence" in rendered
+    assert "Each note applies only to its labeled section or contribution." in rendered
+    assert sections == before
+
+
+@pytest.mark.parametrize("contexts", [[], [{"type": "unresolved", "omitted": False}], [{"type": "heading", "author_notes": []}]])
+def test_overview_without_verified_author_notes_is_empty(contexts):
+    assert module().render_overview_author_notes([{"title": "Selected", "status": "completed", "attribution_contexts": contexts}]) == ""
+
+
+@pytest.mark.parametrize("mode", ["oversized", "omitted"])
+def test_overview_note_budget_excess_is_explicit_instead_of_silent_omission(mode):
+    contexts = [{"type": "heading", "title": "Selected", "author_notes": [
+        {"quote": "x" * 800, "truncated": True} for _ in range(21)
+    ]}] if mode == "oversized" else [{"type": "unresolved", "omitted": True}]
+    with pytest.raises(module().AuthorNoteContextTooLarge):
+        module().render_overview_author_notes([{"title": "Selected", "status": "completed", "attribution_contexts": contexts}])

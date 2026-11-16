@@ -24,9 +24,11 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
 )
 from tldw_Server_API.app.core.Research_Workspace.research_workspace_outputs import ResearchWorkspaceOutputSettings
 from tldw_Server_API.app.core.Research_Workspace.section_attribution import (
+    AuthorNoteContextTooLarge,
     build_section_attribution_contexts,
     contextual_author,
     render_attribution_context,
+    render_overview_author_notes,
 )
 
 BATCH_CHARS = 24_000
@@ -75,6 +77,7 @@ _FAILURE_MESSAGES = {
     "unknown_evidence_reference": "The synthesis cited an evidence ID that was not supplied. Retry synthesis using the saved evidence.",
     "synthesis_input_too_large": "A generated portion exceeds the synthesis input limit. Generate a new output with a more concise summary instruction; Retry retains the saved portions.",
     "synthesis_not_reduced": "The model did not shorten the synthesis input. Retry synthesis. To use a more concise instruction, generate a new output.",
+    "author_note_context_too_large": "The source author notes exceed the overview context limit. Generate an overview for fewer sections; saved chapters remain available.",
     "provider_timeout": "The provider timed out. Retry the incomplete portion when the provider is available.",
     "provider_failed": "The provider could not complete this portion. Check provider availability and credentials, then retry.",
 }
@@ -93,6 +96,8 @@ def _generation_failure(exc: Exception) -> tuple[str, str]:
     code = (
         exc.code
         if isinstance(exc, SectionGenerationError)
+        else "author_note_context_too_large"
+        if isinstance(exc, AuthorNoteContextTooLarge)
         else "invalid_json"
         if isinstance(exc, json.JSONDecodeError)
         else "provider_timeout"
@@ -752,11 +757,14 @@ async def process_section_summary(
             "unread_portions": sum(batch["status"] not in {"completed", "failed"} for batch in all_portions),
         }
         try:
+            last_completion = None
+            overview_context = render_overview_author_notes(analysis["sections"])
             analysis["synthesis"] = await synthesize(
                 completed,
                 build_section_overview_instruction(payload["artifact_type"], settings.summary_instruction, coverage),
                 progress_message=synthesis_progress,
                 stage="overview_synthesis",
+                attribution_context=overview_context,
             )
             analysis.pop("synthesis_error", None)
             analysis.pop("synthesis_error_code", None)

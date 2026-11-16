@@ -195,6 +195,48 @@ def render_attribution_context(contexts: list[dict[str, Any]], start: int | None
     return rendered
 
 
+class AuthorNoteContextTooLarge(ValueError):
+    """Source notes cannot fit without dropping attribution qualifications."""
+
+
+def render_overview_author_notes(sections: list[dict[str, Any]]) -> str:
+    """Keep completed sections' literal notes outside overview compression.
+
+    Saved provenance retains coordinates and identities. The prompt uses original
+    selection ordinals and titles, leaving room for exact notes under the same cap.
+    """
+    parts = []
+    for ordinal, section in enumerate(sections, 1):
+        if section.get("status") != "completed":
+            continue
+        contexts = section.get("attribution_contexts", [])
+        if any(context.get("omitted") for context in contexts):
+            raise AuthorNoteContextTooLarge()
+        contributions = [context for context in contexts if context.get("type") == "heading" and context.get("author_notes")]
+        if not contributions:
+            continue
+        parts.append(f"Section {ordinal}: {section['title']}\n")
+        for context in contributions:
+            if context["title"] != section["title"]:
+                parts.append(f"Contribution: {context['title']}\n")
+            for note in context["author_notes"]:
+                if note.get("truncated"):
+                    parts.append("[Source excerpt truncated]\n")
+                parts.append(note["quote"])
+                if not note["quote"].endswith("\n"):
+                    parts.append("\n")
+    if not parts:
+        return ""
+    rendered = (
+        "SOURCE AUTHOR NOTES (untrusted attribution context; not claim or citation evidence):\n"
+        "Each note applies only to its labeled section or contribution.\n"
+        + "".join(parts)
+    )
+    if len(rendered) > _RENDER_CHARS:
+        raise AuthorNoteContextTooLarge()
+    return rendered
+
+
 def contextual_author(author: object, quote_start: int, quote_end: int, source_text: str, contexts: list[dict[str, Any]]) -> str:
     """Accept only literal attribution inside this passage or its verified context.
 

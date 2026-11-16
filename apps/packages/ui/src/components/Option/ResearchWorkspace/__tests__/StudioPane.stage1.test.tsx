@@ -2317,6 +2317,26 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(JSON.stringify(artifact)).toBe(before)
   })
 
+  it("preserves the actionable overview context-limit warning after canonical restore", () => {
+    const artifact = sectionReaderArtifact()
+    artifact.status = "failed"
+    const analysis = artifact.data!.sectionAnalysis as Record<string, unknown>
+    delete analysis.synthesis
+    analysis.synthesis_error_code = "author_note_context_too_large"
+    const message = "The source author notes exceed the overview context limit. Generate an overview for fewer sections; saved chapters remain available."
+    analysis.synthesis_error = message
+    artifact.versionMetadata = { workspaceClient: { schemaVersion: 1, data: artifact.data } }
+    artifact.data = undefined
+    const before = JSON.stringify(artifact)
+    workspaceStoreState.generatedArtifacts = [artifact]
+    renderStudioPane()
+    expandGeneratedOutputsSection()
+    expect(screen.getByText(message)).toBeInTheDocument()
+    expect(screen.queryByText(/Retry to rebuild the overview/)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View" })).toBeEnabled()
+    expect(JSON.stringify(artifact)).toBe(before)
+  })
+
   it.each(["failed", "unread", "generating"])("warns about restored incomplete sections with a %s section and no client error", (status) => {
     const artifact = sectionReaderArtifact()
     artifact.status = "failed"

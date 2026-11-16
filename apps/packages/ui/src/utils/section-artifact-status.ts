@@ -23,6 +23,7 @@ export const getSectionArtifactErrorMessage = (artifact: GeneratedArtifact): str
   if (analysis.sections.some(section => section.status !== "completed"))
     return artifact.errorMessage || INCOMPLETE_SECTIONS_MESSAGE
   if (typeof analysis.synthesis_error !== "string" || !analysis.synthesis_error.trim()) return artifact.errorMessage
+  if (analysis.synthesis_error_code === "author_note_context_too_large") return analysis.synthesis_error
 
   return "All selected sections are complete. The overview could not be completed. Retry to rebuild the overview from saved evidence."
 }
