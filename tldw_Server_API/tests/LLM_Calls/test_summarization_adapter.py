@@ -813,26 +813,49 @@ def test_legacy_empty_config_still_allows_summary_adapter_reload(monkeypatch):
     assert result == "legacy"
 
 
+def _analyze_with_empty_moonshot_handle():
+    return sgl.analyze(
+        "moonshot",
+        "hello",
+        None,
+        api_key="explicit-key",
+        app_config=None,
+        credentials_resolved=True,
+        provider_credentials=_provider_credentials(
+            "moonshot",
+            api_key="explicit-key",
+            app_config=None,
+        ),
+        raise_on_error=True,
+    )
+
+
 @pytest.mark.unit
-def test_explicit_missing_summary_model_does_not_use_default_model_environment(monkeypatch):
+def test_explicit_missing_summary_model_uses_default_model_environment_under_the_override_policy(monkeypatch):
+    # TASK-15496: aca6ed7b32 kept this fallback out because it was unchecked; it now meets the override policy.
+    adapter = _Adapter(response={"choices": [{"message": {"content": "Cedar summary"}}]})
     monkeypatch.setenv("DEFAULT_MODEL_MOONSHOT", "server-env-model")
+    monkeypatch.setattr(sgl, "get_registry", lambda: _Registry(adapter))
+    monkeypatch.setattr(sgl, "_model_allowed_by_override", lambda provider, model: model != "blocked-model")
+
+    assert _analyze_with_empty_moonshot_handle() == "Cedar summary"
+    assert adapter.requests[0][0]["model"] == "server-env-model"
+
+    monkeypatch.setenv("DEFAULT_MODEL_MOONSHOT", "blocked-model")
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        _analyze_with_empty_moonshot_handle()
+
+    assert exc_info.value.code == "configuration"
+    assert len(adapter.requests) == 1
+
+
+@pytest.mark.unit
+def test_explicit_missing_summary_model_without_default_model_environment_is_missing_model(monkeypatch):
+    monkeypatch.delenv("DEFAULT_MODEL_MOONSHOT", raising=False)
     monkeypatch.setattr(sgl, "get_registry", lambda: _Registry(_Adapter()))
 
     with pytest.raises(sgl.SummaryProviderError) as exc_info:
-        sgl.analyze(
-            "moonshot",
-            "hello",
-            None,
-            api_key="explicit-key",
-            app_config=None,
-            credentials_resolved=True,
-            provider_credentials=_provider_credentials(
-                "moonshot",
-                api_key="explicit-key",
-                app_config=None,
-            ),
-            raise_on_error=True,
-        )
+        _analyze_with_empty_moonshot_handle()
 
     assert exc_info.value.code == "missing_model"
 
