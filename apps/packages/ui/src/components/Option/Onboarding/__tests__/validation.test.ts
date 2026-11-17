@@ -124,6 +124,19 @@ describe("onboarding validation error classification", () => {
     expect(mocks.saveManualSingleUserCredential).not.toHaveBeenCalled()
   })
 
+  it("rejects a stale visible Save after held key validation before persisting credentials", async () => {
+    let release!: (valid: boolean) => void
+    mocks.testApiKey.mockReturnValueOnce(new Promise<boolean>(resolve => { release = resolve }))
+    let current = true
+    const save = commitManualServerTransition({ serverUrl: "https://new.example.test", apiKey: "new-key", persistence: "device",
+      assertCurrent: () => { if (!current) throw new Error("Save source changed") } })
+    const result = expect(save).rejects.toThrow("Save source changed")
+    current = false
+    release(true)
+    await result
+    expect(mocks.saveManualSingleUserCredential).not.toHaveBeenCalled()
+  })
+
   it("commits only after a successful candidate-origin probe", async () => {
     mocks.testApiKey.mockResolvedValueOnce(true)
 

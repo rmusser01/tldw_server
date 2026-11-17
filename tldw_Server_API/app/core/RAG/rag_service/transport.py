@@ -10,13 +10,13 @@ from uuid import uuid4
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
+from tldw_Server_API.app.core.config import RAG_SERVICE_CONFIG, get_config_value, settings
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.RAG.rag_schemas_unified import (
     KnowledgeSourceHealthResponse,
     UnifiedBatchRequest,
     UnifiedRAGRequest,
 )
-from tldw_Server_API.app.core.config import RAG_SERVICE_CONFIG, get_config_value, settings
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.RAG.rag_service.request_bundle import (
     ResolvedRequestBundle,
     build_request_bundle,

@@ -202,6 +202,11 @@ class ChatProviderRegistry:
 
             if type(adapter) is OpenAIAdapter:
                 return _OPENAI_STRICT_TRANSPORT
+        if provider_name == "llama.cpp" and adapter is not None:
+            from .providers.local_adapters import LlamaCppAdapter
+
+            if type(adapter) is LlamaCppAdapter:
+                return _OPENAI_STRICT_TRANSPORT
         return None
 
     def resolve_provider_name(self, name: str | None) -> str:

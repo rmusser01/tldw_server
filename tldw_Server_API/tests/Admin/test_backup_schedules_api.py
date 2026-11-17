@@ -21,13 +21,9 @@ def _setup_env(tmp_path) -> None:
 
 
 async def _reset_authnz_state() -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
 
 async def _build_backup_repo(tmp_path):
@@ -47,7 +43,7 @@ async def _build_backup_repo(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_backup_schedule_roundtrip_crud(tmp_path) -> None:
+async def test_backup_schedule_roundtrip_crud(tmp_path, fresh_services) -> None:
     _setup_env(tmp_path)
     await _reset_authnz_state()
 
@@ -112,7 +108,7 @@ async def test_backup_schedule_roundtrip_crud(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_backup_schedule_requires_target_user_for_per_user_dataset(tmp_path) -> None:
+async def test_create_backup_schedule_requires_target_user_for_per_user_dataset(tmp_path, fresh_services) -> None:
     _setup_env(tmp_path)
     await _reset_authnz_state()
 
@@ -133,7 +129,7 @@ async def test_create_backup_schedule_requires_target_user_for_per_user_dataset(
 
 
 @pytest.mark.asyncio
-async def test_create_backup_schedule_forbids_target_user_for_authnz(tmp_path) -> None:
+async def test_create_backup_schedule_forbids_target_user_for_authnz(tmp_path, fresh_services) -> None:
     _setup_env(tmp_path)
     await _reset_authnz_state()
 
@@ -155,7 +151,7 @@ async def test_create_backup_schedule_forbids_target_user_for_authnz(tmp_path) -
 
 
 @pytest.mark.asyncio
-async def test_create_backup_schedule_rejects_out_of_scope_user(tmp_path, monkeypatch) -> None:
+async def test_create_backup_schedule_rejects_out_of_scope_user(tmp_path, monkeypatch, fresh_services) -> None:
     _setup_env(tmp_path)
     await _reset_authnz_state()
 
@@ -196,7 +192,7 @@ async def test_create_backup_schedule_rejects_out_of_scope_user(tmp_path, monkey
 
 @pytest.mark.asyncio
 async def test_list_backup_schedules_hides_platform_rows_and_reports_visible_total(
-    tmp_path,
+    tmp_path, fresh_services,
 ) -> None:
     _setup_env(tmp_path)
     await _reset_authnz_state()
@@ -253,7 +249,7 @@ async def test_list_backup_schedules_hides_platform_rows_and_reports_visible_tot
 
 
 @pytest.mark.asyncio
-async def test_create_authnz_backup_schedule_requires_platform_admin(tmp_path) -> None:
+async def test_create_authnz_backup_schedule_requires_platform_admin(tmp_path, fresh_services) -> None:
     _setup_env(tmp_path)
     await _reset_authnz_state()
 

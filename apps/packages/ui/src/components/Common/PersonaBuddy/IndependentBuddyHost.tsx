@@ -30,6 +30,12 @@ import { BuddyInteraction } from "./BuddyInteraction"
 import { SpriteFrameRenderer } from "./SpriteFrameRenderer"
 import type { BuddyDraftState } from "./buddy-drafts"
 import { buddyConversationLabels } from "./buddy-conversation-labels"
+import {
+  buddyFailureSignature,
+  buddyReadSignature,
+  startBuddyPoll,
+  type BuddyPoll
+} from "./buddy-poll-schedule"
 
 const emptyAttachment: BuddyAttachmentState = {
   client_slot: "default",
@@ -94,6 +100,13 @@ export const IndependentBuddySession = ({
       alive.current = false
     }
   }, [])
+  // WP-39: the poll back off to once a minute while neither the interaction
+  // panel nor the management modal is open. Kept in a ref so panel changes do
+  // not restart the polling effect (and its immediate read).
+  const panelActiveRef = React.useRef(false)
+  React.useEffect(() => {
+    panelActiveRef.current = open || management.open
+  }, [open, management.open])
   const setPosition = usePersonaBuddyShellStore((s) => s.setPosition)
   const resetPosition = usePersonaBuddyShellStore((s) => s.resetPosition)
   React.useEffect(() => {
@@ -113,6 +126,7 @@ export const IndependentBuddySession = ({
   React.useEffect(() => {
     let active = true
     let pending = false
+    let poll: BuddyPoll | null = null
     const refresh = async () => {
       if (pending) return
       pending = true
@@ -208,10 +222,17 @@ export const IndependentBuddySession = ({
         setLoadedScope(nextScope)
         setHasLoaded(true)
         setAttached(Boolean(next.attachment || next.unavailable_reason))
+        poll?.settle(
+          buddyReadSignature({ attachment: next, profiles, conversations: rows })
+        )
       } catch (e) {
         if (active) {
-          setError(e instanceof Error ? e.message : "Buddy unavailable")
+          const message = e instanceof Error ? e.message : "Buddy unavailable"
+          setError(message)
           setConversations([])
+          // The same failure again (Buddies disabled, forbidden, server down)
+          // backs off like an unchanged read instead of polling every 5 s.
+          poll?.settle(buddyFailureSignature(message))
         }
       } finally {
         pending = false
@@ -221,11 +242,12 @@ export const IndependentBuddySession = ({
         }
       }
     }
-    void refresh()
-    const timer = window.setInterval(() => void refresh(), 5000)
+    poll = startBuddyPoll(() => void refresh(), {
+      isActive: () => panelActiveRef.current
+    })
     return () => {
       active = false
-      window.clearInterval(timer)
+      poll?.stop()
     }
   }, [revision, profilePages, conversationPages, loadedScope, setAttached])
   React.useEffect(

@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     get_usage_event_logger,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     IngestWebContentRequest,
 )
@@ -72,6 +73,11 @@ async def ingest_web_content(
     # Basic validation: require at least one URL.
     if not request.urls:
         raise HTTPException(status_code=400, detail="At least one URL is required")
+    # Analysis alone means LLM work: the crawl methods summarize with a default provider, and the others may
+    # extract with an LLM even when no provider is named (TASK-13889).
+    if request.perform_analysis:
+        # Usage quotas (LLM usage accounting spec §4a), before any page is fetched.
+        await enforce_llm_quota(current_user.id)
 
     # Shared usage logging, topic monitoring, and per-method scraping are
     # handled by the orchestration helper.

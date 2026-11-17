@@ -1,5 +1,6 @@
 import React from "react"
 import { useStorage } from "@plasmohq/storage/hook"
+import { useSpeechHistory } from "@/hooks/useSpeechHistory"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import {
@@ -250,10 +251,12 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   const queryClient = useQueryClient()
 
   const [mode, setMode] = useStorage<SpeechMode>("speechPlaygroundMode", "roundtrip")
-  const [historyItems, setHistoryItems] = useStorage<SpeechHistoryItem[]>(
-    "speechPlaygroundHistory",
-    []
-  )
+  const [historyItems, setHistoryItems] = useSpeechHistory<SpeechHistoryItem>(() => {
+    clearSegments()
+    stopStreaming()
+    stopTtsJob()
+    setTtsText("")
+  })
   const [historyFilter, setHistoryFilter] = React.useState<"all" | "stt" | "tts">(
     "all"
   )
@@ -1909,6 +1912,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         openAiVoice
       })
 
+      if (created.length === 0) return
       if (created.length > 0) {
         const nowIso = new Date().toISOString()
         addHistoryItem({
@@ -1981,6 +1985,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   }
 
   const handleStop = () => {
+    if (isGenerating) clearSegments()
     stopStreaming()
     stopTtsJob()
     const el = audioRef.current
@@ -2349,7 +2354,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   const isStreamingActive = streamStatus === "connecting" || streamStatus === "streaming"
   const isTtsJobRunning = ttsJobStatus === "running"
   const isPlayDisabled = isGenerating || isStreamingActive || isTtsJobRunning || Boolean(playDisabledReason)
-  const canStop = Boolean(segments.length || audioRef.current || isStreamingActive || isTtsJobRunning)
+  const canStop = Boolean(isGenerating || segments.length || audioRef.current || isStreamingActive || isTtsJobRunning)
   const stopDisabledReason =
     !canStop && t("playground:tts.stopDisabled", "Stop activates after audio starts.")
   const showElevenLabsHint =

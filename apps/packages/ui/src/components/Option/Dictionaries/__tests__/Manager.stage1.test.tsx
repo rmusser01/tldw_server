@@ -1,3 +1,4 @@
+import { dictionaryOwnerFixture, dictionarySnapshotFixture, scopedDictionaryQueryFixture, scopedDictionaryQueryClientFixture, selectDictionaryChatFixture } from "./dictionary-owner.fixture"
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
@@ -51,10 +52,14 @@ const {
   }
 }))
 
+vi.mock("@/hooks/useChatDraftOwner", () => ({ useChatDraftOwner: () => dictionaryOwnerFixture }))
+vi.mock("@/hooks/chat/useSelectServerChat", () => ({ useSelectServerChat: () => selectDictionaryChatFixture }))
+vi.mock("@/services/service-prompts", () => ({ loadServicePromptSnapshot: (...args: Parameters<typeof dictionarySnapshotFixture>) => dictionarySnapshotFixture(...args) }))
+
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: useQueryMock,
+  useQuery: (options: { queryKey?: readonly unknown[] }) => scopedDictionaryQueryFixture(options, useQueryMock(options)),
   useMutation: useMutationMock,
-  useQueryClient: useQueryClientMock
+  useQueryClient: () => scopedDictionaryQueryClientFixture(useQueryClientMock())
 }))
 
 vi.mock("react-i18next", () => ({
@@ -184,7 +189,7 @@ describe("DictionariesManager stage-1 empty and error states", () => {
     expect(screen.getByText("No dictionaries yet")).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Create your first dictionary to transform text consistently across chats."
+        "Create a dictionary and preview its text transformations. Saved chat assignment is unavailable in this server version."
       )
     ).toBeInTheDocument()
     expect(

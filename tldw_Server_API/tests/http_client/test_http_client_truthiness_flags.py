@@ -7,25 +7,24 @@ import tldw_Server_API.app.core.http_client as hc
 pytestmark = pytest.mark.unit
 
 
-def test_validate_egress_treats_tldw_test_mode_y_as_test_context(monkeypatch):
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+def test_validate_egress_never_relaxes_the_private_ip_policy_in_a_test_context(monkeypatch):
     monkeypatch.setenv("TEST_MODE", "0")
-    monkeypatch.setenv("TESTING", "0")
+    monkeypatch.setenv("TESTING", "1")
     monkeypatch.setenv("TLDW_TEST_MODE", "y")
 
     from tldw_Server_API.app.core.Security import egress as egress_mod
 
     captured: dict[str, object] = {}
 
-    def _fake_policy(url: str, *, block_private_override=None):
+    def _fake_policy(url: str, **kwargs):
         captured["url"] = url
-        captured["block_private_override"] = block_private_override
+        captured["kwargs"] = kwargs
         return types.SimpleNamespace(allowed=True, reason=None)
 
     monkeypatch.setattr(egress_mod, "evaluate_url_policy", _fake_policy)
 
     hc._validate_egress_or_raise("https://example.com/path")
-    assert captured["block_private_override"] is False
+    assert captured["kwargs"].get("block_private_override") is None
 
 
 def test_validate_egress_keeps_ip_policy_for_literal_ip_in_test_context(monkeypatch):
@@ -38,15 +37,15 @@ def test_validate_egress_keeps_ip_policy_for_literal_ip_in_test_context(monkeypa
 
     captured: dict[str, object] = {}
 
-    def _fake_policy(url: str, *, block_private_override=None):
+    def _fake_policy(url: str, **kwargs):
         captured["url"] = url
-        captured["block_private_override"] = block_private_override
+        captured["kwargs"] = kwargs
         return types.SimpleNamespace(allowed=True, reason=None)
 
     monkeypatch.setattr(egress_mod, "evaluate_url_policy", _fake_policy)
 
     hc._validate_egress_or_raise("http://127.0.0.1/")
-    assert captured["block_private_override"] is None
+    assert captured["kwargs"].get("block_private_override") is None
 
 
 def test_validate_egress_without_scope_keeps_global_port_policy(monkeypatch):

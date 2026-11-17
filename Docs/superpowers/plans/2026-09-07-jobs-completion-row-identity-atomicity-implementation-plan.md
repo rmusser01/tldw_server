@@ -51,7 +51,7 @@ existing files without introducing unrelated formatting churn.
     null-safe identity guards, and base-fact bookkeeping.
 - Modify: `tldw_Server_API/app/core/Jobs/worker_sdk.py:1019`
   - Pass `expected_uuid` on ordinary successful completion.
-- Modify: `backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md`
+- Modify: `backlog/tasks/task-15149 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md`
   - Record red/green evidence, verification, touched files, and final outcome.
 - Modify: this plan
   - Mark stages and task checkboxes as execution proceeds.
@@ -72,7 +72,7 @@ WorkerSDK suites listed below.
 ### Task 1: Refresh the branch and record the baseline
 
 **Files:**
-- Modify: `backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md`
+- Modify: `backlog/tasks/task-15149 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md`
 - Modify: `Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md`
 
 - [x] **Step 1: Verify the live remote `dev` tip explicitly**
@@ -148,7 +148,7 @@ after final verification; no implementation checkpoint will contain red tests.
 
 ```bash
 git add Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md \
-  "backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md"
+  "backlog/tasks/task-15149 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md"
 git diff --cached --check
 git commit -m "docs(jobs): record completion atomicity baseline"
 ```
@@ -964,7 +964,7 @@ git add tldw_Server_API/app/core/Jobs/manager.py \
   tldw_Server_API/tests/Jobs/test_jobs_rls_postgres.py \
   tldw_Server_API/tests/Jobs/test_jobs_lifecycle_hardening_regressions.py \
   Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md \
-  "backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md"
+  "backlog/tasks/task-15149 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md"
 git diff --cached --check
 git commit -m "fix(jobs): bind completion to locked row identity"
 ```
@@ -1079,7 +1079,7 @@ Expected: all selected tests pass.
 git add tldw_Server_API/app/core/Jobs/worker_sdk.py \
   tldw_Server_API/tests/Jobs/test_worker_sdk.py \
   Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md \
-  "backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md"
+  "backlog/tasks/task-15149 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md"
 git diff --cached --check
 git commit -m "fix(jobs): bind worker completion to acquired UUID"
 ```
@@ -1205,7 +1205,7 @@ Jobs tests are present; the worktree is clean after final tracking updates.
 ### Task 7: Request review and prepare the branch for a PR
 
 **Files:**
-- Modify: `backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md`
+- Modify: `backlog/tasks/task-15149 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md`
 - Modify: `Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md`
 
 - [x] **Step 1: Perform the required code review**
@@ -1235,7 +1235,7 @@ update `TASK-13215` with:
 
 ```bash
 git add Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md \
-  "backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md"
+  "backlog/tasks/task-15149 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md"
 git diff --cached --check
 git commit -m "docs(jobs): record completion atomicity verification"
 ```

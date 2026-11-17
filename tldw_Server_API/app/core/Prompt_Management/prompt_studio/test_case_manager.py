@@ -7,14 +7,14 @@ from typing import Any, Optional, Union
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCallCredentials,
-)
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import (
     ConflictError,
     DatabaseError,
     InputError,
     PromptStudioDatabase,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCallCredentials,
 )
 
 ########################################################################################################################

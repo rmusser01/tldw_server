@@ -41,6 +41,7 @@ _JWT_SERVICE_NONCRITICAL_EXCEPTIONS = (
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 #######################################################################################################################
 #
@@ -1156,31 +1157,23 @@ class JWTService:
 #
 # Module Functions for convenience
 
-# Global instance with thread-safe initialization
-_jwt_service: Optional[JWTService] = None
+# Serializes first-time creation of the container's ``jwt_service`` slot.
 _jwt_service_lock = threading.Lock()
 
 
 def get_jwt_service() -> JWTService:
-    """Get JWT service singleton instance (thread-safe)"""
-    global _jwt_service
+    """Get the JWT service from the app-service container (thread-safe)."""
+    services = app_services()
     # Fast path - no lock if already initialized
-    if _jwt_service is not None:
-        return _jwt_service
+    if services.jwt_service is not None:
+        return services.jwt_service
 
     # Slow path - acquire lock for initialization
     with _jwt_service_lock:
         # Double-check after acquiring lock
-        if _jwt_service is None:
-            _jwt_service = JWTService()
-        return _jwt_service
-
-
-def reset_jwt_service() -> None:
-    """Reset the cached JWTService singleton (used in tests to pick up new settings)."""
-    global _jwt_service
-    with _jwt_service_lock:
-        _jwt_service = None
+        if services.jwt_service is None:
+            services.jwt_service = JWTService()
+        return services.jwt_service
 
 
 def create_access_token(user_id: int, username: str, role: str) -> str:

@@ -1,6 +1,10 @@
 import React from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import {
+  QueryClient,
+  QueryClientProvider,
+  focusManager
+} from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -164,6 +168,155 @@ describe("use-ingestion-sources", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ingestionSourceKeys.detail("12")
     })
+  })
+
+  it("refreshes mounted tracked items when manual sync is acknowledged", async () => {
+    const client = createMockClient()
+    client.listIngestionSourceItems.mockResolvedValue({ items: [], total: 0 })
+    client.syncIngestionSource.mockResolvedValue({
+      status: "queued",
+      source_id: "12",
+      job_id: 9
+    })
+    const api = client as Parameters<typeof useIngestionSourceDetailQuery>[1]
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const hook = renderHook(
+      () => ({
+        items: useIngestionSourceItemsQuery("12", undefined, api),
+        sync: useSyncIngestionSourceMutation(api)
+      }),
+      { wrapper: buildWrapper(queryClient) }
+    )
+    try {
+      await waitFor(() =>
+        expect(hook.result.current.items.isSuccess).toBe(true)
+      )
+      expect(client.listIngestionSourceItems).toHaveBeenCalledTimes(1)
+      await act(async () => {
+        await hook.result.current.sync.mutateAsync("12")
+      })
+      await waitFor(() =>
+        expect(client.listIngestionSourceItems).toHaveBeenCalledTimes(2)
+      )
+    } finally {
+      hook.unmount()
+      queryClient.clear()
+    }
+  })
+
+  it("does not read or refresh another mounted query when observation is disabled", async () => {
+    const client = createMockClient()
+    client.listIngestionSourceItems.mockResolvedValue({ items: [], total: 0 })
+    const api = client as Parameters<typeof useIngestionSourceDetailQuery>[1]
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const wrapper = buildWrapper(queryClient)
+    const items = renderHook(
+      () => useIngestionSourceItemsQuery("12", undefined, api),
+      { wrapper }
+    )
+    let detail: ReturnType<typeof renderHook> | undefined
+    try {
+      await waitFor(() => expect(items.result.current.isSuccess).toBe(true))
+      queryClient.setQueryData(ingestionSourceKeys.detail("12"), {
+        id: "12",
+        last_sync_completed_at: "2026-10-30T02:00:00Z"
+      })
+      detail = renderHook(
+        () =>
+          useIngestionSourceDetailQuery("12", api, {
+            enabled: false,
+            refetchInterval: 2000
+          }),
+        { wrapper }
+      )
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(client.getIngestionSource).not.toHaveBeenCalled()
+      expect(client.listIngestionSourceItems).toHaveBeenCalledTimes(1)
+    } finally {
+      detail?.unmount()
+      items.unmount()
+      queryClient.clear()
+    }
+  })
+
+  it("observes completion after the queued acknowledgement and stops observing on unmount", async () => {
+    vi.useFakeTimers()
+    focusManager.setFocused(true)
+    const client = createMockClient()
+    let completed = false
+    client.getIngestionSource.mockImplementation(async () => ({
+      id: "12",
+      last_sync_status: completed ? "success" : "running",
+      last_sync_completed_at: completed ? "2026-10-30T02:00:00Z" : null
+    }))
+    client.listIngestionSourceItems.mockImplementation(async () => ({
+      items: completed
+        ? [{ id: "item", normalized_relative_path: "rowan.txt" }]
+        : [],
+      total: completed ? 1 : 0
+    }))
+    client.syncIngestionSource.mockResolvedValue({
+      status: "queued",
+      source_id: "12",
+      job_id: 9
+    })
+    const api = client as Parameters<typeof useIngestionSourceDetailQuery>[1]
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } }
+    })
+    const hook = renderHook(
+      () => ({
+        detail: useIngestionSourceDetailQuery("12", api, {
+          refetchInterval: 2000
+        }),
+        items: useIngestionSourceItemsQuery("12", undefined, api),
+        sync: useSyncIngestionSourceMutation(api)
+      }),
+      { wrapper: buildWrapper(queryClient) }
+    )
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1)
+      })
+      expect(hook.result.current.detail.data?.last_sync_status).toBe("running")
+      await act(async () => {
+        await hook.result.current.sync.mutateAsync("12")
+        await vi.advanceTimersByTimeAsync(1)
+      })
+      completed = true
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000)
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1)
+      })
+      expect(hook.result.current.detail.data?.last_sync_status).toBe("success")
+      expect(hook.result.current.items.data?.items).toHaveLength(1)
+      expect(client.syncIngestionSource).toHaveBeenCalledTimes(1)
+      hook.unmount()
+      const calls = [
+        client.getIngestionSource.mock.calls.length,
+        client.listIngestionSourceItems.mock.calls.length
+      ]
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000)
+      })
+      expect([
+        client.getIngestionSource.mock.calls.length,
+        client.listIngestionSourceItems.mock.calls.length
+      ]).toEqual(calls)
+    } finally {
+      hook.unmount()
+      queryClient.clear()
+      focusManager.setFocused(undefined)
+      vi.useRealTimers()
+    }
   })
 
   it("invalidates list and detail queries after syncing a source", async () => {

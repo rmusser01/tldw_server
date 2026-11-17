@@ -24,21 +24,26 @@ Implements soft delete, archive, versioning, and FTS5 search.
 """
 
 import contextlib  # noqa: E402
+import hashlib  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import sqlite3  # noqa: E402
 import threading  # noqa: E402
 import uuid as uuid_module  # noqa: E402
+from collections.abc import Callable  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
-from typing import Any  # noqa: E402
+from typing import Any, NoReturn  # noqa: E402
 
 from loguru import logger  # noqa: E402
 
 from tldw_Server_API.app.core.config import settings  # noqa: E402
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths, _is_test_context  # noqa: E402
-from tldw_Server_API.app.core.DB_Management.kanban_vector_search import create_kanban_vector_search  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths  # noqa: E402
 from tldw_Server_API.app.core.exceptions import StorageUnavailableError  # noqa: E402
+from tldw_Server_API.app.core.testing import is_test_context  # noqa: E402
+
+# Builds the vector index from (user_id, embedding_config); the openers pass core.Kanban's factory.
+KanbanVectorSearchFactory = Callable[[str, dict[str, Any]], Any]
 
 _KANBAN_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -76,7 +81,7 @@ def _generate_uuid() -> str:
 def _normalize_user_id_for_records(user_id: str) -> str:
     """Normalize user IDs for storage; in tests, prefix numeric IDs with test_user_."""
     raw = str(user_id).strip()
-    if _is_test_context() and raw.isdigit():
+    if is_test_context() and raw.isdigit():
         return f"test_user_{raw}"
     return raw
 
@@ -268,7 +273,13 @@ class KanbanDB:
         ("impl", "done", 1, 0, None, None, None, 0, 1),
     )
 
-    def __init__(self, db_path: str, user_id: str) -> None:
+    def __init__(
+        self,
+        db_path: str,
+        user_id: str,
+        *,
+        vector_search_factory: KanbanVectorSearchFactory | None = None,
+    ) -> None:
         """
         Initialize the KanbanDB instance.
 
@@ -277,6 +288,8 @@ class KanbanDB:
                 user-scoped database directory.
             user_id: The user ID for this database instance. In test context,
                 purely numeric IDs are stored as test_user_<id>.
+            vector_search_factory: Builds the vector index from (user_id, embedding_config).
+                Without one, the DB does no vector indexing or search.
         """
         raw_user_id = str(user_id)
         if not raw_user_id.strip():
@@ -288,6 +301,7 @@ class KanbanDB:
             raw_user_id,
         )
         self._memory_conn: _KanbanMemoryConnection | None = None
+        self._vector_search_factory = vector_search_factory
         self._vector_search = None
         self._vector_search_initialized = False
         self._vector_index_retry_pending: set[tuple[str, int]] = set()
@@ -3834,6 +3848,8 @@ END;
         with self._lock:
             if self._vector_search_initialized:
                 return self._vector_search
+            if self._vector_search_factory is None:
+                return None
             embedding_config = dict(settings.get("EMBEDDING_CONFIG") or {})
             user_db_base_dir = None
             if not self._is_memory_db:
@@ -3850,7 +3866,7 @@ END;
                 user_db_base_dir = settings.get("USER_DB_BASE_DIR")
             if user_db_base_dir:
                 embedding_config["USER_DB_BASE_DIR"] = user_db_base_dir
-            self._vector_search = create_kanban_vector_search(self.user_id, embedding_config)
+            self._vector_search = self._vector_search_factory(self.user_id, embedding_config)
             self._vector_search_initialized = True
             return self._vector_search
 
@@ -3907,7 +3923,7 @@ END;
         retry_attempt: int,
     ) -> None:
         """Schedule a best-effort retry for vector index operations."""
-        if _is_test_context():
+        if is_test_context():
             return
         if retry_attempt >= self.VECTOR_INDEX_MAX_RETRY_ATTEMPTS:
             return
@@ -6866,7 +6882,7 @@ END;
         """
         Import a board from exported JSON data.
 
-        Supports both tldw_kanban_v1 format and Trello JSON export format.
+        Supports native exports, atomic generated drafts and Trello JSON exports.
 
         Args:
             data: The exported board data.
@@ -6882,19 +6898,211 @@ END;
         # Detect format
         format_type = data.get("format")
 
-        if format_type == "tldw_kanban_v1":
+        if format_type == "tldw_kanban_draft_v1":
+            result = self._import_generated_draft(data, board_name, board_client_id)
+        elif format_type == "tldw_kanban_v1":
             result = self._import_tldw_format(data, board_name, board_client_id)
         elif "cards" in data and "lists" in data and "name" in data:
             # Trello format detection
             result = self._import_trello_format(data, board_name, board_client_id)
         else:
-            raise InputError("Unrecognized import format. Must be tldw_kanban_v1 or Trello JSON format.")  # noqa: TRY003
+            raise InputError("Unrecognized import format. Must be tldw_kanban_v1, tldw_kanban_draft_v1 or Trello JSON format.")  # noqa: TRY003
 
         try:
             self.optimize_fts()
         except _KANBAN_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"Kanban FTS optimize after import failed: {exc}")
         return result
+
+    def _import_generated_draft(
+        self,
+        data: dict[str, Any],
+        board_name: str | None,
+        board_client_id: str | None,
+    ) -> dict[str, Any]:
+        """Validate a bounded generated tree and save it atomically under one client identity."""
+
+        def invalid() -> NoReturn:
+            raise InputError("Invalid generated board draft")  # noqa: TRY003
+
+        def text(value: Any, limit: int, *, required: bool = False) -> str | None:
+            if value is None and not required:
+                return None
+            if not isinstance(value, str) or len(value) > limit:
+                invalid()
+            if required:
+                value = value.strip()
+                if not value:
+                    invalid()
+            return value
+
+        if set(data) != {"format", "client_id", "board", "lists"}:
+            invalid()
+        client_id = text(board_client_id if board_client_id is not None else data["client_id"], 100, required=True)
+        raw_board, raw_lists = data["board"], data["lists"]
+        if not isinstance(raw_board, dict) or not {"name"} <= set(raw_board) <= {"name", "description"}:
+            invalid()
+        board_data = {
+            "name": text(board_name if board_name is not None else raw_board["name"], 255, required=True),
+            "description": text(raw_board.get("description"), 5000),
+        }
+        if not isinstance(raw_lists, list) or not 1 <= len(raw_lists) <= self.MAX_LISTS_PER_BOARD:
+            invalid()
+        lists = []
+        card_count = 0
+        for raw_list in raw_lists:
+            if not isinstance(raw_list, dict) or set(raw_list) != {"name", "cards"}:
+                invalid()
+            cards = raw_list["cards"]
+            if not isinstance(cards, list) or len(cards) > self.MAX_CARDS_PER_LIST:
+                invalid()
+            card_count += len(cards)
+            if card_count > self.MAX_CARDS_PER_BOARD:
+                invalid()
+            normalized = {"name": text(raw_list["name"], 255, required=True), "cards": []}
+            for raw_card in cards:
+                if not isinstance(raw_card, dict) or not {"title"} <= set(raw_card) <= {"title", "description"}:
+                    invalid()
+                normalized["cards"].append(
+                    {
+                        "title": text(raw_card["title"], 500, required=True),
+                        "description": text(raw_card.get("description"), 5000),
+                    }
+                )
+            lists.append(normalized)
+        if not card_count:
+            invalid()
+        try:
+            payload = json.dumps(
+                {"format": data["format"], "board": board_data, "lists": lists},
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except UnicodeError as error:
+            raise InputError("Invalid generated board draft") from error  # noqa: TRY003
+        if len(payload) > 128_000:
+            invalid()
+        fingerprint = hashlib.sha256(payload).hexdigest()
+        now = _utcnow_iso()
+        card_ids = []
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                existing = conn.execute(
+                    "SELECT id, metadata, deleted FROM kanban_boards WHERE user_id = ? AND client_id = ?",
+                    (self.user_id, client_id),
+                ).fetchone()
+                if existing is not None:
+                    metadata = json.loads(existing["metadata"] or "{}")
+                    if (
+                        existing["deleted"]
+                        or not isinstance(metadata, dict)
+                        or metadata.get("generated_draft_sha256") != fingerprint
+                    ):
+                        raise ConflictError(
+                            "Generated board draft identity already used", entity="board", entity_id=client_id
+                        )  # noqa: TRY003
+                    board_id = existing["id"]
+                else:
+                    count = conn.execute(
+                        "SELECT COUNT(*) FROM kanban_boards WHERE user_id = ? AND deleted = 0", (self.user_id,)
+                    ).fetchone()[0]
+                    if count >= self.MAX_BOARDS_PER_USER:
+                        raise InputError(f"Maximum boards ({self.MAX_BOARDS_PER_USER}) reached")  # noqa: TRY003
+                    cursor = conn.execute(
+                        "INSERT INTO kanban_boards (uuid, user_id, client_id, name, description, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            _generate_uuid(),
+                            self.user_id,
+                            client_id,
+                            board_data["name"],
+                            board_data["description"],
+                            json.dumps({"generated_draft_sha256": fingerprint}),
+                            now,
+                            now,
+                        ),
+                    )
+                    board_id = cursor.lastrowid
+                    self._log_activity_internal(
+                        conn, board_id, "board_created", "board", entity_id=board_id, details={"name": board_data["name"]}
+                    )
+                    for position, item in enumerate(lists):
+                        identity = _generate_uuid()
+                        cursor = conn.execute(
+                            "INSERT INTO kanban_lists (uuid, board_id, client_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (identity, board_id, identity, item["name"], position, now, now),
+                        )
+                        list_id = cursor.lastrowid
+                        self._log_activity_internal(
+                            conn,
+                            board_id,
+                            "list_created",
+                            "list",
+                            entity_id=list_id,
+                            list_id=list_id,
+                            details={"name": item["name"]},
+                        )
+                        for card_position, card in enumerate(item["cards"]):
+                            identity = _generate_uuid()
+                            cursor = conn.execute(
+                                "INSERT INTO kanban_cards (uuid, board_id, list_id, client_id, title, description, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                (
+                                    identity,
+                                    board_id,
+                                    list_id,
+                                    identity,
+                                    card["title"],
+                                    card["description"],
+                                    card_position,
+                                    now,
+                                    now,
+                                ),
+                            )
+                            card_id = cursor.lastrowid
+                            self._log_activity_internal(
+                                conn,
+                                board_id,
+                                "card_created",
+                                "card",
+                                entity_id=card_id,
+                                list_id=list_id,
+                                card_id=card_id,
+                                details={"title": card["title"]},
+                            )
+                            card_ids.append(card_id)
+                    self._log_activity_internal(
+                        conn,
+                        board_id,
+                        "board_imported",
+                        "board",
+                        entity_id=board_id,
+                        details={"lists_imported": len(lists), "cards_imported": card_count},
+                    )
+                board = self._get_board_by_id(conn, board_id)
+                conn.commit()
+            except sqlite3.Error as error:
+                conn.rollback()
+                raise KanbanDBError("Failed to save generated board draft") from error  # noqa: TRY003
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+        self._sync_vector_index_for_card_ids(card_ids)
+        return {
+            "board": board,
+            "import_stats": {
+                "board_id": board_id,
+                "lists_imported": len(lists),
+                "cards_imported": card_count,
+                "labels_imported": 0,
+                "checklists_imported": 0,
+                "checklist_items_imported": 0,
+                "comments_imported": 0,
+            },
+        }
 
     def _run_fts_maintenance(self, action: str) -> None:
         """Run FTS5 maintenance commands (optimize or rebuild)."""

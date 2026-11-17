@@ -37,14 +37,16 @@ export const generateID = () => {
 const MODEL_KEY_PREFIX = "model:"
 
 const toStorageKey = (id: string) => `${MODEL_KEY_PREFIX}${id}`
+const storageAliases = (id: string) => [toStorageKey(id), id]
 
-const isModelRecord = (key: string, value: unknown): value is Model => {
+// Legacy reads expose recognizable rows even when provider metadata is missing.
+const isStoredModel = (id: string, value: unknown): value is Model => {
   if (!value || typeof value !== "object") return false
-  const record = value as Partial<Model> & { id?: unknown }
+  const record = value as Partial<Model>
   return (
-    record.id === key &&
+    record.id === id &&
     typeof record.model_id === "string" &&
-    typeof record.provider_id === "string"
+    (typeof record.provider_id === "string" || record.db_type === "openai_model")
   )
 }
 
@@ -101,12 +103,12 @@ export class ModelDb {
 
     const byId = new Map<string, Model>()
     for (const [key, value] of Object.entries(items)) {
-      if (isModelRecord(key, value)) byId.set(value.id, value)
+      if (isStoredModel(key, value)) byId.set(value.id, value)
     }
     // Current records win over legacy duplicates regardless of enumeration order.
     for (const [key, value] of Object.entries(items)) {
       if (key.startsWith(MODEL_KEY_PREFIX)) {
-        if (isModelRecord(key.slice(MODEL_KEY_PREFIX.length), value)) {
+        if (isStoredModel(key.slice(MODEL_KEY_PREFIX.length), value)) {
           byId.set(value.id, value)
         }
       }
@@ -120,42 +122,15 @@ export class ModelDb {
 
   /** Batched write: all records land in one set(), without shared index RMW. */
   createMany = async (models: Model[]): Promise<void> => {
-    if (models.length === 0) return
-    const writes = Object.fromEntries(
-      models.map((record) => [toStorageKey(record.id), record])
-    )
-    const keys = Object.keys(writes)
-    let items = await readStorage(this.db, keys)
-    // Keyed web-shim reads use null for absence; distinguish stored null.
-    if (keys.some((key) => items[key] === null)) {
-      items = await readStorage(this.db, null)
-    }
-    for (const model of models) {
-      const key = toStorageKey(model.id)
-      if (
-        Object.prototype.hasOwnProperty.call(items, key) &&
-        !isModelRecord(model.id, items[key])
-      ) {
-        throw new Error(`Cannot overwrite occupied model storage key: ${key}`)
-      }
-    }
-    await new Promise<void>((resolve, reject) => {
-      this.db.set(writes, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve()
-        }
-      })
-    })
+    await this.replaceAll(models)
   }
 
   getById = async (id: string): Promise<Model | undefined> => {
-    const items = await readStorage(this.db, [toStorageKey(id), id])
+    const items = await readStorage(this.db, storageAliases(id))
     const current = items[toStorageKey(id)]
-    if (isModelRecord(id, current)) return current
+    if (isStoredModel(id, current)) return current
     const legacy = items[id]
-    return isModelRecord(id, legacy) ? legacy : undefined
+    return isStoredModel(id, legacy) ? legacy : undefined
   }
 
   update = async (model: Model): Promise<void> => {
@@ -168,23 +143,69 @@ export class ModelDb {
 
   /** Batched delete: one remove() for current and legacy aliases. */
   deleteMany = async (ids: string[]): Promise<void> => {
-    if (ids.length === 0) return
-    await this.removeRecords(ids)
+    await this.replaceAll([], ids)
+  }
+
+  /**
+   * Preflight reads before mutation, then write before removing.
+   * If removal fails, remaining old records stay visible.
+   */
+  replaceAll = async (records: Model[], removeIds: string[] = []): Promise<void> => {
+    const writes = new Map<string, Model>()
+    for (const record of records) {
+      for (const field of ["id", "model_id", "provider_id"] as const) {
+        if (typeof record?.[field] !== "string") {
+          throw new Error(`Invalid model storage record: ${field} must be a string`)
+        }
+      }
+      writes.set(toStorageKey(record.id), { ...record })
+    }
+
+    const retiringIds = removeIds.filter((id) => !writes.has(toStorageKey(id)))
+    const destinations = Array.from(writes.keys())
+    const keys = [...new Set([...destinations, ...retiringIds.flatMap(storageAliases)])]
+    if (keys.length === 0) return
+
+    let items = await readStorage(this.db, keys)
+    // Keyed web-shim reads use null for absence; distinguish stored null.
+    if (destinations.some((key) => items[key] === null)) {
+      items = await readStorage(this.db, null)
+    }
+
+    // A proposed retirement grants authority only over matching stored records.
+    const retiringKeys = new Set(retiringIds.flatMap((id) =>
+      storageAliases(id).filter((key) => isStoredModel(id, items[key]))
+    ))
+    for (const [key, record] of writes) {
+      if (
+        Object.prototype.hasOwnProperty.call(items, key) &&
+        !isStoredModel(record.id, items[key]) &&
+        !retiringKeys.has(key)
+      ) {
+        throw new Error(`Cannot overwrite occupied model storage key: ${key}`)
+      }
+    }
+
+    if (writes.size > 0) {
+      await new Promise<void>((resolve, reject) => {
+        this.db.set(Object.fromEntries(writes), () => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError)
+          } else {
+            resolve()
+          }
+        })
+      })
+    }
+    await this.removeKeys([...retiringKeys].filter((key) => !writes.has(key)))
   }
 
   deleteAll = async (): Promise<void> => {
     const ids = (await this.getAll()).map((model) => model.id)
-    await this.removeRecords(ids)
+    await this.deleteMany(ids)
   }
 
-  private removeRecords = async (ids: string[]): Promise<void> => {
-    const items = ids.length
-      ? await readStorage(this.db, ids.flatMap((id) => [toStorageKey(id), id]))
-      : {}
-    // An alias may hold unrelated data or another model with a prefix-shaped id.
-    const keys = ids.flatMap((id) =>
-      [toStorageKey(id), id].filter((key) => isModelRecord(id, items[key]))
-    )
+  private removeKeys = async (keys: string[]): Promise<void> => {
     if (keys.length === 0) return
     await new Promise<void>((resolve, reject) => {
       this.db.remove(keys, () => {
@@ -354,13 +375,14 @@ export const deleteAllModelsByProviderId = async (provider_id: string) => {
 
 export const bulkAddModelsFB = async (models: Model[]) => {
   const db = new ModelDb()
-  // delete all exist models
-  const modelsToDelete = (await db.getAll()).filter(
+  const existing = await db.getAll()
+  const modelsToDelete = existing.filter(
     (model) => model?.db_type === "openai_model"
   )
-  await db.deleteMany(modelsToDelete.map((model) => model.id))
-  // add new models
-  await db.createMany(models)
+  await db.replaceAll(
+    models,
+    modelsToDelete.map((model) => model.id)
+  )
 }
 
 export const isLookupExist = async (lookup: string) => {

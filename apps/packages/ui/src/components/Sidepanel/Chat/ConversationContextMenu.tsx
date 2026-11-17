@@ -47,7 +47,7 @@ export type ConversationContextMenuProps = {
   /** Delete the tab's server chat; offered only for a tab bound to one. */
   onDelete: (tabId: string) => DialogAction
   /** Close the tab. A tab with no server chat offers this instead of Delete. */
-  onCloseTab: (tabId: string) => void
+  onCloseTab: (tabId: string) => DialogAction
   currentStatus?: ConversationStatus
 }
 

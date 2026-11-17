@@ -18,6 +18,17 @@ import {
   type FakeServerPrompt
 } from "@/services/__tests__/server-prompts-api-fixture"
 import { PromptSelect } from "../PromptSelect"
+import { useStoreMessageOption } from "@/store/option"
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => ({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), ready: true, boundaryKey: "server-library-fixture" })
+}))
+vi.mock("@/services/recipe-persistence-uncertainty", async original => ({
+  ...await original<typeof import("@/services/recipe-persistence-uncertainty")>(),
+  resolveRecipePersistenceOwnerView: async () => ({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), authorizationRevision: "server-library-fixture" })
+}))
+vi.mock("@/services/api-send", () => ({
+  apiSend: async (payload: any) => ({ ok: true, status: 200, data: await mocks.bgRequest(payload) })
+}))
 
 const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn(),
@@ -158,7 +169,8 @@ const renderPromptSelect = () => {
     systemPrompt: "",
     setSystemPrompt: vi.fn(),
     setSelectedSystemPrompt: vi.fn(),
-    setSelectedQuickPrompt: vi.fn()
+    setSelectedQuickPrompt: vi.fn((prompt: string | undefined) =>
+      useStoreMessageOption.getState().setSelectedQuickPrompt(prompt ?? null))
   }
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -203,6 +215,7 @@ describe("PromptSelect server prompt library (CC-05 #3112)", { timeout: 60_000 }
       localPrompt({ id: "local-2", title: "daily standup", content: "Standup notes" }),
       localPrompt({
         id: "local-3",
+        ownerId: "recipe-owner:sha256:" + "a".repeat(64),
         title: "Renamed on device",
         content: "Tutor",
         is_system: true,
@@ -294,7 +307,8 @@ describe("PromptSelect server prompt library (CC-05 #3112)", { timeout: 60_000 }
         name: "Socratic tutor",
         system_prompt: "Ask guiding questions.",
         keywords: ["teaching"]
-      })
+      }),
+      "recipe-owner:sha256:" + "a".repeat(64)
     )
     expect(props.setSelectedQuickPrompt).not.toHaveBeenCalled()
   })

@@ -20,6 +20,27 @@ workflow jobs.
 `USER_DB_BASE_DIR` is defined in `tldw_Server_API.app.core.config` (defaults to `Databases/user_databases/` under the project root). Override via environment variable or `Config_Files/config.txt` as needed.
 Replace `<content-db>.db` with your configured per-user content DB filename in the examples below.
 
+### ChaChaNotes schema 92 with a separate runtime role
+
+Run the schema upgrade as the content schema owner before restarting the API.
+If the API connects as a separate role, the owner must grant that existing role
+access to the new message insertion-order ledger and its owned sequence. Use the
+schema that contains the ChaChaNotes tables and replace `content_runtime` below
+with the deployment's existing runtime role:
+
+```sql
+GRANT SELECT (id, client_id) ON messages TO content_runtime;
+GRANT SELECT ON message_insertion_order TO content_runtime;
+GRANT INSERT (message_id) ON message_insertion_order TO content_runtime;
+GRANT USAGE ON SEQUENCE message_insertion_order_sequence_seq TO content_runtime;
+```
+
+Grant only the `SELECT` permissions for a read-only role. Writers must also retain their existing
+permission to select and lock their conversation rows. The ledger's forced
+owner-scoped row policies remain enabled. Do not grant access to `PUBLIC` or
+give the runtime role schema ownership. Check a Chat write as the runtime role
+before restoring traffic.
+
 ## Step 1 - Prepare connection details
 
 Collect the PostgreSQL host, port, database, username, and password. These map directly onto the

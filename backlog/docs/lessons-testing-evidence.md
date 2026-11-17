@@ -1,5 +1,12 @@
 # Testing Evidence Lessons
 
+
+## Hash navigation does not replay browser initialization (TASK-13227, 2026-10-11)
+
+**Incident.** The disposable extension upgrade fixture registered a version0 Buddy-shell seed after the options document had loaded, then navigated only to its workspace hash. The initialization script never ran, so the check did not exercise the claimed migration. A real reload applied the seed; the final WebUI and extension journeys observed version1 with the retained240,160 position.
+
+**What to do.** Install persisted-state seeds before document creation or reload after registering initialization. Assert both the preexisting value and the migrated result. A hash-route change preserves the current document and cannot prove initialization or upgrade behavior.
+
 ## Check event-loop progress while blocking work is held
 
 **Incident (TASK-13424, PR #3091, 2026-10-03):** The VN recipe-capture

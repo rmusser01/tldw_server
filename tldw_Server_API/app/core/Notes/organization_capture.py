@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import server_origin_stable_
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     ServerOriginMutationStep,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 _MAX_SERVER_ROUTING_METADATA_BYTES = 1_024
 
@@ -290,7 +291,7 @@ def replace_keywords(
     seen: set[str] = set()
     for value in keywords:
         normalized = str(value or "").strip()
-        folded = normalized.casefold()
+        folded = normalize_keyword_identity(normalized)
         if normalized and folded not in seen:
             seen.add(folded)
             desired.append((folded, normalized))
@@ -316,7 +317,7 @@ def replace_keywords(
         if subject_type == "note"
         else coordinator.note_db.get_keywords_for_conversation(subject_id)
     )
-    current = {str(row["keyword"]).casefold(): str(row["sync_id"]) for row in current_rows}
+    current = {normalize_keyword_identity(str(row["keyword"])): str(row["sync_id"]) for row in current_rows}
     desired_ids: dict[str, str] = {}
     steps: list[ServerOriginMutationStep] = []
     for folded, value in desired:

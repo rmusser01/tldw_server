@@ -36,6 +36,7 @@ Docs/superpowers/plans/2026-05-27-notes-ux-remediation.md
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-05-27-notes-ux-remediation.md and ran the requested plan-review subagent. First pass found two blocking coverage gaps: import/export/offline sync and navigation into /notes. Patched the plan to add navigation coverage to PR 3 and a dedicated PR 9 for import/export/offline draft sync, then fixed PR numbering issues found on second pass. Final reviewer pass: Approved, no issues. Verification: git diff --check passed. Bandit not applicable because this is documentation/planning only.
+Its subtasks TASK-481.1 to TASK-481.19 were re-parented as TASK-12446.1 to TASK-12446.19 on 2026-11-03 (TASK-13962), in that order: 3a660d4f1d (2026-07-05) renumbered this task from TASK-481 without them. Docs/Development/Backlog_Task_Id_Renumbering.md maps each id.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

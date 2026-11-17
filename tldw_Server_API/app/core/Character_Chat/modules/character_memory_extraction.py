@@ -15,6 +15,8 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -237,6 +239,8 @@ def extract_character_memories(
             response_format={"type": "json_object"},
             app_config=app_config,
         )
+    except LLMQuotaExceededError:
+        raise  # the user's limit, not "no memories found"
     except Exception:
         logger.exception("Character memory extraction LLM call failed")
         return ExtractionResult(unique=[], total_parsed=0, duplicates_skipped=0)

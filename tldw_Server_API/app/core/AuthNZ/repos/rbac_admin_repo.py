@@ -158,7 +158,13 @@ async def permissions_with_prefix(conn: Any, *, is_postgres: bool, prefix: str) 
 
 
 async def get_role(conn: Any, *, is_postgres: bool, role_id: int) -> dict[str, Any] | None:
-    return await fetch_one(conn, is_postgres, "SELECT id, name FROM roles WHERE id = ?", (int(role_id),), ("id", "name"))
+    # Keep a checked role present until its request transaction commits.
+    sql = (
+        "SELECT id, name FROM roles WHERE id = ? FOR KEY SHARE"
+        if is_postgres
+        else "SELECT id, name FROM roles WHERE id = ?"
+    )
+    return await fetch_one(conn, is_postgres, sql, (int(role_id),), ("id", "name"))
 
 
 async def roles_page(

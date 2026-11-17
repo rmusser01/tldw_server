@@ -1,7 +1,8 @@
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
+import type { HistorySelectionReference } from "@/hooks/chat/useHistorySelection"
 import type {
-  CompareHistorySelectionV1, HistoryCursorV1, HistoryNodeV1, HistoryResolutionV1,
+  CompareHistorySelectionV1, HistoryEditTargetV1, HistoryCursorV1, HistoryNodeV1, HistoryResolutionV1,
   HistorySelectedContentV1, HistorySelectionSnapshotV1, HistorySelectionV1, HistoryViewSelectionV1
 } from "@/types/history-selection"
 
@@ -10,6 +11,61 @@ export class HistorySelectionError extends Error {
     super(code)
     this.name = "HistorySelectionError"
   }
+}
+
+/** Only a scoped address crosses the extension full-page URL. */
+export type HistorySelectionHandoff = HistorySelectionReference & {
+  owner_kind: "local" | "native"
+}
+
+export const parseHistorySelectionHandoff = (
+  search: string
+): HistorySelectionHandoff | null => {
+  const value = new URLSearchParams(search.replace(/^.*\?/, "")).get(
+    "historySelection"
+  )
+  if (!value) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    throw new Error("invalid_history_reference")
+  }
+  const keys = [
+    "profile_id",
+    "client_session_id",
+    "owner_key",
+    "conversation_id",
+    "owner_kind"
+  ]
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    Object.keys(parsed).some(
+      (key) => !keys.includes(key) && key !== "pending_confirmation_reference"
+    ) ||
+    keys.some(
+      (key) =>
+        typeof (parsed as any)[key] !== "string" || !(parsed as any)[key].length
+    ) ||
+    !["local", "native"].includes((parsed as any).owner_kind)
+  )
+    throw new Error("invalid_history_reference")
+  const pointer = (parsed as HistorySelectionReference)
+    .pending_confirmation_reference
+  if (
+    pointer !== undefined &&
+    (!pointer ||
+      typeof pointer !== "object" ||
+      Array.isArray(pointer) ||
+      Object.keys(pointer).length !== 3 ||
+      ["client_session_id", "view_session_id", "projection_id"].some(
+        (key) => typeof pointer[key] !== "string" || !pointer[key]
+      ))
+  )
+    throw new Error("invalid_history_reference")
+  return parsed as HistorySelectionHandoff
 }
 
 /** Owner keys minted by this client's local H1 authority (db/dexie/history-selection.ts). */
@@ -222,4 +278,84 @@ export const resolveHistorySelection = (
     if (!(error instanceof HistorySelectionError)) throw error
     return { status: error.code === "missing_cursor" ? "stale_selection" : "invalid_history", code: error.code }
   }
+}
+
+/** Only this exact scoped leaf-check response proves that input was not admitted. */
+export const isDefinitiveNativeBranchRejection = (
+  error: unknown,
+  selection: { conversation_id: string; messages: readonly { id: string }[] }
+): boolean => {
+  const response = error as {
+    status?: unknown
+    details?: { detail?: unknown }
+  } | null
+  const value = response?.details?.detail
+  if (
+    response?.status !== 409 ||
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  )
+    return false
+  const detail = value as Record<string, unknown>
+  return (
+    detail.status === "stale_selection" &&
+    detail.code === "history_branch_changed" &&
+    detail.conversation_id === selection.conversation_id &&
+    detail.parent_message_id === (selection.messages.at(-1)?.id ?? null) &&
+    Array.isArray(detail.leaf_ids) &&
+    detail.leaf_ids.length > 0 &&
+    detail.leaf_ids.every((id) => typeof id === "string" && id.length > 0) &&
+    new Set(detail.leaf_ids).size === detail.leaf_ids.length &&
+    typeof detail.history_version === "number" &&
+    Number.isSafeInteger(detail.history_version) &&
+    detail.history_version >= 0
+  )
+}
+
+/** Only the original excluded-target refusal proves a protected Edit was not admitted. */
+export const isDefinitiveNativeEditRejection = (
+  error: unknown,
+  selection: Pick<
+    HistorySelectionV1,
+    "conversation_id" | "cursor" | "selection_digest"
+  >,
+  target: HistoryEditTargetV1
+): boolean => {
+  const response = error as {
+    status?: unknown
+    details?: { detail?: unknown }
+    detail?: unknown
+  } | null
+  if (
+    response?.status !== 409 ||
+    target.version !== 1 ||
+    !target.message_id ||
+    !target.message_revision ||
+    !selection.conversation_id ||
+    !selection.selection_digest ||
+    selection.cursor.kind !== "before_message" ||
+    selection.cursor.message_id !== target.message_id
+  )
+    return false
+  const nested = response.details?.detail
+  const direct = response.detail
+  const matches = (value: unknown) => {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return false
+    const detail = value as Record<string, unknown>
+    return (
+      detail.status === "stale_selection" &&
+      detail.code === "history_edit_target_changed" &&
+      detail.conversation_id === selection.conversation_id &&
+      detail.message_id === target.message_id &&
+      detail.message_revision === target.message_revision &&
+      detail.selection_digest === selection.selection_digest
+    )
+  }
+  return (
+    (nested !== undefined || direct !== undefined) &&
+    (nested === undefined || matches(nested)) &&
+    (direct === undefined || matches(direct))
+  )
 }

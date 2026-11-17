@@ -305,7 +305,7 @@ class ModerationReviewStore:
         ).fetchone()
         return self._row_to_audit(row)
 
-    def upsert_item(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def upsert_item(self, payload: dict[str, Any], *, actor_id: str | None = None) -> dict[str, Any]:
         """Insert a sanitized review item or return the existing idempotent row."""
         now = _utc_now()
         item_id = str(payload.get("id") or uuid.uuid4())
@@ -353,7 +353,7 @@ class ModerationReviewStore:
                     conn,
                     item_id=item["id"],
                     decision_id=None,
-                    actor_id=None,
+                    actor_id=actor_id,
                     action="item.created",
                     summary="Moderation review item created",
                     metadata={"source_type": item.get("source_type"), "phase": item.get("phase")},

@@ -522,6 +522,7 @@ def apply_chunking_template_if_any(
     db: Any,
     chunking_options_dict: dict[str, Any] | None,
     *,
+    owner_user_id: str | int | None,
     TemplateClassifier: Any | None = None,
     first_url: str | None = None,
     first_filename: str | None = None,
@@ -538,13 +539,17 @@ def apply_chunking_template_if_any(
         if not getattr(form_data, "perform_chunking", False):
             return chunking_options_dict
 
+        # Missing identity must never broaden template selection to every tenant.
+        owner_user_id = str(owner_user_id or "").strip()
+        if not owner_user_id:
+            return chunking_options_dict
         opts = chunking_options_dict or {}
 
         # 1) Apply explicit template by name when provided.
         template_name = getattr(form_data, "chunking_template_name", None)
         if template_name:
             try:
-                tpl = db.get_chunking_template(name=template_name)
+                tpl = db.get_chunking_template(name=template_name, owner_user_id=owner_user_id)
             except _CHUNKING_OPTIONS_NONCRITICAL_EXCEPTIONS as db_err:
                 logging.warning("Chunking template lookup failed (error_type={})", exception_type_for_log(db_err))
                 return opts
@@ -596,7 +601,7 @@ def apply_chunking_template_if_any(
                     include_builtin=True,
                     include_custom=True,
                     tags=None,
-                    user_id=None,
+                    user_id=owner_user_id,
                     include_deleted=False,
                 )
             except _CHUNKING_OPTIONS_NONCRITICAL_EXCEPTIONS as list_err:

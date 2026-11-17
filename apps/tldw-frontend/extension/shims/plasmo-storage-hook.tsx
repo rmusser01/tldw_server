@@ -9,7 +9,7 @@ type UseStorageOptions<T> = {
 
 type UseStorageMeta<T> = {
   isLoading: boolean
-  setRenderValue: (value: T | undefined) => void
+  setRenderValue: (value: T | undefined | ((previous: T | undefined) => T | undefined)) => void
 }
 
 type SetValue<T> = (
@@ -94,5 +94,11 @@ export function useStorage<T = unknown>(
     [options.key, storage, applyValue]
   )
 
-  return [value, setStoredValue, { isLoading, setRenderValue: applyValue }]
+  const setRenderValue = useCallback((next: T | undefined | ((previous: T | undefined) => T | undefined)) => {
+    applyValue(typeof next === "function"
+      ? (next as (previous: T | undefined) => T | undefined)(valueRef.current)
+      : next)
+  }, [applyValue])
+
+  return [value, setStoredValue, { isLoading, setRenderValue }]
 }

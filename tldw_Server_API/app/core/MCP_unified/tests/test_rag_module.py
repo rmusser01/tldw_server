@@ -17,7 +17,7 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.rag_module imp
 )
 from tldw_Server_API.app.core.MCP_unified.modules.registry import ModuleRegistry
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
-from tldw_Server_API.app.core.MCP_unified import server as mcp_server_module
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 pytestmark = pytest.mark.unit
 
@@ -726,7 +726,7 @@ async def test_default_controls_enforce_source_tool_permission(monkeypatch: pyte
     protocol = MCPProtocol()
     protocol.rbac_policy = _DenyNotesSearchRBAC()
     protocol.rate_limiter = _NoopRateLimiter()
-    monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
+    monkeypatch.setattr(app_services(), "mcp_server", SimpleNamespace(protocol=protocol))
 
     async def fail_if_pipeline_runs(**kwargs):  # noqa: ANN001
         del kwargs
@@ -752,7 +752,7 @@ async def test_default_controls_require_source_tool_module_registered(monkeypatc
     protocol.module_registry = ModuleRegistry()
     protocol.rbac_policy = _AllowAllRBAC()
     protocol.rate_limiter = _NoopRateLimiter()
-    monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
+    monkeypatch.setattr(app_services(), "mcp_server", SimpleNamespace(protocol=protocol))
 
     async def fail_if_pipeline_runs(**kwargs):  # noqa: ANN001
         del kwargs
@@ -777,7 +777,7 @@ async def test_default_controls_authorize_character_backed_rag_sources(monkeypat
     protocol.rbac_policy = _AllowAllRBAC()
     protocol.rate_limiter = _NoopRateLimiter()
     _install_source_tool_registry(protocol, "characters.search")
-    monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
+    monkeypatch.setattr(app_services(), "mcp_server", SimpleNamespace(protocol=protocol))
     calls: dict[str, object] = {}
 
     async def fake_pipeline(**kwargs):
@@ -834,7 +834,7 @@ async def test_default_controls_enforce_rag_query_billing_limit(monkeypatch: pyt
     protocol.rbac_policy = _AllowAllRBAC()
     protocol.rate_limiter = _NoopRateLimiter()
     _install_source_tool_registry(protocol, "media.search")
-    monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
+    monkeypatch.setattr(app_services(), "mcp_server", SimpleNamespace(protocol=protocol))
 
     async def deny_limit(*, request_like, current_user=None, units: int = 1):  # noqa: ANN001
         del request_like, current_user, units
@@ -941,7 +941,7 @@ async def test_rag_module_jsonrpc_tools_call_smoke(monkeypatch: pytest.MonkeyPat
     protocol.rbac_policy = _AllowAllRBAC()
     protocol.rate_limiter = _NoopRateLimiter()
     _install_source_tool_registry(protocol, "media.search")
-    monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
+    monkeypatch.setattr(app_services(), "mcp_server", SimpleNamespace(protocol=protocol))
     context = RequestContext(request_id="rag-jsonrpc-smoke", user_id="1", client_id="unit")
 
     search = await protocol.process_request(

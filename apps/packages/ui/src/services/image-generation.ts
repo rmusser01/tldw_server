@@ -36,8 +36,8 @@ const IMAGE_BACKEND_CONFIGS_SETTING = defineSetting(
   coerceConfigMap
 )
 
-export const getImageBackendConfigs = async (): Promise<ImageBackendConfigMap> =>
-  getSetting(IMAGE_BACKEND_CONFIGS_SETTING)
+export const getImageBackendConfigs = async (options?: { throwOnError?: boolean }): Promise<ImageBackendConfigMap> =>
+  getSetting(IMAGE_BACKEND_CONFIGS_SETTING, options)
 
 export const setImageBackendConfigs = async (configs: ImageBackendConfigMap) =>
   setSetting(IMAGE_BACKEND_CONFIGS_SETTING, configs)

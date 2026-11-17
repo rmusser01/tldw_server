@@ -62,7 +62,7 @@ async def run_arxiv_search_adapter(config: dict[str, Any], context: dict[str, An
       - papers: list[dict] - Paper metadata
       - total_results: int
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -160,7 +160,7 @@ async def run_arxiv_download_adapter(config: dict[str, Any], context: dict[str, 
       - pdf_path: str
       - downloaded: bool
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -242,7 +242,7 @@ async def run_pubmed_search_adapter(config: dict[str, Any], context: dict[str, A
       - papers: list[dict]
       - total_results: int
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -356,7 +356,7 @@ async def run_semantic_scholar_search_adapter(config: dict[str, Any], context: d
       - papers: list[dict]
       - total_results: int
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -441,7 +441,7 @@ async def run_google_scholar_search_adapter(config: dict[str, Any], context: dic
       - papers: list[dict]
       - total_results: int
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -521,7 +521,7 @@ async def run_patent_search_adapter(config: dict[str, Any], context: dict[str, A
       - patents: list[dict]
       - total_results: int
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}

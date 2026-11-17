@@ -146,7 +146,8 @@ async def test_sqlite_mode_with_the_flag_on_still_only_warns(monkeypatch):
 
 
 @pytest.mark.parametrize("missing", ["conversations", "messages", "chacha_keywords", "keyword_collections", "sync_log", "notes", "character_cards"])
-def test_non_owner_probe_rejects_missing_required_content_table(missing):
+def test_non_owner_probe_rejects_missing_required_content_table(missing: str) -> None:
+    """Reject non-owner startup when a required content table is missing."""
     names = {"conversations", "messages", "chacha_keywords", "keyword_collections", "sync_log", "notes", "character_cards"}
     rows = [{"relname": name, "relrowsecurity": True, "relforcerowsecurity": True, "policy_count": 1} for name in names - {missing}]
     with pytest.raises(RuntimeError, match=missing):
@@ -154,7 +155,10 @@ def test_non_owner_probe_rejects_missing_required_content_table(missing):
 
 
 @pytest.mark.parametrize("field,value", [("relrowsecurity", False), ("relforcerowsecurity", False), ("policy_count", 0)])
-def test_non_owner_probe_rejects_unprotected_chat_table(field, value):
+def test_non_owner_probe_rejects_unprotected_chat_table(
+    field: str, value: bool | int
+) -> None:
+    """Reject a chat table without forced RLS and a visible isolation policy."""
     names = {"conversations", "messages", "chacha_keywords", "keyword_collections", "sync_log", "notes", "character_cards"}
     rows = [{"relname": name, "relrowsecurity": True, "relforcerowsecurity": True, "policy_count": 1} for name in names]
     next(row for row in rows if row["relname"] == "messages")[field] = value

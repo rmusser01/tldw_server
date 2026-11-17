@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { createWorkspaceStorage, useWorkspaceStore, WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY,
+import { createWorkspaceStorage, flushWorkspacePersistence, useWorkspaceStore, WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY,
   WORKSPACE_STORAGE_INDEXEDDB_FLAG_STORAGE_KEY } from "../workspace"
 import { WORKSPACE_STORAGE_KEY } from "../workspace-events"
 import { hydrateWorkspaceFromServer } from "../workspace-api"
@@ -19,6 +19,7 @@ const snapshotKey = `${WORKSPACE_STORAGE_KEY}:workspace:${id}:snapshot`
 const chatKey = `${WORKSPACE_STORAGE_KEY}:workspace:${id}:chat`
 
 beforeEach(async () => {
+  await flushWorkspacePersistence()
   localStorage.clear()
   useWorkspaceStore.getState().reset()
   const local = await hydrateWorkspaceFromServer(id, { requireComplete: true, fetch: async () => serverWorkspacePayload() })
@@ -53,6 +54,13 @@ describe.each(["split", "monolithic"])("tombstone union with %s storage", mode =
     if (kind === "missing-owner") candidate.state.workspaceSnapshots[id].serverWorkspace = { metadata: { id, workspace_profile: "research" } }
     candidate.state.archivedWorkspaces = [{ ...candidate.state.savedWorkspaces[0], id }]
     const raw = JSON.stringify(candidate)
+    await flushWorkspacePersistence()
+    // Seed the legacy split records even when the reader now uses monolithic storage.
+    localStorage.setItem(WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY, "1")
+    localStorage.setItem(WORKSPACE_STORAGE_INDEXEDDB_FLAG_STORAGE_KEY, "0")
+    await createWorkspaceStorage().setItem(WORKSPACE_STORAGE_KEY, raw)
+    expect(localStorage.getItem(snapshotKey)).not.toBeNull()
+    expect(localStorage.getItem(chatKey)).not.toBeNull()
     const adapter = storage()
     await adapter.setItem(WORKSPACE_STORAGE_KEY, raw)
     markDeleted()

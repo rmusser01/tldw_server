@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -356,26 +356,25 @@ async def test_notes_graph_neighbors_maps_db_error_to_500(monkeypatch: pytest.Mo
 async def test_notes_graph_read_sanitizes_generic_error_log(monkeypatch: pytest.MonkeyPatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(notes_graph_mod, "logger", logger_stub)
-    monkeypatch.setattr(notes_graph_mod, "NOTES_GRAPH_ENABLED", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Notes_Graph.graph_service.NOTES_GRAPH_ENABLED", lambda: True)
 
     def _raise_generic_error(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("notes graph backend exploded at /private/notes-graph.db")
 
     monkeypatch.setattr(notes_graph_mod.NoteGraphService, "generate_graph", _raise_generic_error)
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(HTTPException) as exc_info:
         await notes_graph_mod.get_notes_graph(
-            _RequestStub(),  # type: ignore[arg-type]
-            notes_graph_mod.NoteGraphRequest(),
-            SimpleNamespace(id_str="1"),
-            object(),  # type: ignore[arg-type]
-            None,
-            None,
-            None,
+            req=notes_graph_mod.NoteGraphRequest(),
+            current_user=SimpleNamespace(id_str="1"),
+            db=object(),  # type: ignore[arg-type]
+            _=None,
+            principal=_make_principal(permissions=[NOTES_GRAPH_READ]),
+            ___=None,
         )
 
-    assert getattr(exc_info.value, "status_code", None) == 500
-    assert getattr(exc_info.value, "detail", None) == "Graph fetch failed"
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Graph fetch failed"
     _assert_sanitized_error_log(logger_stub, "notes.graph.read failed")
 
 
@@ -383,7 +382,7 @@ async def test_notes_graph_read_sanitizes_generic_error_log(monkeypatch: pytest.
 async def test_notes_graph_neighbors_sanitizes_generic_error_log(monkeypatch: pytest.MonkeyPatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(notes_graph_mod, "logger", logger_stub)
-    monkeypatch.setattr(notes_graph_mod, "NOTES_GRAPH_ENABLED", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Notes_Graph.graph_service.NOTES_GRAPH_ENABLED", lambda: True)
 
     def _raise_generic_error(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("notes graph backend exploded at /private/notes-graph.db")

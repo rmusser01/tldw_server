@@ -1215,7 +1215,8 @@ async def test_run_recipe_run_jobs_worker_stops_sdk_when_stop_event_is_set(monke
         def stop(self) -> None:
             observed["stopped"] = True
 
-        async def run(self, *, handler) -> None:
+        async def run(self, *, handler, job_type) -> None:
+            assert job_type == RECIPE_RUN_JOB_TYPE  # nosec B101 - pytest declared recipe claim assertion.
             while not observed["stopped"]:
                 await asyncio.sleep(0)
 

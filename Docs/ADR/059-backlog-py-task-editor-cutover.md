@@ -41,6 +41,7 @@ backlog-py already had the safe-mutation core, path containment, and Definition 
   - backlog-py has no browser UI, no `--plan`, priority, assignee, or parent options, and no MCP server adapter (its MCP tools are pure functions). Agents use the CLI.
   - The ratchet runs only when `backend-required` sees backend changes. Backlog-only PRs are covered by the `backlog-task-format` pre-commit hook instead: it runs `backlog-py task normalize --check` on each changed `backlog/tasks/*.md` file, locally and in the (not required) `run-pre-commit` CI job, so a Node-format task file shows up red on the PR that adds it. Making that check required, or putting `backlog/tasks/**` in the backend gate, costs a full `backend-required` run on every task-only PR and was not chosen. Because the ratchet is scoped to each PR's own changes, a file that slips through this way does not fail later PRs; the next backlog-py edit of it normalizes it.
 - Id collisions are not solved by the tool. backlog-py's default next id sees only the local checkout, so AGENTS.md has agents check `origin/dev` and every open PR branch before choosing an id.
+  - Amended 2026-11-07 (TASK-13854): `task create` now takes the max across local tasks, a fetched `origin/dev` and open PR files, and rejects a colliding `--id`; each unreachable source warns and the manual AGENTS.md recipe remains the fallback.
 
 ## Follow-up
 

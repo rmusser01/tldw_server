@@ -8,8 +8,12 @@ from typing import Any, Optional
 from tldw_Server_API.app.core.DB_Management.prompt_studio_db.prompt_fields import (
     _prepare_prompt_record_fields as prepare_prompt_record_fields,
 )
-from tldw_Server_API.app.core.DB_Management.prompt_studio_db.repositories._common import DB_ERRORS, json_or_none
-from tldw_Server_API.app.core.DB_Management.Prompts_DB import DatabaseError, InputError
+from tldw_Server_API.app.core.DB_Management.prompt_studio_db.repositories._common import (
+    DB_ERRORS,
+    is_unique_violation,
+    json_or_none,
+)
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import ConflictError, DatabaseError, InputError
 from tldw_Server_API.app.core.DB_Management.retry_policy import run_with_contention_retry
 
 _INSERT_VERSION_SQL = """
@@ -67,7 +71,11 @@ class PromptVersionsRepository:
     def _run(self, fn: Any, failure: str) -> dict[str, Any]:
         try:
             return run_with_contention_retry(fn)
-        except DB_ERRORS as exc:
+        except (*DB_ERRORS, ConflictError) as exc:
+            if is_unique_violation(exc):
+                raise ConflictError(
+                    "Prompt version already exists. Reopen the latest version and reapply your changes."
+                ) from exc
             raise DatabaseError(f"{failure}: {exc}") from exc  # noqa: TRY003
 
     def create(

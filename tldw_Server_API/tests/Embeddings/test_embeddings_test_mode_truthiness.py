@@ -10,16 +10,6 @@ from tldw_Server_API.app.api.v1.endpoints import (
 pytestmark = pytest.mark.unit
 
 
-def test_embeddings_is_test_context_accepts_single_letter_y(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.delenv("TESTING", raising=False)
-    monkeypatch.setenv("TEST_MODE", "y")
-
-    assert emb_mod._is_test_context() is True
-
-
 def test_embeddings_build_user_metadata_skips_with_testing_single_letter_y(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

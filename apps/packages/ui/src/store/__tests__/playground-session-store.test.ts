@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
 import { buildQueuedRequest } from "@/utils/chat-request-queue"
+import type { ChatDraftHandle } from "@/utils/chat-draft-address"
 import { usePlaygroundSessionStore } from "../playground-session"
 
 describe("playground-session-store", () => {
@@ -18,6 +19,23 @@ describe("playground-session-store", () => {
     expect(usePlaygroundSessionStore.getState().isSessionValid()).toBe(true)
   })
 
+  it("persists a valid draft-only handle, preserving the Temporary bit and excluding runtime intent", () => {
+    const chatDraftHandle: ChatDraftHandle = { ownerHash: "a".repeat(64), address: { kind: "fresh", id: "new", scope: { type: "global" }, temporary: true } }
+    usePlaygroundSessionStore.getState().saveSession({ scopeKey: "scope:a", chatDraftHandle })
+    expect(usePlaygroundSessionStore.getState().isSessionValid("scope:a")).toBe(true)
+    expect(JSON.parse(localStorage.getItem("tldw-playground-session")!).state.chatDraftHandle).toEqual(chatDraftHandle)
+    usePlaygroundSessionStore.getState().clearSession()
+    expect(usePlaygroundSessionStore.getState().chatDraftHandle).toBeNull()
+  })
+
+  it.each([
+    { ownerHash: "credentials", address: { kind: "fresh", id: "new", scope: { type: "global" }, temporary: false } },
+    { ownerHash: "a".repeat(64), address: { kind: "fresh", id: "new", scope: { type: "workspace", workspaceId: "" }, temporary: false } }
+  ])("does not treat a malformed draft-only handle as a saved session (%j)", chatDraftHandle => {
+    usePlaygroundSessionStore.getState().saveSession({ chatDraftHandle: chatDraftHandle as unknown as ChatDraftHandle })
+    expect(usePlaygroundSessionStore.getState().isSessionValid()).toBe(false)
+  })
+
   it("keeps deliberate server selection transient and clears it with account state", () => {
     usePlaygroundSessionStore.getState().requestServerChatSelection("chat-a")
     const first = usePlaygroundSessionStore.getState().serverChatSelectionIntent
@@ -26,6 +44,18 @@ describe("playground-session-store", () => {
     expect(JSON.parse(localStorage.getItem("tldw-playground-session")!).state)
       .not.toHaveProperty("serverChatSelectionIntent")
     usePlaygroundSessionStore.getState().clearSession()
+    expect(usePlaygroundSessionStore.getState().serverChatSelectionIntent).toBeNull()
+  })
+
+  it("retiring a completed selection cannot clear its replacement intent", () => {
+    const store = usePlaygroundSessionStore.getState()
+    store.requestServerChatSelection("B")
+    const completed = usePlaygroundSessionStore.getState().serverChatSelectionIntent
+    store.requestServerChatSelection("B")
+    const replacement = usePlaygroundSessionStore.getState().serverChatSelectionIntent
+    store.completeServerChatSelection(completed)
+    expect(usePlaygroundSessionStore.getState().serverChatSelectionIntent).toBe(replacement)
+    store.completeServerChatSelection(replacement)
     expect(usePlaygroundSessionStore.getState().serverChatSelectionIntent).toBeNull()
   })
 
@@ -68,3 +98,38 @@ it("stores only an initialization address and clears it with the session", () =>
   usePlaygroundSessionStore.getState().clearSession()
   expect(usePlaygroundSessionStore.getState().historySelectionReference).toBeNull()
 })
+
+
+it.each([false, true])(
+  "keeps only a valid Temporary session eligible beyond ordinary bookmark expiry (%s)",
+  (temporary) => {
+    const chatDraftHandle: ChatDraftHandle = {
+      ownerHash: "a".repeat(64),
+      address: {
+        kind: "fresh",
+        id: "age",
+        scope: { type: "global" },
+        temporary
+      }
+    }
+    usePlaygroundSessionStore
+      .getState()
+      .saveSession({ scopeKey: "scope:a", chatDraftHandle })
+    usePlaygroundSessionStore.setState({
+      lastUpdated: Date.now() - 48 * 60 * 60 * 1000
+    })
+    expect(usePlaygroundSessionStore.getState().isSessionStale()).toBe(
+      !temporary
+    )
+    expect(usePlaygroundSessionStore.getState().isSessionValid("scope:a")).toBe(
+      temporary
+    )
+    expect(usePlaygroundSessionStore.getState().isSessionValid("scope:b")).toBe(
+      false
+    )
+    usePlaygroundSessionStore.getState().clearSession()
+    expect(usePlaygroundSessionStore.getState().isSessionValid("scope:a")).toBe(
+      false
+    )
+  }
+)

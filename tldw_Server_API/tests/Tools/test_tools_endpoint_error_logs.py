@@ -19,7 +19,7 @@ async def test_execute_tool_sanitizes_denied_or_invalid_log(monkeypatch):
             raise tools.ToolExecutionError("tool denied after reading /private/tool-config.json")
 
     monkeypatch.setattr(tools, "logger", logger_stub)
-    monkeypatch.setattr(tools, "ToolExecutor", lambda: _FailingExecutor())
+    monkeypatch.setattr("tldw_Server_API.app.core.Tools.tool_executor.ToolExecutor", lambda: _FailingExecutor())
 
     with pytest.raises(HTTPException) as excinfo:
         await tools.execute_tool_endpoint(

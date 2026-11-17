@@ -136,7 +136,9 @@ describe("McpToolsStep", () => {
     renderMcpToolsStep(createProps({ catalog: null, loadCatalog }));
 
     expect(loadCatalog).toHaveBeenCalledTimes(1);
-    expect(await screen.findByLabelText(/research/i)).toBeChecked();
+    await waitFor(() => {
+      expect(screen.getByLabelText(/research/i)).toBeChecked();
+    });
     expect(screen.getByLabelText(/writing/i)).not.toBeChecked();
   });
 

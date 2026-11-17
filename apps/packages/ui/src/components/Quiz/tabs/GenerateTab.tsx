@@ -365,6 +365,14 @@ const extractErrorDetail = (error: unknown): string | null => {
     );
   };
 
+  const record = asRecord(error);
+  const responseDetail =
+    extract(record?.details) ??
+    extract(record?.detail) ??
+    extract(record?.error) ??
+    extract(asRecord(record?.response)?.data);
+  if (responseDetail) return responseDetail;
+
   if (error instanceof Error) {
     const message = error.message.trim();
     if (message && !/failed to generate quiz/i.test(message)) {
@@ -372,16 +380,7 @@ const extractErrorDetail = (error: unknown): string | null => {
     }
   }
 
-  const record = asRecord(error);
-  if (!record) return null;
-
-  return (
-    extract(record.detail) ??
-    extract(record.error) ??
-    extract(asRecord(record.response)?.data) ??
-    extract(record.message) ??
-    null
-  );
+  return extract(record?.message);
 };
 
 const extractWordCount = (details: unknown): number | null => {

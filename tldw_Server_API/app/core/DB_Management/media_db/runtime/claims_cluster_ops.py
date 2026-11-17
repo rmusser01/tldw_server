@@ -6,11 +6,12 @@ import logging
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.media_db.claims_cluster_rebuild_types import ClusterRebuildStorageError
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_rebuild_snapshot import lock_claim_rows
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
-
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
@@ -295,6 +296,13 @@ def add_claim_to_cluster(
 ) -> None:
     now = self._get_current_utc_timestamp_str()
     with self.transaction() as conn:
+        query = "SELECT id FROM claim_clusters WHERE id = ?"
+        if self.backend_type == BackendType.POSTGRESQL:
+            query = "SELECT id FROM claim_clusters WHERE id = ? FOR UPDATE"
+        destination = self._fetchone_with_connection(conn, query, (int(cluster_id),))
+        if not destination:
+            raise ClusterRebuildStorageError("claims_cluster_source_changed", retryable=True)
+        lock_claim_rows(self, conn, (int(claim_id),), owner_user_id=None)
         self._execute_with_connection(
             conn,
             (

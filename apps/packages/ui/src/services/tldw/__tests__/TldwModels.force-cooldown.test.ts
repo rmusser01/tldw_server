@@ -8,7 +8,10 @@ const mocks = vi.hoisted(() => ({
   getRuntimeSingleUserApiKeyOverride: vi.fn(),
   // Shared, Map-backed storage: survives across service instances exactly
   // like chrome.storage.local survives an MV3 worker suspension.
-  storageMap: new Map<string, unknown>()
+  storageMap: new Map<string, unknown>(),
+  storageGet: vi.fn<(key: string) => Promise<unknown>>(),
+  storageSet: vi.fn<(key: string, value: unknown) => Promise<void>>(),
+  storageRemove: vi.fn<(key: string) => Promise<void>>()
 }))
 
 const config = {
@@ -27,21 +30,15 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     getModels: (...args: unknown[]) =>
       (mocks.getModels as (...args: unknown[]) => unknown)(...args),
     getCurrentUserProfile: (...args: unknown[]) =>
-      (mocks.getCurrentUserProfile as (...args: unknown[]) => unknown)(
-        ...args
-      )
+      (mocks.getCurrentUserProfile as (...args: unknown[]) => unknown)(...args)
   }
 }))
 
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
-    get: async (key: string) => mocks.storageMap.get(key),
-    set: async (key: string, value: unknown) => {
-      mocks.storageMap.set(key, value)
-    },
-    remove: async (key: string) => {
-      mocks.storageMap.delete(key)
-    },
+    get: (key: string) => mocks.storageGet(key),
+    set: (key: string, value: unknown) => mocks.storageSet(key, value),
+    remove: (key: string) => mocks.storageRemove(key),
     watch: () => () => undefined
   })
 }))
@@ -56,6 +53,15 @@ import { TldwModelsService } from "@/services/tldw/TldwModels"
 describe("TldwModelsService persisted force cooldown + freshness", () => {
   beforeEach(() => {
     mocks.storageMap.clear()
+    mocks.storageGet
+      .mockReset()
+      .mockImplementation(async (key) => mocks.storageMap.get(key))
+    mocks.storageSet.mockReset().mockImplementation(async (key, value) => {
+      mocks.storageMap.set(key, value)
+    })
+    mocks.storageRemove.mockReset().mockImplementation(async (key) => {
+      mocks.storageMap.delete(key)
+    })
     mocks.getConfig.mockReset()
     mocks.getConfig.mockResolvedValue(config)
     mocks.initialize.mockReset()
@@ -97,6 +103,120 @@ describe("TldwModelsService persisted force cooldown + freshness", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it("does not restore a retired cooldown from a held startup read", async () => {
+    await new TldwModelsService().getModels(true)
+    const retiredAt = mocks.storageMap.get("tldwModelsForceCooldown")
+    let finishRead!: (value: unknown) => void
+    let entered!: () => void
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const held = new Promise<unknown>((resolve) => {
+      finishRead = resolve
+    })
+    mocks.storageGet.mockImplementation(async (key) => {
+      if (key === "tldwModelsForceCooldown") {
+        entered()
+        return held
+      }
+      return mocks.storageMap.get(key)
+    })
+    const service = new TldwModelsService()
+    const hydration = service.getModels(false)
+    await started
+    await service.clearCache()
+    finishRead(retiredAt)
+    await hydration
+    await service.getModels(true)
+    expect(mocks.getModels).toHaveBeenCalledTimes(3)
+  })
+
+  it("drops an unissued forced timestamp when invalidation overtakes its write queue", async () => {
+    let releaseCache!: () => void
+    let entered!: () => void
+    const held = new Promise<void>((resolve) => {
+      releaseCache = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    mocks.storageSet.mockImplementationOnce(async (key, value) => {
+      entered()
+      await held
+      mocks.storageMap.set(key, value)
+    })
+    const service = new TldwModelsService()
+    const oldCatalog = service.getModels(false)
+    await started
+    let fetched!: () => void
+    const fetchedPromise = new Promise<void>((resolve) => {
+      fetched = resolve
+    })
+    mocks.getModels.mockImplementationOnce(async () => {
+      fetched()
+      return [{ id: "m2", name: "Second Model" }]
+    })
+    const oldForce = service.getModels(true, { requireFresh: true })
+    await fetchedPromise
+    // Let the resolved network read enqueue its timestamp behind the held cache write.
+    await Promise.resolve()
+    const invalidation = service.clearCache()
+    releaseCache()
+    await Promise.all([oldCatalog, oldForce, invalidation])
+    expect(
+      mocks.storageSet.mock.calls.filter(
+        ([key, value]) => key === "tldwModelsForceCooldown" && Number(value) > 0
+      )
+    ).toEqual([])
+  })
+
+  it("clears a retired cooldown even when a non-forced fresh read overtakes the queued clear", async () => {
+    const service = new TldwModelsService()
+    await service.getModels(true)
+    let releaseCache!: () => void
+    let entered!: () => void
+    const held = new Promise<void>((resolve) => {
+      releaseCache = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    mocks.storageSet.mockImplementationOnce(async (key, value) => {
+      entered()
+      await held
+      mocks.storageMap.set(key, value)
+    })
+    const older = service.getModels(false, { requireFresh: true })
+    await started
+    const clear = service.clearCache()
+    const successor = service.getModels(false, { requireFresh: true })
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(3))
+    releaseCache()
+    await Promise.all([older, clear, successor])
+    await new TldwModelsService().getModels(true)
+    expect(mocks.getModels).toHaveBeenCalledTimes(4)
+  })
+
+  it("keeps the new forced cooldown after an older asynchronous clear finishes", async () => {
+    const service = new TldwModelsService()
+    await service.getModels(true)
+    let finishRemove!: () => void
+    const held = new Promise<void>((resolve) => {
+      finishRemove = resolve
+    })
+    mocks.storageRemove.mockImplementationOnce(async (key) => {
+      await held
+      mocks.storageMap.delete(key)
+    })
+    const clear = service.clearCache()
+    const fresh = service.getModels(true)
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(2))
+    finishRemove()
+    await Promise.all([clear, fresh])
+    await new TldwModelsService().getModels(true)
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
   })
 
   it("reports catalog freshness for the model-warm alarm no-op gate", async () => {

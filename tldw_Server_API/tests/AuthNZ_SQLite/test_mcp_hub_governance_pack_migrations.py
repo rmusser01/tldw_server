@@ -9,9 +9,9 @@ import pytest
 @pytest.mark.asyncio
 async def test_mcp_hub_governance_pack_tables_exist_after_authnz_migrations_sqlite(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -20,7 +20,6 @@ async def test_mcp_hub_governance_pack_tables_exist_after_authnz_migrations_sqli
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))

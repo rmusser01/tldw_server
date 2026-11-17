@@ -1,3 +1,8 @@
+import { servicePromptAuthorityKey } from "@/services/tldw/domains/service-prompts";
+import {
+  createNotesGraphAuthorityScope,
+  useNotesGraphAuthorityScope,
+} from "@/components/Notes/hooks/useNotesGraphAuthorityScope";
 /**
  * KnowledgeQAProvider - Context provider for Knowledge QA state management
  */
@@ -13,6 +18,9 @@ import React, {
   useState,
   type ReactNode,
 } from "react"
+import { useTranslation } from "react-i18next"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { removeLocalCopyOfServerChat } from "@/components/Sidepanel/Chat/tab-conversation-actions"
 import { useInRouterContext, useLocation } from "react-router-dom"
 import { parseKnowledgeScope } from "@/utils/knowledge-scope-handoff"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -1759,6 +1767,7 @@ function OwnedKnowledgeQAProvider({
   scopeSearch?: string
   scopeArrivalKey?: string
 }) {
+  const { t } = useTranslation("common")
   const [state, rawDispatch] = useReducer(reducer, initialState)
   const mounted = useRef(true)
   const isCurrent = useCallback(() => mounted.current && authority.isCurrent(), [authority])
@@ -1767,11 +1776,37 @@ function OwnedKnowledgeQAProvider({
     [authority.snapshot, isCurrent]
   )
   const tldwClient = useMemo(() => createKnowledgeQaClient(authority.snapshot, isCurrent), [authority.snapshot, isCurrent])
-  const dispatch = useCallback((action: Action) => {
-    if (isCurrent()) rawDispatch(action)
-  }, [isCurrent])
+  const queryIntentRevisionRef = useRef(0)
+  const dispatch = useCallback(
+    (action: Action) => {
+      if (!isCurrent()) return
+      if (action.type === "SET_QUERY") queryIntentRevisionRef.current += 1
+      rawDispatch(action)
+    },
+    [isCurrent]
+  )
+
   const historyStorageKey = authority.snapshot
     ? getKnowledgeQaHistoryStorageKey(authority.snapshot.requestScope) : null
+  const verifiedNotesAuthorityScope = useNotesGraphAuthorityScope({
+    config: authority.snapshot?.requestScope.config ?? null,
+    loading: !authority.snapshot,
+  });
+  const expectedNotesAuthorityScope =
+    authority.snapshot?.requestScope.userId != null
+      ? createNotesGraphAuthorityScope(
+          authority.snapshot.requestScope.config.serverUrl,
+          authority.snapshot.requestScope.userId,
+        )
+      : verifiedNotesAuthorityScope;
+  const notesAuthorityScope =
+    verifiedNotesAuthorityScope === expectedNotesAuthorityScope
+      ? verifiedNotesAuthorityScope
+      : null;
+  const notesAuthorityId =
+    notesAuthorityScope && authority.snapshot
+      ? servicePromptAuthorityKey(authority.snapshot.requestScope)
+      : null;
   const storageScopeKey = authority.snapshot
     ? getKnowledgeQaStorageScopeKey(authority.snapshot.requestScope) : null
   useEffect(() => {
@@ -2290,6 +2325,11 @@ function OwnedKnowledgeQAProvider({
       })
 
       const syncedMessages: KnowledgeQAMessage[] = []
+      // WP-48: rag-context writes depend only on their own message id, never
+      // on parent chaining, so they are deferred off the sequential message
+      // chain and settle in parallel once the chain completes. A server-side
+      // whole-tail payload (note on TASK-13515) would replace both layers.
+      const pendingRagContextWrites: Promise<boolean>[] = []
       let parentMessageId: string | null = null
       for (const messageToSync of messagesToSync) {
         const persisted = await persistChatMessage(
@@ -2309,14 +2349,14 @@ function OwnedKnowledgeQAProvider({
             ? syncRagContextTrust(messageToSync.ragContext)
             : messageToSync.ragContext
         if (messageToSync.role === "assistant" && messageToSync.ragContext) {
-          const persistedContext = await persistRagContext(
+          const ragContextWrite = persistRagContext(
             persisted.id,
             syncedRagContext as RagContextData
           )
-          if (!persistedContext) {
-            dispatch({ type: "MARK_SYNC_FAILED" })
-            return false
-          }
+          // Guard the early-exit paths above against unhandled rejections;
+          // the awaited copy below preserves the failure semantics.
+          ragContextWrite.catch(() => false)
+          pendingRagContextWrites.push(ragContextWrite)
         }
 
         syncedMessages.push({
@@ -2326,6 +2366,12 @@ function OwnedKnowledgeQAProvider({
           timestamp: persisted.timestamp || messageToSync.timestamp,
           ragContext: syncedRagContext,
         })
+      }
+
+      const ragContextWriteResults = await Promise.all(pendingRagContextWrites)
+      if (ragContextWriteResults.some((persisted) => !persisted)) {
+        dispatch({ type: "MARK_SYNC_FAILED" })
+        return false
       }
 
       dispatch({ type: "SET_THREAD_ID", payload: targetThreadId })
@@ -2539,7 +2585,7 @@ function OwnedKnowledgeQAProvider({
           dispatch({ type: "ADD_MESSAGE", payload: userMessage })
         }
 
-        const { options } = buildRagSearchRequest({
+        const { options, timeoutMs } = buildRagSearchRequest({
           ...effectiveSettings,
           query: trimmedQuery,
           enable_web_fallback: effectiveSettings.enable_web_fallback,
@@ -2645,7 +2691,8 @@ function OwnedKnowledgeQAProvider({
           }
           const streamingUpdateScheduler = createStreamingUpdateScheduler<null>({
             shouldFlush: () => !streamEnded && !isStaleSearchRequest(),
-            apply: () => publishPartialResults(),
+            // Deltas use the same scope-validated publication path as contexts.
+            apply: publishPartialResults,
           })
           abortController.signal.addEventListener("abort", streamingUpdateScheduler.cancel, { once: true })
 
@@ -2657,6 +2704,7 @@ function OwnedKnowledgeQAProvider({
               ) => AsyncGenerator<any, void, unknown>
             }).ragSearchStream(trimmedQuery, {
               ...options,
+              timeoutMs,
               signal: abortController.signal,
             })) {
               if (isStaleSearchRequest()) {
@@ -2781,6 +2829,7 @@ function OwnedKnowledgeQAProvider({
           dispatch({ type: "SET_QUERY_STAGE", payload: "ranking" })
           const response = await tldwClient.ragSearch(trimmedQuery, {
             ...options,
+            timeoutMs,
             signal: abortController.signal,
           })
           if (isStaleSearchRequest()) {
@@ -3055,15 +3104,20 @@ function OwnedKnowledgeQAProvider({
     })
   }, [dispatch, message, state.isSearching])
 
-  const search = useCallback(async () => {
-    const queryLength = state.query.trim().length
+  const search = useCallback(async (queryOverride?: string) => {
+    // SearchBar keeps the raw query in local state and syncs the reducer on a
+    // 250ms debounce; on submit it passes its current text explicitly so the
+    // request never waits on (or races) that sync (WP-08).
+    const queryText =
+      typeof queryOverride === "string" ? queryOverride : state.query
+    const queryLength = queryText.trim().length
     if (queryLength > 0) {
       void trackKnowledgeQaSearchMetric({
         type: "search_submit",
         query_length: queryLength,
       })
     }
-    await runKnowledgeQuery(state.query, true)
+    await runKnowledgeQuery(queryText, true)
   }, [state.query, runKnowledgeQuery])
 
   const rerunWithTokenLimit = useCallback(
@@ -3710,20 +3764,56 @@ function OwnedKnowledgeQAProvider({
     dispatch({ type: "TOGGLE_HISTORY_PIN", payload: id })
   }, [dispatch, markHistoryMutation])
 
+  const deleteHistoryViewRevision = activeThreadHydrationRequestIdRef.current
   const deleteHistoryItem = useCallback(
     async (id: string) => {
       const item = state.searchHistory.find((h) => h.id === id)
       const conversationId = item?.conversationId
 
+      const queryRevision = queryIntentRevisionRef.current
+      const completeDeletion = () => {
+        if (!isCurrent()) return
+        const deletedActiveThread =
+          deleteHistoryViewRevision ===
+            activeThreadHydrationRequestIdRef.current &&
+          Boolean(state.currentThreadId) &&
+          (conversationId === state.currentThreadId ||
+            id === state.currentThreadId)
+        if (deletedActiveThread) {
+          clearResults()
+          if (queryRevision === queryIntentRevisionRef.current) {
+            dispatch({ type: "SET_QUERY", payload: "" })
+          }
+        }
+        markHistoryMutation()
+        dispatch({ type: "REMOVE_HISTORY_ITEM", payload: id })
+      }
       const toastKey = `knowledge-qa-delete-${id}`
       const attemptServerDelete = async () => {
         try {
           await tldwClient.deleteChat(conversationId as string)
+          if (!isCurrent() || !authority.snapshot) return false
+          const removed = await removeLocalCopyOfServerChat(
+            conversationId as string,
+            serverChatMirrorOwnerKey(authority.snapshot),
+            {
+              scope: { type: "global" },
+              signal: authority.snapshot.scopeSignal,
+              validate_lease: isCurrent
+            }
+          )
+          if (!isCurrent()) return false
+          completeDeletion()
           message.open({
             key: toastKey,
-            type: "success",
-            content: "Deleted from server history.",
-            duration: 2.5,
+            type: removed ? "success" : "warning",
+            content: removed
+              ? "Deleted from server history."
+              : t(
+                  "chatSidebar.deletedDeviceCopyRetained",
+                  "Removed from server history. A cached copy remains on this device because it could not be removed."
+                ),
+            duration: 2.5
           })
           return true
         } catch (error) {
@@ -3740,13 +3830,12 @@ function OwnedKnowledgeQAProvider({
                   className="text-primary underline"
                   onClick={() => {
                     attemptServerDelete().catch(() => undefined)
-                  }}
-                >
+                  }}>
                   Retry
                 </button>
               </span>
             ),
-            className: "max-w-sm",
+            className: "max-w-sm"
           })
           return false
         }
@@ -3758,34 +3847,27 @@ function OwnedKnowledgeQAProvider({
           return
         }
       } else {
+        completeDeletion()
         message.open({
           key: toastKey,
           type: "success",
           content: "Removed from local history.",
-          duration: 2,
+          duration: 2
         })
       }
-
-      const deletedActiveThread =
-        Boolean(state.currentThreadId) &&
-        (conversationId === state.currentThreadId || id === state.currentThreadId)
-      if (deletedActiveThread) {
-        clearResults()
-        dispatch({ type: "SET_QUERY", payload: "" })
-      }
-
-      markHistoryMutation()
-      dispatch({ type: "REMOVE_HISTORY_ITEM", payload: id })
     },
     [
+      authority.snapshot,
       clearResults,
+      deleteHistoryViewRevision,
       dispatch,
       isCurrent,
       markHistoryMutation,
       message,
       state.currentThreadId,
       state.searchHistory,
-      tldwClient,
+      t,
+      tldwClient
     ]
   )
 
@@ -4018,6 +4100,8 @@ function OwnedKnowledgeQAProvider({
       client: tldwClient,
       isAuthorityCurrent: isCurrent,
       storageScopeKey,
+      notesAuthorityScope,
+      notesAuthorityId,
       historyHydrated,
       setQuery,
       search,
@@ -4058,6 +4142,8 @@ function OwnedKnowledgeQAProvider({
       isCurrent,
       historyHydrated,
       storageScopeKey,
+      notesAuthorityScope,
+      notesAuthorityId,
       setQuery,
       search,
       cancelSearch,
@@ -4090,8 +4176,8 @@ function OwnedKnowledgeQAProvider({
       persistRagContext,
       scrollToSource,
       scrollToCitation,
-    ]
-  )
+    ],
+  );
 
   return (
     <KnowledgeQAContext.Provider value={contextValue}>

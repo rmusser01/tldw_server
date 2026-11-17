@@ -18,11 +18,12 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, Any, AsyncGenerator, Optional
 from unittest.mock import Mock, AsyncMock, MagicMock
+from urllib.parse import quote, unquote
 
 import asyncpg
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
@@ -33,7 +34,7 @@ from tldw_Server_API.app.services.registration_service import RegistrationServic
 from tldw_Server_API.app.core.Audit.unified_audit_service import UnifiedAuditService
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 from tldw_Server_API.app.core.config import settings
-from tldw_Server_API.app.core.AuthNZ.scheduler import reset_authnz_scheduler
+from tldw_Server_API.app.services.authnz_scheduler import reset_authnz_scheduler
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import reset_token_blacklist
 from tldw_Server_API.app.core.AuthNZ.alerting import reset_security_alert_dispatcher
 
@@ -50,9 +51,9 @@ def _parse_pg_dsn(dsn: str):
             return None
         host = parsed.hostname or "localhost"
         port = int(parsed.port or 5432)
-        user = parsed.username or "tldw_user"
-        password = parsed.password or "TestPassword123!"
-        db = (parsed.path or "/tldw_test").lstrip("/") or "tldw_test"
+        user = unquote(parsed.username or "tldw_user")
+        password = unquote(parsed.password or "TestPassword123!")
+        db = unquote((parsed.path or "/tldw_test").lstrip("/") or "tldw_test")
         return {
             "host": host,
             "port": port,
@@ -70,6 +71,14 @@ TEST_DB_HOST = (_parsed or {}).get("host") or os.getenv("TEST_DB_HOST", "localho
 TEST_DB_PORT = int(((_parsed or {}).get("port")) or int(os.getenv("TEST_DB_PORT", "5432")))
 TEST_DB_USER = (_parsed or {}).get("user") or os.getenv("TEST_DB_USER", "tldw_user")
 TEST_DB_PASSWORD = (_parsed or {}).get("password") or os.getenv("TEST_DB_PASSWORD", "TestPassword123!")
+
+
+def _pg_test_dsn(database: str) -> str:
+    """Quote connection components without changing AuthNZ fixture precedence."""
+    return (
+        f"postgresql://{quote(TEST_DB_USER, safe='')}:{quote(TEST_DB_PASSWORD, safe='')}"
+        f"@{TEST_DB_HOST}:{TEST_DB_PORT}/{quote(database, safe='')}"
+    )
 
 # Import TestClient for isolated environment
 from fastapi.testclient import TestClient
@@ -476,15 +485,13 @@ async def reset_singletons(request):
     _stripped_user_middleware: list | None = None
     _stripped_app: object | None = None
     # Reset before test
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.tests._plugins.app_services_fixtures import discard_app_services
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.registration_service import reset_registration_service
     from tldw_Server_API.app.services.org_invite_service import reset_invite_service
     from tldw_Server_API.app.core.Billing.enforcement import reset_billing_enforcer
     from tldw_Server_API.app.core.Billing.subscription_service import reset_subscription_service
     from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import reset_api_key_manager
     from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
     from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import close_all_chacha_db_instances
@@ -495,15 +502,13 @@ async def reset_singletons(request):
 
     close_all_chacha_db_instances()
 
-    await reset_db_pool()
-    await reset_session_manager()
+    await discard_app_services()
     await reset_token_blacklist()
     await reset_security_alert_dispatcher()
     await reset_authnz_scheduler()
     await reset_rate_limiter()
     await reset_lockout_tracker()
     reset_settings()
-    reset_jwt_service()
     await reset_registration_service()
     await reset_invite_service()
     await reset_subscription_service()
@@ -567,12 +572,11 @@ async def reset_singletons(request):
         # and restore it below, after `yield`.
         try:
             from tldw_Server_API.app.core.Metrics.http_middleware import HTTPMetricsMiddleware as _HTTPMM
-            from tldw_Server_API.app.core.Security.middleware import SecurityHeadersMiddleware as _SHM
             from tldw_Server_API.app.core.Security.request_id_middleware import RequestIDMiddleware as _RID
             original_user_middleware = list(getattr(_app, 'user_middleware', []))
             kept = []
             for m in original_user_middleware:
-                if getattr(m, 'cls', None) in (_HTTPMM, _SHM, _RID):
+                if getattr(m, 'cls', None) in (_HTTPMM, _RID):
                     continue
                 kept.append(m)
             if len(kept) != len(original_user_middleware):
@@ -603,15 +607,13 @@ async def reset_singletons(request):
                 _ = None
 
         # Reset after test
-        await reset_db_pool()
-        await reset_session_manager()
+        await discard_app_services()
         await reset_token_blacklist()
         await reset_security_alert_dispatcher()
         await reset_authnz_scheduler()
         await reset_rate_limiter()
         await reset_lockout_tracker()
         reset_settings()
-        reset_jwt_service()
         await reset_registration_service()
         await reset_invite_service()
         await reset_subscription_service()
@@ -1330,7 +1332,7 @@ async def isolated_test_environment(monkeypatch, tmp_path):
         await test_conn.close()
 
     # 4. Set environment variables for this test
-    db_url = f"postgresql://{TEST_DB_USER}:{TEST_DB_PASSWORD}@{TEST_DB_HOST}:{TEST_DB_PORT}/{db_name}"
+    db_url = _pg_test_dsn(db_name)
     monkeypatch.setenv("TEST_DATABASE_URL", db_url)
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", db_url)
@@ -1342,11 +1344,10 @@ async def isolated_test_environment(monkeypatch, tmp_path):
     # Defer heavy startup (embeddings, TTS, request queue, etc.) to prevent local hangs
     monkeypatch.setenv("DEFER_HEAVY_STARTUP", "true")
     monkeypatch.setenv("TEST_MODE", "true")
-    monkeypatch.setenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", "1")
 
     # 5. Reset ALL singletons to force fresh initialization with new DB
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.tests._plugins.app_services_fixtures import discard_app_services
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import reset_api_key_manager
     from tldw_Server_API.app.core.AuthNZ.rate_limiter import reset_rate_limiter
@@ -1354,19 +1355,18 @@ async def isolated_test_environment(monkeypatch, tmp_path):
     from tldw_Server_API.app.services.registration_service import reset_registration_service
     from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
     from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
         ensure_billing_tables_pg,
         ensure_identity_federation_tables_pg,
     )
 
-    await reset_db_pool()
-    await reset_session_manager()
+    await discard_app_services()
     await reset_api_key_manager()
     await reset_rate_limiter()
     await reset_lockout_tracker()
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
     await reset_registration_service()
     await shutdown_audit_service()
     await reset_users_db()
@@ -1400,8 +1400,7 @@ async def isolated_test_environment(monkeypatch, tmp_path):
         yield client, db_name
 
     # 8. Cleanup: reset singletons again
-    await reset_db_pool()
-    await reset_session_manager()
+    await discard_app_services()
     await reset_token_blacklist()
     await reset_authnz_scheduler()
     await reset_rate_limiter()
@@ -1433,15 +1432,8 @@ async def isolated_test_environment(monkeypatch, tmp_path):
     )
 
     try:
-        await cleanup_conn.execute(
-            """
-            SELECT pg_terminate_backend(pid)
-            FROM pg_stat_activity
-            WHERE datname = $1 AND pid <> pg_backend_pid()
-            """,
-            db_name,
-        )
-        await cleanup_conn.execute(f"DROP DATABASE IF EXISTS {db_name}")
+        # Terminate sessions and drop only this disposable database in one operation.
+        await cleanup_conn.execute(f"DROP DATABASE IF EXISTS {db_name} WITH (FORCE)")
         logger.info(f"Dropped test database: {db_name}")
     finally:
         await cleanup_conn.close()
@@ -1455,7 +1447,7 @@ async def setup_test_database(monkeypatch):
     """Create and setup the test database for the test session."""
     # Ensure FastAPI + core settings pick Postgres for this test DB
     require_pg = os.getenv("TLDW_TEST_POSTGRES_REQUIRED", "").lower() in ("1", "true", "yes")
-    test_dsn = f"postgresql://{TEST_DB_USER}:{TEST_DB_PASSWORD}@{TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME}"
+    test_dsn = _pg_test_dsn(TEST_DB_NAME)
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", test_dsn)
     try:
@@ -1715,9 +1707,8 @@ async def setup_test_database(monkeypatch):
     # Also run the AuthNZ module's Postgres bootstrap to ensure full schema parity
     # (sessions, registration_codes, RBAC, API keys, usage tables, etc.)
     monkeypatch.setenv("AUTH_MODE", "multi_user")
-    monkeypatch.setenv("DATABASE_URL", f"postgresql://{TEST_DB_USER}:{TEST_DB_PASSWORD}@{TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME}")
+    monkeypatch.setenv("DATABASE_URL", _pg_test_dsn(TEST_DB_NAME))
     monkeypatch.setenv("JWT_SECRET_KEY", os.environ.get("JWT_SECRET_KEY", "test-secret-key-for-testing-only"))
-    monkeypatch.setenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", "1")
     try:
         from tldw_Server_API.app.core.AuthNZ.initialize import setup_database as _authnz_setup_db
         await _authnz_setup_db()
@@ -1727,6 +1718,9 @@ async def setup_test_database(monkeypatch):
         raise RuntimeError("AuthNZ Postgres schema bootstrap failed in setup_test_database") from exc
 
     yield
+
+    # Close the pool opened by schema bootstrap before dropping its database.
+    await reset_db_pool()
 
     # Cleanup: Drop test database after all tests
     cleanup_conn = await asyncpg.connect(
@@ -1830,7 +1824,7 @@ async def clean_database(setup_test_database):
 @pytest_asyncio.fixture
 async def test_db_pool(setup_test_database, clean_database):
     """Create a test database pool connected to the test PostgreSQL database."""
-    test_database_url = f"postgresql://{TEST_DB_USER}:{TEST_DB_PASSWORD}@{TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME}"
+    test_database_url = _pg_test_dsn(TEST_DB_NAME)
 
     test_settings = Settings(
         AUTH_MODE="multi_user",

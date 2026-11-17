@@ -16,7 +16,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, rbac_rate_limit, User
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.llm_providers import get_configured_providers_async
 from tldw_Server_API.app.api.v1.schemas.writing_schemas import (
     WritingCapabilitiesResponse,
@@ -72,7 +72,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
-from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.exceptions import TokenizerUnavailable
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import get_allowed_fields
 from tldw_Server_API.app.core.LLM_Calls.extra_body_compat_catalog import (
@@ -87,7 +86,8 @@ from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     resolve_tokenizer as _resolve_tokenizer_shared,
     strict_token_counting_enabled as _strict_token_counting_enabled_shared,
 )
-from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.testing import is_test_context
+import tldw_Server_API.app.core.config as _config
 
 router = APIRouter()
 
@@ -194,7 +194,7 @@ def _resolve_provider_native_tokenizer(
         provider,
         model,
         strict_mode_effective=_strict_token_counting_enabled(),
-        config_loader=load_comprehensive_config,
+        config_loader=_config.load_comprehensive_config,
         adapter_cls=_ProviderNativeTokenizerHTTPAdapter,
         runtime_probe_exact=True,
         runtime_probe_timeout_seconds=2.0,
@@ -248,7 +248,7 @@ def _resolve_tokenizer(provider: str, model: str) -> tuple[Any, str, str, str, b
         provider,
         model,
         strict_mode_effective=strict_mode_effective,
-        config_loader=load_comprehensive_config,
+        config_loader=_config.load_comprehensive_config,
         adapter_cls=_ProviderNativeTokenizerHTTPAdapter,
         runtime_probe_exact=True,
         runtime_probe_timeout_seconds=2.0,
@@ -418,7 +418,7 @@ def _truthy(value: Any) -> bool:
 def _runtime_context() -> dict[str, Any]:
     strict_openai_compat = False
     try:
-        config_parser = load_comprehensive_config()
+        config_parser = _config.load_comprehensive_config()
         if config_parser.has_section("Local-API") and config_parser.has_option("Local-API", "strict_openai_compat"):
             strict_openai_compat = _truthy(
                 config_parser.get("Local-API", "strict_openai_compat", fallback="false")
@@ -715,10 +715,6 @@ DEFAULT_WRITING_THEME_CATALOG: list[WritingDefaultTheme] = [
         order=0,
     )
 ]
-
-
-def _is_test_mode() -> bool:
-    return bool(os.getenv("PYTEST_CURRENT_TEST") or is_test_mode())
 
 
 def _normalize_wordcloud_options(options: WritingWordcloudOptions | None) -> WritingWordcloudOptions:
@@ -1911,7 +1907,7 @@ async def create_wordcloud(
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "writing wordcloud")
 
-    if _is_test_mode():
+    if is_test_context():
         _run_wordcloud_job(db, cache_key, text, options)
         try:
             refreshed = db.get_writing_wordcloud(cache_key)

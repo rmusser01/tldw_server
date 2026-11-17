@@ -11,6 +11,7 @@ pytest_plugins = [
     "tldw_Server_API.tests._plugins.singleton_guard",
     # Opt-in `reset_embeddings_singletons` fixture (not autouse).
     "tldw_Server_API.tests._plugins.singleton_reset_fixtures",
+    "tldw_Server_API.tests._plugins.app_services_fixtures",
 ]
 
 from collections.abc import Callable
@@ -72,7 +73,7 @@ os.environ.setdefault("WORKFLOWS_WEBHOOK_ALLOWLIST", "*")
 os.environ.setdefault("WORKFLOWS_EGRESS_ALLOWED_PORTS", "*")
 # Disable AuthNZ scheduler functions proactively to avoid background threads
 try:
-    from tldw_Server_API.app.core.AuthNZ import scheduler as _auth_sched
+    from tldw_Server_API.app.services import authnz_scheduler as _auth_sched
     async def _noop():
         return None
     _auth_sched.start_authnz_scheduler = _noop  # type: ignore[assignment]
@@ -208,6 +209,9 @@ def _run_coro_sync_best_effort(coro):
     if loop is not None and not loop.is_closed():
         try:
             if loop.is_running():
+                from loguru import logger
+
+                logger.debug("_run_coro_sync_best_effort: loop is running; cleanup skipped")
                 return None
             return loop.run_until_complete(coro)
         except Exception:
@@ -307,6 +311,39 @@ def _restore_risky_env_and_logging():
         logging.getLogger(__name__).debug("system_log_buffer reset failed: %s", exc)
 
 
+@pytest.fixture(autouse=True)
+def _offline_provider_model_inventory(request, monkeypatch):
+    """Skip the live provider model check (TASK-13460) unless a test opts in.
+
+    Cloud generation now confirms the selected model against the provider's
+    live model list first. Most tests fake only the generation transport, so
+    that check would reach the network and fail closed. Tests of the check
+    itself mark ``provider_inventory`` and stub discovery.
+
+    Each test starts with empty inventory caches. An unmarked test that still
+    reaches discovery (a lazy import, a listing) hits a fetch that raises
+    instead of the network (review M5).
+    """
+    from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
+
+    provider_model_inventory._CACHE.clear()
+    provider_model_inventory._FAILED.clear()
+    if request.node.get_closest_marker("provider_inventory"):
+        return
+
+    def live_discovery(**_kwargs):
+        raise AssertionError("unmarked test reached live provider discovery")
+
+    monkeypatch.setattr(provider_model_inventory, "_http_fetch", live_discovery)
+    for name in (
+        "tldw_Server_API.app.core.LLM_Calls.gateway",
+        "tldw_Server_API.app.api.v1.endpoints.messages",
+    ):
+        module = sys.modules.get(name)
+        if module is not None and hasattr(module, "_validate_provider_model_selection"):
+            monkeypatch.setattr(module, "_validate_provider_model_selection", lambda _provider, _request, **_kw: None)
+
+
 @pytest.fixture()
 def auth_headers():
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
@@ -348,14 +385,14 @@ def _restore_auth_env_and_singletons():
     This fixture restores a small set of high-impact environment keys to their
     baseline values and resets key singletons used by the auth/jobs stacks.
     """
+    from tldw_Server_API.app.core.Utils.app_services import app_services
+    from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
+
+    session_before = app_services().session_manager
+
     # Defensive pre-test reset: avoid stale singleton state inherited from
     # collection-time imports or prior tests.
-    try:
-        from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
-
-        reset_jwt_service()
-    except Exception:
-        _ = None
+    app_services().jwt_service = None
 
     yield
 
@@ -365,6 +402,11 @@ def _restore_auth_env_and_singletons():
         else:
             os.environ[key] = baseline_value
 
+    # A manager the test published is shut down; the slot goes back to what the test found.
+    _run_coro_sync_best_effort(close_app_service("session_manager", restore=session_before))
+    # Per-test lock: it never stays bound to a previous test's event loop.
+    app_services().session_manager_lock = asyncio.Lock()
+
     # Ensure subsequent tests rebuild Settings from the restored environment.
     try:
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -372,12 +414,7 @@ def _restore_auth_env_and_singletons():
         reset_settings()
     except Exception:
         _ = None
-    try:
-        from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
-
-        reset_jwt_service()
-    except Exception:
-        _ = None
+    app_services().jwt_service = None
 
     # Avoid leaking the process-wide jobs acquisition gate across tests.
     try:
@@ -414,16 +451,12 @@ def _restore_user_db_env_and_chacha_cache():
     except Exception:
         _ = None
 
-    # Drain ChaCha background tasks/futures before closing DB handles to avoid
-    # races where sqlite connections are closed during active executor queries.
+    # Close the ChaCha runtime (drains background tasks/futures before closing DB
+    # handles) and empty its slot, so the next test gets a fresh runtime.
     try:
-        from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
-            reset_chacha_shutdown_state,
-            shutdown_chacha_resources,
-        )
+        from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
 
-        _run_coro_sync_best_effort(shutdown_chacha_resources(wait_timeout=5.0))
-        reset_chacha_shutdown_state()
+        _run_coro_sync_best_effort(close_app_service("chacha_runtime"))
     except Exception:
         _ = None
 
@@ -595,7 +628,13 @@ try:
     except Exception:
         _ = None
     # Enable deterministic test behaviors across subsystems
-    os.environ.setdefault("TEST_MODE", "1")
+    # security-required's "Security suites with TEST_MODE unset" step (TASK-13950.19) sets
+    # TLDW_UNSET_TEST_FLAGS=1 to run the suites without any of the three test-mode flags.
+    if os.getenv("TLDW_UNSET_TEST_FLAGS") == "1":
+        for _flag in ("TEST_MODE", "TESTING", "TLDW_TEST_MODE"):
+            os.environ.pop(_flag, None)
+    else:
+        os.environ.setdefault("TEST_MODE", "1")
     os.environ.setdefault("OTEL_SDK_DISABLED", "true")
     # Ensure Postgres helpers see consistent defaults immediately at import time.
     # Many PG tests call get_pg_env() at module import; set test user/password
@@ -767,10 +806,8 @@ def pytest_sessionfinish(session, exitstatus):  # pragma: no cover - diagnostics
         except Exception:
             _ = None
         try:
-            from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
-                shutdown_chacha_resources,
-            )
-            _run_coro_sync_best_effort(shutdown_chacha_resources(wait_timeout=5.0))
+            from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
+            _run_coro_sync_best_effort(close_app_service("chacha_runtime"))
         except Exception:
             _ = None
         try:
@@ -894,15 +931,27 @@ def healthy_no_override_tts_credential_snapshot():
             llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
         )
 
-    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+    # Bound now: a test may patch this setter, and its monkeypatch can be undone after this teardown.
+    set_overrides_cache = llm_provider_overrides.set_llm_provider_overrides_cache_for_tests
+    set_overrides_cache({})
     try:
         yield
     finally:
-        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        set_overrides_cache(
             original_overrides,
             healthy=original_healthy,
             ttl_enabled=not original_ttl_disabled,
         )
+
+
+@pytest.fixture(autouse=True)
+def _healthy_empty_llm_provider_override_store(request):
+    """Every test starts with the healthy, empty override store app startup gives production (TASK-13950.13).
+
+    Mark a test ``ambient_llm_provider_override_store`` to see the import-time (unloaded, unhealthy) store instead.
+    """
+    if request.node.get_closest_marker("ambient_llm_provider_override_store") is None:
+        request.getfixturevalue("healthy_no_override_tts_credential_snapshot")
 
 
 @pytest.fixture()
@@ -932,7 +981,8 @@ def client_with_single_user(monkeypatch):
     Returns a tuple of (client, usage_logger) for tests that also need to inspect usage events.
     """
     # Ensure tests run in non-production behavior
-    os.environ.setdefault("TESTING", "true")
+    if os.getenv("TLDW_UNSET_TEST_FLAGS") != "1":
+        os.environ.setdefault("TESTING", "true")
 
     usage_logger = _TestUsageLogger()
 
@@ -978,16 +1028,17 @@ def client_with_single_user(monkeypatch):
                 logging.getLogger(__name__).debug("Failed to set request.state.auth: %s", e)
         return principal
 
-    fastapi_app.dependency_overrides[get_request_user] = _override_user
-    fastapi_app.dependency_overrides[get_usage_event_logger] = _override_logger
-    fastapi_app.dependency_overrides[get_auth_principal] = _override_principal
+    # Through monkeypatch, not set-then-pop: a test that also overrides one of
+    # these keys with monkeypatch.setitem recorded this fixture's value and, as
+    # monkeypatch tears down after this fixture, put it back on the shared app
+    # after the pop, so every later test in the process ran authenticated.
+    # monkeypatch undoes both in reverse order.
+    monkeypatch.setitem(fastapi_app.dependency_overrides, get_request_user, _override_user)
+    monkeypatch.setitem(fastapi_app.dependency_overrides, get_usage_event_logger, _override_logger)
+    monkeypatch.setitem(fastapi_app.dependency_overrides, get_auth_principal, _override_principal)
 
     with TestClient(fastapi_app) as client:
         yield client, usage_logger
-
-    fastapi_app.dependency_overrides.pop(get_request_user, None)
-    fastapi_app.dependency_overrides.pop(get_usage_event_logger, None)
-    fastapi_app.dependency_overrides.pop(get_auth_principal, None)
 
 
 @pytest.fixture()
@@ -1169,13 +1220,9 @@ def _reset_workflow_scheduler():
     # Ensure ChaCha executor threads are not reported as lingering non-daemon
     # workers by the per-test scheduler reset diagnostics.
     try:
-        from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
-            reset_chacha_shutdown_state,
-            shutdown_chacha_resources,
-        )
+        from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
 
-        _run_coro_sync_best_effort(shutdown_chacha_resources(wait_timeout=5.0))
-        reset_chacha_shutdown_state()
+        _run_coro_sync_best_effort(close_app_service("chacha_runtime"))
     except Exception:
         _ = None
 

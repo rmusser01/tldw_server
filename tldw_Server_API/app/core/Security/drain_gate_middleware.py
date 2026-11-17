@@ -22,6 +22,7 @@ CORS_EXPOSE_HEADERS: tuple[str, ...] = (
     "X-Trace-Id",
     "X-TLDW-TTS-Backend",
     "X-TLDW-TTS-Fallback-Used",
+    "X-Generated-File-Id",
 )
 CORS_EXPOSE_HEADERS_VALUE = ", ".join(CORS_EXPOSE_HEADERS)
 

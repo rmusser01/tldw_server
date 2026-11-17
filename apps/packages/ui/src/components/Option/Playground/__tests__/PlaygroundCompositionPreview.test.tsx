@@ -54,7 +54,7 @@ const summary = (
       id: "context",
       kind: "context",
       label: "Context",
-      title: "1 active source",
+      title: "1 selected source",
       detail: "1 configured source",
       state: "active",
     },
@@ -119,12 +119,16 @@ describe("PlaygroundCompositionPreview", () => {
       name: "Next message composition",
     });
 
-    expect(within(region).getByText("Ready")).toBeInTheDocument();
+    expect(within(region).getByText("Preview ready")).toBeInTheDocument();
     expect(within(region).getByText("Research brief")).toBeInTheDocument();
     expect(within(region).getByText("Research Persona")).toBeInTheDocument();
     expect(within(region).getAllByText("openai:gpt-4.1-mini")).toHaveLength(2);
-    expect(within(region).getAllByText("MCP tools").length).toBeGreaterThanOrEqual(1);
-    expect(within(region).getByText("Scope: openai:gpt-4.1-mini")).toBeInTheDocument();
+    expect(
+      within(region).getAllByText("MCP tools").length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      within(region).getByText("Scope: openai:gpt-4.1-mini"),
+    ).toBeInTheDocument();
   });
 
   it("keeps composition/status rows visible in the closed summary", () => {
@@ -150,7 +154,9 @@ describe("PlaygroundCompositionPreview", () => {
     });
 
     expect(within(region).getByText("Context preview")).toBeInTheDocument();
-    expect(within(region).getByText("Context preview loading")).toBeInTheDocument();
+    expect(
+      within(region).getByText("Context preview loading"),
+    ).toBeInTheDocument();
     expect(within(region).getByText("Loading")).toBeInTheDocument();
   });
 
@@ -215,7 +221,7 @@ describe("PlaygroundCompositionPreview", () => {
     expect(screen.getByText("Degraded")).toBeInTheDocument();
     expect(screen.getByText("MCP unavailable")).toBeInTheDocument();
     expect(screen.getByText("Unavailable")).toBeInTheDocument();
-    expect(screen.queryByText("Ready")).not.toBeInTheDocument();
+    expect(screen.queryByText("Preview ready")).not.toBeInTheDocument();
   });
 
   it("uses the design-system empty state label for absent composition rows", () => {
@@ -257,5 +263,27 @@ describe("PlaygroundCompositionPreview", () => {
 
     expect(screen.getAllByText("Empty")).toHaveLength(3);
     expect(screen.queryByText("Disabled")).not.toBeInTheDocument();
+  });
+  it("shows an unknown footprint and selection labels without claiming request readiness", () => {
+    render(
+      <PlaygroundCompositionPreview
+        summary={summary({
+          overallState: "planned",
+          footprint: {
+            providerMessageCount: null,
+            previewSectionCount: null,
+            contextPieceCount: null,
+            warningCount: null,
+            readiness: "unavailable",
+          },
+        })}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show composition details" }),
+    );
+    expect(screen.getByText("Not previewed")).toBeInTheDocument();
+    expect(screen.queryByText("0 provider messages")).not.toBeInTheDocument();
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
   });
 });

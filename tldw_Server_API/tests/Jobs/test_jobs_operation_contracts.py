@@ -662,6 +662,14 @@ def test_prepared_operation_contracts_are_exported() -> None:
     }.issubset(contracts.__all__)
 
 
+def test_create_job_command_snapshots_nested_payload() -> None:
+    payload = {"items": [{"value": "before"}]}
+    command = CreateJobCommand("test", "default", "noop", payload, "owner")
+    payload["items"][0]["value"] = "after"
+    payload["new"] = [{"value": "added"}]
+    assert command.payload == {"items": [{"value": "before"}]}
+
+
 def test_create_job_command_carries_public_job_facts() -> None:
     """Verify create commands carry public job facts without transformation."""
 

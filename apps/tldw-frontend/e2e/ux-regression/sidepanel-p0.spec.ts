@@ -139,7 +139,9 @@ test.describe("Extension side-panel P0 reproductions", () => {
     const server = await settleServerChat(api, chat.chatId)
     await panel.search(chat.title)
     const noMatches = panel.sidebar.getByText("No matches found")
-    await expect(panel.searchResult(chat.title).or(noMatches).first()).toBeVisible()
+    // Cached rows can remain visible while search refreshes; require its settled empty state.
+    await expect(noMatches).toBeVisible()
+    await expect(panel.searchResult(chat.title)).toHaveCount(0)
     const listed = await panel.searchResult(chat.title).allInnerTexts()
     expect(
       {

@@ -1,4 +1,7 @@
-import { sha256Text } from "@/store/workspace-migration"
+import { useResearchActorScene } from "./useResearchActorScene"
+import { projectWorkspaceRagSources } from "@/utils/workspace-rag-sources"
+import { isChatSubmitSuccess } from "@/hooks/chat/chat-action-utils"
+import { saveResearchWorkspaceChatReference, sha256Text } from "@/store/workspace-migration"
 import { appendCapturedNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import {
@@ -7,10 +10,10 @@ import {
 } from "@/utils/research-web-capture"
 import type { ScopedRequestOptions } from "@/services/tldw/TldwApiClient"
 import React from "react"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { useTranslation } from "react-i18next"
 import {
   AlertCircle,
-  ChevronDown,
   FileText,
   Send,
   MessageSquarePlus,
@@ -28,9 +31,9 @@ import {
 } from "lucide-react"
 import { Modal, Tag, Tooltip, Input, Slider, Switch, Button, message } from "antd"
 import type { InputRef } from "antd"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   DEGRADED_STATE_LABEL,
-  READY_STATE_LABEL,
   getDesignSystemState
 } from "@/design-system"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -42,10 +45,23 @@ import {
 import { useWorkspaceStore } from "@/store/workspace"
 import { useStoreMessageOption } from "@/store/option"
 import type { Message } from "@/store/option"
+import { generateID } from "@/db/dexie/helpers"
+import {
+  buildRetrievalDiagnostics,
+  extractCitationMediaId,
+  isRecord,
+  normalizeConfidenceScore,
+  normalizeText,
+  toFiniteNumber,
+  toPositiveInt,
+  type RetrievalDiagnostics
+} from "./retrieval-diagnostics"
+import { resolveSourceContentText } from "../source-content-text"
 import type { WorkspaceCapabilitiesResponse } from "@/services/tldw/domains/workspace-api"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useWorkspaceChatCheckpoint } from "@/hooks/chat/useWorkspaceChatCheckpoint"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
+import { ScrollToLatestButton } from "@/components/Common/ScrollToLatestButton"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { useModelSelector } from "@/hooks/playground"
 import { useConnectionStore } from "@/store/connection"
@@ -100,17 +116,31 @@ import { WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT } from "../workspace-task-prefill"
 const { TextArea } = Input
 const VISIBLE_SOURCE_TAG_COUNT = 5
 
-type RetrievalDiagnostics = {
-  chunkCount: number | null
-  sourceCount: number | null
-  sourceLabels: string[]
-  averageRelevanceScore: number | null
-  faithfulnessScore: number | null
-  promptTokens: number | null
-  completionTokens: number | null
-  totalTokens: number | null
-  costUsd: number | null
-  confidenceLevel: "high" | "medium" | "low" | null
+// Stage 3 (WP-04): windowed transcript rendering. Below this row count the
+// transcript keeps plain flow layout (matching the web Playground's
+// VirtualChatTimeline enable gate); above it only the visible window plus
+// overscan mounts.
+const CHAT_VIRTUALIZATION_MIN_MESSAGES = 100
+
+// Stable row identity for messages that reach the transcript without id or
+// serverMessageId (older persisted sessions): the fallback is keyed by
+// message object identity, so a given object resolves to one id for its
+// lifetime. Replaces the former index-templated React-key fallback (WP-04),
+// which re-keyed every row after any splice and defeated reconciliation.
+const transientMessageIdFallbacks = new WeakMap<object, string>()
+const stableMessageId = (
+  message: Pick<Message, "id" | "serverMessageId">
+): string => {
+  const direct = message.id?.trim()
+  if (direct) return direct
+  const server = message.serverMessageId?.trim()
+  if (server) return `server:${server}`
+  let fallback = transientMessageIdFallbacks.get(message)
+  if (!fallback) {
+    fallback = `transient:${generateID()}`
+    transientMessageIdFallbacks.set(message, fallback)
+  }
+  return fallback
 }
 
 type ChatModePreference = "normal" | "rag"
@@ -322,94 +352,6 @@ const getSourceTagColor = (
   return "blue"
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null
-
-const toPositiveInt = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
-    return value
-  }
-  if (typeof value === "string") {
-    const parsed = Number.parseInt(value, 10)
-    if (Number.isInteger(parsed) && parsed > 0) {
-      return parsed
-    }
-  }
-  return null
-}
-
-const toFiniteNumber = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value
-  }
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number.parseFloat(value)
-    if (Number.isFinite(parsed)) {
-      return parsed
-    }
-  }
-  return null
-}
-
-const normalizeText = (value: unknown): string =>
-  typeof value === "string" ? value.trim().toLowerCase() : ""
-
-const extractStringCandidate = (value: unknown): string => {
-  if (typeof value !== "string") return ""
-  return value.trim()
-}
-
-const extractSourceFullText = (detail: unknown): string => {
-  if (!isRecord(detail)) return ""
-  const content = isRecord(detail.content) ? detail.content : null
-  const processing = isRecord(detail.processing) ? detail.processing : null
-
-  const candidates: unknown[] = [
-    content?.text,
-    content?.content,
-    content?.full_text,
-    content?.transcript,
-    content?.raw_text,
-    processing?.analysis,
-    processing?.transcript,
-    processing?.text
-  ]
-
-  for (const candidate of candidates) {
-    const normalized = extractStringCandidate(candidate)
-    if (normalized.length > 0) {
-      return normalized
-    }
-  }
-
-  return ""
-}
-
-const extractCitationMediaId = (citation: unknown): number | null => {
-  if (!isRecord(citation)) return null
-  const metadata = isRecord(citation.metadata) ? citation.metadata : null
-  const includeMediaIds = Array.isArray(metadata?.include_media_ids)
-    ? metadata?.include_media_ids
-    : []
-  const mediaCandidates: unknown[] = [
-    citation.mediaId,
-    citation.media_id,
-    citation.mediaID,
-    metadata?.mediaId,
-    metadata?.media_id,
-    metadata?.mediaID,
-    ...includeMediaIds
-  ]
-
-  for (const candidate of mediaCandidates) {
-    const mediaId = toPositiveInt(candidate)
-    if (mediaId !== null) {
-      return mediaId
-    }
-  }
-  return null
-}
-
 const findSourceIdFromCitation = (
   citation: unknown,
   sources: WorkspaceSource[]
@@ -466,284 +408,6 @@ const findSourceIdFromCitation = (
   }
 
   return null
-}
-
-const extractSourceScore = (source: unknown): number | null => {
-  if (!isRecord(source)) return null
-  const metadata = isRecord(source.metadata) ? source.metadata : null
-  const scoreCandidates: unknown[] = [
-    source.score,
-    source.relevance,
-    source.relevance_score,
-    source.similarity,
-    source.rerank_score,
-    metadata?.score,
-    metadata?.relevance,
-    metadata?.relevance_score,
-    metadata?.similarity,
-    metadata?.rerank_score
-  ]
-
-  for (const candidate of scoreCandidates) {
-    const parsed = toFiniteNumber(candidate)
-    if (parsed !== null) {
-      return parsed
-    }
-  }
-  return null
-}
-
-const extractSourceLabel = (source: unknown): string | null => {
-  if (!isRecord(source)) return null
-  const metadata = isRecord(source.metadata) ? source.metadata : null
-  const candidates: unknown[] = [
-    source.name,
-    source.title,
-    source.source,
-    source.url,
-    metadata?.title,
-    metadata?.source,
-    metadata?.url
-  ]
-
-  for (const candidate of candidates) {
-    const normalized = extractStringCandidate(candidate)
-    if (normalized.length > 0) {
-      return normalized
-    }
-  }
-
-  return null
-}
-
-const normalizeConfidenceScore = (score: number | null): number | null => {
-  if (score === null || !Number.isFinite(score)) {
-    return null
-  }
-  if (score > 1 && score <= 100) {
-    return score / 100
-  }
-  if (score < 0) {
-    return 0
-  }
-  if (score > 1) {
-    return 1
-  }
-  return score
-}
-
-const getConfidenceLevel = (
-  score: number | null
-): RetrievalDiagnostics["confidenceLevel"] => {
-  const normalized = normalizeConfidenceScore(score)
-  if (normalized === null) {
-    return null
-  }
-  if (normalized >= 0.8) {
-    return "high"
-  }
-  if (normalized >= 0.55) {
-    return "medium"
-  }
-  return "low"
-}
-
-const getNumericField = (
-  generationInfo: unknown,
-  paths: Array<string[]>
-): number | null => {
-  if (!isRecord(generationInfo)) return null
-
-  for (const path of paths) {
-    let current: unknown = generationInfo
-    for (const key of path) {
-      if (!isRecord(current)) {
-        current = undefined
-        break
-      }
-      current = current[key]
-    }
-    const parsed = toFiniteNumber(current)
-    if (parsed !== null) {
-      return parsed
-    }
-  }
-
-  return null
-}
-
-const buildRetrievalDiagnostics = (
-  messageSources: unknown[] | undefined,
-  generationInfo: unknown
-): RetrievalDiagnostics | null => {
-  const sources = Array.isArray(messageSources) ? messageSources : []
-
-  const chunkCountFromGeneration = getNumericField(generationInfo, [
-    ["retrieval", "chunks_retrieved"],
-    ["retrieval", "chunk_count"],
-    ["retrieval", "chunks"],
-    ["chunks_retrieved"],
-    ["chunk_count"],
-    ["retrieved_chunks"],
-    ["context_chunks"]
-  ])
-
-  const sourceCountFromGeneration = getNumericField(generationInfo, [
-    ["retrieval", "source_count"],
-    ["retrieval", "sources_used"],
-    ["source_count"],
-    ["sources_used"]
-  ])
-
-  const avgScoreFromGeneration = getNumericField(generationInfo, [
-    ["retrieval", "avg_relevance_score"],
-    ["retrieval", "average_relevance_score"],
-    ["avg_relevance_score"],
-    ["average_relevance_score"],
-    ["relevance_score"]
-  ])
-  const faithfulnessScore = getNumericField(generationInfo, [
-    ["faithfulness", "score"],
-    ["faithfulness", "faithfulness_score"],
-    ["faithfulness", "overall_score"],
-    ["faithfulness_score"],
-    ["claim_verification", "faithfulness_score"],
-    ["retrieval", "faithfulness_score"],
-    ["confidence"],
-    ["confidence_score"]
-  ])
-  const promptTokensFromGeneration = getNumericField(generationInfo, [
-    ["usage", "prompt_tokens"],
-    ["usage", "input_tokens"],
-    ["prompt_tokens"],
-    ["input_tokens"],
-    ["prompt_eval_count"]
-  ])
-  const completionTokensFromGeneration = getNumericField(generationInfo, [
-    ["usage", "completion_tokens"],
-    ["usage", "output_tokens"],
-    ["completion_tokens"],
-    ["output_tokens"],
-    ["eval_count"]
-  ])
-  const totalTokensFromGeneration = getNumericField(generationInfo, [
-    ["usage", "total_tokens"],
-    ["total_tokens"],
-    ["total_token_count"]
-  ])
-  const costUsdFromGeneration = getNumericField(generationInfo, [
-    ["usage", "total_cost_usd"],
-    ["usage", "estimated_cost_usd"],
-    ["usage", "cost_usd"],
-    ["pricing", "total_cost_usd"],
-    ["pricing", "estimated_cost_usd"],
-    ["pricing", "cost_usd"],
-    ["total_cost_usd"],
-    ["estimated_cost_usd"],
-    ["cost_usd"],
-    ["total_cost"],
-    ["estimated_cost"]
-  ])
-
-  const uniqueSourceKeys = new Set<string>()
-  const uniqueSourceLabels = new Set<string>()
-  for (const source of sources) {
-    if (!isRecord(source)) continue
-    const sourceLabel = extractSourceLabel(source)
-    if (sourceLabel) {
-      uniqueSourceLabels.add(sourceLabel)
-    }
-
-    const mediaId = extractCitationMediaId(source)
-    if (mediaId !== null) {
-      uniqueSourceKeys.add(`media:${mediaId}`)
-    } else {
-      const metadata = isRecord(source.metadata) ? source.metadata : null
-      const label = normalizeText(
-        source.name || source.url || metadata?.source || metadata?.title
-      )
-      if (label) {
-        uniqueSourceKeys.add(`label:${label}`)
-      }
-    }
-  }
-
-  const sourceScores = sources
-    .map((source) => extractSourceScore(source))
-    .filter((score): score is number => score !== null)
-
-  const averageScoreFromSources =
-    sourceScores.length > 0
-      ? sourceScores.reduce((sum, score) => sum + score, 0) /
-        sourceScores.length
-      : null
-
-  const diagnostics: RetrievalDiagnostics = {
-    chunkCount:
-      chunkCountFromGeneration !== null
-        ? Math.max(0, Math.round(chunkCountFromGeneration))
-        : sources.length > 0
-          ? sources.length
-          : null,
-    sourceCount:
-      sourceCountFromGeneration !== null
-        ? Math.max(0, Math.round(sourceCountFromGeneration))
-        : uniqueSourceKeys.size > 0
-          ? uniqueSourceKeys.size
-          : null,
-    sourceLabels: Array.from(uniqueSourceLabels),
-    averageRelevanceScore:
-      avgScoreFromGeneration !== null
-        ? avgScoreFromGeneration
-        : averageScoreFromSources,
-    faithfulnessScore,
-    promptTokens:
-      promptTokensFromGeneration !== null
-        ? Math.max(0, Math.round(promptTokensFromGeneration))
-        : null,
-    completionTokens:
-      completionTokensFromGeneration !== null
-        ? Math.max(0, Math.round(completionTokensFromGeneration))
-        : null,
-    totalTokens:
-      totalTokensFromGeneration !== null
-        ? Math.max(0, Math.round(totalTokensFromGeneration))
-        : promptTokensFromGeneration !== null ||
-            completionTokensFromGeneration !== null
-          ? Math.max(
-              0,
-              Math.round(
-                (promptTokensFromGeneration || 0) +
-                  (completionTokensFromGeneration || 0)
-              )
-            )
-          : null,
-    costUsd:
-      costUsdFromGeneration !== null && costUsdFromGeneration >= 0
-        ? costUsdFromGeneration
-        : null,
-    confidenceLevel: getConfidenceLevel(
-      faithfulnessScore !== null
-        ? faithfulnessScore
-        : avgScoreFromGeneration !== null
-          ? avgScoreFromGeneration
-          : averageScoreFromSources
-    )
-  }
-
-  if (
-    diagnostics.chunkCount === null &&
-    diagnostics.sourceCount === null &&
-    diagnostics.averageRelevanceScore === null &&
-    diagnostics.faithfulnessScore === null &&
-    diagnostics.sourceLabels.length === 0 &&
-    diagnostics.totalTokens === null &&
-    diagnostics.costUsd === null
-  ) {
-    return null
-  }
-
-  return diagnostics
 }
 
 /**
@@ -1292,6 +956,7 @@ const SimpleChatInput: React.FC<{
       return
     }
     const isCurrent = getSubmitLease?.() ?? (() => true)
+    if (!isCurrent()) return
     updateValue("", "submit")
     setShowSlashMenu(false)
     try {
@@ -1571,10 +1236,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const createNewWorkspace = useWorkspaceStore((s) => s.createNewWorkspace)
   const setCurrentNote = useWorkspaceStore((s) => s.setCurrentNote)
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace)
+  const saveWorkspaceChatSession = useWorkspaceStore((s) => s.saveWorkspaceChatSession)
+  const getWorkspaceChatSession = useWorkspaceStore((s) => s.getWorkspaceChatSession)
 
   // Model settings for model badge (UX-009)
-  const selectedModel = useStoreMessageOption((s) => s.selectedModel)
-  const setSelectedModel = useStoreMessageOption((s) => s.setSelectedModel)
   const chatScope = React.useMemo<ChatScope | undefined>(
     () =>
       workspaceId
@@ -1586,9 +1251,17 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     [workspaceId]
   )
 
+  const { capturePrivateScene, captureChatReferenceOwner } = useResearchActorScene(workspaceId, workspaceChatReferenceId)
+
   // Message option hook
-  const chat = useMessageOption({ scope: chatScope, hydrateServerChat: Boolean(workspaceId) })
+  const chat = useMessageOption({
+    scope: chatScope,
+    hydrateServerChat: Boolean(workspaceId),
+    capturePrivateScene
+  })
   const {
+    selectedModel,
+    setSelectedModel,
     messages,
     setMessages,
     history,
@@ -1606,7 +1279,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     historyId,
     setHistoryId,
     serverChatId,
-    setServerChatId
+    setServerChatId,
+    selectedModelIsLoading
   } = chat
 
   // RAG state from store
@@ -1708,7 +1382,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const checkpoint = useWorkspaceChatCheckpoint({
     workspaceId, workspaceReady: Boolean(storeHydrated && workspaceId),
     draft: composerDraft, setDraft: setComposerDraftState, chat,
-    legacySessionKey: workspaceSessionId,
     replaceRouteSearch: search => navigate({ pathname: location.pathname, search, hash: location.hash }, { replace: true, flushSync: true })
   })
   const { controller: checkpointController, setDraft: setCheckpointDraft } = checkpoint
@@ -1729,9 +1402,142 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setCheckpointDraft(value)
   }, [setCheckpointDraft])
 
+  const captureNativeReferenceOwner = React.useCallback(() => {
+    const owner = captureChatReferenceOwner()
+    const current = checkpointController?.getCurrent()
+    if (!owner?.isCurrent() || !checkpoint.fence()() || !serverChatId ||
+      current?.status !== "ready" || current.owner?.kind !== "native" ||
+      !current.owner.request_scope || !current.owner.validate_lease() ||
+      serverChatMirrorOwnerKey({ requestScope: current.owner.request_scope }) !== owner.serverScopeKey ||
+      current.owner.conversation_id !== serverChatId ||
+      checkpointController?.getReference()?.conversation_id !== serverChatId) return
+    return owner
+  }, [captureChatReferenceOwner, checkpoint.fence, checkpointController, serverChatId])
+
+  const saveOwnedChatSession = React.useCallback(
+    (
+      owner: NonNullable<ReturnType<typeof captureChatReferenceOwner>>,
+      session: Parameters<typeof saveWorkspaceChatSession>[1],
+      clear = false
+    ) => {
+      if (!owner.isCurrent()) return
+      try {
+        const captured = { ...owner, clear }
+        if (checkpoint.active) {
+          // The canonical checkpoint owns rows and draft; the route reads only a location hint.
+          if (!workspaceId || !workspaceChatReferenceId) return
+          saveResearchWorkspaceChatReference(workspaceId, workspaceChatReferenceId, session.serverChatId, captured)
+        } else {
+          if (getWorkspaceChatSession(workspaceSessionId)?.checkpoint) return
+          saveWorkspaceChatSession(workspaceSessionId, session, captured)
+        }
+        messageApi.destroy("research-chat-reference-save")
+      } catch {
+        messageApi.error({
+          key: "research-chat-reference-save",
+          duration: 0,
+          content: t(
+            "playground:chat.referenceSaveFailed",
+            "Your answer is retained in this session, but its saved chat could not be remembered for reload. Free browser storage before leaving this page."
+          )
+        })
+      }
+    },
+    [
+      checkpoint.active,
+      getWorkspaceChatSession,
+      messageApi,
+      saveWorkspaceChatSession,
+      t,
+      workspaceId,
+      workspaceChatReferenceId,
+      workspaceSessionId
+    ]
+  )
+
   // Smart scroll for chat messages
-  const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
-    useSmartScroll(messages, streaming, 120)
+  const {
+    containerRef,
+    isAutoScrollToBottom,
+    autoScrollToBottom,
+    hasUnseenMessages
+  } = useSmartScroll(messages, streaming, 120)
+
+  // Stage 3 (WP-04): windowed transcript rendering. Copies the proven
+  // Sidepanel/Chat/body.tsx useVirtualizer wiring (overscan 3,
+  // measureElement, stable getItemKey) onto the smart-scroll container, gated
+  // by the same >100-row threshold the web Playground's VirtualChatTimeline
+  // uses so short conversations keep plain flow layout. Stream
+  // stick-to-bottom behavior is preserved by useSmartScroll above (its
+  // messages-effect pins the container to the bottom during streaming, which
+  // slides the virtual window to the end index where the streaming row
+  // mounts).
+  const chatVirtualizationEnabled =
+    messages.length > CHAT_VIRTUALIZATION_MIN_MESSAGES
+  const chatRowVirtualizer = useVirtualizer({
+    count: messages.length,
+    enabled: chatVirtualizationEnabled,
+    getScrollElement: () => containerRef.current,
+    getItemKey: (index) => stableMessageId(messages[index]),
+    estimateSize: () => 120,
+    overscan: 3,
+    measureElement: (el) => el?.getBoundingClientRect().height || 120
+  })
+  const chatVirtualRows = chatVirtualizationEnabled
+    ? chatRowVirtualizer.getVirtualItems()
+    : null
+  // Flow-layout rows for the non-virtualized path share the virtual row
+  // shape so the transcript body below has a single render loop.
+  const chatRenderRows: Array<{
+    index: number
+    key: React.Key
+    start: number
+  }> =
+    chatVirtualRows ??
+    messages.map((message, index) => ({
+      index,
+      key: stableMessageId(message),
+      start: 0
+    }))
+
+  // Per-message retrieval diagnostics cache (WP-04): buildRetrievalDiagnostics
+  // walks every source object per bot row. Memoizing by message id and
+  // sources/generationInfo identity keeps streaming flushes (which replace
+  // only the last message object, Stage 1) from recomputing diagnostics for
+  // every older bot row. Cleared when the workspace session changes (see the
+  // conversationInstanceId effect below).
+  const retrievalDiagnosticsCacheRef = React.useRef(
+    new Map<
+      string,
+      {
+        sources: unknown
+        generationInfo: unknown
+        diagnostics: RetrievalDiagnostics | null
+      }
+    >()
+  )
+  const getRowRetrievalDiagnostics = React.useCallback((message: Message) => {
+    if (!message.isBot) return null
+    const key = stableMessageId(message)
+    const cached = retrievalDiagnosticsCacheRef.current.get(key)
+    if (
+      cached &&
+      cached.sources === message.sources &&
+      cached.generationInfo === message.generationInfo
+    ) {
+      return cached.diagnostics
+    }
+    const diagnostics = buildRetrievalDiagnostics(
+      message.sources,
+      message.generationInfo
+    )
+    retrievalDiagnosticsCacheRef.current.set(key, {
+      sources: message.sources,
+      generationInfo: message.generationInfo,
+      diagnostics
+    })
+    return diagnostics
+  }, [])
 
   const sourceScopeSources = useSelectedSourceScopeSources()
   const queryableSelectedSources = React.useMemo(
@@ -2187,11 +1993,74 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setRagMediaIds
   ])
 
-  React.useEffect(() => { setSubmitError(null) }, [workspaceSessionId])
+  const skipLegacySave = React.useRef(false)
+  React.useLayoutEffect(() => {
+    setSubmitError(null)
+    if (checkpoint.active || !workspaceId || storeHydrated === false) return
+    // The first render after a switch still carries the outgoing chat's rows.
+    skipLegacySave.current = true
+    const nextSession = getWorkspaceChatSession(workspaceSessionId)
+    const legacySession = nextSession?.checkpoint ? null : nextSession
+    setMessages(legacySession?.messages ?? [])
+    setHistory(legacySession?.history ?? [])
+    setHistoryId(legacySession?.historyId ?? null, { preserveServerChatId: true })
+    setServerChatId(legacySession?.serverChatId ?? null)
+    setStreaming(false)
+    setIsProcessing(false)
+  }, [
+    checkpoint.active,
+    getWorkspaceChatSession,
+    setHistory,
+    setHistoryId,
+    setIsProcessing,
+    setMessages,
+    setServerChatId,
+    setStreaming,
+    storeHydrated,
+    workspaceId,
+    workspaceSessionId
+  ])
+
+  React.useLayoutEffect(() => {
+    if (chat.temporaryChat || !workspaceId || storeHydrated === false) return
+    if (skipLegacySave.current) {
+      skipLegacySave.current = false
+      return
+    }
+    const owner = checkpoint.active ? captureNativeReferenceOwner() : captureChatReferenceOwner()
+    if (owner) saveOwnedChatSession(owner, { messages, history, historyId, serverChatId })
+  }, [
+    captureChatReferenceOwner, captureNativeReferenceOwner, chat.temporaryChat, checkpoint.active, history, historyId,
+    messages, saveOwnedChatSession, serverChatId, storeHydrated, workspaceId, workspaceSessionId
+  ])
+
+  // Chat search focus targets may point at a row outside the virtualized
+  // window (WP-04): scroll its index into range first. The range change
+  // re-mounts the row and re-runs this effect (chatFocusTargetInRange flips),
+  // which then reveals and highlights the mounted element as before.
+  const chatFocusTargetIndex = React.useMemo(() => {
+    const messageId = chatFocusTarget?.messageId
+    if (!messageId) return -1
+    return messages.findIndex(
+      (message, index) =>
+        getWorkspaceChatSearchMessageId(message, index) === messageId
+    )
+  }, [chatFocusTarget?.messageId, messages])
+  const chatFocusTargetInRange =
+    !chatVirtualizationEnabled ||
+    (chatVirtualRows?.some((row) => row.index === chatFocusTargetIndex) ??
+      false)
 
   React.useEffect(() => {
     const targetMessageId = chatFocusTarget?.messageId
     if (!targetMessageId) return
+
+    if (chatFocusTargetIndex >= 0 && !chatFocusTargetInRange) {
+      chatRowVirtualizer.scrollToIndex(chatFocusTargetIndex, {
+        align: "center"
+      })
+      return
+    }
 
     const targetElement = chatMessageItemRefs.current[targetMessageId]
     if (!targetElement) {
@@ -2214,7 +2083,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       window.clearTimeout(revealTimer)
       window.clearTimeout(highlightTimer)
     }
-  }, [chatFocusTarget, clearChatFocusTarget])
+  }, [
+    chatFocusTarget,
+    chatFocusTargetIndex,
+    chatFocusTargetInRange,
+    chatRowVirtualizer,
+    clearChatFocusTarget
+  ])
 
   const captureRequests = React.useRef(new Set<AbortController>())
   React.useEffect(
@@ -2396,17 +2271,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 )
               return { source, fullText: version.content }
             }
-            const detail = await tldwClient.getMediaDetails(source.mediaId, {
-              include_content: true,
-              include_versions: false,
-              include_version_content: false,
-              ...options
-            })
+            // WP-45: reuse already-ingested source text from the workspace
+            // store; only misses hit the network.
+            const resolvedContent = await resolveSourceContentText(
+              source.mediaId,
+              options
+            )
             assertCurrent()
-            const fullText = extractSourceFullText(detail)
             return {
               source,
-              fullText
+              fullText: resolvedContent.text
             }
           })
         )
@@ -2520,7 +2394,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   }, [responseLength, responseStyle])
 
   const handleSubmit = async (message: string): Promise<boolean> => {
-    if (preparingSourceContext) return false
+    if (preparingSourceContext || selectedModelIsLoading) return false
     const durableCheckpoint = checkpoint.active && !chat.temporaryChat
     if (durableCheckpoint && (!storeHydrated || !workspaceId || !workspaceChatReferenceId || checkpoint.restoring)) return false
     const isCurrent = checkpoint.fence()
@@ -2776,9 +2650,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleClearChat = () => {
     if (!hasMessages) return
-    const isCurrent = checkpoint.fence()
-    const currentSelection = checkpointController?.fence()
     const nativeClear = checkpointController?.getCurrent().owner?.kind === "native" && !chat.temporaryChat
+    const owner = nativeClear ? captureNativeReferenceOwner() : captureChatReferenceOwner()
+    const checkpointIsCurrent = checkpoint.fence()
+    const selectionIsCurrent = checkpointController?.fence()
+    const isCurrent = () =>
+      (checkpoint.active ? checkpointIsCurrent() : Boolean(owner?.isCurrent())) &&
+      (selectionIsCurrent?.() ?? true)
+    if (!isCurrent()) return
 
     Modal.confirm({
       title: t("playground:chat.clearTitle", "Clear chat?"),
@@ -2789,7 +2668,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       okText: t("common:clear", "Clear"),
       cancelText: t("common:cancel", "Cancel"),
       onOk: () => {
-        if ((nativeClear && !isCurrent()) || currentSelection?.() === false) return
+        if (!isCurrent()) return
         const restoreNative = nativeClear ? checkpoint.clearChat() : null
         if (nativeClear && !restoreNative) return
         const previousMessages = [...messages]
@@ -2799,7 +2678,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
         const undoHandle = scheduleWorkspaceUndoAction({
           apply: () => {
-            if (restoreNative) { setSubmitError(null); return }
+            if (restoreNative) {
+              setSubmitError(null)
+              if (owner) saveOwnedChatSession(owner, { messages: [], history: [], historyId: null, serverChatId: null }, true)
+              return
+            }
+            if (!isCurrent()) return
             setMessages([])
             setHistory([])
             setHistoryId(null, { preserveServerChatId: true })
@@ -2807,6 +2691,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             setStreaming(false)
             setIsProcessing(false)
             setSubmitError(null)
+            if (!checkpoint.active && owner && !chat.temporaryChat) {
+              saveOwnedChatSession(owner, { messages: [], history: [], historyId: null, serverChatId: null }, true)
+            }
           },
           undo: () => {
             if (restoreNative) {
@@ -2816,6 +2703,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               })
               return
             }
+            if (!isCurrent()) return
             setMessages(previousMessages)
             setHistory(previousHistory)
             setHistoryId(previousHistoryId, { preserveServerChatId: true })
@@ -2823,6 +2711,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             setStreaming(false)
             setIsProcessing(false)
             setSubmitError(null)
+            if (!checkpoint.active && owner && !chat.temporaryChat) {
+              saveOwnedChatSession(owner, {
+                messages: previousMessages,
+                history: previousHistory,
+                historyId: previousHistoryId,
+                serverChatId: previousServerChatId
+              })
+            }
           }
         })
 
@@ -2841,7 +2737,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               size="small"
               type="link"
               onClick={() => {
-                if (undoWorkspaceAction(undoHandle.id) && !restoreNative) {
+                if ((restoreNative || isCurrent()) && undoWorkspaceAction(undoHandle.id) && !restoreNative) {
                   messageApi.success(
                     t("playground:chat.restored", "Chat restored")
                   )
@@ -2870,17 +2766,28 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const handleDeleteMessageWithUndo = React.useCallback(
     async (messageIndex: number) => {
       if (!Number.isInteger(messageIndex) || messageIndex < 0) return
+      const owner = captureChatReferenceOwner()
+      const checkpointIsCurrent = checkpoint.fence()
+      const selectionIsCurrent = checkpointController?.fence()
+      const isCurrent = () =>
+        checkpoint.active ? checkpointIsCurrent() : Boolean(owner?.isCurrent())
+      if (!isCurrent() || selectionIsCurrent?.() === false) return false
       const previousMessages = [...messages]
       const previousHistory = [...history]
       const previousHistoryId = historyId
       const previousServerChatId = serverChatId
       if (!previousMessages[messageIndex]) return
 
-      await deleteMessage(messageIndex)
+      const accepted = await deleteMessage(messageIndex)
+      if (accepted === false || !isCurrent()) return false
+      // A canonical server tombstone cannot be undone by restoring browser rows.
+      if (previousServerChatId) return true
+      if (selectionIsCurrent?.() === false) return false
 
       const undoHandle = scheduleWorkspaceUndoAction({
         apply: () => {},
         undo: () => {
+          if (!isCurrent() || selectionIsCurrent?.() === false) return
           setMessages(previousMessages)
           setHistory(previousHistory)
           setHistoryId(previousHistoryId, { preserveServerChatId: true })
@@ -2909,7 +2816,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             size="small"
             type="link"
             onClick={() => {
-              if (undoWorkspaceAction(undoHandle.id)) {
+              if (isCurrent() && selectionIsCurrent?.() !== false && undoWorkspaceAction(undoHandle.id)) {
                 messageApi.success(
                   t("playground:chat.messageRestored", "Message restored")
                 )
@@ -2933,6 +2840,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       }
     },
     [
+      captureChatReferenceOwner,
+      checkpoint.active,
+      checkpoint.fence,
+      checkpointController,
       deleteMessage,
       history,
       historyId,
@@ -3125,41 +3036,60 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleSaveMessageToNotes = React.useCallback(
     (msg: {
-      isBot: boolean
-      message: string
-      name?: string
-      sources?: unknown[]
+      isBot: boolean;
+      message: string;
+      name?: string;
+      sources?: unknown[];
     }) => {
       const destination = useWorkspaceStore.getState()
-      if (destination.serverWorkspace || destination.currentNote.serverWorkspaceId) {
+      if (destination.serverWorkspace || destination.currentNote?.serverWorkspaceId) {
         messageApi.warning(t("playground:studio.serverNotesReadOnly", "Server notes are view-only"))
         return
       }
       const snippet = String(msg.message || "").trim()
       if (!snippet) return
-      const citedMediaIds = new Set(
-        (msg.sources || []).map(extractCitationMediaId)
-      )
-      const citedCaptures = sources.filter(
-        (source) => source.webCapture && citedMediaIds.has(source.mediaId)
-      )
-      const provenance = citedCaptures.length
-        ? appendCapturedNoteProvenance(
-            useWorkspaceStore.getState().currentNote,
-            citedCaptures
-          )
-        : null
-      captureToCurrentNote({
-        ...(provenance ? { provenance } : {}),
-        title: buildCapturedMessageTitle(
-          msg.isBot,
-          snippet,
-          t("playground:chat.savedAssistantPrefix", "Assistant"),
-          t("playground:chat.savedUserPrefix", "User")
-        ),
-        content: snippet,
-        mode: "append"
-      })
+      try {
+        const citedMediaIds = new Set(
+          (msg.sources || []).map(extractCitationMediaId),
+        );
+        const citedCaptures = sources.filter(
+          (source) => source.webCapture && citedMediaIds.has(source.mediaId),
+        );
+        const capturedMediaIds = new Set(
+          citedCaptures.map((source) => source.mediaId),
+        );
+        const citedPlainSources = (msg.sources || []).filter(
+          (source) => !capturedMediaIds.has(extractCitationMediaId(source)),
+        );
+        const plainProvenance = citedPlainSources.length
+          ? projectWorkspaceRagSources(citedPlainSources)
+          : null;
+        if (citedPlainSources.length && !plainProvenance)
+          throw new Error("Source history is invalid or too large to save");
+        const provenance = appendCapturedNoteProvenance(
+          destination.currentNote,
+          citedCaptures,
+          plainProvenance?.sources || [],
+        );
+        captureToCurrentNote({
+          ...(provenance ? { provenance } : {}),
+          title: buildCapturedMessageTitle(
+            msg.isBot,
+            snippet,
+            t("playground:chat.savedAssistantPrefix", "Assistant"),
+            t("playground:chat.savedUserPrefix", "User"),
+          ),
+          content: snippet,
+          mode: "append",
+        });
+      } catch {
+        messageApi.error(
+          t(
+            "option:researchWorkspace.sourceHistorySaveError",
+            "Source history is invalid or too large to save. Your Note has not changed.",
+          ),
+        );
+      }
     },
     [captureToCurrentNote, messageApi, sources, t]
   )
@@ -3282,7 +3212,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       currentModel: selectedModel,
       models: composerModels,
       preferredModelIds: favoriteModels,
-      isCurrentModelHydrating: false,
+      isCurrentModelHydrating: selectedModelIsLoading,
       arePreferencesHydrating: favoriteModelsIsLoading
     })
     if (nextModel && typeof setSelectedModel === "function") {
@@ -3293,6 +3223,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     favoriteModels,
     favoriteModelsIsLoading,
     selectedModel,
+    selectedModelIsLoading,
     setSelectedModel
   ])
 
@@ -3311,16 +3242,19 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         getDesignSystemState("degraded")?.label ?? DEGRADED_STATE_LABEL
       )
     }
-    return t(
-      "playground:composer.providerStatusReady",
-      getDesignSystemState("ready")?.label ?? READY_STATE_LABEL
-    )
+    return t("playground:composer.serverStatusConnected", "Server connected")
   }, [connectionUxState, isConnectionReady, t])
   const connectionStatusWarning =
     !isConnectionReady || connectionUxState === "connected_degraded"
 
   // Conversation instance ID (use workspace ID or fallback)
   const conversationInstanceId = workspaceSessionId
+  // The per-message diagnostics cache is conversation-scoped: clear it when
+  // the workspace session changes so ids from a previous conversation cannot
+  // pin stale entries.
+  React.useEffect(() => {
+    retrievalDiagnosticsCacheRef.current.clear()
+  }, [conversationInstanceId])
   const hasConnectionFailure =
     connectionState.phase === ConnectionPhase.ERROR &&
     !connectionState.isChecking
@@ -3349,7 +3283,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     isConnectionUnavailable || isChatCapabilityBlocked
   const isModelSelectionMissing =
     typeof selectedModel !== "string" || selectedModel.trim().length === 0
-  const isSendBlocked = !isChatUnavailable && (isModelSelectionMissing || checkpoint.restoring)
+  const isSendBlocked = !isChatUnavailable && (
+    isModelSelectionMissing || selectedModelIsLoading || checkpoint.restoring ||
+    (checkpoint.active && !chat.temporaryChat && (!storeHydrated || !workspaceId || !workspaceChatReferenceId))
+  )
   const sendBlockedMessage = isModelSelectionMissing
     ? t(
         "playground:chat.selectModelBeforeSending",
@@ -3388,7 +3325,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       {/* Context indicator */}
       <ChatContextIndicator statusGuardrailsEnabled={statusGuardrailsEnabled} />
 
-      {/* Connection banner */}
+      {/* Context indicator */}
       {showConnectionBanner && (
         <div className="border-b border-error/30 bg-error/5 px-4 py-2">
           <div className={`mx-auto flex w-full ${contentMaxWidthClass} items-center justify-between gap-3`}>
@@ -3398,13 +3335,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 {submitError === "Snapshot changed outside refresh"
                   ? t(
                       "playground:sources.snapshotChanged",
-                      "Snapshot changed outside refresh"
+                      "Snapshot changed outside refresh",
                     )
-                  : t(
+                  : `${t(
                       "playground:chat.connectionBanner",
-                      "Unable to reach server"
-                    )}
-                : {connectionDescription}
+                      "Unable to reach server",
+                    )}: ${connectionDescription}`}
               </span>
             </div>
             <button
@@ -3421,7 +3357,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         </div>
       )}
 
-      {/* Chat controls */}
+      {/* Context indicator */}
       <div className="border-b border-border bg-surface px-4 py-2">
         <div className={`mx-auto flex w-full ${contentMaxWidthClass} items-center justify-end gap-1.5`}>
           <Tooltip
@@ -3549,7 +3485,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         </div>
       )}
 
-      {/* Chat messages area */}
+      {/* Context indicator */}
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={containerRef}
@@ -3562,10 +3498,23 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           <div className={`mx-auto w-full ${contentMaxWidthClass} pb-6`}>
             {checkpoint.controller ? <HistorySelectionReview selection={checkpoint.controller} onReprepareRecovery={reprepareRecovery} /> : null}
             {hasMessages ? (
-              <div className="space-y-4 py-4">
-                {messages.map((msg, idx) => {
+              <div className="py-4">
+                <div
+                  style={
+                    chatVirtualRows
+                      ? {
+                          height: chatRowVirtualizer.getTotalSize(),
+                          width: "100%",
+                          position: "relative"
+                        }
+                      : undefined
+                  }
+                >
+                {chatRenderRows.map((virtualRow) => {
+                  const idx = virtualRow.index
+                  const msg = messages[idx]
                   const diagnostics = msg.isBot
-                    ? buildRetrievalDiagnostics(msg.sources, msg.generationInfo)
+                    ? getRowRetrievalDiagnostics(msg)
                     : null
                   const chatSearchMessageId = getWorkspaceChatSearchMessageId(
                     msg,
@@ -3576,15 +3525,35 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
                   return (
                     <div
-                      key={msg.id || `msg-${idx}`}
-                      data-chat-message-id={chatSearchMessageId}
-                      ref={(element) => {
-                        chatMessageItemRefs.current[chatSearchMessageId] = element
-                      }}
-                      className={`space-y-2 rounded-md transition ${
-                        isHighlighted ? "ring-2 ring-primary/40 bg-primary/5 p-1.5" : ""
-                      }`}
+                      key={virtualRow.key}
+                      ref={
+                        chatVirtualRows
+                          ? chatRowVirtualizer.measureElement
+                          : undefined
+                      }
+                      data-index={idx}
+                      style={
+                        chatVirtualRows
+                          ? {
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              transform: `translateY(${virtualRow.start}px)`,
+                              width: "100%"
+                            }
+                          : undefined
+                      }
+                      className="pb-4"
                     >
+                      <div
+                        data-chat-message-id={chatSearchMessageId}
+                        ref={(element) => {
+                          chatMessageItemRefs.current[chatSearchMessageId] = element
+                        }}
+                        className={`space-y-2 rounded-md transition ${
+                          isHighlighted ? "ring-2 ring-primary/40 bg-primary/5 p-1.5" : ""
+                        }`}
+                      >
                       <PlaygroundMessage
                         isBot={msg.isBot}
                         role={msg.role}
@@ -3657,21 +3626,36 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         }
                         onDeleteMessage={() => handleDeleteMessageWithUndo(idx)}
                         suppressDeleteSuccessToast
-                        onEditFormSubmit={(value: string, isSend: boolean) => {
+                        onEditFormSubmit={(
+                          value: string,
+                          isSend: boolean,
+                          editIsCurrent?: () => boolean,
+                          editOriginIsCurrent?: () => boolean
+                        ) => {
                           if (isSend)
-                            void withCurrentCaptureHeads(
+                            return withCurrentCaptureHeads(
                               async (_options, assertCurrent) => {
                                 assertCurrent?.()
-                                await editMessage(
-                                  idx,
-                                  value,
-                                  !msg.isBot,
-                                  isSend
+                                return isChatSubmitSuccess(
+                                  await editMessage(
+                                    idx,
+                                    value,
+                                    !msg.isBot,
+                                    isSend,
+                                    editIsCurrent,
+                                    editOriginIsCurrent
+                                  )
                                 )
-                                return true
                               }
                             )
-                          else editMessage(idx, value, !msg.isBot, isSend)
+                          return editMessage(
+                            idx,
+                            value,
+                            !msg.isBot,
+                            isSend,
+                            editIsCurrent,
+                            editOriginIsCurrent
+                          )
                         }}
                         hideEditAndRegenerate={!msg.isBot && idx !== messages.length - 1}
                         hideContinue={true}
@@ -3682,9 +3666,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                           <RetrievalDiagnosticsPanel diagnostics={diagnostics} />
                         </div>
                       )}
+                      </div>
                     </div>
                   )
                 })}
+                </div>
               </div>
             ) : (
               <div className="flex min-h-full flex-col justify-end">
@@ -3706,30 +3692,18 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           </div>
         </div>
 
-        {/* Scroll to bottom button */}
+        {/* Horizontally scrollable source tags */}
         {!isAutoScrollToBottom && hasMessages && (
-          <div className="pointer-events-none absolute bottom-24 left-0 right-0 flex justify-center">
-            <button
-              onClick={() => autoScrollToBottom()}
-              aria-label={t(
-                "playground:composer.scrollToLatest",
-                "Scroll to latest messages"
-              )}
-              title={
-                t(
-                  "playground:composer.scrollToLatest",
-                  "Scroll to latest messages"
-                ) as string
-              }
-              className="pointer-events-auto rounded-full border border-border bg-surface p-2 text-text-subtle shadow-card transition-colors hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <ChevronDown className="size-4 text-text-subtle" aria-hidden="true" />
-            </button>
-          </div>
+          <ScrollToLatestButton
+            onClick={() => autoScrollToBottom()}
+            replyInProgress={streaming}
+            hasUnseenMessages={hasUnseenMessages}
+            className="absolute bottom-24 right-4"
+          />
         )}
       </div>
 
-      {/* Chat input */}
+      {/* Context indicator */}
       <div
         data-testid="chat-drop-zone"
         data-drop-active={dropZoneActive ? "true" : "false"}

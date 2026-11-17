@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react"
+import { lazy, Suspense, useState, useCallback, useRef } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   Dropdown,
@@ -18,25 +18,22 @@ import {
   Download,
   RefreshCw,
   Archive,
-  MoreVertical
+  MoreVertical,
+  Sparkles
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import {
-  listBoards,
-  getBoard,
-  createBoard,
-  deleteBoard,
-  archiveBoard,
-  exportBoard,
-  createList,
-  generateClientId
-} from "@/services/kanban"
+import { generateClientId } from "@/services/kanban"
+import { KanbanScopeProvider, useKanbanScope } from "./KanbanScope"
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
 import { BoardView } from "./BoardView"
 import { ImportPanel } from "./ImportPanel"
 import { ArchivedItemsDrawer } from "./ArchivedItemsDrawer"
 import { BoardGallery } from "./BoardGallery"
 import { useKanbanShortcuts } from "./useKanbanShortcuts"
+
+const GenerateBoardDialog = lazy(() => import("./GenerateBoardDialog"))
 
 const BADGE_INDICATOR_STYLE = {
   backgroundColor: "rgb(var(--color-primary))",
@@ -44,14 +41,27 @@ const BADGE_INDICATOR_STYLE = {
 }
 
 export const KanbanPlayground = () => {
+  const { config, authorityLoading } = useCanonicalConnectionConfig()
+  if (!config || authorityLoading) return <p role="status">Resolving Kanban connection…</p>
+  return (
+    <KanbanScopeProvider key={deriveConnectionAuthorityId(config)} config={config}>
+      <KanbanWorkspace />
+    </KanbanScopeProvider>
+  )
+}
+
+const KanbanWorkspace = () => {
   const { t } = useTranslation(["settings", "common"])
   const queryClient = useQueryClient()
+  const { api, key, isActive } = useKanbanScope()
+  const { listBoards, getBoard, createBoard, deleteBoard, archiveBoard, exportBoard, createList } = api
 
   // Board selection state
   const [selectedBoardId, setSelectedBoardId] = useState<number | null>(null)
 
   // Create board modal state
   const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [generateModalOpen, setGenerateModalOpen] = useState(false)
   const [newBoardName, setNewBoardName] = useState("")
   const [newBoardDescription, setNewBoardDescription] = useState("")
 
@@ -73,7 +83,7 @@ export const KanbanPlayground = () => {
     isLoading: boardsLoading,
     refetch: refetchBoards
   } = useQuery({
-    queryKey: ["kanban-boards"],
+    queryKey: key("kanban-boards"),
     queryFn: () => listBoards({ limit: 100 }),
     staleTime: 60 * 1000
   })
@@ -84,7 +94,7 @@ export const KanbanPlayground = () => {
     isLoading: boardLoading,
     refetch: refetchBoard
   } = useQuery({
-    queryKey: ["kanban-board", selectedBoardId],
+    queryKey: key("kanban-board", selectedBoardId),
     queryFn: () => getBoard(selectedBoardId!),
     enabled: selectedBoardId !== null,
     staleTime: 30 * 1000
@@ -95,14 +105,16 @@ export const KanbanPlayground = () => {
     mutationFn: ({ name, description }: { name: string; description?: string }) =>
       createBoard({ name, description, client_id: generateClientId() }),
     onSuccess: (newBoard) => {
+      if (!isActive()) return
       message.success("Board created")
-      queryClient.invalidateQueries({ queryKey: ["kanban-boards"] })
+      queryClient.invalidateQueries({ queryKey: key("kanban-boards") })
       setSelectedBoardId(newBoard.id)
       setCreateModalOpen(false)
       setNewBoardName("")
       setNewBoardDescription("")
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to create board. Please try again.")
     }
   })
@@ -111,11 +123,13 @@ export const KanbanPlayground = () => {
   const deleteBoardMutation = useMutation({
     mutationFn: (boardId: number) => deleteBoard(boardId),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("Board deleted")
-      queryClient.invalidateQueries({ queryKey: ["kanban-boards"] })
+      queryClient.invalidateQueries({ queryKey: key("kanban-boards") })
       setSelectedBoardId(null)
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to delete board. Please try again.")
     }
   })
@@ -124,11 +138,13 @@ export const KanbanPlayground = () => {
   const archiveBoardMutation = useMutation({
     mutationFn: (boardId: number) => archiveBoard(boardId),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("Board archived")
-      queryClient.invalidateQueries({ queryKey: ["kanban-boards"] })
+      queryClient.invalidateQueries({ queryKey: key("kanban-boards") })
       setSelectedBoardId(null)
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to archive board. Please try again.")
     }
   })
@@ -155,9 +171,10 @@ export const KanbanPlayground = () => {
   }, [selectedBoardId, archiveBoardMutation])
 
   const handleExportBoard = useCallback(async () => {
-    if (!selectedBoardId || !boardData) return
+    if (!selectedBoardId || !boardData || !isActive()) return
     try {
       const data = await exportBoard(selectedBoardId)
+      if (!isActive()) return
       const blob = new Blob([JSON.stringify(data, null, 2)], {
         type: "application/json"
       })
@@ -171,17 +188,19 @@ export const KanbanPlayground = () => {
       URL.revokeObjectURL(url)
       message.success("Board exported")
     } catch (err) {
+      if (!isActive()) return
       message.error("Failed to export board. Please try again.")
     }
-  }, [selectedBoardId, boardData])
+  }, [selectedBoardId, boardData, isActive, exportBoard])
 
   const handleBoardImported = useCallback(
     (boardId: number) => {
-      queryClient.invalidateQueries({ queryKey: ["kanban-boards"] })
+      if (!isActive()) return
+      queryClient.invalidateQueries({ queryKey: key("kanban-boards") })
       setSelectedBoardId(boardId)
       setImportModalOpen(false)
     },
-    [queryClient]
+    [isActive, key, queryClient]
   )
 
   // Quick setup: create To Do / In Progress / Done lists
@@ -190,19 +209,22 @@ export const KanbanPlayground = () => {
     const names = ["To Do", "In Progress", "Done"]
     try {
       for (const name of names) {
+        if (!isActive()) return
         await createList(selectedBoardId, {
           name,
           client_id: generateClientId()
         })
       }
+      if (!isActive()) return
       message.success("Lists created")
       queryClient.invalidateQueries({
-        queryKey: ["kanban-board", selectedBoardId]
+        queryKey: key("kanban-board", selectedBoardId)
       })
     } catch (err) {
+      if (!isActive()) return
       message.error("Failed to create lists. Please try again.")
     }
-  }, [selectedBoardId, queryClient])
+  }, [selectedBoardId, isActive, queryClient, key, createList])
 
   // Keyboard shortcuts
   const { helpOpen, setHelpOpen } = useKanbanShortcuts({
@@ -246,12 +268,12 @@ export const KanbanPlayground = () => {
   ]
 
   const renderHeader = () => (
-    <div className="flex items-center justify-between mb-4">
+    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div className="flex items-center gap-3">
         <Kanban className="w-6 h-6 text-primary" />
         <h1 className="text-xl font-semibold">Kanban Playground</h1>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2 text-sm text-text-muted">
           <span>Boards</span>
           <Badge
@@ -276,10 +298,12 @@ export const KanbanPlayground = () => {
         >
           New Board
         </Button>
+        <Button icon={<Sparkles className="w-4 h-4" />} onClick={() => setGenerateModalOpen(true)}>Generate board</Button>
         <Dropdown menu={{ items: actionsMenuItems }} trigger={["click"]}>
-          <Button icon={<MoreVertical className="w-4 h-4" />} />
+          <Button aria-label="Board actions" icon={<MoreVertical className="w-4 h-4" />} />
         </Dropdown>
         <Button
+          aria-label="Refresh boards"
           icon={<RefreshCw className="w-4 h-4" />}
           onClick={() => {
             refetchBoards()
@@ -336,6 +360,14 @@ export const KanbanPlayground = () => {
       {renderHeader()}
 
       <div className="min-h-[500px]">{renderContent()}</div>
+
+      {generateModalOpen && <Suspense fallback={<p role="status">Loading board generation…</p>}>
+        <GenerateBoardDialog onClose={() => setGenerateModalOpen(false)} onSaved={boardId => {
+          if (!isActive()) return
+          handleBoardImported(boardId)
+          setGenerateModalOpen(false)
+        }} />
+      </Suspense>}
 
       {/* Archive drawer */}
       <ArchivedItemsDrawer

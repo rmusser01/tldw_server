@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ import byok_runtime
 from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as overrides_module
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
@@ -54,9 +54,9 @@ def _configure_no_dispatch_boundary(
     monkeypatch.setenv("CHAT_FORCE_MOCK", "false")
     monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
     monkeypatch.setattr(chat_endpoint, "resolve_provider_api_key", static_fallback)
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", dispatch)
-    monkeypatch.setattr(chat_endpoint, "get_provider_manager", lambda: None)
-    monkeypatch.setattr(chat_endpoint, "get_request_queue", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", lambda: None)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
     monkeypatch.setattr(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False)
     monkeypatch.setattr(chat_endpoint, "QUEUED_EXECUTION", False)
@@ -112,12 +112,10 @@ def test_legacy_chat_key_resolver_cannot_bypass_unhealthy_override_store(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Legacy adapters share the same fail-closed credential boundary."""
-    # This regression exercises the dynamic/config fallback used in production,
-    # not the explicit module-key seam installed by the Chat test harness.
-    monkeypatch.setattr(chat_request_schemas, "API_KEYS", {})
-    monkeypatch.setattr(chat_endpoint, "API_KEYS", {})
+    # This regression exercises the dynamic/config fallback used in production.
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys",
+        config_llm_providers,
+        "get_api_keys",
         lambda: {"openai": "configured-static-key"},
     )
     overrides_module.set_llm_provider_overrides_cache_for_tests(
@@ -286,9 +284,9 @@ def test_late_override_after_structured_absence_cannot_mix_chat_adapter_credenti
         "resolve_static_server_fallback_from_snapshot",
         gated_static_lookup,
     )
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", adapter_boundary)
-    monkeypatch.setattr(chat_endpoint, "get_provider_manager", lambda: None)
-    monkeypatch.setattr(chat_endpoint, "get_request_queue", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", adapter_boundary)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", lambda: None)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
     monkeypatch.setattr(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False)
     monkeypatch.setattr(chat_endpoint, "QUEUED_EXECUTION", False)
@@ -350,7 +348,6 @@ def test_chat_static_fallback_freezes_one_config_generation_at_adapter_boundary(
     expected_base_url: str | None,
 ) -> None:
     """Chat cannot combine an earlier static decision with a later config load."""
-    from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
     from tldw_Server_API.app.core.AuthNZ import byok_helpers, provider_credential_runtime
 
     rotated_config = {
@@ -408,12 +405,10 @@ def test_chat_static_fallback_freezes_one_config_generation_at_adapter_boundary(
         load_static_snapshot,
     )
     monkeypatch.setattr(byok_runtime, "loaded_config_data", initial_config)
-    monkeypatch.setattr(chat_request_schemas, "get_api_keys", legacy_dynamic_keys)
-    monkeypatch.setattr(chat_request_schemas, "API_KEYS", {})
-    monkeypatch.setattr(chat_endpoint, "API_KEYS", {})
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", adapter_boundary)
-    monkeypatch.setattr(chat_endpoint, "get_provider_manager", lambda: None)
-    monkeypatch.setattr(chat_endpoint, "get_request_queue", lambda: None)
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", legacy_dynamic_keys)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", adapter_boundary)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", lambda: None)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
     monkeypatch.setattr(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False)
     monkeypatch.setattr(chat_endpoint, "QUEUED_EXECUTION", False)
@@ -485,10 +480,10 @@ def test_late_chat_override_policy_change_blocks_provider_dispatch(
 
     monkeypatch.setenv("CHAT_FORCE_MOCK", "false")
     monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
-    monkeypatch.setattr(chat_endpoint, "validate_provider_override", gated_validate)
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", adapter_boundary)
-    monkeypatch.setattr(chat_endpoint, "get_provider_manager", lambda: None)
-    monkeypatch.setattr(chat_endpoint, "get_request_queue", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.validate_provider_override", gated_validate)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", adapter_boundary)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", lambda: None)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
     monkeypatch.setattr(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False)
     monkeypatch.setattr(chat_endpoint, "QUEUED_EXECUTION", False)

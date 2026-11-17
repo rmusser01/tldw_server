@@ -37,7 +37,6 @@ vi.mock('react-i18next', () => ({
 }))
 
 vi.mock('@tanstack/react-query', () => ({
-  useQueryClient: () => mocks.queryClient,
   useQuery: () => ({
     data: mocks.queryData,
     refetch: mocks.refetch,

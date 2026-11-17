@@ -21,3 +21,16 @@ export const getBrowserRuntime = () => {
 
 export const isExtensionRuntime = (runtime = getBrowserRuntime()): boolean =>
   Boolean(runtime?.id)
+
+export const resolveOptionsHref = (path: string) => {
+  try {
+    const runtime = getBrowserRuntime()
+    if (isExtensionRuntime(runtime) && runtime?.getURL) {
+      return runtime.getURL(`/options.html#${path}`)
+    }
+  } catch {
+    // Fall back to the hosted WebUI path when extension APIs are unavailable.
+  }
+
+  return path
+}

@@ -975,3 +975,36 @@ def test_strategy_modules_do_not_import_chat_provider_or_upward_layers() -> None
                 continue
             violations.extend((filename, name) for name in imports if set(name.split(".")) & forbidden)
     assert violations == []
+
+
+def test_provider_quota_refusal_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A quota refusal is final: one provider call, no backoff, and it reaches the caller (spec §4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    provider_calls = 0
+    sleeps: list[float] = []
+    refusal = LLMQuotaExceededError(
+        category="llm_tokens_month", current=10, limit=10, message="Monthly LLM token limit reached", retry_after=60
+    )
+
+    def provider(**_kwargs: Any) -> dict[str, Any]:
+        """Refuse every call."""
+        nonlocal provider_calls
+        provider_calls += 1
+        raise refusal
+
+    monkeypatch.setenv("EXTRACTOR_MAX_RETRIES", "3")
+    monkeypatch.setenv("EXTRACTOR_RETRY_BASE_MS", "25")
+    monkeypatch.setenv("EXTRACTOR_RETRY_JITTER_MS", "0")
+    _install_dependencies(monkeypatch, llm_strategy, perform_chat_api_call=provider, sleep=sleeps.append)
+
+    with pytest.raises(LLMQuotaExceededError) as exc_info:
+        extraction.extract_llm_entities(
+            "<p>Body</p>",
+            "https://example.com/quota",
+            llm_settings={"provider": "openai"},
+        )
+
+    assert exc_info.value is refusal
+    assert provider_calls == 1
+    assert sleeps == []

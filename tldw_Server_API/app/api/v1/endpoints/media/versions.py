@@ -43,10 +43,11 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
-from tldw_Server_API.app.core.Utils.metadata_utils import (
-    normalize_safe_metadata,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.safe_metadata_write_ops import (
     update_version_safe_metadata_in_transaction,
 )
+from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Utils.metadata_utils import normalize_safe_metadata
 
 router = APIRouter(tags=["Media Versioning"])
 
@@ -71,15 +72,6 @@ _MEDIA_VERSIONS_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     json.JSONDecodeError,
 )
-
-
-def _is_test_mode() -> bool:
-    try:
-        from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode_impl
-
-        return bool(_is_test_mode_impl())
-    except _MEDIA_VERSIONS_NONCRITICAL_EXCEPTIONS:
-        return False
 
 
 @router.get(
@@ -310,7 +302,7 @@ async def create_version(
 
     # TEST_MODE diagnostics (best-effort; non-fatal if anything fails)
     try:
-        if _is_test_mode():
+        if is_test_mode():
             db_path = getattr(db, "db_path_str", getattr(db, "db_path", "?"))
             headers: dict[str, Any] = getattr(request, "headers", {}) or {}
             logger.info(

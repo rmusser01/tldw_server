@@ -471,8 +471,21 @@ def test_v1_1_import_uses_verified_explicit_content_item_path(service):
     )
 
     assert success is True, message
-    assert details == {"imported_items": {"note": 1}, "warnings": []}
-    service.db.add_note.assert_called_once_with(title="Verified Note", content="Verified body")
+    assert details == {
+        "imported_items": {"note": 1},
+        "warnings": [],
+        "total_items": 1,
+        "processed_items": 1,
+        "successful_items": 1,
+        "failed_items": 0,
+        "skipped_items": 0,
+    }
+    service.db.add_note.assert_called_once_with(
+        title="Verified Note",
+        content="Verified body",
+        conversation_id=None,
+        message_id=None,
+    )
 
 
 def test_v1_1_import_rejects_null_file_path_missing_fallback_inventory_before_writes(service):

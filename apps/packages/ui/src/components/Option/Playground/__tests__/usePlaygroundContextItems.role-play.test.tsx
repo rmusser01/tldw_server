@@ -134,7 +134,7 @@ describe("usePlaygroundContextItems role-play state", () => {
           id: "rolePlayBehavior",
           label: "Behavior",
           value: "Character Actor",
-          tone: "active",
+          tone: "neutral",
         }),
       ]),
     );
@@ -277,14 +277,15 @@ describe("usePlaygroundContextItems role-play state", () => {
     ).toBeUndefined();
   });
 
-  it("shows included character context when the current request can use character flow", () => {
+  it("shows selected character setup without a save or prompt-use claim", () => {
     const { result } = renderHook(() =>
       usePlaygroundContextItems(
         createDeps({
           rolePlayCompatibility: {
             status: "included",
             reasonCode: "character_flow",
-            messageKey: "playground:composer.rolePlayCompatibility.character_flow",
+            messageKey:
+              "playground:composer.rolePlayCompatibility.character_flow",
           },
           rolePlayState: {
             ...baseRolePlayState,
@@ -302,12 +303,40 @@ describe("usePlaygroundContextItems role-play state", () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: "rolePlayCompatibility",
-          label: "Character context",
-          value: "Included",
-          tone: "active",
+          label: "Character setup",
+          value: "Selected",
+          tone: "neutral",
         }),
       ]),
     );
+  });
+
+  it("keeps selected character sources and their review action visible", () => {
+    const openKnowledgePanel = vi.fn();
+    const { result } = renderHook(() =>
+      usePlaygroundContextItems(
+        createDeps({
+          openKnowledgePanel,
+          rolePlayCompatibility: {
+            status: "blended",
+            reasonCode: "rag_sources",
+            messageKey: "playground:composer.rolePlayCompatibility.rag_sources",
+          },
+          rolePlayState: {
+            ...baseRolePlayState,
+            identity: { kind: "character", id: "selected-mira", name: "Mira" },
+          },
+        }),
+      ),
+    );
+    const chip = result.current.find((item) => item.id === "rolePlayCompatibility");
+    expect(chip).toEqual(expect.objectContaining({
+      label: "Character setup",
+      value: "Selected with sources",
+      tone: "warning",
+    }));
+    act(() => { chip?.onClick?.(); });
+    expect(openKnowledgePanel).toHaveBeenCalledWith("search");
   });
 
   it("shows a warning and cleanup action when custom prompt may override character behavior", () => {
@@ -319,7 +348,8 @@ describe("usePlaygroundContextItems role-play state", () => {
           rolePlayCompatibility: {
             status: "override-risk",
             reasonCode: "custom_prompt",
-            messageKey: "playground:composer.rolePlayCompatibility.custom_prompt",
+            messageKey:
+              "playground:composer.rolePlayCompatibility.custom_prompt",
           },
           rolePlayState: {
             ...baseRolePlayState,
@@ -338,7 +368,7 @@ describe("usePlaygroundContextItems role-play state", () => {
     );
     expect(chip).toEqual(
       expect.objectContaining({
-        label: "Character context",
+        label: "Character setup",
         value: "Prompt override risk",
         tone: "warning",
       }),
@@ -360,7 +390,8 @@ describe("usePlaygroundContextItems role-play state", () => {
           rolePlayCompatibility: {
             status: "excluded",
             reasonCode: "compare_mode",
-            messageKey: "playground:composer.rolePlayCompatibility.compare_mode",
+            messageKey:
+              "playground:composer.rolePlayCompatibility.compare_mode",
           },
           rolePlayState: {
             ...baseRolePlayState,
@@ -379,7 +410,7 @@ describe("usePlaygroundContextItems role-play state", () => {
     );
     expect(chip).toEqual(
       expect.objectContaining({
-        label: "Character context",
+        label: "Character setup",
         value: "Excluded in this mode",
         tone: "warning",
       }),
@@ -399,7 +430,8 @@ describe("usePlaygroundContextItems role-play state", () => {
           rolePlayCompatibility: {
             status: "included",
             reasonCode: "persona_flow",
-            messageKey: "playground:composer.rolePlayCompatibility.persona_flow",
+            messageKey:
+              "playground:composer.rolePlayCompatibility.persona_flow",
           },
           rolePlayState: {
             ...baseRolePlayState,
@@ -417,10 +449,31 @@ describe("usePlaygroundContextItems role-play state", () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: "rolePlayCompatibility",
-          label: "Persona context",
-          value: "Included",
+          label: "Persona setup",
+          value: "Selected",
         }),
       ]),
     );
+  });
+  it("does not show a pending quick insertion as a prompt context chip", () => {
+    const { result } = renderHook(() =>
+      usePlaygroundContextItems(
+        createDeps({ selectedQuickPrompt: "Pending review" }),
+      ),
+    );
+    expect(result.current.find((item) => item.id === "prompt")).toBeUndefined();
+  });
+
+  it("labels an enabled local scene as a draft rather than active behavior", () => {
+    const { result } = renderHook(() =>
+      usePlaygroundContextItems(
+        createDeps({
+          rolePlayState: { ...baseRolePlayState, scene: { active: true } },
+        }),
+      ),
+    );
+    expect(
+      result.current.find((item) => item.id === "rolePlayScene")?.value,
+    ).toBe("Draft enabled");
   });
 });

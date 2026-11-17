@@ -25,6 +25,10 @@ describe("Theme editor regressions", () => {
   })
 
   it("treats transient themes without ids as create mode in the advanced editor", () => {
+    vi.spyOn(Date, "now").mockReturnValue(
+      Date.parse("2026-04-18T22:58:00.123Z")
+    )
+
     const onSave = vi.fn()
     const onClose = vi.fn()
     const draftTheme = {
@@ -53,7 +57,7 @@ describe("Theme editor regressions", () => {
 
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: generateThemeId("Draft Quick Theme"),
+        id: "custom-draft-quick-theme-mo4xu1q3",
         name: "Draft Quick Theme"
       })
     )

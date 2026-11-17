@@ -1,3 +1,4 @@
+import type { InitialChatSetupAttempt } from "@/utils/settings-return"
 import type { TFunction } from "i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
@@ -28,6 +29,8 @@ export type ManualServerTransitionInput = {
   serverUrl: string
   apiKey: string
   persistence: ApiKeyPersistence
+  assertCurrent?: () => void
+  initialSetup?: InitialChatSetupAttempt
 }
 
 export const shouldClearManualApiKeyForServerChange = (
@@ -46,6 +49,7 @@ export const shouldClearManualApiKeyForServerChange = (
 export const commitManualServerTransition = async (
   input: ManualServerTransitionInput
 ): Promise<"device" | "session" | "memory"> => {
+  input.assertCurrent?.()
   if (!normalizeServerOrigin(input.serverUrl)) {
     throw new Error("Invalid server URL")
   }
@@ -56,6 +60,7 @@ export const commitManualServerTransition = async (
     error.status = 401
     throw error
   }
+  input.assertCurrent?.()
   return await tldwClient.saveManualSingleUserCredential(input)
 }
 

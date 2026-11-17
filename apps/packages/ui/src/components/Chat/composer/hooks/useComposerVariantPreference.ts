@@ -1,6 +1,10 @@
 import React from "react"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { ChatComposerVariant } from "../types"
+import {
+  forgetPendingComposerProfileRead,
+  readComposerProfilePreferences,
+} from "./composer-profile-read"
 
 export const COMPOSER_VARIANT_PREFERENCE_KEY = "tldw:composerVariant"
 
@@ -85,9 +89,7 @@ export function useComposerVariantPreference(
     const hydrateVersion = localChangeVersionRef.current
     const hydrate = async () => {
       try {
-        const profile = await tldwClient.getCurrentUserProfile({
-          sections: "preferences",
-        })
+        const profile = await readComposerProfilePreferences()
         if (cancelled) return
         if (localChangeVersionRef.current !== hydrateVersion) return
         const serverValue = profile?.preferences?.[COMPOSER_VARIANT_PROFILE_KEY]
@@ -148,6 +150,7 @@ export function useComposerVariantPreference(
       // Fire-and-forget server update. Errors are swallowed: the user's
       // local choice already applied; a failed sync just means the
       // preference doesn't propagate to other devices this time.
+      forgetPendingComposerProfileRead()
       void tldwClient
         .updateCurrentUserProfile({
           updates: [{ key: COMPOSER_VARIANT_PROFILE_KEY, value: next }],

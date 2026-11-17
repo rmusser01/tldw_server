@@ -7,10 +7,10 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from tldw_Server_API.app.api.v1.schemas.setup_schemas import SetupProviderValidationResponse
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+from tldw_Server_API.app.core.Setup.setup_schemas import SetupProviderValidationResponse
 
 VALIDATION_STATUS_READY = "ready"
 VALIDATION_STATUS_ACCEPTED = "accepted"
@@ -224,6 +224,18 @@ async def validate_local_openai_endpoint(
         close = getattr(response, "close", None)
         if callable(close):
             close()
+
+    selected_model = (payload.model or "").strip()
+    if selected_model and selected_model not in model_ids:
+        return SetupProviderValidationResponse(
+            provider_key=payload.provider_key,
+            status=VALIDATION_STATUS_FAILED,
+            failure_category="model_unavailable",
+            message="The selected model is unavailable. Select a discovered model or switch provider.",
+            models=model_ids,
+            validation_level="live_non_generative",
+            can_gate_first_chat=False,
+        )
 
     return SetupProviderValidationResponse(
         provider_key=payload.provider_key,

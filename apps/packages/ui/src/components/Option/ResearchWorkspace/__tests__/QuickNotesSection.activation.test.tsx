@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useWorkspaceStore } from "@/store/workspace"
 import { hydrateWorkspaceFromServer } from "@/store/workspace-api"
 import { serverWorkspacePayload } from "@/store/__tests__/workspace-activation.fixtures"
@@ -33,6 +33,11 @@ const install = async () => {
 }
 
 describe("canonical QuickNotes adapter (unit boundary doubles)", () => {
+  const originalLocks = Object.getOwnPropertyDescriptor(navigator, "locks")
+  afterEach(() => {
+    if (originalLocks) Object.defineProperty(navigator, "locks", originalLocks)
+    else Reflect.deleteProperty(navigator, "locks")
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
@@ -160,6 +165,12 @@ describe("canonical QuickNotes adapter (unit boundary doubles)", () => {
   })
 
   it("retains a draft edited while an ordinary save is in flight", async () => {
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: {
+        request: (_key: string, operation: () => unknown) => Promise.resolve().then(operation)
+      }
+    })
     useWorkspaceStore.getState().initializeWorkspace("Legacy")
     useWorkspaceStore.getState().setCurrentNote({ id: 7, title: "Draft", content: "First", keywords: [], version: 1, isDirty: true })
     let resolve!: (value: unknown) => void

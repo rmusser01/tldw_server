@@ -52,6 +52,10 @@ Operational guidance for running, migrating, backing up, and troubleshooting the
      - Safe replay: transient failure on a replay-safe step.
      - Conditional replay: transient failure on a side-effecting or human-reviewed step.
      - Fix-before-rerun: definition, input, or policy failures. Run `POST /api/v1/workflows/preflight` after the change before retrying.
+   - Manual `POST /runs/{run_id}/retry` requires a failed run with a recorded failed step. It replays that step, retains successful prefix outputs and leaves the failed attempt in history; it never skips a failed prerequisite.
+   - Concurrent requests for the same observed failure admit one execution. A new failure can be retried again; queued/running, successful and cancelled runs are not restarted by Retry.
+   - `result=applied` acknowledges asynchronous dispatch. Follow the run, step attempts and terminal result to verify execution; it does not guarantee that a side-effecting step is safe to replay.
+   - The `llm` step checks Admin provider enablement and model restrictions before streaming or ordinary dispatch. A restricted provider needs an explicit or configured model; an unresolved model is refused.
    - If the derived investigation looks stale or incomplete, fall back to `GET /runs/{run_id}/events` and artifact/log inspection.
 2) User cannot see run
    - Check tenant and owner constraints; admins can filter with `owner=`.

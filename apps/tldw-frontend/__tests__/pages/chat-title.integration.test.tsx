@@ -22,7 +22,7 @@ const fixture = vi.hoisted(() => ({
   updateChat: vi.fn(),
   snapshot: vi.fn(),
 }));
-vi.mock('next/dynamic', () => ({ default: () => () => <main>Chat workspace</main> }));
+vi.mock('@/routes/option-chat', () => ({ default: () => <main>Chat workspace</main> }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: fixture.t }) }));
 vi.mock('react-router-dom', () => ({
   useLocation: () => ({ pathname: '/chat' }),
@@ -123,7 +123,8 @@ vi.mock('@/hooks/useDarkmode', () => ({
 vi.mock('@/hooks/useSelectedCharacter', () => ({ useSelectedCharacter: () => [null, vi.fn()] }));
 vi.mock('@/components/Sidepanel/Chat/TtsClipsDrawer', () => ({ TtsClipsDrawer: () => null }));
 vi.mock('@/components/Layouts/HeaderShortcuts', () => ({ HeaderShortcuts: () => null }));
-vi.mock('antd', () => ({
+vi.mock('antd', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('antd')>()),
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   Modal: () => null,
   Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
@@ -147,7 +148,7 @@ vi.mock('antd', () => ({
   ),
 }));
 
-import ChatPage from '@web/pages/chat';
+import ChatPage from '@web/components/ChatPageContent';
 import { Header } from '@/components/Layouts/Header';
 import { useStoreMessageOption } from '@/store/option';
 import { usePlaygroundSessionStore } from '@/store/playground-session';

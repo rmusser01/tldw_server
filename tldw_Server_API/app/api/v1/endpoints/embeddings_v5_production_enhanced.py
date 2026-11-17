@@ -48,7 +48,6 @@ from loguru import logger
 from prometheus_client import REGISTRY, Counter, Gauge, Histogram
 from pydantic import BaseModel, Field
 
-from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     RequireRole,
@@ -67,30 +66,14 @@ from tldw_Server_API.app.api.v1.schemas.embeddings_models import (
     EmbeddingUsage,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventCategory, AuditEventType
-from tldw_Server_API.app.core.AuthNZ.byok_config import (
-    PROVIDER_APP_CONFIG_KEYS,
-    runtime_base_url_override_provenance,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    ResolvedByokCredentials,
-    record_byok_missing_credentials,
-    resolve_byok_credentials,
-    resolve_static_server_fallback_from_snapshot,
-)
-from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
 from tldw_Server_API.app.core.AuthNZ.permissions import EMBEDDINGS_ADMIN, SYSTEM_CONFIGURE
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     DaemonCapacityError,
-    await_bounded_sync_call,
     await_owned_worker,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
@@ -125,8 +108,6 @@ from tldw_Server_API.app.core.Embeddings.provider_resolution import (
 )
 from tldw_Server_API.app.core.Embeddings.request_batching import (
     EmbeddingsRateLimitError,
-)
-from tldw_Server_API.app.core.Embeddings.request_batching import (
     create_embeddings_batch_async as batching_create_embeddings_batch_async,
 )
 from tldw_Server_API.app.core.Embeddings.request_types import (
@@ -140,9 +121,6 @@ from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingRateLimitError,
     EmbeddingRequestContext,
     ProviderModelIntent,
-)
-from tldw_Server_API.app.core.Embeddings.result_mapping import (
-    map_embedding_response_headers,
 )
 from tldw_Server_API.app.core.Embeddings.vector_validation import (
     validated_embedding_vectors,
@@ -159,23 +137,18 @@ from tldw_Server_API.app.core.exceptions import (
 )
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy as _RetryPolicy,
-)
-from tldw_Server_API.app.core.http_client import (
-    afetch as _http_afetch,
-)
-from tldw_Server_API.app.core.http_client import (
     create_async_client as _create_async_client,
 )
 
 # Circuit Breaker
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreakerOpenError as CircuitBreakerError
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import registry as circuit_breaker_registry
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerOpenError as CircuitBreakerError,
+    registry as circuit_breaker_registry,
+)
 from tldw_Server_API.app.core.Infrastructure.redis_factory import (
     create_async_redis_client,
-    ensure_async_client_closed,
 )
-from tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry import get_embeddings_registry
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     encode_huggingface_model_path,
     encode_provider_model_path,
@@ -184,15 +157,40 @@ from tldw_Server_API.app.core.LLM_Calls.providers.base import (
     EmbeddingsAdapterUnavailableError,
 )
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
+    PROVIDER_APP_CONFIG_KEYS,
+    runtime_base_url_override_provenance,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    ResolvedByokCredentials,
+    record_byok_missing_credentials,
+    resolve_static_server_fallback_from_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
 from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
 from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
-from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode, is_truthy
 from tldw_Server_API.app.core.Usage.usage_tracker import (
     backfill_legacy_tokens_to_ledger,
     log_llm_usage,
 )
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+import tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps as _Audit_DB_Deps
+import tldw_Server_API.app.core.AuthNZ.crypto_utils as _crypto_utils
+import tldw_Server_API.app.core.Embeddings.ChromaDB_Library as _ChromaDB_Library
+import tldw_Server_API.app.core.Embeddings.result_mapping as _result_mapping
+import tldw_Server_API.app.core.Embeddings.workflow_runner as _workflow_runner
+import tldw_Server_API.app.core.Infrastructure.redis_factory as _redis_factory
+import tldw_Server_API.app.core.LLM_Calls.bounded_daemon as _bounded_daemon
+import tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry as _embeddings_adapter_registry
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
+import tldw_Server_API.app.core.Provider_Credentials.byok_runtime as _byok_runtime
+import tldw_Server_API.app.core.Streaming.streams as _streams
+import tldw_Server_API.app.core.config as _config
+import tldw_Server_API.app.core.http_client as _http_client
+import tldw_Server_API.app.core.testing as _testing
 
 # Exception buckets to replace broad Exception catches while preserving behavior.
 try:
@@ -234,10 +232,8 @@ try:
         LocalAPICfg,
         ONNXModelCfg,
         OpenAIModelCfg,
-        resolve_model_storage_base_dir,
-    )
-    from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import (
         create_embeddings_batch_async as create_explicit_embeddings_batch_async,
+        resolve_model_storage_base_dir,
     )
 
     EMBEDDINGS_AVAILABLE = True
@@ -478,7 +474,7 @@ def _cfg_int(name: str, default_val: int) -> int:
 # Backpressure and quotas configuration
 def _cfg_float(name: str, default_val: float) -> float:
     try:
-        v = settings.get(name, None)
+        v = _config.settings.get(name, None)
         if isinstance(v, (int, float)):
             return float(v)
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
@@ -562,7 +558,7 @@ def _is_embeddings_backpressure_redis_enabled() -> bool:
         return is_truthy(redis_enabled_env)
 
     try:
-        configured = settings.get("REDIS_ENABLED", None)
+        configured = _config.settings.get("REDIS_ENABLED", None)
         if configured is not None:
             if isinstance(configured, str):
                 return is_truthy(configured)
@@ -643,7 +639,7 @@ async def _check_backpressure_and_quotas(request: Request, user: User) -> HTTPEx
         finally:
             try:
                 if client is not None:
-                    await ensure_async_client_closed(client)
+                    await _redis_factory.ensure_async_client_closed(client)
             except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug("Failed to close embeddings backpressure Redis client: {}", exc)
 
@@ -675,7 +671,7 @@ async def _check_backpressure_and_quotas(request: Request, user: User) -> HTTPEx
             finally:
                 with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                     if client2 is not None:
-                        await ensure_async_client_closed(client2)
+                        await _redis_factory.ensure_async_client_closed(client2)
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
         user_id = getattr(user, "id", "anon")
         request_state = getattr(request, "state", None)
@@ -849,7 +845,7 @@ async def _resolve_embeddings_byok(
                 raise ByokResolutionError("invalid_provider_credentials", provider)
 
         try:
-            server_config_snapshot = load_server_config_snapshot()
+            server_config_snapshot = _byok_helpers.load_server_config_snapshot()
             static_fallback = resolve_static_server_fallback_from_snapshot(
                 provider,
                 server_config_snapshot,
@@ -877,7 +873,7 @@ async def _resolve_embeddings_byok(
             resolver_kwargs["rejected_credential_generation"] = (
                 rejected_credential_generation
             )
-        resolution = await resolve_byok_credentials(
+        resolution = await _byok_runtime.resolve_byok_credentials(
             provider,
             **resolver_kwargs,
         )
@@ -909,20 +905,11 @@ def _record_oauth_401_retry(provider: str, outcome: str) -> None:
         pass
 
 
-def _is_test_context() -> bool:
-    try:
-        if os.getenv("PYTEST_CURRENT_TEST"):
-            return True
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        pass
-    return env_flag_enabled("TESTING") or is_test_mode()
-
-
 def _should_skip_missing_key(
     provider: str,
     credentials: ResolvedByokCredentials | None = None,
 ) -> bool:
-    if not _is_test_context():
+    if not _testing.is_test_context():
         return False
     if credentials is None:
         return True
@@ -966,7 +953,7 @@ PROVIDER_MODELS = {
 # Optional allowlists and per-model token limits (override via settings)
 def _get_allowed_providers() -> list[str] | None:
     try:
-        vals = settings.get("ALLOWED_EMBEDDING_PROVIDERS", [])
+        vals = _config.settings.get("ALLOWED_EMBEDDING_PROVIDERS", [])
         if isinstance(vals, list) and vals:
             return [str(v).lower() for v in vals]
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
@@ -975,7 +962,7 @@ def _get_allowed_providers() -> list[str] | None:
 
 
 def _chroma_manager_for_user(user: User) -> ChromaDBManager:
-    cfg = settings.get("EMBEDDING_CONFIG", {}).copy()
+    cfg = _config.settings.get("EMBEDDING_CONFIG", {}).copy()
     try:
         user_db_base_dir = str(DatabasePaths.get_user_db_base_dir())
     except Exception as exc:  # noqa: BLE001 - canonical storage failures must fail closed
@@ -985,8 +972,8 @@ def _chroma_manager_for_user(user: User) -> ChromaDBManager:
         )
         raise
     cfg["USER_DB_BASE_DIR"] = user_db_base_dir
-    user_id = getattr(user, "id", None) or settings.get("SINGLE_USER_FIXED_ID", "1")
-    return ChromaDBManager(user_id=str(user_id), user_embedding_config=cfg)
+    user_id = getattr(user, "id", None) or _config.settings.get("SINGLE_USER_FIXED_ID", "1")
+    return _ChromaDB_Library.ChromaDBManager(user_id=str(user_id), user_embedding_config=cfg)
 
 
 def _split_provider_model(model: str) -> tuple[str | None, str]:
@@ -997,7 +984,7 @@ def _split_provider_model(model: str) -> tuple[str | None, str]:
 
 def _resolve_model_and_provider(model: str | None, provider: str | None) -> tuple[str, str]:
     # Compatibility shim: provider_resolution owns this once endpoint callers migrate.
-    cfg = settings.get("EMBEDDING_CONFIG", {}) or {}
+    cfg = _config.settings.get("EMBEDDING_CONFIG", {}) or {}
     try:
         intent = resolve_provider_model(
             model,
@@ -1013,7 +1000,7 @@ def _resolve_model_and_provider(model: str | None, provider: str | None) -> tupl
 
 def _get_allowed_models() -> list[str] | None:
     try:
-        vals = settings.get("ALLOWED_EMBEDDING_MODELS", [])
+        vals = _config.settings.get("ALLOWED_EMBEDDING_MODELS", [])
         if isinstance(vals, list) and vals:
             return [str(v) for v in vals]
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
@@ -1023,7 +1010,7 @@ def _get_allowed_models() -> list[str] | None:
 def _get_model_max_tokens(provider: str, model: str) -> int:
     # Settings-driven override map: {"provider:model": max_tokens} or {"model": max_tokens}
     try:
-        mapping = settings.get("EMBEDDING_MODEL_MAX_TOKENS", {}) or {}
+        mapping = _config.settings.get("EMBEDDING_MODEL_MAX_TOKENS", {}) or {}
         key1 = f"{provider}:{model}"
         if key1 in mapping:
             return int(mapping[key1])
@@ -1342,7 +1329,7 @@ async def _embeddings_router_lifespan(app):
         if ci and auto_dl:
             async def _preload_models_on_startup():
                 try:
-                    cfg = settings.get("EMBEDDING_CONFIG", {}) or {}
+                    cfg = _config.settings.get("EMBEDDING_CONFIG", {}) or {}
                     preload_list = []
                     env_models = os.getenv("PRELOAD_EMBEDDING_MODELS")
                     if env_models:
@@ -1380,7 +1367,7 @@ async def _embeddings_router_lifespan(app):
                                 if not is_model_allowed(provider, model):
                                     logger.warning(f"Skipping preload for disallowed model {provider}:{model}")
                                     continue
-                                if provider == "openai" and not settings.get("OPENAI_API_KEY"):
+                                if provider == "openai" and not _config.settings.get("OPENAI_API_KEY"):
                                     logger.info("Skipping OpenAI preload due to missing OPENAI_API_KEY")
                                     continue
                                 await create_embeddings_batch_async(texts=["ci preload"], provider=provider, model_id=model)
@@ -1494,9 +1481,9 @@ def get_cache_key(
 def _embedding_cache_key_secret() -> bytes:
     """Return a stable keyed-hash secret for embedding cache partitioning."""
     try:
-        return derive_hmac_key()
+        return _crypto_utils.derive_hmac_key()
     except ValueError:
-        if _is_test_context():
+        if _testing.is_test_context():
             # Keep cache keys deterministic in test contexts when AuthNZ secrets are absent.
             return b"tldw_embeddings_cache_hmac_fallback"
         raise
@@ -1788,9 +1775,9 @@ async def _invoke_embeddings_adapter(
     result: object | None = None
     failure: _EmbeddingAdapterFailure | None = None
     try:
-        result = await await_bounded_sync_call(
+        result = await _bounded_daemon.await_bounded_sync_call(
             lambda: adapter.embed(adapter_request),
-            pool=SYNC_ADAPTER_CALL_POOL,
+            pool=_bounded_daemon.SYNC_ADAPTER_CALL_POOL,
             exhaustion_message="Embeddings adapter capacity is exhausted",
             on_cancel_result=on_cancel_result,
         )
@@ -2153,7 +2140,7 @@ def _should_enforce_policy(user: User | None = None, principal: AuthPrincipal | 
         return True
     # 3) Settings-level boolean if provided
     try:
-        cfg_val = settings.get("EMBEDDINGS_ENFORCE_POLICY", None)
+        cfg_val = _config.settings.get("EMBEDDINGS_ENFORCE_POLICY", None)
         if isinstance(cfg_val, bool):
             return cfg_val
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
@@ -2191,7 +2178,7 @@ def resolve_fallback_chain(primary_provider: str) -> list[str]:
     # Compatibility shim: embedding_policy owns fallback-chain resolution after callers migrate.
     mapping = None
     try:
-        mapping = settings.get("EMBEDDINGS_FALLBACK_CHAIN", {}) or {}
+        mapping = _config.settings.get("EMBEDDINGS_FALLBACK_CHAIN", {}) or {}
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         pass
     return embedding_policy_core.resolve_fallback_chain(
@@ -2206,7 +2193,7 @@ def _fallback_model_map() -> dict[str, dict[str, str]]:
     """
     configured_map = None
     try:
-        configured_map = settings.get("EMBEDDINGS_FALLBACK_MODEL_MAP", None)
+        configured_map = _config.settings.get("EMBEDDINGS_FALLBACK_MODEL_MAP", None)
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         pass
     return embedding_policy_core.fallback_model_map(
@@ -2226,7 +2213,7 @@ def map_model_for_provider(src_provider: str, dst_provider: str, model_id: str) 
 # Models that require trust_remote_code=True for HuggingFace loading
 def _hf_trusts_remote_code(model_name: str) -> bool:
     try:
-        patterns = settings.get("TRUSTED_HF_REMOTE_CODE_MODELS", []) or []
+        patterns = _config.settings.get("TRUSTED_HF_REMOTE_CODE_MODELS", []) or []
         for pat in patterns:
             if fnmatch(model_name, pat) or fnmatch(model_name.lower(), pat.lower()):
                 logger.info(f"HF trust_remote_code enabled for model '{model_name}' (matched '{pat}')")
@@ -2308,7 +2295,7 @@ def _policy_error_to_http(exc: EmbeddingPolicyError) -> HTTPException:
 
 def _embedding_policy_setting(name: str, default: Any) -> Any:
     try:
-        return settings.get(name, default)
+        return _config.settings.get(name, default)
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         return default
 
@@ -2395,7 +2382,7 @@ def build_provider_config(
         config = {
             "provider": "openai",
             "model_name_or_path": model,
-            "api_key": api_key or settings.get("OPENAI_API_KEY"),
+            "api_key": api_key or _config.settings.get("OPENAI_API_KEY"),
         }
         if api_url:
             config["api_url"] = api_url
@@ -2422,7 +2409,7 @@ def build_provider_config(
         config = {
             "provider": "cohere",
             "model_name_or_path": model,
-            "api_key": api_key or settings.get("COHERE_API_KEY"),
+            "api_key": api_key or _config.settings.get("COHERE_API_KEY"),
         }
         if api_url:
             config["api_url"] = api_url
@@ -2431,13 +2418,13 @@ def build_provider_config(
         config = {
             "provider": "voyage",
             "model_name_or_path": model,
-            "api_key": api_key or settings.get("VOYAGE_API_KEY"),
+            "api_key": api_key or _config.settings.get("VOYAGE_API_KEY"),
         }
         if api_url:
             config["api_url"] = api_url
         return config
     elif provider == EmbeddingProvider.GOOGLE:
-        configured_key = api_key or settings.get("GOOGLE_API_KEY")
+        configured_key = api_key or _config.settings.get("GOOGLE_API_KEY")
         config = {
             "provider": "google",
             "model_name_or_path": model,
@@ -2453,7 +2440,7 @@ def build_provider_config(
         config = {
             "provider": "mistral",
             "model_name_or_path": model,
-            "api_key": api_key or settings.get("MISTRAL_API_KEY"),
+            "api_key": api_key or _config.settings.get("MISTRAL_API_KEY"),
         }
         if api_url:
             config["api_url"] = api_url
@@ -2467,7 +2454,7 @@ def build_provider_config(
         config = {
             "provider": "local_api",
             "model_name_or_path": model,
-            "api_url": api_url or settings.get("LOCAL_API_URL"),
+            "api_url": api_url or _config.settings.get("LOCAL_API_URL"),
         }
         if api_key:
             config["api_key"] = api_key
@@ -2517,7 +2504,7 @@ async def create_embeddings_with_circuit_breaker(
                     ) from exc
                 base = str(config["api_url"]).rstrip("/")
                 client = await connection_manager.get_session(provider)
-                resp = await _http_afetch(
+                resp = await _http_client.afetch(
                     method="POST",
                     url=f"{base}/{encoded_model}",
                     client=client,
@@ -2601,7 +2588,7 @@ async def create_embeddings_with_circuit_breaker(
                 )
             elif provider == "cohere":
                 # Direct async call to Cohere embeddings
-                api_key = config.get("api_key") or settings.get("COHERE_API_KEY")
+                api_key = config.get("api_key") or _config.settings.get("COHERE_API_KEY")
                 if not api_key:
                     raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Cohere API key not configured")
                 mdl = config.get("model_name_or_path", model_id) or "embed-english-v3.0"
@@ -2609,7 +2596,7 @@ async def create_embeddings_with_circuit_breaker(
                 url = "https://api.cohere.com/v1/embed"
                 headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
                 payload = {"model": mdl, "texts": texts, "input_type": "search_document"}
-                resp = await _http_afetch(
+                resp = await _http_client.afetch(
                     method="POST",
                     url=url,
                     client=client,
@@ -2644,7 +2631,7 @@ async def create_embeddings_with_circuit_breaker(
                 return embs
             elif provider == "google":
                 # Direct async call to Google Generative Language API (text-embedding-004)
-                api_key = config.get("api_key") or settings.get("GOOGLE_API_KEY")
+                api_key = config.get("api_key") or _config.settings.get("GOOGLE_API_KEY")
                 if not api_key:
                     raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Google API key not configured")
                 raw_model = str(
@@ -2672,7 +2659,7 @@ async def create_embeddings_with_circuit_breaker(
                 }
                 reqs = [{"model": model_name, "content": {"parts": [{"text": t}]}} for t in texts]
                 payload = {"requests": reqs}
-                resp = await _http_afetch(
+                resp = await _http_client.afetch(
                     method="POST",
                     url=url,
                     client=client,
@@ -2711,7 +2698,7 @@ async def create_embeddings_with_circuit_breaker(
                 return embs
             elif provider == "mlx":
                 loop = asyncio.get_running_loop()
-                registry = get_embeddings_registry()
+                registry = _embeddings_adapter_registry.get_embeddings_registry()
                 adapter = registry.get_adapter("mlx")
                 if adapter is None:
                     raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="MLX embeddings adapter unavailable")
@@ -3319,7 +3306,7 @@ class _EndpointEmbeddingExecutor:
         adapter = None
         lookup_failure: _EmbeddingAdapterFailure | None = None
         try:
-            registry = get_embeddings_registry()
+            registry = _embeddings_adapter_registry.get_embeddings_registry()
             adapter = registry.get_adapter(provider)
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
             lookup_failure = _EmbeddingAdapterFailure("execution", type(exc).__name__)
@@ -3657,7 +3644,7 @@ def _build_embedding_request_orchestrator(
     executor: _EndpointEmbeddingExecutor | None = None,
 ) -> EmbeddingRequestOrchestrator:
     try:
-        settings_config = settings.get("EMBEDDING_CONFIG", {}) or {}
+        settings_config = _config.settings.get("EMBEDDING_CONFIG", {}) or {}
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         settings_config = {}
     settings_config = settings_config if isinstance(settings_config, dict) else {}
@@ -3715,7 +3702,7 @@ def _build_embedding_inline_workflow_runner(
     pre_execute: PreExecuteHook | None = None,
 ) -> EmbeddingInlineWorkflowRunner:
     """Build the inline workflow runner for the feature-flagged embeddings path."""
-    return EmbeddingInlineWorkflowRunner(
+    return _workflow_runner.EmbeddingInlineWorkflowRunner(
         orchestrator.preparation_pipeline,
         orchestrator.execution_coordinator,
         pre_execute=pre_execute,
@@ -4074,7 +4061,7 @@ async def _create_embedding_with_orchestrator(
         await endpoint_executor.touch_resolved_credentials(outcome.provider, outcome.model)
         _record_orchestrator_cache_hits(outcome)
         rg_actual_units = int(outcome.total_tokens or outcome.prompt_tokens or rg_reserved_units)
-        for header_name, header_value in map_embedding_response_headers(outcome).items():
+        for header_name, header_value in _result_mapping.map_embedding_response_headers(outcome).items():
             if response is not None:
                 response.headers[str(header_name)] = str(header_value)
 
@@ -4471,7 +4458,7 @@ async def _create_embedding_legacy(
             adapter = None
             lookup_failure: _EmbeddingAdapterFailure | None = None
             try:
-                registry = get_embeddings_registry()
+                registry = _embeddings_adapter_registry.get_embeddings_registry()
                 adapter = registry.get_adapter(provider)
             except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
                 lookup_failure = _EmbeddingAdapterFailure("execution", type(exc).__name__)
@@ -5041,7 +5028,7 @@ async def create_embeddings_batch_endpoint(
 )
 async def list_embedding_models():
     """List configured/known models with allowlist status."""
-    cfg = settings.get("EMBEDDING_CONFIG", {}) or {}
+    cfg = _config.settings.get("EMBEDDING_CONFIG", {}) or {}
     default_model = cfg.get("default_model_id") or cfg.get("embedding_model") or "text-embedding-3-small"
     default_provider = cfg.get("embedding_provider", "openai")
 
@@ -5233,7 +5220,7 @@ async def get_tenant_quotas(
     finally:
         try:
             if client is not None:
-                await ensure_async_client_closed(client)
+                await _redis_factory.ensure_async_client_closed(client)
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
             pass
 
@@ -5289,7 +5276,7 @@ async def bump_job_priority(
     finally:
         try:
             if client is not None:
-                await ensure_async_client_closed(client)
+                await _redis_factory.ensure_async_client_closed(client)
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
             # Connection cleanup must never interfere with HTTP error semantics
             pass
@@ -5574,28 +5561,28 @@ async def health_check():
             }
 
     try:
-        hyde_enabled = bool(settings.get("HYDE_ENABLED", False))
+        hyde_enabled = bool(_config.settings.get("HYDE_ENABLED", False))
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         hyde_enabled = False
     try:
-        hyde_questions = int(settings.get("HYDE_QUESTIONS_PER_CHUNK", 0) or 0)
+        hyde_questions = int(_config.settings.get("HYDE_QUESTIONS_PER_CHUNK", 0) or 0)
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         hyde_questions = 0
     hyde_info = {
         "enabled": hyde_enabled,
         "questions_per_chunk": hyde_questions,
     }
-    hyde_provider = settings.get("HYDE_PROVIDER")
-    hyde_model = settings.get("HYDE_MODEL")
+    hyde_provider = _config.settings.get("HYDE_PROVIDER")
+    hyde_model = _config.settings.get("HYDE_MODEL")
     if hyde_provider:
         hyde_info["provider"] = hyde_provider
     if hyde_model:
         hyde_info["model"] = hyde_model
-    hyde_weight = settings.get("HYDE_WEIGHT_QUESTION_MATCH")
+    hyde_weight = _config.settings.get("HYDE_WEIGHT_QUESTION_MATCH")
     if hyde_weight is not None:
         with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
             hyde_info["weight"] = float(hyde_weight)
-    hyde_k_fraction = settings.get("HYDE_K_FRACTION")
+    hyde_k_fraction = _config.settings.get("HYDE_K_FRACTION")
     if hyde_k_fraction is not None:
         with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
             hyde_info["k_fraction"] = float(hyde_k_fraction)
@@ -5847,7 +5834,7 @@ async def list_dlq_items(
     finally:
         try:
             if client is not None:
-                await ensure_async_client_closed(client)
+                await _redis_factory.ensure_async_client_closed(client)
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
             # Connection cleanup must never interfere with HTTP error semantics
             pass
@@ -5929,7 +5916,7 @@ async def requeue_dlq_item(
             out["warning"] = warning
         # Audit: DLQ requeue single
         try:
-            svc = await get_audit_service_for_user(current_user)
+            svc = await _Audit_DB_Deps.get_audit_service_for_user(current_user)
             ctx = AuditContext(
                 user_id=str(getattr(current_user, "id", "")),
                 endpoint="/api/v1/embeddings/dlq/requeue",
@@ -5954,7 +5941,7 @@ async def requeue_dlq_item(
         dlq_requeue_errors_total.labels(queue_name=dlq_stream, error_type=type(e).__name__).inc()
         raise HTTPException(status_code=500, detail="Failed to requeue DLQ item") from e
     finally:
-        await ensure_async_client_closed(client)
+        await _redis_factory.ensure_async_client_closed(client)
 
 
 class DLQRequeueBulkRequest(BaseModel):
@@ -6038,7 +6025,7 @@ async def requeue_dlq_bulk(
             results.append(res)
         # Audit: DLQ bulk requeue summary
         try:
-            svc = await get_audit_service_for_user(current_user)
+            svc = await _Audit_DB_Deps.get_audit_service_for_user(current_user)
             ctx = AuditContext(
                 user_id=str(getattr(current_user, "id", "")),
                 endpoint="/api/v1/embeddings/dlq/requeue/bulk",
@@ -6066,7 +6053,7 @@ async def requeue_dlq_bulk(
             pass
         return {"from": dlq_stream, "to": live_stream, "results": results}
     finally:
-        await ensure_async_client_closed(client)
+        await _redis_factory.ensure_async_client_closed(client)
 
 
 @router.get(
@@ -6128,7 +6115,7 @@ async def get_dlq_stats(
 
         return {"queues": depths, "dlq": dlq_depths, "total_dlq": total_dlq, "stages": stages}
     finally:
-        await ensure_async_client_closed(client)
+        await _redis_factory.ensure_async_client_closed(client)
 
 
 # ---------------------------------------------------------------------------
@@ -6173,7 +6160,7 @@ async def set_dlq_state(req: DLQStateSetRequest, current_user: User = Depends(ge
         await client.hset(_dlq_state_key(dlq_stream, req.entry_id), mapping=val)
         # Audit: DLQ quarantine state change
         try:
-            svc = await get_audit_service_for_user(current_user)
+            svc = await _Audit_DB_Deps.get_audit_service_for_user(current_user)
             ctx = AuditContext(
                 user_id=str(getattr(current_user, "id", "")),
                 endpoint="/api/v1/embeddings/dlq/state",
@@ -6192,7 +6179,7 @@ async def set_dlq_state(req: DLQStateSetRequest, current_user: User = Depends(ge
             pass
         return {"ok": True, "stream": dlq_stream, "entry_id": req.entry_id, "state": st}
     finally:
-        await ensure_async_client_closed(client)
+        await _redis_factory.ensure_async_client_closed(client)
 
 
 # ---------------------------------------------------------------------------
@@ -6229,7 +6216,7 @@ async def get_stage_status(current_user: User = Depends(get_request_user)):
             }
         return out
     finally:
-        await ensure_async_client_closed(client)
+        await _redis_factory.ensure_async_client_closed(client)
 
 
 @router.post(
@@ -6255,7 +6242,7 @@ async def control_stage(req: StageControlRequest, current_user: User = Depends(g
                 raise HTTPException(status_code=400, detail="Invalid action; must be pause|resume|drain")
         # Audit
         try:
-            svc = await get_audit_service_for_user(current_user)
+            svc = await _Audit_DB_Deps.get_audit_service_for_user(current_user)
             ctx = AuditContext(
                 user_id=str(getattr(current_user, "id", "")),
                 endpoint="/api/v1/embeddings/stage/control",
@@ -6274,7 +6261,7 @@ async def control_stage(req: StageControlRequest, current_user: User = Depends(g
             pass
         return {"ok": True, "stages": stages, "action": req.action}
     finally:
-        await ensure_async_client_closed(client)
+        await _redis_factory.ensure_async_client_closed(client)
 
 
 # ---------------------------------------------------------------------------
@@ -6301,7 +6288,7 @@ async def mark_job_skipped(req: JobSkipRequest, current_user: User = Depends(get
         await client.set(_skip_key(req.job_id), "1", ex=int(req.ttl_seconds))
         # Audit
         try:
-            svc = await get_audit_service_for_user(current_user)
+            svc = await _Audit_DB_Deps.get_audit_service_for_user(current_user)
             ctx = AuditContext(
                 user_id=str(getattr(current_user, "id", "")),
                 endpoint="/api/v1/embeddings/job/skip",
@@ -6320,7 +6307,7 @@ async def mark_job_skipped(req: JobSkipRequest, current_user: User = Depends(get
             pass
         return {"ok": True, "job_id": req.job_id, "ttl_seconds": req.ttl_seconds}
     finally:
-        await ensure_async_client_closed(client)
+        await _redis_factory.ensure_async_client_closed(client)
 
 
 @router.get(
@@ -6334,7 +6321,7 @@ async def get_job_skip_status(job_id: str = Query(..., description="Job ID to ch
         val = await client.get(_skip_key(job_id))
         return {"job_id": job_id, "skipped": str(val).lower() in ("1", "true", "yes")}
     finally:
-        await ensure_async_client_closed(client)
+        await _redis_factory.ensure_async_client_closed(client)
 
 
 # ---------------------------------------------------------------------------
@@ -6408,7 +6395,7 @@ async def get_ledger_status(
             out["dedupe"] = entry
         return out
     finally:
-        await ensure_async_client_closed(client)
+        await _redis_factory.ensure_async_client_closed(client)
 
 
 # ---------------------------------------------------------------------------
@@ -6705,7 +6692,7 @@ async def orchestrator_events(_current_user: User = Depends(get_request_user)):
                     orchestrator_sse_disconnects_total.inc()
                 except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
                     pass
-                await ensure_async_client_closed(client)
+                await _redis_factory.ensure_async_client_closed(client)
         return StreamingResponse(_gen(), media_type="text/event-stream")
 
     # Unified path (flagged): use SSEStream with standardized heartbeats and error handling
@@ -6713,7 +6700,7 @@ async def orchestrator_events(_current_user: User = Depends(get_request_user)):
         import random as _random
         try:
             orchestrator_sse_connections.inc()
-            stream = SSEStream(
+            stream = _streams.SSEStream(
                 # Honor env defaults for interval/mode; allow overriding via env
                 heartbeat_interval_s=None,
                 heartbeat_mode=None,
@@ -6758,7 +6745,7 @@ async def orchestrator_events(_current_user: User = Depends(get_request_user)):
                 orchestrator_sse_disconnects_total.inc()
             except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
                 pass
-            await ensure_async_client_closed(client)
+            await _redis_factory.ensure_async_client_closed(client)
 
     headers = {
         "Cache-Control": "no-cache",
@@ -6787,7 +6774,7 @@ async def orchestrator_summary(current_user: User = Depends(get_request_user)):
             with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                 orchestrator_summary_failures_total.inc()
             snapshot = _zero_snapshot()
-            await ensure_async_client_closed(client)
+            await _redis_factory.ensure_async_client_closed(client)
             client = None
             return snapshot
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
@@ -6801,4 +6788,4 @@ async def orchestrator_summary(current_user: User = Depends(get_request_user)):
             orchestrator_summary_failures_total.inc()
         return _zero_snapshot()
     finally:
-        await ensure_async_client_closed(client)
+        await _redis_factory.ensure_async_client_closed(client)

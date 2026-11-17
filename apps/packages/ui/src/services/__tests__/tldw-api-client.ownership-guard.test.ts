@@ -59,6 +59,9 @@ describe("TldwApiClient ownership guard", () => {
       ])
     ) as unknown as typeof TRANSITIONAL_DOMAIN_OVERLAPS
 
-    expect(actualOverlaps).toEqual(TRANSITIONAL_DOMAIN_OVERLAPS)
+    const expectedOverlaps = Object.fromEntries(
+      Object.entries(TRANSITIONAL_DOMAIN_OVERLAPS).map(([domain, methods]) => [domain, [...methods].sort()])
+    )
+    expect(actualOverlaps).toEqual(expectedOverlaps)
   })
 })

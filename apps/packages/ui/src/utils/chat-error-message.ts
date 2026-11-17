@@ -3,6 +3,7 @@ import { formatErrorMessage } from "@/utils/format-error-message"
 import { parseBillingLimitError } from "@/utils/billing-error"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import { ChatStreamTimeoutError } from "@/services/tldw/chat-timeouts"
+import { chatProviderFailureKind } from "@/utils/chat-model-readiness"
 
 export const TLDW_ERROR_BUBBLE_PREFIX = "__tldw_error__:"
 
@@ -62,14 +63,21 @@ export const decodeChatErrorPayload = (
   }
 }
 
-const translateErrorText = (key: string, fallback: string): string => {
-  const translated = i18n.t(key, fallback)
+const interpolate = (text: string, values: Record<string, string>): string =>
+  text.replace(/\{\{(\w+)\}\}/g, (match, name: string) => values[name] ?? match)
+
+const translateErrorText = (
+  key: string,
+  fallback: string,
+  values: Record<string, string> = {}
+): string => {
+  const translated = i18n.t(key, fallback, values)
   return typeof translated === "string" && translated.trim().length > 0
     ? translated
-    : fallback
+    : interpolate(fallback, values)
 }
 
-const findModelUnavailableError = (error: unknown): unknown => {
+const findRecoveryServerError = (error: unknown): unknown => {
   const seen = new Set<unknown>()
   let current = error
   while (current && typeof current === "object" && !seen.has(current)) {
@@ -78,8 +86,9 @@ const findModelUnavailableError = (error: unknown): unknown => {
       details?: { detail?: unknown }
       detail?: unknown
       cause?: unknown
+      status?: unknown
     }
-    if ([record, record.details, record.details?.detail, record.detail].some(
+    if (record.status === 413 || [record, record.details, record.details?.detail, record.detail].some(
       value => value && typeof value === "object" &&
         (value as { error_code?: unknown }).error_code === "model_not_available"
     )) return current
@@ -88,20 +97,47 @@ const findModelUnavailableError = (error: unknown): unknown => {
   return undefined
 }
 
-export const buildFriendlyErrorMessage = (rawError: unknown): string => {
+/** What the failing request was for, when the caller knows it. */
+export type ChatErrorContext = {
+  /** The model's one-line label, e.g. "gemma3:1b (Ollama)" (formatChatModelLabel). */
+  modelLabel?: string
+}
+
+export const buildFriendlyErrorMessage = (
+  rawError: unknown,
+  context: ChatErrorContext = {}
+): string => {
   let detail = formatErrorMessage(rawError, "Request failed")
   const lower = detail.toLowerCase()
   // Ordinary chat wraps the direct transport error in Error.cause. Preserve
   // its model-selection guidance without changing unrelated error handling.
-  const modelUnavailable = findModelUnavailableError(rawError)
+  const recoveryError = findRecoveryServerError(rawError)
+  const tooLarge = (recoveryError as { status?: unknown } | undefined)?.status === 413
+  const modelUnavailable = tooLarge ? undefined : recoveryError
+
+  if (tooLarge) {
+    return encodeChatErrorPayload({
+      summary: translateErrorText("common:error.friendlyMessageTooLargeSummary", "Your message is too large."),
+      hint: translateErrorText("common:error.friendlyMessageTooLargeHint", "Use a smaller image or shorten your message, then try again."),
+      detail: sanitizeServerErrorMessage(recoveryError, "Your message is too large.")
+    })
+  }
 
   if (rawError instanceof ChatStreamTimeoutError) {
     const startup = rawError.phase === "startup"
+    const modelLabel = context.modelLabel?.trim()
     return encodeChatErrorPayload({
-      summary: translateErrorText(
-        startup ? "common:error.chatStartupTimeoutSummary" : "common:error.chatIdleTimeoutSummary",
-        startup ? "The model did not start responding in time." : "The response stopped progressing."
-      ),
+      // A reply that never started names its model and the wait (CM-06).
+      summary: startup && modelLabel
+        ? translateErrorText(
+            "common:error.chatStartupTimeoutModelSummary",
+            "No response from {{model}} after {{seconds}} seconds.",
+            { model: modelLabel, seconds: String(Math.round(rawError.timeoutMs / 1_000)) }
+          )
+        : translateErrorText(
+            startup ? "common:error.chatStartupTimeoutSummary" : "common:error.chatIdleTimeoutSummary",
+            startup ? "The model did not start responding in time." : "The response stopped progressing."
+          ),
       hint: translateErrorText(
         startup ? "common:error.chatStartupTimeoutHint" : "common:error.chatIdleTimeoutHint",
         startup
@@ -129,6 +165,37 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
         "Choose another model"
       ),
       serverRetryRequired: rawError.serverRetryRequired
+    })
+  }
+
+  // The provider behind the model didn't answer (CC-N2). Only a tldw provider
+  // error code shows the tldw server itself answered.
+  const providerFailure = chatProviderFailureKind(rawError)
+  if (providerFailure) {
+    const modelLabel = context.modelLabel?.trim()
+    return encodeChatErrorPayload({
+      summary: modelLabel
+        ? translateErrorText(
+            "common:error.providerUnavailableSummary",
+            "Couldn't reach {{model}}.",
+            { model: modelLabel }
+          )
+        : translateErrorText(
+            "common:error.providerUnavailableSummaryGeneric",
+            "Couldn't reach this model's provider."
+          ),
+      hint: providerFailure === "provider"
+        ? translateErrorText(
+            "common:error.providerUnavailableHint",
+            "Your tldw server is fine, but this model's provider didn't respond. Start the provider or switch models."
+          )
+        : translateErrorText(
+            "common:error.gatewayUnavailableHint",
+            "The model's provider, or a proxy in front of your tldw server, didn't respond. Check that both are running, or switch models."
+          ),
+      detail: sanitizeServerErrorMessage(rawError, detail),
+      recoveryAction: "open-model-selector",
+      recoveryLabel: translateErrorText("common:error.switchModel", "Switch model")
     })
   }
 
@@ -329,10 +396,11 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
 
 export const buildAssistantErrorContent = (
   botMessage: string | undefined,
-  rawError: unknown
+  rawError: unknown,
+  context?: ChatErrorContext
 ): string => {
   if (botMessage && String(botMessage).trim().length > 0) {
     return String(botMessage)
   }
-  return buildFriendlyErrorMessage(rawError)
+  return buildFriendlyErrorMessage(rawError, context)
 }

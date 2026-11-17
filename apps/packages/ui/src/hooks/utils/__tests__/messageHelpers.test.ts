@@ -94,8 +94,22 @@ describe("message helper wrappers", () => {
       conversationId: "server-chat-42"
     })
 
-    expect(onServerConversationLinked).toHaveBeenCalledWith("server-chat-42")
+    expect(onServerConversationLinked).toHaveBeenCalledWith(
+      "server-chat-42", { conversationId: "server-chat-42" }, "history-success"
+    )
   })
+
+  it('keeps an acknowledged H1 turn out of the SDK linkage callback', async () => {
+    const linked = vi.fn();
+    const wrapped = createSaveMessageOnSuccess(false, vi.fn(), {
+      onServerConversationLinked: linked,
+    });
+    const historyTurn = { complete: vi.fn() };
+    const payload = { conversationId: 'native-h1', historyTurn };
+    await wrapped(payload);
+    expect(mocks.saveSuccess).toHaveBeenCalledWith(expect.objectContaining(payload));
+    expect(linked).not.toHaveBeenCalled();
+  });
 
   it("preserves local history without linking an explicitly nonpersisted conversation", async () => {
     const linked = vi.fn()

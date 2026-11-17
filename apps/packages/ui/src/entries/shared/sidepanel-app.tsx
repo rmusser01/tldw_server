@@ -38,7 +38,7 @@ export const SidepanelApp: React.FC = () => {
     <>
       {platformConfig.features.showQuickChatHelper && <QuickChatHelperButton />}
       {platformConfig.features.showKeyboardShortcutsModal && (
-        <PageHelpModalHost />
+        <PageHelpModalHost scope="sidepanel" />
       )}
     </>
   )

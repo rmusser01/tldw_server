@@ -9,6 +9,8 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from tldw_Server_API.app.core.LLM_Calls.error_utils import exception_summary  # noqa: F401 - re-exported
+
 _ALLOWED_MESSAGE_ROLES = {"assistant", "developer", "function", "system", "tool", "user"}
 _ALLOWED_CONTENT_PART_TYPES = {"file", "image_url", "input_audio", "refusal", "text"}
 
@@ -137,23 +139,6 @@ def tool_payload_summary(value: Any) -> dict[str, Any]:
     if value is None:
         return {"kind": "none"}
     return {"kind": type(value).__name__}
-
-
-def exception_summary(exc: BaseException) -> dict[str, Any]:
-    """Summarize exception metadata without rendering the exception message."""
-    summary: dict[str, Any] = {"type": type(exc).__name__}
-    for attr in ("status_code", "status", "provider"):
-        value = getattr(exc, attr, None)
-        if value is not None:
-            summary[attr] = value
-    response = getattr(exc, "response", None)
-    if response is not None:
-        status_code = getattr(response, "status_code", None)
-        if status_code is None:
-            status_code = getattr(response, "status", None)
-        if status_code is not None:
-            summary["response_status_code"] = status_code
-    return summary
 
 
 def response_summary(response: Any) -> dict[str, Any]:

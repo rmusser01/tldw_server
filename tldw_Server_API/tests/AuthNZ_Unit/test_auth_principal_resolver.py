@@ -123,7 +123,7 @@ async def test_get_auth_principal_jwt_path(monkeypatch):
         _fake_verify_jwt_and_fetch_user,
     )
 
-    req = _make_request(headers={"Authorization": "Bearer token-abc"})
+    req = _make_request(headers={"Authorization": "Bearer header.payload.sig"})
 
     try:
         principal = await get_auth_principal(req)
@@ -162,7 +162,7 @@ async def test_get_auth_principal_jwt_path_ignores_boolean_is_admin_without_clai
         _fake_verify_jwt_and_fetch_user,
     )
 
-    req = _make_request(headers={"Authorization": "Bearer token-abc"})
+    req = _make_request(headers={"Authorization": "Bearer header.payload.sig"})
 
     try:
         principal = await get_auth_principal(req)

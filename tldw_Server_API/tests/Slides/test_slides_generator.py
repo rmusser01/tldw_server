@@ -11,6 +11,14 @@ from tldw_Server_API.app.core.Slides.slides_generator import (
 )
 
 
+@pytest.fixture(autouse=True)
+def empty_provider_policy(monkeypatch):
+    # Unit LLM stubs need an explicit healthy policy dependency, not a real AuthNZ store.
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as policy
+
+    monkeypatch.setattr(policy, "_get_healthy_override_snapshot", lambda _provider=None: {})
+
+
 def _stub_llm_call(api_provider=None, messages=None, **kwargs):
     user_content = ""
     if messages:
@@ -533,3 +541,169 @@ def test_user_style_snapshot_uses_raw_generation_rules_and_artifact_preferences(
     assert "Preferred visual block types: stat_group" in system_prompt
     assert "custom-outline" in system_prompt
     assert "Cyan grid blueprint treatment with technical linework." not in system_prompt
+
+
+@pytest.mark.parametrize(
+    "override,model,expected",
+    [
+        ({"is_enabled": False}, "qwen", "provider_disabled"),
+        ({"allowed_models": ["allowed"]}, "blocked", "model_not_allowed"),
+        ({"allowed_models": ["allowed"]}, None, "model_not_allowed"),
+    ],
+)
+def test_slides_provider_policy_refuses_before_llm(monkeypatch, override, model, expected):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as policy
+    from tldw_Server_API.app.core.LLM_Calls import adapter_utils
+
+    monkeypatch.setattr(adapter_utils, "ensure_app_config", lambda: {})
+    monkeypatch.setattr(adapter_utils, "resolve_provider_model", lambda _provider, _config: None)
+    snapshot = policy.ProviderOverrideCallSnapshot(
+        provider="llama.cpp", _override=policy.LLMProviderOverride(provider="llama.cpp", **override)
+    )
+    monkeypatch.setattr(policy, "capture_provider_override_call_snapshot", lambda _provider: snapshot)
+    llm = Mock(return_value=_stub_llm_call())
+    generator = SlidesGenerator(llm_call=llm)
+    with pytest.raises(SlidesGenerationInputError, match="^" + expected + "$"):
+        generator._call_llm(
+            provider="llamacpp",
+            model=model,
+            api_key="explicit-test-key",
+            temperature=None,
+            max_tokens=256,
+            system_prompt="Source only",
+            user_prompt="Rowan",
+        )
+    llm.assert_not_called()
+
+
+def test_slides_override_store_unavailable_refuses_before_llm(monkeypatch):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as policy
+    from tldw_Server_API.app.core.Slides import slides_generator
+
+    def unavailable(_provider):
+        raise policy.LLMProviderOverridesRefreshError()
+
+    monkeypatch.setattr(policy, "capture_provider_override_call_snapshot", unavailable)
+    llm = Mock(return_value=_stub_llm_call())
+    with pytest.raises(slides_generator.SlidesGenerationError, match="^llm_call_failed$"):
+        SlidesGenerator(llm_call=llm)._call_llm(
+            provider="llama.cpp",
+            model="qwen",
+            api_key=None,
+            temperature=None,
+            max_tokens=256,
+            system_prompt="Source only",
+            user_prompt="Rowan",
+        )
+    llm.assert_not_called()
+
+
+@pytest.mark.parametrize("explicit_model,configured_model", [("allowed", "other"), (None, "allowed")])
+def test_slides_dispatches_the_same_model_checked_by_policy(monkeypatch, explicit_model, configured_model):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as policy
+    from tldw_Server_API.app.core.LLM_Calls import adapter_utils
+
+    snapshot = policy.ProviderOverrideCallSnapshot(
+        provider="llama.cpp", _override=policy.LLMProviderOverride(provider="llama.cpp", allowed_models=["allowed"])
+    )
+    monkeypatch.setattr(policy, "capture_provider_override_call_snapshot", lambda _provider: snapshot)
+    monkeypatch.setattr(adapter_utils, "ensure_app_config", lambda: {"llama_api": {"model": configured_model}})
+    llm = Mock(return_value=_stub_llm_call())
+    SlidesGenerator(llm_call=llm)._call_llm(
+        provider="llamacpp",
+        model=explicit_model,
+        api_key=None,
+        temperature=None,
+        max_tokens=256,
+        system_prompt="Source only",
+        user_prompt="Rowan",
+    )
+    assert llm.call_args.kwargs["model"] == "allowed"  # nosec B101 # Pytest checks the exact policy-bound outbound model.
+
+
+def test_slides_rechecks_policy_between_summary_chunks(monkeypatch):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as policy
+    from tldw_Server_API.app.core.Slides import slides_generator
+
+    monkeypatch.setattr(slides_generator, "is_test_mode", lambda: False)
+    monkeypatch.setitem(slides_generator.settings, "TOKEN_ESTIMATOR_MODE", "whitespace")
+    allowed = policy.ProviderOverrideCallSnapshot(provider="llama.cpp", _override=None)
+    denied = policy.ProviderOverrideCallSnapshot(
+        provider="llama.cpp", _override=policy.LLMProviderOverride(provider="llama.cpp", is_enabled=False)
+    )
+    monkeypatch.setattr(policy, "capture_provider_override_call_snapshot", Mock(side_effect=[allowed, denied]))
+    llm = Mock(return_value={"choices": [{"message": {"content": "Controlled summary"}}]})
+    with pytest.raises(SlidesGenerationInputError, match="^provider_disabled$"):
+        SlidesGenerator(llm_call=llm).generate_from_text(
+            source_text="one two three four",
+            title_hint=None,
+            provider="llamacpp",
+            model="allowed",
+            api_key=None,
+            temperature=None,
+            max_tokens=256,
+            max_source_tokens=None,
+            max_source_chars=None,
+            enable_chunking=True,
+            chunk_size_tokens=2,
+            summary_tokens=32,
+        )
+    llm.assert_called_once()
+
+
+@pytest.mark.parametrize("provider", ["llama.cpp", "llamacpp", "llama"])
+def test_slides_disabled_provider_alias_uses_canonical_policy(monkeypatch, provider):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as policy
+
+    def snapshot(canonical):
+        assert canonical == "llama.cpp"  # nosec B101 # Pytest checks alias lookup uses the canonical policy key.
+        return {canonical: policy.LLMProviderOverride(provider=canonical, is_enabled=False)}
+
+    monkeypatch.setattr(policy, "_get_healthy_override_snapshot", snapshot)
+    llm = Mock(return_value=_stub_llm_call())
+    with pytest.raises(SlidesGenerationInputError, match="^provider_disabled$"):
+        SlidesGenerator(llm_call=llm)._call_llm(
+            provider=provider,
+            model="qwen",
+            api_key=None,
+            temperature=None,
+            max_tokens=256,
+            system_prompt="Source only",
+            user_prompt="Rowan",
+        )
+    llm.assert_not_called()
+
+
+def test_slides_refuses_disallowed_configured_default(monkeypatch):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as policy
+    from tldw_Server_API.app.core.LLM_Calls import adapter_utils
+
+    snapshot = policy.ProviderOverrideCallSnapshot(
+        provider="llama.cpp", _override=policy.LLMProviderOverride(provider="llama.cpp", allowed_models=["allowed"])
+    )
+    monkeypatch.setattr(policy, "capture_provider_override_call_snapshot", lambda _provider: snapshot)
+    monkeypatch.setattr(adapter_utils, "ensure_app_config", lambda: {"llama_api": {"model": "blocked"}})
+    llm = Mock(return_value=_stub_llm_call())
+    with pytest.raises(SlidesGenerationInputError, match="^model_not_allowed$"):
+        SlidesGenerator(llm_call=llm)._call_llm(
+            provider="llamacpp",
+            model=None,
+            api_key=None,
+            temperature=None,
+            max_tokens=256,
+            system_prompt="Source only",
+            user_prompt="Rowan",
+        )
+    llm.assert_not_called()

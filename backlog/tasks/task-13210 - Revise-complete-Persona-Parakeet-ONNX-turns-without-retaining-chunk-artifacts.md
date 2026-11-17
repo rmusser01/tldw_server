@@ -8,7 +8,7 @@ assignee:
 priority: high
 references:
 - TASK-13202
-- TASK-13208
+- TASK-15147
 - TASK-13209
 modified_files:
 - tldw_Server_API/app/core/Persona/turn_transcriber.py

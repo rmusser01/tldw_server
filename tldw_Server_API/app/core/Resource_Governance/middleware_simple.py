@@ -27,6 +27,14 @@ from .governor import RGRequest
 from .policy_eval import requests_window
 from .tenant import TenantScopeConfig, get_tenant_id, parse_tenant_config
 
+try:
+    from redis.exceptions import RedisError
+except ImportError:  # pragma: no cover - redis is an optional deployment dependency
+    _REDIS_ERRORS: tuple[type[Exception], ...] = ()
+else:
+    # redis-py's ConnectionError and TimeoutError are not the builtins: they derive from RedisError.
+    _REDIS_ERRORS = (RedisError,)
+
 _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
     ConnectionError,
@@ -39,6 +47,7 @@ _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     UnicodeDecodeError,
     ValueError,
     re.error,
+    *_REDIS_ERRORS,
 )
 
 # ponytail: per-process identity cache. A revoked credential keeps charging its old

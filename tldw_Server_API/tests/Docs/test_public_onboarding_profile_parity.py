@@ -148,13 +148,16 @@ def test_readme_resources_list_peer_profiles_in_order() -> None:
     assert positions == sorted(positions)
 
 
-def test_multi_user_docs_generate_and_persist_admin_password() -> None:
+def test_multi_user_docs_securely_collect_and_persist_admin_password() -> None:
     for path in PUBLIC_ONBOARDING_DOCS:
         text = path.read_text(encoding="utf-8")
         assert "replace-with-a-long-password" not in text, f"{path} uses a static admin password"
         assert "ADMIN_USERNAME" in text, f"{path} should persist ADMIN_USERNAME for login examples"
         assert "ADMIN_PASSWORD" in text, f"{path} should persist ADMIN_PASSWORD for login examples"
-        assert "secrets.token_urlsafe(24)" in text, f"{path} should generate ADMIN_PASSWORD"
+        assert "export ADMIN_PASSWORD" in text, f"{path} should retain ADMIN_PASSWORD for setup"  # nosec B101 - Documentation contract assertion.
+        assert "secrets.token_urlsafe(24)" in text or "IFS= read -rs ADMIN_PASSWORD" in text, (  # nosec B101 - Documentation contract assertion.
+            f"{path} should generate a password or collect it without terminal echo"
+        )
 
 
 def test_multi_user_external_postgres_docs_use_override_vars() -> None:

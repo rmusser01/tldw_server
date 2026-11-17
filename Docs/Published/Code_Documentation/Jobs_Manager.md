@@ -28,6 +28,28 @@ Two acquisition paths exist:
 
 ## Practical guidance
 
+### Resource-Required Claims Work
+
+`claims_rebuild_clusters` uses `admit_resource_job` rather than bare creation or
+independent receipt admission. Its resource is `(claims, owner, cluster-rebuild)`
+across queues/methods. Heads precede exact Jobs-row locks; reactivation retains
+immutable generation and cannot replace a successor. Resource heads/counters
+survive ordinary pruning; unexpired request receipts pin their exact UUID target
+for 24 hours, bounded to 128 aliases. Media publication receipts are independent
+domain output metadata, not another execution history.
+
+Workers finalize with acquired UUID/worker/lease authority even when optional
+completion enforcement is disabled. Owner-safe status projection does not grant
+admin controls; foreign admin links additionally bind `job_uuid`. Cancellation
+does not stop a physical thread or undo committed domain output. The recovery
+candidate window can underfill under contention; no post-row-lock refill or
+global fairness guarantee is claimed. Eligible bulk maintenance may hold its
+selected heads through commit.
+
+See the [Claims operations runbook](../Operations/Claims_Cluster_Rebuild_Jobs.md)
+for rollout allowlists, safe rollback ordering and coordinated restore evidence.
+False routing enables legacy sync and is not an admission/restore barrier.
+
 - Prefer enabling `JOBS_PG_SINGLE_UPDATE_ACQUIRE=true` in PG deployments to align behavior with SQLite FIFO semantics and reduce acquisition contention.
 - When tests require strict FIFO semantics across backends, ensure the PG single-update mode is enabled in the test environment.
 - Scheduled jobs (future `available_at`) are not considered “ready”; FIFO applies to ready jobs where `available_at IS NULL OR available_at <= now`.

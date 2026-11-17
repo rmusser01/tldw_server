@@ -6,7 +6,8 @@ import {
   collectGreetings,
   normalizeGreetingValue,
   parseGreetingSelectionIndex,
-  resolveGreetingSelection
+  resolveGreetingSelection,
+  resolveCharacterMessageType
 } from "../character-greetings"
 
 describe("character greetings utils", () => {
@@ -121,4 +122,41 @@ describe("character greetings utils", () => {
     expect(result.option?.text).toBe("Primary")
     expect(result.isStale).toBe(true)
   })
+})
+
+
+describe("native creation seed provenance is independent of display positions", () => {
+  it.each([false, true])("preserves exact raw alternate indices through filtering/deduplication (JSON=%s)", json => {
+    const alternates = ["", 7, "  Alternate {{char}}  ", "Alternate {{char}}", "Last"]
+    const options = buildGreetingOptionsFromEntries(collectGreetingEntries({ greeting: "Compatibility alias", first_message: "  Default {{user}}  ", alternate_greetings: json ? JSON.stringify(alternates) : alternates }))
+    expect(options.map(option => option.text)).toEqual(["Compatibility alias", "Default {{user}}", "Alternate {{char}}", "Last"])
+    expect(options[1]).toMatchObject({ index: 1, seed: { greetingStrategy: "default", rawText: "  Default {{user}}  " } })
+    expect(options[2]).toMatchObject({ index: 2, seed: { greetingStrategy: "alternate_index", alternateIndex: 2, rawText: "  Alternate {{char}}  " } })
+    expect(options[3]).toMatchObject({ index: 3, seed: { greetingStrategy: "alternate_index", alternateIndex: 4, rawText: "Last" } })
+    expect(options[0]).not.toHaveProperty("seed")
+  })
+  it("deduplicated compatibility text retains a matching canonical default before alternates", () => {
+    const [option] = buildGreetingOptionsFromEntries(collectGreetingEntries({ greeting: "Same", first_message: "  Same  ", alternate_greetings: ["Same"] }))
+    expect(option).toMatchObject({ sourceKey: "greeting", index: 0, seed: { greetingStrategy: "default", rawText: "  Same  " } })
+    expect(option.seed).not.toHaveProperty("alternateIndex")
+  })
+  it.each([
+    { firstMessage: "Legacy alias", alternateGreetings: ["Legacy alternate"] },
+    { first_message: ["List default"], alternate_greetings: JSON.stringify(JSON.stringify(["Nested alternate"])) },
+    { first_message: '["Split default"]', alternate_greetings: "Plain text alternate" }
+  ])("does not manufacture a server seed for unsupported fields or encodings: %j", character => {
+    const options = buildGreetingOptionsFromEntries(collectGreetingEntries(character))
+    expect(options.length).toBeGreaterThan(0)
+    expect(options.every(option => !Object.hasOwn(option, "seed"))).toBe(true)
+  })
+})
+
+it.each(["id", "serverMessageId"] as const)("projects an owned native root greeting using %s and preserves explicit message types", idField => {
+  const root = { isBot: true, role: "assistant", parentMessageId: null,
+    id: idField === "id" ? "saved-root" : undefined,
+    serverMessageId: idField === "serverMessageId" ? "saved-root" : undefined }
+  expect(resolveCharacterMessageType(root, 0, true)).toBe("character:greeting")
+  for (const [message, index, owned] of [[root, 1, true], [root, 0, false], [{ ...root, id: undefined, serverMessageId: undefined }, 0, true], [{ ...root, id: "  ", serverMessageId: "" }, 0, true], [{ ...root, parentMessageId: "user" }, 0, true], [{ ...root, isBot: false, role: "user" }, 0, true]] as const)
+    expect(resolveCharacterMessageType(message, index, owned)).toBeUndefined()
+  expect(resolveCharacterMessageType({ ...root, messageType: "compare:reply" }, 0, true)).toBe("compare:reply")
 })

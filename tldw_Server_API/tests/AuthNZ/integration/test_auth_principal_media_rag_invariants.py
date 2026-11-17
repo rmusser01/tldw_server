@@ -275,7 +275,7 @@ def test_rag_search_jwt_principal_and_state_alignment(isolated_test_environment,
     async def _fake_pipeline(**kwargs):
         return _StubRagResult(kwargs.get("query", ""))
 
-    monkeypatch.setattr(rag_mod, "unified_rag_pipeline", _fake_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_pipeline)
 
     try:
         # 1. Register and log in via real auth endpoints.

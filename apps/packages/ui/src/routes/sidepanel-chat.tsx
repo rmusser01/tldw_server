@@ -1,6 +1,15 @@
+import type { RestoreChatDraft } from "@/components/Chat/composer/ChatDraftRecovery"
 import { restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation"
+import { browser } from "wxt/browser"
+import { freshChatDraftAddress, isChatDraftAddress, isChatDraftHandle, chatDraftAddressKey, type ChatDraftAddress } from "@/utils/chat-draft-address"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
+import { captureChatDraftLoad, captureChatDraftSource, chatDraftAddressForReceipt, confirmTemporaryChatDiscard } from "@/hooks/chat/chat-draft-transition"
+import { RecoveryCallout } from "@/components/ui/state/RecoveryCallout"
+import { resolveOptionsHref } from "@/utils/browser-runtime"
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
-import { HistorySelectionContext, useHistorySelection, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { HistorySelectionContext, useHistorySelection, useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedHistoryTurns"
 import { SidepanelSendGateContext, type SidepanelSendGate } from "@/hooks/chat/sidepanel-send-gate"
 import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
@@ -13,13 +22,14 @@ import {
   getTitleById,
   getRecentChatFromCopilot,
   generateID,
-  getFullChatData,
-  updateHistory
+  getFullChatData
 } from "@/db/dexie/helpers"
 import { getDesignSystemState } from "@/design-system"
 import useBackgroundMessage from "@/hooks/useBackgroundMessage"
 import { useMigration } from "@/hooks/useMigration"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
+import { ScrollToLatestButton } from "@/components/Common/ScrollToLatestButton"
+import { useComposerDockHeight } from "@/hooks/useComposerDockHeight"
 import {
   useChatShortcuts,
   useSidebarShortcuts,
@@ -29,9 +39,13 @@ import {
 import { useConnectionActions } from "@/hooks/useConnectionState"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
-import { useCharacterGreeting } from "@/hooks/useCharacterGreeting"
+import { usePageChatModeToggle } from "@/components/Sidepanel/Chat/page-chat-mode"
 import { useTTS } from "@/hooks/useTTS"
 import { copilotResumeLastChat } from "@/services/app"
+import {
+  buildSidepanelChatWebUiHandoffUrl, SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
+  type SidepanelChatWebUiConfig, type SidepanelChatWebUiHandoffOverrides
+} from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { ServerChatMessage as ApiServerChatMessage } from "@/services/tldw/TldwApiClient"
 import { createSafeStorage } from "@/utils/safe-storage"
@@ -41,25 +55,39 @@ import {
   CHAT_CHARACTER_IMAGE_OPACITY_SETTING,
   CHAT_MESSAGE_OPACITY_SETTING,
   CHAT_WINDOW_OPACITY_SETTING,
-  resolveOpacityAlpha
-} from "@/services/settings/ui-settings"
-import { useSetting } from "@/hooks/useSetting"
-import { useStorage } from "@plasmohq/storage/hook"
-import { ChevronDown, ExternalLink } from "lucide-react"
-import React, { lazy, Suspense } from "react"
-import { useTranslation } from "react-i18next"
-import { SidePanelBody } from "~/components/Sidepanel/Chat/body"
-import { SidepanelForm } from "~/components/Sidepanel/Chat/form"
-import { SidepanelHeaderSimple } from "~/components/Sidepanel/Chat/SidepanelHeaderSimple"
-import { ConnectionBanner } from "~/components/Sidepanel/Chat/ConnectionBanner"
-import { ServerChatFreshnessNotice } from "~/components/Sidepanel/Chat/ServerChatFreshnessNotice"
-import { readTabConversationTitle, renameTabConversation } from "~/components/Sidepanel/Chat/tab-conversation-actions"
-import { useMessage } from "~/hooks/useMessage"
-import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
-import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
-import { useSidepanelChatTabsStore } from "@/store/sidepanel-chat-tabs"
-import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
-import type { Character } from "@/types/character"
+  resolveOpacityAlpha,
+} from '@/services/settings/ui-settings';
+import { useSetting } from '@/hooks/useSetting';
+import { useStorage } from '@plasmohq/storage/hook';
+import { ExternalLink } from 'lucide-react';
+import React, { lazy, Suspense } from 'react';
+import { Drawer } from 'antd';
+import { ChatErrorBoundary } from '@/components/Common/Playground/ChatErrorBoundary';
+import { useTranslation } from 'react-i18next';
+import { SidePanelBody } from '~/components/Sidepanel/Chat/body';
+import { SidepanelForm, type SidepanelWebUiOpenSource } from '~/components/Sidepanel/Chat/form';
+import { SidepanelHeaderSimple } from '~/components/Sidepanel/Chat/SidepanelHeaderSimple';
+import { ConnectionBanner } from '~/components/Sidepanel/Chat/ConnectionBanner';
+import { ServerChatFreshnessNotice } from '~/components/Sidepanel/Chat/ServerChatFreshnessNotice';
+import {
+  SIDEPANEL_UNDOCKED_SIDEBAR_MEDIA_QUERY,
+  readProSidebarCollapsed,
+  writeProSidebarCollapsed,
+} from '~/components/Sidepanel/Chat/sidepanel-sidebar-layout';
+import { sidepanelScrollToLatestBottom } from '~/components/Sidepanel/Chat/sidepanel-scroll-latest';
+import {
+  readTabConversationTitle,
+  renameTabConversation,
+} from '~/components/Sidepanel/Chat/tab-conversation-actions';
+import { useMessage } from '~/hooks/useMessage';
+import { useSelectedCharacter } from '@/hooks/useSelectedCharacter';
+import { useSelectedAssistant } from '@/hooks/useSelectedAssistant';
+import { useSidepanelChatTabsStore } from '@/store/sidepanel-chat-tabs';
+import {
+  SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT,
+  SIDEPANEL_STICKY_CHAT_INPUT_KEY,
+} from '@/types/chat-settings';
+import type { Character } from '@/types/character';
 import type {
   ChatModelSettingsSnapshot,
   SidepanelChatSnapshot,
@@ -102,11 +130,13 @@ import {
 } from "@/utils/timeline-actions"
 import {
   getTabsStorageKey,
+  durableSidepanelTabs,
   readSidepanelTabs,
   type SidepanelTabsState,
-  readSidepanelRuntimeTabId
-} from "./sidepanel-chat-resume"
-import { useSidepanelChatFreshness } from "./sidepanel-chat-freshness"
+  readSidepanelRuntimeTabId,
+} from './sidepanel-chat-resume';
+import { useSidepanelChatFreshness } from './sidepanel-chat-freshness';
+import { isHiddenBySelfOrAncestor } from '@/utils/focus-return';
 
 // Lazy-load Timeline to reduce initial bundle size (~1.2MB cytoscape)
 const TimelineModal = lazy(() =>
@@ -413,9 +443,6 @@ const buildHistorySnapshot = ({
 }: BuildHistorySnapshotParams): SidepanelChatSnapshot => {
   const lastUsedPrompt = historyInfo.last_used_prompt
   const nextSelectedSystemPrompt = lastUsedPrompt?.prompt_id ?? null
-  const nextSelectedQuickPrompt = lastUsedPrompt?.prompt_id
-    ? null
-    : lastUsedPrompt?.prompt_content ?? null
   const nextSelectedModel = historyInfo.model_id ?? selectedModel ?? null
 
   return {
@@ -427,7 +454,7 @@ const buildHistorySnapshot = ({
     toolChoice,
     selectedModel: nextSelectedModel,
     selectedSystemPrompt: nextSelectedSystemPrompt,
-    selectedQuickPrompt: nextSelectedQuickPrompt,
+    selectedQuickPrompt: null,
     temporaryChat: false,
     useOCR,
     serverChatId: historyInfo.server_chat_id ?? null,
@@ -442,10 +469,29 @@ const buildHistorySnapshot = ({
 }
 
 const SidepanelChat = () => {
-  const owner = useSidepanelChatOwner()
-  return owner
-    ? <OwnedSidepanelChat key={`${owner.ownerKey}:${owner.revision}`} owner={owner} />
-    : <PageAssistLoader />
+  const { owner, verificationState, retryVerification } = useSidepanelChatOwner()
+  const { t } = useTranslation(["sidepanel", "common"])
+  if (owner) return <OwnedSidepanelChat key={`${owner.ownerKey}:${owner.revision}`} owner={owner} />
+  if (verificationState === "checking") return <PageAssistLoader />
+  const checking = verificationState === "retrying"
+  return <div className="p-4">
+    <RecoveryCallout
+      state={checking ? "retrying" : "unavailable"}
+      role="alert"
+      aria-live="polite"
+      aria-atomic="true"
+      title={t("sidepanel:chat.verificationFailed", "We couldn’t verify the chat connection")}
+      message={checking
+        ? t("sidepanel:chat.verifying", "Checking the chat connection…")
+        : t("sidepanel:chat.verificationHelp", "Retry or open server settings.")}
+      primaryAction={{ label: t("common:retry", "Retry"), disabled: checking, onClick: retryVerification }}
+      secondaryActions={[{ label: t("sidepanel:chat.serverSettings", "Server settings"), onClick: () => {
+        if (requestSettingsNavigation("/settings/tldw")) {
+          window.open(resolveOptionsHref("/settings/tldw"), "_blank", "noopener,noreferrer")
+        }
+      } }]}
+    />
+  </div>
 }
 
 type CaptureListener = (capture: HistorySelectionCaptureV1) => void
@@ -456,15 +502,32 @@ const OwnedSidepanelChat = ({ owner }: { owner: SidepanelChatOwner }) => {
   // installed capture tells the check what the tab now shows.
   const sendGate = React.useRef<SidepanelSendGate | null>(null)
   const captureListener = React.useRef<CaptureListener | null>(null)
-  const selection = useHistorySelection({ onCapture: capture => {
-    if (!owner.isCurrent()) return
-    const display = formatSelectedHistory(capture)
-    useStoreMessageOption.getState().setHistory(display.history)
-    useStoreMessageOption.getState().setMessages(display.messages)
-    captureListener.current?.(capture)
-  } })
+  const selection: HistorySelectionController = useHistorySelection({
+    onCapture: (capture) => {
+      if (!owner.isCurrent()) return
+      const capturedOwner = selection.getCurrent().owner
+      if (
+        capturedOwner?.kind === "native" &&
+        chatDraftOwnerKey(capturedOwner.request_scope) !==
+          chatDraftOwnerKey(owner.snapshot.requestScope)
+      )
+        return
+      const source = captureChatDraftSource(selection.fence())
+      const display = formatSelectedHistory(capture)
+      useStoreMessageOption.setState({
+        history: display.history,
+        messages: display.messages
+      })
+      if (source.isCurrent() && owner.isCurrent())
+        captureListener.current?.(capture)
+    }
+  })
   return (
-    <HistorySelectionContext.Provider value={selection}>
+    <HistorySelectionContext.Provider value={{ ...selection, draftAccount: {
+      requestScope: owner.snapshot.requestScope,
+      isCurrent: owner.isCurrent,
+      retryVerification: () => {}
+    } }}>
       <SidepanelSendGateContext.Provider value={sendGate}>
         <SidepanelChatContent owner={owner} sendGate={sendGate} captureListener={captureListener} />
       </SidepanelSendGateContext.Provider>
@@ -481,17 +544,19 @@ const SidepanelChatContent = ({
   sendGate: React.MutableRefObject<SidepanelSendGate | null>
   captureListener: React.MutableRefObject<CaptureListener | null>
 }) => {
+  const chatDraftAddress = useStoreMessageOption(state => state.chatDraftAddress)
   const historySelection = useHistorySelectionContext()!
+  // Destination preparation must not replace the mounted composer's owner.
+  const openingHistorySelection = useHistorySelection()
   const transferFlashcards = useFlashcardsGenerateTransfer()
   const transferStudyPack = useStudyPackTransfer()
   useServerOnline()
   const drop = React.useRef<HTMLDivElement>(null)
   const [dropedFile, setDropedFile] = React.useState<File | undefined>()
-  const [sidebarOpen, setSidebarOpen] = React.useState(false)
   const [sidebarSearchQuery, setSidebarSearchQuery] = React.useState("")
   const sidebarSearchInputRef = React.useRef<HTMLInputElement>(null)
   const [sidebarSearchFocusNonce, setSidebarSearchFocusNonce] = React.useState(0)
-  const [composerHeight, setComposerHeight] = React.useState(0)
+  const { ref: composerDockRef, height: composerHeight } = useComposerDockHeight()
   const { t } = useTranslation(["playground", "sidepanel", "common"])
   // Avoid depending on the `t` function in effects; it can be referentially unstable.
   const newChatLabel = React.useMemo(
@@ -507,7 +572,9 @@ const SidepanelChatContent = ({
   // tabId: undefined = not resolved yet, null = resolved but unavailable.
   const [tabId, setTabId] = React.useState<number | null | undefined>(undefined)
   const [isRestoringChat, setIsRestoringChat] = React.useState(true)
-  const [restoreFailed, setRestoreFailed] = React.useState(false)
+  const isRestoringChatRef = React.useRef(true)
+  isRestoringChatRef.current = isRestoringChat
+  const [restoreFailure, setRestoreFailure] = React.useState<"storage" | "target" | null>(null)
   const storageRef = React.useRef(
     createSafeStorage({
       area: "local"
@@ -553,7 +620,6 @@ const SidepanelChatContent = ({
     setMessages,
     selectedModel,
     setSelectedModel,
-    selectedQuickPrompt,
     setSelectedQuickPrompt,
     selectedSystemPrompt,
     setSelectedSystemPrompt,
@@ -571,6 +637,10 @@ const SidepanelChatContent = ({
     setTemporaryChat,
     sidepanelTemporaryChat,
     stopStreamingRequest,
+    getRecoveryRetryContext,
+    retryRecoveredHistoryTurn,
+    getSavedQuestionReview,
+    retrySavedQuestion,
     temporaryChat,
     clearChat,
     queuedMessages,
@@ -592,6 +662,11 @@ const SidepanelChatContent = ({
     webSearch,
     setWebSearch
   } = useMessage()
+  const hideKeptHistoryTurn = useKeepInterruptedHistoryTurns({
+    selection: historySelection,
+    messages,
+    setMessages
+  })
   const [selectedCharacter] =
     useSelectedCharacter<Character | null>(null)
   const [selectedAssistant] = useSelectedAssistant(null)
@@ -604,26 +679,27 @@ const SidepanelChatContent = ({
   const [timelineAction, setTimelineAction] =
     React.useState<TimelineActionDetail | null>(null)
   const isSwitchingTabRef = React.useRef(false)
-  // A tab opened for a server chat that is still loading. The shared chat store
-  // holds a half-loaded conversation meanwhile, so nothing saves it into a tab.
-  const pendingOpenTabIdRef = React.useRef<string | null>(null)
   const loadGenerationRef = React.useRef(0)
-  const invalidateLoads = React.useCallback(() => { loadGenerationRef.current++ }, [])
+  const preparingTabRef = React.useRef<(() => boolean) | null>(null)
+  const loadingGenerationRef = React.useRef<number | null>(null)
+  const invalidateLoads = React.useCallback(() => {
+    loadGenerationRef.current++
+    if (loadingGenerationRef.current !== null) {
+      loadingGenerationRef.current = null
+      if (owner.isCurrent()) setIsLoading(false)
+    }
+  }, [owner, setIsLoading])
   // XP-08: a tab bound to a server chat is checked against the chat when it is
   // shown, when the panel regains focus and before each send.
-  const isRestoringChatRef = React.useRef(isRestoringChat)
-  React.useEffect(() => {
-    isRestoringChatRef.current = isRestoringChat
-  }, [isRestoringChat])
   const freshness = useSidepanelChatFreshness({
     historySelection,
     checkableTabId: () => {
-      if (!owner.isCurrent() || isRestoringChatRef.current || isSwitchingTabRef.current) return null
+      if (!owner.isCurrent() || isRestoringChatRef.current || isSwitchingTabRef.current || preparingTabRef.current?.()) return null
       const tabsState = useSidepanelChatTabsStore.getState()
       const currentTabId = tabsState.activeTabId
-      if (!currentTabId || pendingOpenTabIdRef.current === currentTabId) return null
+      if (!currentTabId) return null
       const chat = useStoreMessageOption.getState()
-      if (chat.streaming || chat.isProcessing || chat.temporaryChat) return null
+      if (chat.isLoading || chat.streaming || chat.isProcessing || chat.temporaryChat) return null
       const boundChatId =
         chat.serverChatId ?? tabsState.tabs.find((tab) => tab.id === currentTabId)?.serverChatId
       return boundChatId ? currentTabId : null
@@ -634,50 +710,175 @@ const SidepanelChatContent = ({
     showTab: showFreshnessTab,
     checkShownTab
   } = freshness
+  React.useEffect(() => {
+    if (!isRestoringChat) checkShownTab()
+  }, [isRestoringChat, checkShownTab])
   sendGate.current = freshness.beforeSend
   captureListener.current = freshness.noteCapture
-  const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
-    useSmartScroll(messages, streaming, 100)
+  const {
+    containerRef,
+    isAutoScrollToBottom,
+    autoScrollToBottom,
+    hasUnseenMessages
+  } = useSmartScroll(messages, streaming, 100, { pinOnContentResize: true })
   const uiMode = useUiModeStore((state) => state.mode)
-  const [isNarrow, setIsNarrow] = React.useState(false)
-  const { checkOnce } = useConnectionActions()
-  const [noteModalOpen, setNoteModalOpen] = React.useState(false)
-  const [noteDraftContent, setNoteDraftContent] = React.useState("")
-  const [noteDraftTitle, setNoteDraftTitle] = React.useState("")
-  const [noteSuggestedTitle, setNoteSuggestedTitle] = React.useState("")
-  const [noteSourceUrl, setNoteSourceUrl] = React.useState<string | undefined>()
-  const [noteSourceMessageId, setNoteSourceMessageId] = React.useState<string | null>(null)
-  const [noteSourceConversationId, setNoteSourceConversationId] = React.useState<string | null>(null)
+  const [isNarrow, setIsNarrow] = React.useState(
+    () =>
+      typeof window !== 'undefined' &&
+      Boolean(window.matchMedia?.(SIDEPANEL_UNDOCKED_SIDEBAR_MEDIA_QUERY).matches)
+  );
+  const isDockedSidebar = uiMode === 'pro' && !isNarrow;
+  const [sidebarVisibility, publishSidebarVisibility] = React.useState(() => ({
+    open: isDockedSidebar && !readProSidebarCollapsed(),
+    revision: 0,
+  }));
+  const sidebarOpen = sidebarVisibility.open;
+  const sidebarPresented = React.useRef(false);
+  const sidebarOpening = React.useRef({
+    revision: 0,
+    open: sidebarVisibility.open,
+    initiator: null as HTMLElement | null,
+  });
+  const sidebarReturnFocus = React.useRef<null | {
+    revision: number;
+    isCurrent: () => boolean;
+    previousFocus: Element | null;
+    target: HTMLElement | null;
+    composer: boolean;
+    tabId: string | null;
+    address: ChatDraftAddress | null;
+    draftRevision: number;
+  }>(null);
+  const sidebarFindFocus = React.useRef<null | {
+    revision: number;
+    isCurrent: () => boolean;
+    initiator: Element | null;
+  }>(null);
+  const sidebarOverlayOpen = sidebarOpen && !isDockedSidebar;
+  const setSidebarOpen = React.useCallback<React.Dispatch<React.SetStateAction<boolean>>>(
+    (value) => {
+      const opening = sidebarOpening.current;
+      const next = typeof value === 'function' ? value(opening.open) : value;
+      const previousFocus = document.activeElement;
+      if (next !== opening.open) sidebarPresented.current = false;
+      const revision = opening.revision + 1;
+      sidebarReturnFocus.current = null;
+      sidebarFindFocus.current = null;
+      if (next && !opening.open)
+        opening.initiator = previousFocus instanceof HTMLElement ? previousFocus : null;
+      if (!next && opening.open && !isDockedSidebar) {
+        const draft = useStoreMessageOption.getState();
+        sidebarReturnFocus.current = {
+          revision,
+          isCurrent: owner.isCurrent,
+          previousFocus,
+          target: opening.initiator,
+          composer: false,
+          tabId: useSidepanelChatTabsStore.getState().activeTabId,
+          address: draft.chatDraftAddress,
+          draftRevision: draft.chatDraftRevision,
+        };
+      }
+      opening.revision = revision;
+      opening.open = next;
+      if (isDockedSidebar) writeProSidebarCollapsed(!next);
+      publishSidebarVisibility({ open: next, revision });
+    },
+    [owner, isDockedSidebar]
+  );
+  React.useEffect(
+    () => () => {
+      sidebarOpening.current.revision += 1;
+      sidebarReturnFocus.current = null;
+      sidebarFindFocus.current = null;
+    },
+    []
+  );
+  React.useEffect(() => {
+    setSidebarOpen(
+      isDockedSidebar && (sidebarOpening.current.open || !readProSidebarCollapsed())
+    );
+  }, [isDockedSidebar, setSidebarOpen]);
+
+  const { checkOnce } = useConnectionActions();
+  const [noteModalOpen, setNoteModalOpen] = React.useState(false);
+  const [noteDraftContent, setNoteDraftContent] = React.useState('');
+  const [noteDraftTitle, setNoteDraftTitle] = React.useState('');
+  const [noteSuggestedTitle, setNoteSuggestedTitle] = React.useState('');
+  const [noteSourceUrl, setNoteSourceUrl] = React.useState<string | undefined>();
+  const [noteSourceMessageId, setNoteSourceMessageId] = React.useState<string | null>(null);
+  const [noteSourceConversationId, setNoteSourceConversationId] = React.useState<string | null>(
+    null
+  );
   const noteCaptureRef = React.useRef<{
-    controller: AbortController
-    pending?: Promise<ServicePromptSnapshot>
-    release?: () => void
-  } | null>(null)
-  const [noteSaving, setNoteSaving] = React.useState(false)
-  const [noteError, setNoteError] = React.useState<string | null>(null)
-  const [ingestCard, setIngestCard] = React.useState<IngestCardState | null>(null)
+    controller: AbortController;
+    pending?: Promise<ServicePromptSnapshot>;
+    release?: () => void;
+  } | null>(null);
+  const [noteSaving, setNoteSaving] = React.useState(false);
+  const [noteError, setNoteError] = React.useState<string | null>(null);
+  const [ingestCard, setIngestCard] = React.useState<IngestCardState | null>(null);
   const ingestFunnelRef = React.useRef<{
-    funnelId: string
-    baselineUserMessages: number
-    tracked: boolean
-    mediaId?: number
-  } | null>(null)
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+    funnelId: string;
+    baselineUserMessages: number;
+    tracked: boolean;
+    mediaId?: number;
+  } | null>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const returnSidebarFocus = React.useCallback((composerReady = false) => {
+    const request = sidebarReturnFocus.current;
+    if (!request) return;
+    const draft = useStoreMessageOption.getState();
+    if (
+      sidebarOpening.current.open ||
+      request.revision !== sidebarOpening.current.revision ||
+      !request.isCurrent() ||
+      request.tabId !== useSidepanelChatTabsStore.getState().activeTabId ||
+      request.address !== draft.chatDraftAddress ||
+      request.draftRevision !== draft.chatDraftRevision
+    ) {
+      sidebarReturnFocus.current = null;
+      return;
+    }
+    const active = document.activeElement;
+    if (
+      active !== document.body &&
+      active?.isConnected &&
+      active !== request.previousFocus &&
+      active !== request.target &&
+      active !== textareaRef.current
+    ) {
+      sidebarReturnFocus.current = null;
+      return;
+    }
+    const needsComposer = request.composer || !request.target?.isConnected;
+    if (needsComposer && !composerReady) return;
+    const target = needsComposer ? textareaRef.current : request.target;
+    if (
+      !target ||
+      !target.isConnected ||
+      target.matches(':disabled') ||
+      target.closest('[inert]') ||
+      isHiddenBySelfOrAncestor(target)
+    )
+      return;
+    sidebarReturnFocus.current = null;
+    target.focus();
+  }, []);
+  const focusReadyComposer = React.useCallback(
+    () => returnSidebarFocus(true),
+    [returnSidebarFocus]
+  );
+  React.useLayoutEffect(() => {
+    if (!sidebarOpen) returnSidebarFocus();
+  }, [sidebarOpen, returnSidebarFocus]);
+
   const [stickyChatInput] = useStorage(
-    "stickyChatInput",
-    DEFAULT_CHAT_SETTINGS.stickyChatInput
-  )
-  const [userDisplayName] = useStorage("chatUserDisplayName", "")
-  useCharacterGreeting({
-    playgroundReady: !isRestoringChat,
-    selectedCharacter,
-    selectedCharacterMode: null,
-    serverChatId,
-    historyId,
-    messagesLength: messages.length,
-    setMessages,
-    setHistory
-  })
+    SIDEPANEL_STICKY_CHAT_INPUT_KEY,
+    SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT
+  );
+  const [userDisplayName] = useStorage('chatUserDisplayName', '');
+
   const composerPadding = composerHeight
     ? `${composerHeight + 16}px`
     : `${DEFAULT_COMPOSER_HEIGHT}px`
@@ -685,13 +886,9 @@ const SidepanelChatContent = ({
     () => messages.reduce((count, item) => count + (item?.isBot ? 0 : 1), 0),
     [messages]
   )
-  const scrollToLatestBottom = React.useMemo(() => {
-    if (!stickyChatInput) return "8rem"
-    const baseOffset = composerHeight
-      ? composerHeight + 24
-      : DEFAULT_COMPOSER_HEIGHT
-    return `${Math.max(baseOffset, 128)}px`
-  }, [composerHeight, stickyChatInput])
+  const scrollToLatestBottom = sidepanelScrollToLatestBottom(
+    composerHeight, DEFAULT_COMPOSER_HEIGHT, Boolean(stickyChatInput)
+  )
 
   const clearNoteCapture = React.useCallback(() => {
     const capture = noteCaptureRef.current
@@ -751,7 +948,11 @@ const SidepanelChatContent = ({
     window.open(normalizedRoute, "_blank")
   }, [])
 
-  const expandSelectedHistory = async () => { const route = await historySelection.prepareExpansionPath(); if (route) openOptionsHashRoute(route) }
+  const expandSelectedHistory = async () => {
+    if (isRestoringChatRef.current || !owner.isCurrent()) return
+    const route = await historySelection.prepareExpansionPath()
+    if (route) openOptionsHashRoute(route)
+  }
 
   const handleGenerateFlashcardsFromSelection = React.useCallback(async () => {
     const content = noteDraftContent
@@ -884,8 +1085,9 @@ const SidepanelChatContent = ({
     if (noteError) setNoteError(null)
   }
 
-  const buildSnapshot = React.useCallback((): SidepanelChatSnapshot => {
-    return {
+  const buildSnapshot = React.useCallback((source?: ReturnType<typeof useStoreMessageOption.getState>): SidepanelChatSnapshot => {
+    const snapshot: SidepanelChatSnapshot = {
+      chatDraftAddress,
       historySelectionReference: historySelection.getReference(),
       history,
       messages,
@@ -895,7 +1097,7 @@ const SidepanelChatContent = ({
       toolChoice,
       selectedModel: selectedModel ?? null,
       selectedSystemPrompt,
-      selectedQuickPrompt,
+      selectedQuickPrompt: null,
       temporaryChat,
       useOCR,
       serverChatId,
@@ -908,7 +1110,35 @@ const SidepanelChatContent = ({
       queuedMessages,
       modelSettings: modelSettingsSnapshot
     }
+    // New is accepted before React commits its next render. Use the live core
+    // for that destination instead of copying the captured departing tab.
+    if (source) Object.assign(snapshot, {
+      chatDraftAddress: source.chatDraftAddress, history: source.history, messages: source.messages,
+      chatMode: source.chatMode, historyId: source.historyId, webSearch: source.webSearch,
+      toolChoice: source.toolChoice, selectedModel: source.selectedModel, selectedSystemPrompt: source.selectedSystemPrompt,
+      selectedQuickPrompt: null, temporaryChat: source.temporaryChat,
+      useOCR: source.useOCR, serverChatId: source.serverChatId, serverChatState: source.serverChatState,
+      serverChatTopic: source.serverChatTopic, serverChatClusterId: source.serverChatClusterId,
+      serverChatSource: source.serverChatSource, serverChatExternalRef: source.serverChatExternalRef,
+      queuedMessages: source.queuedMessages, modelSettings: pickChatModelSettings(useStoreChatModelSettings.getState())
+    })
+    const address = snapshot.chatDraftAddress
+    const selected = historySelection.getCurrent()
+    const qualified = selected.owner && selected.view ? chatDraftAddressForReceipt({ owner: selected.owner, view: selected.view }) : null
+    const coherent = address && (address.kind === "fresh"
+      ? (!snapshot.historyId || (snapshot.temporaryChat && snapshot.historyId === "temp")) && !snapshot.serverChatId && address.temporary === snapshot.temporaryChat &&
+        (snapshot.temporaryChat || (!snapshot.history.length && !snapshot.messages.length))
+      : !snapshot.temporaryChat && qualified && chatDraftAddressKey(qualified) === chatDraftAddressKey(address) &&
+        (address.kind === "local" ? snapshot.historyId === address.id && !snapshot.serverChatId
+          : snapshot.serverChatId === address.id && selected.owner?.kind === "native" &&
+            chatDraftOwnerKey(selected.owner.request_scope) === chatDraftOwnerKey(owner.snapshot.requestScope)))
+    snapshot.chatDraftHandle = coherent && owner.isCurrent() ? { address, ownerHash: chatDraftOwnerKey(owner.snapshot.requestScope) } : null
+    if (address?.kind === "fresh") snapshot.historySelectionReference = null
+    return snapshot
   }, [
+    owner,
+    historySelection,
+    chatDraftAddress,
     latestSeenServerMessageRef,
     history,
     messages,
@@ -918,7 +1148,6 @@ const SidepanelChatContent = ({
     toolChoice,
     selectedModel,
     selectedSystemPrompt,
-    selectedQuickPrompt,
     temporaryChat,
     useOCR,
     serverChatId,
@@ -931,14 +1160,46 @@ const SidepanelChatContent = ({
     modelSettingsSnapshot
   ])
 
+  const prepareSnapshot = React.useCallback(async (
+    snapshot: SidepanelChatSnapshot, current: () => boolean
+  ): Promise<SidepanelChatSnapshot | null> => {
+    const handle = isChatDraftHandle(snapshot.chatDraftHandle) &&
+      snapshot.chatDraftHandle.ownerHash === chatDraftOwnerKey(owner.snapshot.requestScope)
+      ? snapshot.chatDraftHandle : null
+    const address = handle?.address ?? (isChatDraftAddress(snapshot.chatDraftAddress) ? snapshot.chatDraftAddress : null)
+    if (!current()) return null
+    if (!address || address.kind === "fresh") return snapshot
+    openingHistorySelection.activate("opening-saved-tab")
+    const loaded = await openingHistorySelection.loadConversation({
+      historyId: address.kind === "local" ? address.id : null,
+      serverChatId: address.kind === "native" ? address.id : null,
+      scope: address.kind === "native" ? address.scope : undefined,
+      isCurrent: current
+    }, snapshot.historySelectionReference)
+    if (!loaded || !current()) return null
+    const selected = openingHistorySelection.getCurrent()
+    const qualified = selected.owner && selected.view
+      ? chatDraftAddressForReceipt({ owner: selected.owner, view: selected.view }) : null
+    if (!qualified || chatDraftAddressKey(qualified) !== chatDraftAddressKey(address) ||
+      (selected.owner?.kind === "native" &&
+        chatDraftOwnerKey(selected.owner.request_scope) !== chatDraftOwnerKey(owner.snapshot.requestScope))) return null
+    return { ...snapshot, chatDraftAddress: qualified,
+      chatDraftHandle: { address: qualified, ownerHash: chatDraftOwnerKey(owner.snapshot.requestScope) },
+      historyId: qualified.kind === "local" ? qualified.id : null,
+      serverChatId: qualified.kind === "native" ? qualified.id : null,
+      historySelectionReference: openingHistorySelection.getReference(),
+      ...(selected.capture?.status === "captured" ? formatSelectedHistory(selected.capture) : {}) }
+  }, [openingHistorySelection, owner])
+
   const applySnapshot = React.useCallback(
-    (snapshot: SidepanelChatSnapshot, { load = true }: { load?: boolean } = {}) => {
+    (snapshot: SidepanelChatSnapshot) => {
       if (!owner.isCurrent()) return
-      historySelection.activate(useSidepanelChatTabsStore.getState().activeTabId || "initial")
+      const handle = isChatDraftHandle(snapshot.chatDraftHandle) && snapshot.chatDraftHandle.ownerHash === chatDraftOwnerKey(owner.snapshot.requestScope) ? snapshot.chatDraftHandle : null
+      const fresh = handle?.address.kind === "fresh" ? handle.address : null
+      const address = handle?.address ?? null
+      const targetTabId = useSidepanelChatTabsStore.getState().activeTabId
+      historySelection.activate(targetTabId || "initial")
       showFreshnessTab(snapshot.serverChatLatestSeenId)
-      // Once loaded, check the tab against its server chat: a saved tab
-      // restores its old position even when the chat continued elsewhere (XP-08).
-      if (load) void historySelection.loadConversation({ historyId: snapshot.historyId, serverChatId: snapshot.serverChatId, temporary: snapshot.temporaryChat }, snapshot.historySelectionReference).then(loaded => { if (loaded) return restoreReadableLocalComparison(historySelection, display => { setHistory(display.history); setMessages(display.messages) }).finally(checkShownTab) }).catch(error => console.warn("Failed to restore readable comparison", error))
       setHistory(snapshot.history || [])
       setMessages(snapshot.messages || [])
       setHistoryId(snapshot.historyId ?? null)
@@ -953,7 +1214,7 @@ const SidepanelChatContent = ({
         setSelectedModel(snapshotModel)
       }
       setSelectedSystemPrompt(snapshot.selectedSystemPrompt ?? null)
-      setSelectedQuickPrompt(snapshot.selectedQuickPrompt ?? null)
+      setSelectedQuickPrompt(null)
       setTemporaryChat(snapshot.temporaryChat ?? false)
       setUseOCR(snapshot.useOCR ?? false)
       setServerChatId(snapshot.serverChatId ?? null)
@@ -970,9 +1231,43 @@ const SidepanelChatContent = ({
       setStreaming(false)
       setIsSearchingInternet(false)
       applyChatModelSettingsSnapshot(snapshot.modelSettings)
+      if (address) useStoreMessageOption.getState().setChatDraftAddress(address)
+      else useStoreMessageOption.getState().startNewChatDraft(snapshot.temporaryChat ?? false)
+      if (fresh) historySelection.reset()
+      else {
+        const accept = captureChatDraftLoad("switch", () => {
+          const selectedOwner = historySelection.getCurrent().owner
+          return owner.isCurrent() &&
+            useSidepanelChatTabsStore.getState().activeTabId === targetTabId &&
+            (selectedOwner?.kind !== "native" ||
+              chatDraftOwnerKey(selectedOwner.request_scope) === chatDraftOwnerKey(owner.snapshot.requestScope))
+        })
+        void historySelection.loadConversation({
+          historyId: snapshot.historyId, serverChatId: snapshot.serverChatId,
+          temporary: snapshot.temporaryChat,
+          scope: address?.kind === "native" ? address.scope : undefined,
+          isCurrent: accept.isCurrent
+        }, snapshot.historySelectionReference, receipt => {
+          const qualified = chatDraftAddressForReceipt(receipt)
+          if (qualified && (!address || chatDraftAddressKey(qualified) === chatDraftAddressKey(address)) &&
+            (receipt.owner.kind !== "native" || chatDraftOwnerKey(receipt.owner.request_scope) === chatDraftOwnerKey(owner.snapshot.requestScope))) accept(receipt)
+        }).then(async loaded => {
+          if (!loaded || !accept.isCurrent()) return
+          await restoreReadableLocalComparison(historySelection, (display) => {
+            if (!accept.isCurrent()) return
+            useStoreMessageOption.setState({
+              history: display.history,
+              messages: display.messages
+            })
+          })
+
+          if (accept.isCurrent()) await checkShownTab()
+        }).catch(error => console.warn("Failed to restore readable comparison", error))
+      }
     },
     [
       owner,
+      historySelection,
       showFreshnessTab,
       checkShownTab,
       setHistory,
@@ -1004,38 +1299,61 @@ const SidepanelChatContent = ({
 
   const saveActiveTabSnapshot = React.useCallback(() => {
     const currentTabId = useSidepanelChatTabsStore.getState().activeTabId
-    if (!owner.isCurrent() || isSwitchingTabRef.current || !currentTabId || currentTabId !== activeTabId) return
-    if (pendingOpenTabIdRef.current === currentTabId) return
-    const snapshot = buildSnapshot()
-    snapshot.modelSettings = pickChatModelSettings(
-      useStoreChatModelSettings.getState()
-    )
+    if (!owner.isCurrent() || isRestoringChat || isSwitchingTabRef.current || !currentTabId || currentTabId !== activeTabId) return
+    const snapshot = buildSnapshot(useStoreMessageOption.getState())
     useSidepanelChatTabsStore.getState().setSnapshot(currentTabId, snapshot)
-  }, [activeTabId, buildSnapshot, owner])
+  }, [activeTabId, buildSnapshot, owner, isRestoringChat])
 
   const toggleSidebar = () => {
     setSidebarOpen((prev) => !prev)
   }
 
   const requestSidebarSearchFocus = React.useCallback(() => {
-    if (uiMode !== "pro" || isNarrow) {
-      setSidebarOpen(true)
-    }
-    setSidebarSearchFocusNonce((prev) => prev + 1)
-  }, [isNarrow, uiMode])
+    const initiator = document.activeElement;
+    setSidebarOpen(true);
+    sidebarFindFocus.current = {
+      revision: sidebarOpening.current.revision,
+      isCurrent: owner.isCurrent,
+      initiator,
+    };
+    setSidebarSearchFocusNonce((prev) => prev + 1);
+  }, [owner, setSidebarOpen]);
+  const focusSidebarSearch = React.useCallback(() => {
+    const request = sidebarFindFocus.current;
+    const input = sidebarSearchInputRef.current;
+    if (!request || !input || (!isDockedSidebar && !sidebarPresented.current)) return;
+    sidebarFindFocus.current = null;
+    if (
+      !sidebarOpening.current.open ||
+      request.revision !== sidebarOpening.current.revision ||
+      !request.isCurrent()
+    )
+      return;
+    const active = document.activeElement;
+    const dialog = input.closest('[role="dialog"]');
+    const drawer = input.closest('.sidepanel-chat-overlay');
+    if (
+      active !== document.body &&
+      active?.isConnected &&
+      active !== request.initiator &&
+      active !== input &&
+      active !== dialog &&
+      active !== drawer
+    )
+      return;
+    input.focus();
+    input.select();
+  }, [isDockedSidebar]);
 
-  const toggleChatMode = () => {
-    setChatMode(chatMode === "rag" ? "normal" : "rag")
-  }
+  const toggleChatMode = usePageChatModeToggle(chatMode, setChatMode)
 
   const toggleWebSearchMode = () => {
     setWebSearch(!webSearch)
   }
 
-  useChatShortcuts(clearChat, true)
-  useSidebarShortcuts(toggleSidebar, true)
-  useChatModeShortcuts(toggleChatMode, true)
-  useWebSearchShortcuts(toggleWebSearchMode, true)
+  useSidebarShortcuts(toggleSidebar, !sidebarOverlayOpen);
+  useChatModeShortcuts(toggleChatMode, !sidebarOverlayOpen);
+  useWebSearchShortcuts(toggleWebSearchMode, !sidebarOverlayOpen);
 
   const [chatBackgroundImage] = useStorage({
     key: CHAT_BACKGROUND_IMAGE_SETTING.key,
@@ -1069,26 +1387,57 @@ const SidepanelChatContent = ({
 
   const applySnapshotRef = React.useRef(applySnapshot)
   applySnapshotRef.current = applySnapshot
+  const prepareSnapshotRef = React.useRef(prepareSnapshot)
+  prepareSnapshotRef.current = prepareSnapshot
   const restoreDefaults = React.useRef({ modelSettingsSnapshot, selectedModel, toolChoice, useOCR, webSearch, newChatLabel })
   const restoreSidepanelState = React.useCallback(async () => {
     const { modelSettingsSnapshot, selectedModel, toolChoice, useOCR, webSearch, newChatLabel } = restoreDefaults.current
     if (tabId === undefined || !owner.isCurrent()) return
-    const generation = ++loadGenerationRef.current
+    invalidateLoads()
+    const generation = loadGenerationRef.current
     const current = () => owner.isCurrent() && generation === loadGenerationRef.current
     isRestoringChatRef.current = true
     setIsRestoringChat(true)
-    setRestoreFailed(false)
+    setRestoreFailure(null)
+    preparingTabRef.current = current
     try {
-      const tabsState = await readSidepanelTabs(storageRef.current, tabId, owner.ownerKey, current)
+      const storageKey = getTabsStorageKey(tabId, owner.ownerKey)
+      const ram = useSidepanelChatTabsStore.getState()
+      const tabsState = ram.storageKey === storageKey && ram.ownerKey === owner.ownerKey && ram.tabs.length
+        ? { version: 2 as const, ownerKey: owner.ownerKey, tabs: ram.tabs, activeTabId: ram.activeTabId, snapshotsById: ram.snapshotsById }
+        : await readSidepanelTabs(storageRef.current, tabId, owner.ownerKey, current, chatDraftOwnerKey(owner.snapshot.requestScope))
       if (!current()) return
       if (tabsState?.tabs.length) {
         const activeId = tabsState.tabs.some(tab => tab.id === tabsState.activeTabId)
           ? tabsState.activeTabId : tabsState.tabs[0].id
+        const prepared = activeId && tabsState.snapshotsById[activeId]
+          ? await prepareSnapshotRef.current(tabsState.snapshotsById[activeId], current) : null
+        if (!current()) return
         useSidepanelChatTabsStore.getState().setTabsState({
-          tabs: tabsState.tabs, activeTabId: activeId, snapshotsById: tabsState.snapshotsById
+          tabs: tabsState.tabs, activeTabId: activeId, snapshotsById: tabsState.snapshotsById, storageKey
         })
-        if (activeId && tabsState.snapshotsById[activeId]) applySnapshotRef.current(tabsState.snapshotsById[activeId])
+        if (!prepared) {
+          // The owner's records were read successfully. Keep them available
+          // for another tab or explicit New while this target cannot qualify.
+          setRestoreFailure("target")
+          return
+        }
+        if (prepared) applySnapshotRef.current(prepared)
       } else {
+        if (ram.storageKey && ram.storageKey !== storageKey) {
+          // A new physical panel has no saved state. Its scaffold must not be
+          // seeded from the previous panel's still-mounted Core transcript.
+          historySelection.reset()
+          const core = useStoreMessageOption.getState()
+          core.setTemporaryChat(false)
+          core.startNewChatDraft(false)
+          useStoreMessageOption.setState({ history: [], messages: [], historyId: null,
+            serverChatId: null, serverChatState: null, serverChatTopic: null,
+            serverChatClusterId: null, serverChatSource: null, serverChatExternalRef: null,
+            queuedMessages: [] })
+          messagesRef.current = []
+        }
+        useSidepanelChatTabsStore.getState().setTabsState({ tabs: [], activeTabId: null, snapshotsById: {}, storageKey })
         const enabled = await copilotResumeLastChat()
         if (!current()) return
         if (enabled && messagesRef.current.length === 0) {
@@ -1119,9 +1468,11 @@ const SidepanelChatContent = ({
     } catch {
       // Keep persistence suspended: a failed read must not replace an owner's
       // saved tabs with an empty scaffold. Offer an explicit same-owner retry.
-      if (current()) setRestoreFailed(true)
+      if (current()) setRestoreFailure("storage")
+    } finally {
+      if (preparingTabRef.current === current) preparingTabRef.current = null
     }
-  }, [owner, tabId])
+  }, [owner, tabId, invalidateLoads])
 
   const persistSidepanelState = React.useCallback(() => {
     if (tabId === undefined || isRestoringChat || !owner.isCurrent()) return
@@ -1130,8 +1481,8 @@ const SidepanelChatContent = ({
     const snapshot: SidepanelTabsState = {
       version: 2, ownerKey: owner.ownerKey, tabs, activeTabId, snapshotsById
     }
-    void storageRef.current.set(getTabsStorageKey(tabId, owner.ownerKey), snapshot).catch(() => {})
-  }, [isRestoringChat, owner, saveActiveTabSnapshot, tabId])
+    void storageRef.current.set(getTabsStorageKey(tabId, owner.ownerKey), durableSidepanelTabs(snapshot, chatDraftOwnerKey(owner.snapshot.requestScope), newChatLabel)).catch(() => {})
+  }, [isRestoringChat, owner, saveActiveTabSnapshot, tabId, newChatLabel])
 
   React.useEffect(() => {
     void checkOnce()
@@ -1139,7 +1490,7 @@ const SidepanelChatContent = ({
 
   React.useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return
-    const media = window.matchMedia("(max-width: 400px)")
+    const media = window.matchMedia(SIDEPANEL_UNDOCKED_SIDEBAR_MEDIA_QUERY)
     const update = () => setIsNarrow(media.matches)
     update()
     media.addEventListener("change", update)
@@ -1174,7 +1525,6 @@ const SidepanelChatContent = ({
 
   React.useEffect(() => {
     if (!owner.isCurrent() || !activeTabId || isRestoringChat || isSwitchingTabRef.current) return
-    if (pendingOpenTabIdRef.current === activeTabId) return
     let isCurrent = true
     const updateLabel = async () => {
       const store = useSidepanelChatTabsStore.getState()
@@ -1232,7 +1582,8 @@ const SidepanelChatContent = ({
     const store = useSidepanelChatTabsStore.getState()
     const tab = store.tabs.find((item) => item.id === store.activeTabId)
     if (!tab || !owner.isCurrent()) return null
-    return readTabConversationTitle(tab, owner.snapshot.requestScope)
+    const title = await readTabConversationTitle(tab, owner.snapshot.requestScope)
+    return owner.isCurrent() && useSidepanelChatTabsStore.getState().activeTabId === tab.id ? title : null
   }, [owner])
 
   const handleRenameActiveTab = React.useCallback(
@@ -1294,15 +1645,16 @@ const SidepanelChatContent = ({
     tabs.length
   ])
 
-  const handleNewTab = React.useCallback(() => {
-    if (!owner.isCurrent() || isRestoringChat) return
-    loadGenerationRef.current++
+  const createFreshTab = React.useCallback((newTabId = generateID(), recovered?: Extract<ChatDraftAddress, { kind: "fresh" }>) => {
+    if (!owner.isCurrent() || (isRestoringChat && restoreFailure !== "target")) return false
     saveActiveTabSnapshot()
-    if (streaming) {
-      stopStreamingRequest()
-    }
+    if (clearChat(() => {
+      isSwitchingTabRef.current = true
+      historySelection.activate(newTabId)
+    }) === false) return false
+    invalidateLoads()
+    if (recovered) useStoreMessageOption.getState().setChatDraftAddress(recovered)
     setDropedFile(undefined)
-    const newTabId = generateID()
     useSidepanelChatTabsStore.getState().upsertTab({
       id: newTabId,
       label: newChatLabel,
@@ -1313,54 +1665,119 @@ const SidepanelChatContent = ({
     })
     isSwitchingTabRef.current = true
     useSidepanelChatTabsStore.getState().setActiveTabId(newTabId)
-    historySelection.activate(newTabId)
-    historySelection.reset()
+    useSidepanelChatTabsStore.getState().setSnapshot(newTabId, buildSnapshot(useStoreMessageOption.getState()))
+    setIsRestoringChat(false)
+    setRestoreFailure(null)
     showFreshnessTab(null)
-    clearChat()
     setTimeout(() => {
       isSwitchingTabRef.current = false
     }, 0)
+    return true
   }, [
     owner,
-      isRestoringChat,
+    invalidateLoads,
+    isRestoringChat,
+    restoreFailure,
     showFreshnessTab,
     clearChat,
     saveActiveTabSnapshot,
+    buildSnapshot,
     setDropedFile,
     stopStreamingRequest,
     streaming,
     newChatLabel
   ])
 
+  const handleNewTab = React.useCallback(() => createFreshTab(), [createFreshTab])
+  const handleRecoverDraft: RestoreChatDraft = async (draft, copy) => {
+    if (!owner.isCurrent() || !isChatDraftHandle(draft.handle) || draft.handle.address.kind !== "fresh" ||
+      draft.handle.ownerHash !== chatDraftOwnerKey(owner.snapshot.requestScope)) return false
+    const source = useStoreMessageOption.getState()
+    const sourceTabId = useSidepanelChatTabsStore.getState().activeTabId
+    const generation = loadGenerationRef.current
+    const current = () => owner.isCurrent() && generation === loadGenerationRef.current && !isRestoringChatRef.current &&
+      useSidepanelChatTabsStore.getState().activeTabId === sourceTabId &&
+      useStoreMessageOption.getState().chatDraftAddress === source.chatDraftAddress &&
+      useStoreMessageOption.getState().chatDraftRevision === source.chatDraftRevision;
+    const newTabId = generateID();
+    const recovered = {
+      ...draft.handle.address,
+      id: freshChatDraftAddress(draft.handle.address.temporary).id,
+    };
+    if (
+      !current() ||
+      !requestSettingsNavigation('/') ||
+      !(await copy(`tldw:sidepanelChatDraft:${newTabId}`, recovered)) ||
+      !current() ||
+      useSidepanelChatTabsStore.getState().tabs.some((tab) => tab.id === newTabId)
+    )
+      return false;
+    return createFreshTab(newTabId, recovered);
+  };
+  useChatShortcuts(handleNewTab, !sidebarOverlayOpen);
+
   const handleSelectTab = React.useCallback(
-    (tabId: string) => {
-      if (!owner.isCurrent() || isRestoringChat || !tabId) return
-      if (tabId === useSidepanelChatTabsStore.getState().activeTabId) return
-      loadGenerationRef.current++
+    async (tabId: string, isAdmitted: () => boolean = () => true) => {
+      if (!isAdmitted() || !owner.isCurrent() || (isRestoringChat && restoreFailure !== "target") || !tabId) return false
+      if (!useSidepanelChatTabsStore.getState().tabs.some(tab => tab.id === tabId)) return false
+      if (tabId === activeTabId) {
+        invalidateLoads()
+        openingHistorySelection.reset()
+        return true
+      }
       saveActiveTabSnapshot()
-      if (streaming) {
-        stopStreamingRequest()
-      }
-      setDropedFile(undefined)
       const snapshot = useSidepanelChatTabsStore.getState().getSnapshot(tabId)
-      isSwitchingTabRef.current = true
-      useSidepanelChatTabsStore.getState().setActiveTabId(tabId)
-      historySelection.activate(tabId)
-      if (snapshot) {
-        applySnapshot(snapshot)
-      } else {
-        showFreshnessTab(null)
-        clearChat()
+      if (snapshot ? !requestSettingsNavigation("/") : clearChat() === false) return false
+      invalidateLoads()
+      const generation = loadGenerationRef.current
+      const source = useStoreMessageOption.getState()
+      const sourceTabId = useSidepanelChatTabsStore.getState().activeTabId
+      const sourceFence = historySelection.fence()
+      const current = () => isAdmitted() && owner.isCurrent() && sourceFence() && generation === loadGenerationRef.current &&
+        useSidepanelChatTabsStore.getState().activeTabId === sourceTabId &&
+        useSidepanelChatTabsStore.getState().tabs.some(tab => tab.id === tabId) &&
+        useSidepanelChatTabsStore.getState().getSnapshot(tabId) === snapshot &&
+        useStoreMessageOption.getState().chatDraftRevision === source.chatDraftRevision &&
+        useStoreMessageOption.getState().chatDraftAddress === source.chatDraftAddress
+      preparingTabRef.current = current
+      try {
+        const prepared = snapshot ? await prepareSnapshot(snapshot, current) : null
+        if (!current() || (snapshot && !prepared)) return false
+        if ((snapshot && !requestSettingsNavigation("/")) || !current()) return false
+        saveActiveTabSnapshot()
+        if (streaming) {
+          stopStreamingRequest()
+        }
+        setDropedFile(undefined)
+        isSwitchingTabRef.current = true
+        useSidepanelChatTabsStore.getState().setActiveTabId(tabId)
+        historySelection.activate(tabId)
+        if (prepared) {
+          applySnapshot(prepared)
+        } else useSidepanelChatTabsStore.getState().setSnapshot(tabId, buildSnapshot(useStoreMessageOption.getState()))
+        setIsRestoringChat(false)
+        setRestoreFailure(null)
+        setTimeout(() => {
+          isSwitchingTabRef.current = false
+          if (owner.isCurrent() && useSidepanelChatTabsStore.getState().activeTabId === tabId) checkShownTab()
+        }, 0)
+        return true
+      } finally {
+        if (preparingTabRef.current === current) preparingTabRef.current = null
       }
-      setTimeout(() => {
-        isSwitchingTabRef.current = false
-      }, 0)
     },
     [
       owner,
+      activeTabId,
+      invalidateLoads,
+      historySelection,
+      openingHistorySelection,
+      prepareSnapshot,
+      checkShownTab,
       isRestoringChat,
+      restoreFailure,
+      buildSnapshot,
       applySnapshot,
-      showFreshnessTab,
       clearChat,
       saveActiveTabSnapshot,
       stopStreamingRequest,
@@ -1370,78 +1787,172 @@ const SidepanelChatContent = ({
   )
 
   const handleCloseTab = React.useCallback(
-    (tabId: string) => {
-      if (!owner.isCurrent() || isRestoringChat) return
+    async (
+      tabId: string,
+      options?: { discardTemporaryConfirmed: true; isCurrent?: () => boolean }
+    ): Promise<boolean> => {
+      const isAdmitted = options?.isCurrent ?? (() => true)
+      if (!isAdmitted() || !owner.isCurrent() || isRestoringChat) return false
       const store = useSidepanelChatTabsStore.getState()
+      const target = store.tabs.find((tab) => tab.id === tabId)
+      if (!target) return false
+      const snapshot = store.getSnapshot(tabId)
+      const chat =
+        tabId === store.activeTabId
+          ? useStoreMessageOption.getState()
+          : snapshot
+      const addressKey =
+        chat && isChatDraftAddress(chat.chatDraftAddress)
+          ? chatDraftAddressKey(chat.chatDraftAddress)
+          : null
+      const sourceFence = historySelection.fence()
+      const source = captureChatDraftSource(() => isAdmitted() && sourceFence())
+      if (
+        chat &&
+        options?.discardTemporaryConfirmed !== true &&
+        !confirmTemporaryChatDiscard(chat)
+      )
+        return false
+      if (
+        !owner.isCurrent() ||
+        !source.isCurrent() ||
+        useSidepanelChatTabsStore.getState().activeTabId !==
+          store.activeTabId ||
+        useSidepanelChatTabsStore.getState().getSnapshot(tabId) !== snapshot
+      )
+        return false
       if (store.tabs.length <= 1) {
-        store.removeTab(tabId)
-        handleNewTab()
-        return
-      }
-      if (tabId === store.activeTabId) {
+        if (
+          !handleNewTab() ||
+          !isAdmitted() ||
+          !owner.isCurrent() ||
+          useSidepanelChatTabsStore.getState().activeTabId === tabId
+        )
+          return false
+      } else if (tabId === store.activeTabId) {
         const currentIndex = store.tabs.findIndex((tab) => tab.id === tabId)
         const nextTab =
           store.tabs[currentIndex + 1] || store.tabs[currentIndex - 1]
-        if (nextTab) {
-          handleSelectTab(nextTab.id)
-        }
+        if (
+          !nextTab ||
+          !(await handleSelectTab(nextTab.id, isAdmitted)) ||
+          !isAdmitted() ||
+          !owner.isCurrent() ||
+          useSidepanelChatTabsStore.getState().activeTabId !== nextTab.id
+        )
+          return false
       }
+      const currentStore = useSidepanelChatTabsStore.getState()
+      const currentTarget = currentStore.tabs.find((tab) => tab.id === tabId)
+      const currentSnapshot = currentStore.getSnapshot(tabId)
+      const currentAddressKey = isChatDraftAddress(
+        currentSnapshot?.chatDraftAddress
+      )
+        ? chatDraftAddressKey(currentSnapshot.chatDraftAddress)
+        : null
+      if (
+        !isAdmitted() ||
+        !owner.isCurrent() ||
+        !currentTarget ||
+        currentTarget.historyId !== target.historyId ||
+        currentTarget.serverChatId !== target.serverChatId ||
+        currentSnapshot?.historyId !== chat?.historyId ||
+        currentSnapshot?.serverChatId !== chat?.serverChatId ||
+        currentAddressKey !== addressKey
+      )
+        return false
       store.removeTab(tabId)
+      return true
     },
-    [handleNewTab, handleSelectTab, owner, isRestoringChat]
+    [handleNewTab, handleSelectTab, historySelection, owner, isRestoringChat]
   )
 
   const openSnapshotTab = React.useCallback(
     (tab: SidepanelChatTab, snapshot: SidepanelChatSnapshot) => {
-      if (!owner.isCurrent()) return
-      const store = useSidepanelChatTabsStore.getState()
-      store.upsertTab(tab)
-      store.setSnapshot(tab.id, snapshot)
-      isSwitchingTabRef.current = true
-      store.setActiveTabId(tab.id)
-      applySnapshot(snapshot)
+      if (!owner.isCurrent()) return false;
+      const store = useSidepanelChatTabsStore.getState();
+      store.upsertTab(tab);
+      store.setSnapshot(tab.id, snapshot);
+      isSwitchingTabRef.current = true;
+      store.setActiveTabId(tab.id);
+      applySnapshot(snapshot);
+      setIsRestoringChat(false);
+      setRestoreFailure(null);
       setTimeout(() => {
-        isSwitchingTabRef.current = false
-      }, 0)
+        isSwitchingTabRef.current = false;
+        if (owner.isCurrent() && useSidepanelChatTabsStore.getState().activeTabId === tab.id)
+          checkShownTab();
+      }, 0);
+      return true;
     },
-    [applySnapshot, owner]
+    [applySnapshot, owner, checkShownTab]
   )
 
   const openLocalHistory = React.useCallback(
     async (targetHistoryId: string) => {
-      if (!owner.isCurrent() || isRestoringChat) return
-      const generation = ++loadGenerationRef.current
-      const current = () => owner.isCurrent() && generation === loadGenerationRef.current
-      const existingTab = tabs.find((tab) => tab.historyId === targetHistoryId)
+      if (!owner.isCurrent() || isRestoringChat) return false;
+      if (!requestSettingsNavigation('/')) return false;
+      invalidateLoads();
+      const generation = loadGenerationRef.current;
+      const sourceDraftRevision = useStoreMessageOption.getState().chatDraftRevision;
+      const sourceCurrent = historySelection.fence();
+      const current = () =>
+        sourceCurrent() &&
+        owner.isCurrent() &&
+        generation === loadGenerationRef.current &&
+        useStoreMessageOption.getState().chatDraftRevision === sourceDraftRevision;
+      const existingTab = tabs.find((tab) => tab.historyId === targetHistoryId);
       if (existingTab) {
-        handleSelectTab(existingTab.id)
-        return
+        return await handleSelectTab(existingTab.id);
       }
       saveActiveTabSnapshot()
       if (streaming) {
         stopStreamingRequest()
       }
       setDropedFile(undefined)
+      loadingGenerationRef.current = generation
       setIsLoading(true)
-      historySelection.beginLoad()
-      const isCurrentLoad = historySelection.fence()
+      openingHistorySelection.activate("opening-history")
+      openingHistorySelection.beginLoad()
+      const isCurrentLoad = openingHistorySelection.fence()
       try {
-        const chatData = await getFullChatData(targetHistoryId)
-        if (!current() || !isCurrentLoad()) return
-        if (!chatData || chatData.historyInfo.server_scope_key !== owner.ownerKey) {
+        const chatData = await getFullChatData(targetHistoryId);
+        if (!current() || !isCurrentLoad()) return false;
+        if (
+          !chatData ||
+          (chatData.historyInfo.server_scope_key &&
+            chatData.historyInfo.server_scope_key !== owner.ownerKey)
+        ) {
           notification.error({
-            message: t("common:error", "Error"),
-            description: t(
-              "common:serverChatLoadError",
-              "Failed to load conversation."
-            )
-          })
-          return
+            message: t('common:error', 'Error'),
+            description: t('common:serverChatLoadError', 'Failed to load conversation.'),
+          });
+          return false;
         }
 
-        const restoredHistory = formatToChatHistory(chatData.messages)
-        const restoredMessages = formatToMessage(chatData.messages)
-        const historyInfo = chatData.historyInfo
+        if (
+          !(await openingHistorySelection.loadConversation(
+            { historyId: targetHistoryId, isCurrent: current },
+            null
+          )) ||
+          !current()
+        )
+          return false;
+        const selected = openingHistorySelection.getCurrent();
+        const address =
+          selected.owner &&
+          selected.view &&
+          selected.owner.kind !== 'unavailable' &&
+          selected.owner.conversation_id ===
+            (chatData.historyInfo.server_chat_id || targetHistoryId)
+            ? chatDraftAddressForReceipt({ owner: selected.owner, view: selected.view })
+            : null;
+        if (!address) return false;
+        const display =
+          selected.capture?.status === 'captured' ? formatSelectedHistory(selected.capture) : null;
+        const restoredHistory = display?.history ?? formatToChatHistory(chatData.messages);
+        const restoredMessages = display?.messages ?? formatToMessage(chatData.messages);
+        const historyInfo = chatData.historyInfo;
         const snapshot = buildHistorySnapshot({
           historyInfo,
           restoredHistory,
@@ -1452,9 +1963,11 @@ const SidepanelChatContent = ({
           useOCR,
           webSearch
         })
+        snapshot.chatDraftAddress = address
+        snapshot.chatDraftHandle = { address, ownerHash: chatDraftOwnerKey(owner.snapshot.requestScope) }
 
         const newTabId = generateID()
-        openSnapshotTab(
+        return openSnapshotTab(
           {
             id: newTabId,
             label: truncateTabLabel(
@@ -1469,19 +1982,26 @@ const SidepanelChatContent = ({
           snapshot
         )
       } catch (err: any) {
-        if (!current()) return
+        if (!current()) return false;
         notification.error({
           message: t("common:error", "Error"),
           description:
-            err?.message ||
-            t("common:serverChatLoadError", "Failed to load conversation.")
-        })
+            err?.message || t('common:serverChatLoadError', 'Failed to load conversation.'),
+        });
+        return false;
       } finally {
-        if (current()) setIsLoading(false)
+        if (owner.isCurrent() && generation === loadGenerationRef.current && loadingGenerationRef.current === generation) {
+          loadingGenerationRef.current = null
+          openingHistorySelection.reset()
+          setIsLoading(false)
+        }
       }
     },
     [
+      historySelection,
+      openingHistorySelection,
       owner,
+      invalidateLoads,
       isRestoringChat,
       handleSelectTab,
       modelSettingsSnapshot,
@@ -1520,205 +2040,163 @@ const SidepanelChatContent = ({
       chat: ServerChatHistoryItem,
       list: ServerChatMessageInput[]
     ) => {
-      const current = historySelection.getCurrent()
+      const current = openingHistorySelection.getCurrent()
       if (current.owner?.kind !== "native" || current.owner.conversation_id !== chatId || current.capture?.status !== "captured") return null
       const ownerKey = serverChatMirrorOwnerKey({ requestScope: current.owner.request_scope })
-      const signal = historySelection.getSignal()
-      const isCurrent = historySelection.fence()
-      const localHistoryId = await linkServerChatMirror({ chatId, title: chat.title || newChatLabel, ownerKey, signal })
+      const signal = openingHistorySelection.getSignal()
+      const isCurrent = openingHistorySelection.fence()
+      const localHistoryId = await linkServerChatMirror({ chatId, title: chat.title || newChatLabel, ownerKey, signal, scope: current.owner.scope, validate_lease: isCurrent })
       if (!isCurrent()) return null
       const incoming = mapServerChatMessages(list, userDisplayName).mappedMessages.map(message => ({ ...message, serverMessageId: message.serverMessageId || message.id }))
       await reconcileServerChatMirror({ historyId: localHistoryId, chatId, ownerKey, messages: incoming, signal })
       return isCurrent() ? localHistoryId : null
     },
-    [historySelection, newChatLabel, userDisplayName]
+    [openingHistorySelection, newChatLabel, userDisplayName]
   )
 
-  /**
-   * Drop the tab of a server chat that did not finish opening. If the open
-   * failed while its tab was showing, return to the tab the user came from. If
-   * another action superseded it, a tab the user has left is removed; one that
-   * is showing again is kept, since its snapshot is bound to the chat and
-   * reloads it.
-   */
-  const discardPendingServerChatTab = React.useCallback(
-    (pendingTabId: string, previousTabId: string | null, failed: boolean) => {
-      if (pendingOpenTabIdRef.current === pendingTabId) pendingOpenTabIdRef.current = null
-      if (!owner.isCurrent()) return
-      const store = useSidepanelChatTabsStore.getState()
-      if (!store.tabs.some((tab) => tab.id === pendingTabId)) return
-      if (store.activeTabId === pendingTabId) {
-        if (!failed) return
-        const returnTo = store.tabs.find((tab) => tab.id === previousTabId)
-        if (!returnTo) {
-          store.removeTab(pendingTabId)
-          handleNewTab()
-          return
-        }
-        handleSelectTab(returnTo.id)
-      }
-      useSidepanelChatTabsStore.getState().removeTab(pendingTabId)
-    },
-    [handleNewTab, handleSelectTab, owner]
-  )
-
+  /** Qualify the target off-view before committing a new tab and its owned draft. */
   const openServerChat = React.useCallback(
     async (chat: ServerChatHistoryItem) => {
-      if (!owner.isCurrent() || isRestoringChat) return
-      const chatId = String(chat.id)
-      const store = useSidepanelChatTabsStore.getState()
-      const existingTab = store.tabs.find((tab) => tab.serverChatId === chatId)
+      if (!owner.isCurrent() || isRestoringChat) return false;
+      if (!requestSettingsNavigation('/')) return false;
+      invalidateLoads();
+      const generation = loadGenerationRef.current;
+      const sourceDraftRevision = useStoreMessageOption.getState().chatDraftRevision;
+      const sourceCurrent = historySelection.fence();
+      const current = () =>
+        sourceCurrent() &&
+        owner.isCurrent() &&
+        generation === loadGenerationRef.current &&
+        useStoreMessageOption.getState().chatDraftRevision === sourceDraftRevision;
+      const chatId = String(chat.id);
+      const existingTab = tabs.find((tab) => tab.serverChatId === chatId);
       if (existingTab) {
-        handleSelectTab(existingTab.id)
-        return
+        return await handleSelectTab(existingTab.id);
       }
-      const generation = ++loadGenerationRef.current
-      const current = () => owner.isCurrent() && generation === loadGenerationRef.current
       saveActiveTabSnapshot()
       if (streaming) {
         stopStreamingRequest()
       }
       setDropedFile(undefined)
-      const snapshotOwner = owner.snapshot
-      const pendingSnapshot: SidepanelChatSnapshot = {
-        historySelectionReference: null,
-        history: [],
-        messages: [],
-        chatMode,
-        historyId: null,
-        webSearch,
-        toolChoice,
-        selectedModel: selectedModel ?? null,
-        selectedSystemPrompt,
-        selectedQuickPrompt,
-        temporaryChat: false,
-        useOCR,
-        serverChatId: chatId,
-        serverChatState: normalizeConversationState(chat.state),
-        serverChatTopic: chat.topic_label ?? null,
-        serverChatClusterId: chat.cluster_id ?? null,
-        serverChatSource: chat.source ?? null,
-        serverChatExternalRef: chat.external_ref ?? null,
-        queuedMessages: [],
-        modelSettings: modelSettingsSnapshot
-      }
-      const tab: SidepanelChatTab = {
-        id: generateID(),
-        label: truncateTabLabel(chat.title || newChatLabel),
-        labelSource: "auto",
-        historyId: null,
-        serverChatId: chatId,
-        serverChatTopic: chat.topic_label ?? null,
-        updatedAt: Date.now()
-      }
-      // Switch to the chat's own tab before loading it (XS-01). Loading
-      // publishes the chat into the shared chat store, which the active tab's
-      // snapshot follows; loading while the previous tab was still active
-      // wrote the opened chat over that tab's conversation.
-      const previousTabId = store.activeTabId
-      store.upsertTab(tab)
-      store.setSnapshot(tab.id, pendingSnapshot)
-      pendingOpenTabIdRef.current = tab.id
-      isSwitchingTabRef.current = true
-      store.setActiveTabId(tab.id)
-      applySnapshot(pendingSnapshot, { load: false })
+      loadingGenerationRef.current = generation
       setIsLoading(true)
-      setTimeout(() => {
-        isSwitchingTabRef.current = false
-      }, 0)
-      let opened = false
+      openingHistorySelection.activate("opening-history")
+      const snapshotOwner = owner.snapshot
       try {
-        const loaded = await historySelection.loadConversation({ serverChatId: chatId })
-        if (!loaded || !current()) return
-        const isCurrent = historySelection.fence()
-        const historyOwner = historySelection.getCurrent().owner
-        const list = await tldwClient.listChatMessages(chatId, {
-          include_deleted: "false", include_metadata: "true"
-        }, { signal: historySelection.getSignal(), requestScope: snapshotOwner.requestScope })
-        if (!current() || !isCurrent() || (historyOwner?.kind === "native" && !historyOwner.validate_lease())) return
-        const messageList: ServerChatMessageInput[] = list
-        const { history, mappedMessages } = mapServerChatMessages(
-          messageList,
-          userDisplayName
+        const loaded = await openingHistorySelection.loadConversation(
+          { serverChatId: chatId, isCurrent: current },
+          null
+        );
+        if (!loaded || !current()) return false;
+        const selected = openingHistorySelection.getCurrent();
+        const address =
+          selected.owner?.kind === 'native' &&
+          selected.owner.conversation_id === chatId &&
+          selected.view
+            ? chatDraftAddressForReceipt({ owner: selected.owner, view: selected.view })
+            : null;
+        if (!address) return false;
+        const isCurrent = openingHistorySelection.fence();
+        const historyOwner = openingHistorySelection.getCurrent().owner;
+        const list = await tldwClient.listChatMessages(
+          chatId,
+          {
+            include_deleted: 'false',
+            include_metadata: 'true',
+          },
+          { signal: openingHistorySelection.getSignal(), requestScope: snapshotOwner.requestScope }
+        );
+        if (
+          !current() ||
+          !isCurrent() ||
+          (historyOwner?.kind === 'native' && !historyOwner.validate_lease())
         )
-        const localHistoryId = await ensureLocalHistoryMirror(chatId, chat, messageList)
-        if (!current()) return
+          return false;
+        const messageList: ServerChatMessageInput[] = list;
+        const { history, mappedMessages } = mapServerChatMessages(messageList, userDisplayName);
+        const localHistoryId = await ensureLocalHistoryMirror(chatId, chat, messageList);
+        if (!current()) return false;
 
-        if (!isCurrent()) return
+        if (!isCurrent()) return false;
         const snapshot: SidepanelChatSnapshot = {
-          ...pendingSnapshot,
-          historySelectionReference: historySelection.getReference(),
-          ...(historySelection.getCurrent().capture?.status === "captured" ? formatSelectedHistory(historySelection.getCurrent().capture as import("@/types/history-selection").HistorySelectionCaptureV1) : { history, messages: mappedMessages }),
+          chatDraftAddress: address,
+          chatDraftHandle: { address, ownerHash: chatDraftOwnerKey(owner.snapshot.requestScope) },
+          historySelectionReference: openingHistorySelection.getReference(),
+          serverChatLatestSeenId: null,
+          ...(openingHistorySelection.getCurrent().capture?.status === "captured" ? formatSelectedHistory(openingHistorySelection.getCurrent().capture as import("@/types/history-selection").HistorySelectionCaptureV1) : { history, messages: mappedMessages }),
+          chatMode,
           historyId: localHistoryId,
-          // The load above noted the chat's latest message when it showed it.
-          serverChatLatestSeenId: latestSeenServerMessageRef.current
+          webSearch,
+          toolChoice,
+          selectedModel: selectedModel ?? null,
+          selectedSystemPrompt,
+          selectedQuickPrompt: null,
+          temporaryChat: false,
+          useOCR,
+          serverChatId: chatId,
+          serverChatState: normalizeConversationState(chat.state),
+          serverChatTopic: chat.topic_label ?? null,
+          serverChatClusterId: chat.cluster_id ?? null,
+          serverChatSource: chat.source ?? null,
+          serverChatExternalRef: chat.external_ref ?? null,
+          queuedMessages: [],
+          modelSettings: modelSettingsSnapshot
         }
 
-        // A rename made while the chat was opening has already renamed the
-        // server chat (XS-07). Keep that name rather than the title the open
-        // started from, and give it to the local copy: the rename ran before
-        // the tab had one, and the copy was linked under the old title.
-        const openingTab = useSidepanelChatTabsStore
-          .getState()
-          .tabs.find((item) => item.id === tab.id)
-        const renamedTitle =
-          openingTab?.labelSource === "manual" ? openingTab.label : null
-        pendingOpenTabIdRef.current = null
-        openSnapshotTab(
+        const newTabId = generateID()
+        return openSnapshotTab(
           {
-            ...tab,
-            ...(renamedTitle
-              ? { label: renamedTitle, labelSource: "manual" as const }
-              : {}),
+            id: newTabId,
+            label: truncateTabLabel(
+              chat.title || newChatLabel
+            ),
+            labelSource: "auto",
             historyId: localHistoryId,
+            serverChatId: chatId,
+            serverChatTopic: chat.topic_label ?? null,
             updatedAt: Date.now()
           },
           snapshot
         )
-        if (renamedTitle && localHistoryId) {
-          void updateHistory(localHistoryId, renamedTitle).catch((error) => {
-            console.warn("[sidepanel] Could not rename the local copy of a chat", error)
-          })
-        }
-        opened = true
       } catch (err: any) {
-        if (!current()) return
+        if (!current()) return false;
         notification.error({
           message: t("common:error", "Error"),
           description:
-            err?.message ||
-            t("common:serverChatLoadError", "Failed to load conversation.")
-        })
+            err?.message || t('common:serverChatLoadError', 'Failed to load conversation.'),
+        });
+        return false;
       } finally {
-        // Still current but not opened means the open failed; otherwise
-        // another action superseded it.
-        const stillCurrent = current()
-        if (!opened) discardPendingServerChatTab(tab.id, previousTabId, stillCurrent)
-        if (stillCurrent) setIsLoading(false)
+        if (owner.isCurrent() && generation === loadGenerationRef.current && loadingGenerationRef.current === generation) {
+          loadingGenerationRef.current = null
+          openingHistorySelection.reset()
+          setIsLoading(false)
+        }
       }
     },
     [
+      historySelection,
+      openingHistorySelection,
+      ensureLocalHistoryMirror,
       owner,
+      invalidateLoads,
       isRestoringChat,
       userDisplayName,
-      applySnapshot,
       chatMode,
-      latestSeenServerMessageRef,
-      discardPendingServerChatTab,
       handleSelectTab,
       modelSettingsSnapshot,
       notification,
       openSnapshotTab,
       saveActiveTabSnapshot,
       selectedModel,
-      selectedQuickPrompt,
-      selectedSystemPrompt,
+        selectedSystemPrompt,
       setDropedFile,
       setIsLoading,
       stopStreamingRequest,
       streaming,
       newChatLabel,
       t,
+      tabs,
       toolChoice,
       truncateTabLabel,
       useOCR,
@@ -2312,6 +2790,53 @@ const SidepanelChatContent = ({
     return newChatLabel
   }, [activeTabId, tabs, newChatLabel])
 
+  const webUiOpenActionRef = React.useRef<(() => Promise<boolean>) | null>(null)
+  const [webUiOpenReady, setWebUiOpenReady] = React.useState(false)
+  const handleWebUiOpenReady = React.useCallback((action: (() => Promise<boolean>) | null) => {
+    const wasReady = webUiOpenActionRef.current !== null
+    webUiOpenActionRef.current = action
+    if (wasReady !== (action !== null)) setWebUiOpenReady(action !== null)
+  }, [])
+  const openHydratedChatInWebUi = React.useCallback(() => webUiOpenActionRef.current?.(), [])
+  const openChatInWebUi = React.useCallback(async (
+    overrides: SidepanelChatWebUiHandoffOverrides = {}, source: SidepanelWebUiOpenSource
+  ) => {
+    const sourceTabId = useSidepanelChatTabsStore.getState().activeTabId
+    const current = () => source.isCurrent() && !isRestoringChatRef.current && owner.isCurrent() &&
+      useSidepanelChatTabsStore.getState().activeTabId === sourceTabId &&
+      useStoreMessageOption.getState().chatDraftRevision === source.state.chatDraftRevision &&
+      useStoreMessageOption.getState().chatDraftAddress === source.state.chatDraftAddress
+    if (!current()) return false
+    const snapshot = buildSnapshot(source.state)
+    const draft = source.draft
+    const read = async <T,>(key: string): Promise<T | null> => {
+      try { return await storageRef.current.get<T>(key) ?? null } catch { return null }
+    }
+    const stored = await read<Record<string, unknown>>("tldwConfig")
+    if (!current()) return false
+    let legacy = await read<string>("webUiUrl")
+    if (!current()) return false
+    if (legacy === null) legacy = await read<string>("webuiUrl")
+    if (!current()) return false
+    const config: SidepanelChatWebUiConfig = {
+      serverUrl: typeof stored?.serverUrl === "string" ? stored.serverUrl : null,
+      webUiUrl: typeof stored?.webUiUrl === "string" ? stored.webUiUrl
+        : typeof stored?.webuiUrl === "string" ? stored.webuiUrl : legacy
+    }
+    const url = buildSidepanelChatWebUiHandoffUrl({ config, payload: {
+      source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft,
+      historyId: snapshot.temporaryChat ? null : snapshot.historyId,
+      serverChatId: snapshot.temporaryChat ? null : snapshot.serverChatId,
+      chatMode: snapshot.chatMode, webSearch: snapshot.webSearch, toolChoice: snapshot.toolChoice,
+      selectedModel: snapshot.selectedModel, selectedSystemPrompt: snapshot.selectedSystemPrompt,
+      selectedQuickPrompt: snapshot.selectedQuickPrompt, temporaryChat: snapshot.temporaryChat,
+      useOCR: snapshot.useOCR, title: activeTabLabel, ...overrides
+    } })
+    if (!current()) return false
+    if (!window.open(url, "_blank")) throw new Error("Window popup was blocked")
+    return true
+  }, [activeTabLabel, buildSnapshot, owner])
+
   const commandPaletteChats = React.useMemo(
     () =>
       [...tabs]
@@ -2388,55 +2913,155 @@ const SidepanelChatContent = ({
 
   const freshnessNotice =
     freshness.notice?.tabId === activeTabId ? freshness.notice : null
-  const isDockedSidebar = uiMode === "pro" && !isNarrow
-  const isSidebarVisible = isDockedSidebar || sidebarOpen
-  const messagePadding = uiMode === "pro" ? "px-4" : "px-6"
-  const artifactsOpen = useArtifactsStore((state) => state.isOpen)
-  const closeArtifacts = useArtifactsStore((state) => state.closeArtifact)
+  const isSidebarVisible = sidebarOpen
+  const navigateFromSidebar = (action: () => boolean | Promise<boolean>) => {
+    const revision = sidebarOpening.current.revision;
+    const accountCurrent = owner.isCurrent;
+    const overlay = !isDockedSidebar && sidebarOpening.current.open;
+    const finish = (accepted: boolean) => {
+      if (
+        accepted &&
+        overlay &&
+        accountCurrent() &&
+        sidebarOpening.current.open &&
+        revision === sidebarOpening.current.revision
+      ) {
+        setSidebarOpen(false);
+        if (sidebarReturnFocus.current) sidebarReturnFocus.current.composer = true;
+      }
+      return accepted;
+    };
+    const result = action();
+    return result instanceof Promise ? result.then(finish) : finish(result);
+  };
+  const messagePadding = uiMode === 'pro' ? 'px-4' : 'px-6';
+  const artifactsOpen = useArtifactsStore((state) => state.isOpen);
+  const closeArtifacts = useArtifactsStore((state) => state.closeArtifact);
+
+  const sidebarRevision = sidebarVisibility.revision;
+  const isSidebarOpeningCurrent = () =>
+    owner.isCurrent() &&
+    sidebarOpening.current.open &&
+    sidebarOpening.current.revision === sidebarRevision;
+  const closeSidebarOpening = () => {
+    if (isSidebarOpeningCurrent()) setSidebarOpen(false);
+  };
+  const handleSidebarTab = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab' || event.defaultPrevented || !isSidebarOpeningCurrent()) return;
+    const drawer =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>('.sidepanel-chat-overlay')
+        : null;
+    if (!drawer) return;
+    const controls = Array.from(
+      drawer.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]')
+    ).filter(
+      (element) =>
+        element.tabIndex >= 0 &&
+        !element.matches(':disabled') &&
+        !element.closest('[inert]') &&
+        !isHiddenBySelfOrAncestor(element)
+    );
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    const active = document.activeElement;
+    const target = event.shiftKey
+      ? active === first || active === drawer
+        ? last
+        : null
+      : active === last
+        ? first
+        : null;
+    if (target) {
+      event.preventDefault();
+      target.focus();
+    }
+  };
+  const sidebarPanel = (
+    <ChatErrorBoundary
+      fallback={
+        <p role="alert" className="p-4 text-sm text-text">
+          {t(
+            'common:chatSidebar.loadError',
+            'Could not load chats. Close this panel and reload the page to try again.'
+          )}
+        </p>
+      }
+    >
+      <Suspense
+        fallback={
+          <p role="status" className="p-4 text-sm text-text">
+            {t('common:chatSidebar.loading', 'Loading chats…')}
+          </p>
+        }
+      >
+        <LazySidepanelChatSidebar
+          open={isSidebarVisible}
+          variant={isDockedSidebar ? 'docked' : 'overlay'}
+          owner={owner}
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onSelectTab={(id) => navigateFromSidebar(() => handleSelectTab(id))}
+          onCloseTab={handleCloseTab}
+          onNewTab={() => navigateFromSidebar(handleNewTab)}
+          searchQuery={sidebarSearchQuery}
+          onSearchQueryChange={setSidebarSearchQuery}
+          searchInputRef={sidebarSearchInputRef}
+          focusSearchTrigger={sidebarSearchFocusNonce}
+          onSearchFocus={focusSidebarSearch}
+          onOpenLocalHistory={(id) => navigateFromSidebar(() => openLocalHistory(id))}
+          onOpenServerChat={(chat) => navigateFromSidebar(() => openServerChat(chat))}
+          onClose={closeSidebarOpening}
+        />
+      </Suspense>
+    </ChatErrorBoundary>
+  );
 
   return (
     <div
       className="flex h-dvh w-full min-w-0 overflow-x-hidden"
       data-testid="chat-workspace"
+      onKeyDown={sidebarOverlayOpen ? handleSidebarTab : undefined}
     >
-      {isSidebarVisible && (
-        <Suspense fallback={null}>
-          <LazySidepanelChatSidebar
-            open={isSidebarVisible}
-            variant={isDockedSidebar ? "docked" : "overlay"}
-            owner={owner}
-          tabs={tabs}
-            activeTabId={activeTabId}
-            onSelectTab={handleSelectTab}
-            onCloseTab={handleCloseTab}
-            onNewTab={handleNewTab}
-            searchQuery={sidebarSearchQuery}
-            onSearchQueryChange={setSidebarSearchQuery}
-            searchInputRef={sidebarSearchInputRef}
-            focusSearchTrigger={sidebarSearchFocusNonce}
-            onOpenLocalHistory={openLocalHistory}
-            onOpenServerChat={openServerChat}
-            onClose={() => setSidebarOpen(false)}
-          />
-        </Suspense>
-      )}
-      {!isDockedSidebar && sidebarOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/30"
-          onClick={() => setSidebarOpen(false)}
-          aria-hidden="true"
-        />
-      )}
+      {isSidebarVisible &&
+        (isDockedSidebar ? (
+          sidebarPanel
+        ) : (
+          <Drawer
+            open
+            placement="left"
+            size={288}
+            rootClassName="sidepanel-chat-overlay"
+            title={t('common:chatSidebar.title', 'Chats')}
+            styles={{ body: { padding: 0 } }}
+            focusable={{ focusTriggerAfterClose: false }}
+            onClose={closeSidebarOpening}
+            afterOpenChange={(presented) => {
+              if (!isSidebarOpeningCurrent()) return;
+              sidebarPresented.current = presented;
+              if (presented) focusSidebarSearch();
+            }}
+          >
+            {sidebarPanel}
+          </Drawer>
+        ))}
       <main
         className="relative flex h-dvh min-w-0 flex-1 flex-col overflow-x-hidden bg-bg"
         data-testid="chat-main"
+        aria-hidden={sidebarOverlayOpen || undefined}
+        ref={(element) => {
+          if (element) element.toggleAttribute('inert', sidebarOverlayOpen);
+        }}
       >
         <div className="relative z-20 w-full">
           <SidepanelHeaderSimple
+            key={activeTabId ?? "initial"}
             sidebarOpen={sidebarOpen}
             setSidebarOpen={setSidebarOpen}
             activeTitle={activeTabLabel}
+            chatReady={!isRestoringChat && owner.isCurrent() && (Boolean(browser.runtime.id) || webUiOpenReady)}
             onRenameTitle={handleRenameActiveTab}
+            onOpenChatInWebUi={browser.runtime.id ? undefined : openHydratedChatInWebUi}
             loadEditableTitle={loadActiveTabTitle}
           />
           {messages.length > 0 ? <ConnectionBanner className="pt-12" /> : null}
@@ -2505,13 +3130,19 @@ const SidepanelChatContent = ({
             aria-relevant="additions"
             aria-label={t("playground:aria.chatTranscript", "Chat messages")}
             data-testid="chat-messages"
-            className={`custom-scrollbar relative z-10 flex min-w-0 flex-1 w-full flex-col items-center overflow-x-hidden overflow-y-auto ${messagePadding}`}
+            className={`custom-scrollbar relative z-10 flex min-w-0 flex-1 min-h-0 w-full flex-col items-center overflow-x-hidden overflow-y-auto ${messagePadding}`}
             style={
               {
                 "--composer-padding": composerPadding,
                 paddingBottom: stickyChatInput
                   ? "calc(var(--composer-padding) + env(safe-area-inset-bottom, 0px))"
-                  : "0px"
+                  : "0px",
+                // The pinned composer overlays the transcript (XS-09). Scrolling a
+                // message control into view, by keyboard focus or script, must
+                // stop above it so the control is not hidden (WCAG 2.4.11).
+                scrollPaddingBottom: stickyChatInput
+                  ? "calc(var(--composer-padding) + env(safe-area-inset-bottom, 0px))"
+                  : undefined
               } as React.CSSProperties
             }
           >
@@ -2629,15 +3260,22 @@ const SidepanelChatContent = ({
                 </div>
               </div>
             )}
-            {isRestoringChat && restoreFailed ? (
+            {isRestoringChat && restoreFailure ? (
               <div role="alert" className="flex flex-col items-center gap-3 px-4 py-8">
-                <p>{t("sidepanel:chat.restoreFailed", "Could not restore your saved chat. Retry to load it.")}</p>
+                <p>{restoreFailure === "target"
+                  ? t("sidepanel:chat.restoreTargetFailed", "This saved chat could not be loaded. Retry, choose another tab, or start a new conversation. Your saved chats and drafts are kept.")
+                  : t("sidepanel:chat.restoreFailed", "Could not restore your saved chat. Retry to load it.")}</p>
                 <button
                   type="button"
                   className="rounded-md border border-border px-3 py-1 text-sm text-text hover:bg-surface2"
                   onClick={() => void restoreSidepanelState()}>
                   {t("common:retry", "Retry")}
                 </button>
+                {restoreFailure === "target" && <button type="button"
+                  className="rounded-md border border-border px-3 py-1 text-sm text-text hover:bg-surface2"
+                  onClick={handleNewTab}>
+                  {t("sidepanel:chat.restoreStartNew", "Start a new conversation")}
+                </button>}
               </div>
             ) : isRestoringChat ? (
               <div
@@ -2669,7 +3307,7 @@ const SidepanelChatContent = ({
                 </div>
               ) : null}
               <div className={historySelection.status === "idle" || freshnessNotice ? undefined : "pt-12"}>
-                <HistorySelectionReview selection={historySelection} onExpand={expandSelectedHistory} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
+                <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={getSavedQuestionReview} onRetrySavedQuestion={retrySavedQuestion} onExpand={expandSelectedHistory} onBind={() => void historySelection.bindUnavailableConversation()} />
               </div>
               <SidePanelBody
                 scrollParentRef={containerRef}
@@ -2681,44 +3319,54 @@ const SidepanelChatContent = ({
               </>
             )}
             {!isRestoringChat && !stickyChatInput && (
-              <div className="w-full min-w-0 pt-4 pb-6">
+              <div
+                ref={composerDockRef}
+                data-testid="sidepanel-composer-dock"
+                className="w-full min-w-0 pt-4 pb-6">
                 <SidepanelForm
                   key={activeTabId || "sidepanel-chat"}
                   dropedFile={dropedFile}
                   inputRef={textareaRef}
-                  onHeightChange={setComposerHeight}
                   draftKey={draftKey}
+                  keyboardShortcutsEnabled={!sidebarOverlayOpen}
+                  onComposerReady={focusReadyComposer}
+                  onRecoverDraft={handleRecoverDraft}
+                  onFindConversations={requestSidebarSearchFocus}
+                  onOpenChatInWebUi={browser.runtime.id ? undefined : openChatInWebUi}
+                onWebUiOpenReady={handleWebUiOpenReady}
                 />
               </div>
             )}
           </div>
 
-          {!isAutoScrollToBottom && (
-            <div
-              className="fixed z-20 left-0 right-0 flex justify-center"
+          {!isAutoScrollToBottom && messages.length > 0 && (
+            <ScrollToLatestButton
+              onClick={() => autoScrollToBottom()}
+              replyInProgress={streaming}
+              hasUnseenMessages={hasUnseenMessages}
+              className="fixed z-20 right-4"
               style={{ bottom: scrollToLatestBottom }}
-            >
-              <button
-                onClick={() => autoScrollToBottom()}
-                aria-label={t("playground:composer.scrollToLatest", "Scroll to latest messages")}
-                title={t("playground:composer.scrollToLatest", "Scroll to latest messages") as string}
-                data-testid="chat-scroll-latest"
-                className="bg-surface shadow border border-border p-1.5 rounded-full pointer-events-auto hover:bg-surface2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warn">
-                <ChevronDown className="size-4 text-text-muted" aria-hidden="true" />
-              </button>
-            </div>
+              data-testid="chat-scroll-latest"
+            />
           )}
           {!isRestoringChat && stickyChatInput && (
             <div
-              className="absolute bottom-0 left-0 right-0 z-10 w-full min-w-0"
+              ref={composerDockRef}
+              data-testid="sidepanel-composer-dock"
+              className="absolute bottom-0 left-0 right-0 z-10 max-h-[60%] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain"
               style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
             >
               <SidepanelForm
                 key={activeTabId || "sidepanel-chat"}
                 dropedFile={dropedFile}
                 inputRef={textareaRef}
-                onHeightChange={setComposerHeight}
                 draftKey={draftKey}
+                keyboardShortcutsEnabled={!sidebarOverlayOpen}
+                onComposerReady={focusReadyComposer}
+                onRecoverDraft={handleRecoverDraft}
+                  onFindConversations={requestSidebarSearchFocus}
+                onOpenChatInWebUi={browser.runtime.id ? undefined : openChatInWebUi}
+                onWebUiOpenReady={handleWebUiOpenReady}
               />
             </div>
           )}
@@ -2782,9 +3430,10 @@ const SidepanelChatContent = ({
         </Suspense>
       ) : null}
       <CommandPaletteHost
+        enabled={!sidebarOverlayOpen}
         commandPaletteProps={{
           scope: "sidepanel",
-          onNewChat: clearChat,
+          onNewChat: handleNewTab,
           onToggleRag: toggleChatMode,
           onToggleWebSearch: toggleWebSearchMode,
           onIngestPage: () => {

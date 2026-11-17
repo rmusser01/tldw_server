@@ -472,13 +472,14 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       sessionId: string,
       payload: Record<string, unknown> | null | undefined
     ) => {
-      if (!suspendEditorPromptSync) {
+      const pendingPayload = pendingSaveMapRef.current[sessionId]
+      if (!suspendEditorPromptSync && !pendingPayload) {
         return {
           prompt: editorText,
           promptRich: editorPromptRichRef.current
         }
       }
-      const sessionPayload = pendingSaveMapRef.current[sessionId] ?? payload
+      const sessionPayload = pendingPayload ?? payload
       return {
         prompt: getPromptFromPayload(sessionPayload),
         promptRich: getPromptRichFromPayload(sessionPayload)

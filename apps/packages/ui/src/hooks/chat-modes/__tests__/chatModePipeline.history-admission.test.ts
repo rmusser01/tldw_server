@@ -74,6 +74,24 @@ const makeTurn = () => {
   }
   return turn
 }
+const makeExistingTurn = () => {
+  const turn = makeTurn()
+  turn.existingSelection = true
+  turn.capture.view = {
+    ...turn.capture.view,
+    cursor: { kind: "after_message", message_id: "question" }
+  }
+  turn.capture.snapshot.nodes = [{
+    id: "question", revision: "question-revision", parent_id: null,
+    role: "user", settled: true, preview: "question"
+  }]
+  turn.capture.rows = turn.capture.snapshot.nodes
+  turn.capture.selected_content = [{
+    id: "question", revision: "question-revision", message: "question", images: []
+  }]
+  turn.currentView = () => turn.capture.view
+  return turn
+}
 const mode: any = {
   id: "normal",
   buildUserMessage: (ctx: any) => ({
@@ -91,13 +109,19 @@ const mode: any = {
     humanMessage: new HumanMessage("question")
   })
 }
-const invoke = (turn: any, overrides = {}, customMode = mode, signal = new AbortController().signal) =>
+const invoke = (
+  turn: Parameters<typeof runChatPipeline>[7]["historyTurn"],
+  overrides = {},
+  customMode = mode,
+  visibleMessages: Parameters<typeof runChatPipeline>[4] = [],
+  signal = new AbortController().signal
+) =>
   runChatPipeline(
     customMode,
     "question",
     "",
     false,
-    [],
+    visibleMessages,
     [],
     signal,
     {
@@ -155,6 +179,54 @@ describe("selected normal send admission boundary", () => {
     expect(result).toMatchObject({ status: "failed", errorMessage: "unsupported_history_durable_turn" })
     expect(mocks.append).not.toHaveBeenCalled()
     expect(mocks.stream).not.toHaveBeenCalled()
+  })
+
+  it("Regenerate loses its view after the accepted-intent write before provider dispatch", async () => {
+    const turn = makeExistingTurn()
+    turn.afterAdmission = vi.fn(async () => {
+      turn.canUpdateView = () => false
+    })
+    await invoke(turn, { userMessageId: "question" })
+    expect(turn.afterAdmission).toHaveBeenCalledTimes(1)
+    expect(mocks.append).not.toHaveBeenCalled()
+    expect(mocks.stream).not.toHaveBeenCalled()
+    expect(turn.recover).toHaveBeenCalledTimes(1)
+  })
+
+  it("Regenerate preserves the original display rows while its provider is paused", async () => {
+    const turn = makeExistingTurn()
+    const original: Parameters<typeof runChatPipeline>[4] = [
+      { id: "question", message: "question", isBot: false, name: "Original You",
+        sources: [{ name: "original-source", url: "https://example.test/source" }] },
+      { id: "old-answer", message: "old answer", isBot: true,
+        parentMessageId: "question", name: "Original model", sources: [] }
+    ]
+    let displayed = original
+    const setMessages: Parameters<typeof runChatPipeline>[7]["setMessages"] = (next) => {
+      displayed = typeof next === "function" ? next(displayed) : next
+    }
+    let entered!: () => void
+    let release!: () => void
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    const paused = new Promise<void>((resolve) => { release = resolve })
+    mocks.stream.mockImplementation(async function* () {
+      entered()
+      await paused
+      yield "another answer"
+    })
+    const pending = invoke(turn, { userMessageId: "question", setMessages }, mode, original)
+    try {
+      await Promise.race([
+        started,
+        pending.then((result) => { throw new Error(`Regenerate provider did not start: ${JSON.stringify(result)}`) })
+      ])
+      expect(displayed.slice(0, 2)).toEqual(original)
+      expect(displayed[0]).toBe(original[0])
+      expect(mocks.append).not.toHaveBeenCalled()
+    } finally {
+      release()
+      await pending
+    }
   })
 
   it("admits once before provider dispatch and carries accepted parent to settlement", async () => {
@@ -286,6 +358,7 @@ describe("selected durable server settlement", () => {
         messages: [{ role: "system", content: "system" }, { role: "user", content: "question" }]
       }),
       stream: vi.fn(async function* (_messages: unknown, options: any) {
+        options.onDispatch()
         const selection = options.preparedRequest.tldw_turn.history_v1.selection
         model.historyAdmission = {
           version: 1, owner_key: "local-key", conversation_id: "chat",
@@ -329,12 +402,30 @@ describe("selected durable server settlement", () => {
     expect(turn.admission.input_message_id).toBe(inputId)
     expect(turn.recover).toHaveBeenCalledOnce()
   })
+  it("retires selected durable intent when its view changes before transport dispatch", async () => {
+    const turn = await nativeTurn(), model = serverModel(turn)
+    turn.cancelPreparation = vi.fn(async () => {})
+    const dispatch = vi.fn()
+    model.stream.mockImplementation(async function* (_messages: unknown, options: { onDispatch: () => void }) {
+      turn.canUpdateView = () => false
+      options.onDispatch()
+      dispatch()
+    })
+    const result = await invoke(turn, { tldwTurn: { user_message_id: inputId }, userMessageId: inputId })
+    expect(result).toEqual({ status: "skipped", reason: "Conversation changed" })
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(turn.dispatched).not.toBe(true)
+    expect(turn.cancelPreparation).toHaveBeenCalledOnce()
+    expect(turn.recover).not.toHaveBeenCalled()
+    expect(mocks.append).not.toHaveBeenCalled()
+  })
   it.each(["unknown", "accepted", "partial"])(
     "presents durable Stop as cancellation while preserving %s recovery",
     async (observation) => {
       const turn = await nativeTurn(), model = serverModel(turn, false)
       const controller = new AbortController(), save = vi.fn(), errorSave = vi.fn()
-      model.stream.mockImplementation(async function* (_messages: unknown, options: { preparedRequest: HistoryDurableRequestBodyV1 }) {
+      model.stream.mockImplementation(async function* (_messages: unknown, options: { onDispatch: () => void; preparedRequest: HistoryDurableRequestBodyV1 }) {
+        options.onDispatch()
         if (observation !== "unknown") {
           const history = options.preparedRequest.tldw_turn.history_v1
           if (history.kind !== "selection") throw new Error("expected_initial_selection")
@@ -356,7 +447,7 @@ describe("selected durable server settlement", () => {
       const result = await invoke(turn, {
         tldwTurn: { user_message_id: inputId }, userMessageId: inputId,
         saveMessageOnSuccess: save, saveMessageOnError: errorSave
-      }, mode, controller.signal)
+      }, mode, [], controller.signal)
 
       expect(result).toEqual({ status: "skipped", reason: "Request cancelled" })
       expect(turn.recover).toHaveBeenCalledWith(
@@ -417,7 +508,8 @@ describe("selected durable server settlement", () => {
         persistedObservations.push(read("selected-operation"))
       }
       turn.recover = async () => write("selected-operation", "accepted_unsent")
-      model.stream.mockImplementation(async function* (_messages: unknown, options: { preparedRequest: HistoryDurableRequestBodyV1 }) {
+      model.stream.mockImplementation(async function* (_messages: unknown, options: { onDispatch: () => void; preparedRequest: HistoryDurableRequestBodyV1 }) {
+        options.onDispatch()
         const history = options.preparedRequest.tldw_turn.history_v1
         if (history.kind !== "selection") throw new Error("expected_initial_selection")
         model.historyAdmission = validateHistoryDurableAdmission(turn.owner, history, inputId, {
@@ -444,7 +536,7 @@ describe("selected durable server settlement", () => {
       const result = await invoke(turn, {
         tldwTurn: { user_message_id: inputId }, userMessageId: inputId,
         saveMessageOnSuccess: save, saveMessageOnError: errorSave
-      }, mode, controller.signal)
+      }, mode, [], controller.signal)
       expect(result).toEqual(failure === "Stop"
         ? { status: "skipped", reason: "Request cancelled" }
         : { status: "failed", errorMessage: failure })
@@ -619,17 +711,20 @@ describe("replies that end early after admission (CS-04)", () => {
     expect(reply!.generationInfo.stopped).toBeUndefined()
   })
 
-  it("records a reply that finished but could not be saved as complete", async () => {
+  it.each([false, true])("distinguishes a lost save receipt from acknowledged cleanup failure (acknowledged=%s)", async acknowledged => {
     const turn = makeTurn()
     const save = vi.fn(async () => {
-      throw new Error("request_config_scope_changed")
+      if (acknowledged) turn.resultId = "assistant-new"
+      throw new Error("Save response or cleanup lost")
     })
-    await invoke(turn, { saveMessageOnSuccess: save })
-    expect(turn.outcome).toBe("complete")
+    const result = await invoke(turn, { saveMessageOnSuccess: save })
+    expect(result.status).toBe(acknowledged ? "submitted" : "failed")
+    expect(turn.outcome).toBe(acknowledged ? "complete" : undefined)
     expect(turn.recover).toHaveBeenCalledWith(
-      expect.objectContaining({ content: "answer", outcome: "complete" }),
+      expect.objectContaining({ content: "answer", outcome: acknowledged ? "complete" : undefined }),
       expect.anything()
     )
+    expect(save).toHaveBeenCalledOnce()
   })
 
   it("does not report an unsaved complete reply as submitted", async () => {

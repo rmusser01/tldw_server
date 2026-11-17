@@ -51,7 +51,7 @@ def test_create_chat_with_default_greeting(
     msgs = r.json()
     assert isinstance(msgs, dict) and "total" in msgs
     first = msgs["messages"][0]
-    assert first["sender"].lower() in {"assistant", "greeterapi"}
+    assert first["sender"] == "assistant"
     # Endpoint resolves placeholders for display
     assert first["content"] == "Hello, User."
 
@@ -85,7 +85,7 @@ def test_create_chat_with_alternate_index_greeting(authenticated_client, mock_ch
     msgs = r.json()
     assert isinstance(msgs, dict) and "total" in msgs
     first = msgs["messages"][0]
-    assert first["sender"].lower() in {"assistant", "greeterapi"}
+    assert first["sender"] == "assistant"
     assert first["content"] == "Welcome, User."
 
 
@@ -122,7 +122,7 @@ def test_create_chat_with_alternate_random_greeting(authenticated_client, mock_c
     msgs = r.json()
     assert isinstance(msgs, dict) and "total" in msgs
     first = msgs["messages"][0]
-    assert first["sender"].lower() in {"assistant", "greeterapi"}
+    assert first["sender"] == "assistant"
     assert first["content"] == "Hey there, User!"
 
 
@@ -157,7 +157,7 @@ def test_create_chat_with_alternate_index_out_of_range_falls_back_default(
     msgs = r.json()
     assert isinstance(msgs, dict) and "total" in msgs and msgs["total"] >= 1
     first = msgs["messages"][0]
-    assert first["sender"].lower() in {"assistant", "greeterapi"}
+    assert first["sender"] == "assistant"
     assert first["content"] == "Hello, User."
 
 

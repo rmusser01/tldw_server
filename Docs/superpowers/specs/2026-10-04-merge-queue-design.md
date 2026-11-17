@@ -2,6 +2,8 @@
 
 - **Date:** 2026-10-04
 - **Status:** Owner-approved direction (2026-10-04: "PRs shouldn't have to race each other"); ships switched off
+- **Amended by:** `Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md` (sections 4.1-4.8, 6, 7
+  and 9 changed there).
 - **Task:** TASK-13462. **ADR:** 063.
 - **Origin:** port of the tldw_chatbook queue (tldw_chatbook PR #2996, ADR-218 there). The queue rules and safety
   invariants are the same; section 4 is what this repository's CI forces to be different.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -23,6 +24,18 @@ from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequireRole,
     get_auth_principal,
+)
+from tldw_Server_API.app.api.v1.API_Deps.jobs_admin_deps import (
+    _enforce_domain_scope as _enforce_domain_scope,
+)
+from tldw_Server_API.app.api.v1.API_Deps.jobs_admin_deps import (
+    _enforce_domain_scope_from_principal as _enforce_domain_scope_from_principal,
+)
+from tldw_Server_API.app.api.v1.API_Deps.jobs_admin_deps import (
+    _enforce_domain_scope_unified,
+)
+from tldw_Server_API.app.api.v1.API_Deps.jobs_admin_deps import (
+    _make_admin_user_from_principal as _make_admin_user_from_principal,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventType
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -66,106 +79,6 @@ router = APIRouter(
 
 def _is_truthy(v: str | None) -> bool:
     return _shared_is_truthy(v)
-
-
-def _make_admin_user_from_principal(principal: AuthPrincipal) -> dict[str, Any]:
-    """Derive the minimal jobs-admin user dict from an AuthPrincipal.
-
-    For user-backed principals, the id field reflects the numeric user_id so
-    existing domain allowlist and RLS semantics continue to apply. For
-    non-user principals (e.g., service or API-key callers) where user_id may
-    be None, id is left as None and username falls back to subject or
-    principal_id (or kind) for audit/diagnostics. Downstream RBAC and RLS
-    enforcement must rely only on the id field; username is informational.
-    """
-    user_id = principal.user_id
-    if user_id is not None:
-        # Prefer a stable, human-readable label when available.
-        username = principal.subject or principal.principal_id or f"user:{user_id}"
-    else:
-        # Preserve RLS/allowlist behavior by not fabricating a synthetic id.
-        # Use subject/principal_id/kind for human-readable/audit labels instead.
-        username = principal.subject or principal.principal_id or principal.kind or "service"
-    return {
-        "id": user_id,
-        "username": str(username),
-    }
-
-
-def _enforce_domain_scope(user: dict, domain: str | None) -> None:
-    """Optional domain-scoped RBAC enforcement.
-
-    Enabled when JOBS_DOMAIN_SCOPED_RBAC=true. If JOBS_REQUIRE_DOMAIN_FILTER=true,
-    a domain filter must be provided. If an allowlist is configured for the user
-    via JOBS_DOMAIN_ALLOWLIST_<USER_ID>, the requested domain must be in it.
-    """
-    try:
-        if not _is_truthy(os.getenv("JOBS_DOMAIN_SCOPED_RBAC")):
-            return
-        # Be robust to user being a Pydantic model or dict
-        try:
-            uid_val = getattr(user, "id", None)
-        except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
-            uid_val = None
-        if uid_val is None and isinstance(user, dict):
-            uid_val = user.get("id")
-        uid = str(uid_val or "")
-        if _is_truthy(os.getenv("JOBS_REQUIRE_DOMAIN_FILTER")) and not (domain and domain.strip()):
-            raise HTTPException(status_code=403, detail="Domain filter is required for this operation")
-        allow = os.getenv(f"JOBS_DOMAIN_ALLOWLIST_{uid}", "").strip()
-        if allow:
-            allowed = {d.strip() for d in allow.split(",") if d.strip()}
-            if domain and domain.strip():
-                if domain not in allowed:
-                    raise HTTPException(status_code=403, detail=f"Not allowed for domain {domain}")
-            else:
-                # denying broad queries when allowlist is present and domain missing
-                raise HTTPException(status_code=403, detail="Domain filter required for allowlisted admin")
-    except HTTPException:
-        raise
-    except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as _rbac_exc:
-        # Fail-closed in forced mode (tests), otherwise fail-open to avoid lockout
-        if _is_truthy(os.getenv("JOBS_RBAC_FORCE")):
-            raise HTTPException(status_code=403, detail="RBAC enforcement error") from _rbac_exc
-        return
-
-
-def _enforce_domain_scope_from_principal(principal: AuthPrincipal, domain: str | None) -> None:
-    """
-    Domain-scoped RBAC enforcement using AuthPrincipal (feature-flagged path).
-
-    When JOBS_DOMAIN_RBAC_PRINCIPAL=1, jobs admin endpoints call this helper
-    instead of passing a user dict directly to _enforce_domain_scope as part
-    of the principal-driven RBAC migration.
-    The underlying semantics (JOBS_DOMAIN_SCOPED_RBAC, JOBS_REQUIRE_DOMAIN_FILTER,
-    JOBS_DOMAIN_ALLOWLIST_*, JOBS_RBAC_FORCE) remain unchanged.
-    """
-    if not _is_truthy(os.getenv("JOBS_DOMAIN_RBAC_PRINCIPAL")):
-        return
-    user = _make_admin_user_from_principal(principal)
-    _enforce_domain_scope(user, domain)
-
-
-def _enforce_domain_scope_unified(
-    principal: AuthPrincipal,
-    domain: str | None,
-) -> dict[str, Any]:
-    """
-    Unified domain-scoped RBAC enforcement for jobs admin endpoints.
-
-    All jobs-admin endpoints in this module use this helper alongside the
-    router-level RequireRole(\"admin\") guard. It always derives the
-    admin_user from the AuthPrincipal so callers can reuse the same user
-    mapping for downstream operations (e.g., Postgres RLS). When
-    JOBS_DOMAIN_RBAC_PRINCIPAL is enabled, enforcement is driven from the
-    AuthPrincipal; otherwise the legacy user-dict path is used.
-    """
-    admin_user = _make_admin_user_from_principal(principal)
-    if _is_truthy(os.getenv("JOBS_DOMAIN_RBAC_PRINCIPAL")):
-        _enforce_domain_scope_from_principal(principal, domain)
-    else:
-        _enforce_domain_scope(admin_user, domain)
-    return admin_user
 
 
 def _set_pg_rls_for_user(user: dict, domain: str | None) -> None:
@@ -1016,7 +929,6 @@ async def stream_job_events(
     return StreamingResponse(_gen(), media_type="text/event-stream", headers=sse_headers)
 
 
-
 class TTLSweepResponse(BaseModel):
     affected: int
 
@@ -1422,6 +1334,7 @@ async def get_job_detail(
     job_id: int,
     principal: AuthPrincipal = Depends(get_auth_principal),
     domain: str | None = None,
+    job_uuid: UUID | None = None,
 ) -> JobDetailResponse:
     admin_user = _enforce_domain_scope_unified(principal, domain)
     db_url = os.getenv("JOBS_DB_URL")
@@ -1429,7 +1342,7 @@ async def get_job_detail(
     if backend == "postgres":
         _set_pg_rls_for_user(admin_user, domain)
     jm = JobManager(backend=backend, db_url=db_url)
-    job = jm.get_job_or_archived(job_id, domain=domain)
+    job = jm.get_job_or_archived(job_id, domain=domain, job_uuid=str(job_uuid) if job_uuid is not None else None)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return JobDetailResponse(**job)

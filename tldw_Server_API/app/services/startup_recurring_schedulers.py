@@ -591,13 +591,13 @@ async def _cancel_unregistered_task(task: SchedulerHandle) -> None:
 
 
 async def _start_authnz_scheduler_service() -> None:
-    from tldw_Server_API.app.core.AuthNZ.scheduler import start_authnz_scheduler
+    from tldw_Server_API.app.services.authnz_scheduler import start_authnz_scheduler
 
     await start_authnz_scheduler()
 
 
 async def _stop_authnz_scheduler_service() -> None:
-    from tldw_Server_API.app.core.AuthNZ.scheduler import stop_authnz_scheduler
+    from tldw_Server_API.app.services.authnz_scheduler import stop_authnz_scheduler
 
     await stop_authnz_scheduler()
 

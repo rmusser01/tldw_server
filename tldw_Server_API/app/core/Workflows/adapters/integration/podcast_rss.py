@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import json
@@ -11,21 +12,25 @@ from datetime import datetime, timezone
 from email.utils import format_datetime, parsedate_to_datetime
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 
 from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError, RetryExhaustedError
+from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
+from tldw_Server_API.app.core.Security.egress import is_url_allowed_for_tenant
 from tldw_Server_API.app.core.Workflows.adapters._common import (
     resolve_workflow_file_path,
     resolve_workflow_file_uri,
 )
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.integration._config import PodcastRSSPublishConfig
+
+# Long-running shows publish multi-megabyte feeds; anything past this is refused.
+_MAX_SEED_FEED_BYTES = 20 * 1024 * 1024
 
 _PODCAST_RSS_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -210,13 +215,24 @@ def _resolve_feed_path(feed_uri: str, context: dict[str, Any], config: dict[str,
     return resolve_workflow_file_path(feed_uri, context, config)
 
 
-def _load_seed_xml(source_feed_url: str) -> ET.Element | None:
+async def _load_seed_xml(source_feed_url: str, tenant_id: str) -> ET.Element | None:
+    """Fetch the seed feed through core.http_client (egress checked per redirect hop, size capped)."""
     parsed = urlparse(source_feed_url)
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
         raise _InvalidRemoteSeedUrl("source_feed_url must use http:// or https://")
-    request = Request(source_feed_url, headers={"User-Agent": "tldw-workflows/0.2"})
-    with urlopen(request, timeout=15) as response:  # nosec B310
-        payload = response.read()
+    if not await asyncio.to_thread(is_url_allowed_for_tenant, source_feed_url, tenant_id):
+        raise EgressPolicyError("source_feed_url blocked by tenant egress policy")
+    response = await afetch(
+        method="GET",
+        url=source_feed_url,
+        headers={"User-Agent": "tldw-workflows/0.2"},
+        timeout=15,
+        retry=RetryPolicy(attempts=1),
+        max_response_bytes=_MAX_SEED_FEED_BYTES,
+    )
+    if response.status_code // 100 != 2:
+        raise NetworkError("source feed returned a non-2xx status", status_code=response.status_code)
+    payload = response.content
     if not payload:
         return None
     return DET.fromstring(payload)
@@ -278,11 +294,16 @@ async def run_podcast_rss_publish_adapter(config: dict[str, Any], context: dict[
     elif source_feed_url:
         if not allow_remote_fetch:
             return {"error": "remote_fetch_disabled", "published": False}
+        tenant_id = str(context.get("tenant_id") or "default")
         try:
-            seeded = _load_seed_xml(source_feed_url)
+            seeded = await _load_seed_xml(source_feed_url, tenant_id)
         except _InvalidRemoteSeedUrl:
             return {"error": "invalid_remote_seed_url", "published": False}
-        except (HTTPError, URLError, TimeoutError, OSError, ValueError):
+        except EgressPolicyError:
+            return {"error": "remote_seed_blocked_egress", "published": False}
+        except ET.ParseError:
+            return {"error": "invalid_feed_xml", "published": False}
+        except (NetworkError, RetryExhaustedError, TimeoutError, OSError, ValueError):
             return {"error": "remote_seed_fetch_failed", "published": False}
         if seeded is None:
             return {"error": "remote_seed_empty", "published": False}

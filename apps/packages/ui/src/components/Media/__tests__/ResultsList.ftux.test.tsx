@@ -37,6 +37,11 @@ describe("ResultsList FTUX", () => {
     expect(screen.getByText(/Get started/i)).toBeInTheDocument()
   })
 
+  it("places first-ingest guidance directly under the page heading", () => {
+    render(<ResultsList {...emptyProps} />)
+    expect(screen.getByRole("heading", { level: 2, name: /Get started/i })).toBeInTheDocument()
+  })
+
   it("has inline URL input and Ingest button", () => {
     render(<ResultsList {...emptyProps} />)
     expect(screen.getByPlaceholderText(/youtube/i)).toBeInTheDocument()

@@ -29,7 +29,7 @@ const buildPersistedPayload = (state: Record<string, unknown>) =>
   })
 
 describe("workspace storage quota eviction recovery", () => {
-  let originalSetItem: typeof Storage.prototype.setItem
+  let originalSetItem: Storage["setItem"]
   let storagePrototype: Storage
 
   beforeEach(() => {
@@ -58,12 +58,12 @@ describe("workspace storage quota eviction recovery", () => {
       onRecovery as EventListener
     )
 
-    storagePrototype.setItem = ((name: string, value: string) => {
+    storagePrototype.setItem = (() => {
       callCount += 1
       if (callCount === 1) {
-        throw buildQuotaError()
+        throw buildQuotaError();
       }
-    }) as typeof Storage.prototype.setItem
+    }) as typeof storagePrototype.setItem;
 
     const payload = buildPersistedPayload({
       workspaceId: "workspace-active",
@@ -182,9 +182,9 @@ describe("workspace storage quota eviction recovery", () => {
     storagePrototype.setItem = (() => {
       callCount += 1
       if (callCount === 1) {
-        throw buildQuotaError()
+        throw buildQuotaError();
       }
-    }) as typeof Storage.prototype.setItem
+    }) as typeof storagePrototype.setItem;
 
     const payload = buildPersistedPayload({
       workspaceId: "workspace-active",
@@ -263,12 +263,12 @@ describe("workspace storage quota eviction recovery", () => {
       onRecovery as EventListener
     )
 
-    storagePrototype.setItem = ((name: string, value: string) => {
+    storagePrototype.setItem = (() => {
       callCount += 1
       if (callCount === 1) {
-        throw buildQuotaError()
+        throw buildQuotaError();
       }
-    }) as typeof Storage.prototype.setItem
+    }) as typeof storagePrototype.setItem;
 
     const payload = buildPersistedPayload({
       workspaceId: "workspace-active",
@@ -386,7 +386,7 @@ describe("workspace storage quota eviction recovery", () => {
     storagePrototype.setItem = (() => {
       callCount += 1
       throw buildQuotaError()
-    }) as typeof Storage.prototype.setItem
+    }) as typeof storagePrototype.setItem
 
     const payload = buildPersistedPayload({
       workspaceId: "workspace-active",

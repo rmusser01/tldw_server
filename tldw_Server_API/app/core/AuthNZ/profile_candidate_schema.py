@@ -6,6 +6,9 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+    _execute_postgres_membership_timestamp_repair,
+)
 from tldw_Server_API.app.core.exceptions import SchemaReadinessError
 
 PROFILE_CANDIDATE_TABLES = (
@@ -531,6 +534,32 @@ def validate_sqlite_profile_candidate_schema(conn: Any) -> None:
         raise SchemaReadinessError("Required profile candidate schema validation failed")
 
 
+POSTGRES_PROFILE_FOREIGN_KEYS_SQL = """
+SELECT relation.relname AS table_name, local_column.attname AS column_name,
+       foreign_namespace.nspname AS foreign_table_schema,
+       foreign_relation.relname AS foreign_table_name,
+       foreign_column.attname AS foreign_column_name,
+       CASE constraint_info.confdeltype
+           WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL'
+           WHEN 'd' THEN 'SET DEFAULT' WHEN 'r' THEN 'RESTRICT'
+           ELSE 'NO ACTION' END AS delete_rule,
+       constraint_info.convalidated AS constraint_validated
+FROM pg_constraint AS constraint_info
+JOIN pg_class AS relation ON relation.oid = constraint_info.conrelid
+JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+JOIN pg_class AS foreign_relation ON foreign_relation.oid = constraint_info.confrelid
+JOIN pg_namespace AS foreign_namespace ON foreign_namespace.oid = foreign_relation.relnamespace
+JOIN LATERAL unnest(constraint_info.conkey, constraint_info.confkey)
+    WITH ORDINALITY AS keys(local_number, foreign_number, position) ON TRUE
+JOIN pg_attribute AS local_column
+    ON local_column.attrelid = relation.oid AND local_column.attnum = keys.local_number
+JOIN pg_attribute AS foreign_column
+    ON foreign_column.attrelid = foreign_relation.oid AND foreign_column.attnum = keys.foreign_number
+WHERE constraint_info.contype = 'f' AND namespace.nspname = 'public'
+  AND relation.relname = ANY($1::text[])
+"""
+
+
 async def validate_postgres_profile_candidate_schema(conn: Any) -> None:
     """Validate canonical candidate metadata on one PostgreSQL connection."""
     placeholders = ", ".join(
@@ -597,27 +626,10 @@ async def validate_postgres_profile_candidate_schema(conn: Any) -> None:
             (int(row["ordinal_position"]), str(row["column_name"]))
         )
 
-    foreign_rows = await conn.fetch(
-        "SELECT tc.table_name, kcu.column_name, "
-        "ccu.table_schema AS foreign_table_schema, "
-        "ccu.table_name AS foreign_table_name, "
-        "ccu.column_name AS foreign_column_name, rc.delete_rule "
-        "FROM information_schema.table_constraints AS tc "
-        "JOIN information_schema.key_column_usage AS kcu "
-        "ON tc.constraint_name = kcu.constraint_name "
-        "AND tc.constraint_schema = kcu.constraint_schema "
-        "JOIN information_schema.referential_constraints AS rc "
-        "ON tc.constraint_name = rc.constraint_name "
-        "AND tc.constraint_schema = rc.constraint_schema "
-        "JOIN information_schema.constraint_column_usage AS ccu "
-        "ON rc.unique_constraint_name = ccu.constraint_name "
-        "AND rc.unique_constraint_schema = ccu.constraint_schema "
-        "WHERE tc.table_schema = 'public' AND tc.constraint_type = 'FOREIGN KEY' "
-        "AND tc.table_name IN "
-        + table_filter,  # nosec B608 -- fixed-count placeholders only.
-        *PROFILE_CANDIDATE_TABLES,
-    )
+    foreign_rows = await conn.fetch(POSTGRES_PROFILE_FOREIGN_KEYS_SQL, list(PROFILE_CANDIDATE_TABLES))
     for row in foreign_rows:
+        if not row["constraint_validated"]:
+            raise SchemaReadinessError("Required profile candidate foreign key is not validated")
         foreign_keys[str(row["table_name"])].add(
             (
                 str(row["column_name"]),
@@ -682,11 +694,17 @@ async def repair_postgres_profile_candidate_timestamps(conn: Any) -> None:
             if fallback_column is not None
             else "CURRENT_TIMESTAMP"
         )
-        await conn.execute(
-            f"UPDATE public.{table_name} SET {source_column} = "  # nosec B608
-            f"COALESCE({source_column}, {fallback}) "
-            f"WHERE {source_column} IS NULL"
-        )
+        if table_name in {"org_members", "team_members"}:
+            await _execute_postgres_membership_timestamp_repair(
+                conn,
+                table_name=table_name,
+            )
+        else:
+            await conn.execute(
+                f"UPDATE public.{table_name} SET {source_column} = "  # nosec B608
+                f"COALESCE({source_column}, {fallback}) "
+                f"WHERE {source_column} IS NULL"
+            )
         await conn.execute(
             f"ALTER TABLE public.{table_name} ALTER COLUMN {source_column} "  # nosec B608
             "SET DEFAULT CURRENT_TIMESTAMP"

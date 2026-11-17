@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import (
     handle_agent_task_job,
 )
 from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 
 _AGENT_WORKER_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -95,7 +96,10 @@ async def run_agent_task_jobs_worker(stop_event: asyncio.Event | None = None) ->
                 continue
 
             try:
-                result = await handle_agent_task_job(job, jobs_manager=jm)
+                _payload = job.get("payload")
+                _owner = job.get("owner_user_id") or (_payload.get("user_id") if isinstance(_payload, dict) else None)
+                with llm_call_root(_owner):
+                    result = await handle_agent_task_job(job, jobs_manager=jm)
                 jm.complete_job(
                     int(job["id"]),
                     result=result,

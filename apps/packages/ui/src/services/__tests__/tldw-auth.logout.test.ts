@@ -187,26 +187,55 @@ describe("TldwAuthService logout", () => {
     vi.restoreAllMocks()
   })
 
-  it("completes local sign-out without a runtime error when remote logout is unavailable", async () => {
-    mocks.bgRequest.mockRejectedValue(new TypeError("Failed to fetch (POST /api/v1/auth/logout)"))
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
-    vi.spyOn(console, "warn").mockImplementation(() => {})
-    let tokensCleared = false
-    mocks.updateConfig.mockImplementation(async () => { tokensCleared = true })
-    const boundaries: boolean[] = []
-    const onBoundary = () => boundaries.push(tokensCleared)
-    window.addEventListener("tldw:auth-principal-changed", onBoundary)
+  it("reports unconfirmed remote revocation after completing local sign-out", async () => {
+    mocks.bgRequest.mockRejectedValue(
+      new TypeError("Failed to fetch (POST /api/v1/auth/logout)"),
+    );
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let tokensCleared = false;
+    mocks.updateConfig.mockImplementation(async () => {
+      tokensCleared = true;
+    });
+    const boundaries: boolean[] = [];
+    const onBoundary = () => boundaries.push(tokensCleared);
+    window.addEventListener("tldw:auth-principal-changed", onBoundary);
     try {
-      await expect(new TldwAuthService().logout()).resolves.toBeUndefined()
+      await expect(new TldwAuthService().logout()).resolves.toBe("unconfirmed");
     } finally {
-      window.removeEventListener("tldw:auth-principal-changed", onBoundary)
+      window.removeEventListener("tldw:auth-principal-changed", onBoundary);
     }
 
-    expect(mocks.bgRequest).toHaveBeenCalledWith({ path: "/api/v1/auth/logout", method: "POST" })
-    expect(mocks.updateConfig).toHaveBeenCalledWith({ accessToken: undefined, refreshToken: undefined })
-    expect(boundaries).toEqual([true])
-    expect(consoleError).not.toHaveBeenCalled()
-  })
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/auth/logout",
+      method: "POST",
+    });
+    expect(mocks.updateConfig).toHaveBeenCalledWith({
+      accessToken: undefined,
+      refreshToken: undefined,
+    });
+    expect(boundaries).toEqual([true]);
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it("reports hosted sign-out unconfirmed when cookie logout is unavailable", async () => {
+    mocks.isHostedMode.mockReturnValue(true);
+    mocks.bgRequest.mockRejectedValue(
+      new TypeError("Declared hosted logout failure"),
+    );
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(new TldwAuthService().logout()).resolves.toBe("unconfirmed");
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/auth/logout",
+      method: "POST",
+    });
+    expect(mocks.updateConfig).toHaveBeenCalledWith({
+      accessToken: undefined,
+      refreshToken: undefined,
+    });
+  });
 
   it("clears Task 14 records after tokens and before the logout boundary without reading values", async () => {
     const draftKey =

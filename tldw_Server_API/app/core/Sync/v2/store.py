@@ -474,6 +474,7 @@ class SyncV2Store:
         return self.db.list_datasets_for_user(
             user_id,
             include_archived=include_archived,
+            connection=self._connection,
         )
 
     def list_devices_for_user(

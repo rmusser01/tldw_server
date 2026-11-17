@@ -381,7 +381,7 @@ describe("ScheduledTaskCreatePanel", () => {
     )
 
     expect(screen.getByText("Create Recurring question")).toBeInTheDocument()
-    expect(screen.getByLabelText("Question")).toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "Question or prompt" })).toBeInTheDocument()
     expect(
       screen.queryByText(
         "Recurring Question scheduling is planned for the API contract and is not executable in this client yet."

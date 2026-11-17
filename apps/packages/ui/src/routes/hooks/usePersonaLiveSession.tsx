@@ -5,12 +5,16 @@ import {
   isCompanionConsentRequiredResponse,
 } from "@/services/companion"
 import { buildPersonaWebSocketUrl } from "@/services/persona-stream"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { toAllowedPath } from "@/services/tldw/path-utils"
 import { downloadBlob } from "@/utils/download-blob"
 
 import type { PersonaGardenTabKey } from "@/utils/persona-garden-route"
 import type { PersonaVoiceDefaults } from "@/hooks/useResolvedPersonaVoiceDefaults"
+import type { SetupTestOutcome } from "@/components/PersonaGarden/SetupTestAndFinishStep"
 import type { PersonaRuntimeApprovalRequest } from "./usePersonaGovernanceContext"
+import type { SetupLiveAttempt } from "../personaTypes"
 
 // ── Internal types ──
 
@@ -104,6 +108,7 @@ const formatMemoryResultsLabel = (count: number) => `Memory results: ${count}`
 // ── Deps interface ──
 
 export interface UsePersonaLiveSessionDeps {
+  historyScope: string | null
   isCompanionMode: boolean
   selectedPersonaId: string
   setSelectedPersonaId: React.Dispatch<React.SetStateAction<string>>
@@ -167,16 +172,17 @@ export interface UsePersonaLiveSessionDeps {
   /** Setup wizard context */
   personaSetupWizardCurrentStep: string
   personaSetupWizardIsSetupRequired: boolean
-  setSetupTestOutcome: React.Dispatch<React.SetStateAction<any>>
+  setSetupTestOutcome: React.Dispatch<React.SetStateAction<SetupTestOutcome | null>>
   setupLiveDetour: unknown
   setupWizardAwaitingLiveResponseRef: React.MutableRefObject<boolean>
   setupWizardLastLiveTextRef: React.MutableRefObject<string>
+  setupLiveAttemptRef: React.MutableRefObject<SetupLiveAttempt | null>
   clearSetupStepError: (step: string) => void
   /** Pending plan */
   setPendingPlan: React.Dispatch<React.SetStateAction<PendingPlan | null>>
   pendingPlan: PendingPlan | null
   /** Capabilities */
-  capabilities: { hasPersonalization?: boolean; hasAudio?: boolean } | null
+  capabilities: { hasPersonalization?: boolean; hasCompanion?: boolean; hasAudio?: boolean } | null
   capsLoading: boolean
   /** Route bootstrap */
   routeBootstrapSessionId?: string | null
@@ -186,6 +192,7 @@ export interface UsePersonaLiveSessionDeps {
 
 export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   const {
+    historyScope,
     isCompanionMode,
     selectedPersonaId,
     setSelectedPersonaId,
@@ -202,6 +209,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     setInput,
     setLogs,
     appendLog,
+    activeSessionPersonaId,
     setActiveSessionPersonaId,
     wsRef,
     manuallyClosingRef,
@@ -230,6 +238,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     setupLiveDetour,
     setupWizardAwaitingLiveResponseRef,
     setupWizardLastLiveTextRef,
+    setupLiveAttemptRef,
     clearSetupStepError,
     setPendingPlan,
     pendingPlan,
@@ -269,7 +278,23 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   // during the awaits must prevent the pending attempt from creating a socket
   // that nothing will ever close (mirrors useVoiceChatStream's attempt guard).
   const connectAttemptRef = React.useRef(0)
+  const messageSequenceRef = React.useRef(0)
   const mountedRef = React.useRef(true)
+  const retireSetupLiveAttempt = React.useCallback(() => {
+    setupLiveAttemptRef.current = null
+    setupWizardAwaitingLiveResponseRef.current = false
+    setSetupTestOutcome((current) =>
+      current?.kind?.startsWith("live_") ? null : current
+    )
+  }, [setSetupTestOutcome, setupLiveAttemptRef, setupWizardAwaitingLiveResponseRef])
+  React.useEffect(() => watchChatAccountChanges((invalidated) => {
+    if (invalidated) retireSetupLiveAttempt()
+  }), [retireSetupLiveAttempt])
+  React.useEffect(() => {
+    if (setupLiveAttemptRef.current && setupLiveAttemptRef.current.sessionId !== sessionId) {
+      retireSetupLiveAttempt()
+    }
+  }, [retireSetupLiveAttempt, sessionId, setupLiveAttemptRef])
 
   // ── Companion mode side-effects ──
   React.useEffect(() => {
@@ -281,7 +306,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
 
   // ── Companion prompts loader ──
   React.useEffect(() => {
-    if (!isCompanionMode || capsLoading || !capabilities?.hasPersonalization) {
+    if (!isCompanionMode || capsLoading || !capabilities?.hasPersonalization || !capabilities?.hasCompanion) {
       setCompanionPrompts([])
       return
     }
@@ -322,7 +347,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
       cancelled = true
       window.clearTimeout(timeoutId)
     }
-  }, [capabilities?.hasPersonalization, capsLoading, input, isCompanionMode])
+  }, [capabilities?.hasPersonalization, capabilities?.hasCompanion, capsLoading, input, isCompanionMode])
 
   // ── Session preferences applicator ──
   const applySessionPreferences = React.useCallback(
@@ -362,6 +387,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
         return false
       }
       flushLiveVoiceSessionAnalytics({ finalize: true })
+      retireSetupLiveAttempt()
       const ws = wsRef.current
       if (!ws) {
         setConnected(false)
@@ -408,6 +434,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
       liveVoiceAnalyticsSnapshotRef,
       manuallyClosingRef,
       resetApprovalHighlightMotion,
+      retireSetupLiveAttempt,
       runtimeApprovalRowRefs,
       setActiveApprovalKey,
       setActiveSessionPersonaId,
@@ -724,6 +751,8 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
       }
 
       ws.onclose = () => {
+        if (wsRef.current !== ws) return
+        retireSetupLiveAttempt()
         wsRef.current = null
         setConnected(false)
         const manual = manuallyClosingRef.current
@@ -767,6 +796,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     personaSetupWizardCurrentStep,
     personaSetupWizardIsSetupRequired,
     resetApprovalHighlightMotion,
+    retireSetupLiveAttempt,
     resumeSessionId,
     runtimeApprovalRowRefs,
     savedPersonaVoiceDefaults,
@@ -808,6 +838,8 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
       // Supersede any in-flight connect() so it can't create a socket after we
       // unmount.
       mountedRef.current = false
+      setupLiveAttemptRef.current = null
+      setupWizardAwaitingLiveResponseRef.current = false
       connectAttemptRef.current += 1
       const ws = wsRef.current
       flushLiveVoiceSessionAnalytics({ finalize: true })
@@ -836,6 +868,8 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     flushLiveVoiceSessionAnalytics,
     liveVoiceAnalyticsSnapshotRef,
     manuallyClosingRef,
+    setupLiveAttemptRef,
+    setupWizardAwaitingLiveResponseRef,
     wsRef,
   ])
 
@@ -843,19 +877,26 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   const canSend = connected && Boolean(sessionId) && Boolean(input.trim())
   const canSaveCompanionCheckIn =
     Boolean(input.trim()) &&
-    Boolean(capabilities?.hasPersonalization) &&
+    Boolean(capabilities?.hasPersonalization && capabilities?.hasCompanion) &&
     !savingCompanionCheckIn
 
   // ── sendUserMessage ──
   const sendUserMessage = React.useCallback(
     () => {
       if (!canSend || !sessionId || !wsRef.current) return
+      const canArmSetup = personaSetupWizardIsSetupRequired && Boolean(setupLiveDetour) &&
+        activeSessionPersonaId === selectedPersonaId
+      if (canArmSetup && setupLiveAttemptRef.current) return
       const trimmed = input.trim()
+      const socket = wsRef.current
+      const clientMessageId = globalThis.crypto?.randomUUID?.() ||
+        `persona-${Date.now()}-${++messageSequenceRef.current}`
       try {
-        wsRef.current.send(
+        socket.send(
           JSON.stringify({
             type: "user_message",
             session_id: sessionId,
+            client_message_id: clientMessageId,
             text: trimmed,
             use_memory_context: memoryEnabled,
             use_companion_context: companionContextEnabled,
@@ -863,12 +904,10 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
             memory_top_k: memoryTopK,
           })
         )
-        if (
-          personaSetupWizardIsSetupRequired &&
-          setupLiveDetour
-        ) {
+        if (canArmSetup) {
           setupWizardAwaitingLiveResponseRef.current = true
           setupWizardLastLiveTextRef.current = trimmed
+          setupLiveAttemptRef.current = { personaId: selectedPersonaId, clientMessageId, sessionId, text: trimmed, responseText: "", socket }
         }
         appendLog("user", trimmed)
         setInput("")
@@ -878,6 +917,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     },
     [
       appendLog,
+      activeSessionPersonaId,
       canSend,
       companionContextEnabled,
       input,
@@ -888,7 +928,9 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
       sessionId,
       setError,
       setInput,
+      selectedPersonaId,
       setupLiveDetour,
+      setupLiveAttemptRef,
       setupWizardAwaitingLiveResponseRef,
       setupWizardLastLiveTextRef,
       wsRef,
@@ -900,16 +942,21 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     (text: string) => {
       const trimmed = String(text || "").trim()
       if (!trimmed) return
+      if (setupLiveAttemptRef.current) return
       clearSetupStepError("test")
-      if (!connected || !sessionId || !wsRef.current) {
+      if (!connected || !sessionId || !wsRef.current || activeSessionPersonaId !== selectedPersonaId) {
         setSetupTestOutcome({ kind: "live_unavailable" })
         return
       }
+      const socket = wsRef.current
+      const clientMessageId = globalThis.crypto?.randomUUID?.() ||
+        `persona-${Date.now()}-${++messageSequenceRef.current}`
       try {
-        wsRef.current.send(
+        socket.send(
           JSON.stringify({
             type: "user_message",
             session_id: sessionId,
+            client_message_id: clientMessageId,
             text: trimmed,
             use_memory_context: memoryEnabled,
             use_companion_context: companionContextEnabled,
@@ -919,6 +966,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
         )
         setupWizardAwaitingLiveResponseRef.current = true
         setupWizardLastLiveTextRef.current = trimmed
+        setupLiveAttemptRef.current = { personaId: selectedPersonaId, clientMessageId, sessionId, text: trimmed, responseText: "", socket }
         setSetupTestOutcome({
           kind: "live_sent",
           text: trimmed,
@@ -936,6 +984,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     },
     [
       appendLog,
+      activeSessionPersonaId,
       clearSetupStepError,
       companionContextEnabled,
       connected,
@@ -943,18 +992,69 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
       memoryTopK,
       personaStateContextEnabled,
       sessionId,
+      selectedPersonaId,
       setSetupTestOutcome,
       setupWizardAwaitingLiveResponseRef,
       setupWizardLastLiveTextRef,
+      setupLiveAttemptRef,
       wsRef,
     ]
   )
 
   // ── loadSessionHistory ──
+  const historyOwnerRef = React.useRef<string | null>(null)
   const clearResumeSelection = React.useCallback(() => {
     setResumeSessionId("")
     setSessionHistory([])
   }, [])
+
+  React.useEffect(() => {
+    const personaId = isCompanionMode ? DEFAULT_PERSONA_ID : selectedPersonaId
+    const owner = historyScope ? JSON.stringify([historyScope, personaId, isCompanionMode]) : null
+    if (!owner) {
+      setSessionHistory([])
+      if (historyOwnerRef.current) setResumeSessionId("")
+      return
+    }
+    if (historyOwnerRef.current && historyOwnerRef.current !== owner) clearResumeSelection()
+    historyOwnerRef.current = owner
+    if (connected || connecting || wsRef.current) return
+
+    setSessionHistory([])
+    const controller = new AbortController()
+    const stopWatching = watchChatAccountChanges((invalidated) => {
+      if (!invalidated) return
+      controller.abort()
+      clearResumeSelection()
+      setError("Saved conversations could not be loaded. Reload this page to retry.")
+    })
+    const attempt = connectAttemptRef.current
+    const current = () => !controller.signal.aborted && mountedRef.current &&
+      connectAttemptRef.current === attempt
+    void (async () => {
+      try {
+        const response = await tldwClient.fetchWithAuth(
+          toAllowedPath(
+            "/api/v1/persona/sessions?persona_id=" + encodeURIComponent(personaId) +
+              (isCompanionMode ? "&surface=companion.conversation" : "") + "&limit=50"
+          ),
+          { method: "GET", signal: controller.signal }
+        )
+        if (!current()) return
+        if (!response?.ok) throw new Error("Saved conversations unavailable")
+        const sessions = await response.json()
+        if (!current()) return
+        if (!Array.isArray(sessions)) throw new Error("Invalid saved conversations")
+        setSessionHistory(sessions)
+      } catch {
+        if (current()) setError("Saved conversations could not be loaded. Reload this page to retry.")
+      }
+    })()
+    return () => {
+      controller.abort()
+      stopWatching()
+    }
+  }, [clearResumeSelection, connected, connecting, historyScope, isCompanionMode, selectedPersonaId, setError, wsRef])
 
   const loadSessionHistory = React.useCallback(async () => {
     if (!sessionId) return
@@ -1135,7 +1235,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     if (
       !trimmed ||
       savingCompanionCheckIn ||
-      !capabilities?.hasPersonalization
+      (!capabilities?.hasPersonalization || !capabilities?.hasCompanion)
     )
       return
     setSavingCompanionCheckIn(true)
@@ -1174,6 +1274,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   }, [
     appendLog,
     capabilities?.hasPersonalization,
+    capabilities?.hasCompanion,
     input,
     isCompanionMode,
     savingCompanionCheckIn,

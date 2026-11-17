@@ -9,9 +9,12 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-from ..models import SyncEnvelope, SyncObjectState
+from ..errors import SyncMaterializationContractError
+from ..models import SyncDomain, SyncEnvelope, SyncEnvelopeCreate, SyncObjectState
 from ..store import SyncV2Store
 from .base import MaterializationResult
+from .guarded_product_mutation import GuardedProductMutation
+from .satisfied_tombstone import is_foreign_device_tombstone, satisfied_result, unheld_tombstone_outcome
 
 # Recorded on a conflict that is closed because its tombstone turned out to be satisfied.
 SATISFIED_TOMBSTONE_NOTE = "tombstone_of_message_the_dataset_never_held"
@@ -22,16 +25,36 @@ class ChatConversationMaterializer:
     """Apply `chat.conversation` upserts and tombstones to ChaChaNotes."""
 
     note_db: CharactersRAGDB
-    domain: str = "chat.conversation"
+    domain: SyncDomain = "chat.conversation"
+
+    def foreign_device_tombstone(self, store: SyncV2Store, envelope: SyncEnvelopeCreate) -> bool:
+        """Return whether the push must refuse this device tombstone without blocking the dataset.
+
+        True for a chat another dataset of the owner holds, or a native chat
+        Sync cannot carry. Read-only.
+        """
+
+        return is_foreign_device_tombstone(
+            store,
+            envelope,
+            check_other_datasets=True,
+            product_is_foreign=lambda: self.note_db.unsynced_conversation_is_foreign(
+                conversation_id=str(envelope.object_id),
+                sync_client_id=_projection_client_id(self.note_db),
+            ),
+        )
 
     def apply(
         self,
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> MaterializationResult:
         """Project one accepted conversation envelope and record apply status."""
 
+        if guarded_mutation is not None:
+            raise SyncMaterializationContractError()
         if envelope.domain != self.domain:
             return MaterializationResult(status="skipped")
         if envelope.server_cursor is None:
@@ -41,12 +64,31 @@ class ChatConversationMaterializer:
                 message="Stored Sync envelope is missing a server cursor",
             )
 
-        current_state = store.get_object_state(envelope.dataset_id, envelope.domain, envelope.object_id)
+        object_id = envelope.object_id
+        if not isinstance(object_id, str) or not object_id:
+            message = f"Stored {self.domain} envelope requires a non-empty string object ID"
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="failed",
+                apply_error_code="chat_projection_failed",
+                apply_error_message=message,
+            )
+            return MaterializationResult(
+                status="failed",
+                error_code="chat_projection_failed",
+                message=message,
+            )
+
+        current_state = store.get_object_state(envelope.dataset_id, envelope.domain, object_id)
         if _is_already_materialized(envelope, current_state):
             return _complete_already_materialized(
                 envelope,
                 store=store,
                 error_code="chat_projection_failed",
+            )
+        if envelope.operation == "tombstone" and current_state is None:
+            return self._apply_unheld_tombstone(
+                envelope, object_id=object_id, server_cursor=envelope.server_cursor, store=store
             )
 
         conflict = _detect_whole_object_conflict(
@@ -72,7 +114,7 @@ class ChatConversationMaterializer:
                 # every persona check on the chat would then answer ``persona_not_found``.
                 payload = _conversation_payload(envelope.payload, self.note_db)
                 self.note_db.upsert_conversation_from_sync(
-                    conversation_id=envelope.object_id,
+                    conversation_id=object_id,
                     title=payload.get("title"),
                     sync_client_id=_projection_client_id(self.note_db),
                     object_revision=object_revision,
@@ -94,7 +136,7 @@ class ChatConversationMaterializer:
                 deleted = False
             elif envelope.operation == "tombstone":
                 self.note_db.tombstone_conversation_from_sync(
-                    conversation_id=envelope.object_id,
+                    conversation_id=object_id,
                     sync_client_id=_projection_client_id(self.note_db),
                     object_revision=object_revision,
                     object_hash=object_hash,
@@ -106,6 +148,8 @@ class ChatConversationMaterializer:
             _record_applied_state(
                 store=store,
                 envelope=envelope,
+                object_id=object_id,
+                server_cursor=envelope.server_cursor,
                 object_revision=object_revision,
                 object_hash=object_hash,
                 deleted=deleted,
@@ -131,22 +175,117 @@ class ChatConversationMaterializer:
 
         return MaterializationResult(status="applied")
 
+    def _apply_unheld_tombstone(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        object_id: str,
+        server_cursor: int,
+        store: SyncV2Store,
+    ) -> MaterializationResult:
+        """Apply a tombstone of a chat the dataset holds no state for as already satisfied (§5.4).
+
+        The chat is gone for this dataset, which is all the tombstone asks for.
+        It is recorded as tombstoned and a copy the owner kept outside Sync is
+        soft-deleted. A base, if the tombstone names one, refers to history that
+        never reached a projection here, so it changes nothing. A chat that other
+        Sync history holds, or that Sync cannot carry, is a conflict.
+        """
+
+        object_revision = _next_object_revision(envelope, None)
+        object_hash = envelope.payload_hash or ""
+        try:
+            outcome = unheld_tombstone_outcome(
+                store,
+                envelope,
+                delete_copy=lambda: self.note_db.tombstone_unsynced_conversation_from_sync(
+                    conversation_id=object_id,
+                    sync_client_id=_projection_client_id(self.note_db),
+                    object_revision=object_revision,
+                    object_hash=object_hash,
+                ),
+            )
+            if outcome == "foreign":
+                conflict = _conflict_result(
+                    reason="missing_server_object",
+                    envelope=envelope,
+                    current_state=None,
+                    conflict_type="whole_object_conflict",
+                    message="chat.conversation tombstone names a chat that other Sync history holds",
+                )
+                store.mark_envelope_apply_status(
+                    server_cursor,
+                    apply_status="conflict",
+                    apply_error_code="whole_object_conflict",
+                    apply_error_message=conflict.message,
+                )
+                return conflict
+            _record_applied_state(
+                store=store,
+                envelope=envelope,
+                object_id=object_id,
+                server_cursor=server_cursor,
+                object_revision=object_revision,
+                object_hash=object_hash,
+                deleted=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - projection failures are persisted for replay
+            logger.warning(
+                "Failed to apply chat.conversation tombstone {} for object {} without Sync state: {}",
+                envelope.client_envelope_id,
+                envelope.object_id,
+                type(exc).__name__,
+            )
+            store.mark_envelope_apply_status(
+                server_cursor,
+                apply_status="failed",
+                apply_error_code="chat_projection_failed",
+                apply_error_message=_safe_error_message(exc),
+            )
+            return MaterializationResult(
+                status="failed",
+                error_code="chat_projection_failed",
+                message=_safe_error_message(exc),
+            )
+        return satisfied_result(envelope)
+
 
 @dataclass(slots=True)
 class ChatMessageMaterializer:
     """Apply `chat.message` appends and tombstones to ChaChaNotes."""
 
     note_db: CharactersRAGDB
-    domain: str = "chat.message"
+    domain: SyncDomain = "chat.message"
+
+    def foreign_device_tombstone(self, store: SyncV2Store, envelope: SyncEnvelopeCreate) -> bool:
+        """Return whether the push must refuse this device tombstone without blocking the dataset.
+
+        True for a message row that carries other Sync history, as the apply
+        rule (#3198) decides from the row's own metadata. Read-only.
+        """
+
+        return is_foreign_device_tombstone(
+            store,
+            envelope,
+            check_other_datasets=False,
+            product_is_foreign=lambda: self.note_db.unsynced_message_is_foreign(
+                stable_message_id=str(envelope.object_id),
+                sync_client_id=_projection_client_id(self.note_db),
+                object_hash=envelope.payload_hash or "",
+            ),
+        )
 
     def apply(
         self,
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> MaterializationResult:
         """Project one accepted message envelope and record apply status."""
 
+        if guarded_mutation is not None:
+            raise SyncMaterializationContractError()
         if envelope.domain != self.domain:
             return MaterializationResult(status="skipped")
         if envelope.server_cursor is None:
@@ -156,7 +295,22 @@ class ChatMessageMaterializer:
                 message="Stored Sync envelope is missing a server cursor",
             )
 
-        current_state = store.get_object_state(envelope.dataset_id, envelope.domain, envelope.object_id)
+        object_id = envelope.object_id
+        if not isinstance(object_id, str) or not object_id:
+            message = f"Stored {self.domain} envelope requires a non-empty string object ID"
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="failed",
+                apply_error_code="chat_projection_failed",
+                apply_error_message=message,
+            )
+            return MaterializationResult(
+                status="failed",
+                error_code="chat_projection_failed",
+                message=message,
+            )
+
+        current_state = store.get_object_state(envelope.dataset_id, envelope.domain, object_id)
         # A recorded conflict stands when the envelope is projected again. The one exception
         # is a tombstone of a message the dataset still holds no state for: that conflict
         # came from the rule this materializer no longer applies, so it is settled below.
@@ -192,7 +346,7 @@ class ChatMessageMaterializer:
                 payload = _message_payload(envelope.payload)
                 divergent_stable_id = current_state is not None and current_state.object_hash != object_hash
                 append_result = self.note_db.append_message_from_sync(
-                    stable_message_id=envelope.object_id,
+                    stable_message_id=object_id,
                     conversation_id=payload["conversation_id"],
                     sender=payload["sender"],
                     content=payload.get("content"),
@@ -225,7 +379,7 @@ class ChatMessageMaterializer:
                 # dataset and keeps the delete from every other device.
                 satisfied = current_state is None and (
                     self.note_db.tombstone_unsynced_message_from_sync(
-                        stable_message_id=envelope.object_id,
+                        stable_message_id=object_id,
                         sync_client_id=_projection_client_id(self.note_db),
                         object_revision=object_revision,
                         object_hash=object_hash,
@@ -243,7 +397,7 @@ class ChatMessageMaterializer:
                         )
                         return conflict
                     self.note_db.tombstone_message_from_sync(
-                        stable_message_id=envelope.object_id,
+                        stable_message_id=object_id,
                         sync_client_id=_projection_client_id(self.note_db),
                         object_revision=object_revision,
                         object_hash=current_state.object_hash if current_state is not None else object_hash,
@@ -255,6 +409,8 @@ class ChatMessageMaterializer:
             _record_applied_state(
                 store=store,
                 envelope=envelope,
+                object_id=object_id,
+                server_cursor=envelope.server_cursor,
                 object_revision=object_revision,
                 object_hash=object_hash,
                 deleted=deleted,
@@ -288,6 +444,8 @@ def _record_applied_state(
     *,
     store: SyncV2Store,
     envelope: SyncEnvelope,
+    object_id: str,
+    server_cursor: int,
     object_revision: int,
     object_hash: str,
     deleted: bool,
@@ -296,14 +454,14 @@ def _record_applied_state(
         SyncObjectState(
             dataset_id=envelope.dataset_id,
             domain=envelope.domain,
-            object_id=envelope.object_id,
+            object_id=object_id,
             object_revision=object_revision,
             object_hash=object_hash,
-            latest_server_cursor=envelope.server_cursor or 0,
+            latest_server_cursor=server_cursor,
             deleted=deleted,
         )
     )
-    store.mark_envelope_apply_status(envelope.server_cursor or 0, apply_status="applied")
+    store.mark_envelope_apply_status(server_cursor, apply_status="applied")
 
 
 def _complete_already_materialized(

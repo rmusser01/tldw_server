@@ -1,4 +1,4 @@
-from typing import Any, Optional, Dict
+from typing import Any, Dict, Optional
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -9,6 +9,7 @@ from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_mod
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 
 def _build_app_with_overrides(
@@ -54,7 +55,7 @@ def _build_app_with_overrides(
         async def get_metrics(self) -> Dict[str, Any]:
             return {"connections": {}, "modules": {}}
 
-    monkeypatch.setattr(mcp_mod, "get_mcp_server", lambda: _DummyServer())
+    monkeypatch.setattr(app_services(), "mcp_server", _DummyServer())
 
     return app
 

@@ -46,6 +46,7 @@ import {
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { READY_STATE_LABEL } from "@/design-system"
+import { RouteLeavePrompt } from "@/entries/shared/route-leave-prompt"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
@@ -970,6 +971,14 @@ export const WritingPlayground = () => {
   // =====================================================================
   // Generation logic (unique - not in hooks)
   // =====================================================================
+  const resolveGenerationTarget = React.useCallback(async () => ({
+    model: selectedModel?.trim().replace(/^tldw:/i, "") || selectedModel || "",
+    apiProvider: (await resolveApiProviderForModel({
+      modelId: selectedModel,
+      explicitProvider: apiProviderOverride
+    })) ?? undefined
+  }), [apiProviderOverride, selectedModel])
+
   const handleGenerate = React.useCallback(
     async (overrideText?: string) => {
     if (generationOperationRef.current || isGenerating || isRevisionGenerating) return
@@ -1158,7 +1167,9 @@ export const WritingPlayground = () => {
       } else {
         generationRequestOptions.signal = controller.signal
       }
+      const target = await resolveGenerationTarget()
       if (!canAccept()) return
+      Object.assign(generationRequestOptions, target)
       dispatched = true
       if (plan.placeholder) emitText(plan.prefix + plan.suffix)
       if (settings.token_streaming) {
@@ -1201,6 +1212,12 @@ export const WritingPlayground = () => {
         )
         emitText(plan.prefix + generated + plan.suffix)
       }
+      if (canAccept() && !generated.trim()) {
+        finish(false)
+        message.error(t("option:writingPlayground.emptyGeneration", {
+          defaultValue: "No writing text was returned. Increase Max tokens or disable reasoning, then try again."
+        }))
+      }
     } catch (error) {
       if (isRequestConfigScopeChangedError(error)) {
         operation.cancel(false)
@@ -1230,6 +1247,7 @@ export const WritingPlayground = () => {
       isSceneBound,
       isOnline,
       pushGenerationHistory,
+      resolveGenerationTarget,
       selectedModel,
       settings,
       requestedLogprobsExplicitlyUnsupported,
@@ -1725,10 +1743,15 @@ export const WritingPlayground = () => {
           content: userPrompt
         }
       ]
+      const binding = generationBindingRef.current
+      const ownsBinding = () => generationMountedRef.current && generationBindingRef.current === binding
+      const target = await resolveGenerationTarget()
+      if (!ownsBinding()) return null
       const responseText = await generationServiceRef.current.sendMessage(
         messages,
-        buildRevisionRequestOptions()
+        { ...buildRevisionRequestOptions(), ...target }
       )
+      if (!ownsBinding()) return null
       return parseRevisionModelResponse({
         responseText,
         sessionId: activeSessionDetail.id,
@@ -1748,6 +1771,7 @@ export const WritingPlayground = () => {
       hasChat,
       isSceneEditorPending,
       isOnline,
+      resolveGenerationTarget,
       selectedModel,
       t
     ]
@@ -2480,6 +2504,17 @@ export const WritingPlayground = () => {
       t
     ]
   )
+
+  const hasUnsavedWritingChanges = isDirty || isSceneDirty || saveSessionMutation.isPending
+  React.useEffect(() => {
+    if (!hasUnsavedWritingChanges) return
+    const protectDraft = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ""
+    }
+    window.addEventListener("beforeunload", protectDraft)
+    return () => window.removeEventListener("beforeunload", protectDraft)
+  }, [hasUnsavedWritingChanges])
 
   const shouldRenderWritingModalHost =
     extraBodyJsonModalOpen ||
@@ -3286,6 +3321,12 @@ export const WritingPlayground = () => {
 
   return (
     <div className={cn("writing-playground flex flex-col h-full", activeThemeClassName)}>
+      {hasUnsavedWritingChanges && (
+        <RouteLeavePrompt
+          when
+          message={t("option:writingPlayground.leaveUnsavedWriting", "Leave and discard unsaved writing changes?")}
+        />
+      )}
       {activeThemeCss ? <style>{activeThemeCss}</style> : null}
       {showOffline && (
         <div className="p-4">

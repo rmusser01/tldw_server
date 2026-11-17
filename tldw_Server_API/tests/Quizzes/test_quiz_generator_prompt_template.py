@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Any
 
@@ -187,3 +188,20 @@ def test_common_prompt_supports_assertion_reasoning_fields_and_rules():
     assert '"reason": "Optional reason for assertion_reasoning"' in QUIZ_GENERATION_PROMPT
     assert "For Assertion / Reasoning" in QUIZ_GENERATION_PROMPT
     assert "Do not provide hidden chain-of-thought" in QUIZ_GENERATION_PROMPT
+
+
+@pytest.mark.parametrize(
+    "sources",
+    [
+        [{"source_type": "note", "source_id": "1787cbc3-6d29-4b00-97c3-da64a7259365"}],
+        [{"source_type": "media", "source_id": "7"}, {"source_type": "note", "source_id": "note-2"}],
+        [{"source_type": "note", "source_id": 'note-"quoted"-\n-雪'}],
+    ],
+    ids=["note_uuid", "mixed_sources", "escaped_identity"],
+)
+def test_source_contract_supplies_exact_json_citation_identities(sources):
+    contract = quiz_generator._build_source_contract(sources)
+    marker = "\n- Allowed citation identities (JSON): "
+    # The model must be able to copy identities without interpreting colon-delimited references.
+    assert marker in contract  # nosec B101 -- Prompt contract presence, not an application guard.
+    assert json.loads(contract.split(marker, 1)[1]) == sources  # nosec B101 -- Exact identity round-trip.

@@ -90,10 +90,10 @@ describe("llama.cpp chat model settings state", () => {
     const extensionRouteSource = readSource(
       "../../../../../tldw-frontend/extension/routes/sidepanel-chat.tsx"
     )
+    expect(extensionRouteSource.trim()).toBe('export { default } from "@/routes/sidepanel-chat"')
 
     for (const key of LLAMA_SETTING_KEYS) {
       expect(sharedRouteSource).toContain(`"${key}"`)
-      expect(extensionRouteSource).toContain(`"${key}"`)
     }
   })
 })

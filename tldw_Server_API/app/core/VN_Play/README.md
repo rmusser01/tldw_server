@@ -38,7 +38,7 @@ VN_Play implements visual novel runtime behavior: save slots, scripted and gener
 ## How It Connects
 
 - `app/api/v1/endpoints/vn_play.py` exposes play, save-slot, turn, action, and setup routes.
-- `app/api/v1/schemas/vn_play_schemas.py` defines play API contracts.
+- `app/core/VN_Play/vn_play_schemas.py` defines the play setup models; `app/api/v1/schemas/vn_play_schemas.py` defines the rest of the play API contracts and re-exports them.
 - `app/core/DB_Management/VNPlay_DB.py` stores runtime state.
 - `app/core/VN_Scripts/` supplies published script snapshots and validation context.
 - `app/core/VN_Assets/` supplies asset packs and manifests.

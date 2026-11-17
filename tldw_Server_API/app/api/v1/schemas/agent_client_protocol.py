@@ -726,6 +726,7 @@ class ACPSessionInfo(BaseModel):
     usage: ACPTokenUsage = Field(default_factory=ACPTokenUsage, description="Token usage for this session")
     tags: list[str] = Field(default_factory=list, description="Tags for organizing sessions")
     has_websocket: bool = Field(default=False, description="Whether a WebSocket is connected")
+    runtime_available: bool | None = Field(default=None, description="Whether the current runtime still owns this session; stored history does not restore execution")
     persona_id: str | None = Field(default=None, description="Persona identifier bound to this ACP session")
     workspace_id: str | None = Field(default=None, description="Workspace identifier bound to this ACP session")
     workspace_group_id: str | None = Field(

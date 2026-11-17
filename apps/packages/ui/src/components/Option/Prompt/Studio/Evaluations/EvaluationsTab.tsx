@@ -83,7 +83,7 @@ export const EvaluationsTab: React.FC = () => {
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -171,11 +171,11 @@ export const EvaluationsTab: React.FC = () => {
     }
   ]
 
-  const formatMetrics = (metrics?: Record<string, any>) => {
+  const formatMetrics = (metrics?: Record<string, any> | null) => {
     if (!metrics || Object.keys(metrics).length === 0) return null
 
     const displayMetrics = []
-    if (metrics.accuracy !== undefined) {
+    if (typeof metrics.accuracy === "number" && Number.isFinite(metrics.accuracy)) {
       displayMetrics.push({
         label: t("managePrompts.studio.evaluations.metrics.accuracy", {
           defaultValue: "Accuracy"
@@ -187,7 +187,7 @@ export const EvaluationsTab: React.FC = () => {
         value: `${(metrics.accuracy * 100).toFixed(1)}%`
       })
     }
-    if (metrics.pass_rate !== undefined) {
+    if (typeof metrics.pass_rate === "number" && Number.isFinite(metrics.pass_rate)) {
       displayMetrics.push({
         label: t("managePrompts.studio.evaluations.metrics.passRate", {
           defaultValue: "Pass Rate"
@@ -199,7 +199,7 @@ export const EvaluationsTab: React.FC = () => {
         value: `${(metrics.pass_rate * 100).toFixed(1)}%`
       })
     }
-    if (metrics.f1 !== undefined) {
+    if (typeof metrics.f1 === "number" && Number.isFinite(metrics.f1)) {
       displayMetrics.push({
         label: t("managePrompts.studio.evaluations.metrics.f1", {
           defaultValue: "F1 Score"
@@ -342,7 +342,7 @@ export const EvaluationsTab: React.FC = () => {
             }),
             key: "test_cases",
             width: 100,
-            render: (_, record) => record.test_case_ids?.length ?? 0
+            render: (_, record) => record.test_case_ids?.length ?? "Unavailable"
           },
           {
             title: t("managePrompts.studio.evaluations.columns.metrics", {
@@ -350,9 +350,9 @@ export const EvaluationsTab: React.FC = () => {
             }),
             key: "metrics",
             render: (_, record) => {
-              const metrics = formatMetrics(record.aggregate_metrics)
+              const metrics = formatMetrics(record.aggregate_metrics ?? record.metrics)
               if (!metrics)
-                return <span className="text-text-muted">-</span>
+                return <span className="text-text-muted">Unavailable</span>
               return (
                 <div className="flex gap-3">
                   {metrics.map((m) => (

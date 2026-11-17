@@ -50,7 +50,7 @@ export const normalizeACPHealthSnapshot = (
 
   return {
     ...data,
-    overall,
+    overall: overall === "ok" ? "healthy" : overall,
     status: fallback?.status,
     rawMessage: extractHealthMessage(payload) ?? fallback?.rawMessage
   }

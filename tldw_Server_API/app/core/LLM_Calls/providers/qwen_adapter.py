@@ -203,7 +203,7 @@ class QwenAdapter(ChatProvider):
         request = validate_payload(self.name, request or {})
         api_key = request.get("api_key")
         if not api_key:
-            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+            from tldw_Server_API.app.core.exceptions import ChatConfigurationError
             raise ChatConfigurationError(provider=self.name, message="Qwen API Key required.")
         cfg = request.get("app_config") or {}
         url = f"{self._base_url(cfg, request)}/chat/completions"
@@ -229,7 +229,7 @@ class QwenAdapter(ChatProvider):
         request = validate_payload(self.name, request or {})
         api_key = request.get("api_key")
         if not api_key:
-            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+            from tldw_Server_API.app.core.exceptions import ChatConfigurationError
             raise ChatConfigurationError(provider=self.name, message="Qwen API Key required.")
         cfg = request.get("app_config") or {}
         url = f"{self._base_url(cfg, request)}/chat/completions"
@@ -259,7 +259,7 @@ class QwenAdapter(ChatProvider):
             log_http_400_body,
         )
         if is_http_status_error(exc):
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
+            from tldw_Server_API.app.core.exceptions import (
                 ChatAPIError,
                 ChatAuthenticationError,
                 ChatBadRequestError,

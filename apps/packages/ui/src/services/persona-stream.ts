@@ -19,17 +19,16 @@ export type PersonaWebSocketConnection = {
  * TASK-12106: the auth credential is NO LONGER placed in the URL query string
  * (it would leak into server access logs, proxy logs, and browser history).
  * Instead it is carried in the WebSocket subprotocol as `["bearer", <token>]`,
- * which the backend parses from `Sec-WebSocket-Protocol`
- * (persona.py:3705-3712: splits on ",", requires parts[0]=="bearer" and uses
- * parts[1] as the token; only consulted when no Authorization header is set).
- * `_should_treat_bearer_as_api_key` (persona.py:3663-3679) then maps a
- * single-user / non-JWT bearer onto the API-key path server-side.
+ * which the backend's core WebSocket resolver (core/AuthNZ/websocket_principal.py)
+ * reads from `Sec-WebSocket-Protocol` when no `Authorization: Bearer` header is
+ * set, and verifies as HTTP does: a single-user / non-JWT bearer is an API key.
  *
  * Subprotocol values must be RFC 6455 tokens. Default tldw keys (secrets
  * token_urlsafe / token_hex) and JWTs are token-safe, but a user-set custom API
  * key containing separators (space, `,`, `/`, `=` ...) would make
  * `new WebSocket(url, ["bearer", key])` throw. For that case we fall back to the
- * legacy query-string token (so persona voice keeps working) rather than crash.
+ * legacy query-string token (so persona voice keeps working) rather than crash;
+ * the server accepts it as deprecated and logs a warning (TASK-13950.61).
  */
 
 // RFC 6455 token charset (valid WebSocket subprotocol characters).

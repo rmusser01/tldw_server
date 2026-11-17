@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
 function table<T extends { id: string }>(rows: Map<string, T>) {
   return {
     get: async (id: string) => rows.get(id),
+    bulkGet: async (ids: string[]) => ids.map(id => (rows.has(id) ? structuredClone(rows.get(id)!) : undefined)),
     add: async (row: T) => {
       if (rows.has(row.id)) throw new Error("duplicate primary key")
       rows.set(row.id, structuredClone(row))
@@ -18,6 +19,10 @@ function table<T extends { id: string }>(rows: Map<string, T>) {
     put: async (row: T) => {
       rows.set(row.id, structuredClone(row))
       return row.id
+    },
+    bulkPut: async (list: T[]) => {
+      for (const row of list) rows.set(row.id, structuredClone(row))
+      return list.map(row => row.id)
     },
     where: (field: string) => ({
       equals: (value: unknown) => ({
@@ -31,6 +36,8 @@ function table<T extends { id: string }>(rows: Map<string, T>) {
 vi.mock("../schema", () => ({ db: {
   chatHistories: table(state.histories), messages: table(state.messages),
   modelNickname: {}, sessionFiles: {},
+  // Token side-table for content search (WP-23): mirror writes index words.
+  searchTokens: { bulkPut: async () => undefined, where: () => ({ anyOf: () => ({ primaryKeys: async () => [] }) }) },
   transaction: async (_mode: string, _tables: unknown[], operation: (transaction: { abort: () => void }) => Promise<unknown>) => operation({ abort: vi.fn() })
 } }))
 vi.mock("../chat", () => ({ PageAssistDatabase: class {

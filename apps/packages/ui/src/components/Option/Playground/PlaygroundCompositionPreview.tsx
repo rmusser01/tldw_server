@@ -12,6 +12,7 @@ import type {
 
 export type PlaygroundCompositionPreviewProps = {
   summary: PlaygroundCompositionPreviewSummary;
+  defaultOpen?: boolean;
 };
 
 type PreviewDesignSystemStateKey =
@@ -23,9 +24,13 @@ type PreviewDesignSystemStateKey =
 
 const previewStateKeyByPreviewState = {
   ready: "ready",
+  planned: "empty",
   degraded: "degraded",
   unavailable: "unavailable",
-} satisfies Record<PlaygroundCompositionPreviewState, PreviewDesignSystemStateKey>;
+} satisfies Record<
+  PlaygroundCompositionPreviewState,
+  PreviewDesignSystemStateKey
+>;
 
 const previewStateKeyByEntryState = {
   active: "ready",
@@ -33,7 +38,10 @@ const previewStateKeyByEntryState = {
   unavailable: "unavailable",
   loading: "loading",
   disabled: "empty",
-} satisfies Record<PlaygroundCompositionPreviewEntryState, PreviewDesignSystemStateKey>;
+} satisfies Record<
+  PlaygroundCompositionPreviewEntryState,
+  PreviewDesignSystemStateKey
+>;
 
 const designSystemStateLabels = {
   ready: getDesignSystemState("ready").label,
@@ -44,10 +52,10 @@ const designSystemStateLabels = {
 } satisfies Record<PreviewDesignSystemStateKey, string>;
 
 const stateClass = (state: PlaygroundCompositionPreviewEntryState) => {
-  if (state === "active") return "border-success/40 bg-success/10 text-success";
-  if (state === "degraded") return "border-warning/40 bg-warning/10 text-warning";
-  if (state === "unavailable") return "border-danger/40 bg-danger/10 text-danger";
-  if (state === "loading") return "border-info/40 bg-info/10 text-info";
+  if (state === "active") return "border-border bg-surface2 text-text-muted";
+  if (state === "degraded") return "border-warning/40 bg-warning/10 text-text";
+  if (state === "unavailable") return "border-danger/40 bg-danger/10 text-text";
+  if (state === "loading") return "border-info/40 bg-info/10 text-text";
   return "border-border bg-surface2 text-text-muted";
 };
 
@@ -55,8 +63,12 @@ const overallLabel = (
   state: PlaygroundCompositionPreviewState,
   t: ReturnType<typeof useTranslation>["t"],
 ) => {
-  const stateLabel = designSystemStateLabels[previewStateKeyByPreviewState[state]];
-  if (state === "ready") return t("cockpit.compositionReady", stateLabel);
+  const stateLabel =
+    designSystemStateLabels[previewStateKeyByPreviewState[state]];
+  if (state === "planned")
+    return t("cockpit.compositionNotPreviewed", "Not previewed");
+  if (state === "ready")
+    return t("cockpit.compositionPreviewReady", "Preview ready");
   if (state === "degraded") return t("cockpit.compositionDegraded", stateLabel);
   return t("cockpit.compositionUnavailable", stateLabel);
 };
@@ -65,8 +77,9 @@ const entryStateLabel = (
   state: PlaygroundCompositionPreviewEntryState,
   t: ReturnType<typeof useTranslation>["t"],
 ) => {
-  const stateLabel = designSystemStateLabels[previewStateKeyByEntryState[state]];
-  if (state === "active") return t("cockpit.active", "Active");
+  const stateLabel =
+    designSystemStateLabels[previewStateKeyByEntryState[state]];
+  if (state === "active") return t("cockpit.selected", "Selected");
   if (state === "degraded") return t("cockpit.degraded", stateLabel);
   if (state === "unavailable") return t("cockpit.unavailable", stateLabel);
   if (state === "loading") return t("cockpit.loading", stateLabel);
@@ -108,29 +121,55 @@ const PreviewRow = ({
 
 export const PlaygroundCompositionPreview = ({
   summary,
+  defaultOpen = true,
 }: PlaygroundCompositionPreviewProps) => {
   const { t } = useTranslation("playground");
-  const [sectionOpen, setSectionOpen] = React.useState(true);
+  const [sectionOpen, setSectionOpen] = React.useState(defaultOpen);
   const [open, setOpen] = React.useState(false);
   const bodyId = React.useId();
   const panelId = React.useId();
   const sectionToggleLabel = sectionOpen
-    ? t("cockpit.collapseRailSection", "Collapse Composition", {
-        title: t("cockpit.composition", "Composition"),
+    ? t("cockpit.collapseRailSection", "Collapse Request preview", {
+        title: t("cockpit.requestPreview", "Request preview"),
       })
-    : t("cockpit.expandRailSection", "Expand Composition", {
-        title: t("cockpit.composition", "Composition"),
+    : t("cockpit.expandRailSection", "Expand Request preview", {
+        title: t("cockpit.requestPreview", "Request preview"),
       });
   const detailButtonLabel = open
     ? t("cockpit.hideCompositionDetails", "Hide composition details")
     : t("cockpit.showCompositionDetails", "Show composition details");
-  const footprintItems = [
-    pluralize(summary.footprint.providerMessageCount, "provider message", "provider messages"),
-    pluralize(summary.footprint.previewSectionCount, "preview section", "preview sections"),
-    pluralize(summary.footprint.contextPieceCount, "context piece", "context pieces"),
-  ];
+  const footprintItems =
+    summary.footprint.providerMessageCount == null ||
+    summary.footprint.previewSectionCount == null ||
+    summary.footprint.contextPieceCount == null
+      ? [
+          t(
+            "cockpit.footprintNotPreviewed",
+            "Not previewed; actual request may include inherited character context.",
+          ),
+        ]
+      : [
+          pluralize(
+            summary.footprint.providerMessageCount,
+            "provider message",
+            "provider messages",
+          ),
+          pluralize(
+            summary.footprint.previewSectionCount,
+            "preview section",
+            "preview sections",
+          ),
+          pluralize(
+            summary.footprint.contextPieceCount,
+            "context piece",
+            "context pieces",
+          ),
+        ];
 
-  if (summary.footprint.warningCount > 0) {
+  if (
+    summary.footprint.warningCount != null &&
+    summary.footprint.warningCount > 0
+  ) {
     footprintItems.push(
       pluralize(summary.footprint.warningCount, "warning", "warnings"),
     );
@@ -142,28 +181,36 @@ export const PlaygroundCompositionPreview = ({
         "cockpit.nextMessageComposition",
         "Next message composition",
       )}
-      className="min-w-0"
+      className={cockpitRailStyles.section}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="text-[11px] font-semibold uppercase text-text-muted">
-            {t("cockpit.composition", "Composition")}
+          <h2 className={cockpitRailStyles.heading}>
+            {t("cockpit.requestPreview", "Request preview")}
           </h2>
           <p className="mt-1 text-sm font-medium text-text">
-            {t("cockpit.nextMessage", "Next message")}
+            {t("cockpit.plannedNextMessage", "Planned next message")}
           </p>
-          {summary.settingsScopeLabel ? (
+          {sectionOpen && summary.settingsScopeLabel ? (
             <p className="mt-0.5 truncate text-xs text-text-muted">
-              {t("cockpit.settingsScope", `Scope: ${summary.settingsScopeLabel}`, {
-                scope: summary.settingsScopeLabel,
-              })}
+              {t(
+                "cockpit.settingsScope",
+                `Scope: ${summary.settingsScopeLabel}`,
+                {
+                  scope: summary.settingsScopeLabel,
+                },
+              )}
             </p>
           ) : null}
         </div>
         <div className="flex shrink-0 items-start gap-2">
           <span
             className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${stateClass(
-              summary.overallState === "ready" ? "active" : summary.overallState,
+              summary.overallState === "ready"
+                ? "active"
+                : summary.overallState === "planned"
+                  ? "disabled"
+                  : summary.overallState,
             )}`}
           >
             {overallLabel(summary.overallState, t)}
@@ -225,7 +272,10 @@ export const PlaygroundCompositionPreview = ({
                 </ul>
               ) : (
                 <p className="mt-1 text-xs text-text-muted">
-                  {t("cockpit.noContextStack", "No context sources active.")}
+                  {t(
+                    "cockpit.noAdditionalContextStack",
+                    "No additional context sources selected.",
+                  )}
                 </p>
               )}
             </div>
@@ -235,10 +285,7 @@ export const PlaygroundCompositionPreview = ({
               </p>
               <ul className="mt-1 flex flex-wrap gap-1.5 text-xs text-text-muted">
                 {footprintItems.map((item) => (
-                  <li
-                    key={item}
-                    className={cockpitRailStyles.tag}
-                  >
+                  <li key={item} className={cockpitRailStyles.tag}>
                     {item}
                   </li>
                 ))}

@@ -54,7 +54,7 @@ const collectVoices = (source: unknown, output: TldwVoice[]) => {
   }
 }
 
-const extractVoices = (source: unknown): TldwVoice[] => {
+export const extractVoices = (source: unknown): TldwVoice[] => {
   const output: TldwVoice[] = []
   collectVoices(source, output)
   const seen = new Set<string>()

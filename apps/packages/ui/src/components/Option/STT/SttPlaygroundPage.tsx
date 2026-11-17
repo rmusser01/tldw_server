@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { resolveServicePromptScope } from "@/services/service-prompts"
+import { useSpeechHistory } from "@/hooks/useSpeechHistory"
 import { useStorage } from "@plasmohq/storage/hook"
 import { Trans, useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
@@ -15,6 +17,7 @@ import { ComparisonPanel } from "./ComparisonPanel"
 import { HistoryPanel } from "./HistoryPanel"
 import type { SttHistoryEntry, SttHistoryResult } from "./HistoryPanel"
 import type { ComparisonResult } from "@/hooks/useComparisonTranscribe"
+import type { SttComparisonMetadata } from "@/components/Option/Audio/comparison-provenance"
 import { AudioReadinessStrip } from "@/components/Option/Audio/AudioReadinessStrip"
 import { AudioPresetControls } from "@/components/Option/Audio/AudioPresetControls"
 import { buildSttReadinessItems } from "@/components/Option/Audio/audio-readiness"
@@ -50,10 +53,22 @@ export const SttPlaygroundPage: React.FC = () => {
   const [currentBlob, setCurrentBlob] = useState<Blob | null>(null)
   const [currentDurationMs, setCurrentDurationMs] = useState<number>(0)
 
-  const handleBlobReady = useCallback((blob: Blob, durationMs: number) => {
+  const sourceEpoch = useRef(0)
+  const [restoredRecording, setRestoredRecording] = useState<{
+    ownerKey: string
+    blob: Blob
+    durationMs: number
+    isCurrent: () => boolean
+  } | null>(null)
+  const handleSourceChange = useCallback(() => {
+    sourceEpoch.current += 1
+    setRestoredRecording(null)
+  }, [])
+  const handleBlobReady = useCallback((blob: Blob | null, durationMs: number) => {
+    handleSourceChange()
     setCurrentBlob(blob)
     setCurrentDurationMs(durationMs)
-  }, [])
+  }, [handleSourceChange])
 
   // ── Settings ──────────────────────────────────────────────────────
   const [globalLanguage] = useStorage("speechToTextLanguage", "en-US")
@@ -205,11 +220,13 @@ export const SttPlaygroundPage: React.FC = () => {
   const readinessItems = useMemo(
     () =>
       buildSttReadinessItems({
-        modelOptions,
+        modelOptions: selectedSttModels.length > 0
+          ? modelOptions.filter((model) => selectedSttModels.includes(model.id))
+          : modelOptions,
         loading: serverModelsLoading,
         error: serverModelsError
       }),
-    [modelOptions, serverModelsError, serverModelsLoading]
+    [modelOptions, selectedSttModels, serverModelsError, serverModelsLoading]
   )
   const recordingDisabledState = useMemo<{
     reason: string
@@ -246,24 +263,34 @@ export const SttPlaygroundPage: React.FC = () => {
   }, [serverModels.length, serverModelsError, serverModelsLoading, t])
 
   // ── History (persisted via Plasmo storage) ────────────────────────
-  const [history, setHistory] = useStorage<SttHistoryEntry[]>(
-    "sttComparisonHistory",
-    []
-  )
+  const [history, setHistory, { ownerKey, isCurrent }] = useSpeechHistory<SttHistoryEntry>(() => {
+    handleSourceChange()
+    setCurrentBlob(null)
+    setCurrentDurationMs(0)
+  }, "sttComparisonHistory")
+
+  const noteControllers = useRef(new Set<AbortController>())
+  useEffect(() => () => {
+    for (const controller of noteControllers.current) controller.abort()
+    noteControllers.current.clear()
+  }, [isCurrent])
 
   // ── Callbacks ─────────────────────────────────────────────────────
 
   const handleComparisonComplete = useCallback(
     async (compResults: ComparisonResult[]) => {
-      if (!currentBlob || compResults.length === 0) return
+      if (!isCurrent() || !ownerKey || !currentBlob || compResults.length === 0) return
+      const completed = compResults.filter(r => r.status === "done")
+      if (completed.length === 0) return
       try {
         const recordingId = await saveSttRecording({
+          ownerKey: ownerKey,
           blob: currentBlob,
           durationMs: currentDurationMs,
           mimeType: currentBlob.type || "audio/webm"
         })
-        const historyResults: SttHistoryResult[] = compResults
-          .filter((r) => r.status === "done")
+        if (!isCurrent()) return
+        const historyResults: SttHistoryResult[] = completed
           .map((r) => ({
             model: r.model,
             text: r.text,
@@ -285,25 +312,37 @@ export const SttPlaygroundPage: React.FC = () => {
         console.error("Failed to save comparison to history", e)
       }
     },
-    [currentBlob, currentDurationMs, setHistory]
+    [currentBlob, currentDurationMs, setHistory, ownerKey, isCurrent]
   )
 
   const handleSaveToNotes = useCallback(
-    async (text: string, model: string) => {
-      const title = `STT Comparison: ${model} - ${new Date().toLocaleString()}`
+    async (text: string, model: string, metadata?: SttComparisonMetadata) => {
+      if (!isCurrent()) return
+      const controller = new AbortController()
+      noteControllers.current.add(controller)
+      const prefix = "STT Comparison: "
+      const suffix = `${model} - ${metadata?.createdAt || new Date().toLocaleString()}`
+      const source = metadata?.audioSourceLabel
+      const title = source
+        ? `${prefix}${source.slice(0, Math.max(0, 255 - prefix.length - suffix.length - 3))} - ${suffix}`.slice(0, 255)
+        : `${prefix}${suffix}`.slice(0, 255)
       try {
+        const requestScope = await resolveServicePromptScope()
+        if (!isCurrent() || controller.signal.aborted) return
         await tldwClient.createNote(text, {
           title,
           metadata: {
             origin: "stt-playground",
             stt_model: model
           }
-        })
+        }, { requestScope, signal: controller.signal })
+        if (!isCurrent()) return
         notification.success({
           message: t("playground:stt.savedToNotes", "Saved to Notes"),
           description: t("playground:stt.savedToNotesDesc", "Transcription saved as a note.")
         })
       } catch (e: unknown) {
+        if (!isCurrent()) return
         notification.error({
           message: t("error", "Error"),
           description: sanitizeServerErrorMessage(
@@ -311,18 +350,28 @@ export const SttPlaygroundPage: React.FC = () => {
             t("somethingWentWrong", "Something went wrong")
           )
         })
+      } finally {
+        noteControllers.current.delete(controller)
       }
     },
-    [notification, t]
+    [notification, t, isCurrent]
   )
 
   const handleRecompare = useCallback(
     async (entry: SttHistoryEntry) => {
+      if (!isCurrent() || !ownerKey) return
+      const epoch = ++sourceEpoch.current
+      setRestoredRecording(null)
       try {
-        const recording = await getSttRecording(entry.recordingId)
+        const recording = await getSttRecording(entry.recordingId, ownerKey)
+        if (!isCurrent() || sourceEpoch.current !== epoch) return
         if (recording) {
-          setCurrentBlob(recording.blob)
-          setCurrentDurationMs(recording.durationMs ?? entry.durationMs ?? 0)
+          setRestoredRecording({
+            ownerKey,
+            blob: recording.blob,
+            durationMs: recording.durationMs ?? entry.durationMs ?? 0,
+            isCurrent: () => isCurrent() && sourceEpoch.current === epoch
+          })
         } else {
           notification.error({
             message: t("playground:stt.recordingNotFound", "Recording not found"),
@@ -331,6 +380,7 @@ export const SttPlaygroundPage: React.FC = () => {
           })
         }
       } catch (e: unknown) {
+        if (!isCurrent()) return
         notification.error({
           message: t("error", "Error"),
           description: sanitizeServerErrorMessage(
@@ -340,11 +390,12 @@ export const SttPlaygroundPage: React.FC = () => {
         })
       }
     },
-    [notification, t]
+    [notification, t, isCurrent, ownerKey]
   )
 
   const handleExport = useCallback(
     async (entry: SttHistoryEntry) => {
+      if (!isCurrent()) return
       const lines = [
         `# STT Comparison - ${new Date(entry.createdAt).toLocaleString()}`,
         "",
@@ -354,6 +405,8 @@ export const SttPlaygroundPage: React.FC = () => {
       if (entry.results) {
         for (const result of entry.results) {
           lines.push(`## ${result.model}`)
+          lines.push(`Source: ${result.metadata?.audioSourceLabel || entry.recordingId}`)
+          if (result.metadata?.createdAt) lines.push(`Transcribed: ${result.metadata.createdAt}`)
           lines.push("")
           lines.push(result.text || "(no text)")
           lines.push("")
@@ -362,50 +415,55 @@ export const SttPlaygroundPage: React.FC = () => {
       const markdown = lines.join("\n")
       try {
         await navigator.clipboard.writeText(markdown)
+        if (!isCurrent()) return
         notification.success({
           message: t("playground:stt.exported", "Copied"),
           description: t("playground:stt.exportedDesc", "Comparison results copied to clipboard as Markdown.")
         })
       } catch {
+        if (!isCurrent()) return
         notification.error({
           message: t("playground:stt.exportFailed", "Copy failed"),
           description: t("playground:stt.exportFailedDesc", "Unable to copy to clipboard.")
         })
       }
     },
-    [notification, t]
+    [notification, t, isCurrent]
   )
 
   const handleDeleteEntry = useCallback(
     async (id: string) => {
+      if (!isCurrent() || !ownerKey) return
       const entry = (history ?? []).find((e) => e.id === id)
       if (entry) {
         try {
-          await deleteSttRecording(entry.recordingId)
+          await deleteSttRecording(entry.recordingId, ownerKey)
         } catch {
           // Dexie record may already be gone; proceed with removal
         }
       }
+      if (!isCurrent()) return
       setHistory((prev) => (prev ?? []).filter((e) => e.id !== id))
       notification.info({
         message: t("playground:stt.deleted", "Deleted"),
         description: t("playground:stt.deletedDesc", "History entry removed.")
       })
     },
-    [history, setHistory, notification, t]
+    [history, setHistory, notification, t, isCurrent, ownerKey]
   )
 
   const handleClearAll = useCallback(async () => {
+    if (!isCurrent() || !ownerKey) return
     const entries = history ?? []
     for (const entry of entries) {
       try {
-        await deleteSttRecording(entry.recordingId)
+        await deleteSttRecording(entry.recordingId, ownerKey)
       } catch {
         // best-effort cleanup
       }
     }
     setHistory([])
-  }, [history, setHistory])
+  }, [history, setHistory, isCurrent, ownerKey])
 
   // ── Keyboard shortcuts ────────────────────────────────────────────
   useEffect(() => {
@@ -504,9 +562,12 @@ export const SttPlaygroundPage: React.FC = () => {
         )}
         <div data-testid="stt-record-strip">
           <RecordingStrip
+            key={ownerKey || "unresolved"}
             onBlobReady={handleBlobReady}
+            onSourceChange={handleSourceChange}
+            restoredRecording={restoredRecording?.ownerKey === ownerKey && isCurrent() ? restoredRecording : null}
             onSettingsToggle={toggleSettings}
-            disabled={Boolean(recordingDisabledState)}
+            disabled={!ownerKey || Boolean(recordingDisabledState)}
             disabledReason={recordingDisabledState?.reason}
             disabledStatusType={recordingDisabledState?.statusType}
           />
@@ -521,7 +582,9 @@ export const SttPlaygroundPage: React.FC = () => {
         {showSettings && <div data-testid="stt-settings-panel"><InlineSettingsPanel onChange={setSttSettings} /></div>}
         <div data-testid="stt-transcription-output">
           <ComparisonPanel
-            blob={currentBlob}
+            isCurrentOwner={isCurrent}
+            key={ownerKey || "unresolved"}
+            blob={isCurrent() ? currentBlob : null}
             availableModels={serverModels}
             availableModelOptions={modelOptions}
             selectedModels={selectedSttModels}

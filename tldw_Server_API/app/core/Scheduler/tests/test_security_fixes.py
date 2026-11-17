@@ -285,7 +285,7 @@ class TestSQLInjectionFixes:
     @pytest.mark.asyncio
     async def test_parameterized_queries(self):
         """Test that queries use proper parameterization."""
-        from ..core.AuthNZ.scheduler import AuthNZScheduler
+        from tldw_Server_API.app.services.authnz_scheduler import AuthNZScheduler
 
         scheduler = AuthNZScheduler()
 
@@ -295,7 +295,7 @@ class TestSQLInjectionFixes:
         mock_pool.fetchall = AsyncMock(return_value=[])
 
         with patch(
-            'tldw_Server_API.app.core.AuthNZ.scheduler.get_db_pool',
+            'tldw_Server_API.app.services.authnz_scheduler.get_db_pool',
             new=AsyncMock(return_value=mock_pool),
         ):
             # Test PostgreSQL path

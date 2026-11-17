@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-  SESSION_STATE_STORAGE_KEY,
   createSerializedSessionStateWriter,
   deserializeSessionState,
   emptySessionState,
@@ -25,8 +24,12 @@ const createMemoryArea = (): SessionStorageArea & {
   const store: Record<string, unknown> = {}
   return {
     store,
-    get: async (key: string) =>
-      key in store ? { [key]: store[key] } : {},
+    get: async (keys: string | string[]) => {
+      const wanted = Array.isArray(keys) ? keys : [keys]
+      const out: Record<string, unknown> = {}
+      for (const key of wanted) if (key in store) out[key] = store[key]
+      return out
+    },
     set: async (items: Record<string, unknown>) => {
       Object.assign(store, items)
     }
@@ -92,16 +95,23 @@ describe("background-session-store serialization", () => {
 
   it("persists to and rehydrates from an injected storage area", async () => {
     const area = createMemoryArea()
-    const written = {
+    const written: PersistedSessionState = {
       ingestSessions: {
         "ingest-9": { funnelId: "ingest-9", status: "running", jobIds: [7] }
       },
       pendingAuthReplay: ["ingest-9"],
-      quickIngestSessions: []
+      quickIngestSessions: [],
+      quickIngestBatches: []
     }
 
     await writePersistedSessionState(written, area)
-    expect(area.store[SESSION_STATE_STORAGE_KEY]).toEqual(written)
+    // WP-19: the state is sharded per funnel with a small index key.
+    expect(area.store["tldw:ingest:ingest-9"]).toEqual(written.ingestSessions["ingest-9"])
+    expect(area.store["tldw:ingest:auth-replay"]).toEqual(["ingest-9"])
+    expect(area.store["tldw:ingest:index"]).toEqual([
+      "tldw:ingest:auth-replay",
+      "tldw:ingest:ingest-9"
+    ])
 
     const restored = await readPersistedSessionState(area)
     expect(restored.ingestSessions["ingest-9"]).toMatchObject({
@@ -335,44 +345,94 @@ describe("serialized session state writer", () => {
     ...emptySessionState(),
     pendingAuthReplay: [tag]
   })
+  const AUTH_REPLAY_SHARD_KEY = "tldw:ingest:auth-replay"
 
   it("coalesces rapid persists and ends on the latest snapshot", async () => {
     const store: Record<string, unknown> = {}
     const setOrder: string[] = []
     let setCount = 0
-    // The first write is deliberately SLOW; a naive parallel writer would let
-    // that stale early snapshot land last. The latch must serialize so only the
+    // A deliberately SLOW first write would let a naive parallel writer land
+    // a stale early snapshot last. The latch must serialize so only the
     // newest snapshot ("v5") is written last.
     const area: SessionStorageArea = {
-      get: async (key) => (key in store ? { [key]: store[key] } : {}),
+      get: async (keys) => {
+        const wanted = Array.isArray(keys) ? keys : [keys]
+        const out: Record<string, unknown> = {}
+        for (const key of wanted) if (key in store) out[key] = store[key]
+        return out
+      },
       set: async (items) => {
         setCount++
-        const state = items[SESSION_STATE_STORAGE_KEY] as PersistedSessionState
-        const tag = state.pendingAuthReplay[0]
+        const state = items[AUTH_REPLAY_SHARD_KEY] as string[]
+        const tag = state[0]
         await new Promise((r) => setTimeout(r, tag === "v1" ? 25 : 1))
         Object.assign(store, items)
         setOrder.push(tag)
       }
     }
 
-    const write = createSerializedSessionStateWriter(area)
+    let current = versioned("v0")
+    const write = createSerializedSessionStateWriter(area, () => current)
     for (let i = 1; i <= 5; i++) {
-      write(versioned(`v${i}`))
+      current = versioned(`v${i}`)
+      write()
     }
     // Let the write chain drain.
     await new Promise((r) => setTimeout(r, 60))
 
-    const stored = store[SESSION_STATE_STORAGE_KEY] as PersistedSessionState
-    expect(stored.pendingAuthReplay).toEqual(["v5"])
-    // Only the in-flight first write + one coalesced final write happen.
-    expect(setOrder).toEqual(["v1", "v5"])
-    expect(setCount).toBe(2)
+    const stored = store[AUTH_REPLAY_SHARD_KEY] as string[]
+    expect(stored).toEqual(["v5"])
+    // The synchronous burst of 5 persists coalesces into exactly ONE write
+    // (serialization is deferred to the end of the drain window).
+    expect(setOrder).toEqual(["v5"])
+    expect(setCount).toBe(1)
+  })
+
+  it("writes again when newer snapshots arrive mid-write", async () => {
+    const store: Record<string, unknown> = {}
+    const setOrder: string[] = []
+    let releaseSet: (() => void) | null = null
+    const area: SessionStorageArea = {
+      get: async (keys) => {
+        const wanted = Array.isArray(keys) ? keys : [keys]
+        const out: Record<string, unknown> = {}
+        for (const key of wanted) if (key in store) out[key] = store[key]
+        return out
+      },
+      set: async (items) => {
+        const state = items[AUTH_REPLAY_SHARD_KEY] as string[]
+        if (!releaseSet) {
+          await new Promise<void>((resolve) => {
+            releaseSet = resolve
+          })
+        }
+        Object.assign(store, items)
+        setOrder.push(state[0])
+      }
+    }
+
+    let current = versioned("v1")
+    const write = createSerializedSessionStateWriter(area, () => current)
+    write()
+    // The first write is now in flight; a newer snapshot arrives mid-write.
+    await Promise.resolve()
+    await Promise.resolve()
+    current = versioned("v2")
+    write()
+    releaseSet!()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(setOrder).toEqual(["v1", "v2"])
+    expect(store[AUTH_REPLAY_SHARD_KEY]).toEqual(["v2"])
   })
 
   it("no-ops without a storage area and reports write errors", async () => {
-    // No area -> writePersistedSessionState no-ops; must not throw.
-    const writeNull = createSerializedSessionStateWriter(null)
-    expect(() => writeNull(emptySessionState())).not.toThrow()
+    // No area -> the drain must not throw.
+    const writeNull = createSerializedSessionStateWriter(
+      null,
+      () => versioned("v1")
+    )
+    expect(() => writeNull()).not.toThrow()
 
     const errors: unknown[] = []
     const failingArea: SessionStorageArea = {
@@ -381,10 +441,12 @@ describe("serialized session state writer", () => {
         throw new Error("boom")
       }
     }
-    const write = createSerializedSessionStateWriter(failingArea, (e) =>
-      errors.push(e)
+    const write = createSerializedSessionStateWriter(
+      failingArea,
+      () => versioned("v1"),
+      (e) => errors.push(e)
     )
-    write(versioned("v1"))
+    write()
     await new Promise((r) => setTimeout(r, 5))
     expect(errors).toHaveLength(1)
     expect((errors[0] as Error).message).toBe("boom")

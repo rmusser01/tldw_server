@@ -8,6 +8,7 @@ export const createTokenRefreshError = (response: ApiSendResponse): Error => {
       ? "Session expired. Please log in again."
       : response.error || "Token refresh returned no access token. Please try again."
   ), {
+    ...(response.code === "REQUEST_ABORTED" ? { name: "AbortError" } : {}),
     status,
     code: response.code,
     headers: response.headers,

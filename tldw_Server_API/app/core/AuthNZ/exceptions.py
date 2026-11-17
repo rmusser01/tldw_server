@@ -8,11 +8,11 @@ from typing import Optional
 #######################################################################################################################
 #
 # Base Exceptions
-
-class UserRegistrationException(Exception):
-    """Base exception for user registration system"""
-    pass
-
+from tldw_Server_API.app.core.exceptions import (  # noqa: F401 - re-exported; defined in core.exceptions (TASK-13950.12)
+    DatabaseError,
+    RollbackSignal,
+    UserRegistrationException,
+)
 
 #######################################################################################################################
 #
@@ -202,15 +202,6 @@ class DirectoryCreationError(StorageError):
 #######################################################################################################################
 #
 # Database Exceptions
-
-class DatabaseError(UserRegistrationException):
-    """Base database exception"""
-    pass
-
-
-class RollbackSignal(Exception):
-    """Trusted control-flow signal that requires transaction rollback."""
-
 
 class DatabaseConcurrencyConflict(DatabaseError):
     """Sanitized deadlock or serialization conflict."""

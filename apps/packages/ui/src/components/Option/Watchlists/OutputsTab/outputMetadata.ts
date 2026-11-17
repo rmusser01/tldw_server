@@ -413,8 +413,19 @@ export const getIncludedItemCount = (metadata: unknown): number =>
 export const getExcludedItemCount = (metadata: unknown): number =>
   getOutputReportCount(metadata, "excluded_item_count")
 
-export const getSourceCount = (metadata: unknown): number =>
-  getOutputReportCount(metadata, "source_count")
+export const getSourceCount = (metadata: unknown): number => {
+  const record = getMetadataRecord(metadata)
+  const explicitCount = asNonNegativeInteger(record?.source_count)
+  if (explicitCount !== undefined) return explicitCount
+  const provenance = record?.provenance
+  if (!Array.isArray(provenance)) return 0
+  const sourceIds = new Set<number>()
+  for (const entry of provenance) {
+    const sourceId = asPositiveInteger(getMetadataRecord(entry)?.source_id)
+    if (sourceId !== undefined && Number.isSafeInteger(sourceId)) sourceIds.add(sourceId)
+  }
+  return sourceIds.size
+}
 
 export const getAlertCount = (metadata: unknown): number =>
   getOutputReportCount(metadata, "alert_count")

@@ -85,6 +85,7 @@ export interface WebArticleCapturePin {
 
 export interface WorkspaceSource {
   webCapture?: WebArticleCapturePin
+  captureOwnerScope?: string
   id: string
   mediaId: number // Server-side media ID
   knowledgeQaEvidence?: KnowledgeNoteEvidence
@@ -394,6 +395,9 @@ export interface WorkspaceStudyArtifactData {
 }
 
 export interface GeneratedArtifact {
+  workspaceArtifactId?: string
+  workspaceArtifactVersion?: number
+  removedFromStudio?: boolean
   id: string
   type: ArtifactType
   title: string
@@ -638,6 +642,7 @@ export const DEFAULT_AUDIO_SETTINGS: AudioGenerationSettings = {
 export interface WorkspaceNote extends KnowledgeNoteHead {
   serverWorkspaceId?: string
   serverScopeKey?: string
+  pendingNoteWriteKey?: string
   pendingKnowledgeProvenance?: KnowledgeNoteProvenance
   id?: string | number // Canonical Notes UUID or legacy workspace note ID
   title: string

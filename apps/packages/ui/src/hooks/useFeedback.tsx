@@ -14,6 +14,8 @@ import { useStoreMessageOption } from "@/store/option"
 import { shallow } from "zustand/shallow"
 import { useAntdNotification } from "./useAntdNotification"
 import { extractSourceFeedbackIds } from "@/utils/feedback"
+import { captureChatDraftSource } from "./chat/chat-draft-transition"
+import { useHistorySelectionContext } from "./chat/useHistorySelection"
 import { useTranslation } from "react-i18next"
 
 type FeedbackContext = {
@@ -47,6 +49,16 @@ export const useFeedback = ({
   messageId,
   query
 }: FeedbackContext) => {
+  const selection = useHistorySelectionContext()
+  const renderedOwner = selection?.getCurrent?.().owner
+  const owner = renderedOwner?.kind === "native" && renderedOwner.conversation_id === conversationId ? renderedOwner : null
+  const mounted = React.useRef(true)
+  const ratingFence = React.useMemo(() => {
+    const fence = selection?.fence?.() ?? (() => false)
+    return () => fence() && selection?.getCurrent().owner === owner
+  }, [selection, owner])
+  const ratingSignal = selection?.getSignal?.()
+  const ratingSource = React.useMemo(() => captureChatDraftSource(ratingFence), [ratingFence])
   const notification = useAntdNotification()
   const { serverChatVersion, setServerChatVersion } = useStoreMessageOption(
     (state) => ({
@@ -106,7 +118,9 @@ export const useFeedback = ({
   }, [])
 
   React.useEffect(() => {
+    mounted.current = true
     return () => {
+      mounted.current = false
       if (thanksTimerRef.current) {
         clearTimeout(thanksTimerRef.current)
       }
@@ -128,28 +142,25 @@ export const useFeedback = ({
 
   const updateRating = React.useCallback(
     async (rating: number) => {
-      if (!conversationId) return
+      const isCurrent = () => mounted.current && ratingSource.isCurrent() && !ratingSignal?.aborted &&
+        owner?.validate_lease() === true && selection?.getCurrent().owner === owner &&
+        selection?.settingsMode?.(conversationId) === "ordinary"
+      if (!conversationId || !owner || !isCurrent() || !Number.isSafeInteger(serverChatVersion) || (serverChatVersion ?? 0) <= 0) return
       try {
-        const updated = await updateChatRating(
-          conversationId,
-          rating,
-          serverChatVersion ?? undefined
-        )
-        if (typeof updated?.version === "number") {
-          setServerChatVersion(updated.version)
-        }
-      } catch (e) {
-        try {
-          const refreshed = await updateChatRating(conversationId, rating)
-          if (typeof refreshed?.version === "number") {
-            setServerChatVersion(refreshed.version)
-          }
-        } catch {
-          // ignore rating update failures (non-blocking)
-        }
+        const updated = await updateChatRating(conversationId, rating, serverChatVersion!, {
+          requestScope: owner.request_scope, scope: owner.scope, signal: ratingSignal
+        })
+        const live = useStoreMessageOption.getState()
+        if (isCurrent() && live.serverChatId === conversationId && updated.id === conversationId &&
+          Number.isSafeInteger(updated.version) && updated.version! > serverChatVersion! &&
+          (live.serverChatVersion == null || live.serverChatVersion <= updated.version!))
+          setServerChatVersion(updated.version!)
+      } catch {
+        // Explicit message feedback succeeded; its advisory conversation rating
+        // must not replay against a newer version or another owner (TASK-13549).
       }
     },
-    [conversationId, serverChatVersion, setServerChatVersion]
+    [conversationId, owner, ratingSource, ratingSignal, selection, serverChatVersion, setServerChatVersion]
   )
 
   const submitThumb = React.useCallback(

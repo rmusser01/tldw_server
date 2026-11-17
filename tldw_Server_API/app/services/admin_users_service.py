@@ -493,7 +493,9 @@ async def update_user(
             overrides = UserProfileOverridesRepo(await get_db_pool())
             await overrides.ensure_tables(db_conn=db)
             if request.storage_quota_mb is None:
+                quota_floor = await gateway.capture_floor(db, user_id=int(user_id))
                 await overrides.delete_override(user_id=int(user_id), key=STORAGE_QUOTA_KEY, db_conn=db)
+                await gateway.final_touch(db, user_id=int(user_id), version_floor=quota_floor)
             else:
                 await overrides.upsert_override(
                     user_id=int(user_id),

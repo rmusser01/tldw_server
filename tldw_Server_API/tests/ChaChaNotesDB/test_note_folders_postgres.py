@@ -209,3 +209,25 @@ def test_postgres_keyword_link_listing_is_owner_scoped(pg_database_config: Datab
         assert linked[owner] in listed
         assert other not in listed
         assert len(listed) == db.count_collection_keyword_links()
+
+
+def test_postgres_keyword_lookup_is_case_insensitive_and_owner_scoped(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    """PostgreSQL strips COLLATE NOCASE, so lookups must not compare case-sensitively (TASK-13950.5)."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(db_path=":memory:", client_id="930001", backend=backend)
+    other = CharactersRAGDB(db_path=":memory:", client_id="930002", backend=backend)
+
+    try:
+        keyword_id = db.add_keyword("foo")
+        other_id = other.add_keyword("FOO")
+
+        found = db.get_keyword_by_text("FOO")
+        other_found = other.get_keyword_by_text("foo")
+
+        assert found is not None and (found["id"], found["keyword"]) == (keyword_id, "foo")
+        assert other_found is not None and other_found["id"] == other_id
+    finally:
+        db.close_connection()
+        other.close_connection()

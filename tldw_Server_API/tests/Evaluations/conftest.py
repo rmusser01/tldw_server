@@ -68,10 +68,11 @@ def _isolate_authnz_daily_ledger(monkeypatch, _evaluations_authnz_db_url):
     from tldw_Server_API.app.core.AuthNZ import database as authnz_db
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
     from tldw_Server_API.app.core.Evaluations import user_rate_limiter
+    from tldw_Server_API.app.core.Utils.app_services import app_services
 
     url = _evaluations_authnz_db_url
     monkeypatch.setenv("DATABASE_URL", url)
-    pool = authnz_db._db_pool
+    pool = app_services().db_pool
     pool_url = getattr(getattr(pool, "settings", None), "DATABASE_URL", None)
     if pool is not None and pool_url != url:
         asyncio.run(authnz_db.reset_db_pool())
@@ -79,6 +80,17 @@ def _isolate_authnz_daily_ledger(monkeypatch, _evaluations_authnz_db_url):
     elif get_settings().DATABASE_URL != url:
         reset_settings()
         user_rate_limiter._evals_daily_ledger = None
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _configured_key_is_the_test_key(monkeypatch):
+    """Single-user auth accepts only the configured key; the suite sends the test key."""
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.tests.test_config import test_config
+
+    monkeypatch.setenv("SINGLE_USER_API_KEY", test_config.TEST_API_KEY)
+    reset_settings()
     yield
 
 

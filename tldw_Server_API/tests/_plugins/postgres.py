@@ -323,6 +323,15 @@ def pg_database_config_session(pg_temp_db_session):
 
 
 @pytest.fixture(scope="function")
+def pg_secondary_database_config(pg_server):
+    """Give a restore target its own per-test database and official cleanup."""
+    from contextlib import closing
+
+    with closing(_temp_db_generator(pg_server)) as databases:
+        yield pg_database_config.__wrapped__(next(databases))
+
+
+@pytest.fixture(scope="function")
 def pg_restricted_backend(pg_database_config):
     """Yield a PostgreSQL backend whose role cannot bypass row-level security.
 
@@ -401,11 +410,54 @@ def pg_restricted_backend(pg_database_config):
         assert not flags["rolsuper"], f"{role} unexpectedly holds SUPERUSER"
         assert not flags["rolbypassrls"], f"{role} unexpectedly holds BYPASSRLS"
 
+        # Provisioning must not leave an idle writer during an offline handoff.
+        admin.get_pool().close_all()
         yield backend
     finally:
         if backend is not None:
             backend.get_pool().close_all()
+        admin.get_pool().close_all()
+        admin = DatabaseBackendFactory.create_backend(pg_database_config)
+        try:
+            _drop_restricted_role(admin, role)
+        finally:
+            admin.get_pool().close_all()
+
+
+_RESTRICTED_ROLE_LOCK_TIMEOUT = "10s"
+
+
+def _drop_restricted_role(admin, role: str) -> None:
+    """Drop the role, failing fast and naming the sessions that still hold a lock.
+
+    A session the test leaked in a transaction keeps its locks, and ``DROP OWNED BY``
+    would wait for them until pytest-timeout ends the whole run. ``admin`` is
+    connected to the test's own database, so every other open transaction on it
+    belongs to the test, whichever role it runs as.
+    """
+    from psycopg import errors, sql
+
+    def drop() -> None:
         with admin.transaction() as conn:
+            conn.execute(sql.SQL("SET LOCAL lock_timeout = {}").format(sql.Literal(_RESTRICTED_ROLE_LOCK_TIMEOUT)))
             conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
             conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
-        admin.get_pool().close_all()
+
+    try:
+        drop()
+        return
+    except errors.LockNotAvailable:
+        pass
+    others = (
+        "FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()"
+        " AND backend_type = 'client backend' AND state <> 'idle'"
+    )
+    with admin.transaction() as conn:
+        sessions = conn.execute(f"SELECT pid, usename, state, left(query, 120) AS query {others}").fetchall()
+        conn.execute(f"SELECT pg_terminate_backend(pid, 5000) {others}")
+    report = f"The test left {len(sessions)} session(s) of {role} or its database holding locks (a leaked checkout?): {sessions}"
+    try:
+        drop()
+    except errors.LockNotAvailable as exc:
+        raise AssertionError(f"{report}; still blocked after terminating them") from exc
+    raise AssertionError(report)

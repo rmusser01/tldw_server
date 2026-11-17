@@ -10,6 +10,8 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Utils.app_services import app_services
+
 
 class _FakeConnection:
     async def fetchval(self, query: str) -> str:
@@ -128,6 +130,8 @@ async def test_fresh_postgres_initialize_executes_trusted_schema_as_guarded_stat
         async def fetchval(self, query: str) -> str | bool:
             if query == "SELECT version()":
                 return "PostgreSQL test"
+            if query == database.POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL:
+                return True
             if "information_schema.tables" in query:
                 return False
             raise AssertionError(f"Unexpected query: {query}")
@@ -326,20 +330,20 @@ async def test_get_db_pool_publishes_only_successfully_initialized_candidate(mon
                 raise database.DatabaseError("schema failed")
             self._initialized = True
 
-    monkeypatch.setattr(database, "_db_pool", None)
+    monkeypatch.setattr(app_services(), "db_pool", None)
     monkeypatch.setattr(database, "DatabasePool", _CandidatePool)
     monkeypatch.setattr(database, "get_settings", _postgres_settings)
 
     with pytest.raises(database.DatabaseError):
         await database.get_db_pool()
 
-    assert database._db_pool is None
+    assert app_services().db_pool is None
 
     pool = await database.get_db_pool()
 
     assert pool is candidates[1]
     assert pool._initialized is True
-    assert database._db_pool is pool
+    assert app_services().db_pool is pool
 
 
 def test_get_db_pool_serializes_initialization_across_event_loops(monkeypatch):
@@ -366,7 +370,7 @@ def test_get_db_pool_serializes_initialization_across_event_loops(monkeypatch):
             await asyncio.to_thread(allow_initialize.wait)
             self._initialized = True
 
-    monkeypatch.setattr(database, "_db_pool", None)
+    monkeypatch.setattr(app_services(), "db_pool", None)
     monkeypatch.setattr(database, "DatabasePool", _CandidatePool)
     monkeypatch.setattr(database, "get_settings", _postgres_settings)
 
@@ -383,7 +387,7 @@ def test_get_db_pool_serializes_initialization_across_event_loops(monkeypatch):
 
     assert first_result is second_result is candidates[0]
     assert len(candidates) == 1
-    database._db_pool = None
+    app_services().db_pool = None
 
 
 @pytest.mark.asyncio
@@ -404,7 +408,7 @@ async def test_cancelled_lifecycle_waiter_exits_without_stranding_process_lock(m
             await allow_initialize.wait()
             self._initialized = True
 
-    monkeypatch.setattr(database, "_db_pool", None)
+    monkeypatch.setattr(app_services(), "db_pool", None)
     monkeypatch.setattr(database, "DatabasePool", _CandidatePool)
     monkeypatch.setattr(database, "get_settings", _postgres_settings)
 
@@ -429,7 +433,7 @@ async def test_cancelled_lifecycle_waiter_exits_without_stranding_process_lock(m
         if waiter is not None:
             pending.append(waiter)
         await asyncio.gather(*pending, return_exceptions=True)
-        database._db_pool = None
+        app_services().db_pool = None
 
 
 @pytest.mark.asyncio
@@ -451,7 +455,7 @@ async def test_lifecycle_waiters_do_not_saturate_default_executor(monkeypatch):
             assert await asyncio.to_thread(lambda: "executor-available") == "executor-available"
             self._initialized = True
 
-    monkeypatch.setattr(database, "_db_pool", None)
+    monkeypatch.setattr(app_services(), "db_pool", None)
     monkeypatch.setattr(database, "DatabasePool", _CandidatePool)
     monkeypatch.setattr(database, "get_settings", _postgres_settings)
     loop = asyncio.get_running_loop()
@@ -472,7 +476,7 @@ async def test_lifecycle_waiters_do_not_saturate_default_executor(monkeypatch):
     finally:
         allow_executor_work.set()
         await asyncio.gather(first, *waiters, return_exceptions=True)
-        database._db_pool = None
+        app_services().db_pool = None
         executor.shutdown(wait=True)
 
 
@@ -496,7 +500,7 @@ async def test_concurrent_get_db_pool_calls_publish_one_candidate(monkeypatch):
             await allow_initialize.wait()
             self._initialized = True
 
-    monkeypatch.setattr(database, "_db_pool", None)
+    monkeypatch.setattr(app_services(), "db_pool", None)
     monkeypatch.setattr(database, "DatabasePool", _CandidatePool)
     monkeypatch.setattr(database, "get_settings", _postgres_settings)
 
@@ -512,14 +516,14 @@ async def test_concurrent_get_db_pool_calls_publish_one_candidate(monkeypatch):
         allow_initialize.set()
         first_result, second_result = await asyncio.gather(first, second)
         assert first_result is second_result is candidates[0]
-        assert database._db_pool is candidates[0]
+        assert app_services().db_pool is candidates[0]
     finally:
         allow_initialize.set()
         pending = [first]
         if second is not None:
             pending.append(second)
         await asyncio.gather(*pending, return_exceptions=True)
-        database._db_pool = None
+        app_services().db_pool = None
 
 
 @pytest.mark.asyncio
@@ -554,7 +558,7 @@ async def test_reset_db_pool_waits_for_inflight_singleton_initialization(monkeyp
     async def _noop_async() -> None:
         return None
 
-    monkeypatch.setattr(database, "_db_pool", None)
+    monkeypatch.setattr(app_services(), "db_pool", None)
     monkeypatch.setattr(database, "DatabasePool", _CandidatePool)
     monkeypatch.setattr(database, "get_settings", _postgres_settings)
     monkeypatch.setattr(mcp_server, "reset_mcp_server", _noop_async)
@@ -578,14 +582,14 @@ async def test_reset_db_pool_waits_for_inflight_singleton_initialization(monkeyp
         allow_initialize.set()
         initialized_pool, _ = await asyncio.gather(get_task, reset_task)
         assert close_calls == [initialized_pool]
-        assert database._db_pool is None
+        assert app_services().db_pool is None
     finally:
         allow_initialize.set()
         pending: list[asyncio.Task[Any]] = [get_task]
         if reset_task is not None:
             pending.append(reset_task)
         await asyncio.gather(*pending, return_exceptions=True)
-        database._db_pool = None
+        app_services().db_pool = None
 
 
 @pytest.mark.asyncio
@@ -758,7 +762,7 @@ async def test_reset_waits_for_inflight_postgres_query_before_detaching_pool(mon
     manager = database.DatabasePool(_postgres_settings())
     manager.pool = main_pool
     manager._initialized = True
-    monkeypatch.setattr(database, "_db_pool", manager)
+    monkeypatch.setattr(app_services(), "db_pool", manager)
     query_task = asyncio.create_task(manager.fetchone("SELECT ? AS value", 7))
     reset_task: asyncio.Task[None] | None = None
 
@@ -767,7 +771,7 @@ async def test_reset_waits_for_inflight_postgres_query_before_detaching_pool(mon
         reset_task = asyncio.create_task(database.reset_db_pool())
         await asyncio.wait_for(main_pool.close_started.wait(), timeout=1)
 
-        assert database._db_pool is manager
+        assert app_services().db_pool is manager
         assert manager.pool is main_pool
 
         main_pool.allow_acquire_return.set()
@@ -777,7 +781,7 @@ async def test_reset_waits_for_inflight_postgres_query_before_detaching_pool(mon
         main_pool.allow_close_return.set()
         await asyncio.wait_for(reset_task, timeout=5)
 
-        assert database._db_pool is None
+        assert app_services().db_pool is None
         assert manager.pool is None
         assert close_order == ["main"]
     finally:
@@ -786,7 +790,7 @@ async def test_reset_waits_for_inflight_postgres_query_before_detaching_pool(mon
         await asyncio.gather(query_task, return_exceptions=True)
         if reset_task is not None and not reset_task.done():
             await asyncio.gather(reset_task, return_exceptions=True)
-        database._db_pool = None
+        app_services().db_pool = None
 
 
 @pytest.mark.asyncio
@@ -799,7 +803,7 @@ async def test_cancelled_reset_preserves_inflight_postgres_helper_branch(monkeyp
     manager = database.DatabasePool(_postgres_settings())
     manager.pool = main_pool
     manager._initialized = True
-    monkeypatch.setattr(database, "_db_pool", manager)
+    monkeypatch.setattr(app_services(), "db_pool", manager)
     query_task = asyncio.create_task(manager.fetchone("SELECT ? AS value", 11))
     reset_task: asyncio.Task[None] | None = None
 
@@ -813,7 +817,7 @@ async def test_cancelled_reset_preserves_inflight_postgres_helper_branch(monkeyp
         main_pool.allow_acquire_return.set()
         assert await asyncio.wait_for(query_task, timeout=1) == {"value": 11}
         assert main_pool.release_calls == [(main_pool.connection, None)]
-        assert database._db_pool is manager
+        assert app_services().db_pool is manager
         assert manager.pool is main_pool
         assert manager._initialized
 
@@ -821,7 +825,7 @@ async def test_cancelled_reset_preserves_inflight_postgres_helper_branch(monkeyp
         with pytest.raises(asyncio.CancelledError):
             await reset_task
 
-        assert database._db_pool is None
+        assert app_services().db_pool is None
         assert manager.pool is None
         assert not manager._initialized
         assert close_order == ["main"]
@@ -831,4 +835,4 @@ async def test_cancelled_reset_preserves_inflight_postgres_helper_branch(monkeyp
         await asyncio.gather(query_task, return_exceptions=True)
         if reset_task is not None and not reset_task.done():
             await asyncio.gather(reset_task, return_exceptions=True)
-        database._db_pool = None
+        app_services().db_pool = None

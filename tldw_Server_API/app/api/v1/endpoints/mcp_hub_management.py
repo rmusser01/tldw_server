@@ -109,7 +109,6 @@ from tldw_Server_API.app.core.MCP_unified.mcp_hub_readiness import (
     is_available_for_discovery_refresh,
     sanitize_discovery_refresh_result_payload,
 )
-from tldw_Server_API.app.core.MCP_unified.server import get_mcp_server
 from tldw_Server_API.app.services.mcp_hub_external_legacy_inventory import (
     McpHubExternalLegacyInventoryService,
 )
@@ -140,10 +139,10 @@ from tldw_Server_API.app.services.mcp_hub_policy_resolver import McpHubPolicyRes
 from tldw_Server_API.app.services.mcp_hub_service import (
     McpHubConflictError,
     McpHubService,
-    get_mcp_hub_event_bus,
-    replay_mcp_hub_audit_events,
 )
 from tldw_Server_API.app.services.mcp_hub_tool_registry import McpHubToolRegistryService
+import tldw_Server_API.app.core.MCP_unified.server as _server
+import tldw_Server_API.app.services.mcp_hub_service as _mcp_hub_service
 
 router = APIRouter(prefix="/mcp/hub", tags=["mcp-hub"], dependencies=[Depends(check_rate_limit)])
 
@@ -246,23 +245,22 @@ async def get_mcp_hub_tool_registry_dep() -> McpHubToolRegistryService:
     return McpHubToolRegistryService()
 
 
-async def _execute_external_refresh_tool(server_id: str) -> dict[str, Any]:
+async def _execute_external_refresh_tool(server_id: str | None) -> dict[str, Any]:
     """Execute the existing external federation discovery refresh tool."""
-    server = get_mcp_server()
+    server = _server.get_mcp_server()
     if not getattr(server, "initialized", False):
         await server.initialize()
     module = await server.module_registry.find_module_for_tool(_MCP_HUB_REFRESH_TOOL_NAME)
     if module is None:
         raise HTTPException(status_code=503, detail="External discovery refresh tool is unavailable")
     result = await module.execute_with_circuit_breaker(
-        module.execute_tool,
-        _MCP_HUB_REFRESH_TOOL_NAME,
-        {"server_id": server_id},
+        _refresh_external_server_discovery_runtime,
+        server_id=server_id,
     )
-    return result if isinstance(result, dict) else {}
+    return result.model_dump()
 
 
-async def get_mcp_hub_external_refresh_executor() -> Callable[[str], Awaitable[dict[str, Any]]]:
+async def get_mcp_hub_external_refresh_executor() -> Callable[[str | None], Awaitable[dict[str, Any]]]:
     """Resolve the external discovery refresh executor for route dependency overrides."""
     return _execute_external_refresh_tool
 
@@ -353,7 +351,7 @@ async def _resolve_external_federation_runtime() -> tuple[Any, Any, str]:
     """Resolve the live MCP external federation module and its registry."""
 
     try:
-        server = get_mcp_server()
+        server = _server.get_mcp_server()
         if not getattr(server, "initialized", False):
             await server.initialize()
     except Exception as exc:
@@ -1646,7 +1644,7 @@ async def refresh_single_external_server_discovery(
     principal: AuthPrincipal = Depends(get_auth_principal),
     svc: McpHubService = Depends(get_mcp_hub_service),
     registry: McpHubToolRegistryService = Depends(get_mcp_hub_tool_registry_dep),
-    refresh_executor: Callable[[str], Awaitable[dict[str, Any]]] = Depends(
+    refresh_executor: Callable[[str | None], Awaitable[dict[str, Any]]] = Depends(
         get_mcp_hub_external_refresh_executor
     ),
 ) -> McpServerReadinessResponse:
@@ -1665,7 +1663,10 @@ async def refresh_single_external_server_discovery(
     except TimeoutError as exc:
         raise HTTPException(status_code=409, detail="Discovery refresh is already running") from exc
     try:
-        raw_result = await refresh_executor(server_id)
+        try:
+            raw_result = await svc.refresh_external_server_discovery(server_id, refresh_executor)
+        except McpHubConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     finally:
         lock.release()
 
@@ -2985,7 +2986,7 @@ async def stream_mcp_hub_events(
     records. Replay reads unified audit first and then falls back to the bounded
     in-process ring for process-local events that were not audit-backed.
     """
-    bus = await get_mcp_hub_event_bus()
+    bus = await _mcp_hub_service.get_mcp_hub_event_bus()
     event_types = _normalize_event_type_filter(event_type)
     visible_scopes = _resolve_visible_scope_filters(
         principal=principal,
@@ -3006,7 +3007,7 @@ async def stream_mcp_hub_events(
         try:
             queue = await bus.subscribe()
             if replay:
-                durable_replayed = await replay_mcp_hub_audit_events(
+                durable_replayed = await _mcp_hub_service.replay_mcp_hub_audit_events(
                     principal_user_id=principal.user_id,
                     user_id=replay_user_id,
                     after_event_id=after_event_id,
@@ -3816,6 +3817,7 @@ async def refresh_external_servers_discovery(
     payload: ExternalServerDiscoveryRefreshRequest | None = Body(default=None),
     server_id: str | None = Query(default=None),
     principal: AuthPrincipal = Depends(get_auth_principal),
+    svc: McpHubService = Depends(get_mcp_hub_service),
 ) -> ExternalServerDiscoveryRefreshResponse:
     """Reconcile live MCP external federation discovery with managed storage."""
     _require_mutation_permission(principal)
@@ -3827,7 +3829,15 @@ async def refresh_external_servers_discovery(
             detail="server_id query parameter conflicts with request body server_id",
         )
     effective_server_id = query_server_id if query_server_id is not None else body_server_id
-    return await _refresh_external_server_discovery_runtime(server_id=effective_server_id)
+
+    async def execute_refresh(target_id: str | None) -> dict[str, Any]:
+        return (await _refresh_external_server_discovery_runtime(server_id=target_id)).model_dump()
+
+    try:
+        result = await svc.refresh_external_server_discovery(effective_server_id, execute_refresh)
+    except McpHubConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ExternalServerDiscoveryRefreshResponse.model_validate(result)
 
 
 @router.post("/external-servers/{server_id}/import", response_model=ExternalServerResponse, status_code=201)

@@ -1,6 +1,11 @@
+import { useDocumentOperation } from "@/hooks/document-workspace/useDocumentOperation"
+import { useDocumentWorkspaceStore } from "@/store/document-workspace"
+import { createDocumentClient } from "@/services/document-generation"
+import { downloadBlob } from "@/utils/download-blob"
+import { formatErrorMessage } from "@/utils/format-error-message"
 import React, { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Modal, Radio, Button, message } from "antd"
+import { Modal, Radio, Button, Alert } from "antd"
 import type { RadioChangeEvent } from "antd"
 import { FileText, FileJson, File } from "lucide-react"
 import type { Annotation, DocumentType } from "../types"
@@ -15,6 +20,8 @@ interface ExportAnnotationsModalProps {
   annotations: Annotation[]
   documentTitle: string
   documentType: DocumentType | null
+  documentId?: number | null
+  hasPendingWrites?: boolean
 }
 
 const FORMAT_OPTIONS: Array<{
@@ -51,32 +58,92 @@ export const ExportAnnotationsModal: React.FC<ExportAnnotationsModalProps> = ({
   onClose,
   annotations,
   documentTitle,
-  documentType
+  documentType,
+  documentId,
+  hasPendingWrites = false
 }) => {
   const { t } = useTranslation(["option", "common"])
-  const [format, setFormat] = useState<ExportFormat>("markdown")
+  const [format, setFormat] = useState<ExportFormat | "pdf">("markdown")
 
   const handleFormatChange = (e: RadioChangeEvent) => {
     setFormat(e.target.value)
   }
 
-  const handleExport = () => {
+  const operation = useDocumentOperation()
+  const pending = useDocumentWorkspaceStore((state) => state.pendingAnnotations)
+  const [exporting, setExporting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const work = React.useRef<AbortController | null>(null)
+  React.useEffect(() => {
+    setExporting(false)
+    setError(null)
+    return () => {
+      work.current?.abort()
+      work.current = null
+    }
+  }, [open, documentId, operation])
+  const unsaved =
+    hasPendingWrites || pending.some((item) => item.documentId === documentId)
+  const disabled =
+    exporting ||
+    (format === "pdf"
+      ? unsaved || !documentId || !operation?.isCurrent()
+      : annotations.length === 0)
+  const handleExport = async () => {
+    if (work.current || disabled || !operation?.isCurrent()) return
+    const controller = new AbortController()
+    work.current = controller
+    setExporting(true)
+    setError(null)
     try {
-      downloadAnnotations(annotations, documentTitle, documentType, format)
-      message.success(
-        t("option:documentWorkspace.exportSuccess", "Annotations exported successfully")
-      )
-      onClose()
-    } catch (err) {
-      message.error(
-        t("option:documentWorkspace.exportFailed", "Failed to export annotations")
-      )
+      if (format === "pdf") {
+        if (documentType !== "pdf" || !documentId || !operation?.isCurrent())
+          return
+        const blob = await createDocumentClient(operation).exportPdf(
+          documentId,
+          controller.signal
+        )
+        if (!operation.isCurrent() || controller.signal.aborted) return
+        downloadBlob(blob, `document-${documentId}-annotated.pdf`)
+      } else {
+        downloadAnnotations(annotations, documentTitle, documentType, format)
+      }
+      if (!controller.signal.aborted) onClose()
+    } catch (failure) {
+      if (!controller.signal.aborted && operation?.isCurrent())
+        setError(
+          formatErrorMessage(
+            failure,
+            "Export failed. The original PDF and saved annotations are unchanged."
+          )
+        )
+    } finally {
+      if (work.current === controller) {
+        work.current = null
+        setExporting(false)
+      }
     }
   }
+  const formats =
+    documentType === "pdf"
+      ? [
+          {
+            value: "pdf" as const,
+            label: "PDF with saved annotations",
+            description:
+              "Original pages with saved highlights and notes as PDF page comments.",
+            icon: <File className="h-5 w-5" />
+          },
+          ...FORMAT_OPTIONS
+        ]
+      : FORMAT_OPTIONS
 
   return (
     <Modal
-      title={t("option:documentWorkspace.exportAnnotations", "Export Annotations")}
+      title={t(
+        "option:documentWorkspace.exportAnnotations",
+        "Export Annotations"
+      )}
       open={open}
       onCancel={onClose}
       footer={[
@@ -87,7 +154,8 @@ export const ExportAnnotationsModal: React.FC<ExportAnnotationsModalProps> = ({
           key="export"
           type="primary"
           onClick={handleExport}
-          disabled={annotations.length === 0}
+          disabled={disabled}
+          loading={exporting}
         >
           {t("option:documentWorkspace.export", "Export")}
         </Button>
@@ -95,15 +163,25 @@ export const ExportAnnotationsModal: React.FC<ExportAnnotationsModalProps> = ({
       width={420}
     >
       <div className="space-y-4">
+        {error && <Alert type="error" showIcon title={error} />}
+        {format === "pdf" && unsaved && (
+          <Alert
+            type="warning"
+            showIcon
+            title="Wait for annotation changes to save before exporting the saved PDF."
+          />
+        )}
+
         {/* Annotation count */}
         <div className="rounded-lg border border-border bg-surface-hover p-3">
           <p className="text-sm">
             <span className="font-medium">{annotations.length}</span>{" "}
-            {t("option:documentWorkspace.annotationsToExport", "annotations to export")}
+            {t(
+              "option:documentWorkspace.annotationsToExport",
+              "annotations to export"
+            )}
           </p>
-          <p className="mt-1 text-xs text-text-secondary">
-            {documentTitle}
-          </p>
+          <p className="mt-1 text-xs text-text-secondary">{documentTitle}</p>
         </div>
 
         {/* Format selection */}
@@ -117,16 +195,16 @@ export const ExportAnnotationsModal: React.FC<ExportAnnotationsModalProps> = ({
             className="w-full"
           >
             <div className="space-y-2">
-              {FORMAT_OPTIONS.map((option) => (
-                <label
+              {formats.map((option) => (
+                <Radio
                   key={option.value}
-                  className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                  value={option.value}
+                  className={`!m-0 !flex w-full cursor-pointer !items-start gap-3 rounded-lg border p-3 transition-colors ${
                     format === option.value
                       ? "border-primary bg-primary/5"
                       : "border-border hover:border-primary/50"
                   }`}
                 >
-                  <Radio value={option.value} className="mt-0.5" />
                   <div className="flex items-start gap-3">
                     <span className="text-text-secondary">{option.icon}</span>
                     <div>
@@ -136,7 +214,7 @@ export const ExportAnnotationsModal: React.FC<ExportAnnotationsModalProps> = ({
                       </p>
                     </div>
                   </div>
-                </label>
+                </Radio>
               ))}
             </div>
           </Radio.Group>

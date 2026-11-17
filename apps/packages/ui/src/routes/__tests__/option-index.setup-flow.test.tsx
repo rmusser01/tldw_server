@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { ConnectionPhase } from "@/types/connection"
+import type { FirstRunMetadata } from "@/types/setup-onboarding"
 import OptionIndex from "../option-index"
 
 let hostedMode = false
 let hasCompletedFirstRun = false
 let phase: ConnectionPhase | null = null
 let firstRunState: { status: string } | null = null
+let firstRunMetadata: FirstRunMetadata | null = null
 let currentLocation = {
   pathname: "/",
   search: "",
@@ -100,7 +102,7 @@ vi.mock("react-router-dom", () => ({
 vi.mock("@/hooks/useSetupOnboarding", () => ({
   useSetupOnboarding: () => ({
     state: firstRunState,
-    metadata: null,
+    metadata: firstRunMetadata,
     loading: false,
     adoptState: vi.fn()
   })
@@ -128,6 +130,7 @@ describe("OptionIndex setup-flow routing", () => {
     hasCompletedFirstRun = false
     phase = null
     firstRunState = null
+    firstRunMetadata = null
     window.localStorage.clear()
     currentLocation = {
       pathname: "/",
@@ -196,6 +199,37 @@ describe("OptionIndex setup-flow routing", () => {
       expect(screen.queryByTestId("resume-setup-banner")).not.toBeInTheDocument()
     })
   })
+
+  it.each(["not_started", "in_progress", "blocked", "first_chat_complete"])(
+    "does not ask a connected completed multi-user server to resume %s setup",
+    async (status) => {
+      phase = ConnectionPhase.CONNECTED
+      firstRunState = { status }
+      firstRunMetadata = {
+        auth_mode: "multi_user",
+        bundled_single_user_auth_available: false,
+        manual_auth_required: true,
+        setup_required: false,
+        setup_completed: true,
+        remote_setup_enabled: false,
+        connection: { browser_access: "local" },
+        setup_paths: [],
+        multi_user_exit: { guide_path: "Docs/Multi-User.md" }
+      }
+
+      render(<OptionIndex />)
+
+      await waitFor(() => {
+        expect(checkOnceMock).toHaveBeenCalled()
+      })
+      expect(
+        screen.queryByRole("button", { name: "Resume setup" })
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByTestId("unified-setup-wizard")
+      ).not.toBeInTheDocument()
+    }
+  )
 
   it("renders companion home in the normal app shell after first run", async () => {
     hasCompletedFirstRun = true

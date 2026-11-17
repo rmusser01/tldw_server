@@ -21,7 +21,7 @@ const card = (dueAt: string | null, index: number): Flashcard => ({
   notes: null, extra: null, is_cloze: false, tags: [], ef: 2.5,
   interval_days: 1, repetitions: 1, lapses: 0, due_at: dueAt,
   last_reviewed_at: null, deleted: false, client_id: "test", version: 1,
-  model_type: "basic", reverse: false
+  model_type: "basic", reverse: false, queue_state: "review"
 })
 
 const setup = () => {

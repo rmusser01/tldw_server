@@ -12,7 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_rate_limit,
     get_auth_principal,
 )
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+from tldw_Server_API.app.api.v1.utils.pagination import (
     build_offset_pagination_meta,
 )
 from tldw_Server_API.app.api.v1.schemas.user_keys import (
@@ -28,13 +28,13 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.repos.byok_validation_runs_repo import (
-    AuthnzByokValidationRunsRepo,
-)
 from tldw_Server_API.app.core.exceptions import (
     ByokValidationActiveRunError,
     ByokValidationDisabledError,
     ByokValidationRunNotFoundError,
+)
+from tldw_Server_API.app.core.Provider_Credentials.repos.byok_validation_runs_repo import (
+    AuthnzByokValidationRunsRepo,
 )
 from tldw_Server_API.app.services import admin_byok_service
 from tldw_Server_API.app.services.admin_byok_validation_service import (

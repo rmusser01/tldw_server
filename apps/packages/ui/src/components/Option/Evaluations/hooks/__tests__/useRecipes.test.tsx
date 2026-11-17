@@ -1,5 +1,5 @@
 import React from "react"
-import { act, renderHook, waitFor } from "@testing-library/react"
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -8,14 +8,18 @@ import {
   useApplyRecipeRecommendation,
   useCreateRecipeRun,
   useEmbeddingRecipeCandidates,
+  useRecipeManifests,
   usePreviewRecipeRecommendationApply
 } from "../useRecipes"
 import {
   applyRecipeRecommendation,
   createRecipeRun,
   getEmbeddingRecipeCandidates,
+  listRecipeManifests,
   previewRecipeRecommendationApply
 } from "@/services/evaluations"
+
+import { EvaluationRecoveryCallout } from "../../components/EvaluationRecoveryCallout"
 
 const { successNotificationSpy, errorNotificationSpy } = vi.hoisted(() => ({
   successNotificationSpy: vi.fn(),
@@ -56,7 +60,7 @@ vi.mock("@/services/evaluations", async () => {
     getEmbeddingRecipeCandidates: vi.fn(),
     getRecipeLaunchReadiness: noopAsync,
     getRecipeRunReport: noopAsync,
-    listRecipeManifests: noopAsync,
+    listRecipeManifests: vi.fn(),
     applyRecipeRecommendation: vi.fn(),
     previewRecipeRecommendationApply: vi.fn(),
     validateRecipeDataset: noopAsync
@@ -72,6 +76,43 @@ const buildWrapper = (queryClient: QueryClient) => {
 describe("useRecipes", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it("preserves the real recipe query refusal in recovery guidance", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    vi.mocked(listRecipeManifests).mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Permission denied: missing evals.read"
+    })
+    try {
+      const { result } = renderHook(() => useRecipeManifests(), {
+        wrapper: buildWrapper(queryClient)
+      })
+      await waitFor(() => expect(result.current.isError).toBe(true))
+      render(
+        <EvaluationRecoveryCallout
+          title="Unable to load recipes"
+          endpoint="/api/v1/evaluations/recipes"
+          error={result.current.error}
+        />
+      )
+
+      expect(screen.getByText("Permission denied")).toBeInTheDocument()
+      expect(
+        screen.getByText("Use an account with access to Evaluations API.")
+      ).toBeInTheDocument()
+      expect(
+        screen.getByLabelText("Diagnostics")
+      ).toHaveTextContent("HTTP 403: Permission denied: missing evals.read")
+      expect(
+        screen.queryByText(/Check server connection and try again/)
+      ).not.toBeInTheDocument()
+    } finally {
+      queryClient.clear()
+    }
   })
 
   it("maps worker-disabled failures to the explicit worker guidance", () => {

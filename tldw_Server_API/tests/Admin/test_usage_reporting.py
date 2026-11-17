@@ -97,18 +97,14 @@ async def _insert_usage_rows_sqlite():
 
 
 @pytest.mark.asyncio
-async def test_admin_usage_endpoints_sqlite_smoke(monkeypatch, tmp_path):
+async def test_admin_usage_endpoints_sqlite_smoke(monkeypatch, tmp_path, fresh_services):
     # Arrange environment and singletons
     _setup_env(tmp_path)
 
     # Reset AuthNZ singletons to pick up new env
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
 

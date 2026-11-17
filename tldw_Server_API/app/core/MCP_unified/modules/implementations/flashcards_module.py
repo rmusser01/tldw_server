@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from ....DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from ....Utils.keyword_identity import dedupe_keywords
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
 
@@ -794,8 +795,7 @@ class FlashcardsModule(BaseModule):
 
             card = db.get_flashcard(card_uuid)
             self._assert_card_workspace(card, workspace_id)
-            # Normalize tags
-            norm_tags = [t.strip().lower() for t in tags if t.strip()][:50]
+            norm_tags = dedupe_keywords(tags)[:50]
             success = db.set_flashcard_tags(card_uuid, norm_tags)
             if not success:
                 raise ValueError(f"Card not found: {card_uuid}")
@@ -817,7 +817,7 @@ class FlashcardsModule(BaseModule):
             card = db.get_flashcard(card_uuid)
             self._assert_card_workspace(card, workspace_id)
             keywords = db.get_keywords_for_flashcard(card_uuid)
-            tags = [str(kw.get("keyword", "")).lower() for kw in keywords if kw.get("keyword")]
+            tags = [str(kw["keyword"]) for kw in keywords if kw.get("keyword")]
             return {"card_uuid": card_uuid, "tags": tags}
         finally:
             try:

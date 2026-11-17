@@ -11,7 +11,6 @@ import {
   Progress,
   Timeline,
   Empty,
-  Modal,
   Input,
   Spin,
   Tag
@@ -25,13 +24,13 @@ import {
   XCircle,
   Clock,
   Loader2,
-  AlertCircle,
   Hand,
   ChevronRight
 } from "lucide-react"
 import { WorkflowRunInspector } from "@/components/Common/Workflow"
 import { Alert } from "@/components/ui/primitives"
 import type { StepExecutionStatus } from "@/types/workflow-editor"
+import type { WorkflowEditorApi } from "@/hooks/useWorkflowEditorApi"
 import { useWorkflowEditorStore } from "@/store/workflow-editor"
 
 const { TextArea } = Input
@@ -90,12 +89,15 @@ const STATUS_CONFIG: Record<
 
 interface ExecutionPanelProps {
   className?: string
+  api?: WorkflowEditorApi
 }
 
-export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
+export const ExecutionPanel = ({ className = "", api }: ExecutionPanelProps) => {
+  const [inputJson, setInputJson] = useState(() => JSON.stringify(useWorkflowEditorStore.getState().pendingRunSubmission?.inputs ?? {}, null, 2))
   // Store state
   const nodes = useWorkflowEditorStore((s) => s.nodes)
   const runId = useWorkflowEditorStore((s) => s.runId)
+  const pendingSubmission = useWorkflowEditorStore((s) => s.pendingRunSubmission)
   const status = useWorkflowEditorStore((s) => s.status)
   const nodeStates = useWorkflowEditorStore((s) => s.nodeStates)
   const pendingApproval = useWorkflowEditorStore((s) => s.pendingApproval)
@@ -107,22 +109,17 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
   const runInvestigationError = useWorkflowEditorStore((s) => s.runInvestigationError)
 
   // Store actions
-  const startRun = useWorkflowEditorStore((s) => s.startRun)
-  const stopRun = useWorkflowEditorStore((s) => s.stopRun)
-  const pauseRun = useWorkflowEditorStore((s) => s.pauseRun)
-  const resumeRun = useWorkflowEditorStore((s) => s.resumeRun)
   const resetExecution = useWorkflowEditorStore((s) => s.resetExecution)
-  const respondToApproval = useWorkflowEditorStore((s) => s.respondToApproval)
-  const validate = useWorkflowEditorStore((s) => s.validate)
   const loadRunInvestigation = useWorkflowEditorStore((s) => s.loadRunInvestigation)
 
   // Calculate progress
   const progress = useMemo(() => {
-    const total = nodes.length
+    const executable = nodes.filter((node) => node.data.stepType !== "start" && node.data.stepType !== "end")
+    const total = executable.length
     if (total === 0) return 0
 
-    const completed = Object.values(nodeStates).filter(
-      (s) => s.status === "success" || s.status === "skipped"
+    const completed = executable.filter(
+      (node) => nodeStates[node.id]?.status === "success" || nodeStates[node.id]?.status === "skipped"
     ).length
 
     return Math.round((completed / total) * 100)
@@ -184,62 +181,28 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
   }, [nodes, nodeStates])
 
   const handleStartRun = () => {
-    const validation = validate()
-    if (!validation.isValid) {
-      Modal.error({
-        title: "Validation Failed",
-        content: (
-          <div className="space-y-2">
-            {validation.issues.map((issue) => (
-              <div key={issue.id} className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
-                <span>{issue.message}</span>
-              </div>
-            ))}
-          </div>
-        )
-      })
-      return
-    }
-
-    // Generate run ID and start
-    const newRunId = `run-${Date.now()}`
-    startRun(newRunId)
-
-    // In a real implementation, this would call the workflow API
-    console.log("Starting workflow run:", newRunId)
+    void api?.run(inputJson)
   }
 
   const handleApprove = () => {
     if (!pendingApproval) return
-    respondToApproval({
-      requestId: pendingApproval.id,
-      action: "approve",
-      respondedAt: Date.now()
-    })
+    void api?.review("approve")
   }
 
   const handleReject = () => {
     if (!pendingApproval) return
-    respondToApproval({
-      requestId: pendingApproval.id,
-      action: "reject",
-      reason: "Rejected by user",
-      respondedAt: Date.now()
-    })
+    void api?.review("reject")
   }
 
-  const isRunning = status === "running"
+  const isRunning = status === "running" || status === "queued"
   const isPaused = status === "paused"
   const isWaiting = status === "waiting_human" || status === "waiting_approval"
   const isIdle = status === "idle"
   const isCompleted = status === "completed" || status === "failed" || status === "cancelled"
 
   useEffect(() => {
-    if (status === "failed" && runId) {
-      void loadRunInvestigation(runId)
-    }
-  }, [loadRunInvestigation, runId, status])
+    if (!api && status === "failed" && runId) void loadRunInvestigation(runId)
+  }, [api, loadRunInvestigation, runId, status])
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
@@ -256,6 +219,8 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
         </div>
 
         {/* Control buttons */}
+        {isIdle && <div className="mb-3"><label htmlFor="workflow-run-inputs" className="text-xs font-medium">Run inputs (JSON object)</label><TextArea id="workflow-run-inputs" aria-label="Run inputs" value={inputJson} onChange={(event) => setInputJson(event.target.value)} rows={4} className="font-mono" /></div>}
+        {isIdle && pendingSubmission && <Alert variant="warning" title="Run submission has an unknown outcome" className="mb-3">Retry the original inputs to recover the same server run. Starting a new attempt may repeat work already accepted by the server.<Button size="small" disabled={api?.pending} onClick={() => { if (confirm("Forget this pending submission? A new Run may repeat work already accepted by the server.")) resetExecution() }}>Reset pending submission</Button></Alert>}
         <div className="flex items-center gap-2">
           {isIdle && (
             <Button
@@ -263,6 +228,7 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
               size="small"
               icon={<Play className="w-4 h-4" />}
               onClick={handleStartRun}
+              disabled={!api?.ready || api.pending}
               className="flex-1"
             >
               Run
@@ -274,7 +240,8 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
               <Button
                 size="small"
                 icon={<Pause className="w-4 h-4" />}
-                onClick={pauseRun}
+                onClick={() => void api?.control("pause")}
+                disabled={!api?.ready || api.pending}
                 className="flex-1"
               >
                 Pause
@@ -283,7 +250,8 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
                 danger
                 size="small"
                 icon={<Square className="w-4 h-4" />}
-                onClick={stopRun}
+                onClick={() => void api?.control("cancel")}
+                disabled={!api?.ready || api.pending}
               >
                 Stop
               </Button>
@@ -296,7 +264,8 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
                 type="primary"
                 size="small"
                 icon={<Play className="w-4 h-4" />}
-                onClick={resumeRun}
+                onClick={() => void api?.control("resume")}
+                disabled={!api?.ready || api.pending}
                 className="flex-1"
               >
                 Resume
@@ -305,7 +274,8 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
                 danger
                 size="small"
                 icon={<Square className="w-4 h-4" />}
-                onClick={stopRun}
+                onClick={() => void api?.control("cancel")}
+                disabled={!api?.ready || api.pending}
               >
                 Stop
               </Button>
@@ -322,6 +292,7 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
               Reset
             </Button>
           )}
+          {isWaiting && <Button danger size="small" disabled={!api?.ready || api.pending} onClick={() => void api?.control("cancel")}>Stop</Button>}
         </div>
 
         {/* Progress bar */}
@@ -337,6 +308,9 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-3">
+        {api?.error && <Alert variant="error" title="Workflow request failed" className="mb-3">{api.error}</Alert>}
+        {runId && <p className="mb-3 text-xs break-all">Server run: {runId}</p>}
+        {api?.output && <div className="mb-3"><h4 className="text-sm font-medium">Server output</h4><pre className="mt-2 whitespace-pre-wrap break-all rounded border border-border p-2 text-xs">{JSON.stringify(api.output, null, 2)}</pre></div>}
         {/* Error display */}
         {error && (
           <Alert
@@ -363,7 +337,7 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
                 title="Diagnostics unavailable"
                 action={{
                   label: "Retry diagnostics",
-                  onClick: () => void loadRunInvestigation(runId)
+                  onClick: () => { if (api) void api.inspect(); else void loadRunInvestigation(runId) }
                 }}
               >
                 {runInvestigationError}
@@ -400,6 +374,7 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
                 size="small"
                 icon={<CheckCircle2 className="w-4 h-4" />}
                 onClick={handleApprove}
+                disabled={!api?.ready || api.pending}
                 className="flex-1"
               >
                 Approve
@@ -409,6 +384,7 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
                 size="small"
                 icon={<XCircle className="w-4 h-4" />}
                 onClick={handleReject}
+                disabled={!api?.ready || api.pending}
                 className="flex-1"
               >
                 Reject

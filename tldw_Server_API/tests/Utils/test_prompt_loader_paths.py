@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def test_prompts_dir_default_points_to_api_config_prompts():
-    from tldw_Server_API.app.core.Utils import prompt_loader as pl
+    from tldw_Server_API.app.core.Context_Integrity import prompt_loader as pl
 
     p = Path(pl._prompts_dir()).resolve()
     # Exists and has expected structure: .../tldw_Server_API/Config_Files/Prompts
@@ -21,7 +21,7 @@ def test_prompts_dir_respects_env_override(tmp_path, monkeypatch):
     # Set env to override
     monkeypatch.setenv("TLDW_CONFIG_DIR", str(cfg_dir))
     try:
-        from tldw_Server_API.app.core.Utils import prompt_loader as pl
+        from tldw_Server_API.app.core.Context_Integrity import prompt_loader as pl
 
         p = Path(pl._prompts_dir()).resolve()
         assert p == prompts.resolve(), f"Env override not respected: {p} vs {prompts}"
@@ -39,7 +39,7 @@ def test_load_prompt_markdown_key_found(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("TLDW_CONFIG_DIR", str(cfg_dir))
     try:
-        from tldw_Server_API.app.core.Utils import prompt_loader as pl
+        from tldw_Server_API.app.core.Context_Integrity import prompt_loader as pl
 
         value = pl.load_prompt("demo", "Existing Key")
         assert value == "hello from prompt"
@@ -57,7 +57,7 @@ def test_load_prompt_markdown_missing_key_returns_none(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("TLDW_CONFIG_DIR", str(cfg_dir))
     try:
-        from tldw_Server_API.app.core.Utils import prompt_loader as pl
+        from tldw_Server_API.app.core.Context_Integrity import prompt_loader as pl
 
         value = pl.load_prompt("demo", "Missing Key")
         assert value is None
@@ -66,6 +66,7 @@ def test_load_prompt_markdown_missing_key_returns_none(tmp_path, monkeypatch):
 
 
 def test_load_prompt_blocks_quarantined_prompt_file(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Context_Integrity import prompt_loader as pl
     from tldw_Server_API.app.core.Context_Integrity.models import (
         ContextIntegrityBootState,
         ContextIntegrityFinding,
@@ -75,7 +76,6 @@ def test_load_prompt_blocks_quarantined_prompt_file(tmp_path, monkeypatch):
         clear_global_context_integrity_resolver,
         set_global_context_integrity_resolver,
     )
-    from tldw_Server_API.app.core.Utils import prompt_loader as pl
 
     cfg_dir = tmp_path / "cfg"
     prompts = cfg_dir / "Prompts"
@@ -111,7 +111,7 @@ def test_load_prompt_blocks_quarantined_prompt_file(tmp_path, monkeypatch):
 
 
 def test_load_prompt_uses_verified_bytes_without_second_read(tmp_path, monkeypatch):
-    from tldw_Server_API.app.core.Utils import prompt_loader as pl
+    from tldw_Server_API.app.core.Context_Integrity import prompt_loader as pl
 
     cfg_dir = tmp_path / "cfg"
     prompts = cfg_dir / "Prompts"
@@ -134,6 +134,7 @@ def test_load_prompt_uses_verified_bytes_without_second_read(tmp_path, monkeypat
 
 
 def test_load_prompt_blocks_live_edit_after_boot(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Context_Integrity import prompt_loader as pl
     from tldw_Server_API.app.core.Context_Integrity.inventory import (
         inventory_prompt_files,
     )
@@ -143,7 +144,6 @@ def test_load_prompt_blocks_live_edit_after_boot(tmp_path, monkeypatch):
         clear_global_context_integrity_resolver,
         set_global_context_integrity_resolver,
     )
-    from tldw_Server_API.app.core.Utils import prompt_loader as pl
 
     cfg_dir = tmp_path / "cfg"
     prompts = cfg_dir / "Prompts"

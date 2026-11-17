@@ -13,11 +13,10 @@ from types import ModuleType
 
 import pytest
 from fastapi.testclient import TestClient
-from tldw_Server_API.app.api.v1.endpoints import audio as audio_endpoints
 
-from tldw_Server_API.app.main import app
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.main import app
 
 pytestmark = [pytest.mark.integration]
 
@@ -239,10 +238,12 @@ def test_translations_ok_with_override(
             app.dependency_overrides.pop(get_request_user, None)
 
 
+@pytest.mark.parametrize("cached_bound_method", [False, True])
 def test_transcriptions_parakeet_variant_routes_to_parakeet(
     monkeypatch,
     bypass_api_limits,
     identity_audio_canonicalization,
+    cached_bound_method,
 ):
 
 
@@ -273,8 +274,11 @@ def test_transcriptions_parakeet_variant_routes_to_parakeet(
 
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_provider_adapter as stt_adapter
 
+        adapter = stt_adapter.get_stt_provider_registry().get_adapter("parakeet")
+        if cached_bound_method:
+            monkeypatch.setitem(adapter.__dict__, "transcribe_batch", adapter.transcribe_batch)
+
         def _fake_parakeet_transcribe_batch(
-            self,
             audio_path,
             *,
             model=None,
@@ -296,11 +300,11 @@ def test_transcriptions_parakeet_variant_routes_to_parakeet(
                 "metadata": {"provider": "parakeet", "model": model or ""},
             }
 
-        monkeypatch.setattr(
-            stt_adapter.ParakeetAdapter,
+        # Restore the exact instance dictionary, including an originally absent override.
+        monkeypatch.setitem(
+            adapter.__dict__,
             "transcribe_batch",
             _fake_parakeet_transcribe_batch,
-            raising=True,
         )
 
         # Parakeet Nemo implementation stub

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from enum import Enum
+
 TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
 ACTIVE_RUN_STATUSES = frozenset({"pending", "running"})
 
@@ -17,3 +19,12 @@ def can_transition_run_status(current: str | None, target: str | None) -> bool:
     if current_norm in TERMINAL_RUN_STATUSES and target_norm != current_norm:
         return False
     return True
+
+
+class RunStatus(str, Enum):
+    """Run status values"""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"

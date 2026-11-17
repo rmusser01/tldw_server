@@ -16,6 +16,14 @@ backend with fresh databases, the mock OpenAI-compatible LLM and the web UI on
 reserved ports, runs the `ux-regression` Playwright project with zero retries,
 fails on skipped tests, and writes `test-results/live-tier-uat/<run-id>/`.
 
+Run the original derived-note Notes Studio caller separately with
+`bun run uat:live-tiers -- --projects=notes-studio --run-id=<fresh-id>`.
+This fixed project uses the same isolated lifecycle, Desktop Chrome and original
+60s/15s deadlines, retains a trace on the first failure, and needs no extension
+build. It is diagnostic coverage, not causal proof or certification. The spec
+remains in `chromium` too: explicitly select one project to avoid running it
+twice when collecting all projects.
+
 Before it starts any service, the runner builds the browser extension
 (`bun run build:chrome:prod` in `apps/extension`, about two minutes) for the
 side-panel specs. The build prints to the runner's output; a failed build
@@ -93,7 +101,7 @@ and GitHub issue that tracks its fix, plus a note.
 
 | Spec | Measures | Baseline |
 |---|---|---|
-| `a11y.spec.ts` | Serious and critical axe violations (WCAG 2.0-2.2 A/AA plus best practices, including `color-contrast` and `target-size`), node count per rule, in five states: /notes empty, populated (25 notes) and with a note in the editor; /chat on a fresh load and with the model picker open. Light theme, 1280x720. | `baselines/a11y.json` |
+| `a11y.spec.ts` | Serious and critical axe violations (WCAG 2.0-2.2 A/AA plus best practices, including `color-contrast` and `target-size`), node count per rule, in six states, each in the dark and the light theme: /notes empty, populated (25 notes) and with a note in the editor; /chat on a fresh load and with the model picker open (1280x720); the extension side panel's chat (420x900, from the built extension). | `baselines/a11y.json` (entries name their `state` and `theme`) |
 | `request-budget.spec.ts` | API requests started in the first `windowMs` after loading warm /notes and /chat: the total, duplicate GETs (same path and query within `duplicateWindowMs`) and polling (an endpoint hit `pollingMinHits`+ times after `idleFromMs`). | `baselines/request-budget.json` |
 
 The comparison (`e2e/utils/ratchet.ts`) fails in both directions:
@@ -112,7 +120,7 @@ The comparison (`e2e/utils/ratchet.ts`) fails in both directions:
 1. Run `bun run e2e:ux-regression -- --grep "ratchet"` (both specs) or
    `--grep "Accessibility ratchet"` / `--grep "Request budget ratchet"`.
 2. The failure lists every difference. Each test also attaches what it
-   observed: `a11y-<state>.json` (every node, with its markup) or
+   observed: `a11y-<state>-<theme>.json` (every node, with its markup) or
    `request-budget-<page>.json` (counts and a request timeline). The runner's
    `test-results/live-tier-uat/<run-id>/playwright-results.json` embeds them.
 3. Remove or lower only the entries your change fixed. Never raise a count

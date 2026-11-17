@@ -202,6 +202,7 @@ export const buildSingleNotePrintableHtml = (
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="referrer" content="no-referrer" />
   <title>${escapeHtml(printableTitle)} - Printable Note</title>
   <style>
   ${SINGLE_NOTE_PRINT_STYLES}
@@ -483,6 +484,7 @@ export const buildStudioPrintableHtml = (
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="referrer" content="no-referrer" />
   <title>${escapeHtml(title)} - ${escapeHtml(labels.printTitleSuffix)}</title>
   <style>${STUDIO_PRINT_STYLES}</style>
 </head>

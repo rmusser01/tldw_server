@@ -57,7 +57,7 @@ export const createStudioSlice: WorkspaceSlice<StudioActions> = (set, get) => ({
               ...a,
               status,
               ...updates,
-              ...(status === "completed" ? { completedAt: new Date() } : {})
+              ...(status === "completed" ? { completedAt: updates.completedAt ?? new Date() } : {})
             }
           : a
       )

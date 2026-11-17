@@ -4,7 +4,6 @@
 # Imports
 import asyncio
 import contextlib
-import os
 from typing import Any, Optional, Union
 from uuid import UUID
 
@@ -47,7 +46,9 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.scope_context import ScopeContext, get_scope, set_scope
 from tldw_Server_API.app.core.exceptions import InactiveUserError
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode, is_truthy
+from tldw_Server_API.app.core.testing import (
+    is_test_context,
+)
 from tldw_Server_API.app.core.Utils.fastapi_routes import served_route_for_scope
 
 _USER_DB_NONCRITICAL_EXCEPTIONS = (
@@ -315,63 +316,11 @@ except _USER_DB_NONCRITICAL_EXCEPTIONS:
     _single_user_instance = None
 
 
-def _is_test_context() -> bool:
-    """Return True when running in pytest or explicit test-mode contexts."""
-    try:
-        if getattr(get_settings(), "TEST_MODE", False):
-            return True
-    except _USER_DB_NONCRITICAL_EXCEPTIONS:
-        pass
-    if os.getenv("PYTEST_CURRENT_TEST") is not None:
-        return True
-    return is_test_mode() or env_flag_enabled("TESTING")
-
-
-def _is_strict_test_bypass_context() -> bool:
-    """
-    Return True only when an explicit test runtime is detected.
-
-    This is intentionally stricter than `_is_test_context()` so that accidental
-    `TESTING=1` environment leakage does not enable auth bypasses in non-test
-    deployments.
-    """
-    if os.getenv("PYTEST_CURRENT_TEST") is not None:
-        return True
-    if is_test_mode():
-        return True
-    try:
-        if getattr(get_settings(), "TEST_MODE", False):
-            return True
-    except _USER_DB_NONCRITICAL_EXCEPTIONS:
-        pass
-    return False
-
-
-def _is_production_like_env() -> bool:
-    """
-    Detect production-like runtime from common deployment environment variables.
-
-    This intentionally checks multiple keys because not all deployments set
-    `tldw_production`.
-    """
-    if is_truthy(os.getenv("tldw_production", "").strip().lower()):
-        return True
-
-    production_values = {"production", "prod", "live"}
-    for key in (
-        "ENVIRONMENT",
-        "APP_ENV",
-        "DEPLOYMENT_ENV",
-        "FASTAPI_ENV",
-        "TLDW_ENV",
-    ):
-        value = os.getenv(key, "").strip().lower()
-        if value in production_values:
-            return True
-    return False
-
-
 def _looks_like_jwt(token: Optional[str]) -> bool:
+    """Whether ``token`` has a JWT's three dot-separated segments; a bearer that does not is an API key.
+
+    The one definition (TASK-13950.7): auth_principal_resolver and API_Deps.auth_deps import it.
+    """
     if not isinstance(token, str):
         return False
     return token.count(".") == 2
@@ -396,7 +345,7 @@ def resolve_user_id_value(
 ) -> Optional[Union[int, str]]:
     """Normalize user_id values with single-user fallback and test-friendly rules."""
     if allow_test_user_ids is None:
-        allow_test_user_ids = _is_test_context()
+        allow_test_user_ids = is_test_context()
 
     missing = user_id is None or (isinstance(user_id, str) and not user_id.strip())
     if missing:
@@ -1017,9 +966,8 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
     This helper centralizes API-key authentication so that both legacy
     dependencies (get_request_user) and the AuthPrincipal resolver can
     share the same behavior and context population. In single-user mode,
-    it also supports the bootstrapped SINGLE_USER_API_KEY /
-    SINGLE_USER_TEST_API_KEY without requiring a backing AuthNZ database
-    row.
+    it also supports the bootstrapped SINGLE_USER_API_KEY without requiring a
+    backing AuthNZ database row.
     """
     settings = get_settings()
 
@@ -1031,10 +979,6 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
             primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
             if primary_key:
                 allowed_keys.add(primary_key)
-            if _is_test_context():
-                test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-                if test_key:
-                    allowed_keys.add(test_key)
             if api_key in allowed_keys:
                 client_ip = resolve_client_ip(request, settings)
                 if not is_single_user_ip_allowed(client_ip, settings):
@@ -1168,10 +1112,10 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
             users_repo = await AuthnzUsersRepo.from_pool()
             user_data = await users_repo.get_user_by_id(user_id)
         except _USER_DB_NONCRITICAL_EXCEPTIONS:
-            if not _is_test_context():
+            if not is_test_context():
                 raise
 
-        if not user_data and _is_test_context():
+        if not user_data and is_test_context():
             try:
                 from tldw_Server_API.app.core.DB_Management.Users_DB import (
                     get_user_by_id as legacy_get_user_by_id,
@@ -1566,45 +1510,6 @@ async def get_request_user(
     - Treats non-JWT Bearer tokens as API keys for compatibility.
     - Delegates headerless requests to the canonical cookie-aware resolver.
     """
-    # Test-mode bypasses are disabled in production for safety
-    try:
-        import os as _os
-        _prod = _is_production_like_env()
-        # Test-mode bypass for evaluations when admin gating is explicitly disabled
-        if (
-            not _prod
-            and env_flag_enabled("TESTING")
-            and not is_truthy(_os.getenv("EVALS_HEAVY_ADMIN_ONLY", "true"))
-            and _is_strict_test_bypass_context()
-        ):
-            logger.info(
-                "TESTING with EVALS_HEAVY_ADMIN_ONLY disabled: "
-                "bypassing auth, returning single-user test instance"
-            )
-            return get_single_user_instance()
-    except _USER_DB_NONCRITICAL_EXCEPTIONS as env_exc:
-        logger.debug(
-            f"get_request_user: test-mode bypass env detection failed; continuing with normal auth: {env_exc}"
-        )
-
-    # Warn if test flags are present in production deployments
-    try:
-        import os as _os
-        _prod = _is_production_like_env()
-        if _prod and (
-            is_test_mode()
-            or env_flag_enabled("TESTING")
-        ) and not getattr(get_request_user, "_warned_testflags_prod", False):
-            logger.warning(
-                "TEST flags detected while tldw_production=true; "
-                "test-only auth bypasses are disabled."
-            )
-            get_request_user._warned_testflags_prod = True
-    except _USER_DB_NONCRITICAL_EXCEPTIONS as warn_exc:
-        logger.debug(
-            f"get_request_user: production test-flag warning emission failed; continuing without warning: {warn_exc}"
-        )
-
     # Fast-path: if an AuthPrincipal has already been resolved, reuse the cached
     # _auth_user instead of re-running authentication logic.
     try:

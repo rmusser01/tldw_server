@@ -20,6 +20,13 @@ describe("sidepanel persistence label contract", () => {
     expect(formSource).toMatch(/<Tooltip title=\{persistenceTooltip\}>/)
   })
 
+  // AX-16 (#3124): the save-to-history switch was the 28x16 px small switch.
+  it("renders the save-to-history control through the full-size switch", () => {
+    expect(formSource).toMatch(
+      /<Tooltip title=\{persistenceTooltip\}>\s*<SidepanelPersistenceSwitch\b/
+    )
+  })
+
   it("does not derive a server persistence claim from connectivity", () => {
     expect(formSource).not.toMatch(/serverChatId\s*\|\|\s*isConnectionReady/)
     expect(formSource).not.toContain(

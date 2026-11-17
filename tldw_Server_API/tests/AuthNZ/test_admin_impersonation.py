@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation import (
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 
 class _LoggerStub:
@@ -78,7 +79,7 @@ def _install_endpoint_stubs(
         "AuthnzUsersRepo",
         SimpleNamespace(from_pool=_from_pool),
     )
-    monkeypatch.setattr(admin_impersonation, "get_jwt_service", lambda: _StubJWTService(), raising=False)
+    monkeypatch.setattr(app_services(), "jwt_service", _StubJWTService())
     monkeypatch.setattr(admin_impersonation, "_emit_admin_account_audit_event", _emit, raising=False)
     return jwt_calls, audit_calls
 

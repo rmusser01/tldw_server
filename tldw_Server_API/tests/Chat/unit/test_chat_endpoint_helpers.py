@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -7,22 +8,34 @@ from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
 
 def test_queue_estimate_sanitizes_base64_payload():
+    def _request(payload: str) -> str:
+        return (
+            "{\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"image_url\",\"image_url\":{\"url\":\""
+            + payload
+            + "\"}}]}]}"
+        )
+
+    large = chat_endpoint.estimate_tokens_from_json(_request("data:image/png;base64," + "a" * 400))
+    small = chat_endpoint.estimate_tokens_from_json(_request("data:image/png;base64," + "a" * 4))
+
+    assert large == small
 
 
-    payload = "data:image/png;base64," + ("a" * 400)
-    raw = (
-        "{\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"image_url\",\"image_url\":{\"url\":\""
-        + payload
-        + "\"}}]}]}"
-    )
+@pytest.mark.parametrize(
+    ("field", "proof"),
+    [
+        ("tldw_history_server_existing_input_v1", {"messages": [{"id": "stored-id"}]}),
+        ("tldw_turn", {"result_v1": {"sources": [{"excerpt": "not inference" * 200}]}}),
+    ],
+)
+def test_inference_estimate_keeps_saved_question_but_omits_history_proofs(field, proof):
+    ordinary = {
+        "messages": [{"role": "user", "content": "Canonical saved question"}],
+        "tldw_history_selection_v1": None,
+    }
 
-    raw_est = max(1, len(raw) // 4)
-    sanitized = chat_endpoint._sanitize_json_for_rate_limit(raw)
-    sanitized_est = max(1, len(sanitized) // 4)
-    helper_est = chat_endpoint._estimate_tokens_for_queue(raw)
-
-    assert helper_est == sanitized_est
-    assert sanitized_est < raw_est
+    assert json.loads(chat_endpoint._inference_request_json({**ordinary, field: None})) == {**ordinary, field: None}
+    assert json.loads(chat_endpoint._inference_request_json({**ordinary, field: proof})) == ordinary
 
 
 def test_build_test_mode_chat_response_returns_mermaid_for_mind_map_prompt():
@@ -165,7 +178,7 @@ async def test_process_content_for_db_sync_large_image_path_handles_processor_re
         async def process_image_url(self, _url: str, _max_size_bytes: int):
             return False, None, "text/plain", "Unsupported image MIME type: text/plain"
 
-    monkeypatch.setattr(chat_endpoint, "get_image_processor", lambda: _RejectingProcessor())
+    monkeypatch.setattr("tldw_Server_API.app.core.Utils.chunked_image_processor.get_image_processor", lambda: _RejectingProcessor())
 
     large_payload = "A" * 100001
     content = [

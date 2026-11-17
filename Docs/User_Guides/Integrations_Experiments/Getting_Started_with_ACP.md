@@ -621,7 +621,7 @@ This keeps secrets out of config files.
 
 **URL:** `WS /api/v1/acp/sessions/{session_id}/stream`
 
-**Authentication:** Pass `token` (JWT) or `api_key` as query parameter.
+**Authentication:** send `Authorization: Bearer <token>` or `X-API-KEY: <key>`; a browser, which cannot set headers on a WebSocket, offers the subprotocol `bearer, <token or key>` (the server echoes only `bearer`). API keys need the `write` scope. The `token` / `api_key` query parameters and the `x-api-key, <key>` subprotocol are deprecated: they still work, with a server warning, until the bundled clients move off them.
 
 ### Environment Variables
 

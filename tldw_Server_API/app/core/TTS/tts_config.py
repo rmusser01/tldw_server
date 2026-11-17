@@ -57,6 +57,7 @@ class ProviderConfig(BaseModel):
     model: Optional[str] = None
     model_revision: Optional[str] = None
     model_path: Optional[str] = None
+    module_path: Optional[str] = None
     binary_path: Optional[str] = None
     tokenizer_path: Optional[str] = None
     mlx_model: Optional[str] = None

@@ -13,6 +13,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
 from tldw_Server_API.app.core import feature_flags
 from tldw_Server_API.app.core.LLM_Calls.routing.decision_store import InMemoryRoutingDecisionStore
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
 from tldw_Server_API.tests.Chat.integration.test_persona_backed_chat_conversations import (
     _create_persona_conversation,
 )
@@ -124,7 +125,7 @@ def test_chat_endpoint_routes_auto_before_provider_normalization(
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
     ):
@@ -226,8 +227,11 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
     )
     captured: dict[str, object] = {}
 
+    router_call_flags: list[bool] = []
+
     async def fake_router_call(**kwargs):
         captured["router_call"] = kwargs
+        router_call_flags.append(current_llm_call_context().records_itself)
         return {
             "choices": [
                 {
@@ -305,12 +309,12 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call_async",
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
             side_effect=fake_router_call,
             create=True,
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.log_model_router_usage",
+            "tldw_Server_API.app.core.LLM_Calls.routing.log_model_router_usage",
             side_effect=fake_router_usage,
             create=True,
         ),
@@ -319,7 +323,7 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
             side_effect=fake_route_model,
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
     ):
@@ -335,6 +339,9 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
     }
     assert captured["router_call"]["model"] == "anthropic/claude-4.5-sonnet"
     assert captured["router_usage"][0]["provider"] == "openrouter"
+    # The fixture's runtime resolves the user's own key, so the router's row says so (TASK-13956).
+    assert captured["router_usage"][0].get("credential_source") == "user"
+    assert router_call_flags == [True]
 
 
 @pytest.mark.integration
@@ -428,7 +435,7 @@ def test_service_rechecks_persona_revoked_after_endpoint_admission(
             conn.execute("UPDATE persona_profiles SET is_active = ? WHERE id = ?", (False, "revoked-persona"))
         return profile
 
-    monkeypatch.setattr(chat_endpoint, "require_current_persona", admit_then_revoke)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.conversation_admission.require_current_persona", admit_then_revoke)
     with patch.object(persona_chat_db, "add_message", wraps=persona_chat_db.add_message) as message:
         response = client.post("/api/v1/chat/completions", headers=headers, json={
             "model": "gpt-4", "api_provider": "openai", "conversation_id": cid, "save_to_db": True,
@@ -495,7 +502,7 @@ def test_chat_endpoint_disables_provider_fallback_for_pinned_provider_auto_routi
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
     ):
@@ -570,11 +577,11 @@ def test_chat_endpoint_auto_routing_uses_post_validation_tool_capabilities(
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.add_skill_tool_to_tools_list_async",
+            "tldw_Server_API.app.core.Skills.context_integration.add_skill_tool_to_tools_list_async",
             side_effect=fake_add_skill_tools,
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
     ):
@@ -582,3 +589,177 @@ def test_chat_endpoint_auto_routing_uses_post_validation_tool_capabilities(
 
     assert response.status_code == status.HTTP_200_OK
     assert captured["requested_capabilities"]["tools"] is True
+
+
+@pytest.mark.integration
+def test_a_refused_router_call_is_not_a_provider_failure_and_the_request_gets_the_402(
+    persona_chat_client,
+    persona_chat_db,
+    execution_scoped_provider_credentials,
+    monkeypatch,
+):
+    """The auto-router's LLM call runs before the boundary check; its refusal must not mark the provider unhealthy."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    authenticated_client, headers, _ = persona_chat_client
+    refuse_llm_work(monkeypatch)
+    request_data = ChatCompletionRequest(
+        model="auto",
+        api_provider="openrouter",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Summarize this")],
+    )
+
+    class _RecordingProviderManager:
+        def __init__(self) -> None:
+            self.failures: list[str] = []
+
+        def record_failure(self, provider, error) -> None:
+            self.failures.append(provider)
+
+        def record_success(self, provider, latency) -> None:
+            pass
+
+        def get_available_provider(self, exclude=None):
+            return None
+
+    provider_manager = _RecordingProviderManager()
+    dispatched: list[dict] = []
+
+    async def refused_router_call(**kwargs):
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    def rules_route_model(**kwargs):
+        return RoutingDecision(
+            provider="openrouter",
+            model="anthropic/claude-4.5-sonnet",
+            canonical=True,
+            decision_source="rules",
+        )
+
+    async def must_not_dispatch(**kwargs):
+        dispatched.append(kwargs)
+        raise AssertionError("dispatched")
+
+    with (
+        patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.get_configured_providers",
+            return_value={
+                "providers": [
+                    {
+                        "name": "openrouter",
+                        "default_model": "anthropic/claude-4.5-sonnet",
+                        "models_info": [
+                            {"name": "anthropic/claude-4.5-sonnet", "tool_support": True, "vision_support": True, "quality_rank": 20},
+                            {"name": "openai/gpt-4.1-mini", "tool_support": True, "vision_support": True, "quality_rank": 10},
+                        ],
+                    }
+                ],
+                "default_provider": "openrouter",
+            },
+        ),
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            side_effect=refused_router_call,
+            create=True,
+        ),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.api.v1.endpoints.chat.route_model", side_effect=rules_route_model),
+        patch("tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call", side_effect=must_not_dispatch),
+    ):
+        response = authenticated_client.post("/api/v1/chat/completions", headers=headers, json=request_data.model_dump())
+
+    assert_llm_quota_402(response)
+    assert provider_manager.failures == []
+    assert dispatched == []
+
+
+@pytest.mark.integration
+def test_a_refused_router_call_that_leaves_no_route_still_gets_the_402(
+    persona_chat_client,
+    persona_chat_db,
+    execution_scoped_provider_credentials,
+    monkeypatch,
+):
+    """Under failure_mode=error a refused router call leaves no route: the over-limit user gets the 402, not a 503."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    authenticated_client, headers, _ = persona_chat_client
+    refuse_llm_work(monkeypatch)
+    request_data = ChatCompletionRequest(
+        model="auto",
+        api_provider="openrouter",
+        routing={"failure_mode": "error"},
+        messages=[ChatCompletionUserMessageParam(role="user", content="Summarize this")],
+    )
+
+    async def refused_router_call(**kwargs):
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    with (
+        patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.get_configured_providers",
+            return_value={
+                "providers": [
+                    {
+                        "name": "openrouter",
+                        "default_model": "anthropic/claude-4.5-sonnet",
+                        "models_info": [
+                            {"name": "anthropic/claude-4.5-sonnet", "tool_support": True, "vision_support": True, "quality_rank": 20},
+                            {"name": "openai/gpt-4.1-mini", "tool_support": True, "vision_support": True, "quality_rank": 10},
+                        ],
+                    }
+                ],
+                "default_provider": "openrouter",
+            },
+        ),
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            side_effect=refused_router_call,
+            create=True,
+        ),
+    ):
+        response = authenticated_client.post("/api/v1/chat/completions", headers=headers, json=request_data.model_dump())
+
+    assert_llm_quota_402(response)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("providers", "expected"),
+    [
+        (
+            [{"name": "openai", "models_info": [{"name": "gpt-test", "tool_support": True, "quality_rank": 1}]}],
+            (503, "auto_routing_failed"),
+        ),
+        ([], (400, "auto_routing_no_candidates")),
+    ],
+    ids=["no-decision", "no-candidates"],
+)
+def test_an_over_limit_user_keeps_the_routing_error_when_no_router_call_was_refused(
+    authenticated_client, mock_chacha_db, setup_dependencies, monkeypatch, providers, expected
+):
+    """Only a router call refused at the call turns a lost route into the 402; other routing errors stay (TASK-13956)."""
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    refuse_llm_work(monkeypatch)
+    request_data = ChatCompletionRequest(
+        model="auto",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Route this")],
+    )
+
+    with (
+        patch("tldw_Server_API.app.api.v1.endpoints.chat.route_model", return_value=None),
+        patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.get_configured_providers",
+            return_value={"providers": providers, "default_provider": "openai"},
+        ),
+    ):
+        response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
+
+    assert (response.status_code, response.json()["detail"].get("error_code")) == expected

@@ -1015,6 +1015,73 @@ def test_operation_owned_clone_confirmation_promotes_pending_keywords(
     assert media_db.get_media_by_id(created.media_id) is not None
 
 
+@pytest.mark.unit
+def test_operation_owned_clone_promotion_reuses_display_cased_keywords(
+    media_db: MediaDatabase,
+) -> None:
+    """Pending clone keywords are lowercase; promotion finds stored display casing (TASK-13950.5)."""
+    db: Any = media_db  # the clone methods are typed on MediaDbLike
+    _seed_media(
+        media_db,
+        title="Display-cased keyword owner",
+        content="display keyword owner content",
+        chunk_text="display keyword owner chunk",
+        transcript_text="display keyword owner transcript",
+        keywords=["Research", "Éclair"],
+    )
+    snapshot = _operation_snapshot(keywords=("research", "éclair"))
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    created = db.insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id="clone-operation-display-casing",
+        source_identity="workspace-source-display-casing",
+        expected_content_hash=expected_hash,
+    )
+
+    assert db.confirm_operation_owned_clone_media(
+        operation_id="clone-operation-display-casing",
+        source_identity="workspace-source-display-casing",
+        expected_content_hash=expected_hash,
+    ) == 1
+    assert media_db.fetch_all_keywords() == ["Research", "Éclair"]
+    assert media_db_api.fetch_keywords_for_media(db, created.media_id) == ["Research", "Éclair"]
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+def test_postgres_clone_promotion_reuses_a_lower_only_fold(pg_database_config: DatabaseConfig) -> None:
+    """Postgres LOWER('İstanbul') is 'istanbul'; the lowercase pending keyword must reuse that row."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db: Any = MediaDatabase(db_path=":memory:", client_id="901", backend=backend)
+    try:
+        with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):
+            _seed_media(
+                db,
+                title="Dotted capital owner",
+                content="dotted capital owner content",
+                chunk_text="dotted capital owner chunk",
+                transcript_text="dotted capital owner transcript",
+                keywords=["İstanbul"],
+            )
+            snapshot = _operation_snapshot(keywords=("istanbul",))
+            expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+            created = db.insert_operation_owned_clone_media(
+                snapshot=snapshot,
+                operation_id="clone-operation-dotted-capital",
+                source_identity="workspace-source-dotted-capital",
+                expected_content_hash=expected_hash,
+            )
+            assert db.confirm_operation_owned_clone_media(
+                operation_id="clone-operation-dotted-capital",
+                source_identity="workspace-source-dotted-capital",
+                expected_content_hash=expected_hash,
+            ) == 1
+            assert media_db_api.fetch_keywords_for_media(db, created.media_id) == ["İstanbul"]
+            assert db.fetch_all_keywords() == ["İstanbul"]
+    finally:
+        db.close_connection()
+
+
 @pytest.mark.integration
 def test_sqlite_v26_migration_releases_real_v25_keyword_graph_and_replays(
     tmp_path: Path,
@@ -2091,7 +2158,7 @@ def test_media_clone_snapshot_materializes_only_active_keywords_and_children(
 
     snapshot = media_db.read_media_clone_snapshots([media_id])[media_id]
 
-    assert snapshot.media["keywords"] == ("alpha", "zulu")
+    assert snapshot.media["keywords"] == ("alpha", "Zulu")
     assert [row["chunk_text"] for row in snapshot.chunks] == ["active chunk"]
     assert [row["transcription"] for row in snapshot.transcripts] == [
         "active transcript"
@@ -2577,12 +2644,17 @@ def test_postgres_media_clone_snapshot_returns_idle_dedicated_connection_on_ever
                         [999_999 if outcome == "missing" else media_id]
                     )
 
-        assert len(acquired_connections) == 1
-        snapshot_connection = acquired_connections[0]
-        assert snapshot_connection is not caller_connection
-        assert returned_connections == [(snapshot_connection, "IDLE")]
         if outcome == "scope_apply_failure":
+            # The pool discards a checkout it cannot scope (TASK-13950.3), so
+            # nothing is handed out, returned for reuse, or queried.
+            assert acquired_connections == []
+            assert returned_connections == []
             assert table_queries == []
+        else:
+            assert len(acquired_connections) == 1
+            snapshot_connection = acquired_connections[0]
+            assert snapshot_connection is not caller_connection
+            assert returned_connections == [(snapshot_connection, "IDLE")]
     finally:
         db.close_connection()
         pool.close_all()
@@ -2710,7 +2782,9 @@ def test_postgres_pool_scope_failure_log_does_not_emit_driver_text(
                 raise RuntimeError("sensitive scope driver detail")
 
             monkeypatch.setattr(pool, "_apply_scope_settings", fail_pool_scope)
-            db.read_media_clone_snapshots([media_id])
+            # An unscoped checkout is discarded, never handed out (TASK-13950.3).
+            with pytest.raises(CloneSnapshotUnavailable):
+                db.read_media_clone_snapshots([media_id])
     finally:
         logger.remove(sink_id)
         db.close_connection()

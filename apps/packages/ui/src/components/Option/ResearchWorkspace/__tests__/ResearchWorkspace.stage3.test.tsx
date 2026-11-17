@@ -1,4 +1,12 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render as renderUI,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import React from "react"
 import { Modal } from "antd"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
@@ -9,6 +17,14 @@ import type { ServerWorkspaceCache } from "@/store/workspace-api"
 import type { WorkspaceState } from "@/store/workspace"
 import { buildResearchWorkspaceServerSourceSignature } from "../workspace-server-reconcile"
 import { serverWorkspaceMetadata } from "@/store/__tests__/workspace-activation.fixtures"
+import type { ResearchWorkspaceMigrationRunResult } from "@/store/workspace-migration"
+
+// Match the router context provided by both deployed shells.
+const render: typeof renderUI = (ui, options) =>
+  renderUI(ui, {
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    ...options
+  })
 
 const {
   mockGetMediaDetails,
@@ -25,9 +41,11 @@ const {
   mockGetWorkspaceMigration,
   mockAckWorkspaceMigrationClientDelete,
   mockRunResearchWorkspaceMigration,
+  mockFlushWorkspacePersistence,
   mockChatPaneProps,
   mockStatusBarProps,
-  mockBgRequest
+  mockBgRequest,
+  mockReadResearchWebCaptures
 } = vi.hoisted(() => ({
   mockGetMediaDetails: vi.fn(),
   mockUpsertWorkspace: vi.fn(),
@@ -43,6 +61,7 @@ const {
   mockGetWorkspaceMigration: vi.fn(),
   mockAckWorkspaceMigrationClientDelete: vi.fn(),
   mockRunResearchWorkspaceMigration: vi.fn(),
+  mockFlushWorkspacePersistence: vi.fn(),
   mockChatPaneProps: [] as any[],
   mockStatusBarProps: [] as Array<{
     activeOperations?: string[]
@@ -54,7 +73,8 @@ const {
     }
     workspaceContextStatus?: unknown
   }>,
-  mockBgRequest: vi.fn()
+  mockBgRequest: vi.fn(),
+  mockReadResearchWebCaptures: vi.fn()
 }))
 
 const { mockScheduleWorkspaceUndoAction, mockUndoWorkspaceAction } = vi.hoisted(
@@ -157,6 +177,7 @@ vi.mock("@/store/workspace", async (importOriginal) => {
       }
     }
   ),
+  flushWorkspacePersistence: mockFlushWorkspacePersistence,
   createWorkspaceStorage: () => ({
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -200,6 +221,12 @@ vi.mock("@/services/service-prompts", () => ({
     scopeInvalidatedSignal: realWorkspace.enabled ? realWorkspace.invalidated.signal : options.signal,
     release: vi.fn()
   })
+}))
+
+// Stage 3 has no captured-article checkpoints; retain the real owner and restore logic.
+vi.mock("@/utils/research-workspace-prefill", async original => ({
+  ...await original<typeof import("@/utils/research-workspace-prefill")>(),
+  readResearchWebCaptures: mockReadResearchWebCaptures
 }))
 
 vi.mock("@/utils/use-research-workspace-prefill", () => ({
@@ -437,12 +464,24 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       workspace: { id: "workspace-original", name: "Saved Research", created_at: "2026-10-01T00:00:00Z", version: 1, workspace_profile: "research", study_materials_policy: "workspace" },
       sources: { items: [{ id: "source-original", workspace_id: "workspace-original", media_id: 7, title: "Larch", source_type: "text", selected: true, added_at: "2026-10-01T00:00:00Z" }] },
       partial_errors: []
-    } : [])
+    } : path.includes("/api/v1/notes/search/") ? { notes: [] } : [])
     render(<ResearchWorkspace />)
     await waitFor(() => expect(testState.installServerWorkspace).toHaveBeenCalledWith(expect.objectContaining({
       id: "workspace-original", name: "Saved Research",
       sources: [expect.objectContaining({ id: "source-original", mediaId: 7 })], selectedSourceIds: ["source-original"]
     }), { scopeKey: "workspace-alice", expectedWorkspaceId: "" }))
+    expect(testState.restoreServerWorkspace).not.toHaveBeenCalled()
+    expect(mockReadResearchWebCaptures).toHaveBeenCalledWith(
+      expect.stringContaining(":auth:multi-user:org:none:user:alice"), "workspace-original"
+    )
+    expect(mockBgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/notes/search/?tokens=workspace%3Aworkspace-original&limit=100&include_keywords=true",
+      method: "GET",
+      servicePromptConfig: {
+        serverUrl: "https://workspace.test", authMode: "multi-user", expectedUserId: "alice"
+      },
+      headers: { "X-TLDW-Expected-User-ID": "alice" }
+    }))
     expect(testState.initializeWorkspace).not.toHaveBeenCalled()
   })
 
@@ -603,12 +642,14 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     realWorkspace.invalidated = new AbortController()
     vi.clearAllMocks()
     workspaceChangeListeners.clear()
+    mockReadResearchWebCaptures.mockReset().mockResolvedValue([])
     ensureLocalStorage()
     delete (window as Window & {
       __tldwResearchWorkspaceFreshInitialization?: Set<string>
     }).__tldwResearchWorkspaceFreshInitialization
     ;(tldwClient as unknown as { getWorkspaceContext?: unknown }).getWorkspaceContext =
       undefined
+    mockFlushWorkspacePersistence.mockReset().mockResolvedValue(undefined)
     mockRunResearchWorkspaceMigration.mockResolvedValue({
       status: "not_needed",
       migrationId: null,
@@ -817,6 +858,12 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     )
     testState.workspaceId = "workspace-imported"
     testState.workspaceName = "Imported Research"
+    mockGetWorkspaceSourcesStatus.mockResolvedValue({
+      ...await mockGetWorkspaceSourcesStatus(), workspace_id: "workspace-imported"
+    })
+    mockGetWorkspaceCapabilities.mockResolvedValue({
+      ...await mockGetWorkspaceCapabilities(), workspace_id: "workspace-imported"
+    })
     render(<ResearchWorkspace />)
 
     await waitFor(() => {
@@ -841,6 +888,204 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     expect(testState.initializeWorkspace).toHaveBeenCalledTimes(1)
   })
 
+  it("waits for current source hydration and pending persistence before capturing migration", async () => {
+    localStorage.setItem(
+      "tldw-workspace",
+      JSON.stringify({ workspaceId: "workspace-1" }),
+    );
+    const status =
+      createDeferred<
+        Awaited<ReturnType<typeof tldwClient.getWorkspaceSourcesStatus>>
+      >();
+    const statusValue = {
+      workspace_id: "workspace-1",
+      sources: [],
+      summary: {
+        total: 0,
+        selected: 0,
+        queryable: 0,
+        partially_queryable: 0,
+        processing: 0,
+        failed: 0,
+        missing: 0,
+      },
+    };
+    const flush = createDeferred<void>();
+    mockGetWorkspaceSourcesStatus.mockReturnValue(status.promise);
+    mockFlushWorkspacePersistence.mockReturnValue(flush.promise);
+    const view = render(<ResearchWorkspace />);
+    try {
+      await waitFor(() =>
+        expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalled(),
+      );
+      expect(mockRunResearchWorkspaceMigration).not.toHaveBeenCalled();
+      await act(async () => status.resolve(statusValue));
+      await waitFor(() =>
+        expect(mockFlushWorkspacePersistence).toHaveBeenCalled(),
+      );
+      expect(mockRunResearchWorkspaceMigration).not.toHaveBeenCalled();
+      await act(async () => flush.resolve());
+      await waitFor(() =>
+        expect(mockRunResearchWorkspaceMigration).toHaveBeenCalledOnce(),
+      );
+    } finally {
+      view.unmount();
+      await act(async () => {
+        status.resolve(statusValue);
+        flush.resolve();
+      });
+    }
+  });
+
+  it.each(["unmount", "workspace", "workspace-round-trip", "account"])(
+    "does not start migration after %s retires its pending persistence drain",
+    async (kind) => {
+      localStorage.setItem(
+        "tldw-workspace",
+        JSON.stringify({ workspaceId: "workspace-1" }),
+      );
+      const flush = createDeferred<void>();
+      mockFlushWorkspacePersistence.mockReturnValue(flush.promise);
+      const view = render(<ResearchWorkspace />);
+      try {
+        await waitFor(() =>
+          expect(mockFlushWorkspacePersistence).toHaveBeenCalled(),
+        );
+        if (kind === "unmount") view.unmount();
+        else if (kind === "workspace")
+          testState.workspaceId = "workspace-other";
+        else if (kind === "workspace-round-trip") {
+          await act(async () => {
+            testState.workspaceId = "workspace-other";
+            workspaceChangeListeners.forEach((listener) => listener());
+            testState.workspaceId = "workspace-1";
+            workspaceChangeListeners.forEach((listener) => listener());
+          });
+        } else
+          await act(async () =>
+            window.dispatchEvent(new Event("tldw:auth-principal-changed")),
+          );
+        await act(async () => flush.resolve());
+        expect(mockRunResearchWorkspaceMigration).not.toHaveBeenCalled();
+      } finally {
+        view.unmount();
+        await act(async () => flush.resolve());
+      }
+    },
+  );
+
+  it("does not use another workspace's source projection to start migration", async () => {
+    localStorage.setItem(
+      "tldw-workspace",
+      JSON.stringify({ workspaceId: "workspace-1" }),
+    );
+    mockGetWorkspaceSourcesStatus.mockResolvedValue({
+      ...(await mockGetWorkspaceSourcesStatus()),
+      workspace_id: "workspace-other",
+    });
+    render(<ResearchWorkspace />);
+    await waitFor(() =>
+      expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalledTimes(2),
+    );
+    expect(mockFlushWorkspacePersistence).not.toHaveBeenCalled();
+    expect(mockRunResearchWorkspaceMigration).not.toHaveBeenCalled();
+  });
+
+  it("keeps an admitted migration current through normal status polling", async () => {
+    localStorage.setItem(
+      "tldw-workspace",
+      JSON.stringify({ workspaceId: "workspace-1" }),
+    );
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const migration = createDeferred<ResearchWorkspaceMigrationRunResult>();
+    mockRunResearchWorkspaceMigration.mockReturnValue(migration.promise);
+    const view = render(<ResearchWorkspace />);
+    try {
+      await waitFor(() =>
+        expect(mockRunResearchWorkspaceMigration).toHaveBeenCalledOnce(),
+      );
+      const input = mockRunResearchWorkspaceMigration.mock.calls[0][0];
+      await act(async () => vi.advanceTimersByTimeAsync(5000));
+      expect(mockGetWorkspaceSourcesStatus.mock.calls.length).toBeGreaterThan(
+        1,
+      );
+      expect(mockRunResearchWorkspaceMigration).toHaveBeenCalledOnce();
+      expect(input.isCurrent()).toBe(true);
+    } finally {
+      view.unmount();
+      await act(async () =>
+        migration.resolve({
+          status: "not_needed",
+          migrationId: null,
+          manifestHash: null,
+          serverMigration: null,
+          localDeletionEligibility: null,
+          deletedSurfaceIds: [],
+          message: "No legacy content",
+        }),
+      );
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["added", "removed"])(
+    "keeps %s drain-time offload stores and newly materialized split keys in migration inventory",
+    async (kind) => {
+      const snapshotKey = "tldw-workspace:workspace:workspace-1:snapshot";
+      const chatKey = "tldw-workspace:workspace:workspace-1:chat";
+      const pointers = [
+        { offloadType: "workspace_artifact_payload_v1" },
+        { offloadType: "workspace_chat_session_v1" },
+      ];
+      localStorage.setItem(
+        "tldw-workspace",
+        JSON.stringify({
+          workspaceId: "workspace-1",
+          ...(kind === "removed" ? { pointers } : {}),
+        }),
+      );
+      mockFlushWorkspacePersistence.mockImplementation(async () => {
+        localStorage.setItem(
+          "tldw-workspace",
+          JSON.stringify({ workspaceId: "workspace-1" }),
+        );
+        localStorage.setItem(
+          snapshotKey,
+          JSON.stringify({
+            workspaceId: "workspace-1",
+            ...(kind === "added" ? { pointers } : {}),
+          }),
+        );
+        localStorage.setItem(chatKey, JSON.stringify({ messages: [] }));
+      });
+      render(<ResearchWorkspace />);
+      await waitFor(() =>
+        expect(mockRunResearchWorkspaceMigration).toHaveBeenCalledOnce(),
+      );
+      const input = mockRunResearchWorkspaceMigration.mock.calls[0][0];
+      expect(input.discoveredLocalStorageKeys).toEqual(
+        expect.arrayContaining(["tldw-workspace", snapshotKey, chatKey]),
+      );
+      expect(input.discoveredIndexedDbStores).toEqual(
+        expect.arrayContaining([
+          {
+            databaseName: "tldw-workspace-storage",
+            storeName: "workspace-artifact-payloads",
+          },
+          {
+            databaseName: "tldw-workspace-storage",
+            storeName: "workspace-chat-sessions",
+          },
+        ]),
+      );
+      const actual = await vi.importActual<
+        typeof import("@/store/workspace-migration")
+      >("@/store/workspace-migration");
+      const plan = await actual.buildResearchWorkspaceMigrationPlan(input);
+      expect(plan.localDeletionEligibility.eligible).toBe(false);
+    },
+  );
+
   it("runs legacy workspace migration once and shows a compact recovery status when local data is retained", async () => {
     const legacyPayload = JSON.stringify({
       workspaces: [{ id: "legacy-workspace", name: "Legacy Workspace" }]
@@ -853,7 +1098,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       serverMigration: {
         id: "research-workspace-workspace-1-abcd",
         status: "finalized",
-        client_delete_eligible: false
+        client_delete_eligible: true
       },
       localDeletionEligibility: {
         eligible: true,
@@ -883,7 +1128,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     await expect(
       migrationInput.readLocalStorageValue("tldw-workspace")
     ).resolves.toBe(legacyPayload)
-    expect(migrationInput.compareAndDeleteLocalStorageValue).toBeUndefined()
+    expect("compareAndDeleteLocalStorageValue" in migrationInput).toBe(false)
     expect(migrationInput.deleteLocalStorageValue).toBeUndefined()
     expect(migrationInput.writeLocalStorageValue).toBeUndefined()
     expect(window.localStorage.getItem("tldw-workspace")).toBe(legacyPayload)
@@ -891,9 +1136,8 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     const notice = await screen.findByTestId("workspace-statusbar-notice")
     expect(notice).toHaveTextContent("Legacy workspace data found")
     expect(notice).toHaveTextContent("Server receipt saved")
-    expect(notice).toHaveTextContent(
-      "Automatic local cleanup is disabled"
-    )
+    expect(notice).toHaveTextContent("Local data retained")
+    expect(notice).toHaveTextContent("Automatic local cleanup is disabled")
     fireEvent.click(
       screen.getByRole("button", { name: "Review migration recovery details" })
     )
@@ -903,6 +1147,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     expect(dialog).toHaveTextContent("research-workspace-workspace-1-abcd")
     expect(dialog).toHaveTextContent("Server receipt saved")
     expect(dialog).toHaveTextContent("Client deletion eligible")
+    expect(within(dialog).getByText("Client deletion eligible").nextElementSibling).toHaveTextContent("No")
     expect(screen.queryByText(/workspace-playground/i)).not.toBeInTheDocument()
     expect(screen.queryByTestId("workspace-trust-panel")).not.toBeInTheDocument()
   })
@@ -1141,9 +1386,8 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
 
     const notice = await screen.findByTestId("workspace-statusbar-notice")
     expect(notice).toHaveTextContent("Server receipt saved")
-    expect(notice).toHaveTextContent(
-      "Automatic local cleanup is disabled"
-    )
+    expect(notice).toHaveTextContent("Local data retained")
+    expect(notice).toHaveTextContent("Automatic local cleanup is disabled")
     expect(window.localStorage.getItem("tldw-workspace")).toBe(legacyPayload)
   })
 

@@ -183,7 +183,7 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
       const source = revisionsRef.current.find(
         (proposal) => proposal.id === proposalId
       )
-      if (!source) return
+      if (!source || source.status !== "pending") return
 
       const regenerationSessionId = activeSessionIdRef.current
       const regenerationVersion = revisionListVersionRef.current
@@ -202,9 +202,14 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
         return
       }
 
+      const replacesSource =
+        replacement.status === "pending" &&
+        replacement.operation !== "advisory" &&
+        typeof replacement.replacementText === "string"
+
       updateRevisions((current) => [
         ...current.map((proposal): WritingRevisionProposal =>
-          proposal.id === source.id
+          replacesSource && proposal.id === source.id
             ? { ...proposal, status: "rejected" as const }
             : proposal
         ),
@@ -214,8 +219,7 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
           target: source.target,
           instruction: source.instruction,
           presetId: source.presetId,
-          presetInstruction: source.presetInstruction,
-          status: "pending"
+          presetInstruction: source.presetInstruction
         } satisfies WritingRevisionProposal)
       ])
     },

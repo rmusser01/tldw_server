@@ -79,6 +79,7 @@ def test_postgres_insertion_order_is_owner_isolated(order_db):
     db, backend = order_db, order_db.backend
     cid = db.add_conversation({"title": "Private order"})
     mid = db.add_message({"conversation_id": cid, "sender": "user", "content": "Private"})
+    runtime_mid = str(uuid4())
     role = backend.escape_identifier(f"durable_order_{uuid4().hex[:12]}")
     created_role = False
     db.close_connection()
@@ -86,13 +87,40 @@ def test_postgres_insertion_order_is_owner_isolated(order_db):
         with backend.transaction() as conn:
             backend.execute(f"CREATE ROLE {role} NOLOGIN NOSUPERUSER NOBYPASSRLS", connection=conn)
             backend.execute(f"GRANT USAGE ON SCHEMA public TO {role}", connection=conn)
-            backend.execute(f"GRANT SELECT ON messages, conversations, message_insertion_order TO {role}", connection=conn)
+            backend.execute(f"GRANT SELECT (id), INSERT ON messages TO {role}", connection=conn)
+            backend.execute(f"GRANT SELECT, UPDATE ON conversations TO {role}", connection=conn)
+            backend.execute(f"GRANT INSERT ON sync_log TO {role}", connection=conn)
+            backend.execute(f"GRANT USAGE ON SEQUENCE sync_log_change_id_seq TO {role}", connection=conn)
             backend.execute(f"GRANT {role} TO CURRENT_USER", connection=conn)
         created_role = True
         with backend.transaction() as conn:
             backend.execute(f"SET LOCAL ROLE {role}", connection=conn)
+            with pytest.raises(CharactersRAGDBError, match="schema owner.*message insertion order"):
+                db._verify_message_order_privileges_postgres(conn)
+        with backend.transaction() as conn:
+            backend.execute(f"GRANT SELECT ON message_insertion_order TO {role}", connection=conn)
+            backend.execute(f"GRANT INSERT (message_id) ON message_insertion_order TO {role}", connection=conn)
+            backend.execute(f"GRANT USAGE ON SEQUENCE message_insertion_order_sequence_seq TO {role}", connection=conn)
+        with backend.transaction() as conn:
+            backend.execute(f"SET LOCAL ROLE {role}", connection=conn)
+            with pytest.raises(CharactersRAGDBError, match="schema owner.*message insertion order"):
+                db._verify_message_order_privileges_postgres(conn)
+        with backend.transaction() as conn:
+            backend.execute(f"GRANT SELECT (client_id) ON messages TO {role}", connection=conn)
+        with backend.transaction() as conn:
+            backend.execute(f"SET LOCAL ROLE {role}", connection=conn)
             backend.execute("SELECT set_config('app.current_user_id', %s, true)", (db.client_id,), connection=conn)
-            assert backend.execute("SELECT message_id FROM message_insertion_order", connection=conn).rows == [{"message_id": mid}]
+            db._verify_message_order_privileges_postgres(conn)
+            backend.execute(
+                "INSERT INTO messages(id, conversation_id, sender, content, timestamp, client_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (runtime_mid, cid, "assistant", "Runtime message", db._get_current_utc_timestamp_iso(), db.client_id),
+                connection=conn,
+            )
+            rows = backend.execute(
+                "SELECT message_id FROM message_insertion_order ORDER BY sequence", connection=conn
+            ).rows
+            assert rows == [{"message_id": mid}, {"message_id": runtime_mid}]
             backend.execute("SELECT set_config('app.current_user_id', %s, true)", ("foreign-owner",), connection=conn)
             assert backend.execute("SELECT message_id FROM message_insertion_order", connection=conn).rows == []
     finally:

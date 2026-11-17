@@ -61,7 +61,7 @@ class LlamaCppConfig(BaseHandlerConfig):
     port_probe_max: int = 10
     allowed_paths: Optional[list[Path]] = None
     http_timeout: float = 120.0  # HTTP request timeout in seconds
-    readiness_timeout: float = 30.0  # Server readiness poll timeout in seconds
+    readiness_timeout: float = 90.0  # Large CPU models need loading time; retain cleanup room within120s.
     stderr_read_timeout: float = 5.0  # Timeout for reading stderr during startup failures
     log_output_file: Optional[Path] = None # Optional: Path to save llama.cpp server logs
 

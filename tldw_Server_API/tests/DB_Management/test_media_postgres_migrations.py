@@ -887,7 +887,7 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
                 connection=conn,
             ).rows
 
-            assert int(version) == 26
+            assert int(version) == 27
             assert _column_definition(
                 backend, conn, "claims_analytics_exports", "job_id"
             ) == {"data_type": "bigint", "is_nullable": "YES"}
@@ -984,7 +984,7 @@ def test_media_postgres_migration_v24_repairs_missing_monitoring_event_extension
                 connection=conn,
             ).scalar
 
-            assert int(version) == 26
+            assert int(version) == 27
             assert backend.table_exists("claims_monitoring_events", connection=conn)
             assert _index_exists(
                 backend,
@@ -1108,7 +1108,7 @@ def test_media_postgres_migration_v25_adds_owned_media_schema_and_preserves_rows
                 connection=conn,
             ).rows[0]
 
-            assert int(version) == 26
+            assert int(version) == 27
             assert all(
                 _column_definition(backend, conn, "media", column_name)
                 == {"data_type": "text", "is_nullable": "YES"}

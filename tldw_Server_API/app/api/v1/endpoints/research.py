@@ -18,7 +18,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 
 #
 # Local Imports
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.research_schemas import (
     ArxivPaper,
     ArxivSearchRequestForm,
@@ -38,10 +38,8 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     User,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
-from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
-from tldw_Server_API.app.core.Third_Party.Arxiv import convert_xml_to_markdown, fetch_arxiv_xml, search_arxiv_custom_api
-from tldw_Server_API.app.core.Third_Party.Semantic_Scholar import search_papers_semantic_scholar
+from tldw_Server_API.app.core.Usage.llm_call_context import capture_llm_call_state, run_with_llm_call_state
 from tldw_Server_API.app.core.Web_Scraping import WebSearch_APIs
 
 _WEBSEARCH_EXECUTOR: ThreadPoolExecutor | None = None
@@ -143,7 +141,7 @@ async def arxiv_search_endpoint(
         # search_arxiv_custom_api now returns: papers_list, total_results_from_api, error_message
         papers_list, total_results_from_api, error_message = await loop.run_in_executor(
             None,
-            search_arxiv_custom_api,
+            _Arxiv.search_arxiv_custom_api,
             search_params.query,
             search_params.author,
             search_params.year,
@@ -199,8 +197,8 @@ async def arxiv_search_endpoint(
 # FIXME - This needs to be updated/Integrated
 def process_and_ingest_arxiv_paper(paper_id, additional_keywords):
     try:
-        xml_content = fetch_arxiv_xml(paper_id)
-        markdown, title, authors, categories = convert_xml_to_markdown(xml_content)
+        xml_content = _Arxiv.fetch_arxiv_xml(paper_id)
+        markdown, title, authors, categories = _Arxiv.convert_xml_to_markdown(xml_content)
 
         keywords = f"arxiv,{','.join(categories)}"
         if additional_keywords:
@@ -211,7 +209,7 @@ def process_and_ingest_arxiv_paper(paper_id, additional_keywords):
             client_id="research_ingest",
             initialize=False,
         ) as db_instance:
-            get_media_repository(db_instance).add_media_with_keywords(
+            _api.get_media_repository(db_instance).add_media_with_keywords(
                 url=f"https://arxiv.org/abs/{paper_id}",
                 title=title,
                 media_type='document',
@@ -262,7 +260,7 @@ async def semantic_scholar_search_endpoint(
         # Call the modified search function from your library
         api_response_data, error_message = await loop.run_in_executor(
             None,
-            search_papers_semantic_scholar,  # Use the renamed function
+            _Semantic_Scholar.search_papers_semantic_scholar,  # Use the renamed function
             search_params.query,
             offset,
             search_params.results_per_page,
@@ -355,6 +353,9 @@ async def semantic_scholar_search_endpoint(
 # Web Search Endpoint
 
 from typing import Union
+import tldw_Server_API.app.core.DB_Management.media_db.api as _api
+import tldw_Server_API.app.core.Third_Party.Arxiv as _Arxiv
+import tldw_Server_API.app.core.Third_Party.Semantic_Scholar as _Semantic_Scholar
 
 
 @router.post(
@@ -418,11 +419,10 @@ async def websearch_endpoint(
         # Run potentially blocking provider calls off the event loop
         # Use an explicit ThreadPoolExecutor for stable thread naming expected by tests
         loop = asyncio.get_running_loop()
+        _llm_state = capture_llm_call_state()
         phase1 = await loop.run_in_executor(
             _get_websearch_executor(),
-            generate_and_search,
-            payload.query,
-            search_params,
+            lambda: run_with_llm_call_state(_llm_state, generate_and_search, payload.query, search_params),
         )
 
         phase1_fatal_error = _get_phase1_fatal_error(phase1)

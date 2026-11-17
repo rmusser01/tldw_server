@@ -54,6 +54,25 @@ class AuthnzAdminMonitoringRepo:
             from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
                 ensure_admin_monitoring_tables_pg,
             )
+            from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+                POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
+            )
+
+            async with self.db_pool.transaction() as conn:
+                if not await conn.fetchval(POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL):
+                    # Serving roles use owner-provisioned tables without replaying CREATE INDEX.
+                    for query in (
+                        "SELECT id, metric, operator, threshold, duration_minutes, severity, enabled, "
+                        "created_by_user_id, updated_by_user_id, created_at, updated_at "
+                        "FROM public.admin_alert_rules LIMIT 0",
+                        "SELECT alert_identity, assigned_to_user_id, snoozed_until, escalated_severity, "
+                        "acknowledged_at, dismissed_at, updated_by_user_id, updated_at "
+                        "FROM public.admin_alert_state LIMIT 0",
+                        "SELECT id, alert_identity, action, actor_user_id, details_json, created_at "
+                        "FROM public.admin_alert_events LIMIT 0",
+                    ):
+                        await conn.fetch(query)
+                    return
 
             ensured = await ensure_admin_monitoring_tables_pg(self.db_pool)
             if not ensured:

@@ -24,7 +24,10 @@ const mocks = vi.hoisted(() => ({
   showUndoNotification: vi.fn(),
   setChatMode: vi.fn(),
   setSelectedKnowledge: vi.fn(),
-  setRagMediaIds: vi.fn()
+  setRagMediaIds: vi.fn(),
+  // Row-destined ResultsList props captured on every render by the ResultsList
+  // mock below, so tests can assert referential stability (WP-11 row memo).
+  resultsListProps: [] as Array<Record<string, unknown>>
 }))
 
 vi.mock('react-i18next', () => ({
@@ -264,21 +267,35 @@ vi.mock('@/components/Media/MediaSectionNavigator', () => ({
 }))
 
 vi.mock('@/components/Media/ResultsList', () => ({
-  ResultsList: ({ results, selectedId, onSelect }: any) => (
-    <div data-testid="results-list">
-      {results.map((result: any) => (
-        <button
-          key={String(result.id)}
-          type="button"
-          data-testid={`result-${String(result.id)}`}
-          aria-pressed={selectedId === result.id}
-          onClick={() => onSelect(result.id)}
-        >
-          {result.title}
-        </button>
-      ))}
-    </div>
-  )
+  ResultsList: (props: any) => {
+    mocks.resultsListProps.push({
+      results: props.results,
+      searchQuery: props.searchQuery,
+      selectionMode: props.selectionMode,
+      selectedIds: props.selectedIds,
+      onSelect: props.onSelect,
+      onToggleSelected: props.onToggleSelected,
+      favorites: props.favorites,
+      onToggleFavorite: props.onToggleFavorite,
+      readingProgress: props.readingProgress
+    })
+    const { results, selectedId, onSelect } = props
+    return (
+      <div data-testid="results-list">
+        {results.map((result: any) => (
+          <button
+            key={String(result.id)}
+            type="button"
+            data-testid={`result-${String(result.id)}`}
+            aria-pressed={selectedId === result.id}
+            onClick={() => onSelect(result.id)}
+          >
+            {result.title}
+          </button>
+        ))}
+      </div>
+    )
+  }
 }))
 
 vi.mock('@/components/Media/ContentViewer', () => ({
@@ -449,6 +466,48 @@ describe('ViewMediaPage stage 12 performance guardrails', () => {
     expect(mocks.refetch).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps ResultsList row props referentially stable across parent re-renders (WP-11)', async () => {
+    renderMediaPage('/media')
+
+    // Let the mounted page settle (initial refetch resolves, rows render)
+    // before snapshotting, so async hydration doesn't race the comparison.
+    await waitFor(() => {
+      expect(mocks.refetch.mock.calls.length).toBeGreaterThan(0)
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('result-1')).toBeInTheDocument()
+    })
+    await act(async () => {})
+
+    const latestProps = () =>
+      mocks.resultsListProps[mocks.resultsListProps.length - 1]
+    const before = latestProps()
+    expect(before).toBeTruthy()
+
+    // Search typing is the hot parent re-render path (every keystroke).
+    fireEvent.change(screen.getByTestId('search-bar'), {
+      target: { value: 'stable' }
+    })
+
+    await waitFor(() => {
+      expect(latestProps()?.searchQuery).toBe('stable')
+    })
+    const after = latestProps()
+
+    // The parent really re-rendered (query text changed), yet every
+    // row-destined prop kept its identity, so the memoized ResultRow
+    // children are skipped instead of re-rendered.
+    expect(before.searchQuery).not.toBe('stable')
+    expect(after.results).toBe(before.results)
+    expect(after.onSelect).toBe(before.onSelect)
+    expect(after.selectedIds).toBe(before.selectedIds)
+    expect(after.onToggleSelected).toBe(before.onToggleSelected)
+    expect(after.selectionMode).toBe(before.selectionMode)
+    expect(after.favorites).toBe(before.favorites)
+    expect(after.onToggleFavorite).toBe(before.onToggleFavorite)
+    expect(after.readingProgress).toBe(before.readingProgress)
+  })
+
   it('keeps explicit pagination changes instead of snapping back to page 1', async () => {
     renderMediaPage('/media')
 
@@ -563,31 +622,20 @@ describe('ViewMediaPage stage 12 performance guardrails', () => {
     })
   })
 
-  it('ignores the legacy unscoped media type cache and uses the live listing', async () => {
+  it('ignores the legacy unscoped media type cache', async () => {
     // 645e58c6a7 retired this cache: it has no account provenance, so hydrating from it
     // could show one account the previous account's media types. A fresh legacy entry
-    // must now be ignored in favour of the current account's live listing.
-    window.localStorage.setItem(
-      MEDIA_TYPES_CACHE_KEY,
-      JSON.stringify({
-        types: ['pdf', 'video'],
-        cachedAt: Date.now()
-      })
-    )
-
-    let resolveSampling: ((value: any) => void) | null = null
-    const samplingPromise = new Promise((resolve) => {
-      resolveSampling = resolve
+    // must stay ignored; known media types come only from the current account's live
+    // search responses (WP-43; response-derived facets are pinned at hook level in
+    // useMediaSearch.mount-cost.test.tsx, since this file mocks the search query).
+    const legacy = JSON.stringify({
+      types: ['pdf', 'video'],
+      cachedAt: Date.now()
     })
+    window.localStorage.setItem(MEDIA_TYPES_CACHE_KEY, legacy)
 
     mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
       const path = String(request?.path || '')
-      if (path === '/api/v1/media/?page=1&results_per_page=50') {
-        return samplingPromise
-      }
-      if (path.startsWith('/api/v1/media/?page=')) {
-        return { items: [], pagination: { total_pages: 1, total_items: 0 } }
-      }
       if (path.startsWith('/api/v1/media/keywords')) {
         return { keywords: [] }
       }
@@ -608,36 +656,21 @@ describe('ViewMediaPage stage 12 performance guardrails', () => {
 
     renderMediaPage('/media')
 
-    // Before the live listing resolves, the legacy cache must not have been hydrated.
     const mediaTypes = await screen.findByTestId('filter-panel-media-types')
+    await act(async () => {})
     expect(mediaTypes).not.toHaveTextContent('pdf')
     expect(mediaTypes).not.toHaveTextContent('video')
-
-    await act(async () => {
-      resolveSampling?.({
-        items: [{ id: 20, title: 'Clip 20', type: 'audio' }],
-        pagination: { total_pages: 1, total_items: 1 }
-      })
-    })
-
-    await waitFor(() => {
-      expect(screen.getByTestId('filter-panel-media-types')).toHaveTextContent('audio')
-    })
-    expect(screen.getByTestId('filter-panel-media-types')).not.toHaveTextContent('pdf')
+    expect(window.localStorage.getItem(MEDIA_TYPES_CACHE_KEY)).toBe(legacy)
   })
 
-  it('falls back to sampled media types when no fresh cache is available', async () => {
+  it('mounts without media type discovery page requests (WP-43)', async () => {
+    // The retired discovery pass fetched /api/v1/media/ pages 1-3 at
+    // results_per_page=50 on every mount just to enumerate media types.
+    // Facets now ride along with the search itself, so no listing-style
+    // /api/v1/media/?page= request may leave the page on mount (the search
+    // itself is mocked at the react-query layer in this harness).
     mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
       const path = String(request?.path || '')
-      if (path === '/api/v1/media/?page=1&results_per_page=50') {
-        return {
-          items: [{ id: 10, title: 'Doc 10', type: 'pdf' }],
-          pagination: { total_pages: 1, total_items: 1 }
-        }
-      }
-      if (path.startsWith('/api/v1/media/?page=')) {
-        return { items: [], pagination: { total_pages: 1, total_items: 0 } }
-      }
       if (path.startsWith('/api/v1/media/keywords')) {
         return { keywords: [] }
       }
@@ -658,9 +691,12 @@ describe('ViewMediaPage stage 12 performance guardrails', () => {
 
     renderMediaPage('/media')
 
-    await waitFor(() => {
-      expect(screen.getByTestId('filter-panel-media-types')).toHaveTextContent('pdf')
-    })
+    await screen.findByTestId('filter-panel-media-types')
+    await act(async () => {})
+    const listingRequests = mocks.bgRequest.mock.calls.filter(([request]) =>
+      String((request as { path?: string } | undefined)?.path || '').startsWith('/api/v1/media/?page=')
+    )
+    expect(listingRequests).toHaveLength(0)
   })
 
   it('hydrates initial keyword suggestions from loaded results before trying the keyword endpoint', async () => {

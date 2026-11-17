@@ -12,6 +12,7 @@ interface MediaBulkToolbarSelection {
   bulkKeywordsDraft: string
   setBulkKeywordsDraft: (value: string) => void
   handleBulkAddKeywords: () => Promise<void> | void
+  handleBulkRemoveKeywords: () => Promise<void> | void
   handleBulkDelete: () => Promise<MediaBulkTrashRecovery | void> | void
   collectionDraftName: string
   setCollectionDraftName: (value: string) => void
@@ -124,6 +125,16 @@ export function MediaBulkToolbar({ selection, t, deleteDisabledReason }: MediaBu
         >
           <Tags className="h-3.5 w-3.5" />
           {t('review:mediaPage.bulkAddKeywords', { defaultValue: 'Add tags' })}
+        </button>
+        <button
+          type="button"
+          onClick={() => void selection.handleBulkRemoveKeywords()}
+          disabled={selection.bulkSelectedItems.length === 0}
+          className="inline-flex min-h-[44px] md:min-h-8 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+          data-testid="media-bulk-remove-tag"
+        >
+          <Tags className="h-3.5 w-3.5" />
+          {t('review:mediaPage.bulkRemoveKeywords', { defaultValue: 'Remove tags' })}
         </button>
       </div>
 

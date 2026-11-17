@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import unicodedata
 from collections import defaultdict, deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -15,12 +14,15 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
-from tldw_Server_API.app.core.Sync.v2.models import SyncDomain, SyncOperation
-from tldw_Server_API.app.core.Sync.v2.notes_organization import (
+from tldw_Server_API.app.core.Sync_Contracts.models import SyncDomain, SyncOperation
+from tldw_Server_API.app.core.Sync_Contracts.notes_organization import (
     NotesOrganizationValidationError,
     organization_link_id,
     parse_notes_organization_payload,
     validate_organization_object_id,
+)
+from tldw_Server_API.app.core.Utils.keyword_identity import (
+    normalize_keyword_identity as _normalize_keyword_identity,
 )
 
 if TYPE_CHECKING:
@@ -163,7 +165,7 @@ class NotesOrganizationSyncStore:
     def normalize_keyword_identity(display: str) -> str:
         """Return the portable keyword identity used by every database backend."""
 
-        return unicodedata.normalize("NFC", display.strip()).casefold()
+        return _normalize_keyword_identity(display)
 
     def _serialize_keyword_identity(self, conn: Any, normalized_identity: str) -> None:
         if self._db.backend_type != BackendType.POSTGRESQL:

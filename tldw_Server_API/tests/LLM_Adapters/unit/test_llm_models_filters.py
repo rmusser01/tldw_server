@@ -1,6 +1,16 @@
 import configparser
 
+import pytest
+
 from tldw_Server_API.app.core.exceptions import EgressPolicyError
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+
+@pytest.fixture(autouse=True)
+def inventory_endpoint_for_filter_fixtures(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import llm_providers
+
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.resolve_provider_models_base_url", lambda *args, **kwargs: "https://fixture.example.invalid/v1")
 
 
 def _fake_config():
@@ -33,11 +43,11 @@ def _fake_config_openrouter_mixed():
 def _patch_llm_providers(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_providers
 
-    monkeypatch.setattr(llm_providers, "load_comprehensive_config", _fake_config)
-    monkeypatch.setattr(llm_providers, "list_provider_models", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)
-    monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {})
-    monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", _fake_image_models)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("gpt-4o-mini", "text-embedding-3-small")))
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.apply_llm_provider_overrides_to_listing", lambda result: result)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Image_Generation.listing.list_image_models_for_catalog", _fake_image_models)
 
 
 def _fake_image_models():
@@ -107,11 +117,11 @@ def test_llm_models_metadata_handles_local_discovery_policy_errors(monkeypatch, 
         calls["count"] += 1
         raise EgressPolicyError("Port not allowed: 8080")
 
-    monkeypatch.setattr(llm_providers, "load_comprehensive_config", _fake_config_with_local_discovery)
-    monkeypatch.setattr(llm_providers, "list_provider_models", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)
-    monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {})
-    monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", _fake_image_models)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config_with_local_discovery)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("gpt-4o-mini",)))
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.apply_llm_provider_overrides_to_listing", lambda result: result)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Image_Generation.listing.list_image_models_for_catalog", _fake_image_models)
     monkeypatch.setattr(llm_providers, "_http_fetch", _raise_egress_policy)
     monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "*")
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
@@ -127,15 +137,15 @@ def test_llm_models_metadata_handles_local_discovery_policy_errors(monkeypatch, 
     assert calls["count"] > 0
 
 
-def test_llm_models_metadata_includes_curated_qwen_models(monkeypatch, client_user_only):
+def test_llm_models_metadata_includes_provider_reported_qwen_models(monkeypatch, client_user_only):
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_providers
 
     _patch_llm_providers(monkeypatch)
     monkeypatch.setattr(
-        llm_providers,
-        "list_provider_models",
-        lambda provider: ["qwen-max", "qwen-plus", "qwen-turbo"] if provider == "qwen" else [],
+        "tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models",
+        lambda provider, *_args, **_kwargs: ModelDiscoveryResult("ready", ("qwen-max", "qwen-plus", "qwen-turbo") if provider == "qwen" else ("gpt-4o-mini",)),
     )
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {"qwen": "synthetic-qwen-key"})
 
     client = client_user_only
     response = client.get("/api/v1/llm/models/metadata")
@@ -150,22 +160,21 @@ def test_llm_models_metadata_includes_curated_qwen_models(monkeypatch, client_us
     assert ("qwen", "qwen-turbo") in provider_and_name
 
 
-def test_llm_models_metadata_marks_unconfigured_provider_catalog_models(
+def test_llm_models_metadata_omits_unconfigured_provider_models(
     monkeypatch, client_user_only
 ):
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_providers
 
     _patch_llm_providers(monkeypatch)
     monkeypatch.setattr(
-        llm_providers,
-        "list_provider_models",
-        lambda provider: (
+        "tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models",
+        lambda provider, *_args, **_kwargs: ModelDiscoveryResult("ready", tuple(
             ["qwen-max"]
             if provider == "qwen"
             else ["gpt-4o-mini"]
             if provider == "openai"
             else []
-        ),
+        )),
     )
 
     client = client_user_only
@@ -181,28 +190,25 @@ def test_llm_models_metadata_marks_unconfigured_provider_catalog_models(
     assert models[("openai", "gpt-4o-mini")]["is_configured"] is True
     assert models[("openai", "gpt-4o-mini")]["provider_is_configured"] is True
     assert models[("openai", "gpt-4o-mini")]["catalog_only"] is False
-    assert models[("qwen", "qwen-max")]["is_configured"] is False
-    assert models[("qwen", "qwen-max")]["provider_is_configured"] is False
-    assert models[("qwen", "qwen-max")]["catalog_only"] is True
+    assert not any(provider == "qwen" for provider, _name in models)
 
 
 def test_llm_models_filter_type_openrouter_image_hints(monkeypatch, client_user_only):
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_providers
 
-    monkeypatch.setattr(llm_providers, "load_comprehensive_config", _fake_config_openrouter_mixed)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config_openrouter_mixed)
     monkeypatch.setattr(
-        llm_providers,
-        "list_provider_models",
-        lambda provider: (
+        "tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models",
+        lambda provider, *_args, **_kwargs: ModelDiscoveryResult("ready", tuple(
             ["black-forest-labs/flux.1-schnell", "openai/gpt-4o-mini"]
             if provider == "openrouter"
             else []
-        ),
+        )),
     )
-    monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)
-    monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {"openrouter": "sk-or-test"})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.apply_llm_provider_overrides_to_listing", lambda result: result)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {"openrouter": "sk-or-test"})
     monkeypatch.setattr(llm_providers, "discover_openrouter_models", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", lambda: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.Image_Generation.listing.list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(
         llm_providers,
         "_resolve_model_tokenizer_support",
@@ -230,3 +236,40 @@ def test_llm_models_filter_type_openrouter_image_hints(monkeypatch, client_user_
     image_models = set(image_resp.json())
     assert "openrouter/black-forest-labs/flux.1-schnell" in image_models
     assert "openrouter/openai/gpt-4o-mini" not in image_models
+
+
+def test_llm_models_metadata_lists_optional_sampling_fields_per_provider(monkeypatch, client_user_only):
+    """#3283: the chat UI sends Top K and Min P only to providers that accept them."""
+    _patch_llm_providers(monkeypatch)
+
+    payload = client_user_only.get("/api/v1/llm/models/metadata").json()
+    by_name = {model.get("name"): model for model in payload.get("models", [])}
+
+    # OpenAI rejects top_k and min_p (capability_registry.validate_payload).
+    assert by_name["gpt-4o-mini"]["sampling_fields"] == []
+    # Image backends take no chat sampling settings.
+    assert "sampling_fields" not in by_name["stable_diffusion_cpp"]
+
+
+def test_llm_models_metadata_lists_top_k_and_min_p_for_openrouter(monkeypatch, client_user_only):
+    import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_providers
+
+    _patch_llm_providers(monkeypatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config_openrouter_mixed)
+
+    payload = client_user_only.get("/api/v1/llm/models/metadata").json()
+    openrouter = [model for model in payload.get("models", []) if model.get("provider") == "openrouter"]
+
+    assert openrouter
+    assert all(model["sampling_fields"] == ["top_k", "min_p"] for model in openrouter)
+
+
+def test_optional_sampling_fields_normalize_catalog_provider_names():
+    """Catalog names such as "llama" and "tabby" map to their registry keys first."""
+    from tldw_Server_API.app.api.v1.endpoints.llm_providers import _optional_sampling_fields
+
+    assert _optional_sampling_fields("llama") == ["top_k", "min_p"]
+    assert _optional_sampling_fields("tabby") == ["top_k", "min_p"]
+    assert _optional_sampling_fields("ollama") == ["top_k"]
+    assert _optional_sampling_fields("openai") == []
+    assert _optional_sampling_fields(None) == []

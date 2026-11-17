@@ -365,6 +365,10 @@ async def test_get_storage_quota_failure_log_is_sanitized(monkeypatch):
         async def calculate_user_storage(self, user_id: int, update_database: bool):  # noqa: ARG002
             raise RuntimeError("quota backend exploded at /private/quota.db")
 
+        async def user_quota_status(self, user_id: int):
+            assert user_id == 7
+            return {"quota_mb": 2000, "used_mb": 400}
+
     async def _fake_require_principal_active_verified(_principal):
         return {
             "id": 7,
@@ -383,9 +387,9 @@ async def test_get_storage_quota_failure_log_is_sanitized(monkeypatch):
     )
 
     assert response.user_id == 7
-    assert response.storage_quota_mb == 1000
-    assert response.storage_used_mb == 250
-    assert response.available_mb == 750
+    assert response.storage_quota_mb == 2000
+    assert response.storage_used_mb == 400
+    assert response.available_mb == 1600
     assert logger_stub.errors == ["Failed to get storage quota"]
     assert "quota backend exploded" not in str(logger_stub.errors)
     assert "/private/quota.db" not in str(logger_stub.errors)

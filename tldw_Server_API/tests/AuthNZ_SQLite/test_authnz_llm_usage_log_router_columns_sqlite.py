@@ -6,8 +6,8 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_llm_usage_log_has_router_analytics_columns_sqlite(tmp_path, monkeypatch):
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_llm_usage_log_has_router_analytics_columns_sqlite(tmp_path, monkeypatch, fresh_services):
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -16,7 +16,6 @@ async def test_llm_usage_log_has_router_analytics_columns_sqlite(tmp_path, monke
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))

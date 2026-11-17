@@ -148,18 +148,22 @@ vi.mock('@plasmohq/storage/hook', () => ({
   useStorage: () => [true, mocks.setHelpDismissed, { isLoading: false }]
 }))
 
-vi.mock('@/hooks/useSetting', () => {
-  const React = require('react') as typeof import('react')
+vi.mock("@/hooks/useSetting", async () => {
+  const React = await import("react");
   return {
     useSetting: (setting: { key: string; defaultValue: unknown }) => {
-      const [value, setValue] = React.useState(setting.defaultValue)
+      const [value, setValue] = React.useState(setting.defaultValue);
       const setter = async (next: unknown | ((prev: unknown) => unknown)) => {
-        setValue((prev: unknown) => (typeof next === 'function' ? (next as (prev: unknown) => unknown)(prev) : next))
-      }
-      return [value, setter, { isLoading: false }] as const
-    }
-  }
-})
+        setValue((prev: unknown) =>
+          typeof next === "function"
+            ? (next as (prev: unknown) => unknown)(prev)
+            : next,
+        );
+      };
+      return [value, setter, { isLoading: false }] as const;
+    },
+  };
+});
 
 vi.mock('@/services/settings/registry', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/settings/registry')>()
@@ -555,7 +559,21 @@ describe('MediaReviewPage active reading context', () => {
     expect(new URL(mocks.navigate.mock.calls.at(-1)![0], "https://local.test").searchParams.get("media_ids")).toBe(selected.map(item => item.id).join(","))
     fireEvent.click(within(toolbar).getByRole("button", { name: "Research with selected sources" }))
     await waitFor(() => expect(mocks.queuePrefill).toHaveBeenCalledOnce())
-    expect(mocks.queuePrefill.mock.calls[0][0].sources.map((source: any) => ({ mediaId: source.mediaId, title: source.title, type: source.type }))).toEqual(selected.map(item => ({ mediaId: item.id, title: item.title, type: item.type })))
+    expect(
+      mocks.queuePrefill.mock.calls[0][0].sources.map(
+        (source: { mediaId: number; title: string; type: string }) => ({
+          mediaId: source.mediaId,
+          title: source.title,
+          type: source.type,
+        }),
+      ),
+    ).toEqual(
+      selected.map((item) => ({
+        mediaId: item.id,
+        title: item.title,
+        type: item.type,
+      })),
+    );
     expect(mocks.bgRequest.mock.calls.filter(([r]) => /media\/\d+\?/.test(String(r.path)))).toHaveLength(0)
   })
 
@@ -769,7 +787,7 @@ describe('MediaReviewPage active reading context', () => {
       id: 99, title: 'Example Domain', type: 'html'
     })
     act(() => result.current.state.setSelectedIds([99]))
-    await act(async () => { await result.current.actions.handleBatchExport('json') })
+    await act(async () => { await result.current.actions.handleBatchExport() })
     const blob = mocks.downloadBlob.mock.calls[0][0] as Blob
     const exported = JSON.parse(await new Promise<string>(resolve => {
       const reader = new FileReader()
@@ -855,16 +873,19 @@ describe('MediaReviewPage active reading context', () => {
     expect(screen.getByText('Item 4 of 40')).toBeInTheDocument()
   })
 
-  it("keeps the footer aligned with preview, selected reading, the next window and restored preview", async () => {
+  it.each(["button", "shortcut"])("keeps the footer aligned through selected reading and restored preview (%s)", async (selection) => {
     render(<MediaReviewPage />)
     fireEvent.click(getResultRowByTitle("Item 3"))
     await screen.findByText("Content 3")
     const footer = screen.getByTestId("media-review-status-bar")
     expect(footer).toHaveTextContent("Previewing 3 of 40")
-    fireEvent.click(
-      screen.getByRole("button", { name: "Add visible to selection (40)" })
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Review selected (40)" }))
+    if (selection === "button") {
+      fireEvent.click(screen.getByRole("button", { name: "Add visible to selection (40)" }))
+    } else {
+      fireEvent.keyDown(document.body, { key: "a", ctrlKey: true })
+    }
+    fireEvent.click(within(screen.getByTestId("media-review-selection-count").parentElement!)
+      .getByRole("button", { name: "Review selected (40)" }))
     await waitFor(() =>
       expect(
         screen.getByTestId("media-review-reading-context")
@@ -1041,6 +1062,8 @@ describe('MediaReviewPage active reading context', () => {
           .mockResolvedValue("retained-token")
         const mutations = new Map<string, ReturnType<typeof vi.fn>>()
         const scroll = vi.fn()
+        const card = document.createElement("div")
+        card.scrollIntoView = scroll
         const { result, rerender } = renderHook(() => {
           const state = useMediaReviewState(React.useRef(null))
           const guardedState = {
@@ -1049,7 +1072,7 @@ describe('MediaReviewPage active reading context', () => {
             allResults: mediaItems,
             visibleIds: [7, 8],
             viewerItems: [{ id: 7 }],
-            cardRefs: { current: { "7": { scrollIntoView: scroll } } }
+            cardRefs: { current: { "7": card } }
           } as typeof state
           for (const key of Object.keys(state).filter((key) =>
             key.startsWith("set")

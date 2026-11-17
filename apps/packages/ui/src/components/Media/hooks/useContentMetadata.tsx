@@ -60,7 +60,7 @@ export const normalizeVectorProcessingStatus = (value: unknown): string | null =
   if (typeof value === 'number' && Number.isFinite(value)) {
     if (value >= 1) return 'completed'
     if (value < 0) return 'failed'
-    return 'pending'
+    return 'not_indexed'
   }
   if (typeof value === 'string' && value.trim().length > 0) {
     const lowered = value.trim().toLowerCase()
@@ -70,7 +70,8 @@ export const normalizeVectorProcessingStatus = (value: unknown): string | null =
     if (['-1', 'false', 'failed', 'error'].includes(lowered)) {
       return 'failed'
     }
-    if (['0', 'pending', 'queued', 'in_progress', 'in-progress'].includes(lowered)) {
+    if (lowered === '0') return 'not_indexed'
+    if (['pending', 'queued', 'in_progress', 'in-progress'].includes(lowered)) {
       return 'pending'
     }
     return lowered

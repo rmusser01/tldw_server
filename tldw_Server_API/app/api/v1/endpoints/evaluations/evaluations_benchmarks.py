@@ -10,12 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, Field
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota_on_own_key
 
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
-from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
-from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
 from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
 from tldw_Server_API.app.core.Evaluations.identity import EvaluationIdentity
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 
 from .evaluations_auth import (
     check_evaluation_rate_limit,
@@ -25,12 +25,15 @@ from .evaluations_auth import (
     sanitize_error_message,
     verify_api_key,
 )
+import tldw_Server_API.app.core.Evaluations.benchmark_loaders as _benchmark_loaders
+import tldw_Server_API.app.core.Evaluations.benchmark_registry as _benchmark_registry
+import tldw_Server_API.app.core.Evaluations.evaluation_manager as _evaluation_manager
 
 benchmarks_router = APIRouter()
 
 
 def _get_evaluation_manager_for_user(identity: EvaluationIdentity) -> EvaluationManager:
-    return EvaluationManager(user_id=identity.user_scope)
+    return _evaluation_manager.EvaluationManager(user_id=identity.user_scope)
 
 
 class BenchmarkRunRequest(BaseModel):
@@ -60,7 +63,7 @@ async def list_benchmarks(
     current_user: User = Depends(get_eval_request_user),
 ):
     _ = user_id, current_user
-    registry = get_registry()
+    registry = _benchmark_registry.get_registry()
     data: list[dict[str, Any]] = []
     for name in registry.list_benchmarks():
         info = registry.get_benchmark_info(name)
@@ -79,7 +82,7 @@ async def get_benchmark_info(
     current_user: User = Depends(get_eval_request_user),
 ):
     _ = user_id, current_user
-    registry = get_registry()
+    registry = _benchmark_registry.get_registry()
     config = registry.get(benchmark_name)
     if not config:
         raise HTTPException(
@@ -103,11 +106,14 @@ async def run_benchmark(
     user_id: str = Depends(verify_api_key),
     current_user: User = Depends(get_eval_request_user),
 ):
+    # Usage quotas (LLM usage accounting spec §4a): every item is an LLM call, so the run is
+    # checked here, before the dataset loads, and then runs to completion; on the user's own key, if any.
+    own_key = await enforce_llm_quota_on_own_key(getattr(current_user, "id", None), canonical_provider_name(request.api_name))
     try:
         identity = get_evaluation_identity(current_user)
         evaluation_manager = _get_evaluation_manager_for_user(identity)
         stable_user_id = identity.created_by
-        registry = get_registry()
+        registry = _benchmark_registry.get_registry()
         config = registry.get(benchmark_name)
         if not config:
             raise HTTPException(
@@ -124,7 +130,7 @@ async def run_benchmark(
 
         # Do not force config.dataset_source globally; benchmark-specific loaders
         # decide whether to use packaged defaults or an explicit source.
-        dataset = load_benchmark_dataset(benchmark_name, limit=request.limit)
+        dataset = _benchmark_loaders.load_benchmark_dataset(benchmark_name, limit=request.limit)
         if not dataset:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -158,6 +164,7 @@ async def run_benchmark(
                     input_data=eval_data["input_data"],
                     scoring_criteria=eval_data["scoring_criteria"],
                     api_name=request.api_name,
+                    provider_credentials=own_key,
                 )
                 tasks.append(task)
 
@@ -175,13 +182,17 @@ async def run_benchmark(
                         }
                     )
 
-        successful_results = [r for r in results if "error" not in r]
+        # An item with no score (its model or judge call failed, or the reply held none) is neither successful
+        # nor failed: it is unscored, outside every average (owner, 2026-11-10).
+        successful_results = [r for r in results if "error" not in r and r["score"] is not None]
+        failed = sum("error" in r for r in results)
         scores = [float(r.get("score", 0.0)) for r in successful_results]
 
         summary: dict[str, Any] = {
             "total_evaluated": len(results),
             "successful": len(successful_results),
-            "failed": len(results) - len(successful_results),
+            "failed": failed,
+            "unscored": len(results) - len(successful_results) - failed,
             "average_score": (sum(scores) / len(scores)) if scores else 0.0,
             "min_score": min(scores) if scores else 0.0,
             "max_score": max(scores) if scores else 0.0,

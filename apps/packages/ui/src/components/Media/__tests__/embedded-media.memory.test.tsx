@@ -52,7 +52,7 @@ it('unloads a detached preview player before its ref is cleared', async () => {
 
 it('bounds preview requests and aborts retired downloads without creating late URLs', async () => {
   const requests: { init: BgRequestInit; resolve: (value: ArrayBuffer) => void }[] = []
-  vi.mocked(bgRequest).mockImplementation(
+  vi.mocked(bgRequest<ArrayBuffer>).mockImplementation(
     (init) => new Promise((resolve) => requests.push({ init, resolve }))
   )
   const createUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview')

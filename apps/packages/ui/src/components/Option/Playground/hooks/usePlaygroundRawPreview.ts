@@ -2,6 +2,7 @@ import React from "react"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import {
   captureChatRequestDebugSnapshot,
+  setChatRequestDebugEnabled,
   type ChatRequestDebugSnapshot,
   type ChatToolRequestDebugMetadata
 } from "@/services/tldw/chat-request-debug"
@@ -624,8 +625,19 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     setToolsPopoverOpen(false)
     setRawRequestSnapshot(null)
     setRawRequestModalOpen(true)
+    // WP-22: the debug snapshot pipeline is disabled by default; opening the
+    // raw-request preview is the user-facing opt-in that re-enables it.
+    setChatRequestDebugEnabled(true)
     void refreshRawRequestSnapshot()
   }, [refreshRawRequestSnapshot, setToolsPopoverOpen])
+
+  const closeRawRequestModal = React.useCallback(() => {
+    setRawRequestModalOpen(false)
+    // WP-22 round 1: the opt-in holds only while the preview is open. Closing
+    // the modal disables the pipeline again so later chat requests keep no
+    // debug snapshot (page-lifetime retention otherwise).
+    setChatRequestDebugEnabled(false)
+  }, [])
 
   const copyRawRequestJson = React.useCallback(async () => {
     if (!rawRequestJson) return
@@ -657,6 +669,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     rolePlayCompatibility,
     refreshRawRequestSnapshot,
     openRawRequestModal,
+    closeRawRequestModal,
     copyRawRequestJson
   }
 }

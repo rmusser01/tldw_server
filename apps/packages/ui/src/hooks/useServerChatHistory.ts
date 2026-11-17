@@ -106,10 +106,12 @@ export const filterServerChatHistoryItems = (
 
 export const deriveServerChatHistoryViewState = ({
   previousData,
+  total,
   error
 }: {
-  previousData: ServerChatHistoryItem[]
-  error: unknown
+  total: number;
+  previousData: ServerChatHistoryItem[];
+  error: unknown;
 }): {
   data: ServerChatHistoryItem[]
   total: number
@@ -118,7 +120,7 @@ export const deriveServerChatHistoryViewState = ({
   isShowingStaleData: boolean
 } => ({
   data: previousData,
-  total: previousData.length,
+  total,
   sidebarRefreshState: "recoverable-error",
   hasUsableData: previousData.length > 0,
   isShowingStaleData: previousData.length > 0
@@ -186,6 +188,7 @@ type UseServerChatHistoryOptions = {
     isCurrent: () => boolean
   }
   enabled?: boolean
+  characterId?: number
   includeDeleted?: boolean
   deletedOnly?: boolean
   scope?: ChatScope
@@ -235,6 +238,7 @@ export const useServerChatHistory = (
   const ownerCurrent = !owner || owner.isCurrent()
   const filterMode = options?.filterMode ?? (deletedOnly ? "trash" : "all")
   const characterScope = getCharacterScopeForFilterMode(filterMode)
+  const characterId = options?.characterId
   const overviewPage = Math.max(1, Math.trunc(options?.page ?? 1))
   const overviewLimit = Math.max(
     1,
@@ -287,6 +291,7 @@ export const useServerChatHistory = (
             : overviewLimit
           : null,
         filterMode,
+        ...(characterId != null ? { characterId } : {}),
         ...(owner ? { ownerKey: owner.key } : {}),
         scope
       }
@@ -310,7 +315,8 @@ export const useServerChatHistory = (
               order_by: "recency",
               ...(includeDeleted || deletedOnly ? { include_deleted: true } : {}),
               ...(deletedOnly ? { deleted_only: true } : {}),
-              ...(characterScope ? { character_scope: characterScope } : {})
+              ...(characterScope ? { character_scope: characterScope } : {}),
+              ...(characterId != null ? { character_id: characterId } : {})
             },
             { signal, scope, ...(owner ? { requestScope: owner.requestScope } : {}) }
           )
@@ -330,6 +336,7 @@ export const useServerChatHistory = (
               ordering: "-updated_at",
               include_message_counts: false,
               ...(characterScope ? { character_scope: characterScope } : {}),
+              ...(characterId != null ? { character_id: characterId } : {}),
               ...(includeDeleted ? { include_deleted: true } : {}),
               ...(deletedOnly ? { deleted_only: true } : {})
             },
@@ -351,6 +358,7 @@ export const useServerChatHistory = (
                 ordering: "-updated_at",
                 include_message_counts: false,
                 ...(characterScope ? { character_scope: characterScope } : {}),
+                ...(characterId != null ? { character_id: characterId } : {}),
                 ...(includeDeleted ? { include_deleted: true } : {}),
                 ...(deletedOnly ? { deleted_only: true } : {})
               },
@@ -383,7 +391,7 @@ export const useServerChatHistory = (
     },
     staleTime: 60_000,
     gcTime: 5 * 60_000,
-    refetchOnMount: false,
+    refetchOnMount: (cached) => cached.state.isInvalidated,
     retry: (failureCount, error) =>
       !isRecoverableServerChatHistoryError(error) && failureCount < 1
   })
@@ -418,6 +426,7 @@ export const useServerChatHistory = (
       if (isRecoverableServerChatHistoryError(query.error)) {
         return deriveServerChatHistoryViewState({
           previousData: filteredData,
+          total: resolvedTotal,
           error: query.error
         })
       }

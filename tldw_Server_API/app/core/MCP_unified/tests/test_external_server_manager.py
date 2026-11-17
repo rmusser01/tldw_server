@@ -635,8 +635,7 @@ async def test_reconcile_servers_waits_for_inflight_tool_execution_before_closin
     created: list[_FakeAdapter] = []
 
     async def _loader():
-        payload = payloads.pop(0) if len(payloads) > 1 else payloads[0]
-        return list(parse_external_server_registry(payload).servers)
+        return list(parse_external_server_registry(payloads[0]).servers)
 
     def _adapter_factory(server_cfg) -> _FakeAdapter:
         if not created:
@@ -664,6 +663,7 @@ async def test_reconcile_servers_waits_for_inflight_tool_execution_before_closin
             manager.execute_virtual_tool("ext.docs.docs.search", {"q": "active"})
         )
         await asyncio.wait_for(entered.wait(), timeout=2.0)
+        payloads.pop(0)  # Persist the changed config only after the old call is admitted.
 
         reconcile_task = asyncio.create_task(manager.reconcile_servers(server_id="docs"))
         await asyncio.sleep(0.05)

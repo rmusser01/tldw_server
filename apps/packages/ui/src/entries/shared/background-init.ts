@@ -1,6 +1,11 @@
 import type { Storage } from "@plasmohq/storage"
 import { browser } from "wxt/browser"
-import { getInitialConfig } from "@/services/action"
+import {
+  ACTION_ICON_CLICK_SETTING,
+  CONTEXT_MENU_CLICK_SETTING,
+  getInitialConfig
+} from "@/services/action"
+import { getStorageForSetting } from "@/services/settings/registry"
 import { getServerCapabilities } from "@/services/tldw/server-capabilities"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { resolveEffectiveTldwConfig } from "@/services/tldw/single-user-credential"
@@ -296,14 +301,16 @@ export const initBackground = async (
     sidePanel: browser.i18n.getMessage("openSidePanelToChat")
   }
 
-  storage.watch({
+  getStorageForSetting(ACTION_ICON_CLICK_SETTING).watch({
     actionIconClick: (value) => {
       const oldValue = value?.oldValue || "webui"
       const newValue = value?.newValue || "webui"
       if (oldValue !== newValue) {
         onActionIconClickChange(newValue)
       }
-    },
+    }
+  })
+  getStorageForSetting(CONTEXT_MENU_CLICK_SETTING).watch({
     contextMenuClick: (value) => {
       const oldValue = value?.oldValue || "sidePanel"
       const newValue = value?.newValue || "sidePanel"
@@ -316,15 +323,23 @@ export const initBackground = async (
           contexts: ["page", "selection"]
         })
       }
-    },
+    }
+  })
+  storage.watch({
     tldwConfig: (value) => {
       const nextUrl = getServerUrl(value?.newValue)
       const prevUrl = getServerUrl(value?.oldValue)
       const hasServer = nextUrl.length > 0
       void scheduleModelWarmAlarm(hasServer)
-      void syncWebClipperContextMenu(saveToClipperMenuId)
-      if (hasServer && nextUrl !== prevUrl) {
-        void warmModels(true)
+      // WP-62: the clipper context menu only depends on the connected
+      // server, so re-sync it (and re-warm models) only when the URL actually
+      // changed — unrelated config writes (e.g. credential refreshes) used to
+      // rebuild the menu and re-resolve capabilities on every write.
+      if (nextUrl !== prevUrl) {
+        void syncWebClipperContextMenu(saveToClipperMenuId)
+        if (hasServer) {
+          void warmModels(true)
+        }
       }
     }
   })

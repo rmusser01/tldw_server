@@ -282,7 +282,7 @@ export function useContentEditState(deps: UseContentEditStateDeps) {
         const endpoint =
           selectedMedia.kind === 'note'
             ? `/api/v1/notes/${selectedMedia.id}`
-            : `/api/v1/media/${selectedMedia.id}`
+            : `/api/v1/media/${selectedMedia.id}/keywords`
         const headers: Record<string, string> = { 'Content-Type': 'application/json' }
         if (selectedMedia.kind === 'note') {
           let expectedVersion = resolveNoteVersion(mediaDetail, selectedMedia.raw)
@@ -307,15 +307,19 @@ export function useContentEditState(deps: UseContentEditStateDeps) {
           headers['expected-version'] = String(expectedVersion)
         }
 
-        await bgRequest({
+        const updated = await bgRequest<{ keywords: string[] }>({
           path: endpoint as any,
-          method: 'PUT' as any,
+          method: (selectedMedia.kind === 'note' ? 'PUT' : 'PATCH') as any,
           headers,
-          body: { keywords: newKeywords }
+          body: selectedMedia.kind === 'note' ? { keywords: newKeywords } : { keywords: newKeywords, mode: 'set' }
         })
-        setEditingKeywords(newKeywords)
+        const savedKeywords = selectedMedia.kind === 'note' ? newKeywords : updated?.keywords
+        if (!Array.isArray(savedKeywords) || !savedKeywords.every(keyword => typeof keyword === 'string')) {
+          throw new Error('Invalid media keyword confirmation')
+        }
+        setEditingKeywords(savedKeywords)
         if (onKeywordsUpdated) {
-          onKeywordsUpdated(selectedMedia.id, newKeywords)
+          onKeywordsUpdated(selectedMedia.id, savedKeywords)
         }
         message.success(
           t('review:mediaPage.keywordsSaved', {

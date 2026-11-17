@@ -42,7 +42,7 @@ Modify:
 - `apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx` - accept source-review generate handoff fields for cloze/basic defaults if needed.
 - `apps/packages/ui/src/components/Quiz/QuizPlayground.tsx` - parse source-review quiz handoff and default to Generate tab.
 - `apps/packages/ui/src/components/Quiz/tabs/GenerateTab.tsx` - preselect supported media/note sources from source-review handoff and show snapshot summary.
-- `backlog/tasks/task-12932 - Add-source-grounded-spaced-repetition-review-schedules.md` - reference this plan and record verification.
+- `backlog/tasks/task-15105 - Add-source-grounded-spaced-repetition-review-schedules.md` - reference this plan and record verification.
 
 Do not create a root-level source-review API, a scheduler engine, external notifications, or automatic artifact generation.
 
@@ -601,7 +601,7 @@ git commit -m "feat: wire source review quiz handoff"
 ### Task 7: Final Verification And Task Record
 
 **Files:**
-- Modify: `backlog/tasks/task-12932 - Add-source-grounded-spaced-repetition-review-schedules.md`
+- Modify: `backlog/tasks/task-15105 - Add-source-grounded-spaced-repetition-review-schedules.md`
 
 - [x] **Step 1: Run backend focused tests**
 
@@ -667,7 +667,7 @@ Record:
 - [x] **Step 7: Commit final task metadata**
 
 ```bash
-git add Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-implementation-plan.md 'backlog/tasks/task-12932 - Add-source-grounded-spaced-repetition-review-schedules.md'
+git add Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-implementation-plan.md 'backlog/tasks/task-15105 - Add-source-grounded-spaced-repetition-review-schedules.md'
 git commit -m "docs: finalize source review task record"
 ```
 

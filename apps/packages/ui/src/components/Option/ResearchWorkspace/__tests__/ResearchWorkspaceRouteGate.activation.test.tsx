@@ -5,6 +5,9 @@ import { useWorkspaceStore } from "@/store/workspace"
 import { hydrateWorkspaceFromServer } from "@/store/workspace-api"
 import { serverWorkspacePayload } from "@/store/__tests__/workspace-activation.fixtures"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import { workspaceApiMethods } from "@/services/tldw/domains/workspace-api"
+import { hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
+import { hasWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec"
 import { ActivatedLocalWorkspace, ResearchWorkspaceRouteGate } from "../ResearchWorkspaceRouteGate"
 
 // External API/account boundaries only are doubled; activation and the store are real.
@@ -21,7 +24,9 @@ vi.mock("react-router-dom", async importOriginal => ({
   ...await importOriginal<typeof import("react-router-dom")>(),
   useLocation: () => boundary.location
 }))
-vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: boundary }))
+vi.mock("@/services/tldw/TldwApiClient", async () => ({
+  tldwClient: { ...(await import("@/services/tldw/domains/workspace-api")).workspaceApiMethods, ...boundary }
+}))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: boundary.request }))
 vi.mock("@/utils/research-workspace-prefill", async importOriginal => ({
   ...await importOriginal<typeof import("@/utils/research-workspace-prefill")>(),
@@ -190,14 +195,28 @@ describe("canonical route activation (unit regression doubles)", () => {
   it("keeps supplied chat content unmounted until qualified canonical activation", async () => {
     const notes = deferred<ReturnType<typeof serverWorkspacePayload>["notes"]>()
     boundary.getWorkspaceNotes.mockReturnValue(notes.promise)
-    render(<ActivatedLocalWorkspace workspaceId="server-research" webClip={false}>
-      <div data-testid="chat-content" />
+    const workspaceId = "server-research"
+    const owner = { workspaceId, referenceId: workspaceId, ownerKey: "checkpoint-owner" }
+    const session = {
+      messages: [], history: [], historyId: null, serverChatId: null,
+      checkpoint: { ...owner, version: 1 as const, draft: "Prepared before open", historySelectionReference: null }
+    }
+    useWorkspaceStore.getState().saveWorkspaceChatSession(workspaceId, session)
+    const ChatContent = () => (
+      <div data-testid="chat-content">
+        {useWorkspaceStore.getState().getWorkspaceChatSession(workspaceId, owner)?.checkpoint?.draft}
+      </div>
+    )
+    render(<ActivatedLocalWorkspace workspaceId={workspaceId} webClip={false}>
+      <ChatContent />
     </ActivatedLocalWorkspace>)
     await waitFor(() => expect(boundary.getWorkspaceNotes).toHaveBeenCalled())
     expect(screen.getByRole("status")).toHaveTextContent("Loading workspace")
     expect(screen.queryByTestId("chat-content")).toBeNull()
     await act(async () => notes.resolve(serverWorkspacePayload().notes))
     expect(await screen.findByTestId("chat-content")).toBeVisible()
+    expect(screen.getByTestId("chat-content")).toHaveTextContent(session.checkpoint.draft)
+    expect(useWorkspaceStore.getState().getWorkspaceChatSession(workspaceId, owner)).toEqual(session)
     expect(screen.queryByTestId("activated-body")).toBeNull()
     expect(useWorkspaceStore.getState().serverWorkspace?.scopeKey).toBe("owner-a")
   })
@@ -403,6 +422,57 @@ describe("canonical route activation (unit regression doubles)", () => {
     expect(await screen.findByTestId("activated-body")).toBeVisible()
     expect(firstSignal.aborted).toBe(true)
     expect(boundary.getWorkspace.mock.calls[1][1].signal).not.toBe(firstSignal)
+  })
+
+  it("only reads captured workspace resources on activation and retry, then enables owned draft edits", async () => {
+    const id = "server-research"
+    const path = "/api/v1/workspaces/server-research"
+    const noteId = "12345678-1234-4123-8123-123456789abc"
+    const searchPath = "/api/v1/notes/search/?tokens=workspace%3Aserver-research&limit=100&include_keywords=true"
+    const notePath = `/api/v1/notes/${noteId}`
+    const reads = [path, `${path}/sources`, `${path}/artifacts`, `${path}/notes`, searchPath, notePath]
+    const payload = serverWorkspacePayload()
+    const failure = new Error("Transient note read")
+    const responses = [
+      payload.metadata, payload.sources, payload.artifacts, payload.notes, { notes: [{ id: noteId }] }, failure,
+      payload.metadata, payload.sources, payload.artifacts, payload.notes, { notes: [{ id: noteId }] },
+      { id: noteId, title: "Restored note", content: "Owned note", version: 1, keywords: [`workspace:${id}`] }
+    ]
+    boundary.scope.scopeKey = "retry-owner"
+    boundary.getWorkspace.mockImplementation(workspaceApiMethods.getWorkspace)
+    boundary.getWorkspaceSources.mockImplementation(workspaceApiMethods.getWorkspaceSources)
+    boundary.getWorkspaceArtifacts.mockImplementation(workspaceApiMethods.getWorkspaceArtifacts)
+    boundary.getWorkspaceNotes.mockImplementation(workspaceApiMethods.getWorkspaceNotes)
+    const expectedPaths = [...reads, ...reads]
+    boundary.request.mockImplementation(async ({ path, method }) => {
+      const index = boundary.request.mock.calls.length - 1
+      if (method !== "GET" || path !== expectedPaths[index]) throw new Error(`Unexpected ${method} ${path}`)
+      const response = responses[index]
+      if (response === failure) throw failure
+      return response
+    })
+    render(<ResearchWorkspaceRouteGate />)
+    expect(await screen.findByRole("alert")).toBeVisible()
+    expect(screen.queryByTestId("activated-body")).toBeNull()
+    expect(boundary.request).toHaveBeenCalledTimes(reads.length)
+    expect(hasCanonicalArtifactWorkspace(id, "retry-owner")).toBe(false)
+    const retiredSignal = boundary.request.mock.calls[0][0].abortSignal
+    fireEvent.click(screen.getByRole("button", { name: "Retry workspace" }))
+    expect(await screen.findByTestId("activated-body")).toBeVisible()
+    const liveSignal = boundary.request.mock.calls[reads.length][0].abortSignal
+    expect(retiredSignal.aborted).toBe(true)
+    expect(liveSignal).not.toBe(retiredSignal)
+    expect(liveSignal.aborted).toBe(false)
+    expect(boundary.request.mock.calls).toEqual(expectedPaths.map((path, index) => [
+      expect.objectContaining({
+        path, method: "GET", abortSignal: index < reads.length ? retiredSignal : liveSignal,
+        servicePromptConfig: { ...boundary.scope.config, expectedUserId: 42 },
+        headers: { "X-TLDW-Expected-User-ID": "42" }
+      })
+    ]))
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({ id: noteId, content: "Owned note" })
+    expect(hasCanonicalArtifactWorkspace(id, "retry-owner")).toBe(true)
+    expect(hasWorkspaceArtifactOrigin(useWorkspaceStore.getState().generatedArtifacts[0], "retry-owner", id)).toBe(true)
   })
 
   it("consumes a hash activation query without changing shared search precedence", async () => {

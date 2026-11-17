@@ -15,7 +15,6 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings, get_settings
-from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
@@ -113,7 +112,7 @@ def _build_single_user_app() -> FastAPI:
 
 @pytest.mark.asyncio
 async def test_single_user_bootstrapped_admin_uses_claims_for_permissions(
-    isolated_test_environment, monkeypatch
+    isolated_test_environment, monkeypatch, fresh_services
 ):
     """Verify single-user bootstrapped admin uses claims for permissions."""
     _client, _db_name = isolated_test_environment
@@ -123,7 +122,6 @@ async def test_single_user_bootstrapped_admin_uses_claims_for_permissions(
 
     # Ensure settings and DB pool see the single-user profile and isolated DB
     reset_settings()
-    await reset_db_pool()
 
     # Seed the single-user admin and primary key via the shared bootstrap helper
     ok_first = await bootstrap_single_user_profile()
@@ -174,7 +172,7 @@ async def test_single_user_bootstrapped_admin_uses_claims_for_permissions(
 
 @pytest.mark.asyncio
 async def test_single_user_non_admin_principal_denied_on_role(
-    isolated_test_environment, monkeypatch
+    isolated_test_environment, monkeypatch, fresh_services
 ):
     """Ensure non-admin single-user principal is denied role-based access."""
     # Reuse the same single-user bootstrap flow but override get_auth_principal
@@ -185,7 +183,6 @@ async def test_single_user_non_admin_principal_denied_on_role(
     monkeypatch.setenv("TEST_MODE", "true")
 
     reset_settings()
-    await reset_db_pool()
 
     ok_first = await bootstrap_single_user_profile()
     ok_second = await bootstrap_single_user_profile()
@@ -210,7 +207,7 @@ async def test_single_user_non_admin_principal_denied_on_role(
 
 @pytest.mark.asyncio
 async def test_single_user_non_admin_principal_denied_on_permission(
-    isolated_test_environment, monkeypatch
+    isolated_test_environment, monkeypatch, fresh_services
 ):
     """Ensure non-admin single-user principal is denied permission-based access."""
     # Same setup as above, but exercise permission-based gating.
@@ -220,7 +217,6 @@ async def test_single_user_non_admin_principal_denied_on_permission(
     monkeypatch.setenv("TEST_MODE", "true")
 
     reset_settings()
-    await reset_db_pool()
 
     ok_first = await bootstrap_single_user_profile()
     ok_second = await bootstrap_single_user_profile()

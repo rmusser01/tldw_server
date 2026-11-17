@@ -217,7 +217,9 @@ function readNumber(record: Record<string, unknown>, key: string): number | unde
 
 export function normalizeSttResponse(response: unknown): NormalizedSttResponse {
   if (typeof response === "string") {
-    return { text: response, metadata: {} }
+    return response.trim() === "[No speech detected]"
+      ? { text: "", metadata: { wordCount: 0 } }
+      : { text: response, metadata: {} }
   }
   if (!response || typeof response !== "object") {
     return { text: "", metadata: {} }
@@ -246,6 +248,12 @@ export function normalizeSttResponse(response: unknown): NormalizedSttResponse {
     metadata.wordCount = record.words.length
   }
 
+  // Parakeet's reserved empty-recognition status is not spoken transcript text.
+  if (text.trim() === "[No speech detected]") {
+    metadata.wordCount = 0
+    if (metadata.segmentCount != null) metadata.segmentCount = 0
+    return { text: "", metadata }
+  }
   return { text, metadata }
 }
 

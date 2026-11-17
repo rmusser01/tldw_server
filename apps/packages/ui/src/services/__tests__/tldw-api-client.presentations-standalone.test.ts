@@ -198,6 +198,32 @@ describe("standalone presentation client contracts", () => {
     vi.clearAllMocks()
   })
 
+  it.each([
+    { label: "structured", detail: structuredDetail },
+    { label: "standalone", detail: standaloneDetail }
+  ])(
+    "revalidates previously cached $label detail while preserving cancellation",
+    async ({ detail }) => {
+      const client = createCore(async () => responseEnvelope(detail))
+      const controller = new AbortController()
+
+      await presentationsMethods.getPresentation.call(client, detail.id, {
+        abortSignal: controller.signal
+      })
+
+      expect(client.request).toHaveBeenCalledExactlyOnceWith({
+        path: `/api/v1/slides/presentations/${detail.id}`,
+        method: "GET",
+        headers: {
+          [ACCEPT_HEADER]: ACCEPTED_CONTENT_KINDS,
+          "Cache-Control": "no-cache"
+        },
+        abortSignal: controller.signal,
+        returnResponse: true
+      })
+    }
+  )
+
   it("normalizes structured detail and preserves the response weak ETag", async () => {
     const client = createCore(async () =>
       responseEnvelope(structuredDetail, { headers: { etag: 'W/"v3"' } })
@@ -997,6 +1023,19 @@ describe("standalone presentation client contracts", () => {
     for (const [request] of (client.request as any).mock.calls) {
       expect(requestHeaders(request)[ACCEPT_HEADER]).toBe(ACCEPTED_CONTENT_KINDS)
     }
+  })
+
+  it("forwards the structured export cancellation signal", async () => {
+    const client = createCore(async () => responseEnvelope(new Uint8Array([1, 2, 3])))
+    const controller = new AbortController()
+    await presentationsMethods.exportPresentation.call(client, "structured-1", "json", {
+      abortSignal: controller.signal
+    })
+    expect(client.request).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/slides/presentations/structured-1/export?format=json",
+      method: "GET",
+      abortSignal: controller.signal
+    }))
   })
 
   it("saves validated standalone source as an exact raw string and adopts only the response ETag", async () => {

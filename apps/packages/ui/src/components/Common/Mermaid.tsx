@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react"
+import React, { useEffect, useId, useRef, useState } from "react"
 import DOMPurify from "dompurify"
 
 export type MermaidTheme =
@@ -59,6 +59,7 @@ export const Mermaid: React.FC<MermaidProps> = ({
   ariaLabel,
   onRenderStateChange
 }) => {
+  const instanceId = useId().replace(/:/g, "")
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [theme, setTheme] = useState<MermaidTheme>(() => resolveMermaidTheme())
@@ -152,7 +153,7 @@ export const Mermaid: React.FC<MermaidProps> = ({
           })
           initializedThemeRef.current = theme
         }
-        const id = `mermaid-${hashCode(code)}-${renderIdRef.current++}`
+        const id = `mermaid-${instanceId}-${hashCode(code)}-${renderIdRef.current++}`
         const { svg, bindFunctions } = await mermaid.render(id, code)
         const sanitizedSvg = DOMPurify.sanitize(svg, {
           USE_PROFILES: { svg: true }
@@ -184,7 +185,7 @@ export const Mermaid: React.FC<MermaidProps> = ({
         renderSequenceRef.current += 1
       }
     }
-  }, [code, theme])
+  }, [code, instanceId, theme])
 
   if (typeof window === "undefined") {
     return (

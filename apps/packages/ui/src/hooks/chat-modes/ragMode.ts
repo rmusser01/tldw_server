@@ -1,3 +1,6 @@
+import { captureNormalChatPreparation, runChatModeWithHistory, type HistoryChatModeParams } from "./normalChatMode"
+import type { ActorSceneSend } from "@/hooks/chat/actor-scene-source"
+import type { ActorSceneRead } from "@/services/actor-settings"
 import {
   type ChatHistory,
   type Message,
@@ -5,7 +8,6 @@ import {
   type Knowledge
 } from "~/store/option"
 import { generateHistory } from "@/utils/generate-history"
-import { formatSelectedHistory } from "@/db/dexie/helpers"
 import { pageAssistModel } from "@/models"
 import { humanMessageFormatter } from "@/utils/human-message"
 import { removeReasoning } from "@/libs/reasoning"
@@ -20,7 +22,6 @@ import type { ChatModelSettings } from "@/store/model"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
   getRequiredServicePrompt,
-  runChatPipeline,
   type ChatModeContext,
   type ChatModeDefinition
 } from "./chatModePipeline"
@@ -34,12 +35,8 @@ import {
 } from "@/services/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
-import { captureNormalHistoryTurn } from "./normalChatMode"
-import type { HistorySendTurn } from "@/types/chat-modes"
-import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import type { ChatTurnIdentity } from "@/services/tldw/TldwApiClient"
 import { projectHistoryDurableSources } from "@/services/history-durable-turn"
-import type { ChatScope } from "@/types/chat-scope"
 
 const RAG_STRING_ARRAY_KEYS = new Set([
   "sources",
@@ -235,15 +232,10 @@ type RagSourceEntry = {
   metadata: RagDocumentMetadata
 }
 
-type RagModeParams = {
-  scope?: ChatScope
-  historySelection?: { controller: HistorySelectionController; originIsCurrent: () => boolean; temporary?: boolean }
-  historyTurn?: HistorySendTurn
+type RagModeParams = HistoryChatModeParams & {
   tldwTurn?: ChatTurnIdentity
-  serverChatId?: string | null
   conversationId?: string
   selectedModel: string
-  selectionSource?: Parameters<typeof captureNormalHistoryTurn>[0]["selectionSource"]
   useOCR: boolean
   selectedKnowledge: Knowledge | null
   currentChatModelSettings: ChatModelSettings | null
@@ -267,6 +259,8 @@ type RagModeParams = {
   ragSources: string[]
   ragAdvancedOptions?: Record<string, unknown>
   systemPromptAppendix?: string
+  actorSceneSend?: ActorSceneSend
+  actorScene?: ActorSceneRead
   actorSettings?: ActorSettings
   clusterId?: string
   userMessageType?: string
@@ -390,6 +384,7 @@ const resolveRagQuery = async (
   ctx: ChatModeContext<RagModeParams>,
   promptForQuestion: string | null
 ) => {
+  ctx.assertPreparationCurrent?.()
   if (!promptForQuestion) return ctx.message
   const questionOllama = await pageAssistModel({
     model: ctx.selectedModel,
@@ -398,6 +393,7 @@ const resolveRagQuery = async (
     saveToDb: false,
     requestScope: ctx.servicePromptSnapshot?.requestScope
   })
+  ctx.assertPreparationCurrent?.()
   const questionMessage = await humanMessageFormatter({
     content: [
       {
@@ -408,10 +404,12 @@ const resolveRagQuery = async (
     model: ctx.selectedModel,
     useOCR: ctx.useOCR
   })
+  ctx.assertPreparationCurrent?.()
   const response = await questionOllama.invoke(
     [questionMessage],
     { signal: ctx.signal }
   )
+  ctx.assertPreparationCurrent?.()
   return removeReasoning(response.content.toString())
 }
 
@@ -469,11 +467,17 @@ const prepareRagRetrieval = async (
   ctx: ChatModeContext<RagModeParams>,
   rewritePrompt: string | null
 ): Promise<PreparedRagRetrieval> => {
+  ctx.assertPreparationCurrent?.()
   const query = await resolveRagQuery(ctx, rewritePrompt)
+  ctx.assertPreparationCurrent?.()
   await tldwClient.initialize()
+  ctx.assertPreparationCurrent?.()
   const defaultTopK = await getNoOfRetrievedDocs()
+  ctx.assertPreparationCurrent?.()
   const ragOptions = await buildRagOptions(ctx, defaultTopK)
+  ctx.assertPreparationCurrent?.()
   const ragRes = (await tldwClient.ragSearch(query, ragOptions)) as RagResponse
+  ctx.assertPreparationCurrent?.()
   const docs = getRagDocuments(ragRes)
   const rawSources = docs.map((doc) => ({
     name:
@@ -537,6 +541,7 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
 
     try {
       const retrieval = await prepareRagRetrieval(ctx, null)
+      ctx.assertPreparationCurrent?.()
       if (retrieval.source.length > 0) {
         selectedSourceRetrievalCache.set(ctx, retrieval)
         return null
@@ -548,6 +553,7 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
         retrieval.rawResponse
       )
     } catch (error) {
+      ctx.assertPreparationCurrent?.()
       if (
         ctx.signal.aborted || isAbortLikeError(error) ||
         isRequestConfigScopeChangedError(error) ||
@@ -564,6 +570,7 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
     }
   },
   preparePrompt: async (ctx) => {
+    ctx.assertPreparationCurrent?.()
     const answerPrompt = getRequiredServicePrompt(
       ctx.servicePromptSnapshot,
       "chat.rag.answer"
@@ -579,12 +586,14 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       }
       const retrieval =
         cachedRetrieval || (await prepareRagRetrieval(ctx, rewritePrompt))
+      ctx.assertPreparationCurrent?.()
       context = retrieval.context
       source = retrieval.source
       if (hasSelectedMediaSources(ctx) && source.length === 0) {
         throw new Error(buildSelectedSourceNoEvidenceText())
       }
     } catch (e) {
+      ctx.assertPreparationCurrent?.()
       if (ctx.signal.aborted || isRequestConfigScopeChangedError(e)) throw e
       if (hasSelectedMediaSources(ctx)) {
         throw e
@@ -615,9 +624,10 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       model: ctx.selectedModel,
       useOCR: ctx.useOCR
     })
+    ctx.assertPreparationCurrent?.()
 
     let applicationChatHistory = generateHistory(
-      ctx.historyForModel ?? ctx.history,
+      ctx.historyTurn?.serverOwned ? [] : ctx.historyForModel ?? ctx.history,
       ctx.selectedModel
     )
 
@@ -627,6 +637,7 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       ctx.actorSettings || null,
       templatesActive
     )
+    ctx.assertPreparationCurrent?.()
 
     return {
       chatHistory: applicationChatHistory,
@@ -646,38 +657,35 @@ export const ragMode = async (
   params: RagModeParams
 ): Promise<ChatSubmitResult> => {
   console.log("Using ragMode")
+  if (params.historySelection && params.tldwTurn &&
+      (isRegenerate || image || !hasSelectedMediaSources(params) || params.actorSettings?.isEnabled))
+    throw new Error("unsupported_history_action_context")
+  const historyPreparation = params.historySelection
+    ? params.historyPreparation ?? captureNormalChatPreparation(params)
+    : undefined
+  const requestScope = params.requestScope ?? params.actorSceneSend?.requestScope
   const ownsServicePromptSnapshot = !params.servicePromptSnapshot
   const servicePromptSnapshot =
     params.servicePromptSnapshot ??
     (await loadServicePromptSnapshot(
       ["chat.rag.answer", "chat.rag.question_rewrite"],
-      { signal, ...(params.requestScope ? { requestScope: params.requestScope } : {}) }
+      { signal, ...(requestScope ? { requestScope } : {}) }
     ))
-  const executionSignal = servicePromptSnapshot.scopeSignal
   const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal
-  let createdTurn: HistorySendTurn | undefined
   try {
     getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
     getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.question_rewrite")
-    if (params.historySelection) {
-      if (!params.tldwTurn || isRegenerate || image || !hasSelectedMediaSources(params) || params.actorSettings?.isEnabled)
-        throw new Error("unsupported_history_action_context")
-      const historyTurn = await captureNormalHistoryTurn(params, message, servicePromptSnapshot, executionSignal)
-      createdTurn = historyTurn
-      messages = formatSelectedHistory(historyTurn.capture).messages
-      const selectedParent = historyTurn.retryAdmission?.input_message_id ?? historyTurn.capture.rows.at(-1)?.id ?? null
-      params = { ...params, historyTurn, userParentMessageId: selectedParent, historyForModel: [] }
-    }
-    const result = await runChatPipeline(
+    return await runChatModeWithHistory(
       ragModeDefinition,
       message,
       image,
       isRegenerate,
       messages,
       history,
-      executionSignal,
+      signal,
       {
         ...params,
+        historyPreparation,
         servicePromptSnapshot,
         discardCurrentTurnOnAbort: () =>
           scopeInvalidatedSignal.aborted,
@@ -686,13 +694,7 @@ export const ragMode = async (
           : undefined
       }
     )
-    if (result.status === "submitted" && params.historyTurn?.resultId) {
-      const followed = await params.historyTurn.followResult(params.historyTurn.resultId)
-      await params.historyTurn.finish?.(followed !== false)
-    }
-    return result
   } finally {
-    createdTurn?.release?.()
     if (ownsServicePromptSnapshot) servicePromptSnapshot.release()
   }
 }

@@ -80,7 +80,8 @@ def test_ensure_prompt_studio_rls_returns_false_for_non_postgres_backends(backen
         pytest.fail("expected non-PostgreSQL backends to be ignored")
 
 
-def test_ensure_prompt_studio_rls_raises_on_partial_failure():
+def test_ensure_prompt_studio_rls_raises_on_partial_failure(monkeypatch):
+    monkeypatch.setattr(rls_module, "_ensure_prompt_studio_schema", lambda _backend: None)
     conn = _TxnConn()
 
     with pytest.raises(DatabaseError, match="prompt_studio"):

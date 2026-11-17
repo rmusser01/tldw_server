@@ -1107,13 +1107,10 @@ describe("extension entry shell performance contracts", () => {
     expect(playgroundChatSource).toContain('import("./ResearchRunStatusStack")')
   })
 
-  it("keeps character-greeting picking off the default chat transcript path", () => {
-    expect(playgroundChatSource).not.toContain(
-      'import { ChatGreetingPicker } from "@/components/Common/ChatGreetingPicker"',
-    )
-    expect(playgroundChatSource).toContain(
-      'import("@/components/Common/ChatGreetingPicker")',
-    )
+  it("keeps character-greeting picking in the owned composer and off the transcript path", () => {
+    expect(playgroundChatSource).not.toContain("ChatGreetingPicker")
+    expect(playgroundFormSource).toContain('from "@/components/Common/ChatGreetingPicker"')
+    expect(playgroundFormSource).toContain("<ChatGreetingPicker selectedCharacter=")
   })
 
   it("defers non-default workflow editor side panels behind sidebar selection boundaries", () => {

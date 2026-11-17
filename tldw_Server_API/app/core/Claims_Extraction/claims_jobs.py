@@ -8,9 +8,15 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.claims_cluster_rebuild_contract import (
+    ClusterRebuildLimits,
+    ClusterRebuildSettings,
+    canonical_cluster_settings,
+)
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.Jobs.operations.contracts import AdmissionResult
+from tldw_Server_API.app.core.Jobs.operations.contracts import AdmissionResult, CreateJobCommand
+from tldw_Server_API.app.core.Jobs.resource_contracts import ResourceAdmission, ResourceAdmissionRequest, ResourceScope
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 
 from .claims_job_contracts import (
@@ -21,10 +27,12 @@ from .claims_job_contracts import (
     CLAIMS_JOB_PAYLOAD_VERSION,
     CLAIMS_JOBS_DEFAULT_QUEUE,
     CLAIMS_JOBS_DOMAIN,
+    CLAIMS_REBUILD_CLUSTERS_JOB_TYPE,
     CLAIMS_REBUILD_MEDIA_JOB_TYPE,
     ClaimsJobError,
     validate_alert_delivery_payload,
     validate_analytics_export_payload,
+    validate_cluster_rebuild_payload,
     validate_rebuild_media_payload,
     validate_review_metrics_payload,
     validate_review_notification_payload,
@@ -81,6 +89,40 @@ def claims_review_metrics_jobs_enabled(
 def claims_jobs_worker_enabled(settings_obj: Mapping[str, Any] | None = None) -> bool:
     """Return whether the Claims Jobs worker should start during app lifecycle."""
     return _truthy(_setting_value("CLAIMS_JOBS_WORKER_ENABLED", False, settings_obj))
+
+
+def claims_cluster_rebuild_jobs_enabled(settings_obj: Mapping[str, Any] | None = None) -> bool:
+    """Resolve routing policy once at the caller, never again during admission."""
+    return claims_jobs_enabled(settings_obj) and _truthy(
+        _setting_value("CLAIMS_CLUSTER_REBUILD_JOBS_ENABLED", False, settings_obj)
+    )
+
+
+def claims_cluster_rebuild_limits(settings_obj: Mapping[str, Any] | None = None) -> ClusterRebuildLimits:
+    """Validate operator execution ceilings; malformed values never widen limits."""
+    maxima = {
+        "exact_claims": 50_000,
+        "embedding_claims": 5_000,
+        "text_bytes": 33_554_432,
+        "vector_width": 4_096,
+        "embedding_components": 2_000_000,
+        "similarity_component_comparisons": 50_000_000,
+        "cleanup_references": 50_000,
+    }
+    values = {}
+    for field, maximum in maxima.items():
+        raw = _setting_value(f"CLAIMS_CLUSTER_REBUILD_MAX_{field.upper()}", maximum, settings_obj)
+        if isinstance(raw, str):
+            text = raw.strip()
+            if not text or not text.isascii() or not text.isdigit():
+                raise ValueError("Invalid Claims cluster rebuild limit")
+            # Bound parsing as well as the resulting integer.
+            text = text.lstrip("0") or "0"
+            if len(text) > len(str(maximum)):
+                raise ValueError("Invalid Claims cluster rebuild limit")
+            raw = int(text)
+        values[field] = raw
+    return ClusterRebuildLimits(**values)
 
 
 def claims_jobs_queue(settings_obj: Mapping[str, Any] | None = None) -> str:
@@ -159,6 +201,41 @@ def enqueue_claims_rebuild_media(
         idempotency_key=idempotency_key,
     )
     return _refresh(manager, created)
+
+
+def enqueue_claims_cluster_rebuild(
+    *,
+    owner_user_id: str,
+    settings: ClusterRebuildSettings,
+    request_key: str | None,
+    job_manager: JobManager,
+    settings_obj: Mapping[str, Any],
+) -> ResourceAdmission:
+    """Admit an already-authorized/routed request in the executing Jobs scope.
+
+    Return the direct typed outcome, including bounded conflicting identities.
+    Routing flags are the caller's captured policy, not an admission-time fence.
+    """
+    canonical = canonical_cluster_settings(settings)
+    payload = validate_cluster_rebuild_payload(
+        {**canonical, "owner_user_id": owner_user_id, "similarity_threshold": settings.similarity_threshold}
+    )
+    command = CreateJobCommand(
+        domain=CLAIMS_JOBS_DOMAIN,
+        queue=claims_jobs_queue(settings_obj),
+        job_type=CLAIMS_REBUILD_CLUSTERS_JOB_TYPE,
+        payload=payload,
+        owner_user_id=owner_user_id,
+        priority=5,
+        max_retries=_max_retries("CLAIMS_JOBS_MAX_RETRIES_CLUSTER_REBUILD", 3, settings_obj),
+    )
+    request = ResourceAdmissionRequest(
+        ResourceScope(CLAIMS_JOBS_DOMAIN, owner_user_id, "cluster-rebuild"), canonical, request_key
+    )
+    with job_manager.scoped_rls_context(
+        is_admin=False, domain_allowlist=CLAIMS_JOBS_DOMAIN, owner_user_id=owner_user_id
+    ):
+        return job_manager.admit_resource_job(command, request=request)
 
 
 def enqueue_claims_analytics_export(

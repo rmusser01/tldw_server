@@ -106,7 +106,7 @@ describe("completed retained reply settlement", () => {
 
   it("reports kept only after settling and clearing the completed record", async () => {
     const { controller, entry } = fixture()
-    expect(await keepHistoryTurnRecovery(controller, entry)).toEqual({ status: "kept", resultId: "answer", followed: true, retained: false })
+    expect(await keepHistoryTurnRecovery(controller, entry)).toEqual({ status: "kept", resultId: "answer", followed: true, retained: false, settledByKeep: true })
     expect(mocks.settle).toHaveBeenCalledOnce()
     expect(mocks.dismiss).toHaveBeenCalledOnce()
   })

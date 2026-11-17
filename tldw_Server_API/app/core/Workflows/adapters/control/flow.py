@@ -9,12 +9,13 @@ import asyncio
 import re
 import time
 import types
+from collections.abc import Coroutine
 from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
-from tldw_Server_API.app.core.exceptions import AdapterError
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
+from tldw_Server_API.app.core.exceptions import AdapterError, LLMQuotaExceededError
 from tldw_Server_API.app.core.Metrics import start_async_span as _start_span
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 from tldw_Server_API.app.core.Workflows.adapters._common import (
@@ -49,6 +50,26 @@ _FLOW_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     re.error,
 )
+
+
+async def _run_cancelling_siblings(coros: list[Coroutine[Any, Any, Any]]) -> list[Any]:
+    """Run sub-steps together and return their results in order.
+
+    The first sub-step to raise cancels the others, those running and those
+    still waiting for a concurrency slot, and its error is raised once they
+    have stopped. ``asyncio.gather`` alone leaves them running (TASK-13863).
+    """
+    tasks = [asyncio.create_task(coro) for coro in coros]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            pass  # e.g. the step timeout fired while they stopped: report the sub-step's own error, not a timeout
+        raise
 
 
 @registry.register(
@@ -188,7 +209,7 @@ async def run_log_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
       - level: str (debug|info|warning|error) default info
     Output: { "logged": true, "message": ... }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
     msg_t = str(config.get("message", ""))
     level = str(config.get("level", "info")).lower()
     # Pre-pass replacements for common templates like {{ inputs.name || '' }} and {{ inputs.name }}
@@ -251,7 +272,7 @@ async def run_branch_adapter(config: dict[str, Any], context: dict[str, Any]) ->
       - false_next: str (step id)
     Output: { "__next__": step_id, "branch": "true"|"false" }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
     cond_t = str(config.get("condition", "")).strip()
     rendered = (_tmpl(cond_t, context) or cond_t).strip().lower()
     is_true = _is_truthy(rendered)
@@ -298,7 +319,7 @@ async def run_map_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
     if isinstance(items_cfg, list):
         items = items_cfg
     else:
-        from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+        from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
         raw = _tmpl(str(items_cfg or ""), context) or str(items_cfg or "")
         try:
             import json as _json
@@ -337,24 +358,25 @@ async def run_map_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
                     preview = preview[:77] + "…"
             except _FLOW_NONCRITICAL_EXCEPTIONS:
                 preview = ""
+            adapter = get_adapter(sub_type)
+            if adapter is None:
+                return {"error": f"unsupported_substep:{sub_type}"}
+            started = False
             try:
                 async with _start_span("workflows.map.item", attributes={
                     "index": int(idx),
                     "sub_type": sub_type,
                     "item_preview": preview,
                 }):
-                    adapter = get_adapter(sub_type)
-                    if adapter is not None:
-                        return await adapter(sub_cfg, sub_ctx)
-                    return {"error": f"unsupported_substep:{sub_type}"}
-            except _FLOW_NONCRITICAL_EXCEPTIONS:
-                # If tracing fails, still attempt the sub-step
-                adapter = get_adapter(sub_type)
-                if adapter is not None:
+                    started = True
                     return await adapter(sub_cfg, sub_ctx)
-                return {"error": f"unsupported_substep:{sub_type}"}
+            except _FLOW_NONCRITICAL_EXCEPTIONS:
+                if started:
+                    raise  # the sub-step's own error: running it again would repeat its side effects (TASK-13886)
+            # The span failed to open: still run the sub-step, untraced
+            return await adapter(sub_cfg, sub_ctx)
 
-    results = await asyncio.gather(*[_run_one(i, it) for i, it in enumerate(items)], return_exceptions=False)
+    results = await _run_cancelling_siblings([_run_one(i, it) for i, it in enumerate(items)])
     return {"results": results, "count": len(results)}
 
 
@@ -408,8 +430,18 @@ async def run_parallel_adapter(config: dict[str, Any], context: dict[str, Any]) 
                 results[idx] = {"error": "parallel_step_error"}
                 if fail_fast:
                     errors.append("parallel_step_error")
+            except LLMQuotaExceededError:
+                raise  # the user's limit fails the step, with or without fail_fast (TASK-13638)
+            except Exception as exc:
+                if fail_fast:
+                    raise
+                logger.warning("parallel sub-step {} ({}) failed: {}", idx, step_type, type(exc).__name__)
+                results[idx] = {"error": "parallel_step_error"}
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if fail_fast or (current is not None and current.cancelling()):
+                    raise  # the step, or a failed sibling, cancelled it
+                results[idx] = {"error": "parallel_step_error"}  # the sub-step's own CancelledError
 
-    tasks = [run_step(i, step) for i, step in enumerate(steps)]
-    await asyncio.gather(*tasks, return_exceptions=not fail_fast)
-
+    await _run_cancelling_siblings([run_step(i, step) for i, step in enumerate(steps)])
     return {"results": results, "count": len(results), "errors": errors if errors else None}

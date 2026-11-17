@@ -15,12 +15,17 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_auth_rate_limit,
     get_auth_principal,
 )
-from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
 
-
 pytestmark = pytest.mark.integration
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 def test_build_federation_redirect_uri_uses_public_base_without_request_host(
@@ -47,10 +52,12 @@ def test_build_federation_redirect_uri_uses_public_base_without_request_host(
 @pytest.fixture
 def federation_client(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    tmp_path: Path, fresh_services,
 ):
     db_path = tmp_path / "oidc_login_flow.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
+    # These tests exercise the OIDC login flow, not CSRF; CSRF is on by default since TASK-13950.19 PR 4.
+    monkeypatch.setenv("CSRF_ENABLED", "false")
     monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_FEDERATION_ENABLED", "true")
@@ -61,7 +68,6 @@ def federation_client(
         raising=False,
     )
 
-    asyncio.run(reset_db_pool())
     reset_settings()
 
     from tldw_Server_API.app.main import app as fastapi_app
@@ -96,7 +102,6 @@ def federation_client(
             yield client
     finally:
         fastapi_app.dependency_overrides.pop(get_auth_principal, None)
-        asyncio.run(reset_db_pool())
         reset_settings()
 
 
@@ -199,13 +204,13 @@ def test_federation_callback_supports_org_scoped_provider_resolution(
     federation_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.federation.oidc_service import OIDCFederationService
     from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import create_organization
     from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
     async def _seed_org_scoped_user() -> tuple[int, int]:
         pool = await get_db_pool()
@@ -892,8 +897,8 @@ def test_federation_callback_revokes_only_provider_managed_grants_in_safe_revoke
         managed_team = await create_team(org_id=int(managed_org["id"]), name="Federated Managed Team")
         manual_org = await create_organization(name="Federated Manual Org", owner_user_id=None)
         manual_team = await create_team(org_id=int(manual_org["id"]), name="Federated Manual Team")
-        await add_org_member(org_id=int(manual_org["id"]), user_id=int(user["id"]), role="member")
-        await add_team_member(team_id=int(manual_team["id"]), user_id=int(user["id"]), role="member")
+        await add_org_member(org_id=int(manual_org["id"]), user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+        await add_team_member(team_id=int(manual_team["id"]), user_id=int(user["id"]), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
         return (
             int(user["id"]),
             int(managed_org["id"]),

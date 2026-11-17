@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
+from fastapi.encoders import jsonable_encoder
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
@@ -32,6 +33,7 @@ from tldw_Server_API.app.core.claims_analytics_export_contract import (
     is_valid_persisted_claims_analytics_export_filters,
     is_valid_persisted_claims_analytics_export_pagination,
 )
+from tldw_Server_API.app.core.claims_cluster_rebuild_contract import ClusterRebuildSettings, canonical_cluster_settings
 from tldw_Server_API.app.core.Claims_Extraction import claims_analytics_exports, claims_jobs
 from tldw_Server_API.app.core.Claims_Extraction.alignment import align_claim_span
 from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
@@ -61,21 +63,26 @@ from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
     resolve_claims_alignment_config,
     resolve_claims_context_window_chars,
     resolve_claims_extraction_passes,
+    resolve_claims_llm_config,
     resolve_claims_prompt_validation_config,
 )
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, RetryExhaustedError
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, RetryExhaustedError
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
+from tldw_Server_API.app.core.Jobs.resource_contracts import ResourceAdmission, ResourceAdmissionRequest, ResourceScope
+from tldw_Server_API.app.core.Jobs.resource_policy import resource_requirement_for
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 try:
     import psycopg as _psycopg
@@ -578,8 +585,11 @@ def _fva_claims_analyze_call(
         logger.warning(f"FVA analyze call unavailable: {exc}")
         return ""
 
-    provider = str(api_endpoint or settings.get("CLAIMS_LLM_PROVIDER", "openai")).strip() or "openai"
-    model = str(model_override or settings.get("CLAIMS_LLM_MODEL", "gpt-4o-mini")).strip() or "gpt-4o-mini"
+    provider = str(api_endpoint or "").strip()
+    model = str(model_override or "").strip() or None
+    if not provider:
+        provider, default_model, _ = resolve_claims_llm_config(settings)
+        model = model or default_model
     try:
         temperature = float(temp if temp is not None else settings.get("CLAIMS_LLM_TEMPERATURE", 0.3))
     except _CLAIMS_NONCRITICAL_EXCEPTIONS:
@@ -610,6 +620,8 @@ def _fva_claims_analyze_call(
     try:
         response = perform_chat_api_call(**call_kwargs)
         return coerce_llm_response_text(response)
+    except LLMQuotaExceededError:
+        raise  # the user's limit: not an empty reply for the verifier to score without the LLM
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"FVA analyze function failed: {exc}")
         return ""
@@ -631,7 +643,7 @@ def _enqueue_claim_rebuild_if_needed(*, media_id: int, db_path: str, owner_user_
                 logger.debug("Claims rebuild Jobs enqueue failed; falling back to legacy queue: {}", exc)
     try:
         svc = get_claims_rebuild_service()
-        svc.submit(media_id=int(media_id), db_path=str(db_path))
+        svc.submit(media_id=int(media_id), db_path=str(db_path), owner_user_id=owner_user_id)
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Claims rebuild enqueue failed: {}", exc)
 
@@ -2842,6 +2854,7 @@ async def review_claim(
             expected_version=int(payload.get("review_version")),
             action_ip=action_ip,
             action_user_agent=action_user_agent,
+            actor_user_id=principal.user_id if principal.user_id is not None else int(current_user.id),
         )
         if updated is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Claim not found")
@@ -2850,7 +2863,7 @@ async def review_claim(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "error": "version_conflict",
-                    "current": updated.get("current"),
+                    "current": jsonable_encoder(updated.get("current")),
                 },
             )
         latency_s = None
@@ -2991,6 +3004,7 @@ def bulk_review_claims(
                 expected_version=int(claim_row.get("review_version") or 1),
                 action_ip=action_ip,
                 action_user_agent=action_user_agent,
+                actor_user_id=principal.user_id if principal.user_id is not None else int(current_user.id),
             )
             if isinstance(updated, dict) and updated.get("conflict"):
                 conflicts.append(int(cid))
@@ -4050,6 +4064,67 @@ def list_claim_clusters(
     }
 
 
+def authorize_claim_cluster_rebuild_owner(
+    *,
+    user_id: int | None,
+    principal: AuthPrincipal,
+    current_user: User,
+) -> str:
+    """Authorize before Jobs lookup and reject non-routable owner identities."""
+    _ensure_claims_admin(principal)
+    if user_id is not None and not _principal_has_platform_admin_claims(principal):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    owner = getattr(current_user, "id", None) if user_id is None else user_id
+    if type(owner) is int:
+        owner = str(owner)
+    if not is_routable_claims_owner_id_text(owner):
+        raise HTTPException(status_code=400, detail="Invalid Claims cluster rebuild owner")
+    return owner
+
+
+def admit_claim_cluster_rebuild(
+    *,
+    min_size: int,
+    method: str | None,
+    similarity_threshold: float | None,
+    user_id: int | None,
+    request_key: str | None,
+    principal: AuthPrincipal,
+    current_user: User,
+    job_manager: JobManager,
+) -> ResourceAdmission:
+    """Admit routed work in Task9's Jobs scope inside the executing thread."""
+    owner = authorize_claim_cluster_rebuild_owner(user_id=user_id, principal=principal, current_user=current_user)
+    cluster_method = (method or settings.get("CLAIMS_CLUSTER_METHOD", "embeddings") or "embeddings").strip().lower()
+    if cluster_method not in {"embeddings", "exact"}:
+        raise HTTPException(status_code=400, detail="Invalid clustering method")
+    threshold = similarity_threshold
+    if cluster_method == "embeddings" and threshold is None:
+        threshold = settings.get("CLAIMS_CLUSTER_SIMILARITY_THRESHOLD", 0.85)
+        if isinstance(threshold, str):
+            try:
+                threshold = float(threshold)
+            except ValueError:
+                raise HTTPException(status_code=422, detail="Invalid clustering settings") from None
+    try:
+        effective = ClusterRebuildSettings(1, cluster_method, min_size, threshold, 1)
+        # Validate at the public service boundary, before backend admission.
+        ResourceAdmissionRequest(
+            ResourceScope("claims", owner, "cluster-rebuild"), canonical_cluster_settings(effective), request_key
+        )
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid clustering settings or request key") from None
+    if resource_requirement_for("claims", "claims_rebuild_clusters") != "cluster-rebuild":
+        raise HTTPException(status_code=503, detail="Claims cluster rebuild admission unavailable")
+    return claims_jobs.enqueue_claims_cluster_rebuild(
+        owner_user_id=owner,
+        settings=effective,
+        request_key=request_key,
+        job_manager=job_manager,
+        settings_obj=settings,
+    )
+
+
 def rebuild_claim_clusters(
     *,
     min_size: int,
@@ -4596,7 +4671,7 @@ def rebuild_claims(
     else:
         db_path = db.db_path_str
     svc = rebuild_service or get_claims_rebuild_service()
-    svc.submit(media_id=media_id, db_path=db_path)
+    svc.submit(media_id=media_id, db_path=db_path, owner_user_id=owner_user_id)
     return {"status": "accepted", "media_id": media_id}
 
 
@@ -4646,7 +4721,7 @@ def rebuild_all_media(
 
         svc = rebuild_service or get_claims_rebuild_service()
         for mid in mids:
-            svc.submit(media_id=mid, db_path=db_path)
+            svc.submit(media_id=mid, db_path=db_path, owner_user_id=owner_user_id)
         return {
             "status": "accepted",
             "enqueued": len(mids),
@@ -4686,9 +4761,9 @@ async def verify_claims_with_fva(
     sources: list[str] | None = None,
     top_k: int = 10,
     fva_config: dict[str, Any] | None = None,
-    user_id: str | None = None,
-    current_user: User | None = None,
-    db: MediaDatabase | None = None,
+    user_id: int | None = None,
+    current_user: User,
+    db: MediaDatabase,
 ) -> dict[str, Any]:
     """
     Verify claims using the FVA (Falsification-Verification Alignment) pipeline.
@@ -4706,13 +4781,39 @@ async def verify_claims_with_fva(
         sources: Data sources to search (defaults to media_db)
         top_k: Number of documents to retrieve
         fva_config: FVA pipeline configuration options
-        user_id: User ID for scoped retrieval
+        user_id: The user to verify for; honoured only for a platform admin, as in
+            rebuild_claims. Anyone else's is ignored and the request runs for current_user.
         current_user: Current authenticated user
-        db: MediaDatabase instance
+        db: The authenticated user's MediaDatabase
 
     Returns:
         FVA verification results with status changes and timing
     """
+    owner_user_id = int(current_user.id)
+    if user_id is None or int(user_id) == owner_user_id or not _legacy_user_has_platform_admin_claims(current_user):
+        return await _verify_claims_with_fva_for(
+            owner_user_id, db, claims=claims, query=query, sources=sources, top_k=top_k, fva_config=fva_config
+        )
+    # An admin verifying for another user: that user's media DB and content scope. The media visibility
+    # filter, the quota decision and the usage rows all read the scope (TASK-13881).
+    # ponytail: the user's personal media only; give the scope their team and org ids if admins need shared media.
+    with scoped_context(user_id=int(user_id), is_admin=False), _claims_user_override_db(int(user_id)) as (owner_db, _):
+        return await _verify_claims_with_fva_for(
+            int(user_id), owner_db, claims=claims, query=query, sources=sources, top_k=top_k, fva_config=fva_config
+        )
+
+
+async def _verify_claims_with_fva_for(
+    owner_user_id: int,
+    db: MediaDatabase,
+    *,
+    claims: list[dict[str, Any]],
+    query: str,
+    sources: list[str] | None,
+    top_k: int,
+    fva_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Run the FVA pipeline on ``db`` and ``owner_user_id``'s vector store, for that user."""
     import time
     from uuid import uuid4
 
@@ -4750,22 +4851,13 @@ async def verify_claims_with_fva(
 
     # Set up budget if specified
     budget: ClaimsJobBudget | None = None
-    job_context: ClaimsJobContext | None = None
     max_budget_usd = config_dict.get("max_budget_usd")
     if max_budget_usd is not None:
         budget = ClaimsJobBudget(max_cost_usd=float(max_budget_usd))
-        job_context = ClaimsJobContext(
-            job_id=str(uuid4()),
-            user_id=user_id or (current_user.username if current_user else None),
-        )
+    job_context = ClaimsJobContext(user_id=owner_user_id)  # the claims_verify usage rows, by id
 
-    # Resolve user_id for retrieval
-    resolved_user_id = user_id
-    if resolved_user_id is None and current_user is not None:
-        resolved_user_id = str(current_user.username) if hasattr(current_user, "username") else None
-
-    # Build retriever
-    retriever = MultiDatabaseRetriever(media_db=db)
+    # The user_id picks the vector store (collection user_{id}_media_embeddings).
+    retriever = MultiDatabaseRetriever({}, user_id=str(owner_user_id), media_db=db)
 
     # Build data sources
     data_sources: list[DataSource] = []
@@ -4777,10 +4869,7 @@ async def verify_claims_with_fva(
         data_sources = [DataSource.MEDIA_DB]
 
     # Retrieve base documents
-    retrieval_config = RetrievalConfig(
-        top_k=top_k,
-        search_mode="hybrid",
-    )
+    retrieval_config = RetrievalConfig(max_results=top_k)  # FTS and vector, merged: the hybrid search
     base_documents = await retriever.retrieve(
         query=query,
         sources=data_sources,
@@ -4825,7 +4914,7 @@ async def verify_claims_with_fva(
         claims=claim_objects,
         query=query,
         documents=base_documents,
-        user_id=resolved_user_id,
+        user_id=str(owner_user_id),
         budget=budget,
         job_context=job_context,
     )

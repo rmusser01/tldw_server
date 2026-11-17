@@ -78,8 +78,20 @@ export async function getDraftsByBatch(batchId: string, operation = quickIngestA
 export async function getDraftById(id: string, operation = quickIngestAuthority.capture()) {
   return readOwned(db.contentDrafts, id, operation)
 }
-export async function upsertContentDraft(draft: ContentDraft, operation = quickIngestAuthority.capture()): Promise<void> {
-  await putOwned(db.contentDrafts, draft, operation)
+export async function upsertContentDraft(draft: ContentDraft, operation = quickIngestAuthority.capture(), expectedUpdatedAt?: number): Promise<void> {
+  if (expectedUpdatedAt === undefined) return putOwned(db.contentDrafts, draft, operation)
+  await transact(operation, "rw", async () => {
+    const previous = await db.contentDrafts.get(draft.id)
+    if (!previous || !owned(previous, operation) || (draft.ownerScope && !owned(draft, operation))) {
+      throw new Error("This draft is no longer available for this account.")
+    }
+    if (previous.updatedAt !== expectedUpdatedAt) {
+      const error = new Error("Draft changed elsewhere. Your edits remain in the editor; copy them before reloading the saved draft.")
+      error.name = "DraftConflictError"
+      throw error
+    }
+    await db.contentDrafts.put({ ...draft, ...(previous.pendingMediaId ? { pendingMediaId: previous.pendingMediaId } : {}), ownerScope: operation.authorityKey })
+  })
 }
 export async function updateContentDraft(id: string, updates: Partial<ContentDraft>, operation = quickIngestAuthority.capture()): Promise<void> {
   await transact(operation, "rw", async () => {
@@ -110,7 +122,15 @@ export async function deleteDraftAssetsByDraftId(draftId: string, operation = qu
   await transact(operation, "rw", async () => { await db.draftAssets.where("draftId").equals(draftId).filter(row => owned(row, operation)).delete() })
 }
 export async function getDraftAssetsTotalBytes(operation = quickIngestAuthority.capture()): Promise<number> {
-  return transact(operation, "r", async () => (await db.draftAssets.filter(row => owned(row, operation)).toArray()).reduce((sum, asset) => sum + (asset.sizeBytes || 0), 0))
+  return transact(operation, "r", async () => {
+    // Streaming accumulation (WP-29): rows are visited one at a time; the
+    // whole table (blob handles included) is never materialized at once.
+    let total = 0
+    await db.draftAssets.each(asset => {
+      if (owned(asset, operation)) total += asset.sizeBytes || 0
+    })
+    return total
+  })
 }
 export async function clearDrafts(operation = quickIngestAuthority.capture()): Promise<void> {
   await transact(operation, "rw", async () => {
@@ -127,7 +147,9 @@ export async function storeDraftAsset(draftId: string, file: DraftAssetInput, op
     if (draft && !owned(draft, operation)) throw new Error("Source draft belongs to another account.")
     const sizeBytes = Number(file.size || 0)
     // The cap covers this browser's physical storage, including preserved legacy assets.
-    const totalBytes = (await db.draftAssets.toArray()).reduce((sum, asset) => sum + (asset.sizeBytes || 0), 0)
+    // Streaming accumulation (WP-29): never materialize the whole table at once.
+    let totalBytes = 0
+    await db.draftAssets.each(asset => { totalBytes += asset.sizeBytes || 0 })
     if (totalBytes + sizeBytes > DRAFT_STORAGE_CAP_BYTES) return { asset: null, stored: false }
     const asset: DraftAsset = {
       id: crypto.randomUUID(), draftId, ownerScope: operation.authorityKey, kind: "file",

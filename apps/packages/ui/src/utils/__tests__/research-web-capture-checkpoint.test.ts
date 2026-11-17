@@ -11,6 +11,7 @@ vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
     hasPersistentBackend: true,
     get: mocks.get,
+    getAll: async () => Object.fromEntries(mocks.values),
     set: mocks.set
   })
 }))

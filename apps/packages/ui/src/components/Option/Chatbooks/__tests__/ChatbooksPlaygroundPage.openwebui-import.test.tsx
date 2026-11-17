@@ -52,8 +52,9 @@ vi.mock("react-i18next", () => ({
         | string
         | {
             defaultValue?: string
+            [name: string]: unknown
           },
-      options?: { count?: number }
+      options?: Record<string, unknown>
     ) => {
       if (typeof defaultValueOrOptions === "string") {
         return defaultValueOrOptions.replace(
@@ -61,7 +62,10 @@ vi.mock("react-i18next", () => ({
           String(options?.count ?? "")
         )
       }
-      if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
+      if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue.replace(
+        /\{\{(\w+)\}\}/g,
+        (_match, name) => String(defaultValueOrOptions[name] ?? "")
+      )
       return key
     }
   })
@@ -480,6 +484,25 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
       })
     })
     expect(screen.getByText("queued")).toBeInTheDocument()
+  })
+
+  it("shows the completed hydration counts from the real flat Jobs result", async () => {
+    tldwClientMock.previewOpenWebUIHydration.mockResolvedValueOnce({ summary: { referenced_files: 1, resolved_files: 1 }, warnings: [] })
+    tldwClientMock.createOpenWebUIHydrationJob.mockResolvedValueOnce({
+      job_id: "42", status: "completed", result: { referenced_files: 1, resolved_files: 1, hydrated_images: 1, registered_media_files: 0, warnings: [] }
+    })
+    render(<ChatbooksPlaygroundPage />)
+    fireEvent.click(screen.getByRole("tab", { name: "Import" }))
+    const source = screen.getAllByRole("combobox").find(element => (element as HTMLSelectElement).value === "chatbook")
+    fireEvent.change(source!, { target: { value: "openwebui_json" } })
+    fireEvent.change(screen.getByLabelText("OpenWebUI data root"), { target: { value: "/srv/openwebui" } })
+    fireEvent.change(screen.getByLabelText("Imported conversation IDs"), { target: { value: "conv-a" } })
+    fireEvent.click(screen.getByRole("button", { name: "Preview attachments" }))
+    const run = screen.getByRole("button", { name: "Run hydration job" })
+    await waitFor(() => expect(run).toBeEnabled())
+    fireEvent.click(run)
+    await waitFor(() => expect(screen.getByText("Hydrated 1 images and registered 0 files.")).toBeInTheDocument())
+    expect(tldwClientMock.createOpenWebUIHydrationJob).toHaveBeenCalledTimes(1)
   })
 
   it("uses the latest OpenWebUI import scope for hydration preview and job creation", async () => {

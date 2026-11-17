@@ -1,5 +1,5 @@
 import React from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ContentViewer } from '../ContentViewer'
 import { useMediaReadingProgress } from '@/hooks/useMediaReadingProgress'
@@ -123,7 +123,7 @@ describe('ContentViewer stage 4 metadata regressions', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     mocks.bgRequest.mockReset()
-    mocks.bgRequest.mockResolvedValue({})
+    mocks.bgRequest.mockImplementation(async (request: { body?: { keywords?: string[] } }) => ({ media_id: 777, keywords: request.body?.keywords || [] }))
     mocks.messageSuccess.mockReset()
     mocks.messageError.mockReset()
     mocks.messageWarning.mockReset()
@@ -213,7 +213,7 @@ describe('ContentViewer stage 4 metadata regressions', () => {
 
     vi.advanceTimersByTime(499)
     expect(mocks.bgRequest).not.toHaveBeenCalledWith(
-      expect.objectContaining({ path: '/api/v1/media/777', method: 'PUT' })
+      expect.objectContaining({ path: '/api/v1/media/777/keywords', method: 'PATCH' })
     )
 
     vi.advanceTimersByTime(1)
@@ -221,10 +221,42 @@ describe('ContentViewer stage 4 metadata regressions', () => {
 
     expect(mocks.bgRequest).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: '/api/v1/media/777',
-        method: 'PUT',
-        body: { keywords: ['second-keyword'] }
+        path: '/api/v1/media/777/keywords',
+        method: 'PATCH',
+        body: { keywords: ['second-keyword'], mode: 'set' }
       })
     )
+  })
+})
+
+
+describe('persisted Media and Note keyword contracts', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    mocks.bgRequest.mockReset().mockResolvedValue({})
+    mocks.messageSuccess.mockReset()
+    mocks.messageError.mockReset()
+    mocks.messageWarning.mockReset()
+    vi.mocked(useMediaReadingProgress).mockReturnValue({ saveProgress: vi.fn(), clearProgress: vi.fn(), progressPercent: null })
+  })
+  afterEach(() => { cleanup(); vi.runOnlyPendingTimers(); vi.useRealTimers() })
+
+  it('persists the requested Media keywords rather than acknowledging a generic PUT no-op', async () => {
+    let stored: string[] = []
+    mocks.bgRequest.mockImplementation(async (request: { path: string; method: string; body?: { keywords?: string[]; mode?: string } }) => {
+      if (request.path === '/api/v1/media/777/keywords' && request.method === 'PATCH' && request.body?.mode === 'set') stored = request.body?.keywords || []
+      return { media_id: 777, keywords: stored }
+    })
+    render(<ContentViewer selectedMedia={baseSelectedMedia} content="Body text" mediaDetail={{ type: 'audio' }} />)
+    fireEvent.click(screen.getByTestId('media-keywords-select-set-second'))
+    await vi.advanceTimersByTimeAsync(500)
+    expect(stored).toEqual(['second-keyword'])
+  })
+
+  it('keeps Note keywords on the versioned Note PUT contract', async () => {
+    render(<ContentViewer selectedMedia={{ ...baseSelectedMedia, kind: 'note', raw: { version: 4 } }} content="Body text" mediaDetail={{ version: 4 }} />)
+    fireEvent.click(screen.getByTestId('media-keywords-select-set-second'))
+    await vi.advanceTimersByTimeAsync(500)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/notes/777', method: 'PUT', headers: expect.objectContaining({ 'expected-version': '4' }), body: { keywords: ['second-keyword'] } }))
   })
 })

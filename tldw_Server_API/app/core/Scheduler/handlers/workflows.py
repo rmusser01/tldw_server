@@ -10,6 +10,7 @@ Location: tldw_Server_API/app/core/Scheduler/handlers/workflows.py
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from loguru import logger
@@ -68,6 +69,19 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
     definition_snapshot = payload.get("definition_snapshot")
     resume_run_id = str(payload.get("resume_run_id") or "").strip() or None
     resume_step_id = str(payload.get("resume_step_id") or "").strip() or None
+    definition_version = None
+    if resume_run_id is None and workflow_id is not None:
+        saved_definition = db.get_definition(int(workflow_id))
+        if (
+            saved_definition is None
+            or saved_definition.tenant_id != tenant_id
+            or str(saved_definition.owner_id) != str(user_id)
+        ):
+            raise ValueError("workflow_run: saved workflow not found")
+        definition_snapshot = json.loads(saved_definition.definition_json or "{}")
+        if not isinstance(definition_snapshot, dict):
+            raise ValueError("workflow_run: saved definition must be a dict")
+        definition_version = saved_definition.version
     if resume_run_id is None and workflow_id is None and not definition_snapshot:
         raise ValueError("workflow_run: must provide workflow_id or definition_snapshot")
     if bool(resume_run_id) != bool(resume_step_id):
@@ -118,7 +132,7 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
                 user_id=user_id,
                 inputs=inputs,
                 workflow_id=int(workflow_id) if workflow_id is not None else None,
-                definition_version=None,
+                definition_version=definition_version,
                 definition_snapshot=definition_snapshot,
                 idempotency_key=None,
                 session_id=None,

@@ -103,3 +103,40 @@ async def test_tool_loop_exhaustion_respects_max_calls(monkeypatch):
     trace = md.get("tool_trace") or []
     assert isinstance(trace, list)
     assert len([t for t in trace if t.get("tool") == "expand_window"]) <= 1
+
+
+@pytest.mark.asyncio
+async def test_planner_quota_refusal_falls_back_to_heuristics(monkeypatch):
+    """A refused LLM planner degrades to heuristic planning instead of failing the search (spec §4a, §4b)."""
+    import tldw_Server_API.app.core.RAG.rag_service.agentic_execution as agentic_execution
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    class FakeRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def retrieve(self, *args, **kwargs):
+            return [_doc()]
+
+    class RefusedPlanner:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def generate(self, *args, **kwargs):  # noqa: ARG002
+            raise LLMQuotaExceededError(
+                category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+            )
+
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(agentic_execution, "AnswerGenerator", RefusedPlanner)
+
+    cfg = ac.AgenticConfig(top_k_docs=1, enable_tools=True, use_llm_planner=True, time_budget_sec=2.0)
+    res = await ac.agentic_rag_pipeline(
+        query="explain attention",
+        sources=["media_db"],
+        search_mode="fts",
+        agentic=cfg,
+        enable_generation=False,
+    )
+
+    assert res.documents

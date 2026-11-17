@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import configparser
 from copy import deepcopy
 from typing import Any
 
@@ -56,8 +57,24 @@ def _default_provider_config() -> dict[str, Any]:
     if default_web_engine not in _VALID_WEB_ENGINES:
         default_web_engine = "duckduckgo"
 
+    raw_vector = str(get_config_value("Search-Agent", "deep_research_local_use_vector", default="true")).strip().lower()
+    try:
+        use_vector = configparser.ConfigParser.BOOLEAN_STATES[raw_vector]
+    except KeyError:
+        raise ValueError("deep_research_local_use_vector must be a boolean") from None
+
+    raw_thinking = get_config_value("Search-Agent", "deep_research_llamacpp_enable_thinking", default=None)
+    thinking_text = "" if raw_thinking is None else str(raw_thinking).strip().lower()
+    enable_thinking = None
+    if thinking_text:
+        try:
+            enable_thinking = configparser.ConfigParser.BOOLEAN_STATES[thinking_text]
+        except KeyError:
+            raise ValueError("deep_research_llamacpp_enable_thinking must be a boolean or blank") from None
+
     return {
         "local": {
+            "use_vector": use_vector,
             "top_k": _coerce_int(
                 get_config_value("Search-Agent", "deep_research_local_top_k", default="5"),
                 default=5,
@@ -85,6 +102,7 @@ def _default_provider_config() -> dict[str, Any]:
             ),
         },
         "synthesis": {
+            "llamacpp_enable_thinking": enable_thinking,
             "provider": (get_config_value("Search-Agent", "deep_research_synthesis_provider", default=None) or None),
             "model": (get_config_value("Search-Agent", "deep_research_synthesis_model", default=None) or None),
             "temperature": _coerce_float(

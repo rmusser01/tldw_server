@@ -253,6 +253,7 @@ def _enqueue_audio_studio_job(
         job_type=job_type,
         payload=payload,
         owner_user_id=str(user_id),
+        batch_group=f"audio-studio:{project_id}",
         project_id=getattr(project, "id", None),
         priority=priority,
         max_retries=2,

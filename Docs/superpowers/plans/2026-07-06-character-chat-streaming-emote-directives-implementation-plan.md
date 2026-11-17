@@ -860,7 +860,7 @@ Omit unchanged optional files from `git add`.
 ## Task 6: Final Verification And Backlog Update
 
 **Files:**
-- Modify: `backlog/tasks/task-12163 - Add-explicit-streaming-emote-directives-for-character-chat-portraits.md`
+- Modify: `backlog/tasks/task-15083 - Add-explicit-streaming-emote-directives-for-character-chat-portraits.md`
 
 - [ ] **Step 1: Run targeted frontend tests**
 
@@ -933,7 +933,7 @@ Check acceptance criteria as completed only after the matching tests pass.
 - [ ] **Step 6: Final commit**
 
 ```bash
-git add "backlog/tasks/task-12163 - Add-explicit-streaming-emote-directives-for-character-chat-portraits.md"
+git add "backlog/tasks/task-15083 - Add-explicit-streaming-emote-directives-for-character-chat-portraits.md"
 git commit -m "chore: record character emote verification"
 ```
 

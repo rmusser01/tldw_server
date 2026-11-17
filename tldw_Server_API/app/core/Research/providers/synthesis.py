@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable
 
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 
 ChatFn = Callable[..., Awaitable[Any]]
@@ -65,17 +66,38 @@ class SynthesisProvider:
             "Return a JSON object with keys: outline_sections, claims, report_sections, "
             "unresolved_questions, summary.\n"
             "Each outline section must contain title, focus_area, source_ids, note_ids.\n"
-            "Each claim must contain text, focus_area, source_ids, citations, confidence.\n"
-            "Each report section must contain title and markdown."
+            "Each claim must contain text, focus_area, source_ids, citations, confidence. "
+            "Confidence must be a JSON number between 0 and 1, never a qualitative label.\n"
+            "Each report section must contain title and markdown, both strings. "
+            "source_ids and note_ids must be arrays of strings; "
+            "citations must be an array of objects with a source_id from Available sources. "
+            "unresolved_questions must be an array of strings; "
+            "summary must be a JSON object (use {} when there is no additional summary metadata)."
         )
+        thinking = config.get("llamacpp_enable_thinking")
+        if thinking is not None and not isinstance(thinking, bool):
+            raise ValueError("llamacpp_enable_thinking must be a boolean or unset")
+        extensions = {}
+        if thinking is not None and get_registry().resolve_provider_name(provider) == "llama.cpp":
+            extensions["extra_body"] = {"chat_template_kwargs": {"enable_thinking": thinking}}
+        temperature = config.get("temperature")
         response = await self._chat_fn(
             messages=[{"role": "user", "content": user_prompt}],
             api_provider=provider,
             model=model,
             system_message=system_message,
-            temperature=float(config.get("temperature", 0.2) or 0.2),
+            temperature=float(0.2 if temperature is None else temperature),
             max_tokens=int(config.get("max_tokens", 2500) or 2500),
+            **extensions,
         )
+        choices = response.get("choices") if isinstance(response, dict) else None
+        if (
+            isinstance(choices, list)
+            and choices
+            and isinstance(choices[0], dict)
+            and choices[0].get("finish_reason") == "length"
+        ):
+            raise ValueError("synthesis_output_truncated")
         return extract_openai_content(response) or response
 
 

@@ -25,7 +25,10 @@ domain-specific fields.
 ## Module Map
 
 - `log_context.py` contains `new_request_id`, `ensure_request_id`,
-  `ensure_traceparent`, `log_context`, and Prompt Studio logger binding.
+  `ensure_traceparent`, `log_context`, request-id sanitizing, and Prompt Studio
+  logger binding.
+- `stt_observability_context.py` holds the opaque STT endpoint id used for log
+  redaction.
 - `access_log_middleware.py` emits structured request logs.
 - `json_log_formatter.py` formats Loguru records for JSON sinks.
 - `system_log_buffer.py` stores recent system log entries in memory.
@@ -33,8 +36,8 @@ domain-specific fields.
 ## How It Connects
 
 - `app/main.py` installs stdlib-to-Loguru interception and the global log patcher.
-- `Security/request_id_middleware.py` sanitizes inbound `X-Request-ID` and
-  places it on `request.state`.
+- `Security/request_id_middleware.py` applies `log_context`'s request-id
+  sanitizing to inbound `X-Request-ID` and places it on `request.state`.
 - Jobs, Prompt Studio, media ingest, and Chatbooks use logging context for
   request/job correlation.
 

@@ -13,8 +13,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("antd", async () => {
-  const ReactModule =
-    await vi.importActual<typeof import("react")>("react")
+  const ReactModule = await vi.importActual<typeof import("react")>("react")
 
   return {
     Popover: ({
@@ -26,9 +25,7 @@ vi.mock("antd", async () => {
     }) => (
       <div>
         {children}
-        <div data-testid="conversation-context-popover-content">
-          {content}
-        </div>
+        <div data-testid="conversation-context-popover-content">{content}</div>
       </div>
     ),
     Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
@@ -178,7 +175,9 @@ describe("ConversationContextPopover", () => {
       />
     )
 
-    expect(screen.getByTestId("conversation-context-trigger")).toBeInTheDocument()
+    expect(
+      screen.getByTestId("conversation-context-trigger")
+    ).toBeInTheDocument()
     expect(screen.getByTestId("mock-character-select")).toHaveTextContent(
       "Character slot 42"
     )
@@ -197,10 +196,30 @@ describe("ConversationContextPopover", () => {
 
     const content = screen.getByTestId("conversation-context-popover-content")
     expect(within(content).getAllByText("Worldbooks").length).toBeGreaterThan(0)
-    expect(within(content).getByText("1 matched / 2 configured")).toBeInTheDocument()
-    expect(within(content).getAllByText("Dictionaries").length).toBeGreaterThan(0)
-    expect(within(content).getByText("1 active / 1 configured")).toBeInTheDocument()
+    expect(
+      within(content).getByText("1 matched / 2 configured")
+    ).toBeInTheDocument()
+    expect(within(content).getAllByText("Dictionaries").length).toBeGreaterThan(
+      0
+    )
+    expect(
+      within(content).getByText("1 processed in preview / 1 configured")
+    ).toBeInTheDocument()
     expect(within(content).getByText("Echo Vault lore.")).toBeInTheDocument()
+  })
+
+  it("does not infer absent inherited lore from an empty client preview", () => {
+    render(
+      <ConversationContextPopover
+        chatId="chat-1"
+        selectedCharacterId="42"
+        setSelectedCharacterId={vi.fn()}
+        composition={null}
+        compositionStatus="idle"
+      />
+    )
+    expect(screen.getByText("Character lore not previewed")).toBeInTheDocument()
+    expect(screen.getByText("Not previewed")).toBeInTheDocument()
   })
 
   it("does not block blank chat when no context assets are selected", () => {
@@ -230,8 +249,9 @@ describe("ConversationContextPopover", () => {
       />
     )
 
-    const loadingClassName =
-      screen.getByTestId("conversation-context-trigger").className
+    const loadingClassName = screen.getByTestId(
+      "conversation-context-trigger"
+    ).className
 
     rerender(
       <ConversationContextPopover
@@ -243,8 +263,9 @@ describe("ConversationContextPopover", () => {
       />
     )
 
-    const readyClassName =
-      screen.getByTestId("conversation-context-trigger").className
+    const readyClassName = screen.getByTestId(
+      "conversation-context-trigger"
+    ).className
     expect(loadingClassName).toContain("min-w-[44px]")
     expect(readyClassName).toContain("min-w-[44px]")
     expect(loadingClassName).toContain("sm:min-w-[104px]")

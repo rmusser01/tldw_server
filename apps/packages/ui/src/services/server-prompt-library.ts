@@ -11,6 +11,7 @@
  * user picks one.
  */
 import { bgRequest } from "@/services/background-proxy"
+import { apiSend } from "@/services/api-send"
 import { appendPathQuery, toAllowedPath } from "@/services/tldw/path-utils"
 
 /** One item of GET /api/v1/prompts (PromptBriefResponse). */
@@ -134,6 +135,7 @@ const resolveTotalItems = (response: Record<string, unknown>): number | null => 
  * Duplicates that appear on two pages (edits during paging) are dropped.
  */
 export async function listAllServerPrompts(options?: {
+  expectedOwnerId?: string | null
   signal?: AbortSignal
   pageSize?: number
   maxPages?: number
@@ -148,11 +150,14 @@ export async function listAllServerPrompts(options?: {
     if (options?.signal?.aborted) {
       throw new DOMException("Server prompt listing aborted", "AbortError")
     }
-    const response = await bgRequest<unknown>({
+    const payload = {
       path: buildServerPromptListPath(page, pageSize),
-      method: "GET",
+      method: "GET" as const,
       ...(options?.signal ? { abortSignal: options.signal } : {})
-    })
+    }
+    const response = options?.expectedOwnerId !== undefined
+      ? await readOwnedServerPrompt(payload, options.expectedOwnerId)
+      : await bgRequest<unknown>(payload)
     if (!isRecord(response) || !Array.isArray(response.items)) {
       throw new Error("Unexpected response from the server prompt library")
     }
@@ -179,12 +184,16 @@ export async function listAllServerPrompts(options?: {
 
 /** Fetch one server prompt with its text (system_prompt / user_prompt). */
 export async function getServerPromptDetail(
-  id: number
+  id: number,
+  expectedOwnerId?: string | null
 ): Promise<ServerPromptDetail> {
-  const response = await bgRequest<unknown>({
+  const payload = {
     path: toAllowedPath(`/api/v1/prompts/${encodeURIComponent(String(id))}`),
-    method: "GET"
-  })
+    method: "GET" as const
+  }
+  const response = expectedOwnerId !== undefined
+    ? await readOwnedServerPrompt(payload, expectedOwnerId)
+    : await bgRequest<unknown>(payload)
   const brief = normalizeBrief(response)
   if (!brief || !isRecord(response)) {
     throw new Error("Server prompt not found")
@@ -206,4 +215,17 @@ export async function getServerPromptDetail(
     version: toFiniteNumber(response.version) ?? undefined,
     deleted: response.deleted === true
   }
+}
+
+async function readOwnedServerPrompt(
+  payload: { path: ReturnType<typeof toAllowedPath>; method: "GET" },
+  expectedOwnerId: string | null
+): Promise<unknown> {
+  if (!expectedOwnerId) throw new Error("Prompt owner is unavailable")
+  const response = await apiSend<unknown>({
+    ...payload,
+    recipePersistence: { mode: "owner", expectedOwnerId }
+  })
+  if (!response.ok) throw new Error(response.error || "Prompt library is unavailable")
+  return response.data
 }

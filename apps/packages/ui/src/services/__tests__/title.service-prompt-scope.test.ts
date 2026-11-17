@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
-  getSetting: vi.fn(async () => true),
-  invoke: vi.fn(async () => ({ content: "Scoped title" })),
+  getSetting: vi.fn(async (..._args: unknown[]) => true),
+  invoke: vi.fn(async (_messages: HumanMessage[], _options?: { signal?: AbortSignal }) => ({ content: "Scoped title" })),
   loadServicePromptSnapshot: vi.fn(),
   pageAssistModel: vi.fn<(options?: unknown) => Promise<any>>()
 }))
@@ -37,6 +37,7 @@ vi.mock("@/services/service-prompts", async () => {
 
 import fixture from "@/utils/__fixtures__/service-prompt-rendering.json"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { HumanMessage } from "@/types/messages"
 import { generateTitle } from "../title"
 
@@ -50,7 +51,7 @@ const requestScope = Object.freeze({
 
 const snapshotFor = (
   template = "Title for {query}",
-  snapshotRequestScope = requestScope,
+  snapshotRequestScope: ServicePromptRequestScope = requestScope,
   source: "user" | "packaged" = "user"
 ) => {
   const scopeController = new AbortController()

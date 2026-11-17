@@ -194,7 +194,7 @@ describe("SearchBar behavior", () => {
     )
   })
 
-  it("truncates typed query updates to max length", () => {
+  it("truncates typed query updates to max length", async () => {
     render(<SearchBar autoFocus={false} />)
 
     const input = screen.getByRole("textbox", {
@@ -203,6 +203,13 @@ describe("SearchBar behavior", () => {
     const longQuery = "x".repeat(25000)
     fireEvent.change(input, { target: { value: longQuery } })
 
+    // The raw query truncates immediately in SearchBar-local state (WP-08:
+    // keystrokes update local state only)...
+    expect(input).toHaveValue(longQuery.slice(0, 20000))
+    // ...and the debounced reducer sync carries the truncated value.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
     expect(state.setQuery).toHaveBeenCalledWith(longQuery.slice(0, 20000))
   })
 

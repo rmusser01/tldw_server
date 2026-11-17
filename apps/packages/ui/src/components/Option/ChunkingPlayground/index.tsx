@@ -41,6 +41,7 @@ import {
   type ChunkingTemplateListResponse
 } from "@/services/chunking"
 import { bgRequest } from "@/services/background-proxy"
+import { downloadBlob } from "@/utils/download-blob"
 
 import { ChunkCardView } from "./ChunkCardView"
 import { ChunkInlineView } from "./ChunkInlineView"
@@ -440,6 +441,27 @@ export const ChunkingPlayground: React.FC<ChunkingPlaygroundProps> = ({
     t
   ])
 
+  const handleExport = useCallback(() => {
+    if (isLoading || !lastResponse?.chunks.length) return
+
+    try {
+      downloadBlob(
+        new Blob([JSON.stringify(lastResponse, null, 2)], {
+          type: "application/json"
+        }),
+        "chunking-result.json"
+      )
+      setError(null)
+    } catch {
+      setError(
+        t(
+          "settings:chunkingPlayground.exportFailed",
+          "Unable to download chunks. Please try again."
+        )
+      )
+    }
+  }, [isLoading, lastResponse, t])
+
   const resetToDefaults = useCallback(() => {
     const defaults = capabilities?.default_options ?? DEFAULT_CHUNKING_OPTIONS
     setOptions({
@@ -470,13 +492,15 @@ export const ChunkingPlayground: React.FC<ChunkingPlaygroundProps> = ({
         throw new Error("Template contains invalid JSON")
       }
       const chunking = config.chunking || {}
-      const chunkingConfig = chunking.config || {}
+      const { method, config: nestedConfig, ...flatConfig } = chunking
+      // Saved UI templates use flat options; built-ins also support nested config.
+      const chunkingConfig = { ...(nestedConfig || {}), ...flatConfig }
 
       const nextOptions: ChunkingOptions = {
         ...options
       }
 
-      if (chunking.method) nextOptions.method = String(chunking.method)
+      if (method) nextOptions.method = String(method)
       Object.entries(chunkingConfig).forEach(([key, value]) => {
         if (value !== undefined) {
           ;(nextOptions as Record<string, any>)[key] = value
@@ -1141,7 +1165,7 @@ export const ChunkingPlayground: React.FC<ChunkingPlaygroundProps> = ({
                         "settings:chunkingPlayground.advanced.templateNameLabel",
                         "Template name"
                       )}>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <AutoComplete
                           value={templateName}
                           onChange={setTemplateName}
@@ -1156,7 +1180,7 @@ export const ChunkingPlayground: React.FC<ChunkingPlaygroundProps> = ({
                               .toLowerCase()
                               .includes(inputValue.toLowerCase())
                           }
-                          className="flex-1"
+                          className="w-full"
                         />
                         <Button
                           size="small"
@@ -1292,14 +1316,24 @@ export const ChunkingPlayground: React.FC<ChunkingPlaygroundProps> = ({
           ]}
         />
 
-        {chunks.length > 0 && (
-          <Text type="secondary">
-            {t("settings:chunkingPlayground.stats", "{{count}} chunks, avg {{avgSize}} chars", {
-              count: stats.count,
-              avgSize: stats.avgCharCount
-            })}
-          </Text>
-        )}
+        <Space wrap>
+          {chunks.length > 0 && (
+            <Text type="secondary">
+              {t("settings:chunkingPlayground.stats", "{{count}} chunks, avg {{avgSize}} chars", {
+                count: stats.count,
+                avgSize: stats.avgCharCount
+              })}
+            </Text>
+          )}
+          {!!lastResponse?.chunks.length && (
+            <Button
+              icon={<DownloadOutlined aria-hidden="true" />}
+              onClick={handleExport}
+              disabled={isLoading}>
+              {t("settings:chunkingPlayground.exportJson", "Export JSON")}
+            </Button>
+          )}
+        </Space>
       </div>
 
       {/* Error display */}

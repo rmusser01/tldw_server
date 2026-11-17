@@ -491,9 +491,10 @@ export const mediaMethods = {
   },
 
   async listReferenceImageCandidates(
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<ReferenceImageListResponse> {
     const response = await bgRequest<any>({
+      ...requestScopeFields(options?.requestScope),
       path: "/api/v1/files/reference-images" as AllowedPath,
       method: "GET",
       abortSignal: options?.signal
@@ -996,7 +997,7 @@ export const mediaMethods = {
 
   async listAnnotations(
     mediaId: string | number,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     media_id: number
     annotations: Array<{
@@ -1030,6 +1031,7 @@ export const mediaMethods = {
   }>({
       path: `/api/v1/media/${id}/annotations`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   },
@@ -1042,8 +1044,10 @@ export const mediaMethods = {
       color?: "yellow" | "green" | "blue" | "pink"
       note?: string
       annotation_type?: "highlight" | "page_note"
+      chapter_title?: string
+      percentage?: number
     },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
       id: string
       media_id: number
@@ -1069,8 +1073,9 @@ export const mediaMethods = {
     }>({
       path: `/api/v1/media/${id}/annotations`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: annotation,
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   },
@@ -1083,7 +1088,7 @@ export const mediaMethods = {
       color?: "yellow" | "green" | "blue" | "pink"
       note?: string
     },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
       id: string
       media_id: number
@@ -1110,8 +1115,9 @@ export const mediaMethods = {
     }>({
       path: `/api/v1/media/${id}/annotations/${annId}`,
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: updates,
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   },
@@ -1119,13 +1125,14 @@ export const mediaMethods = {
   async deleteAnnotation(
     mediaId: string | number,
     annotationId: string,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<void> {
     const id = encodeURIComponent(String(mediaId))
     const annId = encodeURIComponent(annotationId)
     await bgRequest<void>({
       path: `/api/v1/media/${id}/annotations/${annId}`,
       method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   },
@@ -1138,9 +1145,11 @@ export const mediaMethods = {
       color?: "yellow" | "green" | "blue" | "pink"
       note?: string
       annotation_type?: "highlight" | "page_note"
+      chapter_title?: string
+      percentage?: number
     }>,
     clientIds?: string[],
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     media_id: number
     synced_count: number
@@ -1176,11 +1185,12 @@ export const mediaMethods = {
   }>({
       path: `/api/v1/media/${id}/annotations/sync`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: {
         annotations,
         ...(clientIds && { client_ids: clientIds })
       },
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   },
@@ -1191,7 +1201,7 @@ export const mediaMethods = {
 
   async getReadingProgress(
     mediaId: string | number,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     media_id: number
     has_progress?: boolean
@@ -1217,6 +1227,7 @@ export const mediaMethods = {
   }>({
       path: `/api/v1/media/${id}/progress`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   },
@@ -1231,7 +1242,7 @@ export const mediaMethods = {
       cfi?: string
       percentage?: number
     },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     media_id: number
     current_page: number
@@ -1255,20 +1266,22 @@ export const mediaMethods = {
   }>({
       path: `/api/v1/media/${id}/progress`,
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: progress,
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   },
 
   async deleteReadingProgress(
     mediaId: string | number,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<void> {
     const id = encodeURIComponent(String(mediaId))
     await bgRequest<void>({
       path: `/api/v1/media/${id}/progress`,
       method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   },
@@ -1310,7 +1323,8 @@ export const mediaMethods = {
       rows_offset?: number
       include_rows?: boolean
       include_sources?: boolean
-    }
+    },
+    options?: ScopedRequestOptions
   ): Promise<any> {
     const id = encodeURIComponent(tableId)
     const query = buildQuery({
@@ -1321,7 +1335,9 @@ export const mediaMethods = {
     } as Record<string, any>)
     const response = await bgRequest<any>({
       path: `/api/v1/data-tables/${id}${query}`,
-      method: "GET"
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
     return response?.table ? mapApiDetailToUi(response) : response
   },
@@ -1334,7 +1350,7 @@ export const mediaMethods = {
     column_hints?: Array<{ name?: string; type?: string; description?: string; format?: string }>
     model?: string
     max_rows?: number
-  }): Promise<ApiDataTableGenerateResponse> {
+  }, options?: ScopedRequestOptions): Promise<ApiDataTableGenerateResponse> {
     const body = {
       name: payload.name,
       prompt: payload.prompt,
@@ -1347,20 +1363,25 @@ export const mediaMethods = {
     return await bgRequest<ApiDataTableGenerateResponse>({
       path: "/api/v1/data-tables/generate",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
       body
     })
   },
 
   async updateDataTable(
     tableId: string,
-    payload: { name?: string; description?: string }
+    payload: { name?: string; description?: string },
+    options?: ScopedRequestOptions
   ): Promise<any> {
     const id = encodeURIComponent(tableId)
     return await bgRequest<any>({
       path: `/api/v1/data-tables/${id}`,
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
       body: payload
     })
   },
@@ -1370,14 +1391,17 @@ export const mediaMethods = {
     payload: {
       columns: DataTableColumn[]
       rows: Record<string, any>[]
-    }
+    },
+    options?: ScopedRequestOptions
   ): Promise<any> {
     const id = encodeURIComponent(tableId)
     const body = buildContentPayload(payload.columns, payload.rows)
     const response = await bgRequest<any>({
       path: `/api/v1/data-tables/${id}/content`,
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
       body
     })
     return response?.table ? mapApiDetailToUi(response) : response
@@ -1391,23 +1415,37 @@ export const mediaMethods = {
     })
   },
 
-  async getDataTableJob(jobId: number): Promise<ApiDataTableJobStatus> {
+  async getDataTableJob(jobId: number, options?: ScopedRequestOptions): Promise<ApiDataTableJobStatus> {
     return await bgRequest<ApiDataTableJobStatus>({
       path: `/api/v1/data-tables/jobs/${encodeURIComponent(String(jobId))}`,
-      method: "GET"
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   },
 
   async regenerateDataTable(
     tableId: string,
-    payload?: { prompt?: string; model?: string; max_rows?: number }
+    payload?: { prompt?: string; model?: string; max_rows?: number },
+    options?: ScopedRequestOptions
   ): Promise<ApiDataTableGenerateResponse> {
     const id = encodeURIComponent(tableId)
     return await bgRequest<ApiDataTableGenerateResponse>({
       path: `/api/v1/data-tables/${id}/regenerate`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
       body: payload || {}
+    })
+  },
+
+  async cancelDataTableJob(jobId: number, options?: ScopedRequestOptions): Promise<{ success: boolean; status: string }> {
+    return await bgRequest({
+      path: `/api/v1/data-tables/jobs/${encodeURIComponent(String(jobId))}`,
+      method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   },
 
@@ -1597,8 +1635,9 @@ export const mediaMethods = {
 
   async createImageArtifact(
     request: ImageArtifactRequest,
-    ensureAndRequest: <T>(init: any, requireAuth?: boolean) => Promise<T>
+    options?: ScopedRequestOptions & { onDispatch?: () => void }
   ): Promise<FileCreateResponse> {
+    options?.signal?.throwIfAborted()
     const payload: Record<string, unknown> = {
       backend: request.backend,
       prompt: request.prompt
@@ -1632,11 +1671,14 @@ export const mediaMethods = {
       body.title = request.title
     }
 
-    return await ensureAndRequest<FileCreateResponse>({
+    return await bgRequest<FileCreateResponse>({
       path: "/api/v1/files/create",
       method: "POST",
       body,
-      timeoutMs: request.timeoutMs
+      timeoutMs: request.timeoutMs,
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      onDispatch: options?.onDispatch
     })
   }
 }

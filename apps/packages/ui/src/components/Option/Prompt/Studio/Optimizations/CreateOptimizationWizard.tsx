@@ -4,7 +4,6 @@ import {
   Steps,
   Form,
   Input,
-  Select,
   InputNumber,
   Table,
   notification,
@@ -34,6 +33,7 @@ import {
   type OptimizationStrategy,
   type StrategyInfo
 } from "@/services/prompt-studio"
+import { StudioModelTargetFields, useStudioModelTarget } from "../StudioModelTargetFields"
 import { Button } from "@/components/Common/Button"
 import { Alert as DsAlert } from "@/components/ui/primitives"
 import { CompareStrategiesModal } from "./CompareStrategiesModal"
@@ -51,6 +51,7 @@ type FormValues = {
   prompt_id: number
   strategy: OptimizationStrategy
   max_iterations?: number
+  provider?: string
   model_name?: string
   temperature?: number
 }
@@ -77,6 +78,7 @@ export const CreateOptimizationWizard: React.FC<
   const { t } = useTranslation(["settings", "common"])
   const [form] = Form.useForm<FormValues>()
   const queryClient = useQueryClient()
+  const modelTarget = useStudioModelTarget(open, form)
 
   const wizardStep = usePromptStudioStore((s) => s.wizardStep)
   const setWizardStep = usePromptStudioStore((s) => s.setWizardStep)
@@ -116,8 +118,11 @@ export const CreateOptimizationWizard: React.FC<
 
   // Create mutation
   const createMutation = useMutation({
-    mutationFn: (payload: OptimizationCreatePayload) =>
-      createOptimization(payload),
+    mutationFn: async (payload: OptimizationCreatePayload) => {
+      const response = await createOptimization(payload)
+      if (response.ok === false) throw new Error(response.error || "Request failed")
+      return response
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["prompt-studio", "optimizations", projectId]
@@ -137,7 +142,7 @@ export const CreateOptimizationWizard: React.FC<
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -170,7 +175,14 @@ export const CreateOptimizationWizard: React.FC<
   }
 
   const handleSubmit = () => {
-    const values = form.getFieldsValue()
+    const values = form.getFieldsValue(true)
+    let target: ReturnType<typeof modelTarget.resolveTarget>
+    try {
+      target = modelTarget.resolveTarget()
+    } catch (error) {
+      notification.error({ message: t("common:error.label", { defaultValue: "Error" }), description: (error as Error).message })
+      return
+    }
 
     const testCaseIdsToUse = selectAllTestCases
       ? testCases.map((tc) => tc.id)
@@ -179,19 +191,26 @@ export const CreateOptimizationWizard: React.FC<
     const strategyInfo = strategies.find((s) => s.name === selectedStrategy)
     const defaultParams = strategyInfo?.default_params ?? {}
 
+    const maxIterations = values.max_iterations ?? defaultParams.max_iterations ?? 10
+    if (!Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > 100) {
+      notification.error({ message: t("common:error.label", { defaultValue: "Error" }), description: "Max Iterations must be an integer from 1 to 100" })
+      return
+    }
+
     const payload: OptimizationCreatePayload = {
       project_id: projectId,
       prompt_id: selectedPromptId!,
       name: values.name || undefined,
       description: values.description || undefined,
       config: {
+        ...defaultParams,
         strategy: selectedStrategy,
-        max_iterations: values.max_iterations ?? defaultParams.max_iterations ?? 10,
-        ...defaultParams
+        max_iterations: maxIterations
       },
-      model_config: values.model_name
+      model_config: target.provider || target.model
         ? {
-            model_name: values.model_name,
+            provider: target.provider,
+            model_name: target.model,
             temperature: values.temperature
           }
         : undefined,
@@ -411,30 +430,9 @@ export const CreateOptimizationWizard: React.FC<
                 <InputNumber min={1} max={100} style={{ width: "100%" }} />
               </Form.Item>
 
-              <div className="grid grid-cols-2 gap-4">
-                <Form.Item
-                  name="model_name"
-                  label={t(
-                    "managePrompts.studio.optimizations.wizard.model",
-                    {
-                      defaultValue: "Model (optional)"
-                    }
-                  )}
-                >
-                  <Select
-                    placeholder="Use default"
-                    allowClear
-                    options={[
-                      { label: "GPT-4o", value: "gpt-4o" },
-                      { label: "GPT-4o mini", value: "gpt-4o-mini" },
-                      {
-                        label: "Claude 3.5 Sonnet",
-                        value: "claude-3-5-sonnet-latest"
-                      }
-                    ]}
-                  />
-                </Form.Item>
+              <StudioModelTargetFields target={modelTarget} />
 
+              <div className="grid grid-cols-2 gap-4">
                 <Form.Item
                   name="temperature"
                   label={t(
@@ -484,6 +482,10 @@ export const CreateOptimizationWizard: React.FC<
                     ? `All (${testCases.length})`
                     : selectedTestCaseIds.length}
                 </p>
+              </div>
+              <div>
+                <span className="text-text-muted text-sm">Provider / Model:</span>
+                <p className="font-medium">{modelTarget.provider || "Default"} / {modelTarget.model || "Default"}</p>
               </div>
               <div>
                 <span className="text-text-muted text-sm">Strategy:</span>

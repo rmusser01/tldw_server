@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
 # World Book Management Tests
 # ========================================================================
 
+
 class TestWorldBookManagement:
     """Test world book CRUD operations."""
 
@@ -166,9 +167,11 @@ class TestWorldBookManagement:
         assert hasattr(service._entry_cache, "_max_size")
         assert hasattr(service._book_cache, "_max_size")
 
+
 # ========================================================================
 # Entry Management Tests
 # ========================================================================
+
 
 class TestEntryManagement:
     """Test world book entry operations."""
@@ -496,9 +499,11 @@ class TestEntryManagement:
         entries = service.get_entries(wb_id)
         assert len(entries) == len(sample_world_book['entries'])
 
+
 # ========================================================================
 # Character Association Tests
 # ========================================================================
+
 
 class TestCharacterAssociation:
     """Test world book to character associations."""
@@ -559,9 +564,11 @@ class TestCharacterAssociation:
         for wb_id in wb_ids:
             assert any(wb['id'] == wb_id for wb in character_books)
 
+
 # ========================================================================
 # Context Processing Tests
 # ========================================================================
+
 
 class TestContextProcessing:
     """Test context processing with world book entries."""
@@ -744,9 +751,11 @@ class TestContextProcessing:
         total_tokens = sum(len(e['content'].split()) for e in activated)
         assert total_tokens <= 120  # Allow small overhead
 
+
 # ========================================================================
 # Search and Filter Tests
 # ========================================================================
+
 
 class TestSearchAndFilter:
     """Test search and filter functionality."""
@@ -795,9 +804,11 @@ class TestSearchAndFilter:
         assert len(recursive) == 1
         assert recursive[0]['content'] == 'Recursive'
 
+
 # ========================================================================
 # Import/Export Tests
 # ========================================================================
+
 
 class TestImportExport:
     """Test import/export functionality."""
@@ -889,9 +900,11 @@ class TestImportExport:
         assert all('key' in e for e in lorebook['entries'])
         assert all('content' in e for e in lorebook['entries'])
 
+
 # ========================================================================
 # Statistics Tests
 # ========================================================================
+
 
 class TestStatistics:
     """Test statistics and analytics."""
@@ -1088,9 +1101,11 @@ class TestStatistics:
         assert result.get("budget_exhausted") is True
         assert int(result.get("skipped_entries_due_to_budget", 0)) >= 1
 
+
 # ========================================================================
 # Cloning Tests
 # ========================================================================
+
 
 class TestCloning:
     """Test world book cloning."""
@@ -1122,9 +1137,11 @@ class TestCloning:
             assert orig['content'] == clone['content']
             assert orig['priority'] == clone['priority']
 
+
 # ========================================================================
 # Keyword Processing Tests
 # ========================================================================
+
 
 class TestKeywordProcessing:
     """Test keyword normalization and processing."""
@@ -1158,9 +1175,11 @@ class TestKeywordProcessing:
             assert len(activated) == 1
             assert activated[0]['content'] == 'Dragon entry'
 
+
 # ========================================================================
 # Error Handling Tests
 # ========================================================================
+
 
 class TestErrorHandling:
     """Test error handling."""
@@ -1217,3 +1236,28 @@ class TestErrorHandling:
         entries = service.get_entries(wb_id)
         entry = next(e for e in entries if 'test2' in e['keywords'])
         assert entry['priority'] <= 100
+
+
+def test_priority_is_preserved_between_literal_and_regex_candidates(world_book_service):
+    service = world_book_service
+    book = service.create_world_book("Competing match priority")
+    service.add_entry(book, ["harbor"], "Low literal", priority=1)
+    high = service.add_entry(book, [r"harb.r"], "High regex", priority=9, regex_match=True)
+    result = service.process_context("harbor", world_book_ids=[book], scan_depth=1, token_budget=20)
+    assert result["entry_ids"] == [high]
+
+
+def test_strict_regex_timeout_reports_failure_and_preserves_legacy_nonmatch():
+    from tldw_Server_API.app.core.Character_Chat.world_book_manager import (
+        WorldBookEntry,
+    )
+
+    class TimedOutPattern:
+        def search(self, text, **kwargs):
+            raise TimeoutError("Owned regex evaluation timed out")
+
+    entry = WorldBookEntry(entry_id=1, keywords=["harbor"], regex_match=True)
+    entry._patterns = [(TimedOutPattern(), "harbor")]
+    assert entry.get_first_match_info("harbor") is None
+    with pytest.raises(TimeoutError):
+        entry.get_first_match_info("harbor", strict=True)

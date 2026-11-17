@@ -54,7 +54,8 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/services/prompt-studio", () => ({
   listPrompts: vi.fn(),
-  runTestCases: vi.fn()
+  runTestCases: vi.fn(),
+  getLlmProviders: vi.fn()
 }))
 
 vi.mock("@tanstack/react-query", () => ({
@@ -75,16 +76,17 @@ vi.mock("@tanstack/react-query", () => ({
   useMutation: (config: { onSuccess?: (response: unknown) => void }) => ({
     isPending: false,
     mutate: vi.fn(() =>
-      config.onSuccess?.({
-        data: {
-          data: runResults.results
-        }
-      })
+      config.onSuccess?.(runResults.results)
     )
   })
 }))
 
 vi.mock("antd", () => ({
+  Form: Object.assign(({ children }: { children?: React.ReactNode }) => <div>{children}</div>, {
+    Item: ({ children, label }: { children?: React.ReactNode; label?: React.ReactNode }) => <label>{label}{children}</label>,
+    useForm: () => [{ getFieldsValue: () => ({}), resetFields: vi.fn() }],
+    useWatch: () => undefined
+  }),
   Alert: ({
     message,
     title,
@@ -121,17 +123,19 @@ vi.mock("antd", () => ({
   },
   Select: ({
     onChange,
+    id,
     options,
     placeholder,
     value
   }: {
     onChange?: (value: number) => void
+    id?: string
     options?: Array<{ label: string; value: number }>
     placeholder?: string
     value?: number | null
   }) => (
     <select
-      aria-label="Select Prompt to Run Against"
+      aria-label={id === "studio-run-prompt" ? "Select Prompt to Run Against" : placeholder}
       value={value ?? ""}
       onChange={(event) => onChange?.(Number(event.currentTarget.value))}
     >
@@ -216,7 +220,7 @@ describe("TestCaseRunModal design-system product states", () => {
   it("renders run result summary and status labels through design-system Badge", async () => {
     renderModal()
 
-    fireEvent.change(screen.getByRole("combobox"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Select Prompt to Run Against" }), {
       target: { value: "55" }
     })
     fireEvent.click(screen.getByRole("button", { name: /Run Tests/i }))

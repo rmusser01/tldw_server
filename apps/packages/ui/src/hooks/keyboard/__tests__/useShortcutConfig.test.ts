@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   defaultShortcuts,
+  formatShortcut,
   mergeShortcutConfig,
   type ShortcutConfig
 } from "../useShortcutConfig"
@@ -45,5 +46,18 @@ describe("shortcut config defaults", () => {
     expect(mergeShortcutConfig(null)).toEqual(defaultShortcuts)
     expect(mergeShortcutConfig("bad-storage-value")).toEqual(defaultShortcuts)
     expect(mergeShortcutConfig(["bad-storage-value"])).toEqual(defaultShortcuts)
+  })
+})
+
+describe("formatShortcut (XP-10)", () => {
+  it("shows Option chords with the ⌥ symbol on macOS", () => {
+    expect(formatShortcut(defaultShortcuts.modeNotes, { mac: true })).toBe("⌥5")
+    expect(formatShortcut(defaultShortcuts.newChat, { mac: true })).toBe("⌃⇧U")
+  })
+
+  it("keeps the spelled-out modifiers elsewhere", () => {
+    expect(formatShortcut(defaultShortcuts.modeNotes, { mac: false })).toBe(
+      "Alt + 5"
+    )
   })
 })

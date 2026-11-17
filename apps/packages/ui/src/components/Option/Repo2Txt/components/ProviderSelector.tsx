@@ -47,7 +47,9 @@ export function ProviderSelector({
     <section className="space-y-3">
       <header>
         <h2 className="text-sm font-semibold">
-          {t("option:repo2txt.providerTitle", { defaultValue: "Source Provider" })}
+          {t("option:repo2txt.providerTitle", {
+            defaultValue: "Source Provider"
+          })}
         </h2>
       </header>
 
@@ -55,6 +57,7 @@ export function ProviderSelector({
         <button
           type="button"
           className="rounded border px-3 py-1.5 text-sm"
+          disabled={busy}
           aria-pressed={provider === "github"}
           onClick={() => onSelectProvider("github")}
         >
@@ -63,6 +66,7 @@ export function ProviderSelector({
         <button
           type="button"
           className="rounded border px-3 py-1.5 text-sm"
+          disabled={busy}
           aria-pressed={provider === "local"}
           onClick={() => onSelectProvider("local")}
         >
@@ -74,6 +78,7 @@ export function ProviderSelector({
         <div className="flex flex-wrap items-center gap-2">
           <input
             type="url"
+            disabled={busy}
             value={githubUrl}
             onChange={(event) => onGithubUrlChange(event.target.value)}
             placeholder={t("option:repo2txt.githubPlaceholder", {
@@ -95,23 +100,35 @@ export function ProviderSelector({
       {provider === "local" && (
         <div className="flex flex-wrap items-center gap-2">
           <label className="inline-flex cursor-pointer items-center gap-2 rounded border px-3 py-1.5 text-sm">
-            <span>{t("option:repo2txt.chooseDirectory", { defaultValue: "Choose Directory" })}</span>
+            <span>
+              {t("option:repo2txt.chooseDirectory", {
+                defaultValue: "Choose Directory"
+              })}
+            </span>
             <input
               type="file"
+              disabled={busy}
               data-testid="repo2txt-local-directory-input"
               className="hidden"
-              onChange={(event) => handleFileSelection(event, onLocalFilesSelected)}
+              onChange={(event) =>
+                handleFileSelection(event, onLocalFilesSelected)
+              }
               multiple
               {...directoryPickerAttributes}
             />
           </label>
           <label className="inline-flex cursor-pointer items-center gap-2 rounded border px-3 py-1.5 text-sm">
-            <span>{t("option:repo2txt.chooseZip", { defaultValue: "Choose Zip" })}</span>
+            <span>
+              {t("option:repo2txt.chooseZip", { defaultValue: "Choose Zip" })}
+            </span>
             <input
               type="file"
+              disabled={busy}
               data-testid="repo2txt-local-zip-input"
               className="hidden"
-              onChange={(event) => handleFileSelection(event, onLocalFilesSelected)}
+              onChange={(event) =>
+                handleFileSelection(event, onLocalFilesSelected)
+              }
               accept=".zip,application/zip"
             />
           </label>

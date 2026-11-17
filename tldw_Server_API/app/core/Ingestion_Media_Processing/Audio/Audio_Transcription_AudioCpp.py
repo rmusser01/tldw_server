@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, BinaryIO, NoReturn, cast
 from urllib.parse import urlparse
 
-from tldw_Server_API.app.core import http_client as _http_client
 from tldw_Server_API.app.core.exceptions import (
     STTExecutionPlanError,
     STTExecutionUnsupportedError,
@@ -28,6 +27,7 @@ from tldw_Server_API.app.core.exceptions import (
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy,
     afetch,
+    create_aiohttp_session,
     create_async_client,
     opaque_stt_http_observability,
     resolve_afetch_transport,
@@ -659,11 +659,9 @@ def _create_audio_cpp_client(
             trust_env=False,
             verify=True,
         )
-    if transport == "aiohttp" and _http_client.aiohttp is not None:
-        return _http_client.aiohttp.ClientSession(
-            timeout=_http_client.aiohttp.ClientTimeout(
-                total=timeout_seconds,
-            ),
+    if transport == "aiohttp":
+        return create_aiohttp_session(
+            timeout=timeout_seconds,
             trust_env=False,
         )
     raise RuntimeError("audio.cpp transport client is unavailable")

@@ -1,5 +1,8 @@
 """Reconcile the relevant released catalog shapes without reconstructing history."""
 
+from types import SimpleNamespace
+from unittest.mock import Mock
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
@@ -37,6 +40,19 @@ def _parent_order_migration(db, connection):
             "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
             (version + 1, db._SCHEMA_NAME, version),
         )
+
+
+def _published_union_migration(db, connection):
+    """Reproduce the published 79/83 catalog, which had no quota owner column."""
+    from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_notes_provenance_rls_sql
+    from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
+
+    postgres = db.backend_type.value == "postgresql"
+    _parent_order_migration(db, connection)
+    connection.execute(notes_provenance_schema_sql(postgres=postgres))
+    if postgres:
+        for statement in build_notes_provenance_rls_sql():
+            connection.execute(statement)
 
 
 @pytest.mark.parametrize("catalog", ["pr3071", "incoming"])
@@ -106,16 +122,18 @@ def test_published_catalog_shapes_reconcile_without_changing_existing_messages(d
     assert reopened.get_message_by_id(added)["content"] == "New answer"
 
 
-@pytest.fixture(params=["parent", "incoming", "current"])
+@pytest.fixture(params=["parent", "incoming", "published_union", "dev"])
 def released_catalog(db_factory, monkeypatch, request):
     """Use the owning isolated factory for each published lineage and union head."""
     catalog = request.param
     with monkeypatch.context() as historical:
         historical.setattr(
-            CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", {"parent": 77, "incoming": 78, "current": 79}[catalog]
+            CharactersRAGDB, "_CURRENT_SCHEMA_VERSION",
+            {"parent": 77, "incoming": 78, "published_union": 79, "dev": 85}[catalog],
         )
         historical.setattr(
-            CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", {"parent": 81, "incoming": 82, "current": 83}[catalog]
+            CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION",
+            {"parent": 81, "incoming": 82, "published_union": 83, "dev": 91}[catalog],
         )
         if catalog == "parent":
             for method in (
@@ -125,17 +143,22 @@ def released_catalog(db_factory, monkeypatch, request):
                 "_migrate_from_v80_to_v81_postgres",
             ):
                 historical.setattr(CharactersRAGDB, method, _parent_order_migration)
-        elif catalog == "incoming":
+        elif catalog in ("incoming", "dev"):
             historical.setattr(CharactersRAGDB, "_migrate_from_v74_to_v75", _incoming_fingerprint_migration)
             historical.setattr(CharactersRAGDB, "_migrate_from_v78_to_v79_postgres", _incoming_fingerprint_migration)
+        else:
+            historical.setattr(CharactersRAGDB, "_migrate_from_v78_to_v79", _published_union_migration)
+            historical.setattr(CharactersRAGDB, "_migrate_from_v82_to_v83_postgres", _published_union_migration)
         database = db_factory()
-    if catalog == "incoming":
+    if catalog in ("incoming", "dev"):
         assert not database.backend.table_exists("message_insertion_order")
         assert database.backend.table_exists("workspace_chat_startup_receipts")
     conversation = database.add_conversation({"title": "Retained union"})
     message = database.add_message({"conversation_id": conversation, "sender": "user", "content": "Retained question"})
     database.add_note("Retained note", "Original body", note_id="catalog-note")
     with database.transaction() as connection:
+        quota_columns = database.backend.get_table_info("native_chat_quota_intents", connection=connection)
+        assert ("quota_owner_json" in {row["name"] for row in quota_columns}) == (catalog == "dev")
         connection.execute(
             "UPDATE conversations SET create_request_fingerprint = ? WHERE id = ?", ("a" * 64, conversation)
         )
@@ -182,7 +205,13 @@ def _assert_union_catalog(database):
         version = (
             database._get_schema_version_postgres(connection) if postgres else database._get_db_version(connection)
         )
-        assert version == (83 if postgres else 79)
+        assert version == (92 if postgres else 86)
+        for table, column in (
+            ("native_chat_quota_intents", "quota_owner_json"),
+            ("native_chat_asset_references", "role"),
+            ("conversations", "source_incarnation_id"),
+        ):
+            assert column in {row["name"] for row in database.backend.get_table_info(table, connection=connection)}
         for table in ("message_insertion_order", "notes_knowledge_provenance", "notes_provenance_receipts"):
             assert database.backend.table_exists(table, connection=connection)
         if postgres:
@@ -202,6 +231,14 @@ def _assert_union_catalog(database):
             )
 
 
+def _assert_preserved_rows(database, before):
+    after = _catalog_rows(database)
+    for table, rows in before.items():
+        assert len(after[table]) == len(rows or [])
+        for original, upgraded in zip(rows or [], after[table], strict=True):
+            assert {column: upgraded[column] for column in original} == original
+
+
 def test_released_lineage_upgrade_and_reopen_preserve_durable_catalogs(db_factory, released_catalog):
     """Missing order/provenance must be installed without reconstructing old data."""
     catalog, old, conversation, message = released_catalog
@@ -209,12 +246,11 @@ def test_released_lineage_upgrade_and_reopen_preserve_durable_catalogs(db_factor
     old.close_all_connections()
     upgraded = db_factory()
     _assert_union_catalog(upgraded)
-    expected = {table: rows if rows is not None else [] for table, rows in before.items()}
-    assert _catalog_rows(upgraded) == expected
+    _assert_preserved_rows(upgraded, before)
     added = upgraded.add_message({"conversation_id": conversation, "sender": "assistant", "content": "Union answer"})
     with upgraded.transaction() as connection:
         rows = connection.execute("SELECT message_id FROM message_insertion_order ORDER BY sequence").fetchall()
-        assert [row["message_id"] for row in rows] == ([added] if catalog == "incoming" else [message, added])
+        assert [row["message_id"] for row in rows] == ([added] if catalog in ("incoming", "dev") else [message, added])
     accepted = _catalog_rows(upgraded)
     with pytest.raises(RuntimeError, match="abort union write"):
         with upgraded.transaction() as connection:
@@ -245,13 +281,13 @@ def test_released_lineage_upgrade_and_reopen_preserve_durable_catalogs(db_factor
     assert _catalog_rows(reopened) == accepted
 
 
-@pytest.mark.parametrize("released_catalog", ["parent", "incoming"], indirect=True)
+@pytest.mark.parametrize("released_catalog", ["incoming", "dev"], indirect=True)
 def test_union_migration_failure_rolls_back_catalog_and_reopens_old_lineage(db_factory, released_catalog, monkeypatch):
     """Failure after union DDL/version update must retain the released source catalog."""
     catalog, old, _, _ = released_catalog
     before = _catalog_rows(old)
     postgres = old.backend_type.value == "postgresql"
-    method = "_migrate_from_v82_to_v83_postgres" if postgres else "_migrate_from_v78_to_v79"
+    method = "_migrate_from_v91_to_v92_postgres" if postgres else "_migrate_from_v85_to_v86"
     migrate = getattr(CharactersRAGDB, method)
     old.close_all_connections()
 
@@ -264,20 +300,20 @@ def test_union_migration_failure_rolls_back_catalog_and_reopens_old_lineage(db_f
         with pytest.raises(CharactersRAGDBError, match="injected union migration failure"):
             db_factory()
     with monkeypatch.context() as historical:
-        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 77 if catalog == "parent" else 78)
-        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 81 if catalog == "parent" else 82)
+        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 85 if catalog == "dev" else 78)
+        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 91 if catalog == "dev" else 82)
         rolled_back = db_factory()
     assert _catalog_rows(rolled_back) == before
     rolled_back.close_all_connections()
     repaired = db_factory()
     _assert_union_catalog(repaired)
-    assert _catalog_rows(repaired) == {table: rows if rows is not None else [] for table, rows in before.items()}
+    _assert_preserved_rows(repaired, before)
 
 
 @pytest.mark.parametrize("db_factory", ["sqlite"], indirect=True)
 @pytest.mark.parametrize("initial_catalog", ["fresh", "incoming78"])
-def test_both_sqlite_legacy_dispatchers_install_union(db_factory, monkeypatch, initial_catalog):
-    """Both historical initializer branches must dispatch the new union migration."""
+def test_sqlite_bootstrap_and_upgrade_dispatch_final_union(db_factory, monkeypatch, initial_catalog):
+    """Fresh and existing databases must reach the final union migration."""
     if initial_catalog == "incoming78":
         with monkeypatch.context() as incoming:
             incoming.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 78)
@@ -286,10 +322,66 @@ def test_both_sqlite_legacy_dispatchers_install_union(db_factory, monkeypatch, i
         assert not old.backend.table_exists("message_insertion_order")
         old.close_all_connections()
 
-    def legacy_initializer(database):
-        database._initialize_schema_sqlite_legacy(target_version=79)
+    _assert_union_catalog(db_factory())
 
-    with monkeypatch.context() as legacy:
-        legacy.setattr(CharactersRAGDB, "_initialize_schema_sqlite", legacy_initializer)
-        database = db_factory()
-    _assert_union_catalog(database)
+
+@pytest.mark.parametrize("dev_catalog", [False, True], ids=["old-union", "dev-catalog"])
+def test_pg_forward_migration_installs_only_the_missing_authority(dev_catalog, monkeypatch):
+    backend = Mock()
+    backend.table_exists.side_effect = lambda table, **_: table != "message_insertion_order" or not dev_catalog
+    backend.get_table_info.side_effect = lambda table, **_: (
+        [{"name": "create_request_fingerprint"}] if table == "conversations"
+        else [{"name": "quota_owner_json"}] if dev_catalog
+        else []
+    )
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db._local = SimpleNamespace()
+    db._backend = backend
+    db._uses_shared_content_backend = False
+    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _: 92)
+    connection = object()
+
+    db._migrate_from_v91_to_v92_postgres(connection)
+
+    calls = backend.execute.call_args_list
+    assert all(call.kwargs["connection"] is connection for call in calls)
+    ddl = "\n".join(call.args[0].strip() for call in calls[:-1])
+    assert ("ADD COLUMN quota_owner_json" in ddl) is not dev_catalog
+    assert ("CREATE TABLE message_insertion_order" in ddl) is dev_catalog
+    if dev_catalog:
+        assert "FORCE ROW LEVEL SECURITY" in ddl
+        assert "CREATE POLICY message_insertion_order_tenant_isolation" in ddl
+        assert "WITH CHECK" in ddl
+        assert "CREATE TRIGGER messages_lock_insertion_order" in ddl
+        assert "CREATE TRIGGER messages_record_insertion_order" in ddl
+    assert "GRANT " not in ddl
+    assert calls[-1].args == (
+        "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 91",
+        (92, db._SCHEMA_NAME),
+    )
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+def test_pg_runtime_requires_order_ledger_privileges(allowed):
+    backend = Mock()
+    backend.execute.return_value.scalar = allowed
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db._local = SimpleNamespace()
+    db._backend = backend
+    db._uses_shared_content_backend = False
+    connection = object()
+
+    if allowed:
+        db._verify_message_order_privileges_postgres(connection)
+    else:
+        with pytest.raises(CharactersRAGDBError, match="schema owner.*message insertion order"):
+            db._verify_message_order_privileges_postgres(connection)
+
+    backend.execute.assert_called_once()
+    sql, = backend.execute.call_args.args
+    assert "has_any_column_privilege(current_user, 'messages', 'INSERT')" in sql
+    assert "has_column_privilege(current_user, 'messages', 'id', 'SELECT')" in sql
+    assert "has_column_privilege(current_user, 'messages', 'client_id', 'SELECT')" in sql
+    assert "has_column_privilege(current_user, 'message_insertion_order', 'message_id', 'INSERT')" in sql
+    assert "pg_get_serial_sequence('message_insertion_order', 'sequence')" in sql
+    assert backend.execute.call_args.kwargs["connection"] is connection

@@ -61,8 +61,13 @@ async def log_model_router_usage(
     status: int = 200,
     estimated: bool = False,
     usage_logger: UsageLogger = log_llm_usage,
+    credential_source: str | None = None,
 ) -> None:
-    """Record an LLM router call as a distinct llm_usage_log operation."""
+    """Record an LLM router call as a distinct llm_usage_log operation.
+
+    ``credential_source`` is whose key the router call used, as its caller resolved it;
+    the LLM quotas leave out a ``user`` row (ADR-083).
+    """
 
     prompt_tokens = int(prompt_tokens)
     completion_tokens = int(completion_tokens)
@@ -86,4 +91,5 @@ async def log_model_router_usage(
         user_agent=context.user_agent,
         token_name=context.token_name,
         conversation_id=context.conversation_id,
+        credential_source=credential_source,
     )

@@ -249,7 +249,7 @@ def test_artifact_writers_reject_cross_session_directory_alias(stored_artifact, 
         owner_user_id="1", query="attacker", source_policy="balanced",
         autonomy_mode="autonomous", limits_json={},
     )
-    victim_path = store._artifact_path(victim_id, victim_artifact.artifact_name)
+    victim_path = Path(victim_artifact.storage_path)
     previous_content = victim_path.read_bytes()
     previous_files = set(victim_path.parent.iterdir())
     attacker_dir = store._artifact_path(attacker.id, victim_artifact.artifact_name).parent
@@ -271,3 +271,126 @@ def test_artifact_writers_reject_cross_session_directory_alias(stored_artifact, 
     assert victim_path.read_bytes() == previous_content
     assert set(victim_path.parent.iterdir()) == previous_files
     assert store.db.list_artifacts(attacker.id) == []
+
+
+@pytest.mark.parametrize(
+    ("writer", "reader", "old", "new"),
+    [
+        ("write_json", "read_json", {"payload": {"old": True}}, {"payload": {"new": True}}),
+        ("write_jsonl", "read_jsonl", {"records": [{"old": True}]}, {"records": [{"new": True}]}),
+        ("write_text", "read_text", {"content": "old"}, {"content": "new"}),
+    ],
+)
+def test_control_change_during_file_write_preserves_registered_content_and_no_unpublished_files(
+    tmp_path,
+    monkeypatch,
+    writer,
+    reader,
+    old,
+    new,
+):
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchPhaseChangedError, ResearchSessionsDB
+    from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
+
+    db = ResearchSessionsDB(tmp_path / "research.db")
+    session = db.create_session(
+        owner_user_id="1", query="Rowan", source_policy="local_only", autonomy_mode="autonomous", limits_json={}
+    )
+    store = ResearchArtifactStore(base_dir=tmp_path / "outputs", db=db)
+    args = {
+        "owner_user_id": "1",
+        "session_id": session.id,
+        "artifact_name": "controlled",
+        "phase": session.phase,
+        "job_id": None,
+    }
+    original = getattr(store, writer)(**args, **old)
+    before = getattr(store, reader)(session_id=session.id, artifact_name="controlled")
+    assert before == next(iter(old.values()))  # nosec B101 -- Establish an actual readable baseline before testing a rejected update.
+    alias = store._artifact_path(session.id, "controlled")
+    alias.write_bytes(b"retained legacy alias")
+    files = set(alias.parent.iterdir())
+    # This unit isolates the Research control fence; real Jobs lease fencing has a separate SDK regression.
+    db.bind_phase_writer(db.get_session(session.id), lambda: None)
+    atomic_write = store._write_bytes_atomically
+    changed = []
+
+    def cancel_after_file(path, data):
+        atomic_write(path, data)
+        if not changed:
+            changed.append(True)
+            ResearchSessionsDB(db.db_path).update_control_state(session.id, control_state="cancel_requested")
+
+    monkeypatch.setattr(store, "_write_bytes_atomically", cancel_after_file)
+    with pytest.raises(ResearchPhaseChangedError):
+        getattr(store, writer)(**args, **new)
+    assert alias.read_bytes() == b"retained legacy alias"  # nosec B101 -- A rejected attempt cannot replace preexisting functional bytes.
+    assert getattr(store, reader)(session_id=session.id, artifact_name="controlled") == before  # nosec B101 -- Canonical reads retain the acknowledged registered version.
+    assert db.list_artifacts(session.id) == [original] and set(alias.parent.iterdir()) == files  # nosec B101 -- Remove this attempt's unpublished version without touching prior files.
+
+
+@pytest.mark.parametrize("readback_unavailable", [False, True])
+def test_artifact_unknown_commit_ack_preserves_registered_file(tmp_path, monkeypatch, readback_unavailable):
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
+    from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
+
+    db = ResearchSessionsDB(tmp_path / "research.db")
+    session = db.create_session(
+        owner_user_id="1", query="Rowan", source_policy="local_only", autonomy_mode="autonomous", limits_json={}
+    )
+    store = ResearchArtifactStore(base_dir=tmp_path / "outputs", db=db)
+    record, read = db.record_artifact_with_event, db.list_artifacts
+    committed = []
+
+    def lose_ack(**kwargs):
+        result = record(**kwargs)
+        committed.append(result[0])
+        raise RuntimeError("controlled manifest acknowledgement")
+
+    def manifest(session_id):
+        if committed and readback_unavailable:
+            raise RuntimeError("controlled manifest readback unavailable")
+        return read(session_id)
+
+    monkeypatch.setattr(db, "record_artifact_with_event", lose_ack)
+    monkeypatch.setattr(db, "list_artifacts", manifest)
+    with pytest.raises(RuntimeError, match="manifest acknowledgement") as error:
+        store.write_json(
+            owner_user_id="1",
+            session_id=session.id,
+            artifact_name="plan.json",
+            payload={"query": "Rowan"},
+            phase="drafting_plan",
+            job_id=None,
+        )
+    assert len(read(session.id)) == 1 and Path(committed[0].storage_path).is_file()  # nosec B101 -- Unknown acknowledgements never delete a registered canonical version.
+    assert bool(getattr(error.value, "__notes__", [])) is readback_unavailable  # nosec B101 -- An unavailable readback remains explicit rather than being treated as rollback.
+
+
+def test_artifact_atomic_replace_failure_removes_its_owned_temporary_file(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
+    from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
+
+    db = ResearchSessionsDB(tmp_path / "research.db")
+    session = db.create_session(
+        owner_user_id="1", query="Rowan", source_policy="local_only", autonomy_mode="autonomous", limits_json={}
+    )
+    store = ResearchArtifactStore(base_dir=tmp_path / "outputs", db=db)
+
+    def interrupt_replace(*args, **kwargs):
+        raise RuntimeError("controlled atomic replace failure")
+
+    monkeypatch.setattr(Path, "replace", interrupt_replace)
+    with pytest.raises(RuntimeError, match="atomic replace"):
+        store.write_json(
+            owner_user_id="1",
+            session_id=session.id,
+            artifact_name="plan.json",
+            payload={"query": "Rowan"},
+            phase="drafting_plan",
+            job_id=None,
+        )
+    assert (
+        db.list_artifacts(session.id) == []
+        and [path for path in (tmp_path / "outputs").rglob("*") if path.is_file()] == []
+    )  # nosec B101 -- Failed writes leave neither partial metadata nor their owned temporary file.

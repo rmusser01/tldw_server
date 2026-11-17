@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -19,6 +20,8 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCallCredentials,
     is_runtime_issued_provider_call_credentials,
 )
+from tldw_Server_API.app.core.Chat import chat_service
+from tldw_Server_API.app.core.LLM_Calls import gateway
 
 pytestmark = pytest.mark.integration
 
@@ -46,7 +49,7 @@ def _openai_response() -> dict[str, Any]:
 
 
 @pytest.fixture(autouse=True)
-def healthy_override_cache_between_tests():
+def healthy_override_cache_between_tests(monkeypatch):
     # Capture raw test state: the public getter correctly fails closed when a
     # background refresh has marked the cache unhealthy, which must not make
     # this test module order-dependent.
@@ -55,6 +58,10 @@ def healthy_override_cache_between_tests():
         original_healthy = overrides_module._OVERRIDE_CACHE_HEALTHY
         original_ttl_enabled = not overrides_module._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
     overrides_module.set_llm_provider_overrides_cache_for_tests(original)
+    monkeypatch.setattr(chat_service, "discover_provider_models", lambda *args, **kwargs: SimpleNamespace(
+        status="ready", models=("claude-3-sonnet-20240229", "claude-3-5-sonnet-latest", "gpt-4o-mini"),
+    ))
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     try:
         yield
     finally:
@@ -101,7 +108,7 @@ def test_messages_dispatch_uses_one_atomic_override_snapshot(
         legacy_field_lookup,
         raising=False,
     )
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", adapter_boundary)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", adapter_boundary)
     overrides_module.set_llm_provider_overrides_cache_for_tests(
         {
             "openai": LLMProviderOverride(
@@ -149,7 +156,7 @@ def test_messages_partial_override_inherits_frozen_static_adapter_config(
 
     monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
     monkeypatch.setattr(runtime_module, "load_server_config_snapshot", load_static_snapshot)
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", adapter_boundary)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", adapter_boundary)
     overrides_module.set_llm_provider_overrides_cache_for_tests(
         {
             "openai": LLMProviderOverride(
@@ -223,7 +230,7 @@ def test_late_override_after_structured_absence_cannot_mix_messages_credentials(
             }
         },
     )
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", adapter_boundary)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", adapter_boundary)
     overrides_module.set_llm_provider_overrides_cache_for_tests({})
 
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -328,7 +335,7 @@ def test_messages_policy_and_credentials_share_one_override_snapshot(
         "capture_provider_override_call_snapshot",
         lambda _provider: GatedSnapshot(),
     )
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", converted_boundary)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", converted_boundary)
     monkeypatch.setattr(messages_endpoint, "_native_post_json", native_boundary)
 
     path = (
@@ -401,7 +408,7 @@ def test_unhealthy_override_store_fails_messages_closed_before_dispatch(
 
     monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
     monkeypatch.setattr(runtime_module, "load_server_config_snapshot", load_static_snapshot)
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", adapter_boundary)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", adapter_boundary)
     overrides_module.set_llm_provider_overrides_cache_for_tests(
         {"openai": LLMProviderOverride(provider="openai", api_key="last-good-key")},
         healthy=False,
@@ -507,7 +514,7 @@ def test_messages_static_fallback_freezes_one_generation_at_adapter_boundary(
     monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
     monkeypatch.setattr(runtime_module, "load_server_config_snapshot", load_static_snapshot)
     monkeypatch.setattr(byok_runtime, "loaded_config_data", initial_config)
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", converted_boundary)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", converted_boundary)
     monkeypatch.setattr(messages_endpoint, "_native_post_json", native_boundary)
     overrides_module.set_llm_provider_overrides_cache_for_tests({})
 

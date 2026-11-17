@@ -1,3 +1,4 @@
+import { usePromptInventory } from "@/hooks/usePromptInventory"
 import {
   buildRecipePromptFields,
   classifyPromptRecipe,
@@ -5,7 +6,6 @@ import {
   getRecipePersistenceState,
 } from "@/components/Option/Prompt/prompt-recipe-library";
 import {
-  getAllPrompts,
   markPromptSyncError,
   permanentlyDeletePrompt,
   restorePromptSnapshot,
@@ -76,10 +76,7 @@ export function PromptRecipeBuilder({
   const isOnline = useServerOnline();
   const [syncPendingNotice, setSyncPendingNotice] = React.useState(false);
   const [unresolvedId, setUnresolvedId] = React.useState<string | null>(null);
-  const { data: prompts = [] } = useQuery({
-    queryKey: ["getAllPromptsForSelect"],
-    queryFn: getAllPrompts,
-  });
+  const { data: prompts = [] } = usePromptInventory("getAllPromptsForSelect");
   const recipeIds = React.useMemo(
     () =>
       prompts.flatMap((prompt) => {
@@ -248,6 +245,7 @@ export function PromptRecipeBuilder({
       setSyncPendingNotice(false);
       try {
         const saved = await savePrompt({
+          expectedOwnerId: persistenceScope,
           title: t("common:promptAssist.untitledRecipe", "Untitled recipe"),
           ...buildRecipePromptFields(definition),
         });
@@ -297,6 +295,7 @@ export function PromptRecipeBuilder({
       const snapshot = structuredClone(current);
       try {
         const id = await updatePrompt({
+          expectedOwnerId: persistenceScope,
           ...current,
           ...buildRecipePromptFields(definition),
           id: savedSourceId,
@@ -316,6 +315,7 @@ export function PromptRecipeBuilder({
       }
     },
     [
+      persistenceScope,
       prompts,
       refreshPromptQueries,
       syncIfEnabled,

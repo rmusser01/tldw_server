@@ -14,7 +14,7 @@ from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_tes
 
 
 @pytest.mark.asyncio
-async def test_single_user_bootstrap_creates_admin_user_and_primary_key(tmp_path, monkeypatch):
+async def test_single_user_bootstrap_creates_admin_user_and_primary_key(tmp_path, monkeypatch, fresh_services):
     # Configure single-user SQLite AuthNZ
     db_path = tmp_path / "users.db"
     monkeypatch.setenv("AUTH_MODE", "single_user")
@@ -23,11 +23,10 @@ async def test_single_user_bootstrap_creates_admin_user_and_primary_key(tmp_path
 
     # Reset AuthNZ singletons and ensure core tables exist
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -80,7 +79,7 @@ async def test_single_user_bootstrap_creates_admin_user_and_primary_key(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_single_user_bootstrap_is_idempotent_for_new_format_api_key(tmp_path, monkeypatch):
+async def test_single_user_bootstrap_is_idempotent_for_new_format_api_key(tmp_path, monkeypatch, fresh_services):
     from tldw_Server_API.app.core.AuthNZ.api_key_crypto import format_api_key
 
     db_path = tmp_path / "users_new_format.db"
@@ -91,11 +90,10 @@ async def test_single_user_bootstrap_is_idempotent_for_new_format_api_key(tmp_pa
     monkeypatch.delenv("SINGLE_USER_TEST_API_KEY", raising=False)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings, get_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -123,7 +121,7 @@ async def test_single_user_bootstrap_is_idempotent_for_new_format_api_key(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_single_user_bootstrap_reuses_preseeded_primary_key(tmp_path, monkeypatch):
+async def test_single_user_bootstrap_reuses_preseeded_primary_key(tmp_path, monkeypatch, fresh_services):
     # Configure single-user SQLite AuthNZ with a deterministic key
     db_path = tmp_path / "users_preseeded.db"
     monkeypatch.setenv("AUTH_MODE", "single_user")
@@ -131,11 +129,10 @@ async def test_single_user_bootstrap_reuses_preseeded_primary_key(tmp_path, monk
     monkeypatch.setenv("SINGLE_USER_API_KEY", "test_single_user_preseeded_key_123")
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings, get_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -218,18 +215,17 @@ async def test_single_user_bootstrap_reuses_preseeded_primary_key(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_single_user_bootstrap_fails_with_extra_active_user_sqlite(tmp_path, monkeypatch):
+async def test_single_user_bootstrap_fails_with_extra_active_user_sqlite(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "users_conflict.db"
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "test_single_user_conflict_key_123")
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -251,19 +247,18 @@ async def test_single_user_bootstrap_fails_with_extra_active_user_sqlite(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_single_user_bootstrap_fails_with_multiple_primary_keys_sqlite(tmp_path, monkeypatch):
+async def test_single_user_bootstrap_fails_with_multiple_primary_keys_sqlite(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "users_multiple_keys.db"
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "test_single_user_multi_key_123")
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings, get_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))

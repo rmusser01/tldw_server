@@ -262,8 +262,11 @@ describe("SchedulerTab editor", () => {
     expect(await screen.findByText(/leech threshold must be >= 1/i)).toBeInTheDocument()
   })
 
-  it("renders scheduler save errors with the design-system Alert", async () => {
-    updateDeckMock.mockRejectedValue(new Error("Could not save deck settings"))
+  it.each([
+    new Error("Could not save deck settings"),
+    Object.assign(new Error("Could not save deck settings"), { status: 500 })
+  ])("renders ordinary scheduler save errors with the design-system Alert (%#)", async (error) => {
+    updateDeckMock.mockRejectedValue(error)
 
     render(<SchedulerTab isActive />)
 
@@ -366,12 +369,11 @@ describe("SchedulerTab editor", () => {
     )
   })
 
-  it("offers reload and reapply actions after a version conflict", async () => {
-    updateDeckMock.mockRejectedValue(
-      Object.assign(new Error("Version mismatch"), {
-        response: { status: 409 }
-      })
-    )
+  it.each([
+    ["nested response", { response: { status: 409 } }],
+    ["direct transport status", { status: 409 }]
+  ])("offers reload and reapply after a %s version conflict", async (_shape, status) => {
+    updateDeckMock.mockRejectedValue(Object.assign(new Error("Version mismatch"), status))
 
     render(<SchedulerTab isActive />)
 

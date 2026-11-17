@@ -13,7 +13,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints.notifications import router as notifications_router
-from tldw_Server_API.app.core.AuthNZ.jwt_service import create_access_token, reset_jwt_service
+from tldw_Server_API.app.core.AuthNZ.jwt_service import create_access_token
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 pytestmark = pytest.mark.integration
 
@@ -58,7 +59,7 @@ def _effective_auth_state(fixture: ModuleType, user_id: int) -> tuple[list[str],
 
 
 def _notification_auth_client(user_id: int, role: str = "user") -> tuple[TestClient, dict[str, str]]:
-    reset_jwt_service()
+    app_services().jwt_service = None
     access_token = create_access_token(user_id, "chatbooks-backup-source", role)
     app = FastAPI()
     app.include_router(notifications_router, prefix="/api/v1")
@@ -186,12 +187,39 @@ async def test_fixture_round_trip_verifies_full_inventory_and_exact_embeddings(
         {"name": character["name"]} for character in expected["characters"]
     ]
     assert verified["account_inventory_counts"] == expected["account_inventory"]["source_counts"]
+    destination_db = fixture.create_media_database(
+        str(expected["destination_user_id"]),
+        db_path=str(fixture.DatabasePaths.get_media_db_path(expected["destination_user_id"])),
+    )
+    destination_media = fixture.get_media_by_title(destination_db, expected["media"]["title"])
+    expected_rows = [
+        {
+            **row,
+            "metadata": {
+                **row["metadata"],
+                "media_id": int(destination_media["id"]),
+                "media_uuid": str(destination_media["uuid"]),
+            },
+        }
+        for row in expected["embeddings"]["rows"]
+    ]
     assert verified["embeddings"] == {
         "collection_name": expected["embeddings"]["collection_name"],
         "collection_ids": expected["embeddings"]["collection_ids"],
         "row_count": expected["embeddings"]["row_count"],
-        "rows": expected["embeddings"]["rows"],
+        "rows": expected_rows,
     }
+
+    service = fixture._new_chatbook_service(int(expected["destination_user_id"]))
+    collection = service._get_chroma_manager().get_collection(expected["embeddings"]["collection_name"])
+    collection.update(
+        ids=[expected_rows[0]["id"]],
+        metadatas=[
+            {**expected_rows[0]["metadata"], "media_uuid": expected["embeddings"]["rows"][0]["metadata"]["media_uuid"]}
+        ],
+    )
+    with pytest.raises(fixture.FixtureVerificationError, match="destination embedding vectors and metadata"):
+        await fixture.verify(tmp_path)
 
 
 def test_fixture_uses_public_media_vector_operation() -> None:

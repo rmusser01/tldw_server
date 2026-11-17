@@ -82,13 +82,15 @@ async def test_speech_adapter_wraps_tts_service_without_real_engine() -> None:
 @pytest.mark.asyncio
 async def test_ace_step_adapter_uses_configured_endpoint_and_runtime_api_key(
     monkeypatch: pytest.MonkeyPatch,
+    ace_step_dns: dict[str, str],
 ) -> None:
     monkeypatch.setenv("AUDIO_STUDIO_ACE_STEP_BASE_URL", "https://ace.example.test")
     monkeypatch.setenv("AUDIO_STUDIO_EXTERNAL_ENDPOINT_ALLOWLIST", "https://ace.example.test")
     monkeypatch.setenv("AUDIO_STUDIO_ACE_STEP_API_KEY", "secret-runtime-key")
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url == "https://ace.example.test/generate"
+        # The connection is pinned to the resolved address; Host carries the origin.
+        assert (request.headers["host"], str(request.url)) == ("ace.example.test", "https://93.184.216.34/generate")
         assert request.headers["authorization"] == "Bearer secret-runtime-key"
         payload = json.loads(request.content.decode("utf-8"))
         assert payload["prompt"] == "ambient theme"
@@ -110,6 +112,7 @@ async def test_ace_step_adapter_uses_configured_endpoint_and_runtime_api_key(
 @pytest.mark.asyncio
 async def test_ace_step_adapter_rejects_cross_origin_redirect_with_bearer_auth(
     monkeypatch: pytest.MonkeyPatch,
+    ace_step_dns: dict[str, str],
 ) -> None:
     monkeypatch.setenv("AUDIO_STUDIO_ACE_STEP_BASE_URL", "https://ace.example.test")
     monkeypatch.setenv(
@@ -121,7 +124,7 @@ async def test_ace_step_adapter_rejects_cross_origin_redirect_with_bearer_auth(
 
     async def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        if request.url.host == "ace.example.test":
+        if request.headers["host"] == "ace.example.test":
             assert request.headers["authorization"] == "Bearer secret-runtime-key"
             return httpx.Response(307, headers={"location": "https://other.example.test/generate"})
         return httpx.Response(200, content=b"must-not-receive-token")
@@ -133,4 +136,4 @@ async def test_ace_step_adapter_rejects_cross_origin_redirect_with_bearer_auth(
     with pytest.raises(ValueError, match="external_audio_redirect_cross_origin_with_auth"):
         await adapter.generate(_request("music"))
 
-    assert [request.url.host for request in requests] == ["ace.example.test"]
+    assert [request.headers["host"] for request in requests] == ["ace.example.test"]

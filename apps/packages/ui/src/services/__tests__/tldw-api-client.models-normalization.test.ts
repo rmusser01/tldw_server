@@ -31,6 +31,43 @@ describe("TldwApiClient getModels normalization", () => {
     vi.clearAllMocks()
   })
 
+  it("carries default provider identity through the actual domain-backed client", async () => {
+    mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
+      if (request.path === "/api/v1/llm/models/metadata")
+        return {
+          models: [
+            {
+              id: "shared",
+              provider: "ollama",
+              type: "chat",
+              is_configured: true,
+              provider_enabled: true,
+              availability: "available"
+            },
+            {
+              id: "shared",
+              provider: "openai",
+              type: "chat",
+              is_configured: true,
+              provider_enabled: true,
+              availability: "available"
+            }
+          ]
+        }
+      if (request.path === "/api/v1/llm/providers")
+        return {
+          default_provider: "openai",
+          providers: [{ name: "openai", default_model: "shared" }]
+        }
+      throw new Error(`Unexpected path ${request.path}`)
+    })
+    const models = await new TldwApiClient().getModels()
+    expect(models.map((model) => model.is_server_default)).toEqual([
+      false,
+      true
+    ])
+  })
+
   it("prefers model-like name over conflicting id when model field is absent", async () => {
     mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
       if (request.path === "/api/v1/llm/models/metadata") {
@@ -261,7 +298,7 @@ describe("TldwApiClient getModels normalization", () => {
     )
   })
 
-  it("skips provider listing when model metadata already has availability status", async () => {
+  it("keeps explicit model availability when provider default discovery fails", async () => {
     mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
       if (request.path === "/api/v1/llm/models/metadata") {
         return {
@@ -278,7 +315,7 @@ describe("TldwApiClient getModels normalization", () => {
         }
       }
       if (request.path === "/api/v1/llm/providers") {
-        throw new Error("provider listing should not be fetched")
+        throw new Error("Provider defaults unavailable")
       }
       return {}
     })
@@ -291,10 +328,13 @@ describe("TldwApiClient getModels normalization", () => {
         id: "openai/gpt-4o-mini",
         is_configured: true,
         provider_enabled: true,
-        availability: "available"
+        availability: "available",
+        is_server_default: false
       })
     )
-    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest.mock.calls.map(([request]) => request.path)).toEqual(
+      ["/api/v1/llm/models/metadata", "/api/v1/llm/providers"]
+    )
   })
 
   it("enriches chat providers even when non-chat catalog entries already have availability metadata", async () => {

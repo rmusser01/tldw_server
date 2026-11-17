@@ -1206,7 +1206,7 @@ def test_get_quiz_attempt_question_assistant_returns_400_for_input_error(
         raise InputError("invalid study assistant context")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.quizzes.build_quiz_attempt_question_context",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.build_quiz_attempt_question_context",
         fake_build_context,
     )
 
@@ -1231,7 +1231,7 @@ def test_get_quiz_attempt_question_assistant_returns_404_for_conflict_error(
         raise ConflictError("Quiz attempt target not found")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.quizzes.build_quiz_attempt_question_context",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.build_quiz_attempt_question_context",
         fake_build_context,
     )
 
@@ -1256,7 +1256,7 @@ def test_get_quiz_attempt_question_assistant_returns_500_for_db_error(
         raise CharactersRAGDBError("study assistant context backend unavailable")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.quizzes.build_quiz_attempt_question_context",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.build_quiz_attempt_question_context",
         fake_build_context,
     )
 
@@ -1712,6 +1712,7 @@ def test_quiz_attempt_question_assistant_respond_persists_user_and_assistant_mes
         provider: str | None = None,
         model: str | None = None,
         guidance: str | None = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
         """Supply a controlled reply while preserving the generation call contract."""
         assert action == "explain"
@@ -1725,7 +1726,7 @@ def test_quiz_attempt_question_assistant_respond_persists_user_and_assistant_mes
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.quizzes.generate_study_assistant_reply",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
         fake_generate_reply,
     )
 
@@ -1741,6 +1742,54 @@ def test_quiz_attempt_question_assistant_respond_persists_user_and_assistant_mes
     assert payload["assistant_message"]["role"] == "assistant"
     assert payload["assistant_message"]["content"] == "The glomerulus is where blood filtration begins."
     assert payload["thread"]["message_count"] == 2
+
+
+@pytest.mark.parametrize(
+    ("provider", "stored", "asks"),
+    [("openai", "openai", ["openai"]), ("openai", "anthropic", ["openai"]), ("not-a-provider", "openai", [])],
+    ids=["own-key", "server-key", "no-usable-provider"],
+)
+def test_quiz_attempt_question_assistant_respond_names_its_provider_to_the_llm_quota(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+    provider: str,
+    stored: str,
+    asks: list[str],
+):
+    """Past a limit, a reply whose provider runs on the user's own key is answered, unmarked; on the server's
+    key, or with no usable provider, it gets the 402 and the assistant never calls the LLM (TASK-15426)."""
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work, users_own_key
+
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+    question_id = question_ids[0]
+    calls: list[dict[str, Any]] = []
+
+    async def recording_generate_reply(**kwargs: Any) -> dict[str, Any]:
+        calls.append({**kwargs, "prechecked": current_llm_call_context().prechecked})
+        return {"assistant_text": "Filtration.", "structured_payload": {}, "provider": "openai", "model": "gpt-test"}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
+        recording_generate_reply,
+    )
+    refuse_llm_work(monkeypatch)
+    asked = users_own_key(monkeypatch, stored)
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/attempts/{attempt_id}/questions/{question_id}/assistant/respond",
+        json={"action": "explain", "provider": provider, "model": "gpt-test"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert asked == asks
+    if stored == provider:
+        assert response.status_code == 200, response.text
+        assert [(call["provider_credentials"].api_key, call["prechecked"]) for call in calls] == [("sk-users-own-key", False)]
+    else:
+        assert_llm_quota_402(response)
+        assert calls == []
 
 
 def test_quiz_attempt_question_assistant_respond_returns_409_for_stale_thread_version(
@@ -1777,6 +1826,7 @@ def test_quiz_attempt_question_assistant_respond_returns_409_for_stale_thread_ve
         provider: str | None = None,
         model: str | None = None,
         guidance: str | None = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
         """Supply a controlled reply while preserving the generation call contract."""
         nonlocal call_count
@@ -1789,7 +1839,7 @@ def test_quiz_attempt_question_assistant_respond_returns_409_for_stale_thread_ve
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.quizzes.generate_study_assistant_reply",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
         fake_generate_reply,
     )
 
@@ -1820,6 +1870,7 @@ def test_quiz_attempt_question_assistant_respond_returns_409_for_db_conflict(
         provider: str | None = None,
         model: str | None = None,
         guidance: str | None = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
         """Supply a controlled reply while preserving the generation call contract."""
         _ = (action, context, message, provider, model)
@@ -1841,7 +1892,7 @@ def test_quiz_attempt_question_assistant_respond_returns_409_for_db_conflict(
         return original_append(*args, **kwargs)
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.quizzes.generate_study_assistant_reply",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
         fake_generate_reply,
     )
     monkeypatch.setattr(quizzes_db, "append_study_assistant_message", raise_conflict)
@@ -1872,13 +1923,14 @@ def test_quiz_attempt_question_assistant_respond_returns_400_for_input_error(
         provider: str | None = None,
         model: str | None = None,
         guidance: str | None = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
         """Exercise input-error mapping through the generation call contract."""
         _ = (action, context, message, provider, model)
         raise InputError("invalid study assistant action")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.quizzes.generate_study_assistant_reply",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
         raise_input_error,
     )
 
@@ -1908,13 +1960,14 @@ def test_quiz_attempt_question_assistant_respond_returns_500_for_db_error(
         provider: str | None = None,
         model: str | None = None,
         guidance: str | None = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
         """Exercise storage-error mapping through the generation call contract."""
         _ = (action, context, message, provider, model)
         raise CharactersRAGDBError("study assistant reply backend unavailable")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.quizzes.generate_study_assistant_reply",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
         raise_db_error,
     )
 
@@ -2217,7 +2270,7 @@ def test_generate_quiz_maps_input_error_to_400(
     async def raise_input_error(**_kwargs):
         raise InputError("invalid quiz generation request")
 
-    monkeypatch.setattr(quiz_endpoints, "generate_quiz_from_sources", raise_input_error)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", raise_input_error)
 
     response = client_with_quizzes_db.post(
         "/api/v1/quizzes/generate",
@@ -2239,7 +2292,7 @@ def test_generate_quiz_returns_404_for_conflict_error(
     async def raise_conflict(**_kwargs):
         raise ConflictError("Quiz attempt 999 not found")
 
-    monkeypatch.setattr(quiz_endpoints, "generate_quiz_from_sources", raise_conflict)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", raise_conflict)
 
     response = client_with_quizzes_db.post(
         "/api/v1/quizzes/generate",
@@ -2261,7 +2314,7 @@ def test_generate_quiz_maps_database_error_to_contextual_500(
     async def raise_db_error(**_kwargs):
         raise CharactersRAGDBError("quiz generation backend unavailable")
 
-    monkeypatch.setattr(quiz_endpoints, "generate_quiz_from_sources", raise_db_error)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", raise_db_error)
 
     response = client_with_quizzes_db.post(
         "/api/v1/quizzes/generate",
@@ -2296,7 +2349,7 @@ def test_generate_quiz_endpoint_forwards_question_plan(
             "questions": [],
         }
 
-    monkeypatch.setattr(quiz_endpoints, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     response = client_with_quizzes_db.post(
         "/api/v1/quizzes/generate",

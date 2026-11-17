@@ -1811,7 +1811,7 @@ class PersonaStateStore:
         """Read an owned profile, optionally locking it in an existing transaction."""
         if for_update and (
             conn is None or not getattr(conn, "in_transaction", False)
-            or (self.backend_type == BackendType.POSTGRESQL and not getattr(self._local, "tx_depth", 0))
+            or (self.backend_type == BackendType.POSTGRESQL and not getattr(self._connection_state(), "tx_depth", 0))
         ):
             raise InputError("Persona locking reads require a transaction connection.")
         query = "SELECT * FROM persona_profiles WHERE id = ? AND user_id = ?"

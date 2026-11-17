@@ -294,6 +294,7 @@ def test_runtime_package_does_not_import_legacy_wrappers_or_policy_modules() -> 
         "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "tldw_Server_API.app.core.Web_Scraping.outbound_policy",
         "tldw_Server_API.app.core.Security.egress",
+        "tldw_Server_API.app.core.Utils.egress",
         "playwright",
     }
     forbidden_package_aliases = {
@@ -304,6 +305,7 @@ def test_runtime_package_does_not_import_legacy_wrappers_or_policy_modules() -> 
             "outbound_policy",
         },
         "tldw_Server_API.app.core.Security": {"egress"},
+        "tldw_Server_API.app.core.Utils": {"egress"},
     }
     runtime_dir = Path(runtime_pkg.__file__).parent
 

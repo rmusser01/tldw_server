@@ -24,10 +24,18 @@ const makeCapabilities = (
     hasPersonalization: false,
     hasSelfMonitoring: false,
     hasPersona: false,
+    hasCompanion: false,
     ...overrides
   } as ServerCapabilities)
 
 describe("route capability gating", () => {
+  it("requires the Companion router for conversation without hiding Home or Persona", () => {
+    const caps = makeCapabilities({ hasPersonalization: true, hasPersona: true, hasCompanion: false })
+    expect(isRouteEnabledForCapabilities(COMPANION_CONVERSATION_PATH, caps)).toBe(false)
+    expect(isRouteEnabledForCapabilities(COMPANION_PATH, caps)).toBe(true)
+    expect(isPersonaDockAvailable(caps)).toBe(true)
+  })
+
   it("exposes the canonical family wizard route path", () => {
     expect(FAMILY_WIZARD_SETTINGS_PATH).toBe("/settings/family-guardrails")
   })
@@ -87,14 +95,14 @@ describe("route capability gating", () => {
 
   it("hides persona dock route when persona capability is missing", () => {
     const caps = makeCapabilities({
-      hasPersona: false
+      hasPersona: false, hasCompanion: true
     })
     expect(isRouteEnabledForCapabilities(PERSONA_DOCK_PATH, caps)).toBe(false)
   })
 
   it("enables persona dock route when persona capability is present", () => {
     const caps = makeCapabilities({
-      hasPersona: true
+      hasPersona: true, hasCompanion: true
     })
     expect(isPersonaDockAvailable(caps)).toBe(true)
     expect(isRouteEnabledForCapabilities(PERSONA_DOCK_PATH, caps)).toBe(true)
@@ -104,7 +112,7 @@ describe("route capability gating", () => {
     "keeps the companion workspace available when hasPersonalization=%s",
     (hasPersonalization) => {
       const caps = makeCapabilities({
-        hasPersonalization
+        hasPersonalization, hasCompanion: true
       })
       expect(isCompanionAvailable(caps)).toBe(true)
       expect(isRouteEnabledForCapabilities(COMPANION_PATH, caps)).toBe(true)
@@ -117,7 +125,7 @@ describe("route capability gating", () => {
         COMPANION_CONVERSATION_PATH,
         makeCapabilities({
           hasPersona: true,
-          hasPersonalization: false
+          hasPersonalization: false, hasCompanion: true
         })
       )
     ).toBe(false)
@@ -126,7 +134,7 @@ describe("route capability gating", () => {
         COMPANION_CONVERSATION_PATH,
         makeCapabilities({
           hasPersona: false,
-          hasPersonalization: true
+          hasPersonalization: true, hasCompanion: true
         })
       )
     ).toBe(false)
@@ -135,7 +143,7 @@ describe("route capability gating", () => {
   it("enables the companion conversation only when both persona and personalization are present", () => {
     const caps = makeCapabilities({
       hasPersona: true,
-      hasPersonalization: true
+      hasPersonalization: true, hasCompanion: true
     })
     expect(isRouteEnabledForCapabilities(COMPANION_CONVERSATION_PATH, caps)).toBe(true)
   })

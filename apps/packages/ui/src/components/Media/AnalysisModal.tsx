@@ -8,6 +8,7 @@ import { ANALYSIS_PRESETS } from "@/components/Media/analysisPresets"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { parseProviderQualifiedModelSelection, resolveApiProviderForModel } from "@/utils/resolve-api-provider"
+import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 import { DEFAULT_ANALYSIS_SUMMARY_PROMPT } from "@/utils/default-prompts"
 import {
   extractMediaDetailAnalysis,
@@ -74,13 +75,20 @@ const extractStreamDelta = (chunk: string): string | null => {
   }
 }
 
-export function AnalysisModal({
+export function AnalysisModal(props: AnalysisModalProps) {
+  const owner = useQuickIngestAuthority()
+  const captured = owner ? quickIngestAuthority.capture({ sessionBound: false }) : null
+  return captured ? <OwnedAnalysisModal key={JSON.stringify([owner, captured.authorityRevision, props.mediaId])} {...props} /> : null
+}
+
+function OwnedAnalysisModal({
   open,
   onClose,
   mediaId,
   mediaContent,
   onAnalysisGenerated
 }: AnalysisModalProps) {
+  const operation = useMemo(() => quickIngestAuthority.capture({ sessionBound: false }), [])
   const { t } = useTranslation(['review', 'common'])
   const messageApi = useAntdMessage()
   const { selectedModel, setSelectedModel } = useSelectedModel()
@@ -191,6 +199,8 @@ export function AnalysisModal({
     ;(async () => {
       try {
         const detail = await bgRequest<any>({
+          servicePromptConfig: operation.requestScope.config,
+          abortSignal: operation.signal,
           path: `/api/v1/media/${mediaId}?include_content=true&include_versions=false&cache_bust=${Date.now()}` as any,
           method: 'GET' as any
         })
@@ -205,7 +215,7 @@ export function AnalysisModal({
     return () => {
       cancelled = true
     }
-  }, [mediaContent, mediaId, open])
+  }, [mediaContent, mediaId, open, operation])
 
   useEffect(() => {
     if (!open) {
@@ -364,17 +374,15 @@ export function AnalysisModal({
       )
       return
     }
-    if (generating) return
+    if (generating || (activeAbortControllerRef.current && !activeAbortControllerRef.current.signal.aborted)) return
+    operation.assertCurrent()
     const catalogModel = models.find((model) => model.id === effectiveModel)
     const normalizedModel = catalogModel?.requestModel || effectiveModel.replace(/^tldw:/, "").trim()
-    const resolvedApiProvider = await resolveApiProviderForModel({
-      modelId: effectiveModel
-    })
-
     cancelledByUserRef.current = false
     setCancelledGeneration(false)
     const abortController = new AbortController()
     activeAbortControllerRef.current = abortController
+    const signal = AbortSignal.any([operation.signal, abortController.signal])
     setGenerating(true)
     setElapsedSeconds(0)
     setAnalysisPreview("")
@@ -388,6 +396,8 @@ export function AnalysisModal({
       if (!effectiveMediaContent || !effectiveMediaContent.trim()) return false
       try {
         let savedDetail = await bgRequest<any>({
+          servicePromptConfig: operation.requestScope.config,
+          abortSignal: signal,
           path: `/api/v1/media/${mediaId}/versions`,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -397,18 +407,20 @@ export function AnalysisModal({
             prompt: systemPrompt
           }
         })
-        if (cancelledByUserRef.current || abortController.signal.aborted)
+        if (cancelledByUserRef.current || signal.aborted)
           return false
         let persistedAnalysis = extractMediaDetailAnalysis(savedDetail)
         if (persistedAnalysis.trim() !== analysisText.trim()) {
           const refreshedDetail = await bgRequest<any>({
+            servicePromptConfig: operation.requestScope.config,
+            abortSignal: signal,
             path: `/api/v1/media/${mediaId}`,
             method: 'GET'
           })
           persistedAnalysis = extractMediaDetailAnalysis(refreshedDetail)
           savedDetail = refreshedDetail
         }
-        if (cancelledByUserRef.current || abortController.signal.aborted)
+        if (cancelledByUserRef.current || signal.aborted)
           return false
         const matches = persistedAnalysis.trim() === analysisText.trim()
         if (matches) {
@@ -438,6 +450,9 @@ export function AnalysisModal({
     }
 
     try {
+      const resolvedApiProvider = await resolveApiProviderForModel({ modelId: effectiveModel })
+      if (signal.aborted) return
+      operation.assertCurrent()
       const { requestTimeoutMs, streamIdleTimeoutMs } = await getAnalysisTimeouts()
       const requestBody = {
         model: normalizedModel || effectiveModel,
@@ -458,14 +473,15 @@ export function AnalysisModal({
         let lastPreviewAt = 0
         let streamedText = ""
         for await (const chunk of bgStream({
+          servicePromptConfig: operation.requestScope.config,
           path: '/api/v1/chat/completions',
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: { ...requestBody, stream: true },
           streamIdleTimeoutMs,
-          abortSignal: abortController.signal
+          abortSignal: signal
         })) {
-          if (cancelledByUserRef.current || abortController.signal.aborted) {
+          if (cancelledByUserRef.current || signal.aborted) {
             return
           }
           const delta = extractStreamDelta(chunk)
@@ -483,15 +499,18 @@ export function AnalysisModal({
           setAnalysisPreview(analysisText)
         }
       } catch (err) {
-        if (cancelledByUserRef.current || abortController.signal.aborted || isAbortError(err)) {
+        if (cancelledByUserRef.current || signal.aborted || isAbortError(err)) {
           return
         }
         streamError = err
       }
 
-      if (cancelledByUserRef.current || abortController.signal.aborted) return
+      if (cancelledByUserRef.current || signal.aborted) return
+      if (streamError) { analysisText = ''; setAnalysisPreview('') }
       if (!analysisText) {
         const resp = await bgRequest<any>({
+          abortSignal: signal,
+          servicePromptConfig: operation.requestScope.config,
           path: '/api/v1/chat/completions',
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -501,10 +520,8 @@ export function AnalysisModal({
         analysisText =
           resp?.choices?.[0]?.message?.content || resp?.content || ''
         if (analysisText) setAnalysisPreview(analysisText)
-      } else if (streamError) {
-        console.warn('Analysis stream completed with warnings:', streamError)
       }
-      if (cancelledByUserRef.current || abortController.signal.aborted) return
+      if (cancelledByUserRef.current || signal.aborted) return
 
       if (!analysisText) {
         messageApi.error(t('mediaPage.noAnalysisReturned', 'No analysis returned from API'))
@@ -512,7 +529,7 @@ export function AnalysisModal({
       }
 
       const persisted = await saveAsVersion(analysisText)
-      if (cancelledByUserRef.current || abortController.signal.aborted) return
+      if (cancelledByUserRef.current || signal.aborted) return
       if (persisted) {
         onAnalysisGenerated?.(analysisText, systemPrompt)
         messageApi.success(t('mediaPage.analysisGeneratedAndSaved', 'Analysis generated and saved'))
@@ -520,7 +537,7 @@ export function AnalysisModal({
         messageApi.error(t('mediaPage.analysisSaveFailed', 'Failed to save analysis to media item'))
       }
     } catch (err) {
-      if (cancelledByUserRef.current || abortController.signal.aborted || isAbortError(err)) {
+      if (cancelledByUserRef.current || signal.aborted || isAbortError(err)) {
         return
       }
       if (isTimeoutError(err)) {
@@ -538,12 +555,12 @@ export function AnalysisModal({
       }
       console.warn('Analysis generation failed:', isTimeoutError(err) ? 'timeout' : 'provider_failure')
     } finally {
-      clearGenerationTimer()
       if (activeAbortControllerRef.current === abortController) {
+        clearGenerationTimer()
         activeAbortControllerRef.current = null
+        setGenerating(false)
+        setElapsedSeconds(0)
       }
-      setGenerating(false)
-      setElapsedSeconds(0)
     }
   }
 

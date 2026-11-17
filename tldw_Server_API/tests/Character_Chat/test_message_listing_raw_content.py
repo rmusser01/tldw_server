@@ -202,6 +202,7 @@ async def test_image_listing_runs_off_event_loop_with_operation_context(
     """Attachment decoding must not block the loop or lose request-owned DB cleanup."""
     import threading
 
+    from tldw_Server_API.app.api.v1.utils import chat_message_images
     from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
         chacha_operation,
         current_connection_state,
@@ -209,7 +210,8 @@ async def test_image_listing_runs_off_event_loop_with_operation_context(
 
     db, chat_id, _, _ = listing_state
     helper_name = "expand_message_images" if recovery else "read_messages_with_images"
-    original = getattr(character_messages, helper_name)
+    helper_module = character_messages if recovery else chat_message_images
+    original = getattr(helper_module, helper_name)
     observed = []
 
     def read(*args: Any, **kwargs: Any) -> Any:
@@ -217,7 +219,7 @@ async def test_image_listing_runs_off_event_loop_with_operation_context(
         observed.append((threading.get_ident(), current_connection_state(db)))
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(character_messages, helper_name, read)
+    monkeypatch.setattr(helper_module, helper_name, read)
     app = FastAPI()
     app.include_router(character_messages.router, prefix="/api/v1")
     app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=41)

@@ -196,7 +196,7 @@ export class SidePanelChat {
     if (await backdrop.isVisible()) {
       await backdrop.click({ position: { x: viewport.width - 10, y: Math.round(viewport.height / 2) } })
     } else {
-      await this.page.getByRole("button", { name: "Collapse sidebar" }).click()
+      await this.sidebar.getByRole("button", { name: "Collapse sidebar" }).click()
     }
     await expect(this.sidebar).toBeHidden()
   }
@@ -227,20 +227,38 @@ export class SidePanelChat {
 
   /**
    * Search the history for `title` and open its server result, as a user
-   * looking up an old chat. Returns once the chat's tab is active; the sidebar
-   * stays open.
+   * looking up an old chat. Returns once the chat's tab is active. Accepted
+   * navigation may close an overlay sidebar; a docked sidebar stays open.
    */
   async openServerChatFromSearch(title: string, chatId: string) {
     await this.search(title)
     const result = this.sidebar.getByRole("button", { name: new RegExp(`^${escapeRegExp(title)}(?: .+)? Server$`) })
     await expect(result).toBeVisible()
     await result.click()
-    await expect
-      .poll(async () => {
-        const state = await this.readTabs()
-        return state.tabs.find((tab) => tab.id === state.activeTabId)?.serverChatId ?? null
-      }, { message: `the side panel should switch to a tab for chat ${chatId}` })
-      .toBe(chatId)
+    try {
+      await expect
+        .poll(async () => {
+          const state = await this.readTabs()
+          return state.tabs.find((tab) => tab.id === state.activeTabId)?.serverChatId ?? null
+        }, { message: `the side panel should switch to a tab for chat ${chatId}` })
+        .toBe(chatId)
+    } catch (error) {
+      console.error("[sidepanel-chat-search:readiness]", await this.page.evaluate(async () => {
+        const store = Reflect.get(window, "__tldw_useConnectionStore")
+        const state = store?.getState?.()?.state
+        const saved = await chrome.storage.local.get(null)
+        return {
+          storeReady: typeof store?.getState === "function",
+          connected: state?.isConnected === true,
+          checking: state?.isChecking === true,
+          restoreBusy: !!document.querySelector('[aria-busy="true"][aria-label="Restoring previous chat"]'),
+          composerDockCount: document.querySelectorAll('[data-testid="sidepanel-composer-dock"]').length,
+          alertCount: document.querySelectorAll('[role="alert"]').length,
+          savedGlobalKeyCount: Object.keys(saved).filter((key) => key.startsWith("sidepanelChatTabsState:v2:") && key.endsWith(":global")).length,
+        }
+      }).catch(() => ({ snapshotUnavailable: true })))
+      throw error
+    }
   }
 
   /** Right-click a tab row and pick an item from its context menu. */

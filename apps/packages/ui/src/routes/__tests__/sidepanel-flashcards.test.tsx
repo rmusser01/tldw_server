@@ -142,6 +142,14 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+const capturedOwnerOptions = {
+  requestScope: expect.objectContaining({
+    userId: 1,
+    config: expect.objectContaining({ serverUrl: "https://selection.test", authMode: "multi-user" })
+  }),
+  signal: expect.objectContaining({ aborted: false })
+}
+
 // This suite renders a full antd tree (Modal, Form, Select, autoSize
 // TextAreas) under jsdom, where every userEvent interaction costs multiple
 // hundred milliseconds of act() flushing and the cost compounds over the run.
@@ -418,6 +426,7 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
       expect(flashcardMocks.reviewFlashcardMutateAsync).toHaveBeenCalledTimes(1)
     })
     expect(flashcardMocks.reviewFlashcardMutateAsync).toHaveBeenCalledWith({
+      options: capturedOwnerOptions,
       cardUuid: "review-card-1",
       rating: 3,
       answerTimeMs: expect.any(Number)
@@ -445,6 +454,7 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
       expect(flashcardMocks.reviewFlashcardMutateAsync).toHaveBeenCalledTimes(1)
     })
     expect(flashcardMocks.reviewFlashcardMutateAsync).toHaveBeenCalledWith({
+      options: capturedOwnerOptions,
       cardUuid: "review-card-1",
       rating,
       answerTimeMs: expect.any(Number)
@@ -544,6 +554,7 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
       () => new Promise(() => undefined)
     )
     render(<SidepanelFlashcards />)
+    await waitFor(() => expect(screen.getByRole("button", { name: "Review due card" })).toBeEnabled())
 
     fireEvent.click(screen.getByRole("button", { name: "Review due card" }))
     fireEvent.click(screen.getByRole("button", { name: "Reveal answer" }))
@@ -688,6 +699,7 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
       expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
     })
     expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledWith({
+      requestOptions: capturedOwnerOptions,
       deck_id: 7,
       front: "What does ATP mean?",
       back: "The cell's energy currency",
@@ -746,6 +758,7 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
       expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
     })
     expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledWith({
+      requestOptions: capturedOwnerOptions,
       deck_id: 7,
       front: "What does ATP mean?",
       back: "The cell's energy currency",
@@ -790,6 +803,7 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
       expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
     })
     expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledWith({
+      requestOptions: capturedOwnerOptions,
       deck_id: 7,
       front: "What does ATP mean?",
       back: "The cell's energy currency",
@@ -866,6 +880,7 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
       expect(flashcardMocks.generateFlashcardsMutateAsync).toHaveBeenCalledTimes(1)
     })
     expect(flashcardMocks.generateFlashcardsMutateAsync).toHaveBeenCalledWith({
+      requestOptions: capturedOwnerOptions,
       text: "Key concept from the active page",
       numCards: 3,
       cardType: "basic",
@@ -890,6 +905,7 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
       expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
     })
     expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledWith({
+      requestOptions: capturedOwnerOptions,
       deck_id: 7,
       front: "What does ATP do?",
       back: "ATP stores and transfers cellular energy.",
@@ -909,6 +925,7 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
       expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(2)
     })
     expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenLastCalledWith({
+      requestOptions: capturedOwnerOptions,
       deck_id: 7,
       front: "What is {{c1::mitochondrial respiration}}?",
       back: "A process that produces ATP from nutrients.",
@@ -929,6 +946,8 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
     const generateDraftCardsButton = screen.getByRole("button", {
       name: "Generate draft cards"
     })
+
+    await waitFor(() => expect(generateDraftCardsButton).toBeEnabled())
 
     await act(async () => {
       fireEvent.click(generateDraftCardsButton)
@@ -951,6 +970,8 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
     const generateFromSelectionButton = screen.getByRole("button", {
       name: "Generate from selection"
     })
+
+    await waitFor(() => expect(generateDraftCardsButton).toBeEnabled())
 
     await act(async () => {
       fireEvent.click(generateDraftCardsButton)
@@ -1084,6 +1105,7 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
       expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
     })
     expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledWith({
+      requestOptions: capturedOwnerOptions,
       deck_id: 7,
       front: "Edited question",
       back: "Edited answer",
@@ -1121,6 +1143,7 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
       expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
     })
     expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledWith({
+      requestOptions: capturedOwnerOptions,
       deck_id: 7,
       front: "Selection Source",
       back: "First queued answer",
@@ -1424,6 +1447,31 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
     expect(screen.getByLabelText("Back")).toHaveValue(
       "Key concept from the active page"
     )
+  })
+
+  it.each([
+    "Capture page selection",
+    "Generate draft cards",
+    "Generate from selection"
+  ])("explains a restricted page before %s while preserving queued work", async (action) => {
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+    await user.click(screen.getByRole("button", { name: "Capture page selection" }))
+    browserMocks.executeScript.mockClear()
+    browserMocks.tabsQuery.mockResolvedValueOnce([
+      { id: 42, title: "Version", url: "chrome://version" }
+    ])
+
+    await user.click(screen.getByRole("button", { name: action }))
+
+    expect(await screen.findByText(
+      "This browser page blocks selection capture. Open a regular web page and select text, or paste text into Create & Import."
+    )).toBeInTheDocument()
+    expect(screen.getByLabelText("Back")).toHaveValue("Key concept from the active page")
+    expect(browserMocks.executeScript).not.toHaveBeenCalled()
+    expect(flashcardMocks.generateFlashcardsMutateAsync).not.toHaveBeenCalled()
+    expect(flashcardMocks.createFlashcardMutateAsync).not.toHaveBeenCalled()
+    expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
   })
 
   it("uses capture wording when no active page tab is available", async () => {

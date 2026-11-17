@@ -26,6 +26,7 @@ let historyPanelProps: Record<string, unknown> | null = null
 const {
   getTranscriptionModelsMock,
   getTranscriptionModelHealthMock,
+  getTranscriptionCapabilitiesMock,
   transcribeAudioMock,
   createNoteMock,
   getSttRecordingMock,
@@ -37,6 +38,7 @@ const {
 } = vi.hoisted(() => ({
   getTranscriptionModelsMock: vi.fn(),
   getTranscriptionModelHealthMock: vi.fn(),
+  getTranscriptionCapabilitiesMock: vi.fn(),
   transcribeAudioMock: vi.fn(),
   createNoteMock: vi.fn(),
   getSttRecordingMock: vi.fn(),
@@ -52,6 +54,9 @@ const {
     }
   }
 }))
+
+vi.mock("@/services/service-prompts", () => ({ resolveServicePromptScope: async () => ({config:{serverUrl:"http://unit-server",authMode:"multi-user"},userId:"test-owner"}) }))
+vi.mock("@/hooks/useChatDraftOwner", () => ({ useChatDraftOwner: () => ({ ownerKey: "test-owner", isCurrent: () => true }) }))
 
 // Mock all dependencies before importing the component
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -70,6 +75,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getTranscriptionModels: getTranscriptionModelsMock,
     getTranscriptionModelHealth: getTranscriptionModelHealthMock,
+    getTranscriptionCapabilities: getTranscriptionCapabilitiesMock,
     transcribeAudio: transcribeAudioMock,
     createNote: createNoteMock
   }
@@ -164,6 +170,7 @@ vi.mock("@/db/dexie/stt-recordings", () => ({
 }))
 
 import { SttPlaygroundPage } from "../SttPlaygroundPage"
+import type { SttHistoryEntry } from "../HistoryPanel"
 
 describe("SttPlaygroundPage", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>
@@ -173,6 +180,7 @@ describe("SttPlaygroundPage", () => {
     recordingStripProps = null
     historyPanelProps = null
     storageValues.sttComparisonHistory = []
+    delete storageValues["sttComparisonHistory:test-owner"]
     getTranscriptionModelsMock.mockReset()
     getTranscriptionModelsMock.mockResolvedValue({
       categories: {
@@ -193,6 +201,8 @@ describe("SttPlaygroundPage", () => {
       },
       all_models: ["whisper-1", "distil-v3"]
     })
+    getTranscriptionCapabilitiesMock.mockReset()
+    getTranscriptionCapabilitiesMock.mockResolvedValue({ models: [] })
     getTranscriptionModelHealthMock.mockReset()
     getTranscriptionModelHealthMock.mockResolvedValue({
       available: true,
@@ -220,6 +230,82 @@ describe("SttPlaygroundPage", () => {
     warnSpy.mockRestore()
   })
 
+  it("B05 history restore hands the owned saved audio to the existing recorder", async () => {
+    const blob = new Blob(["owned saved audio"])
+    getSttRecordingMock.mockResolvedValueOnce({ blob, durationMs: 12800, ownerKey: "test-owner" })
+    render(<SttPlaygroundPage />)
+    await act(async () => { await (historyPanelProps?.onRecompare as (entry: unknown) => Promise<void>)({ recordingId: "saved", durationMs: 12800 }) })
+    expect(recordingStripProps?.restoredRecording).toEqual(expect.objectContaining({ blob, durationMs: 12800, ownerKey: "test-owner" }))
+    expect(getSttRecordingMock).toHaveBeenCalledWith("saved", "test-owner")
+    expect(comparisonPanelProps?.blob).toBeNull()
+  })
+
+  it("B05 history restore cannot overwrite a new source intent before its effect", async () => {
+    let resolve!: (value: unknown) => void
+    getSttRecordingMock.mockImplementationOnce(() => new Promise((done) => { resolve = done }))
+    render(<SttPlaygroundPage />)
+    let pending!: Promise<void>
+    act(() => { pending = (historyPanelProps?.onRecompare as (entry: unknown) => Promise<void>)({ recordingId: "old", durationMs: 9000 }) })
+    act(() => { (recordingStripProps?.onSourceChange as (() => void) | undefined)?.() })
+    await act(async () => { resolve({ blob: new Blob(["old history"]), durationMs: 9000 }); await pending })
+    expect(comparisonPanelProps?.blob).toBeNull()
+    expect(recordingStripProps?.restoredRecording).toBeFalsy()
+  })
+
+  it("B05 source handoff persists the reviewed source label and transcription time in the note title", async () => {
+    render(<SttPlaygroundPage />)
+    await act(async()=>{
+      await (comparisonPanelProps?.onSaveToNotes as (text:string,model:string,metadata:{audioSourceLabel:string;createdAt:string})=>Promise<void>)("Reviewed exact text","parakeet",{audioSourceLabel:"New Recording 6.m4a",createdAt:"2026-10-16T22:59:32.000Z"})
+    })
+    expect(createNoteMock.mock.calls[0][0]).toBe("Reviewed exact text")
+    expect(createNoteMock.mock.calls[0][1].title).toContain("New Recording 6.m4a")
+    expect(createNoteMock.mock.calls[0][1].title).toContain("2026-10-16T22:59:32.000Z")
+  })
+
+  it("B05 source handoff reserves model and transcription time when the filename is long", async () => {
+    render(<SttPlaygroundPage />)
+    await act(async () => {
+      await (comparisonPanelProps?.onSaveToNotes as (text: string, model: string, metadata: { audioSourceLabel: string; createdAt: string }) => Promise<void>)(
+        "Reviewed exact text", "parakeet", {
+          audioSourceLabel: "recording".repeat(100) + ".m4a",
+          createdAt: "2026-10-16T22:59:32.000Z"
+        }
+      )
+    })
+    const title = createNoteMock.mock.calls[0][1].title
+    expect(title.length).toBeLessThanOrEqual(255)
+    expect(title).toContain("parakeet - 2026-10-16T22:59:32.000Z")
+    expect(createNoteMock.mock.calls[0][0]).toBe("Reviewed exact text")
+  })
+
+  it.each([true, false])("B05 history export retains raw text and available source identity (metadata %s)", async (withMetadata) => {
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard")
+    const writeText = vi.fn(async (_text: string) => {})
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    try {
+      render(<SttPlaygroundPage />)
+      const entry: SttHistoryEntry = {
+        id: "history-source", recordingId: "local-recording-1", createdAt: "2026-10-16T23:00:00.000Z", durationMs: 3000,
+        results: [{ model: "parakeet", text: "Original raw transcript", metadata: withMetadata ? {
+          audioSourceLabel: "New Recording 6.m4a", createdAt: "2026-10-16T22:59:32.000Z"
+        } : undefined }]
+      }
+      await act(async () => {
+        await (historyPanelProps?.onExport as (entry: SttHistoryEntry) => Promise<void>)(entry)
+      })
+      expect(writeText).toHaveBeenCalledTimes(1)
+      const markdown = writeText.mock.calls[0][0]
+      expect(markdown).toContain("Source: " + (withMetadata ? "New Recording 6.m4a" : "local-recording-1"))
+      if (withMetadata) expect(markdown).toContain("Transcribed: 2026-10-16T22:59:32.000Z")
+      expect(markdown).toContain("Original raw transcript")
+      expect(markdown).toContain("## parakeet")
+      expect(markdown).toContain("Duration: 3.0s")
+    } finally {
+      if (originalClipboard) Object.defineProperty(navigator, "clipboard", originalClipboard)
+      else Reflect.deleteProperty(navigator, "clipboard")
+    }
+  })
+
   it("renders the Speech to Text page heading", () => {
     render(<SttPlaygroundPage />)
     expect(
@@ -227,12 +313,29 @@ describe("SttPlaygroundPage", () => {
     ).toBeTruthy()
   })
 
+  it("B05 unavailable selected model is not hidden by another ready model", async () => {
+    getTranscriptionCapabilitiesMock.mockResolvedValue({ models: [
+      { id: "distil-v3", availability: "unavailable", availability_source: "health" },
+      { id: "whisper-1", availability: "ready", availability_source: "health" }
+    ] })
+    render(<SttPlaygroundPage />)
+    await waitFor(() => expect(comparisonPanelProps?.availableModelOptions).toEqual([
+      expect.objectContaining({ id: "distil-v3", availability: "unavailable" }),
+      expect.objectContaining({ id: "whisper-1", availability: "ready" })
+    ]))
+    expect(screen.getByRole("status", { name: "STT readiness" })).toHaveTextContent("STT models: Ready")
+    act(() => (comparisonPanelProps?.onSelectedModelsChange as (models: string[]) => void)(["distil-v3"]))
+    expect(screen.getByRole("status", { name: "STT readiness" })).toHaveTextContent("STT models: Blocked")
+    act(() => (comparisonPanelProps?.onSelectedModelsChange as (models: string[]) => void)([]))
+    expect(screen.getByRole("status", { name: "STT readiness" })).toHaveTextContent("STT models: Ready")
+  })
+
   it("renders model readiness from the server catalog and health check", async () => {
     render(<SttPlaygroundPage />)
 
-    expect(
-      await screen.findByRole("status", { name: "STT readiness" })
-    ).toHaveTextContent("STT models: Ready")
+    await waitFor(() => {
+      expect(screen.getByRole("status", { name: "STT readiness" })).toHaveTextContent("STT models: Ready")
+    })
     expect(getTranscriptionModelHealthMock).toHaveBeenCalledWith("distil-v3")
     expect(comparisonPanelProps?.availableModelOptions).toEqual([
       expect.objectContaining({
@@ -452,7 +555,8 @@ describe("SttPlaygroundPage", () => {
           origin: "stt-playground",
           stt_model: "whisper-1"
         })
-      })
+      }),
+      expect.objectContaining({ requestScope: expect.objectContaining({userId:"test-owner"}), signal: expect.any(AbortSignal) })
     )
     expect(notificationErrorMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -472,7 +576,7 @@ describe("SttPlaygroundPage", () => {
   })
 
   it("sanitizes recording history load failure notifications", async () => {
-    storageValues.sttComparisonHistory = [
+    storageValues["sttComparisonHistory:test-owner"] = { ownerKey: "test-owner", items: [
       {
         id: "hist-1",
         recordingId: "recording-1",
@@ -485,7 +589,7 @@ describe("SttPlaygroundPage", () => {
           }
         ]
       }
-    ]
+    ] }
     getSttRecordingMock.mockRejectedValueOnce(
       new Error(
         "IndexedDB read failed (GET /api/v1/audio/transcriptions/history) secret=sk-history-secret /home/alice/stt-recording.webm"

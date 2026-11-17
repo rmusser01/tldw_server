@@ -24,7 +24,8 @@ describe("dynamic UI surface guard", () => {
     )
 
     expect(chatSource).toContain("dynamicUISurface=\"web-chat\"")
-    expect(chatSource).toContain("onDynamicUIAction={onDynamicUIAction}")
+    expect(chatSource).toContain("const resolvedDynamicUIAction = onDynamicUIAction ?? bridgedDynamicUIAction")
+    expect(chatSource).toContain("onDynamicUIAction={resolvedDynamicUIAction}")
     expect(compareSource).toContain("dynamicUISurface={dynamicUISurface}")
     expect(compareSource).toContain("onDynamicUIAction={onDynamicUIAction}")
   })

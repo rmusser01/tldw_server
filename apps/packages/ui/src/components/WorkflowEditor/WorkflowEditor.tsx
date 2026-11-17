@@ -16,6 +16,8 @@ import {
   Segmented,
   Badge,
   Drawer,
+  Modal,
+  Select,
   message
 } from "antd"
 import {
@@ -38,7 +40,8 @@ import {
   Trash2,
   PanelLeft
 } from "lucide-react"
-import type { SidebarPanel } from "@/types/workflow-editor"
+import type { SidebarPanel, WorkflowInputValidator } from "@/types/workflow-editor"
+import { useWorkflowEditorApi } from "@/hooks/useWorkflowEditorApi"
 import { useWorkflowEditorStore } from "@/store/workflow-editor"
 import { useDesktop } from "@/hooks/useMediaQuery"
 import { WorkflowCanvas } from "./WorkflowCanvas"
@@ -58,10 +61,12 @@ const LazyExecutionPanel = lazy(() =>
 
 interface WorkflowEditorProps {
   className?: string
+  validateInputs?: WorkflowInputValidator
 }
 
-export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
+export const WorkflowEditor = ({ className = "", validateInputs }: WorkflowEditorProps) => {
   const isDesktop = useDesktop()
+  const api = useWorkflowEditorApi(validateInputs)
 
   // Store state
   const workflowName = useWorkflowEditorStore((s) => s.workflowName)
@@ -95,6 +100,8 @@ export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
   const [isEditing, setIsEditing] = useState(false)
   const [editName, setEditName] = useState(workflowName)
   const [isMobilePanelsOpen, setIsMobilePanelsOpen] = useState(false)
+  const [isOpenPickerVisible, setIsOpenPickerVisible] = useState(false)
+  const [selectedWorkflow, setSelectedWorkflow] = useState<number | undefined>()
 
   useEffect(() => {
     if (isDesktop) {
@@ -112,10 +119,10 @@ export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
 
   // Load server-driven step types once
   useEffect(() => {
-    if (stepTypesStatus === "idle") {
+    if (api.ready && stepTypesStatus === "idle") {
       void loadStepTypes()
     }
-  }, [stepTypesStatus, loadStepTypes])
+  }, [api.ready, stepTypesStatus, loadStepTypes])
 
   // Validate on graph/config changes with a short debounce for typing comfort
   useEffect(() => {
@@ -125,12 +132,10 @@ export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
     return () => window.clearTimeout(timeoutId)
   }, [nodes, edges, validate])
 
-  const handleSave = useCallback(() => {
-    const workflow = saveWorkflow()
-    console.log("Workflow saved:", workflow)
-    message.success("Workflow saved")
-    // In a real implementation, this would call the API
-  }, [saveWorkflow])
+  const handleSave = async () => {
+    const saved = await api.save()
+    if (saved) message.success(saved.clean ? `Workflow saved (version ${saved.version})` : `Version ${saved.version} saved; newer changes remain unsaved`)
+  }
 
   const handleExport = useCallback(() => {
     const workflow = saveWorkflow()
@@ -157,7 +162,9 @@ export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
       try {
         const text = await file.text()
         const workflow = JSON.parse(text)
-        useWorkflowEditorStore.getState().loadWorkflow(workflow)
+        if (!Array.isArray(workflow.nodes) || !Array.isArray(workflow.edges) || typeof workflow.name !== "string") throw new Error("Malformed canvas")
+        useWorkflowEditorStore.getState().loadWorkflow({ ...workflow, id: undefined, version: undefined })
+        useWorkflowEditorStore.setState({ isDirty: true })
         message.success("Workflow imported")
       } catch (error) {
         message.error("Failed to import workflow")
@@ -266,7 +273,7 @@ export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
     if (sidebarPanel === "execution") {
       return (
         <Suspense fallback={null}>
-          <LazyExecutionPanel className="h-full" />
+          <LazyExecutionPanel className="h-full" api={api} />
         </Suspense>
       )
     }
@@ -435,13 +442,14 @@ export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
         )}
 
         {/* Save button */}
-        <Tooltip title="Save (Cmd+S)">
+        <Tooltip title="Save">
           <Button
             type="primary"
             size="small"
             icon={<Save className="w-4 h-4" />}
             onClick={handleSave}
-            disabled={!isDirty}
+            disabled={!isDirty || !api.ready || api.pending}
+            loading={api.pending}
           >
             Save
           </Button>
@@ -479,12 +487,13 @@ export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
           {validationSummaryLabel}
         </span>
         <span className="inline-flex items-center rounded-full border border-border bg-surface px-2 py-0.5 font-medium text-text">
-          {isDirty ? "Unsaved changes" : "Saved"}
+          {isDirty ? "Unsaved changes" : useWorkflowEditorStore.getState().workflowId ? `Saved version ${useWorkflowEditorStore.getState().workflowVersion}` : "Not saved on server"}
         </span>
         <span className="inline-flex items-center rounded-full border border-border bg-surface px-2 py-0.5 font-medium text-text">
           Run {status}
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-1">
+          <Button size="small" aria-label="Open saved workflow" disabled={!api.ready || api.pending} onClick={() => { setSelectedWorkflow(undefined); setIsOpenPickerVisible(true); void api.list() }}>Open saved</Button>
           <Button
             size="small"
             aria-label="Import workflow"
@@ -511,6 +520,15 @@ export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
           </Button>
         </div>
       </section>
+
+      {api.error && sidebarPanel !== "execution" && <div role="alert" className="px-3 py-2 text-danger">{api.error}</div>}
+      <Modal title="Open saved workflow" open={isOpenPickerVisible} onCancel={() => setIsOpenPickerVisible(false)} okText="Open" confirmLoading={api.pending} okButtonProps={{ "aria-label": "Open selected workflow", disabled: selectedWorkflow === undefined || api.pending }} onOk={async () => {
+        if (selectedWorkflow === undefined || (isDirty && !confirm("Discard unsaved changes and open this saved workflow?"))) return
+        if (await api.open(selectedWorkflow)) setIsOpenPickerVisible(false)
+      }}>
+        {api.error && <div role="alert">{api.error}</div>}
+        <Select aria-label="Saved workflow" className="w-full" value={selectedWorkflow} onChange={setSelectedWorkflow} placeholder="Choose a saved workflow" loading={api.pending} options={api.definitions.filter((definition) => definition.is_active).map((definition) => ({ value: definition.id, label: `${definition.name} — version ${definition.version}` }))} />
+      </Modal>
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">

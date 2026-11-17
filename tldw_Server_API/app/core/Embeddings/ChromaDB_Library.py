@@ -13,6 +13,7 @@ from pathlib import Path
 
 # Redundant in some environments, but keep explicit Dict import for clarity
 from typing import Any, Callable, Literal, Optional, Union
+from weakref import WeakValueDictionary
 
 # 3rd-Party Imports:
 import chromadb
@@ -42,6 +43,7 @@ _CHROMA_NONCRITICAL_EXCEPTIONS = (
     ChromaError,
 )
 _CHROMA_SEGMENT_RETRY_DELAYS_SECONDS = (0.05, 0.1, 0.2, 0.5, 1.0)
+_CHROMA_PROCESS_PID = os.getpid()
 
 
 def _is_transient_chroma_segment_error(error: BaseException) -> bool:
@@ -54,6 +56,12 @@ def _is_transient_chroma_segment_error(error: BaseException) -> bool:
 from tldw_Server_API.app.core.Chunking import Chunker, chunk_for_embedding  # Using V2 through compatibility layer
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.Embeddings.chroma_storage import (
+    ChromaStorageError,
+    ExistingClient,
+    GuardedClient,
+    StorageSession,
+)
 
 # Import embeddings creation lazily/safely to avoid hard dependency at import time
 try:
@@ -61,21 +69,26 @@ try:
         create_embedding,
         create_embeddings_batch,
     )
+
     _EMBEDDINGS_BACKEND_AVAILABLE = True
 except _CHROMA_EMBEDDINGS_IMPORT_EXCEPTIONS:
     _EMBEDDINGS_BACKEND_AVAILABLE = False
+
     def create_embedding(*args, **kwargs):  # type: ignore[no-redef]
         raise RuntimeError("Embeddings backend unavailable; install embeddings dependencies")
+
     def create_embeddings_batch(*args, **kwargs):  # type: ignore[no-redef]
         raise RuntimeError("Embeddings backend unavailable; install embeddings dependencies")
+
+
 import contextlib
 
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Embeddings.audit_adapter import (
     log_security_violation,
 )
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze  # Assuming this is correct
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_truthy
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Utils.Utils import logger  # Assuming this is 'logging' aliased or a custom logger
 
 
@@ -236,21 +249,24 @@ def _persistent_client_cache_key(user_chroma_path: Path) -> str:
 
 @dataclass
 class _PersistentClientState:
-    """Track a shared PersistentClient plus its synchronization and lease count."""
+    """Track an inert client facade, shared storage session and manager count."""
 
     client: Any
-    lock: threading.RLock
+    lock: StorageSession
     ref_count: int = 1
+
 
 #
 # Functions:
 ChromaIncludeLiteral = Literal["documents", "embeddings", "metadatas", "distances", "uris", "data"]
+
 
 class ChromaDBManager:
     """
     Manages ChromaDB instances and operations for specific users.
     Each instance of this class corresponds to a user's isolated ChromaDB storage.
     """
+
     DEFAULT_COLLECTION_NAME_PREFIX = "user_embeddings_for_"  # Can be made configurable
 
     def __init__(
@@ -260,6 +276,8 @@ class ChromaDBManager:
         *,
         client: Optional[Any] = None,
         client_factory: Optional[Callable[[Path, dict[str, Any]], Any]] = None,
+        existing_only: bool = False,
+        preflight_limits: Any = None,
     ):
         """
         Initializes the ChromaDBManager for a specific user.
@@ -268,6 +286,9 @@ class ChromaDBManager:
             user_id (str): The ID of the user for whom this ChromaDB instance is.
             user_embedding_config (Dict[str, Any]): The global application configuration dictionary.
         """
+        if os.getpid() != _CHROMA_PROCESS_PID:
+            raise ChromaStorageError("vector_forked_handle", retryable=True)
+        self._manager_pid = os.getpid()
         if not user_embedding_config:
             logger.error("Initialization failed: user_embedding_config cannot be empty for ChromaDBManager.")
             raise ValueError("user_embedding_config cannot be empty for ChromaDBManager.")
@@ -283,40 +304,60 @@ class ChromaDBManager:
         if not self.user_embedding_config:
             logger.error("Initialization failed: normalized user_embedding_config is empty.")
             raise ValueError("user_embedding_config cannot be empty for ChromaDBManager.")
-        self._lock = threading.RLock()  # Rebound to a shared lock for cached persistent clients.
+        self._lock = threading.RLock()  # Persistent clients rebind to a shared StorageSession.
         self._persistent_client_cache_key: Optional[str] = None
+        self.existing_only = existing_only
 
         # --- Configuration Usage (Point 1) ---
         user_db_base_dir_str = self.user_embedding_config.get("USER_DB_BASE_DIR")
         if not user_db_base_dir_str:
-            logger.critical("USER_DB_BASE_DIR not found in user_embedding_config. ChromaDBManager cannot be initialized.")
+            logger.critical(
+                "USER_DB_BASE_DIR not found in user_embedding_config. ChromaDBManager cannot be initialized."
+            )
             raise ValueError("USER_DB_BASE_DIR not configured in application settings.")
 
         try:
-            self.user_chroma_path = DatabasePaths.get_user_chroma_dir(
+            self.user_chroma_path = DatabasePaths.resolve_user_chroma_directory(
                 self.user_id,
                 base_dir_override=user_db_base_dir_str,
             )
+            if not existing_only:
+                # The lock's parent is configuration storage, not the owner tree.
+                self.user_chroma_path.parent.parent.mkdir(parents=True, exist_ok=True)
         except _CHROMA_NONCRITICAL_EXCEPTIONS as e:
+            if existing_only:
+                raise ChromaStorageError("vector_configuration", retryable=isinstance(e, OSError)) from e
             logger.critical(
                 f"Failed to resolve ChromaDB storage path for user '{self.user_id}': {e}",
                 exc_info=True,
             )
             raise
 
-        logger.info(f"ChromaDBManager for user '{self.user_id}' initialized. Path: {self.user_chroma_path}")
+        if not existing_only:
+            logger.info(f"ChromaDBManager for user '{self.user_id}' initialized. Path: {self.user_chroma_path}")
 
         chroma_client_settings_config = self.user_embedding_config.get("chroma_client_settings", {})
 
         # Initialize embedding configuration early so it's available regardless of backend choice
         self.embedding_config = self.user_embedding_config.get("embedding_config", {})
-        self.default_embedding_model_id = self.embedding_config.get('default_model_id')
+        self.default_embedding_model_id = self.embedding_config.get("default_model_id")
         # Backend selection and initialization
-        if client is not None:
+        if existing_only:
+            if client is not None or client_factory is not None:
+                raise ChromaStorageError("vector_unsupported_client", retryable=False)
+            # stat(), not exists(): permission failures are not absence.
+            self.user_chroma_path.stat()
+            self._lock = _storage_session_for_path(self.user_chroma_path, chroma_client_settings_config)
+            self.client = ExistingClient(self._lock, limits=preflight_limits)
+            with self._lock:
+                self.client.validate()
+        elif client is not None:
             # Constructor-injected client takes precedence
+            self.user_chroma_path.mkdir(parents=True, exist_ok=True)
             self.client = client
             logger.info(f"User '{self.user_id}': Using injected Chroma client instance.")
         elif client_factory is not None:
+            self.user_chroma_path.mkdir(parents=True, exist_ok=True)
             try:
                 factory_settings: dict[str, Any] = {
                     **chroma_client_settings_config,
@@ -336,11 +377,10 @@ class ChromaDBManager:
                 or backend == "stub"
                 or _env_force_stub
             )
-            allow_stub_fallback = is_truthy(
-                str(chroma_client_settings_config.get("allow_stub_fallback", "")).strip()
-            )
+            allow_stub_fallback = is_truthy(str(chroma_client_settings_config.get("allow_stub_fallback", "")).strip())
 
             if use_stub:
+                self.user_chroma_path.mkdir(parents=True, exist_ok=True)
                 # Scope the stub client key by user and base dir to avoid cross-config leakage
                 stub_key = f"{self.user_id}::{str(user_db_base_dir_str)}"
                 with _TEST_STUB_CLIENTS_LOCK:
@@ -349,9 +389,7 @@ class ChromaDBManager:
                         cli = _InMemoryChromaClient()
                         _TEST_STUB_CLIENTS[stub_key] = cli
                 self.client = cli
-                logger.warning(
-                    f"User '{self.user_id}': Using internal in-memory Chroma client (config backend=stub)."
-                )
+                logger.warning(f"User '{self.user_id}': Using internal in-memory Chroma client (config backend=stub).")
             else:
                 # Build robust Settings with explicit persist_directory for Chroma 0.4.x/1.x compatibility
                 client_settings = ChromaSettings(
@@ -360,47 +398,37 @@ class ChromaDBManager:
                     allow_reset=chroma_client_settings_config.get("allow_reset", True),
                 )
                 cache_key = _persistent_client_cache_key(self.user_chroma_path)
-                with _PERSISTENT_CLIENTS_LOCK:
-                    cached_state = _PERSISTENT_CLIENTS.get(cache_key)
+                session = _storage_session_for_path(self.user_chroma_path, chroma_client_settings_config)
+                path = self.user_chroma_path
+                # Never hold the global cache mutex while waiting on a store.
+                with session:
+                    session.require_mode(False)
+                    path.mkdir(parents=True, exist_ok=True)
+                    with _PERSISTENT_CLIENTS_LOCK:
+                        cached_state = _PERSISTENT_CLIENTS.get(cache_key)
+                    if cached_state is None:
+                        facade = GuardedClient(
+                            session,
+                            lambda: chromadb.PersistentClient(path=str(path), settings=client_settings),
+                        )
+                        try:
+                            facade._sdk()
+                        except _CHROMA_NONCRITICAL_EXCEPTIONS as e:
+                            if not allow_stub_fallback:
+                                raise RuntimeError("ChromaDB client initialization failed") from e
+                            stub_key = f"{self.user_id}::{str(user_db_base_dir_str)}"
+                            with _TEST_STUB_CLIENTS_LOCK:
+                                self.client = _TEST_STUB_CLIENTS.setdefault(stub_key, _InMemoryChromaClient())
+                        else:
+                            cached_state = _PersistentClientState(client=facade, lock=session, ref_count=0)
+                            with _PERSISTENT_CLIENTS_LOCK:
+                                _PERSISTENT_CLIENTS[cache_key] = cached_state
                     if cached_state is not None:
-                        cached_state.ref_count += 1
+                        with _PERSISTENT_CLIENTS_LOCK:
+                            cached_state.ref_count += 1
                         self.client = cached_state.client
                         self._lock = cached_state.lock
                         self._persistent_client_cache_key = cache_key
-                        logger.info(
-                            f"User '{self.user_id}': Reusing cached Chroma persistent client for {self.user_chroma_path}."
-                        )
-                    else:
-                        try:
-                            self.client = chromadb.PersistentClient(
-                                path=str(self.user_chroma_path),
-                                settings=client_settings,
-                            )
-                        except _CHROMA_NONCRITICAL_EXCEPTIONS as e:
-                            logger.error(
-                                f"Failed to initialize Chroma persistent client at {self.user_chroma_path}: {e}",
-                                exc_info=True,
-                            )
-                            if allow_stub_fallback:
-                                stub_key = f"{self.user_id}::{str(user_db_base_dir_str)}"
-                                with _TEST_STUB_CLIENTS_LOCK:
-                                    cli = _TEST_STUB_CLIENTS.get(stub_key)
-                                    if cli is None:
-                                        cli = _InMemoryChromaClient()
-                                        _TEST_STUB_CLIENTS[stub_key] = cli
-                                self.client = cli
-                                logger.warning(
-                                    f"User '{self.user_id}': Falling back to in-memory Chroma stub (allow_stub_fallback=true)."
-                                )
-                            else:
-                                raise RuntimeError(f"ChromaDB client initialization failed: {e}") from e
-                        else:
-                            _PERSISTENT_CLIENTS[cache_key] = _PersistentClientState(
-                                client=self.client,
-                                lock=threading.RLock(),
-                            )
-                            self._lock = _PERSISTENT_CLIENTS[cache_key].lock
-                            self._persistent_client_cache_key = cache_key
 
         # Default embedding model_id for this manager instance.
         # Already initialized above; keep values consistent for non-stub client path.
@@ -422,6 +450,8 @@ class ChromaDBManager:
     # Resource management helpers
     def close(self) -> None:
         """Close underlying ChromaDB client and release file descriptors."""
+        if os.getpid() != getattr(self, "_manager_pid", _CHROMA_PROCESS_PID):
+            raise ChromaStorageError("vector_forked_handle", retryable=True)
         with self._lock:
             client = getattr(self, "client", None)
             if client is None:
@@ -444,6 +474,9 @@ class ChromaDBManager:
                     self._persistent_client_cache_key = None
                     return
             try:
+                if isinstance(client, (GuardedClient, ExistingClient)):
+                    client.closed = True
+                    return
                 # Prefer explicit close if available (future APIs)
                 close_fn = getattr(client, "close", None)
                 if callable(close_fn):
@@ -589,6 +622,8 @@ class ChromaDBManager:
         Raises:
             RuntimeError: If collection creation or retrieval fails.
         """
+        if self.existing_only:
+            raise ChromaStorageError("vector_read_only", retryable=False)
         name_to_use = collection_name or self.get_user_default_collection_name()
         with self._lock:
             try:
@@ -597,10 +632,7 @@ class ChromaDBManager:
                 # However, setting metadata like hnsw:space can be useful.
                 cleaned = self._clean_metadata(collection_metadata) if collection_metadata else None
                 try:
-                    collection = self.client.get_or_create_collection(
-                        name=name_to_use,
-                        metadata=cleaned
-                    )
+                    collection = self.client.get_or_create_collection(name=name_to_use, metadata=cleaned)
                 except TypeError as te:
                     # Older/simpler clients (including our test stub prior to this patch)
                     # may not accept a 'metadata' kwarg. Fallback to calling without it,
@@ -1833,6 +1865,19 @@ class ChromaDBManager:
                 # Depending on severity, either return 0 or raise
                 raise RuntimeError(f"Failed to count items in collection: {e}") from e
 
+    def storage_access(self):
+        """Hold a complete session across related validation/read/write operations.
+
+        This synchronous context must enter/exit on the same thread. Individual
+        persistent client/collection calls also acquire it automatically.
+        """
+        return self._lock
+
+    def get_existing_collection_strict(self, collection_name: str) -> Collection:
+        """Strict lookup: only NotFoundError means a proven absent collection."""
+        with self._lock:
+            return self.client.get_collection(name=collection_name)
+
     def get_collection(self, collection_name: str) -> Collection:
         """
         Gets an existing ChromaDB collection without creating one.
@@ -1890,6 +1935,7 @@ class ChromaDBManager:
                              exc_info=True)
                 raise RuntimeError(f"Unexpected error deleting collection '{collection_name}': {e}") from e
 
+
 # Example of how you might instantiate and use it (outside this file):
 # from tldw_Server_API.app.core.config import settings
 # from tldw_Server_API.app.core.Vector_DB_Management.ChromaDB_Library import ChromaDBManager
@@ -1908,12 +1954,29 @@ _TEST_FALLBACK_DIRS: dict[str, Path] = {}
 _TEST_STUB_CLIENTS: dict[str, Any] = {}
 _TEST_STUB_CLIENTS_LOCK = threading.Lock()
 _PERSISTENT_CLIENTS: dict[str, _PersistentClientState] = {}
+_STORAGE_SESSIONS: WeakValueDictionary[str, StorageSession] = WeakValueDictionary()
+
+
+def _storage_session_for_path(path: Path, config: dict[str, Any]) -> StorageSession:
+    """Cache only inert per-store coordination, with no blocking under mutex."""
+    if os.getpid() != _CHROMA_PROCESS_PID:
+        raise ChromaStorageError("vector_forked_handle", retryable=True)
+    key = _persistent_client_cache_key(path)
+    with _PERSISTENT_CLIENTS_LOCK:
+        session = _STORAGE_SESSIONS.get(key)
+        if session is None:
+            session = StorageSession(path, timeout=float(config.get("storage_lock_timeout", 5)))
+            _STORAGE_SESSIONS[key] = session
+        return session
+
+
 _PERSISTENT_CLIENTS_LOCK = threading.Lock()
 
 
 # --------------------
 # Test-mode in-memory fallback client (minimal Chroma-like API)
 # --------------------
+
 
 class _InMemorySystem:
     def stop(self):

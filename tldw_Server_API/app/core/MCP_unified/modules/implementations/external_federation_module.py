@@ -20,6 +20,7 @@ from tldw_Server_API.app.services.mcp_credential_broker_service import (
     get_mcp_credential_broker_service,
 )
 from tldw_Server_API.app.services.mcp_hub_external_registry_service import (
+    McpHubExternalRegistryService,
     get_mcp_hub_external_registry_service,
 )
 
@@ -33,6 +34,7 @@ class ExternalFederationModule(BaseModule):
     def __init__(self, config):
         super().__init__(config)
         self._manager: ExternalServerManager | None = None
+        self._registry_service: McpHubExternalRegistryService | None = None
 
     async def on_initialize(self) -> None:
         config_path = str(
@@ -48,6 +50,7 @@ class ExternalFederationModule(BaseModule):
         else:
             registry_service = await get_mcp_hub_external_registry_service()
             manager = manager.with_server_loader(registry_service.list_runtime_servers)
+            self._registry_service = registry_service
         if callable(custom_broker):
             manager = manager.with_credential_broker(custom_broker)
         else:
@@ -210,6 +213,10 @@ class ExternalFederationModule(BaseModule):
         if tool_name == "external.tools.refresh":
             server_id = args.get("server_id")
             try:
+                if self._registry_service is not None:
+                    return await self._registry_service.refresh_external_server_discovery(
+                        server_id, self._manager.reconcile_servers
+                    )
                 return await self._manager.refresh_discovery(server_id=server_id)
             finally:
                 self.invalidate_capability_caches()

@@ -234,7 +234,7 @@
     "message": "Media Basics"
   },
   "media_basics_description": {
-    "message": "Search, filter, inspect, and manage ingested media in the library"
+    "message": "Open a saved item and inspect its content."
   },
   "media_basics_searchTitle": {
     "message": "Search Media"
@@ -258,7 +258,7 @@
     "message": "Results List"
   },
   "media_basics_resultsContent": {
-    "message": "Review matched items, select one, and navigate pages to inspect more content."
+    "message": "Select an item to inspect it. If this list is empty, add a file or URL with Add media."
   },
   "media_basics_viewerTitle": {
     "message": "Content Viewer"
@@ -282,7 +282,7 @@
     "message": "Ask a Question"
   },
   "knowledge_basics_searchContent": {
-    "message": "Enter a focused question about your docs, notes, or media to start retrieval."
+    "message": "Ask a question your saved sources can answer, such as “What decisions were made in the last meeting?”"
   },
   "knowledge_basics_sourcesTitle": {
     "message": "Choose Sources"
@@ -348,7 +348,7 @@
     "message": "Prompts Basics"
   },
   "prompts_basics_description": {
-    "message": "Create reusable prompts, search your library, and manage prompt workflow segments"
+    "message": "Save instructions you can reuse in Chat."
   },
   "prompts_basics_segmentedTitle": {
     "message": "Prompt Workspaces"
@@ -360,7 +360,7 @@
     "message": "Create Prompt"
   },
   "prompts_basics_createContent": {
-    "message": "Create a reusable prompt template you can insert into chat conversations."
+    "message": "Choose New prompt and save a set of instructions you use often. Insert the saved prompt in Chat when you need it."
   },
   "prompts_basics_searchTitle": {
     "message": "Search Prompts"
@@ -419,38 +419,26 @@
   "notes_basics_label": {
     "message": "Notes Basics"
   },
-  "notes_basics_description": {
-    "message": "Organize notes, apply filters, and edit content with split list/editor workflow"
+  "notes_basics_quickStartDescription": {
+    "message": "Learn to create, edit, and save a note."
   },
-  "notes_basics_listTitle": {
-    "message": "Notes List"
+  "notes_basics_createTitle": {
+    "message": "Create a note"
   },
-  "notes_basics_listContent": {
-    "message": "Browse and select notes from the sidebar to load them in the editor."
+  "notes_basics_quickStartCreate": {
+    "message": "Choose + or Create note. If the notes list is closed, open it first. Add a title and text, then choose Save."
   },
-  "notes_basics_modeTitle": {
-    "message": "Active and Trash Views"
+  "notes_basics_quickStartEditTitle": {
+    "message": "Add a title and text"
   },
-  "notes_basics_modeContent": {
-    "message": "Switch between active notes and trash to recover or permanently remove entries."
+  "notes_basics_quickStartEdit": {
+    "message": "Give your note a title you can recognize later, then add your text in the editor below."
   },
-  "notes_basics_filtersTitle": {
-    "message": "Sort and Filter"
+  "notes_basics_quickStartSaveTitle": {
+    "message": "Save your note"
   },
-  "notes_basics_filtersContent": {
-    "message": "Sort by date/title and use notebook/keyword filters to narrow your working set."
-  },
-  "notes_basics_editorTitle": {
-    "message": "Editor Workspace"
-  },
-  "notes_basics_editorContent": {
-    "message": "Edit note content, references, and metadata in the main editor panel."
-  },
-  "notes_basics_saveTitle": {
-    "message": "Save and Actions"
-  },
-  "notes_basics_saveContent": {
-    "message": "Save updates, duplicate notes, export content, and run helper actions from the header."
+  "notes_basics_quickStartSave": {
+    "message": "Choose Save to keep your note. You can also use Ctrl+S or ⌘S."
   },
   "flashcards_basics_label": {
     "message": "Flashcards Basics"
@@ -540,13 +528,13 @@
     "message": "Status Filters"
   },
   "worldBooks_basics_filtersContent": {
-    "message": "Filter by enabled/disabled state and attachment status before editing or exporting."
+    "message": "Filter by status and attachment before editing or exporting. On smaller screens, open Filters to show these controls."
   },
   "worldBooks_basics_tableTitle": {
     "message": "World Book Library"
   },
   "worldBooks_basics_tableContent": {
-    "message": "Select a row to manage entries, attachments, and advanced actions for each world book."
+    "message": "Select a saved world book to manage entries and attachments. If the library is empty, create or import your first world book."
   },
   "worldBooks_basics_actionsTitle": {
     "message": "Create and Import"
@@ -679,5 +667,50 @@
   },
   "monitoring_basics_historyContent": {
     "message": "When alerts trigger, they appear here. You can assign alerts to yourself, snooze them, or escalate to critical."
+  },
+  "playground_basics_customizeTitle": {
+    "message": "Customize Responses"
+  },
+  "playground_basics_customizeContent": {
+    "message": "A system prompt guides how the assistant replies. Use chat customization controls to choose one or adjust the response; create reusable prompts in the Prompts workspace."
+  },
+  "playground_basics_newChatContentV2": {
+    "message": "Start a new conversation from the sidebar or with the New chat shortcut listed in keyboard help. Saved conversations can be reopened with Find conversations. A Temporary conversation asks before you discard it."
+  },
+  "settings_basics_label": {
+    "message": "Settings Basics"
+  },
+  "settings_basics_description": {
+    "message": "Find the settings you need and see what each section controls."
+  },
+  "settings_basics_overviewTitle": {
+    "message": "Settings by section"
+  },
+  "settings_basics_overviewContent": {
+    "message": "Check the heading after switching sections so you know which settings your changes will affect."
+  },
+  "settings_basics_navigationTitle": {
+    "message": "Find a setting"
+  },
+  "settings_basics_navigationContent": {
+    "message": "Search for a section on desktop, or choose a section from the Settings menu on mobile."
+  },
+  "collections_basics_label": {
+    "message": "Collections Basics"
+  },
+  "collections_basics_description": {
+    "message": "Organize saved articles, highlights, and reading digests."
+  },
+  "collections_basics_overviewTitle": {
+    "message": "Your saved reading"
+  },
+  "collections_basics_overviewContent": {
+    "message": "Collections keeps your reading list, highlights, templates, and digest schedules together."
+  },
+  "collections_basics_tabsTitle": {
+    "message": "Choose a tool"
+  },
+  "collections_basics_tabsContent": {
+    "message": "Use Reading List to manage articles, Highlights to revisit passages, or Import/Export to move your reading list."
   }
 }

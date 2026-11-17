@@ -40,7 +40,7 @@ Out-of-scope (v1):
 3. Metrics
    - Chunking: token length stats; cohesion vs separation (cosine similarities); coverage proxy (proportion of answer-supporting spans present in retrieved chunks downstream).
    - Retrieval: precision/recall (if ground truth spans or gold answers exist), diversity (inverse pairwise similarity), optional MRR/nDCG.
-   - Generation: reuse `RAGEvaluator` (faithfulness, claim_faithfulness, relevance, answer_similarity) and `rag_custom_metrics` (attribution, completeness/coherence, response time, costs).
+   - Generation: reuse `RAGEvaluator` (faithfulness, claim_faithfulness, relevance, answer_similarity) and `rag_custom_metrics` (attribution, coherence, response time, costs; its completeness metric was deleted in TASK-13635, unused and unable to reach a provider).
    - Aggregation: confidence-weighted overall score; secondary sort by cost and latency.
 
 4. Caching

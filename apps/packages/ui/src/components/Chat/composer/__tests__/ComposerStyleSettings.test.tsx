@@ -84,6 +84,14 @@ describe("ComposerStyleSettings", () => {
     expect(container.querySelector('[data-variant-option="v5"]')).toBeTruthy()
   })
 
+  // CC-11 (#3112): '@' mentions are browser tabs, which only the extension
+  // reads and only when tab mentions are on; the settings must not promise them.
+  it("does not promise @ mentions", () => {
+    render(<ComposerStyleSettings />)
+    const section = screen.getByTestId("composer-style-settings")
+    expect(section.textContent).not.toMatch(/@|mention/i)
+  })
+
   it("renders description copy for each variant", () => {
     render(<ComposerStyleSettings />)
     expect(screen.getByText(/cleaned-up take/i)).toBeTruthy()

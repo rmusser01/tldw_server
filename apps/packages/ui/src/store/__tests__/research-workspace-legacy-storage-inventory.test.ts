@@ -217,3 +217,46 @@ describe("Research Workspace legacy deletion eligibility", () => {
     ])
   })
 })
+
+
+describe("Chat reference metadata key boundaries", () => {
+  it.each([
+    "",
+    ":workspace",
+    "owner:",
+    "owner:workspace:extra",
+    "owner%3aother:workspace",
+    "owner:%",
+    "owner:%20",
+    "%20:workspace",
+  ])(
+    "keeps malformed reference suffix %j unknown and deletion-blocking",
+    (suffix) => {
+      const key = "tldw:research-workspace:chat-reference:" + suffix
+      const result = evaluateResearchWorkspaceLegacyDeletionEligibility({
+        discoveredLocalStorageKeys: [key],
+        manifestCoveredSurfaceIds: [],
+      })
+      expect(result.eligible).toBe(false)
+      expect(result.retainedLocalSurfaces).toEqual([])
+      expect(result.unknownSurfaces).toHaveLength(1)
+    },
+  )
+
+  it("retains canonical encoded scope/workspace metadata without content authority", () => {
+    const key =
+      "tldw:research-workspace:chat-reference:owner%3Aalice:workspace%20one"
+    const result = classifyResearchWorkspaceLegacyStorageSurface({
+      kind: "local_storage",
+      key,
+    })
+    expect(result).toMatchObject({
+      key,
+      workspaceId: "workspace one",
+      classification: "metadata",
+      deletionPolicy: "retain_local",
+      authoritativeForMigration: false,
+      contentClasses: [],
+    })
+  })
+})

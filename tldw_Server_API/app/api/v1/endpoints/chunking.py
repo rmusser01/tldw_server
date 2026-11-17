@@ -28,7 +28,6 @@ from tldw_Server_API.app.core.Chunking import (
     InvalidChunkingMethodError,
     InvalidInputError,
     ProcessingError,
-    improved_chunking_process,
 )
 
 # Default chunking options
@@ -59,25 +58,7 @@ from tldw_Server_API.app.api.v1.schemas.chunking_schema import (
     build_chunking_options_schema,
 )
 from tldw_Server_API.app.api.v1.schemas.media_request_models import PdfEngine
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    derive_trusted_credential_scope,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    load_server_config_snapshot as load_server_configs,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCallCredentials,
-    ProviderCredentialRuntime,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
-    SYNC_ADAPTER_CALL_POOL,
     DaemonCapacityError,
     await_bounded_sync_call,
     await_owned_worker,
@@ -90,7 +71,20 @@ from tldw_Server_API.app.core.Chunking.strategies.rolling_summarize import (
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze as general_llm_analyzer
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
+)
+import tldw_Server_API.app.core.Chunking as _Chunking
+import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as _Summarization_General_Lib
+import tldw_Server_API.app.core.LLM_Calls.bounded_daemon as _bounded_daemon
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
+import tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides as _llm_provider_overrides
+import tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime as _provider_credential_runtime
 
 #
 #######################################################################################################################
@@ -176,19 +170,19 @@ async def _resolve_chunking_credentials(
     current_user: User,
     request: Request,
 ) -> tuple[ProviderCredentialRuntime, ProviderCallCredentials]:
-    runtime: ProviderCredentialRuntime | None = None
+    runtime: _provider_credential_runtime.ProviderCredentialRuntime | None = None
     try:
         frozen_config = copy.deepcopy(app_config_snapshot)
         user_id_int, team_ids, org_ids, trusted_base_url_override = (
-            derive_trusted_credential_scope(request, current_user)
+            _byok_helpers.derive_trusted_credential_scope(request, current_user)
         )
-        runtime = ProviderCredentialRuntime(
+        runtime = _provider_credential_runtime.ProviderCredentialRuntime(
             user_id=user_id_int,
             team_ids=team_ids,
             org_ids=org_ids,
             trusted_base_url_override=trusted_base_url_override,
             server_config_snapshot=frozen_config,
-            override_snapshot_resolver=capture_provider_override_call_snapshot,
+            override_snapshot_resolver=_llm_provider_overrides.capture_provider_override_call_snapshot,
         )
         credentials = await runtime.resolve(provider, model=model)
         return runtime, credentials
@@ -213,6 +207,19 @@ def _raise_missing_chunking_key(provider: str) -> None:
             },
         )
     )
+
+
+def _get_owned_chunking_template(media_db: Any, current_user: User, name: str) -> Any:
+    """Read a named template only with the authenticated owner and an available DB."""
+    if not media_db:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Chunking template requested but user database is unavailable.",
+        )
+    owner_user_id = str(getattr(current_user, "id", "") or "").strip()
+    if not owner_user_id:
+        raise HTTPException(status_code=401, detail="Authenticated template owner required.")
+    return media_db.get_chunking_template(name=name, owner_user_id=owner_user_id)
 
 
 # --- FastAPI Router ---
@@ -268,10 +275,7 @@ async def process_text_for_chunking_json(
         try:
             # Use the injected user-specific database instance
             # Get template from database
-            if not media_db:
-                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                                    detail="Chunking template requested but user database is unavailable.")
-            template_data = media_db.get_chunking_template(name=request_data.options.template_name)
+            template_data = _get_owned_chunking_template(media_db, current_user, request_data.options.template_name)
             if template_data:
                 logger.info(f"Using chunking template: {request_data.options.template_name}")
                 template_used = True
@@ -329,7 +333,7 @@ async def process_text_for_chunking_json(
                 current_chunking_method_tmp = effective_options.get('method')
                 if current_chunking_method_tmp == 'rolling_summarize':
                     # Reuse the same provider/model selection logic from below
-                    server_configs = await asyncio.to_thread(load_server_configs)
+                    server_configs = await asyncio.to_thread(_byok_helpers.load_server_config_snapshot)
                     if not server_configs:
                         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                             detail="Server configuration error, cannot perform LLM-dependent chunking.")
@@ -382,7 +386,7 @@ async def process_text_for_chunking_json(
                             "provider_credentials": provider_credentials_tmp,
                             LLM_USAGE_TRACKER_KEY: provider_usage_tracker_tmp,
                         }
-                        configured_chunker = Chunker(llm_call_func=general_llm_analyzer, llm_config=llm_api_config_to_use_tmp)
+                        configured_chunker = Chunker(llm_call_func=_Summarization_General_Lib.analyze, llm_config=llm_api_config_to_use_tmp)
                     except BaseException as exc:
                         if credential_runtime_tmp is not None:
                             await await_owned_worker(credential_runtime_tmp.close())
@@ -417,7 +421,7 @@ async def process_text_for_chunking_json(
                         if credential_runtime_tmp is not None:
                             results = await await_bounded_sync_call(
                                 _process_template_sync,
-                                pool=SYNC_ADAPTER_CALL_POOL,
+                                pool=_bounded_daemon.SYNC_ADAPTER_CALL_POOL,
                                 exhaustion_message=_CHUNKING_SYNC_CAPACITY_MESSAGE,
                             )
                         else:
@@ -559,11 +563,11 @@ async def process_text_for_chunking_json(
 
     current_chunking_method = effective_options.get('method')
     if current_chunking_method == 'rolling_summarize': # Or other methods you add that need LLM
-        llm_call_func_to_use = general_llm_analyzer # Your Summarization_General_Lib.analyze
+        llm_call_func_to_use = _Summarization_General_Lib.analyze # Your Summarization_General_Lib.analyze
 
         try:
             # Load server's comprehensive configuration to get API keys and defaults
-            server_configs = await asyncio.to_thread(load_server_configs)
+            server_configs = await asyncio.to_thread(_byok_helpers.load_server_config_snapshot)
             if not server_configs:
                 logger.error("Server configuration could not be loaded. LLM-dependent chunking may fail.")
                 # Depending on policy, you might raise an error here if the method *requires* LLM
@@ -686,7 +690,7 @@ async def process_text_for_chunking_json(
         processing_options = {**effective_options, "align_text_to_source": False}
     try:
         def _process_sync() -> list[dict[str, Any]]:
-            return improved_chunking_process(
+            return _Chunking.improved_chunking_process(
                 request_data.text_content,
                 processing_options,
                 tokenizer_for_chunker,
@@ -698,7 +702,7 @@ async def process_text_for_chunking_json(
             if credential_runtime is not None:
                 results = await await_bounded_sync_call(
                     _process_sync,
-                    pool=SYNC_ADAPTER_CALL_POOL,
+                    pool=_bounded_daemon.SYNC_ADAPTER_CALL_POOL,
                     exhaustion_message=_CHUNKING_SYNC_CAPACITY_MESSAGE,
                 )
             else:
@@ -892,9 +896,9 @@ async def process_file_for_chunking(
 
     current_chunking_method_file = effective_processing_options.get('method')
     if current_chunking_method_file == 'rolling_summarize':
-        llm_call_func_to_use_file = general_llm_analyzer
+        llm_call_func_to_use_file = _Summarization_General_Lib.analyze
         try:
-            server_configs_file = await asyncio.to_thread(load_server_configs)
+            server_configs_file = await asyncio.to_thread(_byok_helpers.load_server_config_snapshot)
             if not server_configs_file:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server configuration error for LLM step (file).")
 
@@ -987,7 +991,7 @@ async def process_file_for_chunking(
 
     try:
         def _process_file_sync() -> list[dict[str, Any]]:
-            return improved_chunking_process(
+            return _Chunking.improved_chunking_process(
                 text_content,
                 processing_options_file,
                 tokenizer_for_chunker_file,
@@ -999,7 +1003,7 @@ async def process_file_for_chunking(
             if credential_runtime_file is not None:
                 results = await await_bounded_sync_call(
                     _process_file_sync,
-                    pool=SYNC_ADAPTER_CALL_POOL,
+                    pool=_bounded_daemon.SYNC_ADAPTER_CALL_POOL,
                     exhaustion_message=_CHUNKING_SYNC_CAPACITY_MESSAGE,
                 )
             else:

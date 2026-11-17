@@ -28,11 +28,14 @@ import {
 } from "@/types/actor"
 import { useActorWorldBooks } from "@/hooks/useActorWorldBooks"
 import { ActorTokens } from "@/components/Common/Settings/ActorTokens"
-import { buildActorDictionaryTokens } from "@/utils/actor"
+import { buildActorDictionaryTokens, buildActorSettingsFromForm } from "@/utils/actor"
 const Markdown = React.lazy(() => import("@/components/Common/Markdown"))
 import { ACTOR_PRESETS, applyActorPresetById } from "@/data/actor-presets"
 import type { ActorPresetId } from "@/data/actor-presets"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
+import { getSelectedAssistantOperationRevision } from "@/hooks/useSelectedAssistant"
+import type { Character } from "@/types/character"
+import { captureActorProfileTarget } from "@/utils/actor-settings-target"
 
 const parseWorldBookEntryOptions = (content: string): string[] => {
   const text = (content || "").trim()
@@ -50,6 +53,8 @@ type Props = {
   form: FormInstance
   settings: ActorSettings | null
   setSettings: (next: ActorSettings) => void
+  isCurrent: () => boolean
+  captureEditGuard: () => () => boolean
   actorPreview: string
   actorTokenCount: number
   onRecompute: () => void
@@ -67,7 +72,9 @@ type ActorBladeId = "aspects" | "notes" | "placement" | "tokens"
 export const ActorEditor: React.FC<Props> = ({
   form,
   settings,
-  setSettings,
+  setSettings: setSettingsState,
+  isCurrent,
+  captureEditGuard,
   actorPreview,
   actorTokenCount,
   onRecompute,
@@ -81,6 +88,7 @@ export const ActorEditor: React.FC<Props> = ({
 }) => {
   const isSimpleMode = editorMode === "simple"
   const { t } = useTranslation(["playground", "common"])
+  const [modal, modalContextHolder] = Modal.useModal()
   const {
     worldBooks,
     worldBooksLoading,
@@ -103,22 +111,205 @@ export const ActorEditor: React.FC<Props> = ({
     tokens: null
   })
 
+  const settingsRevisionRef = React.useRef(0)
+  const renderedSettingsRevision = settingsRevisionRef.current
+  const setSettings = React.useCallback(
+    (next: ActorSettings) => {
+      if (!isCurrent()) return
+      settingsRevisionRef.current++
+      setSettingsState(next)
+    },
+    [isCurrent, setSettingsState]
+  )
+
   // Currently active assistant/character (from CharacterSelect).
   // Used to label per-character defaults and profiles.
-  const [selectedCharacter] = useSelectedCharacter<any>(null)
+  const [selectedCharacter, , characterMeta] =
+    useSelectedCharacter<Character>(null)
+  const renderedCharacterRevision = getSelectedAssistantOperationRevision()
+  const profileActionRef = React.useRef<object | null>(null)
+  const profileMountedRef = React.useRef(true)
+  const [profileBusy, setProfileBusy] = React.useState(false)
+  const [profileFeedback, setProfileFeedback] = React.useState<{
+    attempt: object
+    pending: boolean
+    error: boolean
+    message: string
+    isCurrent: () => boolean
+  } | null>(null)
+  React.useEffect(() => {
+    profileMountedRef.current = true
+    return () => {
+      profileMountedRef.current = false
+    }
+  }, [])
+
+  const runCharacterDefault = async (action: "save" | "apply") => {
+    const characterId = selectedCharacter?.id
+    if (
+      profileActionRef.current ||
+      !settings ||
+      !characterId ||
+      settingsRevisionRef.current !== renderedSettingsRevision
+    )
+      return
+    const sourceIsCurrent = () =>
+      profileMountedRef.current &&
+      isCurrent() &&
+      characterMeta?.isCurrent?.() !== false &&
+      getSelectedAssistantOperationRevision() === renderedCharacterRevision
+    const editIsCurrent = captureEditGuard()
+    const profileTarget = captureActorProfileTarget(characterMeta?.ownerKey, characterId, sourceIsCurrent)
+    if (!sourceIsCurrent() || !editIsCurrent()) return
+    const attempt = {}
+    profileActionRef.current = attempt
+    const canPublish = () =>
+      profileActionRef.current === attempt && sourceIsCurrent()
+    const canCommit = () => canPublish() && editIsCurrent()
+    const feedback = (
+      message: string,
+      error = false,
+      pending = false,
+      editGuard = editIsCurrent
+    ) =>
+      setProfileFeedback({
+        attempt,
+        pending,
+        error,
+        message,
+        isCurrent: () => sourceIsCurrent() && editGuard()
+      })
+    let staged = false
+    let stagedEditIsCurrent = editIsCurrent
+    setProfileBusy(true)
+    feedback(
+      action === "save"
+        ? t("playground:actor.defaultSaving", "Saving character default...")
+        : t("playground:actor.defaultLoading", "Loading character default..."),
+      false,
+      true
+    )
+    try {
+      if (!profileTarget) throw new Error("actor_profile_scope_unavailable")
+      const proposal =
+        action === "save"
+          ? buildActorSettingsFromForm(settings, form.getFieldsValue(true))
+          : null
+      const service = await import("@/services/actor-settings")
+      if (!canCommit()) return
+      if (proposal) {
+        const saved = await service.saveActorProfileForCharacter({
+          characterId,
+          target: profileTarget,
+          settings: proposal,
+          validate_lease: canCommit
+        })
+        if (!canCommit()) return
+        if (!saved) throw new Error("actor_profile_save_failed")
+        feedback(
+          t(
+            "playground:actor.defaultSaved",
+            "Character default saved on this device."
+          )
+        )
+        return
+      }
+      const profile = await service.getActorProfileForCharacter(characterId, {
+        target: profileTarget,
+        throwOnError: true,
+        validate_lease: canCommit
+      })
+      if (!canCommit()) return
+      if (!profile) {
+        feedback(
+          t(
+            "playground:actor.defaultAbsent",
+            "No saved default exists for this character on this device."
+          )
+        )
+        return
+      }
+      staged = true
+      setSettings(profile)
+      if (!canPublish()) return
+      stagedEditIsCurrent = captureEditGuard()
+      if (!stagedEditIsCurrent()) return
+      const fieldValues: Record<string, unknown> = {
+        actorEnabled: profile.isEnabled,
+        actorNotes: profile.notes ?? "",
+        actorNotesGmOnly: profile.notesGmOnly ?? false,
+        actorChatPosition: profile.chatPosition,
+        actorChatDepth: profile.chatDepth,
+        actorChatRole: profile.chatRole,
+        actorTemplateMode: profile.templateMode ?? "merge",
+        actorAppendable: profile.appendable ?? false
+      }
+      for (const aspect of profile.aspects || []) {
+        fieldValues[`actor_${aspect.id}`] = aspect.value ?? ""
+        fieldValues[`actor_key_${aspect.id}`] = aspect.key
+      }
+      form.setFieldsValue(fieldValues)
+      if (!canPublish() || !stagedEditIsCurrent()) return
+      onRecompute()
+      if (!canPublish() || !stagedEditIsCurrent()) return
+      feedback(
+        t(
+          "playground:actor.defaultStaged",
+          "Character default applied to this draft. Save applies it to this chat."
+        ),
+        false,
+        false,
+        stagedEditIsCurrent
+      )
+    } catch {
+      if (!(staged ? canPublish() && stagedEditIsCurrent() : canCommit())) return
+      feedback(
+        action === "save"
+          ? t(
+              "playground:actor.defaultSaveError",
+              "Character default could not be saved. Your staged edits are still here; try Save default again."
+            )
+          : staged
+            ? t(
+                "playground:actor.defaultApplyError",
+                "Character default could not be applied. Review your staged scene and try Apply default again."
+              )
+            : t(
+                "playground:actor.defaultLoadError",
+                "Character default could not be loaded. Your staged edits are still here; try Apply default again."
+              ),
+        true,
+        false,
+        staged ? stagedEditIsCurrent : editIsCurrent
+      )
+    } finally {
+      // Keep an issued write's admission until it settles, even after its view retires.
+      if (profileActionRef.current === attempt) {
+        profileActionRef.current = null
+        if (profileMountedRef.current) {
+          setProfileBusy(false)
+          setProfileFeedback((current) =>
+            current?.attempt === attempt && current.pending ? null : current
+          )
+        }
+      }
+    }
+  }
 
   // Focus management: focus first interactive element when blade changes
   React.useEffect(() => {
     const contentEl = bladeContentRefs.current[activeBlade]
     if (!contentEl) return
     // Wait for DOM to update, then focus first focusable element
-    requestAnimationFrame(() => {
+    const frame = requestAnimationFrame(() => {
+      if (!isCurrent()) return
       const focusable = contentEl.querySelector<HTMLElement>(
         'input:not([disabled]), select:not([disabled]), button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
       )
       focusable?.focus()
     })
-  }, [activeBlade])
+    return () => cancelAnimationFrame(frame)
+  }, [activeBlade, isCurrent])
 
   React.useEffect(() => {
     if (isSimpleMode && activeBlade === "placement") {
@@ -127,16 +318,16 @@ export const ActorEditor: React.FC<Props> = ({
   }, [activeBlade, isSimpleMode])
 
   React.useEffect(() => {
-    if (!settings) return
+    if (!settings || !isCurrent()) return
     for (const aspect of settings.aspects || []) {
       if (aspect.source === "lore" && aspect.lorebookId) {
         void loadEntriesForWorldBook(aspect.lorebookId)
       }
     }
-  }, [loadEntriesForWorldBook, settings])
+  }, [isCurrent, loadEntriesForWorldBook, settings])
 
   React.useEffect(() => {
-    if (!settings) return
+    if (!settings || !isCurrent()) return
     if (!worldBooks || worldBooksLoading) return
 
     const worldBookIds = new Set(worldBooks.map((wb) => wb.id))
@@ -197,9 +388,11 @@ export const ActorEditor: React.FC<Props> = ({
         ...base,
         aspects: nextAspects
       })
+      if (!isCurrent()) return
       onRecompute()
     }
 
+    if (!isCurrent()) return
     setLoreWarnings((prev) => {
       const prevKeys = Object.keys(prev)
       const nextKeys = Object.keys(nextWarnings)
@@ -215,6 +408,7 @@ export const ActorEditor: React.FC<Props> = ({
     })
   }, [
     entriesByWorldBook,
+    isCurrent,
     onRecompute,
     setSettings,
     settings,
@@ -225,21 +419,22 @@ export const ActorEditor: React.FC<Props> = ({
 
   const handleRemoveAspect = React.useCallback(
     (aspectId: string) => {
-      if (!settings) return
+      if (!settings || !isCurrent()) return
       const next: ActorSettings = {
         ...settings,
         aspects: (settings.aspects || []).filter((a) => a.id !== aspectId)
       }
       setSettings(next)
+      if (!isCurrent()) return
       form.setFieldsValue({ [`actor_${aspectId}`]: undefined })
       onRecompute()
     },
-    [form, onRecompute, setSettings, settings]
+    [form, isCurrent, onRecompute, setSettings, settings]
   )
 
   const handleAddAspect = React.useCallback(() => {
     const name = newAspectName.trim()
-    if (!settings || !name) return
+    if (!settings || !name || !isCurrent()) return
 
     const target: ActorTarget = newAspectTarget || "user"
     const baseSlug = name
@@ -274,12 +469,14 @@ export const ActorEditor: React.FC<Props> = ({
     }
 
     setSettings(next)
+    if (!isCurrent()) return
     form.setFieldsValue({ [`actor_${id}`]: "" })
     form.setFieldsValue({ [`actor_key_${id}`]: key })
     setNewAspectName("")
     onRecompute()
   }, [
     form,
+    isCurrent,
     newAspectName,
     newAspectTarget,
     onRecompute,
@@ -329,6 +526,7 @@ export const ActorEditor: React.FC<Props> = ({
       )
 
       const handleSourceChange = (nextSource: ActorSource) => {
+        if (!isCurrent()) return
         const base = settings ?? createDefaultActorSettings()
         const aspects = (base.aspects || []).map((a) =>
           a.id === aspect.id
@@ -348,10 +546,11 @@ export const ActorEditor: React.FC<Props> = ({
           ...base,
           aspects
         })
-        onRecompute()
+        if (isCurrent()) onRecompute()
       }
 
       const handleWorldBookChange = (worldBookId: string) => {
+        if (!isCurrent()) return
         const id = worldBookId || ""
         const base = settings ?? createDefaultActorSettings()
         const aspects = (base.aspects || []).map((a) =>
@@ -367,6 +566,7 @@ export const ActorEditor: React.FC<Props> = ({
           ...base,
           aspects
         })
+        if (!isCurrent()) return
         if (id) {
           void loadEntriesForWorldBook(id)
         }
@@ -377,6 +577,7 @@ export const ActorEditor: React.FC<Props> = ({
       }
 
       const handleEntryChange = (entryId: string) => {
+        if (!isCurrent()) return
         const id = entryId || ""
         const base = settings ?? createDefaultActorSettings()
         const aspects = (base.aspects || []).map((a) =>
@@ -391,6 +592,7 @@ export const ActorEditor: React.FC<Props> = ({
           ...base,
           aspects
         })
+        if (!isCurrent()) return
 
         if (!loreWorldBookId) {
           return
@@ -413,6 +615,8 @@ export const ActorEditor: React.FC<Props> = ({
       }
 
       const handleKeyChange = (val: string) => {
+        const canApply = captureEditGuard()
+        if (!canApply()) return
         const currentKey = aspect.key || ""
         const candidate = (val || "").trim() || currentKey
         const fallbackKey = currentKey || `${aspect.target}_aspect`
@@ -456,7 +660,7 @@ export const ActorEditor: React.FC<Props> = ({
             )
         )
         if (existingKeys.has(normalized)) {
-          Modal.error({
+          modal.error({
             title: t(
               "playground:actor.keyCollisionTitle",
               "Actor key already in use"
@@ -466,13 +670,13 @@ export const ActorEditor: React.FC<Props> = ({
               "Another aspect already uses this key. Keys must be unique per chat."
             ),
             onOk: () => {
-              form.setFieldsValue({ [keyFieldName]: currentKey })
+              if (canApply()) form.setFieldsValue({ [keyFieldName]: currentKey })
             }
           })
           return
         }
 
-        Modal.confirm({
+        modal.confirm({
           title: t(
             "playground:actor.keyChangeTitle",
             "Change Actor token key?"
@@ -488,6 +692,7 @@ export const ActorEditor: React.FC<Props> = ({
           okText: t("common:confirm", "Confirm"),
           cancelText: t("common:cancel", "Cancel"),
           onOk: () => {
+            if (!canApply()) return
             const base = settings ?? createDefaultActorSettings()
             const aspects = (base.aspects || []).map((a) =>
               a.id === aspect.id ? { ...a, key: normalized } : a
@@ -496,10 +701,10 @@ export const ActorEditor: React.FC<Props> = ({
               ...base,
               aspects
             })
-            form.setFieldsValue({ [keyFieldName]: normalized })
+            if (isCurrent()) form.setFieldsValue({ [keyFieldName]: normalized })
           },
           onCancel: () => {
-            form.setFieldsValue({ [keyFieldName]: currentNormalized })
+            if (canApply()) form.setFieldsValue({ [keyFieldName]: currentNormalized })
           }
         })
       }
@@ -652,6 +857,9 @@ export const ActorEditor: React.FC<Props> = ({
       entriesByWorldBook,
       entriesLoading,
       form,
+      captureEditGuard,
+      isCurrent,
+      modal,
       isSimpleMode,
       loadEntriesForWorldBook,
       loreWarnings,
@@ -782,6 +990,25 @@ export const ActorEditor: React.FC<Props> = ({
 
   return (
     <div className="space-y-3">
+      {modalContextHolder}
+      <Form.Item noStyle shouldUpdate>
+        {() =>
+          profileFeedback?.isCurrent() ? (
+            <div
+              role={profileFeedback.error ? "alert" : "status"}
+              className="text-xs text-text-muted">
+              {profileFeedback.message}
+            </div>
+          ) : profileBusy ? (
+            <div role="status" className="text-xs text-text-muted">
+              {t(
+                "playground:actor.defaultWaiting",
+                "Waiting for the previous character default action..."
+              )}
+            </div>
+          ) : null
+        }
+      </Form.Item>
       <div className="space-y-2">
         {renderBladeHeader(
           "aspects",
@@ -876,10 +1103,11 @@ export const ActorEditor: React.FC<Props> = ({
                   key={preset.id}
                   type="button"
                   onClick={() => {
-                    if (!settings) return
+                    if (!settings || !isCurrent()) return
                     const base = settings ?? createDefaultActorSettings()
                     const next = applyActorPresetById(base, preset.id)
                     setSettings(next)
+                    if (!isCurrent()) return
                     setSelectedPreset(preset.id)
                     const fieldValues: Record<string, any> = {
                       actorNotes: next.notes ?? ""
@@ -913,21 +1141,25 @@ export const ActorEditor: React.FC<Props> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      Modal.confirm({
+                      const canApply = captureEditGuard()
+                      if (!canApply()) return
+                      modal.confirm({
                         title: t(
                           "playground:actor.resetConfirmTitle",
                           "Reset Actor settings?"
                         ),
                         content: t(
-                          "playground:actor.resetConfirmBody",
-                          "This will clear all configured aspects, notes, and placement settings for this chat. This action cannot be undone."
+                          "playground:actor.resetStagedHelp",
+                          "This resets the staged aspects, notes, and placement. Save applies the reset; Cancel keeps your saved scene."
                         ),
                         okText: t("common:confirm", "Confirm"),
                         cancelText: t("common:cancel", "Cancel"),
                         okButtonProps: { danger: true },
                         onOk: () => {
+                          if (!canApply()) return
                           const base = createDefaultActorSettings()
                           setSettings(base)
+                          if (!isCurrent()) return
                           const fieldValues: Record<string, any> = {
                             actorEnabled: base.isEnabled,
                             actorNotes: base.notes ?? "",
@@ -954,19 +1186,10 @@ export const ActorEditor: React.FC<Props> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                   <button
                     type="button"
-                    onClick={async () => {
-                      if (!settings) return
-                      const characterId = selectedCharacter?.id
-                      if (!characterId) return
-                      const { saveActorProfileForCharacter } = await import(
-                        "@/services/actor-settings"
-                      )
-                      await saveActorProfileForCharacter({
-                        characterId,
-                        settings
-                      })
+                    onClick={() => {
+                      void runCharacterDefault("save")
                     }}
-                    disabled={!selectedCharacter?.id}
+                    disabled={profileBusy || !selectedCharacter?.id}
                     className="inline-flex items-center justify-center rounded-md border border-border-strong px-2 py-1 text-xs text-text hover:bg-surface2 disabled:opacity-50">
                     {t(
                       "playground:actor.saveAsCharacterDefault",
@@ -976,38 +1199,14 @@ export const ActorEditor: React.FC<Props> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={async () => {
-                      const characterId = selectedCharacter?.id
-                      if (!characterId) return
-                      const {
-                        getActorProfileForCharacter
-                      } = await import("@/services/actor-settings")
-                      const profile = await getActorProfileForCharacter(characterId)
-                      if (!profile) return
-                      setSettings(profile)
-                      const fieldValues: Record<string, any> = {
-                        actorNotes: profile.notes ?? "",
-                        actorNotesGmOnly: profile.notesGmOnly ?? false,
-                        actorChatPosition: profile.chatPosition,
-                        actorChatDepth: profile.chatDepth,
-                        actorChatRole: profile.chatRole,
-                        actorTemplateMode: profile.templateMode ?? "merge",
-                        actorAppendable: profile.appendable ?? false
-                      }
-                      for (const aspect of profile.aspects || []) {
-                        fieldValues[`actor_${aspect.id}`] = aspect.value ?? ""
-                        fieldValues[`actor_key_${aspect.id}`] = aspect.key
-                      }
-                      form.setFieldsValue(fieldValues)
-                      onRecompute()
+                    onClick={() => {
+                      void runCharacterDefault("apply")
                     }}
-                    disabled={!selectedCharacter?.id}
+                    disabled={profileBusy || !selectedCharacter?.id}
                     className="inline-flex items-center justify-center rounded-md border border-border-strong px-2 py-1 text-xs text-text hover:bg-surface2 disabled:opacity-50">
-                    {t(
-                      "playground:actor.applyCharacterDefault",
-                      "Apply {{name}}'s default",
-                      { name: selectedCharacter?.name || "character" }
-                    )}
+                    {t("playground:actor.applyCharacterDefault", "Apply {{name}}'s default", {
+                      name: selectedCharacter?.name || "character"
+                    })}
                   </button>
                 </div>
               </>

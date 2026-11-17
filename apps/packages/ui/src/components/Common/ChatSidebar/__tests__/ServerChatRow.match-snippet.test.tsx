@@ -1,15 +1,10 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { fireEvent, render, screen } from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { TFunction } from "i18next"
 
 import type { ServerChatHistoryItem } from "@/hooks/useServerChatHistory"
-
-vi.mock("antd", () => ({
-  Dropdown: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-  Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>
-}))
 
 import { ServerChatRow } from "../ServerChatRow"
 
@@ -28,18 +23,23 @@ const createChat = (overrides: Partial<ServerChatHistoryItem> = {}): ServerChatH
   ...overrides
 })
 
-const renderRow = (chat: ServerChatHistoryItem) =>
-  render(
-    <ServerChatRow
+const onTogglePinned = vi.fn()
+const onSelectChat = vi.fn()
+beforeEach(() => vi.clearAllMocks())
+
+const renderRow = (chat: ServerChatHistoryItem, overrides: { isPinned?: boolean; readOnly?: boolean; isTrashView?: boolean } = {}) => {
+  const Row = () => {
+    const [openMenuFor, setOpenMenuFor] = React.useState<string | null>(null)
+    return <ServerChatRow
       chat={chat}
       selectionMode={false}
       isTrashView={false}
       isPinned={false}
       isActive={false}
-      openMenuFor={null}
-      setOpenMenuFor={vi.fn()}
-      onSelectChat={vi.fn()}
-      onTogglePinned={vi.fn()}
+      openMenuFor={openMenuFor}
+      setOpenMenuFor={setOpenMenuFor}
+      onSelectChat={onSelectChat}
+      onTogglePinned={onTogglePinned}
       onOpenSettings={vi.fn()}
       onRenameChat={vi.fn()}
       onCreateTable={vi.fn()}
@@ -47,8 +47,11 @@ const renderRow = (chat: ServerChatHistoryItem) =>
       onDeleteChat={vi.fn()}
       onRestoreChat={vi.fn()}
       t={t}
+      {...overrides}
     />
-  )
+  }
+  return render(<Row />)
+}
 
 describe("ServerChatRow search match snippet (CS-02)", () => {
   it("shows what was said under the title when the chat matched by message content", () => {
@@ -76,5 +79,31 @@ describe("ServerChatRow search match snippet (CS-02)", () => {
 
     expect(screen.queryByTestId("server-chat-match-snippet")).toBeNull()
     expect(screen.getByRole("button", { name: /^Weekly sync\b/ })).toBeInTheDocument()
+  })
+})
+
+
+describe("ServerChatRow conversation actions", () => {
+  it.each([false, true])("pins or unpins through the conversation menu (pinned=%s)", async (isPinned) => {
+    renderRow(createChat(), { isPinned })
+    fireEvent.click(screen.getByRole("button", { name: "More actions: Weekly sync" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: isPinned ? "Unpin" : "Pin", exact: true }))
+    expect(onTogglePinned).toHaveBeenCalledExactlyOnceWith("chat-1")
+    expect(onSelectChat).not.toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: /^(Unpin|Pin)$/ })).toBeNull()
+  })
+
+  it("does not expose pin or management actions for read-only history", () => {
+    renderRow(createChat(), { readOnly: true })
+    expect(screen.queryByRole("button", { name: "More actions: Weekly sync" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /^Weekly sync/ }))
+    expect(onSelectChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: "chat-1" }))
+  })
+
+  it("keeps trashed conversations free of pin actions", async () => {
+    renderRow(createChat(), { isTrashView: true })
+    fireEvent.click(screen.getByRole("button", { name: "More actions: Weekly sync" }))
+    expect(await screen.findByRole("menuitem", { name: "Restore", exact: true })).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: /^(Unpin|Pin)$/ })).toBeNull()
   })
 })

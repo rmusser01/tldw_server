@@ -44,7 +44,6 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     StreamingStatusResponse,
     StreamingTestResponse,
 )
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER, get_api_keys
 from tldw_Server_API.app.core.Audio.error_payloads import _maybe_debug_details
 from tldw_Server_API.app.core.Audio.quota_helpers import EXPECTED_DB_EXC, EXPECTED_REDIS_EXC, _get_failopen_cap_minutes
 from tldw_Server_API.app.core.Audio.streaming_exceptions import QuotaExceeded
@@ -58,24 +57,7 @@ from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_aud
 from tldw_Server_API.app.core.Audio.tts_service import (
     tts_provider_credential_scope,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    derive_trusted_credential_scope,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-)
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCredentialRuntime,
-)
 from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
-)
 from tldw_Server_API.app.core.Billing.enforcement import (
     LimitCategory,
     billing_checks_active,
@@ -106,6 +88,8 @@ from tldw_Server_API.app.core.config import (
     load_comprehensive_config,
     resolve_default_transcription_model_setting,
 )
+from tldw_Server_API.app.core.config_llm_providers import get_api_keys, get_default_provider
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
@@ -148,6 +132,19 @@ from tldw_Server_API.app.core.Metrics.stt_metrics import (
     emit_stt_session_end_total,
     emit_stt_session_start_total,
     observe_stt_final_latency_seconds,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    derive_trusted_credential_scope,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCredentialRuntime,
 )
 from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.Streaming import speech_chat_service
@@ -344,21 +341,6 @@ def _audio_shim_attr(name: str):
     package_candidate: Any = None
     module_candidate: Any = None
 
-    def _is_test_override(value: Any) -> bool:
-        try:
-            module_name = str(getattr(value, "__module__", "") or "")
-        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
-            module_name = ""
-        if module_name.startswith("tldw_Server_API.tests") or module_name.startswith("tests."):
-            return True
-        if module_name == "__main__":
-            return True
-        try:
-            class_module = str(getattr(getattr(value, "__class__", object), "__module__", "") or "")
-        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
-            class_module = ""
-        return class_module.startswith("tldw_Server_API.tests") or class_module.startswith("tests.")
-
     try:
         from tldw_Server_API.app.api.v1.endpoints import audio as audio_pkg_shim
 
@@ -381,10 +363,6 @@ def _audio_shim_attr(name: str):
     if package_candidate is not None and module_candidate is not None:
         if package_candidate is module_candidate:
             return package_candidate
-        package_is_test_override = _is_test_override(package_candidate)
-        module_is_test_override = _is_test_override(module_candidate)
-        if package_is_test_override != module_is_test_override:
-            return package_candidate if package_is_test_override else module_candidate
         if default_value is not None:
             package_changed = package_candidate is not default_value
             module_changed = module_candidate is not default_value
@@ -1247,15 +1225,6 @@ async def audio_chat_turn(
 ws_router = APIRouter()
 
 
-async def _preflight_audio_cookie_websocket(websocket: WebSocket) -> bool:
-    await resolve_single_user_cookie_websocket(websocket)
-    close_code = cookie_websocket_rejection_code(websocket)
-    if close_code is None:
-        return True
-    await websocket.close(code=close_code)
-    return False
-
-
 @ws_router.websocket("/stream/transcribe")
 async def websocket_transcribe(
     websocket: WebSocket, token: Optional[str] = Query(None)  # Legacy query-token auth; disabled by default.
@@ -1274,7 +1243,13 @@ async def websocket_transcribe(
         websocket (WebSocket): The active WebSocket connection.
         token (Optional[str]): Legacy API key or JWT query-string token, ignored unless AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
-    if not await _preflight_audio_cookie_websocket(websocket):
+    # Authenticated before anything else runs: the socket is accepted only to read an auth frame.
+    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
+        websocket,
+        endpoint_id="audio.stream.transcribe",
+        ws_path="/api/v1/audio/stream/transcribe",
+    )
+    if not auth_ok:
         return
     # Create a lightweight WebSocketStream for uniform metrics on outer error paths
     _outer_stream = None
@@ -1354,15 +1329,6 @@ async def websocket_transcribe(
         flag = str(_os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")).strip().lower()
         return 1008 if is_truthy(flag) else 4003
 
-    # Authenticate (shared helper; parity with other audio WS endpoints)
-    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
-        websocket,
-        _outer_stream,
-        endpoint_id="audio.stream.transcribe",
-        ws_path="/api/v1/audio/stream/transcribe",
-    )
-    if not auth_ok:
-        return
     if not await _guard_audio_ws_work_start(
         websocket,
         kind="audio.stream.transcribe",
@@ -1477,14 +1443,6 @@ async def websocket_transcribe(
                 return
             emit_stt_session_start_total(provider=stt_metrics_provider)
             stt_session_started = True
-
-        ok_stream, msg_stream = await _can_start_stream(user_id_for_usage)
-        if not ok_stream:
-            if _outer_stream:
-                await _outer_stream.send_json({"type": "error", "message": msg_stream})
-            await websocket.close()
-            return
-        acquired_stream = True
 
         query_params = getattr(websocket, "query_params", {}) or {}
         persistence_enabled = _coerce_bool(
@@ -1790,6 +1748,14 @@ async def websocket_transcribe(
             except EXPECTED_REDIS_EXC as _hb_e:
                 logger.debug(f"Heartbeat failed for user_id={user_id_for_usage}: {_hb_e}")
 
+        # Take the stream slot only here: the finally below is what gives it back (TASK-13435).
+        ok_stream, msg_stream = await _can_start_stream(user_id_for_usage)
+        if not ok_stream:
+            if _outer_stream:
+                await _outer_stream.send_json({"type": "error", "message": msg_stream})
+            await websocket.close()
+            return
+        acquired_stream = True
         try:
             await handle_unified_websocket(
                 policy_websocket,
@@ -1960,9 +1926,14 @@ async def websocket_audio_chat_stream(
       - Single-user: API key via header or an initial auth message; optional IP allowlist.
       - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
-    if not await _preflight_audio_cookie_websocket(websocket):
+    # Authenticated before anything else runs: the socket is accepted only to read an auth frame.
+    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
+        websocket,
+        endpoint_id="audio.chat.stream",
+        ws_path="/api/v1/audio/chat/stream",
+    )
+    if not auth_ok:
         return
-    await websocket.accept()
 
     try:
         _raw_idle = os.getenv("AUDIO_WS_IDLE_TIMEOUT_S") or os.getenv("STREAM_IDLE_TIMEOUT_S")
@@ -2018,15 +1989,6 @@ async def websocket_audio_chat_stream(
         flag = str(os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")).strip().lower()
         return 1008 if is_truthy(flag) else 4003
 
-    # Authenticate (parity with STT/WS TTS)
-    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
-        websocket,
-        _outer_stream,
-        endpoint_id="audio.chat.stream",
-        ws_path="/api/v1/audio/chat/stream",
-    )
-    if not auth_ok:
-        return
     if not await _guard_audio_ws_work_start(
         websocket,
         kind="audio.chat.stream",
@@ -2263,7 +2225,7 @@ async def websocket_audio_chat_stream(
         emit_stt_session_start_total(provider=stt_metrics_provider)
         stt_session_started = True
 
-        llm_provider = (llm_cfg.get("provider") or llm_cfg.get("api_provider") or DEFAULT_LLM_PROVIDER).lower()
+        llm_provider = (llm_cfg.get("provider") or llm_cfg.get("api_provider") or get_default_provider()).lower()
         llm_model = llm_cfg.get("model") or os.getenv("AUDIO_CHAT_DEFAULT_LLM_MODEL") or "gpt-3.5-turbo"
         llm_temperature = llm_cfg.get("temperature")
         llm_max_tokens = llm_cfg.get("max_tokens")
@@ -2411,61 +2373,64 @@ async def websocket_audio_chat_stream(
             if persistence_ready and persistence_db is not None and persistence_session_id:
                 return persistence_db, persistence_session_id
             try:
-                if persistence_db is None:
-                    persistence_db = await _shim_get_chacha_db_for_user_id(
-                        int(user_id_for_usage),
-                        client_id=str(user_id_for_usage),
-                    )
-                loop = asyncio.get_running_loop()
-                character_card, character_db_id = await _shim_get_or_create_character_context(
-                    persistence_db,
-                    None,
-                    loop,
-                )
-                if not character_db_id:
-                    raise ValueError("Unable to resolve character context for WS persistence")
-                character_name = "Helpful AI Assistant"
-                if isinstance(character_card, dict) and character_card.get("name"):
-                    character_name = str(character_card.get("name"))
-
-                persistence_session_id, conversation_created = await _shim_get_or_create_conversation(
-                    persistence_db,
-                    persistence_session_id,
-                    int(character_db_id),
-                    character_name,
-                    str(user_id_for_usage),
-                    loop,
-                )
-                session_id = persistence_session_id
-
-                if session_id and not any(
-                    msg.get("role") == "system" and msg.get("content") == f"session:{session_id}"
-                    for msg in chat_history
-                ):
-                    chat_history.insert(0, {"role": "system", "content": f"session:{session_id}"})
-
-                action_hint = _action_hint()
-                settings_payload = {
-                    "audio_chat_ws": {
-                        "session_id": persistence_session_id,
-                        "action_hint": action_hint,
-                        "metadata": metadata or {},
-                    }
-                }
-                try:
-                    await loop.run_in_executor(
+                # A WebSocket runs outside the HTTP operation middleware. Own this step's
+                # checkouts so they go back to the pool when it ends.
+                with chacha_operation(independent=True):
+                    if persistence_db is None:
+                        persistence_db = await _shim_get_chacha_db_for_user_id(
+                            int(user_id_for_usage),
+                            client_id=str(user_id_for_usage),
+                        )
+                    loop = asyncio.get_running_loop()
+                    character_card, character_db_id = await _shim_get_or_create_character_context(
+                        persistence_db,
                         None,
-                        partial(
-                            _persist_audio_chat_settings,
-                            persistence_db,
-                            persistence_session_id,
-                            settings_payload,
-                            conversation_created=conversation_created,
-                        ),
+                        loop,
                     )
-                except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as settings_exc:
-                    logger.debug(f"audio.chat.stream conversation_settings upsert failed: {settings_exc}")
+                    if not character_db_id:
+                        raise ValueError("Unable to resolve character context for WS persistence")
+                    character_name = "Helpful AI Assistant"
+                    if isinstance(character_card, dict) and character_card.get("name"):
+                        character_name = str(character_card.get("name"))
 
+                    persistence_session_id, conversation_created = await _shim_get_or_create_conversation(
+                        persistence_db,
+                        persistence_session_id,
+                        int(character_db_id),
+                        character_name,
+                        str(user_id_for_usage),
+                        loop,
+                    )
+                    session_id = persistence_session_id
+
+                    if session_id and not any(
+                        msg.get("role") == "system" and msg.get("content") == f"session:{session_id}"
+                        for msg in chat_history
+                    ):
+                        chat_history.insert(0, {"role": "system", "content": f"session:{session_id}"})
+
+                    action_hint = _action_hint()
+                    settings_payload = {
+                        "audio_chat_ws": {
+                            "session_id": persistence_session_id,
+                            "action_hint": action_hint,
+                            "metadata": metadata or {},
+                        }
+                    }
+                    try:
+                        await asyncio.to_thread(
+                            partial(
+                                _persist_audio_chat_settings,
+                                persistence_db,
+                                persistence_session_id,
+                                settings_payload,
+                                conversation_created=conversation_created,
+                            ),
+                        )
+                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as settings_exc:
+                        logger.debug(f"audio.chat.stream conversation_settings upsert failed: {settings_exc}")
+
+                # The step's checkouts are back: a slow client cannot hold one through the send.
                 if _outer_stream and not persistence_announced:
                     await _outer_stream.send_json({"type": "session", "session_id": persistence_session_id})
                     persistence_announced = True
@@ -2491,6 +2456,7 @@ async def websocket_audio_chat_stream(
                 return
             chat_db, conversation_id = context
 
+            @chacha_operation(independent=True)
             def _persist_sync() -> None:
                 chat_db.add_message(
                     {
@@ -3317,7 +3283,9 @@ async def websocket_audio_chat_stream(
                 if overlap_session is None:
                     await _stream_tts(assistant_text, eos_detected_at)
             finally:
-                cleanup_cancelled = False
+                # Re-raise the caught cancellation itself: a new bare CancelledError is not the host's
+                # (anyio's cancel scope does not recognise it) and escapes it (TASK-13950.7).
+                cleanup_cancelled: Optional[asyncio.CancelledError] = None
 
                 async def _close_overlap_tts_resources() -> None:
                     finish_failed = False
@@ -3340,8 +3308,8 @@ async def websocket_audio_chat_stream(
 
                 try:
                     await await_owned_worker(_close_overlap_tts_resources())
-                except asyncio.CancelledError:
-                    cleanup_cancelled = True
+                except asyncio.CancelledError as cancelled:
+                    cleanup_cancelled = cancelled
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
                     logger.debug(
                         "audio.chat.stream TTS cleanup failed error_type={}",
@@ -3352,8 +3320,8 @@ async def websocket_audio_chat_stream(
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
                     logger.debug(f"audio.chat.stream transcriber.reset() failed in finalize_turn: {exc}")
                 processing_turn = False
-                if cleanup_cancelled:
-                    raise asyncio.CancelledError
+                if cleanup_cancelled is not None:
+                    raise cleanup_cancelled
 
         async def _start_turn(
             commit_at: Optional[float],
@@ -3717,9 +3685,14 @@ async def websocket_tts(
     - Single-user: fixed API key via header or initial auth message; optional IP allowlist.
     - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
-    if not await _preflight_audio_cookie_websocket(websocket):
+    # Authenticated before anything else runs: the socket is accepted only to read an auth frame.
+    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
+        websocket,
+        endpoint_id="audio.stream.tts",
+        ws_path="/api/v1/audio/stream/tts",
+    )
+    if not auth_ok:
         return
-    await websocket.accept()
 
     try:
         _raw_idle = os.getenv("AUDIO_WS_IDLE_TIMEOUT_S") or os.getenv("STREAM_IDLE_TIMEOUT_S")
@@ -3767,15 +3740,6 @@ async def websocket_tts(
         flag = str(os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")).strip().lower()
         return 1008 if is_truthy(flag) else 4003
 
-    # Authenticate (parity with STT WS)
-    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
-        websocket,
-        _outer_stream,
-        endpoint_id="audio.stream.tts",
-        ws_path="/api/v1/audio/stream/tts",
-    )
-    if not auth_ok:
-        return
     if not await _guard_audio_ws_work_start(
         websocket,
         kind="audio.stream.tts",
@@ -3979,9 +3943,14 @@ async def websocket_tts_realtime(
       - JSON status/warning/error frames
       - Binary audio frames for synthesized audio
     """
-    if not await _preflight_audio_cookie_websocket(websocket):
+    # Authenticated before anything else runs: the socket is accepted only to read an auth frame.
+    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
+        websocket,
+        endpoint_id="audio.stream.tts.realtime",
+        ws_path="/api/v1/audio/stream/tts/realtime",
+    )
+    if not auth_ok:
         return
-    await websocket.accept()
 
     try:
         _raw_idle = os.getenv("AUDIO_WS_IDLE_TIMEOUT_S") or os.getenv("STREAM_IDLE_TIMEOUT_S")
@@ -4072,14 +4041,6 @@ async def websocket_tts_realtime(
         with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
             await websocket.close(code=close_code)
 
-    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
-        websocket,
-        _outer_stream,
-        endpoint_id="audio.stream.tts.realtime",
-        ws_path="/api/v1/audio/stream/tts/realtime",
-    )
-    if not auth_ok:
-        return
     if not await _guard_audio_ws_work_start(
         websocket,
         kind="audio.stream.tts.realtime",
@@ -4399,7 +4360,9 @@ async def websocket_tts_realtime(
         with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
             await _send_error("internal_error", "Internal error", close=True)
     finally:
-        cleanup_cancelled = False
+        # Re-raise the caught cancellation itself: a new bare CancelledError is not the host's
+        # (anyio's cancel scope does not recognise it) and escapes it (TASK-13950.7).
+        cleanup_cancelled: Optional[asyncio.CancelledError] = None
 
         async def _close_realtime_tts_resources() -> None:
             try:
@@ -4417,8 +4380,8 @@ async def websocket_tts_realtime(
 
         try:
             await await_owned_worker(_close_realtime_tts_resources())
-        except asyncio.CancelledError:
-            cleanup_cancelled = True
+        except asyncio.CancelledError as cancelled:
+            cleanup_cancelled = cancelled
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
             logger.debug(
                 "audio.stream.tts.realtime cleanup failed error_type={}",
@@ -4443,8 +4406,8 @@ async def websocket_tts_realtime(
                     "audio.stream.tts.realtime websocket close failed after _outer_stream.done error: "
                     f"outer_error={outer_exc}, close_error={close_exc}"
                 )
-        if cleanup_cancelled:
-            raise asyncio.CancelledError
+        if cleanup_cancelled is not None:
+            raise cleanup_cancelled
 
 
 @router.get(
@@ -4532,8 +4495,9 @@ async def streaming_limits(
             - used_today_minutes (float): Minutes already used today (0.0 if unavailable).
             - remaining_minutes (float|None): Minutes remaining today (0.0 if none left, `None` when there is no daily limit).
             - used_month_minutes / remaining_month_minutes (float|None): Monthly usage and remainder (`None` remainder when no monthly limit).
-            - active_streams (None): Per-user stream concurrency is not tracked.
-            - _can_start_stream (bool): Always True; stream concurrency is not limited per user.
+            - active_streams (None): The count of the user's open streams is not reported.
+            - _can_start_stream (bool): Always True. It is not a live check: this endpoint does not
+              report open streams, so a stream over `limits.audio_concurrent_streams` is refused when it starts.
     """
     # Correlate logs with request_id if available
     rid = ensure_request_id(request) if request is not None else None
@@ -4594,7 +4558,7 @@ async def streaming_limits(
             "Failed to get tier for user %s, falling back to 'free': %s", current_user.id, e
         )
         tier = "free"
-    # Stream concurrency isn't limited per user.
+    # Not a live check: this endpoint does not report open streams; a stream over the limit is refused when it starts.
     can_start = True
     return {
         "user_id": current_user.id,

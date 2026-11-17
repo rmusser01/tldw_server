@@ -97,18 +97,11 @@ class PolicyCompiler:
     _ALLOWED_REGEX_FLAGS = {"i", "m", "s", "x"}
     _ALLOWED_ACTIONS = {"block", "redact", "warn"}
 
-    @staticmethod
-    def policy_types() -> tuple[type[ModerationPolicy], type[PatternRule]]:
-        """Return the canonical policy dataclasses without loading the service."""
-
-        return _ModerationPolicy, _PatternRule
-
     def compile_global(self, data: PolicyCompilationInput) -> PolicyCompilationResult:
         """Compile the global moderation policy from config and blocklist input."""
 
         report = PolicyCompilationReport()
         config = data.config
-        ModerationPolicy, _ = self.policy_types()
         categories_enabled = self.resolve_runtime_categories(
             data.runtime_override,
             config.categories_enabled,
@@ -118,7 +111,7 @@ class PolicyCompiler:
         if pii_enabled:
             block_patterns.extend(list(data.pii_rules or []))
 
-        policy = ModerationPolicy(
+        policy = _ModerationPolicy(
             enabled=config.enabled,
             input_enabled=config.input_enabled,
             output_enabled=config.output_enabled,
@@ -141,8 +134,7 @@ class PolicyCompiler:
         report = PolicyCompilationReport()
         if not override:
             return PolicyCompilationResult(policy=base_policy, report=report)
-        ModerationPolicy, _ = self.policy_types()
-        policy = ModerationPolicy(
+        policy = _ModerationPolicy(
             enabled=self.coalesce_bool(override.get("enabled"), base_policy.enabled),
             input_enabled=self.coalesce_bool(override.get("input_enabled"), base_policy.input_enabled),
             output_enabled=self.coalesce_bool(override.get("output_enabled"), base_policy.output_enabled),
@@ -211,7 +203,7 @@ class PolicyCompiler:
         if "#" in line:
             cut_index = cls._find_category_suffix(line)
             if cut_index != -1:
-                after = line[cut_index + 1:]
+                after = line[cut_index + 1 :]
                 cats = {c.strip().lower() for c in after.split(",") if c.strip()}
                 if cats:
                     categories = cats
@@ -224,7 +216,7 @@ class PolicyCompiler:
                     rhs_lower = rhs.lower()
                     if rhs_lower.startswith("redact:"):
                         action = "redact"
-                        replacement = rhs[len("redact:"):].strip()
+                        replacement = rhs[len("redact:") :].strip()
                     elif rhs_lower in cls._ALLOWED_ACTIONS:
                         action = rhs_lower
                     else:
@@ -273,7 +265,7 @@ class PolicyCompiler:
             if ch == "/" and in_regex:
                 in_regex = False
                 continue
-            if not in_regex and text[i:i + 2] == "->":
+            if not in_regex and text[i : i + 2] == "->":
                 backslash_count = 0
                 j = i - 1
                 while j >= 0 and text[j] == "\\":
@@ -281,7 +273,7 @@ class PolicyCompiler:
                     j -= 1
                 if backslash_count % 2 == 1:
                     continue
-                return text[:i].strip(), text[i + 2:].strip()
+                return text[:i].strip(), text[i + 2 :].strip()
         return text, None
 
     @classmethod
@@ -293,7 +285,7 @@ class PolicyCompiler:
         last_slash = expr.rfind("/")
         if last_slash <= 0:
             return None
-        flags = expr[last_slash + 1:]
+        flags = expr[last_slash + 1 :]
         if flags:
             lowered = flags.lower()
             if any(ch not in cls._ALLOWED_REGEX_FLAGS for ch in lowered):
@@ -394,7 +386,6 @@ class PolicyCompiler:
     ) -> PatternRule | None:
         """Compile one literal or regex expression into a pattern rule."""
 
-        _, PatternRule = self.policy_types()
         try:
             regex_parts = self.parse_regex_expr(expr)
             if regex_parts:
@@ -409,7 +400,7 @@ class PolicyCompiler:
         except re.error:
             report.add(source, "invalid_regex", index=index)
             return None
-        return PatternRule(
+        return _PatternRule(
             regex=regex,
             action=action or None,
             replacement=replacement or None,
@@ -497,7 +488,6 @@ class PolicyCompiler:
             return None
         if phase not in {"input", "output", "both"}:
             phase = "both"
-        _, PatternRule = self.policy_types()
         try:
             if is_regex:
                 if self.is_regex_dangerous(pattern):
@@ -509,7 +499,7 @@ class PolicyCompiler:
         except re.error:
             report.add("user_rule", "invalid_regex", index=index)
             return None
-        return PatternRule(
+        return _PatternRule(
             regex=regex,
             action=action,
             replacement=None,

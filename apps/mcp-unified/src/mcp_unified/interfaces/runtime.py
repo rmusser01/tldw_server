@@ -16,6 +16,7 @@ from mcp_unified.tool_use_reporting.recorder import (
     ToolUseRecorder,
 )
 
+from .model_completion import ModelCompletionPortFactory
 from .policy import (
     ApprovalEvaluator,
     EffectivePolicyResolver,
@@ -256,6 +257,13 @@ class AuthenticatedIdentity:
     user_id: str
     roles: list[str] = field(default_factory=list)
     permissions: list[str] = field(default_factory=list)
+    active_org_id: int | None = None
+    active_team_id: int | None = None
+
+    def __post_init__(self) -> None:
+        for value in (self.active_org_id, self.active_team_id):
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError("Active scope IDs must be positive non-boolean integers")
 
 
 class ServerAuthProvider(Protocol):
@@ -387,3 +395,4 @@ class MCPRuntimeDependencies:
     websocket_stream_factory: WebSocketStreamFactory
     tool_use_recorder: ToolUseRecorder = field(default_factory=NoopToolUseRecorder)
     tool_call_hook_manager: ToolCallHookManager = field(default_factory=NoopToolCallHookManager)
+    model_completion_port_factory: ModelCompletionPortFactory | None = None

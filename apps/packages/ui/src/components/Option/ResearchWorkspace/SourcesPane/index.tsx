@@ -30,6 +30,7 @@ import {
   Dropdown
 } from "antd"
 import { READY_STATE_LABEL, getDesignSystemState } from "@/design-system"
+import { isAbsoluteHttpUrl } from "@/utils/absolute-url-guard"
 import {
   isWorkspaceSourcePartiallyQueryable,
   isWorkspaceSourceSelectable
@@ -346,6 +347,47 @@ const persistSourceAnnotations = (
   } catch {
     // Annotation persistence is best-effort local UI state.
   }
+}
+
+const SourcesPanePreview = (
+  props: React.ComponentProps<typeof WorkspaceSourcePreview>
+) => {
+  const { children, onClose, source, title, workspaceId } = props
+  const unavailable = source?.statusDetails?.statusReason === "capture_unavailable"
+
+  React.useEffect(() => {
+    if (!unavailable || !source || !workspaceId?.trim()) return
+    return useWorkspaceStore.subscribe((state, previous) => {
+      const current = state.sources.find((item) => item.id === source.id)
+      if (
+        state.workspaceId !== previous.workspaceId ||
+        !current ||
+        current.mediaId !== source.mediaId ||
+        current.webCapture !== source.webCapture ||
+        current.statusDetails?.statusReason !== "capture_unavailable"
+      ) {
+        onClose()
+      }
+    })
+  }, [onClose, source, unavailable, workspaceId])
+
+  return (
+    <>
+      {/* Keep the shared account-change dismissal even without a fetchable source. */}
+      <WorkspaceSourcePreview {...props} source={unavailable ? null : source} />
+      {unavailable && workspaceId?.trim() && (
+        <Modal open title={title} onCancel={onClose} footer={null} width={680}>
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-text">{source.title}</p>
+            <p role="alert" className="text-sm text-warning">
+              Exact capture version unavailable
+            </p>
+            {children}
+          </div>
+        </Modal>
+      )}
+    </>
+  )
 }
 
 interface SourcesPaneProps {
@@ -1680,13 +1722,14 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             isSelected ? "border border-primary/20 bg-primary/5" : ""
           }`}
         >
-          {source.url && onCaptureArticle && (
-            <Button size="small" onClick={() => onCaptureArticle(source)}>
-              {source.webCapture
-                ? t("playground:sources.refreshCapture", "Refresh capture")
-                : t("playground:sources.captureArticle", "Capture article")}
-            </Button>
-          )}
+          {isAbsoluteHttpUrl(source.webCapture?.requestedUrl || source.url) &&
+            onCaptureArticle && (
+              <Button size="small" onClick={() => onCaptureArticle(source)}>
+                {source.webCapture
+                  ? t("playground:sources.refreshCapture", "Refresh capture")
+                  : t("playground:sources.captureArticle", "Capture article")}
+              </Button>
+            )}
           <SourceFolderMembershipMenu
             sourceTitle={source.title}
             folderOptions={sourceFolderOptions}
@@ -2483,7 +2526,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           })()}
       </Modal>
 
-      <WorkspaceSourcePreview
+      <SourcesPanePreview
         workspaceId={rawWorkspaceId ?? null}
         source={previewSource}
         onClose={handleClosePreview}
@@ -2604,7 +2647,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             </div>
           </>
         )}
-      </WorkspaceSourcePreview>
+      </SourcesPanePreview>
 
       <AddSourceModal researchWorkspaceCapabilities={researchWorkspaceCapabilities} />
     </div>

@@ -165,7 +165,7 @@ describe('VNAssetsWorkbench', () => {
         const user = userEvent.setup();
         render(<VNAssetsWorkbench />);
         await screen.findByText(failure === 'network' ? 'Profile network unavailable' : 'Current server and account could not be verified.');
-        expect(screen.queryByText('Loading VN asset packs...')).not.toBeInTheDocument();
+        await waitFor(() => expect(screen.queryByText('Loading VN asset packs...')).not.toBeInTheDocument());
         expect(screen.getByRole('button', { name: 'Retry recovery check' })).toBeEnabled();
         expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
         expect(mocks.listVNAssetPacks).not.toHaveBeenCalled();

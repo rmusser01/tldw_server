@@ -227,7 +227,7 @@ async def test_tenant_quotas_flag_enabled_single_user_principal_http(monkeypatch
         return None
 
     monkeypatch.setattr(emb_mod, "_get_redis_client", _fake_get_redis_client)
-    monkeypatch.setattr(emb_mod, "ensure_async_client_closed", _fake_ensure_async_client_closed)
+    monkeypatch.setattr("tldw_Server_API.app.core.Infrastructure.redis_factory.ensure_async_client_closed", _fake_ensure_async_client_closed)
 
     app = _make_app()
 
@@ -282,7 +282,7 @@ async def test_tenant_quotas_flag_enabled_multi_user_principal_http(monkeypatch)
         return None
 
     monkeypatch.setattr(emb_mod, "_get_redis_client", _fake_get_redis_client)
-    monkeypatch.setattr(emb_mod, "ensure_async_client_closed", _fake_ensure_async_client_closed)
+    monkeypatch.setattr("tldw_Server_API.app.core.Infrastructure.redis_factory.ensure_async_client_closed", _fake_ensure_async_client_closed)
 
     app = _make_app()
 

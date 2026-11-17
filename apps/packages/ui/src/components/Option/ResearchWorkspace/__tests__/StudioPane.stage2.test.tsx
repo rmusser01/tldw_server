@@ -1,10 +1,21 @@
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { Modal } from "antd"
-import type { WorkspaceSource } from "@/types/workspace"
+import { ConfigProvider, Modal } from "antd"
+import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec"
+import type { GeneratedArtifact, WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
 import { createGroundedClaimVerification } from "./studio-test-fixtures"
+const editIO = vi.hoisted(() => ({ save: vi.fn(), release: vi.fn() }))
+vi.mock("@/services/workspace-artifact-persistence", () => ({
+  persistWorkspaceArtifact: editIO.save, hasCanonicalArtifactWorkspace: () => false,
+}))
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (_ids: unknown, options: { signal: AbortSignal }) => ({
+    scopeKey: "server:alice", requestScope: { config: { serverUrl: "https://owned.test" }, userId: "alice" },
+    scopeSignal: options.signal, scopeInvalidatedSignal: options.signal, release: editIO.release,
+  }),
+}))
 const {
   mockScheduleWorkspaceUndoAction,
   mockUndoWorkspaceAction,
@@ -271,6 +282,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 vi.mock("@/services/tldw", () => ({
   tldwModels: {
     getChatModels: mockGetChatModels,
+    clearCache: vi.fn(async () => undefined),
     getProviderDisplayName: (provider: string) => provider
   }
 }))
@@ -288,9 +300,10 @@ vi.mock("@/store/model", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
+  hasResearchWorkspaceMigrationTombstone: () => false,
+  useWorkspaceStore: Object.assign((
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  ) => selector(workspaceStoreState), { getState: () => workspaceStoreState })
 }))
 
 vi.mock("@/components/Common/Mermaid", () => ({
@@ -323,6 +336,7 @@ vi.mock("@/components/Common/MermaidDiagramBlock", () => ({
 vi.mock("../undo-manager", () => ({
   WORKSPACE_UNDO_WINDOW_MS: 10000,
   scheduleWorkspaceUndoAction: mockScheduleWorkspaceUndoAction,
+  finalizeWorkspaceUndoAction: vi.fn(() => true),
   undoWorkspaceAction: mockUndoWorkspaceAction
 }))
 
@@ -364,33 +378,37 @@ Object.defineProperty(HTMLMediaElement.prototype, "pause", {
   value: vi.fn()
 })
 
-const expandOutputTypesSection = () => {
-  const toggle = screen.getByRole("button", { name: /Output Types/i })
+const expandOutputTypesSection = (container: HTMLElement) => {
+  const toggle = within(container).getByRole("button", { name: /Output Types/i });
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
 }
 
-const expandGeneratedOutputsSection = () => {
-  const toggle = screen.getByRole("button", { name: /Generated Outputs/i })
+const expandGeneratedOutputsSection = (container: HTMLElement) => {
+  const toggle = within(container).getByRole("button", {
+    name: /Generated Outputs/i,
+  });
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
 }
 
-const expandMoreOutputsSection = () => {
-  const toggle = screen.queryByRole("button", {
-    name: /More outputs/i
-  })
+const expandMoreOutputsSection = (container: HTMLElement) => {
+  const toggle = within(container).queryByRole("button", {
+    name: /More outputs/i,
+  });
   if (toggle?.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
 }
 
 const renderStudioPane = () => {
-  const renderResult = render(<StudioPane />)
-  expandOutputTypesSection()
-  expandGeneratedOutputsSection()
+  const renderResult = render(
+    <ConfigProvider theme={{ token: { motion: false } }}><StudioPane /></ConfigProvider>
+  )
+  expandOutputTypesSection(renderResult.container);
+  expandGeneratedOutputsSection(renderResult.container);
   return renderResult
 }
 
@@ -483,6 +501,10 @@ describe("StudioPane Stage 2 workflows", () => {
       workspaceStoreState.generatingOutputType = isGenerating ? outputType : null
     })
 
+    mockGetMediaDetails.mockReset().mockResolvedValue({
+      id: 101, title: "DSPy Prompting Talk",
+      content: "Selene is the telescope at Rowan Observatory."
+    })
     mockListDecks.mockResolvedValue([])
     mockGenerateFlashcardsService.mockResolvedValue({
       flashcards: [{ front: "Term", back: "Definition" }],
@@ -496,8 +518,8 @@ describe("StudioPane Stage 2 workflows", () => {
     })
     mockGetChatModels.mockResolvedValue([])
     mockCreateDeck.mockResolvedValue({ id: 1, name: "Workspace Flashcards" })
-    mockCreateFlashcard.mockResolvedValue({ uuid: "card-1" })
-    mockCreateFlashcardsBulk.mockResolvedValue({
+    mockCreateFlashcard.mockReset().mockResolvedValue({ uuid: "card-1" })
+    mockCreateFlashcardsBulk.mockReset().mockResolvedValue({
       items: [{ uuid: "card-1", deck_id: 4 }],
       count: 1,
       total: 1
@@ -583,6 +605,7 @@ describe("StudioPane Stage 2 workflows", () => {
 
   afterEach(() => {
     Modal.destroyAll()
+    ConfigProvider.config({ holderRender: undefined })
     cleanup()
   })
 
@@ -738,7 +761,7 @@ describe("StudioPane Stage 2 workflows", () => {
     expect(mockUpsertWorkspace).toHaveBeenCalledWith("workspace-a", {
       name: "Workspace A",
       study_materials_policy: "workspace"
-    })
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
 
     expect(mockCreateQuiz).not.toHaveBeenCalled()
     expect(mockCreateQuestion).not.toHaveBeenCalled()
@@ -1334,12 +1357,14 @@ describe("StudioPane Stage 2 workflows", () => {
         provider: "openai",
         claims_verification_provider: "llamacpp",
         claims_verification_model: "qwen-claims"
-      })
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
     expect(mockGenerateFlashcardsService).not.toHaveBeenCalledWith(
       expect.objectContaining({
         text: ""
-      })
+      }),
+      expect.anything()
     )
     expect(mockRagSearch).not.toHaveBeenCalled()
     expect(mockCreateFlashcardsBulk).toHaveBeenCalledWith([
@@ -1431,7 +1456,7 @@ describe("StudioPane Stage 2 workflows", () => {
     ], expect.objectContaining({ signal: expect.any(AbortSignal) }))
   }, 15000)
 
-  it("falls back to per-card flashcard saves when bulk save rejects", async () => {
+  it("falls back to per-card flashcard saves only when the bulk route is unsupported", async () => {
     mockListDecks.mockResolvedValue([])
     mockGenerateFlashcardsService.mockResolvedValue({
       flashcards: [
@@ -1444,7 +1469,7 @@ describe("StudioPane Stage 2 workflows", () => {
       id: 9,
       name: "Workspace A Flashcards"
     })
-    mockCreateFlashcardsBulk.mockRejectedValueOnce(new Error("Bulk flashcard save failed"))
+    mockCreateFlashcardsBulk.mockRejectedValueOnce(Object.assign(new Error("Not Implemented"), { status: 501 }))
     mockCreateFlashcard
       .mockResolvedValueOnce({ uuid: "card-a" })
       .mockRejectedValueOnce(new Error("Second card failed"))
@@ -1479,6 +1504,40 @@ describe("StudioPane Stage 2 workflows", () => {
       })
     )
   }, 15000)
+
+  it.each(["network", "postcommit-500", "empty-ack"])(
+    "does not duplicate committed flashcards after %s", async (failure) => {
+      mockGetMediaDetails.mockResolvedValue({
+        id: 101, title: "DSPy Prompting Talk",
+        content: "Selene is the telescope at Rowan Observatory."
+      });
+      mockListDecks.mockResolvedValue([]);
+      mockGenerateFlashcardsService.mockResolvedValue({
+        flashcards: [{ front: "Selene", back: "Rowan telescope" }], count: 1
+      });
+      mockCreateDeck.mockResolvedValue({ id: 12, name: "Workspace A Flashcards" });
+      const committed: unknown[] = [];
+      mockCreateFlashcardsBulk.mockImplementationOnce(async (inputs) => {
+        committed.push(...inputs);
+        if (failure === "empty-ack") return { items: [] };
+        throw Object.assign(new Error("Save acknowledgement unavailable"), {
+          ...(failure === "postcommit-500" ? { status: 500 } : {})
+        });
+      });
+      mockCreateFlashcard.mockImplementation(async input => {
+        committed.push(input);
+        return { uuid: "duplicate" };
+      });
+      renderStudioPane();
+      fireEvent.click(screen.getByRole("button", { name: "Flashcards" }));
+      await waitFor(() => expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/), "failed",
+        expect.objectContaining({ errorMessage: expect.any(String) })
+      ));
+      expect(mockCreateFlashcard).not.toHaveBeenCalled();
+      expect(committed).toHaveLength(1);
+    }, 15000
+  );
 
   it("does not fall back to per-card saves when bulk flashcard save aborts", async () => {
     mockListDecks.mockResolvedValue([])
@@ -1612,10 +1671,12 @@ describe("StudioPane Stage 2 workflows", () => {
       )
     )
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Compare Sources" }))
+    fireEvent.click(
+      within(container).getByRole("button", { name: "Compare Sources" }),
+    );
 
     await waitFor(() => {
       expect(mockCreateChatCompletion).toHaveBeenCalled()
@@ -1688,10 +1749,10 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     ])
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Mind Map" }));
 
     await waitFor(() => {
       expect(mockGenerateResearchWorkspaceArtifact).toHaveBeenCalledTimes(1)
@@ -1767,15 +1828,17 @@ describe("StudioPane Stage 2 workflows", () => {
       )
     )
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Mind Map" }));
 
-    expect(screen.getByTestId("studio-prerequisite-warning")).toHaveTextContent(
-      "Select a chat model before generating Studio outputs."
-    )
-    expect(screen.getByRole("button", { name: "Mind Map" })).toBeDisabled()
+    expect(
+      within(container).getByTestId("studio-prerequisite-warning"),
+    ).toHaveTextContent("Select a chat model before generating Studio outputs.");
+    expect(
+      within(container).getByRole("button", { name: "Mind Map" }),
+    ).toBeDisabled();
     expect(mockCreateChatCompletion).not.toHaveBeenCalled()
     expect(mockAddArtifact).not.toHaveBeenCalled()
   })
@@ -1791,10 +1854,10 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     })
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Mind Map" }));
 
     await waitFor(() => {
       expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
@@ -1822,10 +1885,12 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     })
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Audio Summary" }))
+    fireEvent.click(
+      within(container).getByRole("button", { name: "Audio Summary" }),
+    );
 
     await waitFor(() => {
       expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
@@ -1877,10 +1942,10 @@ describe("StudioPane Stage 2 workflows", () => {
       claim_verification: createGroundedClaimVerification()
     })
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Data Table" }));
 
     await waitFor(() => {
       expect(mockGenerateResearchWorkspaceArtifact).toHaveBeenCalledTimes(1)
@@ -1934,10 +1999,10 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     })
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Data Table" }));
 
     await waitFor(() => {
       expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
@@ -1963,10 +2028,10 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     })
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Data Table" }));
 
     await waitFor(() => {
       expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
@@ -2021,15 +2086,17 @@ describe("StudioPane Stage 2 workflows", () => {
       )
     )
 
-    renderStudioPane()
-    expandMoreOutputsSection()
+    const { container } = renderStudioPane();
+    expandMoreOutputsSection(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
+    fireEvent.click(within(container).getByRole("button", { name: "Data Table" }));
 
-    expect(screen.getByTestId("studio-prerequisite-warning")).toHaveTextContent(
-      "Select a chat model before generating Studio outputs."
-    )
-    expect(screen.getByRole("button", { name: "Data Table" })).toBeDisabled()
+    expect(
+      within(container).getByTestId("studio-prerequisite-warning"),
+    ).toHaveTextContent("Select a chat model before generating Studio outputs.");
+    expect(
+      within(container).getByRole("button", { name: "Data Table" }),
+    ).toBeDisabled();
     expect(mockCreateChatCompletion).not.toHaveBeenCalled()
     expect(mockAddArtifact).not.toHaveBeenCalled()
   })
@@ -2093,7 +2160,7 @@ describe("StudioPane Stage 2 workflows", () => {
     })
   }, 15000)
 
-  it("uses fullscreen modal sizing when viewing outputs on mobile", () => {
+  it("uses fullscreen modal sizing when viewing outputs on mobile", async () => {
     isMobile = true
     workspaceStoreState.generatedArtifacts = [
       {
@@ -2106,32 +2173,103 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     ]
 
-    const modalInfoSpy = vi
-      .spyOn(Modal, "info")
-      .mockImplementation(
-        () =>
-          ({
-            destroy: vi.fn(),
-            update: vi.fn()
-          }) as any
-      )
-
     renderStudioPane()
     fireEvent.click(screen.getByRole("button", { name: "View" }))
 
-    expect(modalInfoSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        width: "100%",
-        style: expect.objectContaining({ top: 0, paddingBottom: 0 }),
-        styles: expect.objectContaining({
-          body: expect.objectContaining({
-            maxHeight: "calc(100dvh - 96px)",
-            overflowY: "auto"
-          })
-        })
-      })
-    )
-
-    modalInfoSpy.mockRestore()
+    const dialog = (await screen.findByText("Mobile view content")).closest(".ant-modal")
+    expect(dialog).toHaveStyle({ width: "100%", top: "0px", paddingBottom: "0px" })
+    expect(dialog.querySelector(".ant-modal-body")).toHaveStyle({
+      maxHeight: "calc(100dvh - 96px)", overflowY: "auto"
+    })
   }, 15000)
+  it.each(["flashcards", "quiz"] as const)("waits for a canonical edit acknowledgement before replacing the %s card or closing its editor", async (type) => {
+    const original = bindWorkspaceArtifactOrigin({
+      id: "canonical-edit", workspaceArtifactId: "canonical-edit", workspaceArtifactVersion: 1,
+      type, title: "Saved study output", status: "completed", content: "Original saved content",
+      data: type === "flashcards" ? { flashcards: [{ front: "Old front", back: "Old back" }] } :
+        { questions: [{ question: "Old question", options: ["yes"], answer: "yes" }] },
+      createdAt: new Date(),
+    } as GeneratedArtifact, "server:alice", "workspace-a")
+    workspaceStoreState.generatedArtifacts = [original]
+    let acknowledge!: (value: unknown) => void
+    editIO.save.mockReset().mockImplementationOnce(() => new Promise(resolve => { acknowledge = resolve }))
+    renderStudioPane()
+    fireEvent.click(screen.getByTestId("studio-artifact-edit-canonical-edit"))
+    const label = type === "flashcards" ? "Flashcard front 1" : "Question prompt 1"
+    fireEvent.change(await screen.findByLabelText(label), { target: { value: "Revised study text" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(editIO.save).toHaveBeenCalledTimes(1))
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
+    expect(screen.getByDisplayValue("Revised study text")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled()
+    const [draft, options] = editIO.save.mock.calls[0]
+    expect(options).toMatchObject({ workspaceId: "workspace-a", updateOnly: "content" })
+    acknowledge({ ...draft, workspaceArtifactVersion: 2 })
+    await waitFor(() => expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+      "canonical-edit", "completed", expect.objectContaining({ workspaceArtifactVersion: 2 })))
+  })
+
+  it("retains flashcard edits and its modal after a canonical optimistic conflict", async () => {
+    workspaceStoreState.generatedArtifacts = [bindWorkspaceArtifactOrigin({
+      id: "edit-conflict", workspaceArtifactId: "edit-conflict", workspaceArtifactVersion: 1,
+      type: "flashcards", title: "Saved cards", status: "completed", content: "Original saved content",
+      data: { flashcards: [{ front: "Old front", back: "Old back" }] }, createdAt: new Date(),
+    } as GeneratedArtifact, "server:alice", "workspace-a")]
+    editIO.save.mockReset().mockRejectedValueOnce(new Error("This saved draft changed. Reload it before saving another revision."))
+    renderStudioPane()
+    fireEvent.click(screen.getByTestId("studio-artifact-edit-edit-conflict"))
+    fireEvent.change(await screen.findByLabelText("Flashcard front 1"), { target: { value: "Keep my unsaved edit" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(editIO.save).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole("alert")).toHaveTextContent("This saved draft changed")
+    expect(screen.getByDisplayValue("Keep my unsaved edit")).toBeInTheDocument()
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+  })
+
+  it.each(["account", "workspace"] as const)("retires a held editor save on %s change without publishing its acknowledgement", async (boundary) => {
+    ConfigProvider.config({ holderRender: children =>
+      <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider> })
+    const original = bindWorkspaceArtifactOrigin({
+      id: "retired-editor", workspaceArtifactId: "retired-editor", workspaceArtifactVersion: 1,
+      type: "flashcards", title: "Private cards", status: "completed", content: "Original saved content",
+      data: { flashcards: [{ front: "Old front", back: "Old back" }] }, createdAt: new Date(),
+    } as GeneratedArtifact, "server:alice", "workspace-a")
+    workspaceStoreState.generatedArtifacts = [original]
+    let acknowledge!: (value: unknown) => void
+    editIO.save.mockReset().mockImplementationOnce(() => new Promise(resolve => { acknowledge = resolve }))
+    const view = renderStudioPane()
+    fireEvent.click(screen.getByTestId("studio-artifact-edit-retired-editor"))
+    fireEvent.change(await screen.findByLabelText("Flashcard front 1"), { target: { value: "Private unsaved edit" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(editIO.save).toHaveBeenCalledTimes(1))
+    if (boundary === "account") window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+    else workspaceStoreState.workspaceId = "other"
+    workspaceStoreState.generatedArtifacts = []
+    view.rerender(
+      <ConfigProvider theme={{ token: { motion: false } }}><StudioPane /></ConfigProvider>
+    )
+    await waitFor(() => expect(screen.queryByDisplayValue("Private unsaved edit")).not.toBeInTheDocument())
+    await act(async () => { acknowledge({ ...editIO.save.mock.calls[0][0], workspaceArtifactVersion: 2 }) })
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+  })
+
+  it("refuses a cached canonical editor card without a current ownership witness", async () => {
+    workspaceStoreState.generatedArtifacts = [{
+      id: "unverified-editor", workspaceArtifactId: "unverified-editor", workspaceArtifactVersion: 1,
+      type: "flashcards", title: "Cached cards", status: "completed", content: "Cached content",
+      data: { flashcards: [{ front: "Old front", back: "Old back" }] }, createdAt: new Date(),
+    }]
+    editIO.save.mockReset()
+    renderStudioPane()
+    fireEvent.click(screen.getByTestId("studio-artifact-edit-unverified-editor"))
+    fireEvent.change(await screen.findByLabelText("Flashcard front 1"), { target: { value: "Keep my draft edit" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("Reopen this output")
+    expect(editIO.save).not.toHaveBeenCalled()
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
+    expect(screen.getByDisplayValue("Keep my draft edit")).toBeInTheDocument()
+  })
+
 })

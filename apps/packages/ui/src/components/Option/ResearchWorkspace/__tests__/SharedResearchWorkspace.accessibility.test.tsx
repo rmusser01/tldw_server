@@ -211,7 +211,9 @@ describe("SharedResearchWorkspace accessibility", () => {
 
     resolveAsk(chatResponse)
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Answer added")
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("Answer added")
+    )
     expect(scrollIntoView).toHaveBeenCalledTimes(1)
   })
 })

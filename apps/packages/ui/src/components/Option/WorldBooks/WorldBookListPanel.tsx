@@ -178,6 +178,7 @@ export const WorldBookListPanel: React.FC<WorldBookListPanelProps> = ({
       className="min-w-0 max-w-full overflow-x-auto pb-1"
       role="region"
       aria-label="World books table"
+      data-testid="world-books-table"
     >
       {tableJsx}
     </div>
@@ -188,7 +189,7 @@ export const WorldBookListPanel: React.FC<WorldBookListPanelProps> = ({
       worldBooks.find((b: any) => b.id === selectedWorldBookId)?.name ||
       "Selected"
     return (
-      <nav aria-label="World books list">
+      <nav aria-label="World books list" data-testid="world-books-library">
         <details className="rounded border border-border">
           <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
             World Books — {selectedName}
@@ -199,5 +200,5 @@ export const WorldBookListPanel: React.FC<WorldBookListPanelProps> = ({
     )
   }
 
-  return <nav aria-label="World books list">{scrollableTable}</nav>
+  return <nav aria-label="World books list" data-testid="world-books-library">{scrollableTable}</nav>
 }

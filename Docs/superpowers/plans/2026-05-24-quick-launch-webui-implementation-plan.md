@@ -62,7 +62,7 @@
 **Files:**
 - Modify: `README.md`
 - Modify: `Docs/Getting_Started/Profile_Local_Single_User.md`
-- Modify: `backlog/tasks/task-500 - Add-WebUI-support-to-OS-quick-launch-scripts.md`
+- Modify: `backlog/tasks/task-15009 - Add-WebUI-support-to-OS-quick-launch-scripts.md`
 - Modify: `Docs/superpowers/plans/2026-05-24-quick-launch-webui-implementation-plan.md`
 
 - [x] Update local quick-launch docs so root scripts are described as API + WebUI launchers by default, with API-only and WebUI-only modes.

@@ -1168,6 +1168,8 @@ def post_message_to_conversation(
     image_mime_type: Optional[str] = None,
     sender_override: Optional[str] = None,
     owner_user_id: int | str | None = None,
+    *,
+    metadata_extra: dict[str, Any] | None = None,
 ) -> Optional[str]:
     """Post a new message to a specified conversation."""
 
@@ -1241,7 +1243,16 @@ def post_message_to_conversation(
                     ) from exc
                 check_message_limit(conversation_id, current_message_count + 1)
 
-            message_id = db.add_message(msg_payload)
+            if metadata_extra is None:
+                message_id = db.add_message(msg_payload)
+            else:
+                # A citation failure must not acknowledge an uncited saved answer.
+                with db.transaction() as conn:
+                    message_id = db.add_message(msg_payload, conn=conn)
+                    if not message_id or not db.set_message_metadata_extra(
+                        message_id, metadata_extra, conn=conn, _advance_history=False
+                    ):
+                        raise InputError("Failed to retain message references")
     except (CharactersRAGDBError, InputError, ConflictError) as exc:
         logger.error(
             "Error posting message from '{}' to conversation {}: {}",
@@ -1518,12 +1529,23 @@ def remove_message_from_conversation(
     db: CharactersRAGDB,
     message_id: str,
     expected_version: int,
+    *,
+    require_leaf: bool = False,
+    expected_revision: str | None = None,
 ) -> bool:
     """Soft-delete a message from a conversation."""
 
     try:
+        if require_leaf or expected_revision is not None:
+            return bool(
+                db.soft_delete_message(
+                    message_id, expected_version, require_leaf=require_leaf, expected_revision=expected_revision
+                )
+            )
         return bool(db.soft_delete_message(message_id, expected_version))
-    except (CharactersRAGDBError, ConflictError) as exc:
+    except ConflictError:
+        raise
+    except CharactersRAGDBError as exc:
         logger.error("Failed to remove message ID {}: {}", message_id, exc)
         return False
     except _CHAR_CHAT_NONCRITICAL_EXCEPTIONS as exc:

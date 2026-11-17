@@ -17,6 +17,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
@@ -79,9 +80,9 @@ def _patch_upload(monkeypatch: pytest.MonkeyPatch, quota_service: Any) -> list[s
     return processed
 
 
-def _orchestrate() -> Any:
+def _orchestrate(media_type: str = "document", **kwargs: Any) -> Any:
     form_data = SimpleNamespace(
-        media_type="document",
+        media_type=media_type,
         urls=[],
         keep_original_file=False,
         perform_chunking=False,
@@ -95,11 +96,13 @@ def _orchestrate() -> Any:
         db=_FakeDB(),
         current_user=SimpleNamespace(id=1),
         usage_log=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
+        **kwargs,
     )
 
 
 @pytest.mark.asyncio
 async def test_cancelling_add_media_mid_persistence_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "0")
     quota_service = _BlockingQuotaService()
     processed = _patch_upload(monkeypatch, quota_service)
 
@@ -122,6 +125,51 @@ async def test_over_quota_upload_is_rejected_with_413(monkeypatch: pytest.Monkey
     assert exc_info.value.status_code == 413
     assert "Storage quota exceeded" in str(exc_info.value.detail)
     assert processed == []
+
+
+@pytest.mark.asyncio
+async def test_analysis_refusal_does_not_record_upload_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    quota_service = AsyncMock()
+    quota_service.check_quota.return_value = (True, {})
+    processed = _patch_upload(monkeypatch, quota_service)
+    admit_analysis = AsyncMock(side_effect=HTTPException(status_code=429, detail="Monthly token quota exceeded"))
+    record_bytes = AsyncMock()
+    monkeypatch.setattr(persistence, "_enforce_and_record_media_bytes", record_bytes)
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "0")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _orchestrate(admit_after_duplicate_check=admit_analysis)
+
+    assert exc_info.value.status_code == 429
+    admit_analysis.assert_awaited_once()
+    record_bytes.assert_not_awaited()
+    assert processed == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_new_item", [False, True])
+async def test_batch_records_upload_bytes_once_after_precheck(monkeypatch: pytest.MonkeyPatch, has_new_item: bool) -> None:
+    quota_service = AsyncMock()
+    quota_service.check_quota.return_value = (True, {})
+    _patch_upload(monkeypatch, quota_service)
+    admit_analysis = AsyncMock()
+    record_bytes = AsyncMock()
+
+    async def batch(**kwargs: Any) -> list[dict[str, Any]]:
+        results = [{"status": "Skipped"}, {"status": "Error"}]
+        if has_new_item:
+            await kwargs["prepare_new_items"]()
+            results.append({"status": "Success"})
+        return results
+
+    monkeypatch.setattr(persistence, "process_batch_media", batch)
+    monkeypatch.setattr(persistence, "_enforce_and_record_media_bytes", record_bytes)
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "0")
+
+    await _orchestrate(media_type="audio", admit_after_duplicate_check=admit_analysis)
+
+    assert admit_analysis.await_count == int(has_new_item)
+    record_bytes.assert_awaited_once_with(1, 5)
 
 
 @pytest.mark.asyncio
@@ -171,20 +219,28 @@ async def test_over_quota_url_item_is_reported_as_that_items_error(
 
 
 @pytest.mark.asyncio
-async def test_upload_admitted_past_stale_column_when_quotas_off(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_upload_admitted_past_stale_column_when_quotas_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Quotas off: a real StorageQuotaService admits a 5 GB + 1 MB upload although users.storage_quota_mb says 5120."""
     from tldw_Server_API.app.core import config as config_module
 
     class _Pool:
         """One users row: used 100 MB, stale legacy column 5120."""
 
-        async def fetchone(self, _sql: str, _user_id: int):
-            """Return the users row."""
+        async def fetchone(self, sql: str, user_id: int):
+            """Keep legacy usage and the empty retained-storage ledger distinct."""
+            assert user_id == 1
+            if "native_chat_quota_reservations" in sql:
+                return {"bytes": 0, "count": 0}
+            assert "users" in sql
             return {"storage_used_mb": 100.0, "storage_quota_mb": 5120}
 
     monkeypatch.delenv("USAGE_QUOTAS_ENABLED", raising=False)
     monkeypatch.delenv("LIMIT_ENFORCEMENT_ENABLED", raising=False)
-    monkeypatch.setattr(config_module, "load_comprehensive_config", lambda *a, **k: None)
+    monkeypatch.setattr(
+        config_module, "load_comprehensive_config", lambda *a, **k: None
+    )
     svc = storage_quota_service.StorageQuotaService(db_pool=_Pool())
     svc._initialized = True
     processed = _patch_upload(monkeypatch, svc)
@@ -199,3 +255,75 @@ async def test_upload_admitted_past_stale_column_when_quotas_off(monkeypatch: py
     monkeypatch.setattr(input_sourcing, "save_uploaded_files", sparse_upload)
     await _orchestrate()
     assert processed, "the upload was rejected although quotas are off"
+
+
+@pytest.fixture()
+def one_ingest_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """limits.media_concurrent_jobs = 1 for every user, with a fresh in-memory lease store (TASK-13435)."""
+    from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor
+    from tldw_Server_API.app.core.Usage import concurrency_quota
+
+    async def _one(_user_id: int, key: str) -> object:
+        """A limit of 1 for concurrent media ingests; every other key unset."""
+        return 1 if key == "limits.media_concurrent_jobs" else None
+
+    monkeypatch.setattr(concurrency_quota, "user_quota", _one)
+    monkeypatch.setattr(concurrency_quota, "_governor", MemoryResourceGovernor(policy_loader=concurrency_quota._QuotaPolicies()))
+
+
+@pytest.mark.asyncio
+async def test_second_ingest_is_refused_while_the_first_runs_and_admitted_once_it_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch, one_ingest_at_a_time: None
+) -> None:
+    """At limit 1 a second /media/add gets 429 before any work; cancelling the first frees the slot."""
+    quota_service = _BlockingQuotaService()
+    _patch_upload(monkeypatch, quota_service)
+    first = asyncio.create_task(_orchestrate())
+    await asyncio.wait_for(quota_service.entered.wait(), timeout=10)
+    processed = _patch_upload(monkeypatch, _RejectingQuotaService())
+    metrics: list[tuple[Any, str]] = []
+    monkeypatch.setattr(
+        persistence, "_emit_ingestion_request_metric", lambda *, media_type, outcome: metrics.append((media_type, outcome))
+    )
+
+    with pytest.raises(HTTPException) as refused:
+        await _orchestrate()
+    assert metrics == [("document", "error")]
+    assert refused.value.status_code == 429
+    assert refused.value.detail == "Media ingestion concurrency limit reached."
+    assert int(refused.value.headers["Retry-After"]) >= 1
+
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(first, timeout=10)
+    with pytest.raises(HTTPException) as after_cancel:
+        await _orchestrate()
+    assert after_cancel.value.status_code == 413
+    assert processed == []
+
+
+@pytest.mark.asyncio
+async def test_a_finished_ingest_gives_its_slot_back(monkeypatch: pytest.MonkeyPatch, one_ingest_at_a_time: None) -> None:
+    """At limit 1, two ingests one after the other both run: a successful request releases its slot."""
+
+    class _AdmittingQuotaService:
+        """A storage quota with room for everything."""
+
+        async def check_quota(self, user_id: int, new_bytes: int, raise_on_exceed: bool = False):
+            """Admit the upload."""
+            return True, {"current_usage_mb": 0, "new_size_mb": 1, "quota_mb": None, "available_mb": None}
+
+    processed = _patch_upload(monkeypatch, _AdmittingQuotaService())
+    await _orchestrate()
+    await _orchestrate()
+    assert len(processed) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_ingest_gives_its_slot_back(monkeypatch: pytest.MonkeyPatch, one_ingest_at_a_time: None) -> None:
+    """An ingest that fails after admission (413) releases its slot: the next one fails on its own merits, not 429."""
+    _patch_upload(monkeypatch, _RejectingQuotaService())
+    for _ in range(2):
+        with pytest.raises(HTTPException) as exc_info:
+            await _orchestrate()
+        assert exc_info.value.status_code == 413

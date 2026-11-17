@@ -3,15 +3,15 @@ id: TASK-12935
 title: Implement chat document upload sidepanel handoff
 status: Done
 assignee: []
-created_date: '2026-07-09 06:03'
-updated_date: '2026-07-09 06:23'
+created_date: 2026-07-09 06:03
+updated_date: 2026-07-09 06:23
 labels:
-  - implementation
-  - chat
-  - frontend
-  - extension
+- implementation
+- chat
+- frontend
+- extension
 dependencies:
-  - TASK-12092
+- TASK-15040
 ---
 
 ## Description

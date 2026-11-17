@@ -192,12 +192,12 @@ def test_start_run_rejects_both_session_and_base_image(monkeypatch) -> None:
 
 
 def test_session_backed_run_inherits_session_defaults(monkeypatch) -> None:
-    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     captured: dict[str, Any] = {}
 
     def _fake_start_run_scaffold(*, user_id, spec, spec_version, idem_key, raw_body, explicit_fields=None):
-        session = sb._service.get_session(spec.session_id) if spec.session_id else None
+        session = default_service.sandbox_service.get_session(spec.session_id) if spec.session_id else None
         if session is not None and explicit_fields is not None:
             if "runtime" not in explicit_fields and session.runtime is not None:
                 spec.runtime = session.runtime
@@ -227,7 +227,7 @@ def test_session_backed_run_inherits_session_defaults(monkeypatch) -> None:
             started_at=datetime.now(timezone.utc),
         )
 
-    monkeypatch.setattr(sb._service, "start_run_scaffold", _fake_start_run_scaffold)
+    monkeypatch.setattr(default_service.sandbox_service, "start_run_scaffold", _fake_start_run_scaffold)
 
     with _client(monkeypatch) as client:
         session_resp = client.post(
@@ -272,6 +272,7 @@ def test_session_backed_run_inherits_session_defaults(monkeypatch) -> None:
 
 def test_session_backed_run_refreshes_session_defaults_after_prelock_work(monkeypatch, tmp_path) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     old_session = Session(
         id="sess-refresh",
@@ -295,9 +296,9 @@ def test_session_backed_run_refreshes_session_defaults_after_prelock_work(monkey
     captured: dict[str, Any] = {}
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb._service, "get_session", lambda session_id: state["session"])
-    monkeypatch.setattr(sb._service._orch, "get_session", lambda session_id, **kwargs: state["session"])
-    monkeypatch.setattr(sb._service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service, "get_session", lambda session_id: state["session"])
+    monkeypatch.setattr(default_service.sandbox_service._orch, "get_session", lambda session_id, **kwargs: state["session"])
+    monkeypatch.setattr(default_service.sandbox_service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
 
     def _switch_session_and_parse(files):
         state["session"] = new_session
@@ -315,8 +316,8 @@ def test_session_backed_run_refreshes_session_defaults_after_prelock_work(monkey
             started_at=datetime.now(timezone.utc),
         )
 
-    monkeypatch.setattr(sb._service, "parse_inline_files", _switch_session_and_parse)
-    monkeypatch.setattr(sb._service._orch, "enqueue_run", _capture_enqueue)
+    monkeypatch.setattr(default_service.sandbox_service, "parse_inline_files", _switch_session_and_parse)
+    monkeypatch.setattr(default_service.sandbox_service._orch, "enqueue_run", _capture_enqueue)
 
     with _client(monkeypatch) as client:
         run_resp = client.post(
@@ -338,10 +339,11 @@ def test_session_backed_run_refreshes_session_defaults_after_prelock_work(monkey
 
 def test_session_backed_run_returns_not_found_if_session_disappears_during_start(monkeypatch) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
     monkeypatch.setattr(
-        sb._service,
+        default_service.sandbox_service,
         "get_session",
         lambda session_id: SimpleNamespace(
             runtime=RuntimeType.docker,
@@ -362,7 +364,7 @@ def test_session_backed_run_returns_not_found_if_session_disappears_during_start
     def _raise_session_not_found(*, user_id, spec, spec_version, idem_key, raw_body, explicit_fields=None):
         raise ValueError("session_not_found")
 
-    monkeypatch.setattr(sb._service, "start_run_scaffold", _raise_session_not_found)
+    monkeypatch.setattr(default_service.sandbox_service, "start_run_scaffold", _raise_session_not_found)
 
     with _client(monkeypatch) as client:
         response = client.post(
@@ -418,6 +420,7 @@ def test_delete_session_cancels_and_drains_active_runs(monkeypatch) -> None:
 
 def test_restore_snapshot_returns_conflict_when_active_runs_exist(monkeypatch) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
 
@@ -427,7 +430,7 @@ def test_restore_snapshot_returns_conflict_when_active_runs_exist(monkeypatch) -
             active_runs=1,
         )
 
-    monkeypatch.setattr(sb._service, "restore_snapshot", _raise_active_runs)
+    monkeypatch.setattr(default_service.sandbox_service, "restore_snapshot", _raise_active_runs)
 
     with _client(monkeypatch) as client:
         response = client.post(
@@ -447,6 +450,7 @@ def test_restore_snapshot_returns_conflict_when_active_runs_exist(monkeypatch) -
 
 def test_create_snapshot_returns_conflict_when_active_runs_exist(monkeypatch) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
 
@@ -456,7 +460,7 @@ def test_create_snapshot_returns_conflict_when_active_runs_exist(monkeypatch) ->
             active_runs=1,
         )
 
-    monkeypatch.setattr(sb._service, "create_snapshot", _raise_active_runs)
+    monkeypatch.setattr(default_service.sandbox_service, "create_snapshot", _raise_active_runs)
 
     with _client(monkeypatch) as client:
         response = client.post("/api/v1/sandbox/sessions/sess-snapshot-busy/snapshot")
@@ -473,6 +477,7 @@ def test_create_snapshot_returns_conflict_when_active_runs_exist(monkeypatch) ->
 
 def test_clone_session_returns_conflict_when_active_runs_exist(monkeypatch) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
 
@@ -482,7 +487,7 @@ def test_clone_session_returns_conflict_when_active_runs_exist(monkeypatch) -> N
             active_runs=1,
         )
 
-    monkeypatch.setattr(sb._service, "clone_session", _raise_active_runs)
+    monkeypatch.setattr(default_service.sandbox_service, "clone_session", _raise_active_runs)
 
     with _client(monkeypatch) as client:
         response = client.post(
@@ -502,6 +507,7 @@ def test_clone_session_returns_conflict_when_active_runs_exist(monkeypatch) -> N
 
 def test_create_snapshot_sanitizes_oserror(monkeypatch) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
 
@@ -509,7 +515,7 @@ def test_create_snapshot_sanitizes_oserror(monkeypatch) -> None:
         _ = session_id
         raise OSError("snapshot path exploded")
 
-    monkeypatch.setattr(sb._service, "create_snapshot", _raise_oserror)
+    monkeypatch.setattr(default_service.sandbox_service, "create_snapshot", _raise_oserror)
 
     with _client(monkeypatch) as client:
         response = client.post("/api/v1/sandbox/sessions/sess-snapshot-error/snapshot")
@@ -520,6 +526,7 @@ def test_create_snapshot_sanitizes_oserror(monkeypatch) -> None:
 
 def test_restore_snapshot_sanitizes_oserror(monkeypatch) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
 
@@ -527,7 +534,7 @@ def test_restore_snapshot_sanitizes_oserror(monkeypatch) -> None:
         _ = (session_id, snapshot_id)
         raise OSError("snapshot restore exploded")
 
-    monkeypatch.setattr(sb._service, "restore_snapshot", _raise_oserror)
+    monkeypatch.setattr(default_service.sandbox_service, "restore_snapshot", _raise_oserror)
 
     with _client(monkeypatch) as client:
         response = client.post(
@@ -541,6 +548,7 @@ def test_restore_snapshot_sanitizes_oserror(monkeypatch) -> None:
 
 def test_clone_session_sanitizes_oserror(monkeypatch) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
 
@@ -548,7 +556,7 @@ def test_clone_session_sanitizes_oserror(monkeypatch) -> None:
         _ = (session_id, new_name)
         raise OSError("session clone exploded")
 
-    monkeypatch.setattr(sb._service, "clone_session", _raise_oserror)
+    monkeypatch.setattr(default_service.sandbox_service, "clone_session", _raise_oserror)
 
     with _client(monkeypatch) as client:
         response = client.post(

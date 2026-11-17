@@ -9,6 +9,8 @@ Currently includes:
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import functools
 import hashlib
 import hmac
 import json
@@ -17,7 +19,8 @@ import os
 import platform
 import re
 import unicodedata
-from collections.abc import Callable, Iterator
+import weakref
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from typing import Any
 
 from tldw_Server_API.app.core.testing import is_truthy
@@ -59,6 +62,21 @@ def contains_tts_credential_fields(value: Any) -> bool:
     if isinstance(value, (list, tuple)):
         return any(contains_tts_credential_fields(item) for item in value)
     return False
+
+
+def tts_jobs_queue() -> str:
+    """The Jobs queue for long-form TTS jobs, shared by the enqueueing endpoint and the TTS worker.
+
+    The audio pipeline workers read the audio domain's ``default`` and ``transcribe`` queues
+    without a job-type filter, so a TTS job there would be taken and failed as an unknown job
+    type. Those two names are refused rather than silently reviving that collision.
+    """
+    queue = (os.getenv("TTS_JOBS_QUEUE") or "").strip() or "tts"
+    if queue in {"default", "transcribe"}:
+        raise ValueError(
+            f"TTS_JOBS_QUEUE must not be {queue!r}: the audio pipeline workers read it without a job-type filter"
+        )
+    return queue
 
 
 def parse_bool(value: Any, default: bool | None = False) -> bool:
@@ -108,6 +126,61 @@ async def run_tts_blocking_next(iterator: Iterator[Any], sentinel: Any) -> Any:
             return sentinel
 
     return await asyncio.to_thread(_next_item)
+
+
+@contextlib.asynccontextmanager
+async def hold_tts_engine(lock: asyncio.Lock) -> AsyncIterator[Callable[..., Awaitable[Any]]]:
+    """Hold a local TTS engine's lock, yielding ``run``, which makes one engine call on a worker thread.
+
+    ``asyncio.to_thread`` cannot stop a thread, so when the holder is cancelled mid-call (a client
+    disconnect), the lock passes to the next caller only once that call returns. Waiting for the
+    thread inside the cancelled holder does not work: anyio re-cancels the wait. A stream holds the
+    lock across chunks by pulling each one with ``await run(next, iterator, sentinel)``.
+    """
+    await lock.acquire()
+    last_call: asyncio.Future | None = None
+
+    async def run(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        nonlocal last_call
+        last_call = asyncio.ensure_future(run_tts_blocking_call(func, *args, **kwargs))
+        return await asyncio.shield(last_call)
+
+    try:
+        yield run
+    finally:
+        if last_call is None or last_call.done():
+            lock.release()
+        else:
+            # ponytail: a cancelled model load's result is discarded, so the next holder loads again
+            # (after it, not alongside it); store the model from the thread if that cost matters.
+            last_call.add_done_callback(functools.partial(_release_engine_lock, lock))
+
+
+_MODEL_LOAD_LOCKS: weakref.WeakValueDictionary[tuple[asyncio.AbstractEventLoop, str, str], asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
+
+
+def tts_model_load_lock(provider: str, model_key: str) -> asyncio.Lock:
+    """The lock every adapter instance takes, through hold_tts_engine, to load ``model_key`` for ``provider``.
+
+    Shared across instances, so a load on a new adapter (a request-owned override adapter, a
+    re-registration, a registry retry) waits for another instance's load thread, even one whose caller
+    was cancelled. Keyed by event loop too, as an asyncio.Lock serves one loop. An entry lives only
+    while a holder or waiter keeps its lock.
+    """
+    key = (asyncio.get_running_loop(), provider, model_key)
+    lock = _MODEL_LOAD_LOCKS.get(key)
+    if lock is None:
+        lock = _MODEL_LOAD_LOCKS[key] = asyncio.Lock()
+    return lock
+
+
+def _release_engine_lock(lock: asyncio.Lock, call: asyncio.Future) -> None:
+    """Release a cancelled holder's engine lock once its engine call returns."""
+    lock.release()
+    if not call.cancelled():
+        call.exception()  # its caller is gone; don't let asyncio log the error as never retrieved
 
 
 def estimate_max_new_tokens(

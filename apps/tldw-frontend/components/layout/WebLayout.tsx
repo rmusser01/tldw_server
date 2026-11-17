@@ -1,9 +1,10 @@
-import { HistorySelectionProvider } from '@/hooks/chat/useHistorySelection';
+import { captureChatDraftSource } from '@/hooks/chat/chat-draft-transition';
+import { HistorySelectionProvider, useHistorySelectionContext } from '@/hooks/chat/useHistorySelection';
 import { WorkspaceChatRouteSearchContext } from '@/hooks/chat/useWorkspaceChatCheckpoint';
 import { formatSelectedHistory } from '@/db/dexie/helpers';
 import React, { lazy, Suspense, useState, useContext, useCallback } from 'react';
 
-import { Drawer, Tooltip } from 'antd';
+import { Drawer, Tooltip, message } from 'antd';
 import { EraserIcon, XIcon } from 'lucide-react';
 import { IconButton } from '@/components/Common/IconButton';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -63,6 +64,7 @@ import {
 } from '@web/components/notifications/NotificationLifecycleProvider';
 import { NotificationToastBridge } from '@web/components/notifications/NotificationToastBridge';
 import { CommandPaletteHost } from '@/components/Common/CommandPaletteHost';
+import { openModelSelector } from '@/utils/model-selector-events';
 import {
   useConnectionActions,
   useConnectionState,
@@ -74,17 +76,17 @@ const TimelineModal = lazy(() =>
   import('@/components/Timeline').then((m) => ({ default: m.TimelineModal }))
 );
 
-const KeyboardShortcutsModal = lazy(() =>
-  import('@/components/Common/KeyboardShortcutsModal').then((m) => ({
-    default: m.KeyboardShortcutsModal,
-  }))
-);
-
 const TutorialRunner = lazy(() =>
   import('@/components/Common/TutorialRunner').then((m) => ({
     default: m.TutorialRunner,
   }))
 );
+const TutorialPrompt = lazy(() =>
+  import('@/components/Common/TutorialPrompt').then((m) => ({
+    default: m.TutorialPrompt,
+  }))
+);
+const PAGE_OWNED_TUTORIAL_ROUTES = ['/research-workspace'];
 import { useConfirmDanger } from '@/components/Common/confirm-danger';
 import { DemoModeProvider, useDemoMode } from '@/context/demo-mode';
 
@@ -115,6 +117,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const confirmDanger = useConfirmDanger();
   const isLayoutEffectsOwner = useLayoutEffectsOwner({ prefer: true });
   useStorageMigrations(isLayoutEffectsOwner);
+  const shellSidebarEnabled = !hideHeader && !hideSidebar;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const activeTutorialId = useTutorialStore((state) => state.activeTutorialId);
   React.useEffect(() => {
@@ -142,9 +145,17 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   } = useNotificationLifecycle();
   const handleOpenNotifications = useCallback(() => navigate('/notifications'), [navigate]);
   const location = useLocation();
+  const shellCommandsEnabled = location.pathname !== '/__debug__/sidepanel-chat';
   const historyId = useStoreMessageOption((state) => state.historyId);
   const serverChatId = useStoreMessageOption((state) => state.serverChatId);
   const mobileSidebarPathRef = React.useRef(location.pathname);
+  const sidebarRouteKey = JSON.stringify([
+    location.key,
+    location.pathname,
+    location.search,
+    location.hash,
+  ]);
+  const pendingSidebarOpenRef = React.useRef<string | null>(null);
   const {
     phase,
     isConnected,
@@ -175,8 +186,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const isChatScreen = location.pathname === '/chat';
   const shouldRenderChatSidebar =
     showChatSidebar &&
-    !hideHeader &&
-    !hideSidebar &&
+    shellSidebarEnabled &&
     !isMobileViewport;
   const headerSidebarCollapsed = showChatSidebar
     ? isMobileViewport
@@ -199,6 +209,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           backgroundRepeat: 'no-repeat',
         }
       : undefined;
+  const captureSelectionFence = useHistorySelectionContext()?.fence;
   const { clearChat, useOCR, chatMode, setChatMode, webSearch, setWebSearch } = useMessageOption();
   const queryClient = useQueryClient();
   const {
@@ -330,7 +341,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 
   // Create toggle function for sidebar
   const toggleSidebar = () => {
-    if (hideSidebar) return;
+    if (!shellSidebarEnabled) return;
     if (showChatSidebar && !hideHeader) {
       if (isMobileViewport) {
         if (!sidebarOpen) signalChatSidebarOpen();
@@ -363,22 +374,39 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   }, [isMobileViewport, showChatSidebar, sidebarOpen, location.pathname]);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined' || !showChatSidebar) return;
-    const handler = () => {
-      if (hideSidebar) return;
-      signalChatSidebarOpen();
-      if (isMobileViewport) {
-        setSidebarOpen(true);
+    if (typeof window === 'undefined') return;
+    if (pendingSidebarOpenRef.current !== sidebarRouteKey) pendingSidebarOpenRef.current = null;
+    const open = () => {
+      if (showChatSidebar) {
+        signalChatSidebarOpen();
+        if (isMobileViewport) {
+          setSidebarOpen(true);
+          return;
+        }
+        setChatSidebarCollapsed(false);
         return;
       }
-      setChatSidebarCollapsed(false);
+      setSidebarOpen(true);
+    };
+    if (shellSidebarEnabled && pendingSidebarOpenRef.current === sidebarRouteKey) {
+      pendingSidebarOpenRef.current = null;
+      open();
+    }
+    const handler = () => {
+      if (!shellSidebarEnabled) {
+        pendingSidebarOpenRef.current = sidebarRouteKey;
+        return;
+      }
+      pendingSidebarOpenRef.current = null;
+      open();
     };
     window.addEventListener('tldw:open-chat-sidebar', handler);
     return () => {
       window.removeEventListener('tldw:open-chat-sidebar', handler);
     };
   }, [
-    hideSidebar,
+    shellSidebarEnabled,
+    sidebarRouteKey,
     isMobileViewport,
     setChatSidebarCollapsed,
     showChatSidebar,
@@ -396,8 +424,9 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     onToggleRag: () => setChatMode(chatMode === 'rag' ? 'normal' : 'rag'),
     onToggleWebSearch: () => setWebSearch(!webSearch),
     onIngestPage: handleIngestPage,
-    onSwitchModel: () => setOpenModelSettings(true),
-    onToggleSidebar: toggleSidebar,
+    // The composer's model picker when /chat is open, else chat settings (AX-01).
+    onSwitchModel: hideHeader ? undefined : () => openModelSelector() || setOpenModelSettings(true),
+    onToggleSidebar: shellSidebarEnabled ? toggleSidebar : undefined,
   };
 
   // Quick Chat Helper toggle
@@ -407,9 +436,9 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   };
 
   // Initialize shortcuts
-  useChatShortcuts(clearChat, true);
-  useSidebarShortcuts(toggleSidebar, true);
-  useQuickChatShortcuts(toggleQuickChat, true);
+  useChatShortcuts(clearChat, shellCommandsEnabled);
+  useSidebarShortcuts(toggleSidebar, shellSidebarEnabled);
+  useQuickChatShortcuts(toggleQuickChat, shellSidebarEnabled);
   useModeNavigationShortcuts(navigate, !hideHeader);
 
   React.useEffect(() => {
@@ -527,12 +556,12 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
               <div
                 key="shell-header"
                 className={classNames(
-                  'relative z-20 w-full min-w-0',
+                  'relative z-30 w-full min-w-0',
                   isViewportConstrainedRoute ? 'shrink-0' : undefined
                 )}
               >
                 <Header
-                  onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
+                  onToggleSidebar={shellSidebarEnabled ? toggleSidebar : undefined}
                   sidebarCollapsed={headerSidebarCollapsed}
                   notificationCount={notificationCount}
                   notificationState={notificationState}
@@ -550,7 +579,9 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
               }
               className={classNames(
                 hideHeader
-                  ? 'relative flex min-h-screen flex-1 flex-col'
+                  ? hideHeaderViewportShell
+                    ? 'relative flex min-h-0 flex-1 flex-col'
+                    : 'relative flex min-h-screen flex-1 flex-col'
                   : 'relative flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col',
                 hideHeader
                   ? hideHeaderViewportShell
@@ -564,27 +595,18 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
             </div>
           </div>
           {/* Mobile Drawer for ChatSidebar when the persistent sidebar is enabled */}
-          {!hideHeader && showChatSidebar && !hideSidebar && isMobileViewport && (
+          {shellSidebarEnabled && showChatSidebar && isMobileViewport && (
             <Drawer
-              title={
-                <div className="flex items-center justify-between">
-                  <span>{t('common:chatSidebar.title', 'Chats')}</span>
-                  <IconButton
-                    onClick={() => setSidebarOpen(false)}
-                    ariaLabel={t('common:close', { defaultValue: 'Close' }) as string}
-                    title={t('common:close', { defaultValue: 'Close' }) as string}
-                    className="h-10 w-10 sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0"
-                  >
-                    <XIcon className="h-5 w-5 text-text-muted" />
-                  </IconButton>
-                </div>
-              }
+              title={t('common:chatSidebar.title', 'Chats')}
+              styles={{ header: { display: 'none' }, body: { padding: 0, overflow: 'hidden' } }}
               placement="left"
               closeIcon={null}
               onClose={() => setSidebarOpen(false)}
               open={sidebarOpen}
+              forceRender={quickChatOpen}
             >
               <ChatSidebar
+                className="!h-full !w-full"
                 collapsed={false}
                 openResetKey={chatSidebarOpenResetKey}
                 onToggleCollapse={() => setSidebarOpen(false)}
@@ -593,7 +615,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
             </Drawer>
           )}
           {/* Legacy Drawer sidebar - only shown when new ChatSidebar feature is disabled */}
-          {!hideHeader && !showChatSidebar && !hideSidebar && (
+          {shellSidebarEnabled && !showChatSidebar && (
             <Drawer
               title={
                 <div className="flex items-center justify-between">
@@ -627,6 +649,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                           }) as string
                         }
                         onClick={async () => {
+                          const source = captureChatDraftSource(captureSelectionFence?.());
                           const ok = await confirmDanger({
                             title: t('common:confirmTitle', {
                               defaultValue: 'Please confirm',
@@ -643,14 +666,19 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                             cancelText: t('common:cancel', { defaultValue: 'Cancel' }),
                           });
 
-                          if (!ok) return;
+                          if (!ok || !source.isCurrent()) return;
+                          if (clearChat({ discardTemporaryConfirmed: true }) === false) return;
 
                           const db = new PageAssistDatabase();
-                          await db.deleteAllChatHistory();
+                          try {
+                            await db.deleteAllChatHistory();
+                          } catch {
+                            message.error(t('common:deleteHistoriesError'));
+                            return;
+                          }
                           await queryClient.invalidateQueries({
                             queryKey: ['fetchChatHistory'],
                           });
-                          clearChat();
                         }}
                         className="text-text-muted hover:text-text h-11 w-11 sm:h-7 sm:w-7 sm:min-w-0 sm:min-h-0"
                       >
@@ -679,7 +707,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           )}
 
           {/* Quick Chat Helper floating button (legacy layout only) */}
-          {!hideHeader && !showChatSidebar && !hideSidebar && <QuickChatHelperButton />}
+          {shellSidebarEnabled && !showChatSidebar && <QuickChatHelperButton />}
 
           {/* Timeline Modal - lazy-loaded */}
           {!hideHeader && (
@@ -689,19 +717,18 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           )}
 
           {/* Command Palette - global keyboard shortcut ⌘K */}
-          <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
+          {shellCommandsEnabled && (
+            <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
+          )}
 
           {/* Shared walkthrough runner for route-level tour controls */}
           <Suspense fallback={null}>
             <TutorialRunner />
           </Suspense>
 
-          {/* Keyboard Shortcuts Help Modal - triggered by ? */}
-          {!hideHeader && (
-            <Suspense fallback={null}>
-              <KeyboardShortcutsModal />
-            </Suspense>
-          )}
+          <Suspense fallback={null}>
+            <TutorialPrompt excludedRoutes={PAGE_OWNED_TUTORIAL_ROUTES} />
+          </Suspense>
 
           {/* Quick Ingest Modal Host - listens for global open events */}
           <QuickIngestModalHost />
@@ -711,8 +738,13 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 
           <BuddyShellHost root="web" />
 
-          {/* Keep help events available when the header is hidden */}
-          {hideHeader && <PageHelpModalHost />}
+          {/* Keep page help available in every shell with its existing demand loading. */}
+          <PageHelpModalHost
+            modeNavigationEnabled={!hideHeader}
+            sidebarToggleEnabled={shellSidebarEnabled}
+            quickChatEnabled={shellSidebarEnabled}
+          />
+
 
           {/* Workflow landing modal + active workflow overlay */}
           <WorkflowIntegrationHost autoShowPaths={['/']} />
@@ -860,14 +892,15 @@ function RootLayoutShell({
       </NotificationRuntimeOwner>
     </DemoModeProvider>
   );
-  return ["/chat", "/chat-workspace", "/research-workspace"].includes(location.pathname) ? (
+  const isWorkspaceRoute = ['/chat-workspace', '/research-workspace'].includes(location.pathname);
+  const isPlaygroundRoute = ['/chat', '/model-playground'].includes(location.pathname);
+  return isWorkspaceRoute || isPlaygroundRoute ? (
     <HistorySelectionProvider
-      key={location.pathname}
-      storageKey={location.pathname === "/chat" ? "tldw-h1-playground-reference" : undefined}
+      key={isWorkspaceRoute ? location.pathname : 'chat'}
+      storageKey={isPlaygroundRoute ? 'tldw-h1-playground-reference' : undefined}
       onCapture={(capture) => {
         const display = formatSelectedHistory(capture);
-        useStoreMessageOption.getState().setHistory(display.history);
-        useStoreMessageOption.getState().setMessages(display.messages);
+        useStoreMessageOption.setState({ history: display.history, messages: display.messages });
       }}
     >
       <WorkspaceChatRouteSearchContext.Provider value={location.search}>
@@ -897,12 +930,8 @@ export default function OptionLayout(props: OptionLayoutProps) {
   const shell = useContext(LayoutShellContext);
   const globalShell = getGlobalShell();
   const ownerId = React.useId();
-  const externalShell =
-    Boolean(globalShell?.mounted) &&
-    (globalShell?.ownerId == null || globalShell.ownerId !== ownerId);
-
-  // Check if we're nested inside an existing shell
-  if (shell.inShell || externalShell) {
+  // A retiring route's global registration does not establish React ancestry.
+  if (shell.inShell) {
     return <NestedLayoutContent props={props} shell={shell} globalShell={globalShell} />;
   }
 

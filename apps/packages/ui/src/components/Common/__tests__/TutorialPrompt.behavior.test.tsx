@@ -1,8 +1,14 @@
 import React from "react"
-import { act, render } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { TutorialRun } from "@/store/tutorials"
 import { TutorialPrompt } from "../TutorialPrompt"
+import { useStoreMessageOption } from "@/store/option"
+import {
+  HistorySelectionContext,
+  type HistorySelectionController
+} from "@/hooks/chat/useHistorySelection"
 
 const infoMock = vi.fn()
 const destroyMock = vi.fn()
@@ -15,16 +21,14 @@ const tutorialStoreState = {
   markPromptSeen: markPromptSeenMock,
   startTutorial: startTutorialMock,
   isHelpModalOpen: false,
-  activeTutorialId: null as string | null
+  activeTutorialId: null as string | null,
+  activeRun: null as TutorialRun | null
 }
 
 type TutorialRouteOptions = {
   completedTutorialIds?: readonly string[]
 }
 
-const hasTutorialsForRouteMock = vi.fn<
-  (route: string, options?: TutorialRouteOptions) => boolean
->(() => true)
 const getPrimaryTutorialForRouteMock = vi.fn<
   (
     route: string,
@@ -33,11 +37,17 @@ const getPrimaryTutorialForRouteMock = vi.fn<
     id: string
     labelKey: string
     labelFallback: string
+    descriptionKey: string
+    descriptionFallback: string
+    requireFirstTargetForPrompt?: boolean
+    steps?: { target: string }[]
   }
 >(() => ({
   id: "playground-basics",
   labelKey: "tutorials:playground.basics.label",
-  labelFallback: "Chat Basics"
+  labelFallback: "Chat Basics",
+  descriptionKey: "tutorials:playground.basics.description",
+  descriptionFallback: "Start a conversation"
 }))
 
 let capturedNavigate: ReturnType<typeof useNavigate> | null = null
@@ -47,33 +57,19 @@ const NavigatorBridge = () => {
   return null
 }
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (_key: string, defaultValueOrOptions?: unknown) => {
-      if (typeof defaultValueOrOptions === "string") {
-        return defaultValueOrOptions
-      }
-      if (
-        defaultValueOrOptions &&
-        typeof defaultValueOrOptions === "object" &&
-        "defaultValue" in (defaultValueOrOptions as Record<string, unknown>)
-      ) {
-        return String(
-          (defaultValueOrOptions as Record<string, unknown>).defaultValue ?? _key
-        )
-      }
-      return _key
-    }
-  })
-}))
+const translate = (
+  _key: string,
+  fallback?: string | { defaultValue?: string }
+) => (typeof fallback === "string" ? fallback : fallback?.defaultValue ?? _key)
+const notificationApi = { info: infoMock, destroy: destroyMock }
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: translate }) }))
 
 vi.mock("antd", () => ({
+  ConfigProvider: ({ children }: React.PropsWithChildren) => <>{children}</>,
+  theme: { useToken: () => ({ token: { zIndexPopupBase: 1000 } }) },
   notification: {
     useNotification: () => [
-      {
-        info: infoMock,
-        destroy: destroyMock
-      },
+      notificationApi,
       <div key="tutorial-prompt-holder" data-testid="tutorial-prompt-holder" />
     ]
   },
@@ -89,18 +85,99 @@ vi.mock("antd", () => ({
 }))
 
 vi.mock("@/store/tutorials", () => ({
-  useTutorialStore: (selector: (state: typeof tutorialStoreState) => unknown) =>
-    selector(tutorialStoreState)
+  useTutorialStore: Object.assign(
+    (selector: (state: typeof tutorialStoreState) => unknown) =>
+      selector(tutorialStoreState),
+    { getState: () => tutorialStoreState }
+  )
 }))
 
-vi.mock("@/tutorials", () => ({
-  hasTutorialsForRoute: (route: string, options?: TutorialRouteOptions) =>
-    hasTutorialsForRouteMock(route, options),
+vi.mock("@/tutorials", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/tutorials")>()),
   getPrimaryTutorialForRoute: (route: string, options?: TutorialRouteOptions) =>
     getPrimaryTutorialForRouteMock(route, options)
 }))
 
 describe("TutorialPrompt behavior", () => {
+  it.each(["dismiss", "close", "unmount", "page navigation"])(
+    "an old notification Start refuses %s",
+    (boundary) => {
+      const mounted = render(
+        <MemoryRouter initialEntries={["/chat"]}>
+          <NavigatorBridge />
+          <TutorialPrompt />
+        </MemoryRouter>
+      )
+      act(() => vi.advanceTimersByTime(2000))
+      const notification = infoMock.mock.calls[0][0]
+      const originalStart = notification.btn.props.children[1].props
+        .onClick as () => void
+      if (boundary === "dismiss")
+        act(() => notification.btn.props.children[0].props.onClick())
+      else if (boundary === "close") act(() => notification.onClose())
+      else if (boundary === "unmount") mounted.unmount()
+      else act(() => capturedNavigate?.("/media"))
+      act(originalStart)
+      expect(startTutorialMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["before delay", "after display"])(
+    "unchanged source rerender %s retains one prompt",
+    (timing) => {
+      const content = () => (
+        <MemoryRouter initialEntries={["/chat"]}>
+          <TutorialPrompt />
+        </MemoryRouter>
+      )
+      const mounted = render(content())
+      if (timing === "after display") act(() => vi.advanceTimersByTime(2000))
+      mounted.rerender(content())
+      act(() => vi.advanceTimersByTime(2000))
+      expect(infoMock).toHaveBeenCalledOnce()
+      expect(destroyMock).not.toHaveBeenCalled()
+    }
+  )
+
+  // Review of #3119: the prompt is about the page, so a chat change on the
+  // same page (switching chats, New chat, a restored session) must not leave
+  // it on screen with a Start that silently does nothing.
+  it.each(["chat switch", "New", "H1"])(
+    "a visible prompt's Start still starts the tour after a %s on the same page",
+    (boundary) => {
+      let epoch = 1
+      const selection = {
+        fence: () => {
+          const captured = epoch
+          return () => captured === epoch
+        }
+      } as unknown as HistorySelectionController
+      render(
+        <MemoryRouter initialEntries={["/chat"]}>
+          <HistorySelectionContext.Provider value={selection}>
+            <NavigatorBridge />
+            <TutorialPrompt />
+          </HistorySelectionContext.Provider>
+        </MemoryRouter>
+      )
+      act(() => vi.advanceTimersByTime(2000))
+      const original = infoMock.mock.calls[0][0].btn
+      if (boundary === "chat switch")
+        act(() => {
+          capturedNavigate?.("/chat?chat=chat-x")
+          useStoreMessageOption.getState().setServerChatId("chat-x")
+        })
+      else if (boundary === "New")
+        act(() => useStoreMessageOption.getState().startNewChatDraft())
+      else epoch++
+      render(original)
+      fireEvent.click(screen.getByRole("button", { name: "Start tour" }))
+      expect(startTutorialMock).toHaveBeenCalledOnce()
+      expect(destroyMock).toHaveBeenCalledWith("tutorial-prompt-global")
+      expect(markPromptSeenMock).toHaveBeenCalledWith("/chat")
+    }
+  )
+
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
@@ -108,11 +185,111 @@ describe("TutorialPrompt behavior", () => {
     tutorialStoreState.completedTutorials = []
     tutorialStoreState.isHelpModalOpen = false
     tutorialStoreState.activeTutorialId = null
+    tutorialStoreState.activeRun = null
+    startTutorialMock.mockImplementation((_id, focusReturn) => {
+      tutorialStoreState.activeRun = { id: 1, focusReturn }
+    })
     capturedNavigate = null
   })
 
   afterEach(() => {
+    startTutorialMock.mock.calls.forEach((call) => call[1]?.dispose?.())
     vi.useRealTimers()
+  })
+
+  it("waits for an open modal to close before offering its walkthrough", async () => {
+    const content = (open: boolean) => (
+      <MemoryRouter initialEntries={["/chat"]}>
+        <TutorialPrompt />
+        <div hidden={!open}>
+          <div role="dialog" aria-modal="true">MCP tool settings</div>
+        </div>
+      </MemoryRouter>
+    )
+    const view = render(content(true))
+
+    act(() => vi.advanceTimersByTime(2000))
+    expect(infoMock).not.toHaveBeenCalled()
+    expect(markPromptSeenMock).not.toHaveBeenCalled()
+
+    await act(async () => view.rerender(content(false)))
+    expect(infoMock).toHaveBeenCalledOnce()
+  })
+
+  it.each(["before", "after"])(
+    "keeps the walkthrough available if the model picker opens %s the prompt",
+    async (when) => {
+      const content = (open: boolean) => (
+        <MemoryRouter initialEntries={["/chat"]}>
+          <TutorialPrompt />
+          <button
+            aria-expanded={open}
+            data-tutorial-prompt-blocker
+            type="button"
+          >
+            Choose a model
+          </button>
+        </MemoryRouter>
+      )
+      const view = render(content(when === "before"))
+      act(() => vi.advanceTimersByTime(2000))
+      const firstPrompt = infoMock.mock.calls[0]?.[0]
+
+      if (when === "before") {
+        expect(firstPrompt).toBeUndefined()
+      } else {
+        expect(firstPrompt).toBeDefined()
+        await act(async () => view.rerender(content(true)))
+        expect(destroyMock).toHaveBeenCalledWith("tutorial-prompt-global")
+        await act(async () =>
+          firstPrompt.btn.props.children[1].props.onClick()
+        )
+        expect(startTutorialMock).not.toHaveBeenCalled()
+      }
+
+      await act(async () => view.rerender(content(false)))
+      expect(infoMock).toHaveBeenCalledTimes(when === "before" ? 1 : 2)
+      // Ant Design can call the old close handler after a replacement appears.
+      act(() => firstPrompt?.onClose())
+      expect(markPromptSeenMock).not.toHaveBeenCalled()
+      const restoredPrompt = infoMock.mock.calls.at(-1)![0]
+      act(() => restoredPrompt.btn.props.children[1].props.onClick())
+      expect(startTutorialMock).toHaveBeenCalledOnce()
+      expect(markPromptSeenMock).toHaveBeenCalledWith("/chat")
+    }
+  )
+
+  it("waits for async page content before offering its walkthrough", async () => {
+    getPrimaryTutorialForRouteMock.mockReturnValueOnce({
+      id: "test-async-tour",
+      labelKey: "tutorials:testAsync",
+      labelFallback: "Test tour",
+      descriptionKey: "tutorials:testAsyncDescription",
+      descriptionFallback: "Review your account",
+      requireFirstTargetForPrompt: true,
+      steps: [{ target: "#test-async-tour-anchor" }]
+    })
+    const renderPrompt = (ready: boolean) => (
+      <MemoryRouter initialEntries={["/account"]}>
+        <TutorialPrompt />
+        {ready && <h1 id="test-async-tour-anchor">Account</h1>}
+      </MemoryRouter>
+    )
+    const view = render(renderPrompt(false))
+    act(() => vi.advanceTimersByTime(2000))
+    expect(infoMock).not.toHaveBeenCalled()
+    await act(async () => view.rerender(renderPrompt(true)))
+    expect(infoMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("honors page-owned guides even when the route has a trailing slash", () => {
+    render(
+      <MemoryRouter initialEntries={["/notes/"]}>
+        <TutorialPrompt excludedRoutes={["/notes", "/research-workspace"]} />
+      </MemoryRouter>
+    )
+    act(() => vi.advanceTimersByTime(2000))
+    expect(infoMock).not.toHaveBeenCalled()
   })
 
   it("shows a prompt with a single global notification key", () => {
@@ -138,6 +315,7 @@ describe("TutorialPrompt behavior", () => {
 
     expect(infoMock).toHaveBeenCalledTimes(1)
     expect(infoMock.mock.calls[0][0]?.key).toBe("tutorial-prompt-global")
+    expect(infoMock.mock.calls[0][0].description.props.children).toBe("Start a conversation")
   })
 
   it("passes completed tutorial IDs into tutorial route lookups", () => {
@@ -166,10 +344,6 @@ describe("TutorialPrompt behavior", () => {
     const expectedOptions = {
       completedTutorialIds: ["getting-started"]
     }
-    expect(hasTutorialsForRouteMock).toHaveBeenCalledWith(
-      "/knowledge",
-      expectedOptions
-    )
     expect(getPrimaryTutorialForRouteMock).toHaveBeenCalledWith(
       "/knowledge",
       expectedOptions
@@ -215,5 +389,62 @@ describe("TutorialPrompt behavior", () => {
       vi.advanceTimersByTime(10000)
     })
     expect(infoMock).toHaveBeenCalledTimes(2)
+  })
+
+  // XP-05: opening a note writes /notes?note=<id> to the address. A same-page
+  // address change before the prompt appears must not cancel it for the rest
+  // of the session; it is shown once the page settles.
+  it("still shows the prompt once after a same-page address change before it appears", () => {
+    render(
+      <MemoryRouter initialEntries={["/notes"]}>
+        <NavigatorBridge />
+        <TutorialPrompt />
+      </MemoryRouter>
+    )
+
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+    act(() => {
+      capturedNavigate?.("/notes?note=n1")
+    })
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(infoMock).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      capturedNavigate?.("/notes?note=n2")
+    })
+    act(() => {
+      vi.advanceTimersByTime(15000)
+    })
+    expect(infoMock).toHaveBeenCalledTimes(1)
+  })
+
+  // #3119: opening a note writes /notes?note=<id>. A prompt already on
+  // screen stays open through that same-page address change, and its Start
+  // still starts the tour.
+  it("keeps a visible prompt open through a same-page address change", () => {
+    render(
+      <MemoryRouter initialEntries={["/notes"]}>
+        <NavigatorBridge />
+        <TutorialPrompt />
+      </MemoryRouter>
+    )
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(infoMock).toHaveBeenCalledTimes(1)
+    const notification = infoMock.mock.calls[0][0]
+
+    act(() => {
+      capturedNavigate?.("/notes?note=n1#section")
+    })
+    expect(destroyMock).not.toHaveBeenCalled()
+
+    act(() => notification.btn.props.children[1].props.onClick())
+    expect(startTutorialMock).toHaveBeenCalledOnce()
+    expect(markPromptSeenMock).toHaveBeenCalledWith("/notes")
   })
 })

@@ -420,7 +420,9 @@ class _PruneDeleteCoordinationCursor:
 
     def execute(self, sql: Any, params: Any = None) -> Any:
         statement = str(sql).lstrip()
-        candidate_row_lock = statement.startswith("SELECT id FROM jobs") and "FOR UPDATE" in statement
+        candidate_row_lock = (
+            statement.startswith("SELECT ") and "FROM jobs WHERE " in statement and "FOR UPDATE" in statement
+        )
         if candidate_row_lock or statement.startswith("DELETE FROM jobs"):
             if not self._replay_detected.wait(timeout=5):
                 raise AssertionError("replay probe did not detect the existing row")

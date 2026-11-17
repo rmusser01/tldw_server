@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
-from tldw_Server_API.app.api.v1.schemas.synthetic_eval_schemas import (
+from tldw_Server_API.app.core.Evaluations.synthetic_eval_schemas import (
     SyntheticEvalProvenance,
 )
 

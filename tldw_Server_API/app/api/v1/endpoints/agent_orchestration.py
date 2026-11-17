@@ -21,7 +21,6 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, User,
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.Agent_Orchestration.artifact_promotion import (
     ACPArtifactPromotionResult,
-    promote_acp_completion_artifacts,
 )
 from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
     CompletionSignalValidationError,
@@ -29,7 +28,6 @@ from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
     validate_review_decision_signal,
     validate_task_completion_signal,
 )
-from tldw_Server_API.app.core.Agent_Orchestration.db_factory import get_orchestration_db
 from tldw_Server_API.app.core.Agent_Orchestration.models import ACPWorkspace, TaskStatus
 from tldw_Server_API.app.core.Agent_Orchestration.orchestration_service import (
     CycleDependencyError,
@@ -44,6 +42,8 @@ from tldw_Server_API.app.core.DB_Management.Orchestration_DB import (
     InvalidTransitionError,
     OrchestrationNotFoundError,
 )
+import tldw_Server_API.app.core.Agent_Orchestration.artifact_promotion as _artifact_promotion
+import tldw_Server_API.app.core.Agent_Orchestration.db_factory as _db_factory
 
 router = APIRouter(prefix="/agent-orchestration", tags=["agent-orchestration"])
 
@@ -92,6 +92,14 @@ async def _close_acp_session_safely(client: Any, session_id: str | None) -> None
             await result
     except Exception:
         logger.warning("Failed to close orchestration ACP session after dispatch failure")
+        return
+    try:
+        from tldw_Server_API.app.services.admin_acp_sessions_service import get_acp_session_store
+
+        store = await get_acp_session_store()
+        await store.close_session(session_id)
+    except Exception:
+        logger.warning("Failed to retire persisted orchestration ACP session after dispatch failure")
 
 
 _TASK_COMPLETION_SIGNAL_INSTRUCTIONS = """\
@@ -119,6 +127,29 @@ def _build_dispatch_prompt(task: Any) -> str:
         prompt_text += f"\n\nSuccess Criteria: {task.success_criteria}"
     prompt_text += f"\n\n{_TASK_COMPLETION_SIGNAL_INSTRUCTIONS}"
     return prompt_text
+
+
+async def _prompt_with_history(
+    client: Any,
+    session_id: str,
+    prompt: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Retain a settled ACP turn and expose native-only text to validation."""
+    from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import _record_acp_prompt
+
+    native_text: list[str] = []
+    result = await client.prompt(session_id, prompt, on_native_text=native_text.append)
+    assistant_text = "".join(native_text) or None
+    await _record_acp_prompt(
+        session_id=session_id,
+        prompt=prompt,
+        result=result,
+        assistant_text=assistant_text,
+    )
+    # Preserve legacy/direct result precedence and the original wire response.
+    if assistant_text and not any(result.get(key) for key in ("content", "message", "output", "text")):
+        return {**result, "content": assistant_text}
+    return result
 
 
 def _build_review_prompt(task: Any, completion_summary: str) -> str:
@@ -1157,7 +1188,7 @@ async def create_workspace(
 ) -> ACPWorkspaceResponse:
     """Create a new ACP workspace."""
     validated_path = _validate_workspace_root(payload.root_path)
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     try:
         ws = await _run_sync(
             lambda: db.create_workspace(
@@ -1190,7 +1221,7 @@ async def list_workspaces(
     user: User = Depends(get_request_user),
 ) -> list[ACPWorkspaceResponse]:
     """List all workspaces for the current user."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     workspaces = await _run_sync(
         lambda: db.list_workspaces(
             workspace_type=workspace_type,
@@ -1219,7 +1250,7 @@ async def ensure_canonical_workspace_bridge(
         raise HTTPException(status_code=404, detail="Workspace not found")
 
     validated_path = _validate_workspace_root(payload.root_path)
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     try:
         workspace = await _run_sync(
             lambda: _ensure_canonical_workspace_bridge_sync(
@@ -1250,7 +1281,7 @@ async def get_workspace(
     user: User = Depends(get_request_user),
 ) -> ACPWorkspaceResponse:
     """Get a workspace with children and MCP servers."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     ws = await _run_sync(lambda: db.get_workspace(workspace_id))
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
@@ -1278,7 +1309,7 @@ async def update_workspace(
     user: User = Depends(get_request_user),
 ) -> ACPWorkspaceResponse:
     """Update a workspace."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     update_fields = payload.model_dump(exclude_unset=True)
 
     # Validate new root_path if provided
@@ -1305,7 +1336,7 @@ async def delete_workspace(
     user: User = Depends(get_request_user),
 ) -> dict[str, Any]:
     """Delete a workspace. Projects are unbound (SET NULL), not deleted."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     deleted = await _run_sync(lambda: db.delete_workspace(workspace_id))
     if not deleted:
         raise HTTPException(status_code=404, detail="Workspace not found")
@@ -1328,7 +1359,7 @@ async def check_workspace_health(
     user: User = Depends(get_request_user),
 ) -> dict[str, Any]:
     """On-demand health check for a single workspace."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     ws = await _run_sync(lambda: db.get_workspace(workspace_id))
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
@@ -1364,7 +1395,7 @@ async def refresh_all_workspace_health(
     user: User = Depends(get_request_user),
 ) -> list[dict[str, Any]]:
     """Refresh health status for all workspaces of the current user."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
 
     from tldw_Server_API.app.services.workspace_health_service import WorkspaceHealthService
 
@@ -1389,7 +1420,7 @@ async def list_workspace_mcp_servers(
     user: User = Depends(get_request_user),
 ) -> list[dict[str, Any]]:
     """List MCP servers configured for a workspace."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     ws = await _run_sync(lambda: db.get_workspace(workspace_id))
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
@@ -1410,7 +1441,7 @@ async def create_workspace_mcp_server(
     user: User = Depends(get_request_user),
 ) -> dict[str, Any]:
     """Add an MCP server configuration to a workspace."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     try:
         server = await _run_sync(
             lambda: db.create_workspace_mcp_server(
@@ -1443,7 +1474,7 @@ async def delete_workspace_mcp_server(
     user: User = Depends(get_request_user),
 ) -> dict[str, Any]:
     """Remove an MCP server from a workspace."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     # Single atomic delete that verifies workspace ownership
     deleted = await _run_sync(lambda: db.delete_workspace_mcp_server(workspace_id, server_id))
     if not deleted:
@@ -1472,7 +1503,7 @@ async def discover_workspaces(
     """Scan a directory tree to discover candidate workspaces."""
     validated_path = _validate_workspace_root(payload.base_path)
 
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
 
     # Gather existing registered paths for already_registered tagging
     existing = await _run_sync(lambda: db.list_workspaces())
@@ -1518,7 +1549,7 @@ async def create_project(
     user: User = Depends(get_request_user),
 ) -> ProjectResponse:
     """Create a new agent project."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     try:
         project = await _run_sync(
             lambda: db.create_project(
@@ -1561,7 +1592,7 @@ async def list_projects(
     user: User = Depends(get_request_user),
 ) -> list[ProjectResponse]:
     """List projects for the current user, optionally filtered by workspace."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     canonical_filter_id = str(canonical_workspace_id or "").strip()
     canonical_filter_source = _normalize_canonical_workspace_filter_source(canonical_workspace_source)
 
@@ -1611,7 +1642,7 @@ async def get_project(
     user: User = Depends(get_request_user),
 ) -> ProjectResponse:
     """Get a project by ID."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     project = await _run_sync(lambda: db.get_project(project_id))
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1638,7 +1669,7 @@ async def delete_project(
     user: User = Depends(get_request_user),
 ) -> dict[str, Any]:
     """Delete a project and all associated tasks/runs."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     project = await _run_sync(lambda: db.get_project(project_id))
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1665,7 +1696,7 @@ async def create_task(
     user: User = Depends(get_request_user),
 ) -> TaskResponse:
     """Create a new task in a project."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     project = await _run_sync(lambda: db.get_project(project_id))
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1708,7 +1739,7 @@ async def list_tasks(
     user: User = Depends(get_request_user),
 ) -> list[TaskResponse]:
     """List tasks in a project with optional status filter."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     project = await _run_sync(lambda: db.get_project(project_id))
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1746,7 +1777,7 @@ async def get_task(
     user: User = Depends(get_request_user),
 ) -> TaskResponse:
     """Get task detail including run history."""
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     task = await _run_sync(lambda: db.get_task(task_id))
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -1789,7 +1820,7 @@ async def dispatch_run(
     CWD resolution: explicit cwd > workspace root_path > "."
     Workspace MCP servers and env_vars are merged into the session.
     """
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     task = await _run_sync(lambda: db.get_task(task_id))
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -1940,8 +1971,8 @@ async def dispatch_run(
     # Send initial prompt with task description and required completion contract
     prompt_text = _build_dispatch_prompt(task)
     try:
-        result = await client.prompt(
-            session_id,
+        result = await _prompt_with_history(
+            client, session_id,
             [{"role": "user", "content": prompt_text}],
         )
 
@@ -2042,8 +2073,8 @@ async def dispatch_run(
                 run_id=review_run.id,
                 metadata={"reviewer": task.reviewer_agent_type},
             )
-            review_result = await client.prompt(
-                review_session_id,
+            review_result = await _prompt_with_history(
+                client, review_session_id,
                 [{"role": "user", "content": _build_review_prompt(task, completion_signal.summary)}],
             )
             review_decision = validate_review_decision_signal(review_result)
@@ -2188,7 +2219,7 @@ async def dispatch_run(
         else:
             try:
                 artifact_promotion_result = await _run_sync(
-                    lambda: promote_acp_completion_artifacts(
+                    lambda: _artifact_promotion.promote_acp_completion_artifacts(
                         canonical_db,
                         task=task,
                         project=project,
@@ -2255,7 +2286,7 @@ async def submit_review(
 
     Approved -> complete. Rejected -> back to in_progress or triage (after max attempts).
     """
-    db = get_orchestration_db(_user_id_int(user))
+    db = _db_factory.get_orchestration_db(_user_id_int(user))
     task = await _run_sync(lambda: db.get_task(task_id))
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")

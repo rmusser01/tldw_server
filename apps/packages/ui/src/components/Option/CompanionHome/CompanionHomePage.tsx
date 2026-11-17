@@ -31,6 +31,7 @@ import { ReadingQueueCard } from "./cards/ReadingQueueCard"
 import { RecentActivityCard } from "./cards/RecentActivityCard"
 import { ResumeWorkCard } from "./cards/ResumeWorkCard"
 import { WhatsNextCard } from "./cards/WhatsNextCard"
+import { COMPANION_HOME_CARD_CONFIG } from "./cards/factory"
 import type { CompanionHomeCardState } from "./cards/CardShell"
 
 type CompanionHomePageProps = {
@@ -56,7 +57,7 @@ export function CompanionHomePage({
   surface,
   onPersonalizationEnabled
 }: CompanionHomePageProps) {
-  const { capabilities, loading: capsLoading } = useServerCapabilities()
+  const { capabilities, loading: capsLoading, refresh: refreshCapabilities } = useServerCapabilities()
   const [customizeOpen, setCustomizeOpen] = React.useState(false)
 
   const isConnected = useIsConnected()
@@ -67,6 +68,7 @@ export function CompanionHomePage({
   }, [isConnected, homeScope, markScopedMilestone])
 
   const hasPersonalization = Boolean(capabilities?.hasPersonalization)
+  const hasCompanion = Boolean(capabilities?.hasCompanion)
   const { layout, updateLayout } = useCompanionHomeLayout(surface)
   const {
     snapshot,
@@ -81,6 +83,7 @@ export function CompanionHomePage({
     surface,
     capsLoading,
     hasPersonalization,
+    hasCompanion,
     onPersonalizationEnabled
   })
   const {
@@ -94,12 +97,14 @@ export function CompanionHomePage({
     enabled: !capsLoading && isConnected
   })
   const refreshHome = React.useCallback(() => {
+    void refreshCapabilities()
     refresh()
     refreshScheduledTaskSignals()
-  }, [refresh, refreshScheduledTaskSignals])
+  }, [refresh, refreshScheduledTaskSignals, refreshCapabilities])
   const hasConversationRoute =
     Boolean(capabilities?.hasPersonalization) &&
     Boolean(capabilities?.hasPersona) &&
+    hasCompanion &&
     profileLoaded &&
     Boolean(profile?.enabled)
 
@@ -127,6 +132,12 @@ export function CompanionHomePage({
       return {
         label: SETUP_REQUIRED_LABEL,
         description: "Connect your tldw server and enable personalization to unlock this feature. " + setupDescription
+      }
+    }
+    if (!hasCompanion) {
+      return {
+        label: "Companion unavailable",
+        description: "Enable Companion in the server configuration, then refresh."
       }
     }
     if (profileLoaded && !profile?.enabled) {
@@ -245,7 +256,14 @@ export function CompanionHomePage({
             </a>
           )
         }
-      : profileLoaded && !profile?.enabled
+      : !hasCompanion
+        ? {
+            eyebrow: "Setup",
+            title: "Companion routes are unavailable",
+            description: "Enable Companion in the server configuration, then refresh. Your personalization setting is unchanged.",
+            action: null
+          }
+        : profileLoaded && !profile?.enabled
         ? {
             eyebrow: "Setup",
             title: "Companion setup required",
@@ -275,7 +293,55 @@ export function CompanionHomePage({
             }
           : null
 
+  // XS-17: while the Companion is not set up, an empty personalized card has
+  // nothing to show but "Setup required". The setup band names those cards
+  // once instead of repeating the notice on each one.
+  const setupBlocked = !hasPersonalization || (profileLoaded && !profile?.enabled)
+  const isWaitingOnSetup = (itemsLength: number) => setupBlocked && itemsLength === 0
+  const coreCards: Partial<
+    Record<CompanionHomeLayoutCard["id"], { title: string; itemsLength: number }>
+  > = {
+    "resume-work": {
+      title: COMPANION_HOME_CARD_CONFIG.resumeWork.title,
+      itemsLength: resolvedSnapshot.resumeWork.length
+    },
+    "goals-focus": {
+      title: COMPANION_HOME_CARD_CONFIG.goalsFocus.title,
+      itemsLength: resolvedSnapshot.goalsFocus.length
+    },
+    "recent-activity": {
+      title: COMPANION_HOME_CARD_CONFIG.recentActivity.title,
+      itemsLength: resolvedSnapshot.recentActivity.length
+    },
+    "reading-queue": {
+      title: COMPANION_HOME_CARD_CONFIG.readingQueue.title,
+      itemsLength: resolvedSnapshot.readingQueue.length
+    }
+  }
+  const isCoreCardWaitingOnSetup = (cardId: CompanionHomeLayoutCard["id"]) => {
+    const card = coreCards[cardId]
+    return Boolean(card && isWaitingOnSetup(card.itemsLength))
+  }
+  const inboxWaitingOnSetup = isWaitingOnSetup(resolvedSnapshot.inbox.length)
+  const needsAttentionWaitingOnSetup = isWaitingOnSetup(
+    resolvedSnapshot.needsAttention.length
+  )
+  const waitingOnSetupTitles = [
+    ...(inboxWaitingOnSetup ? [COMPANION_HOME_CARD_CONFIG.inbox.title] : []),
+    ...(needsAttentionWaitingOnSetup
+      ? [COMPANION_HOME_CARD_CONFIG.needsAttention.title]
+      : []),
+    ...(layout ?? [])
+      .filter(
+        (card) => card.kind === "core" && card.visible && isCoreCardWaitingOnSetup(card.id)
+      )
+      .map((card) => coreCards[card.id]?.title ?? card.title)
+  ]
+
   const renderCoreCard = (cardId: CompanionHomeLayoutCard["id"]): React.ReactNode => {
+    if (isCoreCardWaitingOnSetup(cardId)) {
+      return null
+    }
     if (cardId === "resume-work") {
       return <ResumeWorkCard items={resolvedSnapshot.resumeWork} state={resumeWorkState} />
     }
@@ -359,6 +425,14 @@ export function CompanionHomePage({
               <div className="max-w-3xl">
                 <h2 className="text-xl font-semibold text-text">{topBand.title}</h2>
                 <p className="mt-2 text-sm leading-6 text-text-muted">{topBand.description}</p>
+                {waitingOnSetupTitles.length > 0 ? (
+                  <p
+                    className="mt-2 text-sm leading-6 text-text-muted"
+                    data-testid="companion-home-waiting-on-setup"
+                  >
+                    {`These appear once the Companion is set up: ${waitingOnSetupTitles.join(", ")}.`}
+                  </p>
+                ) : null}
               </div>
               {topBand.action}
             </div>
@@ -422,11 +496,15 @@ export function CompanionHomePage({
           partial={scheduledTaskSignalsPartial}
           error={scheduledTaskSignalsError}
         />
-        <InboxPreviewCard items={resolvedSnapshot.inbox} state={inboxState} />
-        <NeedsAttentionCard
-          items={resolvedSnapshot.needsAttention}
-          state={needsAttentionState}
-        />
+        {inboxWaitingOnSetup ? null : (
+          <InboxPreviewCard items={resolvedSnapshot.inbox} state={inboxState} />
+        )}
+        {needsAttentionWaitingOnSetup ? null : (
+          <NeedsAttentionCard
+            items={resolvedSnapshot.needsAttention}
+            state={needsAttentionState}
+          />
+        )}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">

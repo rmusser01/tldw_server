@@ -2,41 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
-ChatLoopEventType = Literal[
-    "run_started",
-    "llm_chunk",
-    "llm_complete",
-    "tool_proposed",
-    "approval_required",
-    "approval_resolved",
-    "tool_started",
-    "tool_finished",
-    "tool_failed",
-    "assistant_message_committed",
-    "run_complete",
-    "run_error",
-    "run_cancelled",
-]
+# Core-owned since TASK-13950.15; re-exported for the API layer.
+from tldw_Server_API.app.core.Chat.chat_loop_schemas import (  # noqa: F401 - re-exported (TASK-13950.15)
+    ChatLoopEvent,
+    ChatLoopEventType,
+)
 
 ChatLoopApprovalDecision = Literal["approve", "reject"]
-
-
-class ChatLoopEvent(BaseModel):
-    """Canonical event envelope emitted by chat loop runs."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    run_id: str = Field(..., min_length=1)
-    seq: int = Field(..., ge=1)
-    ts: datetime = Field(default_factory=datetime.utcnow)
-    event: ChatLoopEventType
-    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatLoopStartRequest(BaseModel):

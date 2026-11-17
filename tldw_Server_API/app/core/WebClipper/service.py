@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
@@ -38,11 +38,13 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
     stable_note_id,
 )
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 from tldw_Server_API.app.core.WebClipper.schemas import (
     WebClipperAttachmentRecord,
     WebClipperEnrichmentPayload,
     WebClipperEnrichmentResponse,
+    WebClipperOutcomeState,
     WebClipperSavedNote,
     WebClipperSaveRequest,
     WebClipperSaveResponse,
@@ -375,7 +377,7 @@ class WebClipperService:
             status = "saved"
         return WebClipperStatusResponse(
             clip_id=clip_id,
-            status=status,
+            status=cast(WebClipperOutcomeState, status),
             note=self._build_note_summary(note),
             workspace_placements=placements,
             attachments=attachments,
@@ -836,25 +838,22 @@ class WebClipperService:
         return None
 
     def _sync_keywords(self, note_id: str, keywords: list[str], warnings: list[str]) -> None:
-        normalized_keywords: list[str] = []
-        seen_keywords: set[str] = set()
+        normalized_keywords: dict[str, str] = {}
         for keyword in keywords:
             text = str(keyword or "").strip()
-            if not text:
-                continue
-            if text in seen_keywords:
-                continue
-            seen_keywords.add(text)
-            normalized_keywords.append(text)
+            if text:
+                normalized_keywords.setdefault(normalize_keyword_identity(text), text)
 
         existing_keywords = self.db.get_keywords_for_note(note_id)
-        existing_ids_by_text = {str(row["keyword"]): int(row["id"]) for row in existing_keywords}
+        existing_ids_by_text = {
+            normalize_keyword_identity(str(row["keyword"])): int(row["id"]) for row in existing_keywords
+        }
         desired_keyword_ids: set[int] = set()
 
-        for text in normalized_keywords:
+        for identity, text in normalized_keywords.items():
             try:
-                if text in existing_ids_by_text:
-                    keyword_id = existing_ids_by_text[text]
+                if identity in existing_ids_by_text:
+                    keyword_id = existing_ids_by_text[identity]
                 else:
                     existing_keyword = self.db.get_keyword_by_text(text)
                     if existing_keyword is not None:
@@ -1189,7 +1188,7 @@ class WebClipperService:
         warnings: list[str],
         workspace_requested: bool,
         workspace_saved: bool,
-    ) -> str:
+    ) -> WebClipperOutcomeState:
         if workspace_requested and not workspace_saved:
             return "partially_saved"
         if warnings:

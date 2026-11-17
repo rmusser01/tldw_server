@@ -100,8 +100,7 @@ def _patch_failing_service(monkeypatch: pytest.MonkeyPatch) -> _LoggerStub:
     logger_stub = _LoggerStub()
     monkeypatch.setattr(evaluations_rag_pipeline, "logger", logger_stub)
     monkeypatch.setattr(
-        evaluations_rag_pipeline,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _ExplodingPipelineService(),
     )
     return logger_stub
@@ -175,8 +174,7 @@ async def test_list_pipeline_presets_sanitizes_backend_fallback_log(monkeypatch:
 
 async def test_list_pipeline_presets_includes_canonical_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        evaluations_rag_pipeline,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _PresetListService(),
     )
 
@@ -254,13 +252,11 @@ async def test_cleanup_ephemeral_collections_sanitizes_per_item_warning(
     logger_stub = _LoggerStub()
     monkeypatch.setattr(evaluations_rag_pipeline, "logger", logger_stub)
     monkeypatch.setattr(
-        evaluations_rag_pipeline,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _CleanupItemService(),
     )
     monkeypatch.setattr(
-        evaluations_rag_pipeline,
-        "create_from_settings_for_user",
+        "tldw_Server_API.app.core.RAG.rag_service.vector_stores.create_from_settings_for_user",
         lambda *_args, **_kwargs: _CleanupItemAdapter(),
     )
 

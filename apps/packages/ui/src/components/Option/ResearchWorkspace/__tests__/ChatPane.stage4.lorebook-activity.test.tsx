@@ -58,6 +58,9 @@ const workspaceStoreState = {
 }
 
 const messageOptionState = {
+  selectedModel: null,
+  setSelectedModel: vi.fn(),
+  selectedModelIsLoading: false,
   messages: [] as Array<{
     id: string
     isBot: boolean

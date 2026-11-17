@@ -152,7 +152,10 @@ async def consume_daily_cap(
     The durable ledger's unique op index prevents double-counting the same
     reservation. The ledger DAL serializes the cap check and insert at the
     database level so multiple app workers cannot overspend the same cap.
+    Details include ``daily_inserted``: only the inserting reservation owns
+    downward reconciliation, not a durable replay after cache expiry/restart.
     """
+
     try:
         cap = int(daily_cap or 0)
         units_i = max(0, int(units or 0))
@@ -167,7 +170,64 @@ async def consume_daily_cap(
         return True, 0, {}
 
     try:
+        occurred_at = datetime.now(timezone.utc)
+        day = str(day_utc or occurred_at.date().isoformat())
         result = await ledger.consume_if_within_cap(
+            LedgerEntry(
+                entity_scope=str(entity_scope),
+                entity_value=str(entity_value),
+                category=str(category),
+                units=units_i,
+                op_id=op,
+                occurred_at=occurred_at,
+            ),
+            daily_cap=cap,
+            day_utc=day,
+        )
+        retry_after = _seconds_until_next_utc_day()
+        used = int(result.used or 0)
+        return (
+            bool(result.allowed),
+            int(retry_after),
+            {
+                "daily_cap": cap,
+                "daily_used": used,
+                "daily_remaining": max(0, cap - used),
+                "daily_reset_seconds": int(retry_after),
+                "daily_day_utc": day,
+                "daily_inserted": bool(result.inserted),
+            },
+        )
+    except _LEDGER_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive
+        logger.debug(f"RG daily caps: consume failed for {entity_scope}:{entity_value}:{category}: {exc}")
+        return True, 0, {}
+
+
+async def reconcile_daily_cap(
+    *,
+    entity_scope: str,
+    entity_value: str,
+    category: str,
+    units: int,
+    op_id: str,
+    day_utc: str | None = None,
+) -> bool:
+    """Best-effort downward settlement of a previously consumed operation.
+
+    Unavailable ledgers and rejected increases leave the durable charge intact.
+    A missing identity is never inserted. This does not change the global
+    fail-open admission policy or provide MCP's durable reservation authority.
+    """
+    ledger = await _get_ledger()
+    if ledger is None or LedgerEntry is None:
+        return False
+
+    try:
+        op = str(op_id or "").strip()
+        units_i = int(units)
+        if not op or units_i < 0:
+            return False
+        return await ledger.adjust_downward(
             LedgerEntry(
                 entity_scope=str(entity_scope),
                 entity_value=str(entity_value),
@@ -176,17 +236,8 @@ async def consume_daily_cap(
                 op_id=op,
                 occurred_at=datetime.now(timezone.utc),
             ),
-            daily_cap=cap,
             day_utc=day_utc,
         )
-        retry_after = _seconds_until_next_utc_day()
-        used = int(result.used or 0)
-        return bool(result.allowed), int(retry_after), {
-            "daily_cap": cap,
-            "daily_used": used,
-            "daily_remaining": max(0, cap - used),
-            "daily_reset_seconds": int(retry_after),
-        }
-    except _LEDGER_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive
-        logger.debug(f"RG daily caps: consume failed for {entity_scope}:{entity_value}:{category}: {exc}")
-        return True, 0, {}
+    except _LEDGER_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(f"RG daily caps: reconcile failed for {entity_scope}:{entity_value}:{category}: {exc}")
+        return False

@@ -885,7 +885,15 @@ async def test_service_allows_explicit_chatbook_media_and_embedding_restore_flag
     )
 
     assert success is True, message
-    assert result == {"imported_items": {}, "warnings": []}
+    assert result == {
+        "imported_items": {},
+        "warnings": [],
+        "total_items": 0,
+        "processed_items": 0,
+        "successful_items": 0,
+        "failed_items": 0,
+        "skipped_items": 0,
+    }
 
 
 @pytest.mark.asyncio

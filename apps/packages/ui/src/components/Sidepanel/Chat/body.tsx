@@ -1,7 +1,11 @@
+import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
+import { resolveCharacterMessageType } from "@/utils/character-greetings"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { PlaygroundMessage } from "~/components/Common/Playground/Message"
 import { useMessage } from "~/hooks/useMessage"
+import { usePageAssist } from "@/context"
 import { EmptySidePanel } from "../Chat/empty"
 import { useWebUI } from "@/store/webui"
 import { useUiModeStore } from "@/store/ui-mode"
@@ -12,7 +16,7 @@ import { generateID } from "@/db/dexie/helpers"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useStoreMessageOption } from "@/store/option"
 import type { Character } from "@/types/character"
-import { ChatGreetingPicker } from "@/components/Common/ChatGreetingPicker"
+import { characterToAssistantSelection, getAssistantSelectionMode, isProtectedTrackedPersonaUnavailable } from "@/types/assistant-selection"
 import {
   EDIT_MESSAGE_EVENT,
   type TimelineActionDetail
@@ -26,15 +30,13 @@ type Props = {
   inputRef?: React.RefObject<HTMLTextAreaElement>
 }
 
-// Stable empty-array fallback so `images={message.images || EMPTY_IMAGES}`
-// keeps prop identity stable for memoized rows without images.
 const EMPTY_IMAGES: string[] = []
 
 /**
- * Get-or-create a cached per-row handler. Handlers are keyed by message id
- * and close only over stable refs, so PlaygroundMessage's memo comparator
- * sees identical callbacks across renders while the handler still reads the
- * latest store state at click time.
+ * Per-row handler interning: rows receive the SAME callback instance across
+ * renders (PlaygroundMessage's strict memo comparator requires this), while
+ * the interned closures only close over stable refs, so they still read the
+ * latest store state at invocation time.
  */
 const getStableRowHandler = <T extends (...args: never[]) => unknown>(
   cache: React.MutableRefObject<Map<string, unknown>>,
@@ -59,10 +61,10 @@ export const SidePanelBody = ({
   const {
     messages,
     setMessages,
-    setHistory,
     streaming,
     isProcessing,
     regenerateLastMessage,
+    effectiveAssistantState,
     editMessage,
     deleteMessage,
     isSearchingInternet,
@@ -73,6 +75,23 @@ export const SidePanelBody = ({
     serverChatId,
     isEmbedding
   } = useMessage()
+  const { t } = useTranslation(["option"])
+  // A request is in flight from the moment it has a controller, before the
+  // server accepts it and streaming starts (G19); the reply bubble offers Stop
+  // until the request is stopped. Only the reply the request is filling counts:
+  // the last row once it is a bot row ending in the "▋" placeholder. While the
+  // request is prepared, the previous finished reply is still last.
+  const { controller: requestController } = usePageAssist()
+  const lastMessage = messages[messages.length - 1]
+  const requestPending = Boolean(
+    requestController && !requestController.signal.aborted &&
+      lastMessage?.isBot && String(lastMessage.message ?? "").endsWith("▋")
+  )
+  const regenerateDisabledReason = isProtectedTrackedPersonaUnavailable(
+    Boolean(historySelection), effectiveAssistantState?.kind,
+    effectiveAssistantState?.mode === "overlay" ? "overlay" : "tracked"
+  ) ? t("assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.") : null
+  const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest)
   const { ttsEnabled } = useWebUI()
   const [openReasoning] = useStorage("openReasoning", false)
   const [selectedCharacter] = useSelectedCharacter<Character | null>(null)
@@ -131,18 +150,23 @@ export const SidePanelBody = ({
     [historySelection, messages, setMessages]
   )
 
-  // Stable callbacks for PlaygroundMessage rows. The underlying handlers are
-  // recreated every render (they close over the latest `messages`), so rows
-  // receive stable callbacks that read the latest handlers/messages through
-  // refs at invocation time. This keeps PlaygroundMessage's memo comparator
-  // effective: non-streaming rows skip re-render during streaming flushes.
+  // Stable callbacks for PlaygroundMessage rows. The hook's action
+  // callbacks are re-created every render (their closures carry the
+  // render-time `messages` snapshot dev's refusal guards rely on), so rows
+  // receive interned props whose identity never depends on that churn:
+  // edit submits capture only stable row coordinates (index + role) and
+  // dispatch through the ref below at submit time, while Delete sources are
+  // ref-like objects resolved by PlaygroundMessage at confirmation-open.
+  // This keeps PlaygroundMessage's strict memo comparator effective:
+  // without it, inline per-row closures would re-render every visible row
+  // on each streaming flush.
   const latestRowHandlers = React.useRef({
     editMessage,
     deleteMessage,
     createChatBranch,
     handleVariantSwipe,
     regenerateLastMessage,
-    stopStreamingRequest
+    stopStreaming: stopStreamingFromUi
   })
   latestRowHandlers.current = {
     editMessage,
@@ -150,60 +174,154 @@ export const SidePanelBody = ({
     createChatBranch,
     handleVariantSwipe,
     regenerateLastMessage,
-    stopStreamingRequest
+    stopStreaming: stopStreamingFromUi
   }
   const handleRegenerateRow = React.useCallback(
-    (...args: Parameters<typeof regenerateLastMessage>) => {
-      latestRowHandlers.current.regenerateLastMessage(...args)
-    },
+    (...args: Parameters<typeof regenerateLastMessage>) =>
+      latestRowHandlers.current.regenerateLastMessage(...args),
     []
   )
   const handleStopStreamingRow = React.useCallback(
-    (...args: Parameters<typeof stopStreamingRequest>) => {
-      latestRowHandlers.current.stopStreamingRequest(...args)
+    (...args: Parameters<typeof stopStreamingFromUi>) => {
+      latestRowHandlers.current.stopStreaming(...args)
     },
     []
   )
   // Per-row handler cache keyed by message id; cleared when the conversation
-  // instance changes so it cannot grow unbounded across conversations.
+  // instance changes so it cannot grow unbounded across conversations. The
+  // initial mount is skipped: clearing right after mount would recreate every
+  // row handler on the first post-mount update (e.g. stream start) and
+  // re-render all rows, defeating the memo boundary (WP-03).
   const rowHandlerCache = React.useRef(new Map<string, unknown>())
+  const rowHandlerCacheConversationRef = React.useRef<string | null>(null)
   React.useEffect(() => {
+    if (rowHandlerCacheConversationRef.current === null) {
+      rowHandlerCacheConversationRef.current = conversationInstanceId
+      return
+    }
+    if (rowHandlerCacheConversationRef.current === conversationInstanceId) {
+      return
+    }
+    rowHandlerCacheConversationRef.current = conversationInstanceId
     rowHandlerCache.current.clear()
   }, [conversationInstanceId])
+  // O(1) row index lookup by message id, rebuilt once per `messages`
+  // identity (a streaming flush rebuilds the map once, not per row).
+  const rowIndexById = React.useMemo(() => {
+    const map = new Map<string, number>()
+    messages.forEach((row, index) => {
+      if (row.id != null) map.set(row.id, index)
+    })
+    return map
+  }, [messages])
+  // Interned edit handlers capture the row INDEX and role at intern time
+  // and dispatch through the hook's LATEST editMessage instance at submit
+  // time: the hook re-creates editMessage every render (its closure carries
+  // the current `messages` snapshot that the hook's own message_changed
+  // guards compare against), so submits must reach the freshest instance.
+  // Capturing only the stable row coordinates keeps the interned identity —
+  // and the row props — stable across streaming flushes and hook identity
+  // churn. When the captured row disappears, the entry is kept and keeps
+  // calling editMessage with the captured index (dev's semantics: the
+  // hook's target guards decide, no silent no-op).
   const getRowEditSubmitHandler = React.useCallback(
-    (messageId: string | undefined) =>
-      getStableRowHandler(
-        rowHandlerCache,
-        `edit:${messageId ?? ""}`,
-        () => (value: string, isSend: boolean) => {
-          const index = messagesRef.current.findIndex(
-            (row) => row.id === messageId
-          )
-          const row = index >= 0 ? messagesRef.current[index] : null
-          if (!row) return
-          void latestRowHandlers.current.editMessage(
-            index,
-            value,
-            !row.isBot,
-            isSend
-          )
-        }
-      ),
-    []
+    (messageId: string | undefined) => {
+      const key = `edit:${messageId ?? ""}`
+      const interned = rowHandlerCache.current.get(key) as
+        | {
+            handler: (
+              value: string,
+              isSend: boolean,
+              editIsCurrent?: () => boolean,
+              editOriginIsCurrent?: () => boolean
+            ) => ReturnType<typeof editMessage>
+            index: number
+            isBot: boolean
+          }
+        | undefined
+      const index =
+        messageId == null
+          ? messages.findIndex((row) => row.id == null)
+          : rowIndexById.get(messageId)
+      const isBot =
+        index !== undefined && index >= 0
+          ? Boolean(messages[index]?.isBot)
+          : interned?.isBot ?? false
+      if (
+        interned &&
+        (index === undefined ||
+          (interned.index === index && interned.isBot === isBot))
+      ) {
+        return interned.handler
+      }
+      const targetIndex = index ?? -1
+      const targetIsBot = isBot
+      const handler = (
+        value: string,
+        isSend: boolean,
+        editIsCurrent?: () => boolean,
+        editOriginIsCurrent?: () => boolean
+      ) => {
+        if (targetIndex < 0) return
+        return latestRowHandlers.current.editMessage(
+          targetIndex,
+          value,
+          !targetIsBot,
+          isSend,
+          editIsCurrent,
+          editOriginIsCurrent
+        )
+      }
+      rowHandlerCache.current.set(
+        key,
+        { handler, index: targetIndex, isBot: targetIsBot }
+      )
+      return handler
+    },
+    [rowIndexById, messages]
   )
-  const getRowDeleteHandler = React.useCallback(
-    (messageId: string | undefined) =>
-      getStableRowHandler(
-        rowHandlerCache,
-        `delete:${messageId ?? ""}`,
-        () => () => {
-          const index = messagesRef.current.findIndex(
-            (row) => row.id === messageId
-          )
-          if (index < 0) return
-          void latestRowHandlers.current.deleteMessage(index)
-        }
-      ),
+  // Interned delete sources are callable functions carrying a `current`
+  // getter. Direct invocation (dev's pending-outcome contract) dispatches
+  // through the hook's latest deleteMessage instance. PlaygroundMessage
+  // instead resolves `.current` once, when the Delete confirmation OPENS,
+  // so the pending onOk keeps the exact deleteMessage instance and row
+  // index that were live at confirmation-open (dev's retained-refusal
+  // semantics) even if later renders replace the source or the target.
+  // The interned function's identity never changes — not across streaming
+  // flushes and not across the hook's per-render deleteMessage identities
+  // (useMessage re-creates deleteMessage whenever `messages` changes; that
+  // churn is what delivers each instance's render-time snapshot to the
+  // confirmation) — so row props stay memo-stable (WP-03) while every
+  // confirmation still captures a fresh source at open.
+  const getRowDeleteSource = React.useCallback(
+    (messageId: string | undefined) => {
+      const key = `delete-source:${messageId ?? ""}`
+      const existing = rowHandlerCache.current.get(key) as
+        | (() => boolean | Promise<boolean>) & {
+            readonly current: () => () => boolean | Promise<boolean>
+          }
+        | undefined
+      if (existing) return existing
+      const resolveCapture = (): (() => boolean | Promise<boolean>) => {
+        const deleteMessageNow = latestRowHandlers.current.deleteMessage
+        const index = messagesRef.current.findIndex(
+          (row) => row.id === messageId
+        )
+        // Never hand the hook a missing target: refuse rather than delete
+        // whatever now sits at a stale position.
+        if (index < 0) return async () => false
+        // Rows await the pending delete outcome; pass it through.
+        return () => deleteMessageNow(index)
+      }
+      const source = (() => resolveCapture()()) as (() => boolean | Promise<boolean>) & {
+        readonly current: () => () => boolean | Promise<boolean>
+      }
+      Object.defineProperty(source, "current", {
+        get: resolveCapture
+      })
+      rowHandlerCache.current.set(key, source)
+      return source
+    },
     []
   )
   const getRowNewBranchHandler = React.useCallback(
@@ -233,8 +351,6 @@ export const SidePanelBody = ({
       (!historySelection.view || historySelection.status === "loading")
   )
 
-  // Previous user message per index, precomputed in one forward pass so row
-  // rendering is O(1) per row instead of an O(n) backward scan per row.
   const previousUserMessageByIndex = React.useMemo(() => {
     const map = new Map<number, (typeof messages)[number] | null>()
     let previous: (typeof messages)[number] | null = null
@@ -368,16 +484,7 @@ export const SidePanelBody = ({
         aria-live="polite"
         className={`relative flex w-full flex-col items-center ${topPaddingClass} pb-4`}
       >
-        {messages.length === 0 && <EmptySidePanel inputRef={inputRef} />}
-        <ChatGreetingPicker
-          selectedCharacter={selectedCharacter}
-          messages={messages}
-          historyId={historyId}
-          serverChatId={serverChatId}
-          setMessages={setMessages}
-          setHistory={setHistory}
-          className="mb-4"
-        />
+        {messages.length === 0 && !(selectedCharacter && getAssistantSelectionMode(characterToAssistantSelection(selectedCharacter)) === "tracked" && !historyId && !serverChatId) && <EmptySidePanel inputRef={inputRef} />}
         <div style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
           {rowVirtualizer.getVirtualItems().map((vr) => {
             const index = vr.index
@@ -394,18 +501,20 @@ export const SidePanelBody = ({
                   currentMessageIndex={index}
                   totalMessages={messages.length}
                   onRegenerate={handleRegenerateRow}
-                  message_type={message.messageType}
+                  regenerateDisabledReason={regenerateDisabledReason}
+                  message_type={resolveCharacterMessageType(message, index, Boolean(serverChatId && characterIdentityEnabled))}
                   isProcessing={isProcessing}
                   isSearchingInternet={isSearchingInternet}
                   sources={message.sources}
                   onEditFormSubmit={getRowEditSubmitHandler(message.id)}
-                  onDeleteMessage={getRowDeleteHandler(message.id)}
+                  onDeleteMessage={getRowDeleteSource(message.id)}
                   onNewBranch={getRowNewBranchHandler(message.id)}
                   isTTSEnabled={ttsEnabled}
                   generationInfo={message?.generationInfo}
                   toolCalls={message?.toolCalls}
                   toolResults={message?.toolResults}
-                  isStreaming={streaming}
+                  isStreaming={streaming && index === messages.length - 1}
+                  isPending={requestPending && index === messages.length - 1}
                   reasoningTimeTaken={message?.reasoning_time_taken}
                   openReasoning={openReasoning}
                   modelImage={message?.modelImage}

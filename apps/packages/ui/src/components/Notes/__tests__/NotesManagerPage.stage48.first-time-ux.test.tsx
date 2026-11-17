@@ -178,7 +178,9 @@ describe("NotesManagerPage stage 48 first-time notes UX", () => {
   it("opens a writable draft and focuses the title from the list empty-state create action", async () => {
     renderPage()
 
-    expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
+    // The editor is a usable draft from the start; no empty state is
+    // stacked on top of it (NO-04).
+    expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
 
     const listRegion = screen.getByTestId("notes-list-region")
     await within(listRegion).findByText("No notes yet", {}, { timeout: 3000 })
@@ -187,9 +189,6 @@ describe("NotesManagerPage stage 48 first-time notes UX", () => {
     }, { timeout: 3000 })
     fireEvent.click(createButton)
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
-    })
     await waitFor(() => {
       expect(screen.getByPlaceholderText("Title")).toHaveFocus()
     })

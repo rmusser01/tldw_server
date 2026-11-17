@@ -74,7 +74,7 @@ export const readWatchlistsIaExperimentTelemetryState =
     }
   }
 
-export const trackWatchlistsIaExperimentTransition = (
+const updateWatchlistsIaExperimentTelemetryState = (
   previousTab: string | null,
   currentTab: string,
   variant: WatchlistsIaExperimentVariant
@@ -126,6 +126,19 @@ export const trackWatchlistsIaExperimentTransition = (
     // localStorage may be unavailable.
   }
 
+  return nextState
+}
+
+export const trackWatchlistsIaExperimentTransition = (
+  previousTab: string | null,
+  currentTab: string,
+  variant: WatchlistsIaExperimentVariant
+): WatchlistsIaExperimentTelemetryState | null => {
+  const nextState = updateWatchlistsIaExperimentTelemetryState(previousTab, currentTab, variant)
+  if (!nextState) return null
+  const normalizedCurrentTab = normalizeTab(currentTab) || "unknown"
+  const normalizedPreviousTab = normalizeTab(previousTab)
+
   const payload: WatchlistsIaExperimentTelemetryPayload = {
     variant: nextState.variant,
     session_id: nextState.session_id,
@@ -148,4 +161,5 @@ export const flushWatchlistsIaExperimentSession = (
   currentTab: string,
   variant: WatchlistsIaExperimentVariant
 ): WatchlistsIaExperimentTelemetryState | null =>
-  trackWatchlistsIaExperimentTransition(currentTab, currentTab, variant)
+  // pagehide cannot safely start async network work; keep its final timestamp local.
+  updateWatchlistsIaExperimentTelemetryState(currentTab, currentTab, variant)

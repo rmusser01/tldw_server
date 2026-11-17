@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_single_user_instance
 from tldw_Server_API.app.core.DB_Management.Evaluations_DB import EvaluationsDatabase
@@ -90,6 +92,58 @@ def test_handle_recipe_run_job_executes_persona_dialogue_tree_recipe_and_persist
         {
             "target_id": "persona-1:character-1",
             "artifact_id": refreshed.metadata["trace_artifacts"][0]["artifact_id"],
+            "case_id": "safe-boundary",
+        }
+    ]
+
+
+@pytest.mark.parametrize("kind", ["persona", "character"])
+def test_optional_target_validates_and_persists_completed_recipe_report(tmp_path, kind: str) -> None:
+    db, service, user_id = _service(tmp_path)
+    target_id = f"{kind}-only"
+    run_config = {
+        "targets": [{"target_id": target_id, kind: {"id": target_id, "name": "Rowan"}}],
+        "include_trace_artifacts": True,
+    }
+    validation = service.validate_dataset(
+        "persona_dialogue_tree_robustness",
+        dataset=_scenario_dataset(),
+        run_config=run_config,
+    )
+    assert validation["valid"] is True, validation["errors"]  # nosec B101 - pytest contract assertion
+    record = service.create_run(
+        "persona_dialogue_tree_robustness",
+        dataset=_scenario_dataset(),
+        run_config=run_config,
+    )
+    result = handle_recipe_run_job(
+        {
+            "id": f"job-{target_id}",
+            "payload": build_recipe_run_job_payload(
+                run_id=record.run_id,
+                recipe_id=record.recipe_id,
+                owner_user_id=user_id,
+            ),
+        },
+        db=db,
+        user_id=user_id,
+    )
+    persisted = db.get_recipe_run(record.run_id)
+
+    assert result["status"] == "completed"  # nosec B101 - pytest contract assertion
+    assert persisted is not None  # nosec B101 - pytest contract assertion
+    assert persisted.status is RunStatus.COMPLETED  # nosec B101 - pytest contract assertion
+    assert persisted.metadata["run_config"] == run_config  # nosec B101 - pytest contract assertion
+    summary = persisted.metadata["recipe_report"]["summary"]
+    assert (summary["target_count"], summary["total_cases"], summary["trace_artifact_count"]) == (  # nosec B101 - pytest contract assertion
+        1,
+        1,
+        1,
+    )
+    assert persisted.metadata["recipe_report"]["trace_artifact_refs"] == [  # nosec B101 - pytest contract assertion
+        {
+            "target_id": target_id,
+            "artifact_id": persisted.metadata["trace_artifacts"][0]["artifact_id"],
             "case_id": "safe-boundary",
         }
     ]

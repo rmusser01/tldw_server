@@ -56,7 +56,8 @@ describe("FirstRunGate", () => {
     mockUseFirstRunCheck.mockReturnValue({ shouldShowSetup: false, loading: false })
     render(<FirstRunGate onStartSetup={onStartSetup} allowCompletedSetup><div>Source task</div></FirstRunGate>)
     expect(screen.getByText("Source task")).toBeInTheDocument()
-    expect(mockUseFirstRunCheck).toHaveBeenCalledWith({ allowCompletedSetup: true, enabled: true })
+    // The gate never shows there, so it does not read profiles (XP-16).
+    expect(mockUseFirstRunCheck).toHaveBeenCalledWith({ allowCompletedSetup: true, enabled: false })
   })
 
   it("renders the overlay when shouldShowSetup is true", () => {

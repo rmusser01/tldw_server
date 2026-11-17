@@ -8,7 +8,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware, chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -202,6 +202,7 @@ def test_suggestion_http_owner_and_foreign_boundaries(suggestion_owners, tmp_pat
     actor = {"id": 3, "db": foreign}
     jobs = JobManager(db_path=tmp_path / "jobs.db")
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(endpoints.router, prefix="/api/v1")
 
     async def database():

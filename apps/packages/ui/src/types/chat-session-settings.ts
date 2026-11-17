@@ -74,7 +74,7 @@ export type ChatSettingsRecord = {
   chatGenerationOverride?: ChatGenerationOverride | null
   generationOverrides?: ChatGenerationOverride | null
   turnTakingMode?: "single" | "round_robin"
-  participantCharacterIds?: string[]
+  participantCharacterIds?: Array<string | number>
   conversationContext?: ConversationContextSettings
   chat_dictionary_ids?: number[]
   summary?: ChatSummary | null

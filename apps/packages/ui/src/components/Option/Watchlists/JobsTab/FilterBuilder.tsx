@@ -1,4 +1,5 @@
 import React from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { Button, Input, InputNumber, Select, Switch, Tag, Tooltip, message } from "antd"
 import { ArrowDown, ArrowUp, Code2, Plus, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -537,7 +538,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
               data-testid="filter-preview-impact-button"
               onClick={() => {
                 const node = document.getElementById(FILTER_PREVIEW_PANEL_ID)
-                node?.scrollIntoView?.({ behavior: "smooth", block: "start" })
+                node?.scrollIntoView?.({ behavior: smoothScrollBehavior(), block: "start" })
               }}
             >
               {t("watchlists:filters.previewImpact", "Preview impact")}

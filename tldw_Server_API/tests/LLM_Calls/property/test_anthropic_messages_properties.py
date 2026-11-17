@@ -1,7 +1,7 @@
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from tldw_Server_API.app.core.LLM_Calls.anthropic_messages import anthropic_messages_to_openai
+from tldw_Server_API.app.core.Chat.anthropic_messages import anthropic_messages_to_openai
 
 _ASCII_TEXT = st.text(
     alphabet=st.characters(min_codepoint=32, max_codepoint=126),

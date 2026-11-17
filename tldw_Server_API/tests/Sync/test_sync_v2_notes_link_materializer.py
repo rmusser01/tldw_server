@@ -177,7 +177,15 @@ def _context(
     return SyncAdapterContext(get_head=get_head, list_heads=list_heads)
 
 
-def _note_head(note_id: str, *, deleted: bool = False) -> SyncEnvelope:
+def _note_head(note_id: str, *, deleted: bool = False, never_live: bool = False) -> SyncEnvelope:
+    """A note's current head: live, deleted after it was live, or (``never_live``) a delete with no base.
+
+    A device's delete of a note the dataset had carries the note's base. One
+    without a base is accepted only when the dataset never had the note, and is
+    applied as satisfied (§5.4): the server may hold no row for it at all.
+    """
+    deleted = deleted or never_live
+    based = deleted and not never_live
     return SyncEnvelope(
         dataset_id=DATASET_ID,
         client_envelope_id=f"note-{note_id}",
@@ -185,9 +193,12 @@ def _note_head(note_id: str, *, deleted: bool = False) -> SyncEnvelope:
         operation="tombstone" if deleted else "upsert",
         object_id=note_id,
         device_id="device-1",
-        server_cursor=1,
-        object_revision=1,
-        entity_version=1,
+        server_cursor=2 if based else 1,
+        base_server_cursor=1 if based else None,
+        base_object_revision=1 if based else None,
+        base_object_hash=f"sha256:{note_id}-live" if based else None,
+        object_revision=2 if based else 1,
+        entity_version=2 if based else 1,
         payload={"title": note_id, "content": "body"},
         payload_hash=f"sha256:{note_id}",
         created_at_client=CREATED_AT,
@@ -310,6 +321,40 @@ def test_adapter_defers_missing_endpoint_and_accepts_deleted_endpoint_identity()
         dataset=_dataset(),
         context=_context(note_heads=deleted),
     )
+    assert isinstance(result, AdapterAccepted)
+
+
+def test_adapter_defers_an_endpoint_the_dataset_knows_only_by_a_device_delete_without_base() -> None:
+    """A note first seen as a device's satisfied tombstone was never live here, and may have no row.
+
+    The link waits, as it did while the note was unknown, instead of being
+    accepted into a projection that has no endpoint to write.
+    """
+    never_live = {
+        SOURCE_NOTE_ID: _note_head(SOURCE_NOTE_ID),
+        TARGET_NOTE_ID: _note_head(TARGET_NOTE_ID, never_live=True),
+    }
+
+    result = NotesLinkDomainAdapter().evaluate_envelope(
+        _incoming(),
+        dataset=_dataset(),
+        context=_context(note_heads=never_live),
+    )
+
+    assert isinstance(result, AdapterDeferred)
+
+
+def test_adapter_accepts_an_endpoint_the_server_deleted_without_base() -> None:
+    """The server's own delete of a note Sync never saw had a row to delete, so a link can still name it."""
+    server_deleted = _note_head(TARGET_NOTE_ID, never_live=True)
+    server_deleted = replace(server_deleted, device_id="server-origin")
+
+    result = NotesLinkDomainAdapter().evaluate_envelope(
+        _incoming(),
+        dataset=_dataset(),
+        context=_context(note_heads={SOURCE_NOTE_ID: _note_head(SOURCE_NOTE_ID), TARGET_NOTE_ID: server_deleted}),
+    )
+
     assert isinstance(result, AdapterAccepted)
 
 

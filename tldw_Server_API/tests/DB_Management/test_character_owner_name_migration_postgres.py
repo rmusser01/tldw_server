@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
+from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -192,7 +193,7 @@ def test_concurrent_actual_default_bootstrap_respects_owner_names(pg_backend, tm
 
     def ensure(db):
         try:
-            return deps._ensure_default_character(db)
+            return chacha_db_provider.ensure_default_character(db)
         finally:
             db.close_connection()
 

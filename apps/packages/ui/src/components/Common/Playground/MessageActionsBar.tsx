@@ -1,28 +1,40 @@
+import type { ChatMessageView } from "@/services/settings/ui-settings"
 import React from "react"
+import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
+import { moveMenuFocus } from "@/utils/menu-keyboard"
 import type { TFunction } from "i18next"
 import { Popover, Tooltip } from "antd"
 import {
+  BookOpenText,
   CheckIcon,
   ChevronLeft,
   ChevronRight,
   CopyIcon,
+  Eraser,
   GitBranchIcon,
   InfoIcon,
+  Languages,
   Layers,
+  Lightbulb,
+  ListCollapse,
   MoreHorizontal,
   Pen,
   PlayCircle,
   Pin,
   PinOff,
   RotateCcw,
+  Shrink,
   Square,
   StickyNote,
   FileText,
+  UserPen,
+  VenetianMask,
   Volume2Icon,
   CornerUpLeft,
   Trash2
 } from "lucide-react"
 import { IconButton } from "../IconButton"
+import { CopyStatus, useCopyFailedHint } from "../CopyStatus"
 import { GenerationInfo } from "./GenerationInfo"
 import { FeedbackButtons } from "@/components/Sidepanel/Chat/FeedbackButtons"
 import type { FeedbackThumb } from "@/store/feedback"
@@ -30,8 +42,11 @@ import type { GenerationInfo as GenerationInfoType } from "./types"
 import type { MessageSteeringMode } from "@/types/message-steering"
 import type { QuickMessageAction } from "./quick-message-actions"
 
+/** Every focusable kind of menu item; the first one takes focus on open. */
+const MENU_ITEMS = "[role='menuitem']:not(:disabled), [role='menuitemcheckbox']:not(:disabled)"
+
 const ACTION_BUTTON_CLASS =
-  "flex items-center justify-center rounded-full border border-border bg-surface2 text-text-muted hover:bg-surface hover:text-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-focus min-w-[44px] min-h-[44px] sm:h-8 sm:w-8 sm:min-w-0 sm:min-h-0"
+  "flex items-center justify-center rounded-full border border-border bg-surface2 text-text-muted hover:bg-surface hover:text-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-focus min-w-[44px] min-h-[44px]"
 
 const ActionButtonWithLabel: React.FC<{
   icon: React.ReactNode
@@ -53,28 +68,77 @@ const OverflowMenuItem: React.FC<{
   label: string
   onClick?: () => void
   disabled?: boolean
+  /** Shown under a disabled item so the user knows why it is unavailable. */
+  disabledReason?: string | null
   danger?: boolean
   active?: boolean
-}> = ({ icon, label, onClick, disabled, danger, active }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    disabled={disabled}
-    aria-disabled={disabled}
-    className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50 ${
-      danger
-        ? "text-danger hover:text-danger"
-        : active
-          ? "bg-primary/10 text-primaryStrong hover:bg-primary/10 hover:text-primaryStrong"
-          : "text-text hover:text-text"
-    }`}
-  >
-    <span className="flex h-4 w-4 items-center justify-center text-text-subtle">{icon}</span>
-    <span>{label}</span>
-  </button>
+  /** Makes the item a toggle (menuitemcheckbox) in this state. */
+  checked?: boolean
+}> = ({ icon, label, onClick, disabled, disabledReason, danger, active, checked }) => {
+  const reasonId = React.useId()
+  const reason = disabled && disabledReason ? disabledReason : null
+  return (
+    <>
+      <button
+        type="button"
+        role={checked === undefined ? "menuitem" : "menuitemcheckbox"}
+        aria-checked={checked}
+        // Roving focus: the arrow keys move between items and Tab leaves.
+        tabIndex={-1}
+        onClick={(event) => {
+          // A disabled item stays focusable, so its reason is read, but does
+          // nothing and leaves the menu open.
+          if (disabled) {
+            event.stopPropagation()
+            return
+          }
+          onClick?.()
+        }}
+        aria-disabled={disabled || undefined}
+        aria-describedby={reason ? reasonId : undefined}
+        title={reason ?? undefined}
+        className={`flex min-h-[44px] min-w-[44px] w-full items-center gap-2 rounded-md px-3 py-2 text-xs transition hover:bg-surface2 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ${
+          danger
+            ? "text-danger hover:text-danger"
+            : active
+              ? "bg-primary/10 text-primaryStrong hover:bg-primary/10 hover:text-primaryStrong"
+              : "text-text hover:text-text"
+        }`}
+      >
+        <span className="flex h-4 w-4 items-center justify-center text-text-subtle">{icon}</span>
+        <span>{label}</span>
+      </button>
+      {reason ? (
+        <p
+          id={reasonId}
+          // Read as the item's description, not as a child of the menu.
+          role="none"
+          className="-mt-1 max-w-[240px] px-3 pb-2 pl-9 text-[11px] leading-snug text-text-muted"
+        >
+          {reason}
+        </p>
+      ) : null}
+    </>
+  )
+}
+
+/** Thin divider between groups of overflow actions. */
+const OverflowMenuDivider: React.FC = () => (
+  <div role="separator" className="my-1 h-px bg-border" />
 )
 
+/** Joins non-empty groups of overflow actions with dividers. */
+const joinOverflowGroups = (groups: React.ReactNode[][]): React.ReactNode[] =>
+  groups
+    .filter((group) => group.length > 0)
+    .flatMap((group, index) =>
+      index === 0
+        ? group
+        : [<OverflowMenuDivider key={`divider-${index}`} />, ...group]
+    )
+
 type MessageActionsBarProps = {
+  messageView?: ChatMessageView
   t: TFunction
   isProMode: boolean
   isBot: boolean
@@ -85,7 +149,6 @@ type MessageActionsBarProps = {
   canSwipeNext: boolean
   onSwipePrev?: () => void
   onSwipeNext?: () => void
-  overflowChipVisibility: string
   actionRowVisibility: string
   isTtsEnabled?: boolean
   ttsDisabledReason?: string | null
@@ -94,6 +157,10 @@ type MessageActionsBarProps = {
   onToggleTts: () => void
   hideCopy?: boolean
   copyPressed: boolean
+  /** The last copy failed; the bar says so and keeps the copy icon. */
+  copyFailed?: boolean
+  /** Changes on every copy, so a repeated result is announced again. */
+  copyAttempt?: number
   onCopy: () => void | Promise<void>
   canReply: boolean
   onReply: () => void
@@ -109,6 +176,7 @@ type MessageActionsBarProps = {
   isLastMessage: boolean
   hideEditAndRegenerate?: boolean
   onRegenerate: () => void
+  regenerateDisabledReason?: string | null
   onNewBranch?: () => void
   temporaryChat?: boolean
   hideContinue?: boolean
@@ -140,6 +208,7 @@ type MessageActionsBarProps = {
 }
 
 export function MessageActionsBar({
+  messageView,
   t,
   isProMode,
   isBot,
@@ -150,7 +219,6 @@ export function MessageActionsBar({
   canSwipeNext,
   onSwipePrev,
   onSwipeNext,
-  overflowChipVisibility,
   actionRowVisibility,
   isTtsEnabled,
   ttsDisabledReason,
@@ -159,6 +227,8 @@ export function MessageActionsBar({
   onToggleTts,
   hideCopy,
   copyPressed,
+  copyFailed = false,
+  copyAttempt,
   onCopy,
   canReply,
   onReply,
@@ -174,6 +244,7 @@ export function MessageActionsBar({
   isLastMessage,
   hideEditAndRegenerate,
   onRegenerate,
+  regenerateDisabledReason,
   onNewBranch,
   temporaryChat,
   hideContinue,
@@ -201,18 +272,40 @@ export function MessageActionsBar({
   onTogglePinned,
   onQuickMessageAction
 }: MessageActionsBarProps) {
-  const actionButtonClass = `${ACTION_BUTTON_CLASS} ${
-    isProMode ? "h-11 px-3 sm:h-8 sm:px-2" : "h-11 w-11 sm:h-8 sm:w-8"
+  const actionButtonClass = `${messageView ? "inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors duration-200" : ACTION_BUTTON_CLASS} ${
+    isProMode ? "h-11 px-3" : "h-11 w-11"
   }`
 
   const [overflowOpen, setOverflowOpen] = React.useState(false)
+  const actionTriggerRef = React.useRef<HTMLButtonElement>(null)
+  const actionMenuRef = React.useRef<HTMLDivElement>(null)
+  const actionMenuOpenRef = React.useRef(overflowOpen)
+  actionMenuOpenRef.current = overflowOpen
+  const actionMenuId = React.useId()
+  const changeActionMenu = (open: boolean) => {
+    const restoreFocus = !open && actionMenuRef.current?.contains(document.activeElement)
+    setOverflowOpen(open)
+    if (restoreFocus) actionTriggerRef.current?.focus()
+  }
+  React.useEffect(() => {
+    const menu = actionMenuRef.current
+    if (!overflowOpen || !menu) return
+    scheduleFocusFirstVisibleElement(MENU_ITEMS, menu, () =>
+      actionMenuOpenRef.current && actionMenuRef.current === menu && menu.isConnected)
+  }, [overflowOpen])
   const showLeftFeedback = !editMode && showFeedbackControls
+  const copyFailedHint = useCopyFailedHint()
 
-  // Build overflow menu items
+  // Build overflow menu items, grouped: reuse · role-play steering ·
+  // transform · listen/feedback/pin · delete, with dividers between groups.
   const overflowItems = React.useMemo(() => {
-    const items: React.ReactNode[] = []
+    const reuse: React.ReactNode[] = []
+    const steering: React.ReactNode[] = []
+    const transform: React.ReactNode[] = []
+    const other: React.ReactNode[] = []
+    const danger: React.ReactNode[] = []
     if (canReply) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="reply"
           icon={<CornerUpLeft className="w-3.5 h-3.5" />}
@@ -222,7 +315,7 @@ export function MessageActionsBar({
       )
     }
     if (isBot && onNewBranch) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="branch"
           icon={<GitBranchIcon className="w-3.5 h-3.5" />}
@@ -232,7 +325,7 @@ export function MessageActionsBar({
       )
     }
     if (isBot && !hideContinue && isLastMessage && onContinue) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="continue"
           icon={<PlayCircle className="w-3.5 h-3.5" />}
@@ -241,16 +334,18 @@ export function MessageActionsBar({
         />
       )
     }
+    // Role-play steering is offered only when the chat passes its handlers,
+    // which it does for character / role-play chats.
     const canControlMessageSteering =
       isBot &&
       isLastMessage &&
       onMessageSteeringModeChange &&
       onMessageSteeringForceNarrateChange
     if (canControlMessageSteering) {
-      items.push(
+      steering.push(
         <OverflowMenuItem
           key="steer-continue"
-          icon={<span className="text-[10px] leading-none font-semibold">C</span>}
+          icon={<UserPen className="w-3.5 h-3.5" />}
           label={
             t("playground:composer.steering.continue", "Continue as user") as string
           }
@@ -266,12 +361,13 @@ export function MessageActionsBar({
             )
           }}
           active={messageSteeringMode === "continue_as_user"}
+          checked={onRunSteeredContinue ? undefined : messageSteeringMode === "continue_as_user"}
         />
       )
-      items.push(
+      steering.push(
         <OverflowMenuItem
           key="steer-impersonate"
-          icon={<span className="text-[10px] leading-none font-semibold">I</span>}
+          icon={<VenetianMask className="w-3.5 h-3.5" />}
           label={
             t("playground:composer.steering.impersonate", "Impersonate user") as string
           }
@@ -287,26 +383,28 @@ export function MessageActionsBar({
             )
           }}
           active={messageSteeringMode === "impersonate_user"}
+          checked={onRunSteeredContinue ? undefined : messageSteeringMode === "impersonate_user"}
         />
       )
-      items.push(
+      steering.push(
         <OverflowMenuItem
           key="steer-narrate"
-          icon={<span className="text-[10px] leading-none font-semibold">N</span>}
+          icon={<BookOpenText className="w-3.5 h-3.5" />}
           label={t("playground:composer.steering.narrate", "Force narrate") as string}
           onClick={() =>
             onMessageSteeringForceNarrateChange(!messageSteeringForceNarrate)
           }
           active={messageSteeringForceNarrate}
+          checked={Boolean(messageSteeringForceNarrate)}
         />
       )
       const steeringActive =
         messageSteeringMode !== "none" || messageSteeringForceNarrate
       if (steeringActive && onClearMessageSteering) {
-        items.push(
+        steering.push(
           <OverflowMenuItem
             key="steer-clear"
-            icon={<span className="text-[10px] leading-none font-semibold">x</span>}
+            icon={<Eraser className="w-3.5 h-3.5" />}
             label={t("common:clear", "Clear") as string}
             onClick={onClearMessageSteering}
           />
@@ -314,7 +412,7 @@ export function MessageActionsBar({
       }
     }
     if (canSaveToWorkspaceNotes && onSaveToWorkspaceNotes) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="save-workspace-note"
           icon={<StickyNote className="w-3.5 h-3.5" />}
@@ -323,7 +421,7 @@ export function MessageActionsBar({
         />
       )
     } else if (isBot && canSaveToNotes) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="save-note"
           icon={<StickyNote className="w-3.5 h-3.5" />}
@@ -334,7 +432,7 @@ export function MessageActionsBar({
       )
     }
     if (isBot && canSaveToFlashcards) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="save-flashcard"
           icon={<Layers className="w-3.5 h-3.5" />}
@@ -345,7 +443,7 @@ export function MessageActionsBar({
       )
     }
     if (isBot && canGenerateDocument) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="generate-doc"
           icon={<FileText className="w-3.5 h-3.5" />}
@@ -355,41 +453,41 @@ export function MessageActionsBar({
       )
     }
     if (isBot && onQuickMessageAction) {
-      items.push(
+      transform.push(
         <OverflowMenuItem
           key="quick-summarize"
-          icon={<span className="text-[10px] leading-none font-semibold">S</span>}
+          icon={<ListCollapse className="w-3.5 h-3.5" />}
           label={t("playground:actions.quickSummarize", "Summarize this")}
           onClick={() => onQuickMessageAction("summarize")}
         />
       )
-      items.push(
+      transform.push(
         <OverflowMenuItem
           key="quick-translate"
-          icon={<span className="text-[10px] leading-none font-semibold">T</span>}
+          icon={<Languages className="w-3.5 h-3.5" />}
           label={t("playground:actions.quickTranslate", "Translate this")}
           onClick={() => onQuickMessageAction("translate")}
         />
       )
-      items.push(
+      transform.push(
         <OverflowMenuItem
           key="quick-shorten"
-          icon={<span className="text-[10px] leading-none font-semibold">L</span>}
+          icon={<Shrink className="w-3.5 h-3.5" />}
           label={t("playground:actions.quickShorten", "Make this shorter")}
           onClick={() => onQuickMessageAction("shorten")}
         />
       )
-      items.push(
+      transform.push(
         <OverflowMenuItem
           key="quick-explain"
-          icon={<span className="text-[10px] leading-none font-semibold">E</span>}
+          icon={<Lightbulb className="w-3.5 h-3.5" />}
           label={t("playground:actions.quickExplain", "Explain this")}
           onClick={() => onQuickMessageAction("explain")}
         />
       )
     }
     if (isBot && isTtsEnabled) {
-      items.push(
+      other.push(
         <OverflowMenuItem
           key="tts"
           icon={
@@ -402,11 +500,12 @@ export function MessageActionsBar({
           label={isSpeaking ? t("ttsStop", "Stop TTS") : t("tts", "Read Aloud")}
           onClick={onToggleTts}
           disabled={ttsActionDisabled}
+          disabledReason={ttsDisabledReason}
         />
       )
     }
     if (onDelete) {
-      items.push(
+      danger.push(
         <OverflowMenuItem
           key="delete"
           icon={<Trash2 className="w-3.5 h-3.5" />}
@@ -417,7 +516,7 @@ export function MessageActionsBar({
       )
     }
     if (canPin && onTogglePinned) {
-      items.push(
+      other.push(
         <OverflowMenuItem
           key="pin-toggle"
           icon={
@@ -436,7 +535,7 @@ export function MessageActionsBar({
         />
       )
     }
-    return items
+    return joinOverflowGroups([reuse, steering, transform, other, danger])
   }, [
     canReply, onReply, isBot, onNewBranch, temporaryChat,
     hideContinue, isLastMessage, onContinue, onRunSteeredContinue,
@@ -446,14 +545,14 @@ export function MessageActionsBar({
     onClearMessageSteering,
     canSaveToFlashcards, canGenerateDocument, onGenerateDocument,
     onSaveKnowledge, savingKnowledge, isTtsEnabled, ttsActionDisabled,
-    isSpeaking, onToggleTts, onDelete, canPin, isPinned, onTogglePinned,
+    ttsDisabledReason, isSpeaking, onToggleTts, onDelete, canPin, isPinned, onTogglePinned,
     onQuickMessageAction, t
   ])
 
   return (
     <div
-      className={`flex w-full items-start gap-2 ${
-        showLeftFeedback ? "justify-between" : "justify-end"
+      className={`${messageView ? "order-20" : ""} flex w-full flex-wrap items-start gap-2 ${
+        showLeftFeedback ? "justify-between" : messageView ? "justify-start" : "justify-end"
       }`}>
       {showLeftFeedback && (
         <FeedbackButtons
@@ -470,7 +569,7 @@ export function MessageActionsBar({
         />
       )}
 
-      <div className="ml-auto flex items-center gap-1">
+      <div className={`flex min-w-0 flex-wrap items-center gap-1 ${messageView && !showLeftFeedback ? "justify-start" : "ml-auto justify-end"}`}>
         {/* Variant pager */}
         {showVariantPager && (
           <div className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-xs text-text-muted">
@@ -481,7 +580,7 @@ export function MessageActionsBar({
               title={t("playground:actions.previousVariant", "Previous response") as string}
               onClick={() => canSwipePrev && onSwipePrev?.()}
               disabled={!canSwipePrev}
-              className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-colors sm:h-4 sm:w-4 sm:min-h-0 sm:min-w-0 ${
+              className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-colors ${
                 canSwipePrev ? "text-text-subtle hover:text-text" : "text-text-muted/50"
               }`}
             >
@@ -500,7 +599,7 @@ export function MessageActionsBar({
               title={t("playground:actions.nextVariant", "Next response") as string}
               onClick={() => canSwipeNext && onSwipeNext?.()}
               disabled={!canSwipeNext}
-              className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-colors sm:h-4 sm:w-4 sm:min-h-0 sm:min-w-0 ${
+              className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-colors ${
                 canSwipeNext ? "text-text-subtle hover:text-text" : "text-text-muted/50"
               }`}
             >
@@ -509,23 +608,12 @@ export function MessageActionsBar({
           </div>
         )}
 
-        {/* Collapsed "..." trigger (shows when action row is hidden) */}
-        <button
-          type="button"
-          data-testid="message-actions-overflow-chip"
-          aria-label={t("common:moreActions", "More actions") as string}
-          title={t("common:moreActions", "More actions") as string}
-          className={`${overflowChipVisibility} inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-border bg-surface2 px-3 py-0.5 text-xs text-text-muted transition-colors hover:text-text sm:min-h-0 sm:min-w-0 sm:px-2`}
-        >
-          •••
-        </button>
-
-        {/* Action row (visible on hover/tap) */}
+        {/* Primary actions (persistent on the last assistant, hover-revealed on older rows) */}
         <div className={`${actionRowVisibility} flex-wrap items-center gap-2`}>
           <div className="flex flex-wrap items-center gap-1">
             {/* Primary actions: Copy, Edit, Regenerate */}
             {!hideCopy && (
-              <Tooltip title={t("copyToClipboard")}>
+              <Tooltip title={copyFailed ? copyFailedHint : t("copyToClipboard")}>
                 <IconButton
                   ariaLabel={t("copyToClipboard") as string}
                   onClick={() => { void onCopy() }}
@@ -545,6 +633,7 @@ export function MessageActionsBar({
                 </IconButton>
               </Tooltip>
             )}
+            {!hideCopy && <CopyStatus status={copyFailed ? "failed" : copyPressed ? "copied" : "idle"} attempt={copyAttempt} />}
             {!hideEditAndRegenerate && (
               <Tooltip title={t("edit")}>
                 <IconButton
@@ -561,9 +650,11 @@ export function MessageActionsBar({
               </Tooltip>
             )}
             {isBot && !hideEditAndRegenerate && isLastMessage && (
-              <Tooltip title={t("regenerate")}>
+              <Tooltip title={regenerateDisabledReason || t("regenerate")}>
                 <IconButton
                   ariaLabel={t("regenerate") as string}
+                  disabled={Boolean(regenerateDisabledReason)}
+                  title={regenerateDisabledReason || undefined}
                   onClick={onRegenerate}
                   className={actionButtonClass}
                 >
@@ -581,6 +672,9 @@ export function MessageActionsBar({
               <Popover
                 content={<GenerationInfo generationInfo={generationInfo} />}
                 title={t("generationInfo")}
+                // Keyboard users open it too (AX-02). Not "click": a click
+                // would close what the hover or the click's own focus opened.
+                trigger={["hover", "focus"]}
               >
                 <IconButton
                   ariaLabel={t("generationInfo") as string}
@@ -594,31 +688,59 @@ export function MessageActionsBar({
                 </IconButton>
               </Popover>
             )}
-
-            {/* Overflow menu for secondary actions */}
-            {overflowItems.length > 0 && (
-              <Popover
-                open={overflowOpen}
-                onOpenChange={setOverflowOpen}
-                trigger="click"
-                placement="bottomRight"
-                content={
-                  <div className="flex min-w-[180px] flex-col py-1" onClick={() => setOverflowOpen(false)}>
-                    {overflowItems}
-                  </div>
-                }
-              >
-                <IconButton
-                  ariaLabel={t("common:moreActions", "More actions") as string}
-                  className={actionButtonClass}
-                >
-                  <MoreHorizontal className="w-3 h-3 text-text-subtle group-hover:text-text" />
-                </IconButton>
-              </Popover>
-            )}
           </div>
-
         </div>
+
+        {/* Overflow menu for secondary actions */}
+        {overflowItems.length > 0 && (
+          <Popover
+            open={overflowOpen}
+            onOpenChange={changeActionMenu}
+            trigger="click"
+            placement="bottomRight"
+            content={
+              <div
+                id={actionMenuId}
+                ref={actionMenuRef}
+                role="menu"
+                aria-label={t("common:moreActions", "More actions") as string}
+                className="flex min-w-[180px] flex-col py-1"
+                onClick={() => changeActionMenu(false)}
+                onBlur={event => {
+                  // Focus left the menu: close it. Clicking the trigger
+                  // toggles it itself; focus lost to nowhere returns to it.
+                  const next = event.relatedTarget
+                  if (next && (event.currentTarget.contains(next) || next === actionTriggerRef.current)) return
+                  changeActionMenu(false)
+                  if (!next) actionTriggerRef.current?.focus()
+                }}
+                onKeyDown={event => {
+                  // Arrow, Home and End move between actions (AX-02).
+                  if (moveMenuFocus(event.currentTarget, event.key)) {
+                    event.preventDefault()
+                    return
+                  }
+                  if (event.key !== "Escape" && event.key !== "Tab") return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  changeActionMenu(false)
+                }}>
+                {overflowItems}
+              </div>
+            }
+          >
+            <IconButton
+              ref={actionTriggerRef}
+              ariaLabel={t("common:moreActions", "More actions") as string}
+              hasPopup="menu"
+              ariaExpanded={overflowOpen}
+              ariaControls={overflowOpen ? actionMenuId : undefined}
+              className={actionButtonClass}
+            >
+              <MoreHorizontal className="w-3 h-3 text-text-subtle group-hover:text-text" />
+            </IconButton>
+          </Popover>
+        )}
       </div>
     </div>
   )

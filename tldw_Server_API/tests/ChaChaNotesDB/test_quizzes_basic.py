@@ -96,6 +96,21 @@ def test_temporary_directory_retries_transient_cleanup_locks(monkeypatch):
     assert not temp_path.exists()
 
 
+@pytest.mark.parametrize(
+    ("question", "answer", "expected"),
+    [
+        ({"question_type": "multiple_choice"}, 0, False),
+        ({"question_type": "multiple_choice", "correct_answer": None}, 0, False),
+        ({"question_type": "multiple_choice", "correct_answer": 0}, "0", True),
+        ({"question_type": "multiple_choice", "correct_answer": 1}, 0, False),
+        ({"question_type": "multiple_choice", "correct_answer": 0}, "invalid", False),
+    ],
+)
+def test_multiple_choice_answer_contract(question, answer, expected):
+    with _temp_chacha_db() as db:
+        assert db._check_answer(question, answer) is expected
+
+
 def test_quizzes_basic_flow():
     with _temp_chacha_db() as db:
 

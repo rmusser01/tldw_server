@@ -32,7 +32,7 @@ def test_chat_completion_persists_system_message(
     )
 
     with patch(
-        "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call"
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call"
     ) as mock_llm:
         mock_llm.return_value = {
             "id": "chatcmpl-test",

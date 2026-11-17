@@ -64,9 +64,9 @@ def test_the_chain_is_bounded_and_survives_a_cycle() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_rejected_users_bootstrap_logs_its_real_cause(tmp_path, monkeypatch) -> None:
+async def test_a_rejected_users_bootstrap_logs_its_real_cause(tmp_path, monkeypatch, fresh_services) -> None:
     """The exact outage shape: a guard rejection inside _create_tables must be named."""
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
     from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import ProfileUserWriteRejected
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -75,7 +75,6 @@ async def test_a_rejected_users_bootstrap_logs_its_real_cause(tmp_path, monkeypa
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     reset_settings()
-    await reset_db_pool()
 
     async def _rejected(*_args: object, **_kwargs: object) -> None:
         raise ProfileUserWriteRejected()
@@ -90,7 +89,6 @@ async def test_a_rejected_users_bootstrap_logs_its_real_cause(tmp_path, monkeypa
             await users_db.initialize()
     finally:
         logger.remove(sink_id)
-        await reset_db_pool()
         reset_settings()
 
     assert any("ProfileUserWriteRejected" in m for m in messages), messages

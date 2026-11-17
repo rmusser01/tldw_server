@@ -83,7 +83,7 @@ export function PromptDiff({ original, candidate }: PromptDiffProps) {
         <p
           role="status"
           aria-live="polite"
-          className="text-sm text-muted-foreground">
+          className="text-sm text-text-muted">
           {t(
             "common:promptAssist.diffTooLarge",
             "This comparison is too large to highlight safely. Showing the plain candidate."
@@ -94,7 +94,7 @@ export function PromptDiff({ original, candidate }: PromptDiffProps) {
             "common:promptAssist.plainCandidateLabel",
             "Plain improved prompt candidate"
           )}
-          className="min-h-48 w-full resize-y rounded-md border border-border bg-background p-3 font-mono text-sm"
+          className="min-h-48 w-full resize-y rounded-md border border-border bg-surface p-3 font-mono text-sm"
           readOnly
           value={candidate}
         />
@@ -106,7 +106,7 @@ export function PromptDiff({ original, candidate }: PromptDiffProps) {
     <div className="space-y-3">
       <div
         data-diff-legend
-        className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+        className="flex flex-wrap gap-4 text-xs text-text-muted">
         <span className="font-medium text-danger">− {removed}</span>
         <span className="font-medium text-success underline decoration-2 underline-offset-2">
           + {added}

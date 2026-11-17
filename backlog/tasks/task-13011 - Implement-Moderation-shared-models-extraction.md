@@ -4,7 +4,7 @@ title: Implement Moderation shared models extraction
 status: Done
 created_date: 2026-08-12 00:45
 dependencies:
-- TASK-13010
+- TASK-15129
 - TASK-12992
 labels:
 - moderation

@@ -611,3 +611,99 @@ async def test_process_sync_job_continues_after_sink_apply_failure_for_other_ite
         assert beta_note is not None
         assert beta_note["title"] == "Beta"
         assert "second body" in beta_note["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_worker_loop_survives_a_git_source_whose_repo_url_has_a_control_character(
+    tmp_path,
+    monkeypatch,
+):
+    """A malformed repo_url fails its own job; the worker goes on to the next user's job."""
+    import asyncio
+    import socket
+
+    source_root = tmp_path / "allowed" / "docs"
+    source_root.mkdir(parents=True)
+    (source_root / "alpha.md").write_text("# Alpha\n\nbody\n", encoding="utf-8")
+
+    def _no_real_network(*_args, **_kwargs):
+        raise AssertionError("ingestion worker reached the network")
+
+    monkeypatch.setattr(socket, "create_connection", _no_real_network)
+    monkeypatch.setattr(socket.socket, "connect", _no_real_network)
+    monkeypatch.setattr(socket, "getaddrinfo", _no_real_network)
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("INGESTION_SOURCE_ALLOWED_ROOTS", str(tmp_path / "allowed"))
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
+    monkeypatch.setenv("INGESTION_SOURCES_POLL_INTERVAL_SECONDS", "0")
+
+    import tldw_Server_API.app.services.ingestion_sources_worker as worker
+    from tldw_Server_API.app.core.Ingestion_Sources.service import (
+        create_source,
+        ensure_ingestion_sources_schema,
+    )
+
+    async with aiosqlite.connect(str(tmp_path / "ingestion_sources.sqlite3")) as db:
+        db.row_factory = aiosqlite.Row
+        await ensure_ingestion_sources_schema(db)
+        bad = await create_source(
+            db,
+            user_id=1,
+            payload={
+                "source_type": "git_repository",
+                "sink_type": "notes",
+                "policy": "canonical",
+                "config": {"mode": "remote_github_repo", "repo_url": "https://github.com/own\x01er/project"},
+            },
+        )
+        good = await create_source(
+            db,
+            user_id=2,
+            payload={
+                "source_type": "local_directory",
+                "sink_type": "notes",
+                "policy": "canonical",
+                "config": {"path": str(source_root)},
+            },
+        )
+        stop = asyncio.Event()
+
+        class _QueuedJobManager(_FakeJobManager):
+            def __init__(self) -> None:
+                super().__init__()
+                self.jobs = [
+                    {"id": 1, "lease_id": "lease-1", "owner_user_id": 1, "payload": {"source_id": bad["id"]}},
+                    {"id": 2, "lease_id": "lease-2", "owner_user_id": 2, "payload": {"source_id": good["id"]}},
+                ]
+                self.outcomes: dict[int, str] = {}
+
+            def acquire_next_job(self, **_kwargs):
+                if not self.jobs:
+                    stop.set()
+                    return None
+                return self.jobs.pop(0)
+
+            def complete_job(self, jid: int, **kwargs) -> None:
+                super().complete_job(jid, **kwargs)
+                self.outcomes[jid] = "completed"
+
+            def fail_job(self, jid: int, **kwargs) -> None:
+                super().fail_job(jid, **kwargs)
+                self.outcomes[jid] = "failed"
+
+        jm = _QueuedJobManager()
+
+        async def _fake_get_db_pool():
+            return _SQLitePool(db)
+
+        async def _inline_to_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        monkeypatch.setattr(worker, "JobManager", lambda: jm, raising=False)
+        monkeypatch.setattr(worker, "get_db_pool", _fake_get_db_pool, raising=False)
+        monkeypatch.setattr(worker.asyncio, "to_thread", _inline_to_thread)
+
+        await asyncio.wait_for(worker.run_ingestion_sources_worker(stop_event=stop), timeout=30)
+
+    assert jm.outcomes == {1: "failed", 2: "completed"}

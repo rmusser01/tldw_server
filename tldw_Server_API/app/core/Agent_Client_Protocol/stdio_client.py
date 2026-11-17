@@ -60,10 +60,41 @@ class ACPStdioClient:
         self._reader_task: asyncio.Task | None = None
         self._stderr_task: asyncio.Task | None = None
         self._pending: dict[str, asyncio.Future] = {}
+        self._response_observers: dict[str, Callable[[], None]] = {}
         self._next_id = 1
         self._write_lock = asyncio.Lock()
         self._request_handler: RequestHandler | None = None
         self._notification_handler: NotificationHandler | None = None
+        self._permission_sessions: set[str] = set()
+        self._permission_tasks: dict[str, asyncio.Task] = {}
+
+    def _register_permission_session(self, session_id: str) -> None:
+        """Register only a successfully created, owner-bound runner session."""
+        self._permission_sessions.add(session_id)
+
+    async def _unregister_permission_session(self, session_id: str) -> None:
+        """Retire the session before joining its permission handler."""
+        self._permission_sessions.discard(session_id)
+        task = self._permission_tasks.pop(session_id, None)
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def _close_permission_tasks(self) -> None:
+        """Settle all tracked permission handlers on transport closure."""
+        self._permission_sessions.clear()
+        tasks = list(self._permission_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._permission_tasks.clear()
+
+    def _permission_task_done(self, session_id: str, task: asyncio.Task) -> None:
+        if self._permission_tasks.get(session_id) is task:
+            self._permission_tasks.pop(session_id, None)
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning("ACP permission response task failed")
 
     def set_request_handler(self, handler: RequestHandler) -> None:
         self._request_handler = handler
@@ -97,6 +128,7 @@ class ACPStdioClient:
     async def close(self) -> None:
         if self._proc is None:
             return
+        await self._close_permission_tasks()
         if self._proc.returncode is None:
             self._proc.terminate()
             try:
@@ -104,13 +136,22 @@ class ACPStdioClient:
             except asyncio.TimeoutError:
                 self._proc.kill()
                 await self._proc.wait()
-        if self._reader_task:
-            self._reader_task.cancel()
-        if self._stderr_task:
-            self._stderr_task.cancel()
+        tasks = [task for task in (self._reader_task, self._stderr_task) if task is not None]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._drain_pending("ACP connection closed")
         self._proc = None
 
-    async def call(self, method: str, params: Any | None = None) -> ACPMessage:
+    async def call(
+        self,
+        method: str,
+        params: Any | None = None,
+        *,
+        timeout_sec: float | None = None,
+        on_response_received: Callable[[], None] | None = None,
+    ) -> ACPMessage:
         if self._proc is None:
             raise ACPResponseError("ACP process not started")
 
@@ -118,6 +159,8 @@ class ACPStdioClient:
         self._next_id += 1
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[str(request_id)] = future
+        if on_response_received is not None:
+            self._response_observers[str(request_id)] = on_response_received
 
         payload = {
             "jsonrpc": "2.0",
@@ -127,14 +170,16 @@ class ACPStdioClient:
         }
         try:
             await self._send(payload)
-            if self.rpc_timeout_sec > 0:
-                resp = await asyncio.wait_for(future, timeout=self.rpc_timeout_sec)
+            call_timeout = self.rpc_timeout_sec if timeout_sec is None else float(timeout_sec)
+            if call_timeout > 0:
+                resp = await asyncio.wait_for(future, timeout=call_timeout)
             else:
                 resp = await future
         except asyncio.TimeoutError as exc:
             raise ACPResponseError(f"ACP call timed out waiting for {method}", code=-32000) from exc
         finally:
             self._pending.pop(str(request_id), None)
+            self._response_observers.pop(str(request_id), None)
         if resp.error:
             raise ACPResponseError(
                 resp.error.get("message", "ACP error"),
@@ -170,39 +215,57 @@ class ACPStdioClient:
             self._drain_pending("ACP stdout not available")
             return
         reader = proc.stdout
-        while True:
-            line = await reader.readline()
-            if not line:
-                break
-            raw = line.strip()
-            if not raw:
-                continue
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                logger.warning("ACP client received invalid JSON")
-                continue
-            msg = ACPMessage(
-                jsonrpc=payload.get("jsonrpc", "2.0"),
-                id=payload.get("id"),
-                method=payload.get("method"),
-                params=payload.get("params"),
-                result=payload.get("result"),
-                error=payload.get("error"),
-            )
+        try:
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    logger.warning("ACP client received invalid JSON")
+                    continue
+                msg = ACPMessage(
+                    jsonrpc=payload.get("jsonrpc", "2.0"),
+                    id=payload.get("id"),
+                    method=payload.get("method"),
+                    params=payload.get("params"),
+                    result=payload.get("result"),
+                    error=payload.get("error"),
+                )
 
-            if msg.method and msg.id is None:
-                await self._handle_notification(msg)
-                continue
-            if msg.method and msg.id is not None:
-                await self._handle_request(msg)
-                continue
+                if msg.method and msg.id is None:
+                    await self._handle_notification(msg)
+                    continue
+                if msg.method and msg.id is not None:
+                    if msg.method == "session/request_permission":
+                        params = msg.params if isinstance(msg.params, dict) else {}
+                        session_id = params.get("sessionId")
+                        if not isinstance(session_id, str) or session_id not in self._permission_sessions:
+                            await self._send_error(msg.id, -32600, "unknown permission session")
+                        elif session_id in self._permission_tasks and not self._permission_tasks[session_id].done():
+                            await self._send_error(msg.id, -32600, "permission request already active")
+                        else:
+                            task = asyncio.create_task(self._handle_request(msg))
+                            self._permission_tasks[session_id] = task
+                            task.add_done_callback(lambda done, owned=session_id: self._permission_task_done(owned, done))
+                    else:
+                        await self._handle_request(msg)
+                    continue
 
-            if msg.id is not None:
-                future = self._pending.pop(str(msg.id), None)
-                if future and not future.done():
-                    future.set_result(msg)
-        self._drain_pending("ACP connection closed")
+                if msg.id is not None:
+                    future = self._pending.pop(str(msg.id), None)
+                    if future and not future.done():
+                        observer = self._response_observers.pop(str(msg.id), None)
+                        if observer is not None:
+                            observer()
+                        future.set_result(msg)
+        finally:
+            await self._close_permission_tasks()
+            self._drain_pending("ACP connection closed")
 
     async def _handle_request(self, msg: ACPMessage) -> None:
         if self._request_handler is None:

@@ -31,6 +31,8 @@ import { useConfirmModal } from "@/hooks/useConfirmModal"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { useClearChat } from "@/hooks/chat/useClearChat"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { captureChatDraftSource, hasTemporaryChatContent } from "@/hooks/chat/chat-draft-transition"
 import { useStoreMessageOption } from "@/store/option"
 import {
   openCharactersWorkspace as openCharactersWorkspaceRoute
@@ -146,8 +148,17 @@ export const CharacterSelect: React.FC<Props> = ({
     useSelectedCharacter<StoredCharacter | null>(null)
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const clearChat = useClearChat()
-  const messages = useStoreMessageOption((state) => state.messages)
-  const serverChatId = useStoreMessageOption((state) => state.serverChatId)
+  const captureSelectionFence = useHistorySelectionContext()?.fence
+  // Derived boolean subscription (WP-06): the component only consumes the
+  // transcript through hasActiveChat, so subscribing to the boolean keeps
+  // message-text updates (streaming flushes) from re-rendering this tree.
+  const hasActiveChat = useStoreMessageOption(
+    (state) =>
+      Boolean(state.serverChatId) ||
+      state.messages.some(
+        (message) => message.messageType !== "character:greeting"
+      )
+  )
   const [userDisplayName, setUserDisplayName] = useStorage(
     "chatUserDisplayName",
     ""
@@ -269,7 +280,7 @@ export const CharacterSelect: React.FC<Props> = ({
     openAssistantSelect(openRequest.tab)
   }, [openAssistantSelect, openRequest])
 
-  const { data: characters = [], isLoading, refetch } = useQuery<
+  const { data: characters = [], isLoading, isFetching: charactersFetching, isError: charactersError, refetch } = useQuery<
     CharacterApiResponse[]
   >({
     queryKey: ["characters-list"],
@@ -281,7 +292,7 @@ export const CharacterSelect: React.FC<Props> = ({
     enabled: !!hasCharacters,
     staleTime: 5 * 60 * 1000 // 5 minutes
   })
-  const { data: personas = [] } = useQuery<PersonaInfo[]>({
+  const { data: personas = [], isLoading: personasLoading, isFetching: personasFetching, isError: personasError, refetch: refetchPersonas } = useQuery<PersonaInfo[]>({
     queryKey: ["persona-profiles", "sidepanel-character-select"],
     queryFn: async () => {
       await tldwClient.initialize().catch(() => null)
@@ -431,12 +442,6 @@ export const CharacterSelect: React.FC<Props> = ({
       ),
     [selectedCharacter?.extensions, selectedCharacterStored?.extensions]
   )
-  const hasActiveChat = useMemo(() => {
-    if (serverChatId) return true
-    return messages.some(
-      (message) => message.messageType !== "character:greeting"
-    )
-  }, [messages, serverChatId])
   const hasUserPersonaImage = useMemo(() => {
     return (
       typeof userPersonaImage === "string" &&
@@ -1037,9 +1042,9 @@ export const CharacterSelect: React.FC<Props> = ({
       }
 
       if (hasActiveChat) {
-        const confirmed = await confirmCharacterSwitch(stored?.name)
-        if (!confirmed) return
-        clearChat()
+        const source = captureChatDraftSource(captureSelectionFence?.())
+        if (!hasTemporaryChatContent(useStoreMessageOption.getState()) && !await confirmCharacterSwitch(stored?.name)) return
+        if (!source.isCurrent() || clearChat() === false) return
       }
 
       greetingRetryAbortRef.current?.abort()
@@ -1124,6 +1129,7 @@ export const CharacterSelect: React.FC<Props> = ({
     [
       buildStoredCharacter,
       clearChat,
+      captureSelectionFence,
       confirmCharacterSwitch,
       hasActiveChat,
       notification,
@@ -1162,9 +1168,9 @@ export const CharacterSelect: React.FC<Props> = ({
         return
       }
       if (hasActiveChat) {
-        const confirmed = await confirmCharacterSwitch(selection.name)
-        if (!confirmed) return
-        clearChat()
+        const source = captureChatDraftSource(captureSelectionFence?.())
+        if (!hasTemporaryChatContent(useStoreMessageOption.getState()) && !await confirmCharacterSwitch(selection.name)) return
+        if (!source.isCurrent() || clearChat() === false) return
       }
       greetingRetryAbortRef.current?.abort()
       greetingRetryAbortRef.current = null
@@ -1175,6 +1181,7 @@ export const CharacterSelect: React.FC<Props> = ({
     },
     [
       clearChat,
+      captureSelectionFence,
       confirmCharacterSwitch,
       hasActiveChat,
       selectedAssistant?.id,
@@ -1607,6 +1614,17 @@ export const CharacterSelect: React.FC<Props> = ({
       )
     }
 
+    if (personasLoading) {
+      return <p role="status" className="px-3 py-4 text-sm text-text-muted">{t("common:loading.title", "Loading...")}</p>
+    }
+    if (personasError) {
+      return <div role="alert" className="space-y-2 px-3 py-4 text-sm text-text-muted">
+        <p>{t("sidepanel:characterSelect.personasLoadFailed", "Personas could not be loaded. Check your connection, then retry.")}</p>
+        <button type="button" disabled={personasFetching} onClick={() => void refetchPersonas()}
+          className="min-h-9 rounded border border-border px-3 py-1 focus-visible:ring-2 focus-visible:ring-focus">{t("common:retry", "Retry")}</button>
+      </div>
+    }
+
     if (filteredPersonas.length === 0) {
       return (
         <div className="px-3 py-4 text-center text-sm text-text-subtle">
@@ -1658,6 +1676,10 @@ export const CharacterSelect: React.FC<Props> = ({
     )
   }, [
     filteredPersonas,
+    personasLoading,
+    personasError,
+    personasFetching,
+    refetchPersonas,
     handlePersonaSelect,
     hasPersona,
     searchText,
@@ -1818,7 +1840,13 @@ export const CharacterSelect: React.FC<Props> = ({
                 })}
               </div>
             ) : null}
-            {activeTab === "persona" ? personaPanel : menu}
+            {activeTab === "persona" ? personaPanel : charactersError ? (
+              <div role="alert" className="space-y-2 px-3 py-4 text-sm text-text-muted">
+                <p>{t("sidepanel:characterSelect.charactersLoadFailed", "Characters could not be loaded. Check your connection, then retry.")}</p>
+                <button type="button" disabled={charactersFetching} onClick={() => void refetch()}
+                  className="min-h-9 rounded border border-border px-3 py-1 focus-visible:ring-2 focus-visible:ring-focus">{t("common:retry", "Retry")}</button>
+              </div>
+            ) : menu}
           </div>
         )}
         placement="topLeft"

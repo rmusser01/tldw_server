@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 
@@ -11,9 +11,21 @@ from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import validate_chat_settings_storage
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import sanitize_sender_name
 from tldw_Server_API.app.core.Chat.generation_metadata import sanitize_generation_metadata
+from tldw_Server_API.app.core.Chat.knowledge_save import strip_reasoning_blocks
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, NotFoundError
 
 SaveMessageFn = Callable[..., Awaitable[str | None]]
+NativeStreamPersistence = Literal["acknowledge", "retain_reasoning"]
+
+
+def native_stream_persistence(request_data: Any, acknowledge: bool) -> NativeStreamPersistence | None:
+    """Choose how to settle a stream after native history admission."""
+    if not acknowledge:
+        return None
+    metadata = getattr(request_data, "metadata", None)
+    if isinstance(metadata, dict) and metadata.get("tldw_retain_reasoning_history_v1") is True:
+        return "retain_reasoning"
+    return "acknowledge"
 
 
 def save_workspace_chat_model_selection(
@@ -180,9 +192,25 @@ def native_history_owner_key(request: Any, user_id: Any) -> str:
     return "native-history-v1:sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-async def prepare_native_history_message(message: dict[str, Any], conversation_id: str, process_content: Any) -> dict[str, Any]:
-    """Prepare validated text/images and role metadata before opening an admission transaction."""
+async def prepare_native_history_message(
+    message: dict[str, Any],
+    conversation_id: str,
+    process_content: Any,
+    *,
+    max_assistant_text_length: int | None = None,
+) -> dict[str, Any]:
+    """Prepare validated content and retain the answer when thinking exceeds the reply limit."""
+    role = message.get("role")
     content = message.get("content")
+    if (
+        role == "assistant"
+        and isinstance(content, str)
+        and max_assistant_text_length is not None
+        and len(content) > max_assistant_text_length
+    ):
+        answer = strip_reasoning_blocks(content)
+        if answer.strip():
+            content = answer
     parts = content if isinstance(content, list) else []
     if any(not isinstance(part, dict) or part.get("type") not in {"text", "image_url"} for part in parts):
         raise HTTPException(422, detail="Versioned input contains unsupported content parts")
@@ -197,7 +225,6 @@ async def prepare_native_history_message(message: dict[str, Any], conversation_i
     expected_images = sum(part.get("type") == "image_url" for part in parts)
     if len(images) != expected_images or len(image_details) != expected_images:
         raise HTTPException(422, detail="Versioned input requires every ordered image to be available")
-    role = message.get("role")
     extra = {"sender_role": role}
     if images:
         extra["image_details"] = image_details
@@ -206,10 +233,13 @@ async def prepare_native_history_message(message: dict[str, Any], conversation_i
             extra[key] = message[key]
     if message.get("name"):
         extra["tool_name" if role == "tool" else "sender_name"] = message["name"]
-    if not text and not images:
+    if not "\n".join(text) and not images:
         if message.get("tool_calls"):
             text = ["[tool_calls]"]
             extra["content_placeholder_reason"] = "tool_calls"
+        elif role == "tool" and content == "" and message.get("tool_call_id") is not None:
+            text = ["[empty tool result]"]
+            extra["content_placeholder_reason"] = "empty_tool_result"
         elif message.get("function_call"):
             text = ["[function_call]"]
             extra["content_placeholder_reason"] = "function_call"

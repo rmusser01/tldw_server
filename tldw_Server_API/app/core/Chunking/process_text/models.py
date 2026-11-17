@@ -78,10 +78,6 @@ class ProcessTextContext(Protocol):
         """Resolve the effective strategy method for a prepared input."""
         ...
 
-    def _compute_paragraph_spans(self, text: str, template: Any = None) -> list[tuple[int, int, str]]:
-        """Return source spans used by multi-level paragraph dispatch."""
-        ...
-
     def chunk_text(
         self,
         text: str,

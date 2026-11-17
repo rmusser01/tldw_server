@@ -174,25 +174,61 @@ def _build_stub_synthesizer(first_source: dict[str, object], first_note: dict[st
     return ResearchSynthesizer(synthesis_provider=StubSynthesisProvider())
 
 
-def test_deep_research_run_can_be_approved_and_exported(tmp_path):
+@pytest.fixture
+def research_queue(tmp_path, monkeypatch):
+    """Bind the service and normal worker to one isolated durable Jobs queue."""
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    return JobManager(enforce_leases=True)
+
+
+async def _drain_research_phase(manager, monkeypatch, *, expected_phase, research_db_path, outputs_dir, **provider_boundaries):
+    """Execute the exact admitted phase through its real lease and completion lifecycle."""
+    from tldw_Server_API.app.core.Research import jobs_worker
+    from tldw_Server_API.app.core.Research.jobs import RESEARCH_DOMAIN, RESEARCH_QUEUE
+
+    queued = manager.list_jobs(domain=RESEARCH_DOMAIN, queue=RESEARCH_QUEUE, status="queued", limit=10)
+    assert len(queued) == 1 and queued[0]["payload"]["phase"] == expected_phase  # nosec B101 -- No fabricated job/phase authority.
+    admitted = queued[0]
+    stop = asyncio.Event()
+    delivered = []
+    actual = jobs_worker.handle_research_phase_job
+
+    async def phase(job, **kwargs):
+        delivered.append((job["id"], job["uuid"], job["payload"]["phase"]))
+        try:
+            return await actual(job, **kwargs, **provider_boundaries)
+        finally:
+            stop.set()
+            await asyncio.sleep(0)
+
+    with monkeypatch.context() as control:
+        control.setattr(jobs_worker, "handle_research_phase_job", phase)
+        await asyncio.wait_for(
+            jobs_worker.run_research_jobs_worker(stop, research_db_path=research_db_path, outputs_dir=outputs_dir),
+            timeout=5,
+        )
+    assert delivered == [(admitted["id"], admitted["uuid"], expected_phase)]  # nosec B101 -- Exact real queued generation.
+    assert manager.get_job(admitted["id"])["status"] == "completed"  # nosec B101 -- Finalized durable parent before approval.
+
+
+def test_deep_research_run_can_be_approved_and_exported(tmp_path, monkeypatch, research_queue):
     from tldw_Server_API.app.api.v1.endpoints import research_runs
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.File_Artifacts.adapter_registry import FileAdapterRegistry
     from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
-    from tldw_Server_API.app.core.Research.jobs import handle_research_phase_job
     from tldw_Server_API.app.core.Research.service import ResearchService
     from tldw_Server_API.app.core.Research.synthesizer import ResearchSynthesizer
 
-    class DummyJobs:
-        def create_job(self, **kwargs):
-            return {"id": 11, "uuid": "job-11", "status": "queued", **kwargs}
 
     research_db_path = tmp_path / "research.db"
     outputs_dir = tmp_path / "outputs"
     service = ResearchService(
         research_db_path=research_db_path,
         outputs_dir=outputs_dir,
-        job_manager=DummyJobs(),
+        job_manager=research_queue,
     )
 
     app = FastAPI()
@@ -217,16 +253,8 @@ def test_deep_research_run_can_be_approved_and_exported(tmp_path):
         session_id = create_resp.json()["id"]
 
     asyncio.run(
-        handle_research_phase_job(
-            {
-                "id": 11,
-                "payload": {
-                    "session_id": session_id,
-                    "phase": "drafting_plan",
-                    "checkpoint_id": None,
-                    "policy_version": 1,
-                },
-            },
+        _drain_research_phase(
+            research_queue, monkeypatch, expected_phase="drafting_plan",
             research_db_path=research_db_path,
             outputs_dir=outputs_dir,
         )
@@ -250,16 +278,8 @@ def test_deep_research_run_can_be_approved_and_exported(tmp_path):
         assert approve_resp.json()["phase"] == "collecting"
 
     asyncio.run(
-        handle_research_phase_job(
-            {
-                "id": 12,
-                "payload": {
-                    "session_id": session_id,
-                    "phase": "collecting",
-                    "checkpoint_id": session.latest_checkpoint_id,
-                    "policy_version": 1,
-                },
-            },
+        _drain_research_phase(
+            research_queue, monkeypatch, expected_phase="collecting",
             research_db_path=research_db_path,
             outputs_dir=outputs_dir,
         )
@@ -333,16 +353,8 @@ def test_deep_research_run_can_be_approved_and_exported(tmp_path):
             }
 
     asyncio.run(
-        handle_research_phase_job(
-            {
-                "id": 13,
-                "payload": {
-                    "session_id": session_id,
-                    "phase": "synthesizing",
-                    "checkpoint_id": session.latest_checkpoint_id,
-                    "policy_version": 1,
-                },
-            },
+        _drain_research_phase(
+            research_queue, monkeypatch, expected_phase="synthesizing",
             research_db_path=research_db_path,
             outputs_dir=outputs_dir,
             synthesizer=ResearchSynthesizer(synthesis_provider=StubSynthesisProvider()),
@@ -372,16 +384,8 @@ def test_deep_research_run_can_be_approved_and_exported(tmp_path):
         assert approve_outline_resp.json()["phase"] == "packaging"
 
     asyncio.run(
-        handle_research_phase_job(
-            {
-                "id": 14,
-                "payload": {
-                    "session_id": session_id,
-                    "phase": "packaging",
-                    "checkpoint_id": session.latest_checkpoint_id,
-                    "policy_version": 1,
-                },
-            },
+        _drain_research_phase(
+            research_queue, monkeypatch, expected_phase="packaging",
             research_db_path=research_db_path,
             outputs_dir=outputs_dir,
         )
@@ -916,16 +920,12 @@ def test_deep_research_run_controls_support_pause_resume_cancel_and_progress_pol
     assert jobs.cancelled == [(52, "research_cancel_requested")]
 
 
-def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_events(tmp_path, monkeypatch):
+def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_events(tmp_path, monkeypatch, research_queue):
     from tldw_Server_API.app.api.v1.endpoints import research_runs
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
-    from tldw_Server_API.app.core.Research.jobs import handle_research_phase_job
     from tldw_Server_API.app.core.Research.service import ResearchService
 
-    class DummyJobs:
-        def create_job(self, **kwargs):
-            return {"id": 11, "uuid": "job-11", "status": "queued", **kwargs}
 
     monkeypatch.setenv("RESEARCH_RUNS_SSE_POLL_INTERVAL", "0.05")
     # The bounded join below owns the assertion timeout; a producer-side wall
@@ -937,7 +937,7 @@ def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_even
     service = ResearchService(
         research_db_path=research_db_path,
         outputs_dir=outputs_dir,
-        job_manager=DummyJobs(),
+        job_manager=research_queue,
     )
 
     app = FastAPI()
@@ -1004,16 +1004,8 @@ def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_even
     )
 
     asyncio.run(
-        handle_research_phase_job(
-            {
-                "id": 11,
-                "payload": {
-                    "session_id": session_id,
-                    "phase": "drafting_plan",
-                    "checkpoint_id": None,
-                    "policy_version": 1,
-                },
-            },
+        _drain_research_phase(
+            research_queue, monkeypatch, expected_phase="drafting_plan",
             research_db_path=research_db_path,
             outputs_dir=outputs_dir,
         )
@@ -1033,16 +1025,8 @@ def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_even
         assert approve_resp.status_code == 200
 
     asyncio.run(
-        handle_research_phase_job(
-            {
-                "id": 12,
-                "payload": {
-                    "session_id": session_id,
-                    "phase": "collecting",
-                    "checkpoint_id": session.latest_checkpoint_id,
-                    "policy_version": 1,
-                },
-            },
+        _drain_research_phase(
+            research_queue, monkeypatch, expected_phase="collecting",
             research_db_path=research_db_path,
             outputs_dir=outputs_dir,
         )
@@ -1067,16 +1051,8 @@ def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_even
     assert evidence_notes is not None
 
     asyncio.run(
-        handle_research_phase_job(
-            {
-                "id": 13,
-                "payload": {
-                    "session_id": session_id,
-                    "phase": "synthesizing",
-                    "checkpoint_id": session.latest_checkpoint_id,
-                    "policy_version": 1,
-                },
-            },
+        _drain_research_phase(
+            research_queue, monkeypatch, expected_phase="synthesizing",
             research_db_path=research_db_path,
             outputs_dir=outputs_dir,
             synthesizer=_build_stub_synthesizer(source_registry["sources"][0], evidence_notes[0]),
@@ -1096,16 +1072,8 @@ def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_even
         assert approve_outline_resp.status_code == 200
 
     asyncio.run(
-        handle_research_phase_job(
-            {
-                "id": 14,
-                "payload": {
-                    "session_id": session_id,
-                    "phase": "packaging",
-                    "checkpoint_id": session.latest_checkpoint_id,
-                    "policy_version": 1,
-                },
-            },
+        _drain_research_phase(
+            research_queue, monkeypatch, expected_phase="packaging",
             research_db_path=research_db_path,
             outputs_dir=outputs_dir,
         )
@@ -1131,16 +1099,12 @@ def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_even
     assert terminal_event["data"]["replayed"] is False
 
 
-def test_deep_research_live_progress_stream_reconnect_replays_only_missed_events(tmp_path, monkeypatch):
+def test_deep_research_live_progress_stream_reconnect_replays_only_missed_events(tmp_path, monkeypatch, research_queue):
     from tldw_Server_API.app.api.v1.endpoints import research_runs
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
-    from tldw_Server_API.app.core.Research.jobs import handle_research_phase_job
     from tldw_Server_API.app.core.Research.service import ResearchService
 
-    class DummyJobs:
-        def create_job(self, **kwargs):
-            return {"id": 21, "uuid": "job-21", "status": "queued", **kwargs}
 
     monkeypatch.setenv("RESEARCH_RUNS_SSE_POLL_INTERVAL", "0.05")
     monkeypatch.setenv("RESEARCH_RUNS_SSE_TEST_MAX_SECONDS", "5.0")
@@ -1150,7 +1114,7 @@ def test_deep_research_live_progress_stream_reconnect_replays_only_missed_events
     service = ResearchService(
         research_db_path=research_db_path,
         outputs_dir=outputs_dir,
-        job_manager=DummyJobs(),
+        job_manager=research_queue,
     )
 
     app = FastAPI()
@@ -1192,16 +1156,8 @@ def test_deep_research_live_progress_stream_reconnect_replays_only_missed_events
     time.sleep(0.2)
 
     asyncio.run(
-        handle_research_phase_job(
-            {
-                "id": 21,
-                "payload": {
-                    "session_id": session_id,
-                    "phase": "drafting_plan",
-                    "checkpoint_id": None,
-                    "policy_version": 1,
-                },
-            },
+        _drain_research_phase(
+            research_queue, monkeypatch, expected_phase="drafting_plan",
             research_db_path=research_db_path,
             outputs_dir=outputs_dir,
         )
@@ -1229,16 +1185,8 @@ def test_deep_research_live_progress_stream_reconnect_replays_only_missed_events
         assert approve_plan_resp.status_code == 200
 
     asyncio.run(
-        handle_research_phase_job(
-            {
-                "id": 22,
-                "payload": {
-                    "session_id": session_id,
-                    "phase": "collecting",
-                    "checkpoint_id": session.latest_checkpoint_id,
-                    "policy_version": 1,
-                },
-            },
+        _drain_research_phase(
+            research_queue, monkeypatch, expected_phase="collecting",
             research_db_path=research_db_path,
             outputs_dir=outputs_dir,
         )
@@ -1262,16 +1210,8 @@ def test_deep_research_live_progress_stream_reconnect_replays_only_missed_events
     assert evidence_notes is not None
 
     asyncio.run(
-        handle_research_phase_job(
-            {
-                "id": 23,
-                "payload": {
-                    "session_id": session_id,
-                    "phase": "synthesizing",
-                    "checkpoint_id": session.latest_checkpoint_id,
-                    "policy_version": 1,
-                },
-            },
+        _drain_research_phase(
+            research_queue, monkeypatch, expected_phase="synthesizing",
             research_db_path=research_db_path,
             outputs_dir=outputs_dir,
             synthesizer=_build_stub_synthesizer(source_registry["sources"][0], evidence_notes[0]),
@@ -1290,16 +1230,8 @@ def test_deep_research_live_progress_stream_reconnect_replays_only_missed_events
         assert approve_outline_resp.status_code == 200
 
     asyncio.run(
-        handle_research_phase_job(
-            {
-                "id": 24,
-                "payload": {
-                    "session_id": session_id,
-                    "phase": "packaging",
-                    "checkpoint_id": session.latest_checkpoint_id,
-                    "policy_version": 1,
-                },
-            },
+        _drain_research_phase(
+            research_queue, monkeypatch, expected_phase="packaging",
             research_db_path=research_db_path,
             outputs_dir=outputs_dir,
         )

@@ -1,3 +1,4 @@
+import { dictionaryOwnerFixture, dictionarySnapshotFixture, scopedDictionaryQueryFixture, scopedDictionaryQueryClientFixture, selectDictionaryChatFixture } from "./dictionary-owner.fixture"
 // @vitest-environment jsdom
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -61,15 +62,20 @@ const {
     initialize: vi.fn(async () => undefined),
     listDictionaries: vi.fn(async () => ({ dictionaries: [] })),
     listChats: vi.fn(async () => []),
+    getChat: vi.fn(async (id: string) => ({ id, title: "ER Intake", state: "in-progress", version: 1, scope_type: "global" })),
     getChatSettings: vi.fn(async () => ({ settings: {} })),
     updateChatSettings: vi.fn(async () => ({ settings: {} }))
   }
 }))
 
+vi.mock("@/hooks/useChatDraftOwner", () => ({ useChatDraftOwner: () => dictionaryOwnerFixture }))
+vi.mock("@/hooks/chat/useSelectServerChat", () => ({ useSelectServerChat: () => selectDictionaryChatFixture }))
+vi.mock("@/services/service-prompts", () => ({ loadServicePromptSnapshot: (...args: Parameters<typeof dictionarySnapshotFixture>) => dictionarySnapshotFixture(...args) }))
+
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: useQueryMock,
+  useQuery: (options: { queryKey?: readonly unknown[] }) => scopedDictionaryQueryFixture(options, useQueryMock(options)),
   useMutation: useMutationMock,
-  useQueryClient: useQueryClientMock
+  useQueryClient: () => scopedDictionaryQueryClientFixture(useQueryClientMock())
 }))
 
 vi.mock("react-i18next", () => ({
@@ -122,17 +128,7 @@ vi.mock("@/components/Common/confirm-danger", () => ({
   useConfirmDanger: () => vi.fn(async () => true)
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: any) => {
-    const state = {
-      setHistoryId: storeActions.setHistoryId,
-      setServerChatId: storeActions.setServerChatId,
-      setServerChatState: storeActions.setServerChatState,
-      setServerChatTitle: storeActions.setServerChatTitle
-    }
-    return selector ? selector(state) : state
-  }
-}))
+
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientMock
@@ -190,17 +186,7 @@ describe("DictionariesManager chat integration stage-1", () => {
 
     useMutationMock.mockImplementation((opts: any) => makeUseMutationResult(opts))
 
-    tldwClientMock.getChatSettings.mockImplementation(async (...args: [string?]) => {
-      const chatId = args[0]
-      if (chatId === "chat-001") {
-        return {
-          settings: {
-            chat_dictionary_ids: [7]
-          }
-        }
-      }
-      throw new Error("404 chat settings not found")
-    })
+
 
     useQueryMock.mockImplementation((opts: any) => {
       const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
@@ -260,66 +246,21 @@ describe("DictionariesManager chat integration stage-1", () => {
       })
     )
 
-    expect(storeActions.setHistoryId).toHaveBeenCalledWith(null, {
-      preserveServerChatId: true
-    })
-    expect(storeActions.setServerChatId).toHaveBeenCalledWith("chat-001")
-    expect(storeActions.setServerChatState).toHaveBeenCalledWith("in-progress")
-    expect(storeActions.setServerChatTitle).toHaveBeenCalledWith("ER Intake")
-    expect(window.location.hash).toBe("#/")
+    await waitFor(() => expect(selectDictionaryChatFixture).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "chat-001", title: "ER Intake", version: 1, scope_type: "global" }), expect.objectContaining({ temporaryChat: false, isCurrent: expect.any(Function) })
+    ))
+    expect(storeActions.setServerChatId).not.toHaveBeenCalled()
   }, 30000)
 
-  it("assigns the dictionary to selected chat sessions", async () => {
+  it("shows current saved-chat assignment as unavailable without a settings request", async () => {
     const user = userEvent.setup()
     render(<DictionariesManager />)
-
-    await user.click(
-      screen.getByRole("button", {
-        name: "Quick assign Medical Terms to chats"
-      })
-    )
-
-    await user.click(screen.getByRole("checkbox", { name: "Select chat ICU Follow-up" }))
-
-    await user.click(
-      screen.getByRole("button", {
-        name: "Assign to 2 chats"
-      })
-    )
-
-    await waitFor(() => {
-      expect(tldwClientMock.updateChatSettings).toHaveBeenCalledTimes(2)
-    })
-
-    const updateCalls = tldwClientMock.updateChatSettings.mock.calls.map(
-      (call: any[]) => ({
-        chatId: call[0],
-        patch: call[1]
-      })
-    )
-
-    expect(updateCalls).toEqual(
-      expect.arrayContaining([
-        {
-          chatId: "chat-001",
-          patch: {
-            chat_dictionary_ids: [7, 42]
-          }
-        },
-        {
-          chatId: "chat-002",
-          patch: {
-            chat_dictionary_ids: [42],
-            chat_dictionary_id: 42
-          }
-        }
-      ])
-    )
-
-    const queryClient = useQueryClientMock.mock.results[0]?.value
-    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["tldw:listDictionaries"]
-    })
-    expect(notificationMock.success).toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Quick assign Medical Terms to chats" }))
+    const row = await screen.findByRole("checkbox", { name: "Select chat ICU Follow-up" })
+    expect(row).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Assignment unavailable" })).toBeDisabled()
+    expect(tldwClientMock.getChatSettings).not.toHaveBeenCalled()
+    expect(tldwClientMock.updateChatSettings).not.toHaveBeenCalled()
+    expect(notificationMock.success).not.toHaveBeenCalled()
   }, 45000)
 })

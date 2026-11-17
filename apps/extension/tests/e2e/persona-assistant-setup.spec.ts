@@ -338,8 +338,7 @@ const launchPersonaSetupPage = async (
 }
 
 const completeSetupThroughDryRun = async (page: Page) => {
-  await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("persona")
-  await expect(page.getByTestId("assistant-setup-post-target")).toHaveText("profiles")
+  await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("Choose persona")
   await expect(page.getByTestId("assistant-setup-progress-step-persona")).toHaveAttribute(
     "data-status",
     "current"
@@ -347,7 +346,7 @@ const completeSetupThroughDryRun = async (page: Page) => {
 
   await page.getByRole("button", { name: `Use ${PERSONA_NAME} persona` }).click()
 
-  await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("voice")
+  await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("Configure voice")
   await expect(page.getByTestId("assistant-setup-progress-step-persona")).toHaveAttribute(
     "data-status",
     "completed"
@@ -359,19 +358,19 @@ const completeSetupThroughDryRun = async (page: Page) => {
   await expect(page.getByRole("button", { name: "Save assistant defaults" })).toBeEnabled()
   await page.getByRole("button", { name: "Save assistant defaults" }).click()
 
-  await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("commands")
+  await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("Add commands")
   await expect(page.getByTestId("assistant-setup-progress-step-voice")).toHaveAttribute(
     "data-status",
     "completed"
   )
-  await page.getByRole("button", { name: "Search Notes" }).click()
+  await page.getByRole("button", { name: "Search Notes", exact: true }).click()
 
-  await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("safety")
+  await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("Review safety")
   await page.getByRole("button", { name: "Ask for destructive actions" }).click()
   await page.getByRole("button", { name: "No external connections for now" }).click()
   await page.getByRole("button", { name: "Save safety choices" }).click()
 
-  await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("test")
+  await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("Run a test")
   await page.getByPlaceholder("Try a spoken phrase").fill("search notes for project alpha")
   await page.getByRole("button", { name: "Run dry-run test" }).click()
   await expect(page.getByText(/Matched Search Notes/i)).toBeVisible()
@@ -424,7 +423,7 @@ test.describe("Persona assistant setup", () => {
       await expect(page.getByText("Recommended next step")).toBeVisible()
       await expect(page.getByText("Add a connection")).toBeVisible()
 
-      await page.getByRole("button", { name: "Open Connections" }).first().click()
+      await page.getByRole("button", { name: "Open connections", exact: true }).click()
       await expect(page.getByRole("tab", { name: "Connections" })).toHaveAttribute(
         "aria-selected",
         "true"
@@ -477,22 +476,22 @@ test.describe("Persona assistant setup", () => {
       await installPersonaSetupMocks(context, { failStarterCommandOnce: true })
       await launchPersonaSetupPage(page, sidepanelUrl, "profiles")
 
-      await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("persona")
+      await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("Choose persona")
       await page.getByRole("button", { name: `Use ${PERSONA_NAME} persona` }).click()
-      await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("voice")
+      await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("Configure voice")
       await page.getByRole("button", { name: "Save assistant defaults" }).click()
-      await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("commands")
+      await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("Add commands")
 
-      await page.getByRole("button", { name: "Search Notes" }).click()
+      await page.getByRole("button", { name: "Search Notes", exact: true }).click()
       await expect(page.getByText("Failed to create starter command")).toBeVisible()
-      await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("commands")
+      await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("Add commands")
 
-      await page.getByRole("button", { name: "Search Notes" }).click()
-      await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("safety")
+      await page.getByRole("button", { name: "Retry Search Notes", exact: true }).click()
+      await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("Review safety")
       await page.getByRole("button", { name: "Ask for destructive actions" }).click()
       await page.getByRole("button", { name: "No external connections for now" }).click()
       await page.getByRole("button", { name: "Save safety choices" }).click()
-      await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("test")
+      await expect(page.getByTestId("assistant-setup-current-step")).toHaveText("Run a test")
 
       await page.getByPlaceholder("Try a spoken phrase").fill("search notes for retry path")
       await page.getByRole("button", { name: "Run dry-run test" }).click()

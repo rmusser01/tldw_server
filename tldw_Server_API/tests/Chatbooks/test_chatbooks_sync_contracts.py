@@ -63,7 +63,7 @@ def _make_import_upload() -> tuple[bytes, str]:
 
 class _ImportDB:
     def __init__(self):
-        self.created_notes: list[tuple[str, str]] = []
+        self.created_notes: list[tuple[str, str, str | None, str | None]] = []
 
     def get_connection(self):
         class _Conn:
@@ -82,8 +82,8 @@ class _ImportDB:
 
         return _Cursor()
 
-    def add_note(self, title: str, content: str):
-        self.created_notes.append((title, content))
+    def add_note(self, title: str, content: str, *, conversation_id=None, message_id=None):
+        self.created_notes.append((title, content, conversation_id, message_id))
         return "new-note-id"
 
 
@@ -227,6 +227,9 @@ def test_sync_import_service_counts_renamed_items_as_imported(tmp_path, monkeypa
     assert message == "Successfully imported 1/1 items"
     assert result["imported_items"]["note"] == 1
     assert result["warnings"] == []
+    assert service.db.created_notes == [
+        ("Conflicting Title (Imported)", "Body", None, None)
+    ]  # nosec B101 - exact imported note and absent links.
 
 
 @pytest.mark.unit

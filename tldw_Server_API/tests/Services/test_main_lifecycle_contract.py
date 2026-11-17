@@ -30,6 +30,7 @@ def isolated_openapi_lifespan(monkeypatch: pytest.MonkeyPatch):
     from tldw_Server_API.app.services import (
         lifespan_shutdown_sequence,
         lifespan_startup_sequence,
+        startup_auth,
     )
 
     handles = SimpleNamespace(db_pool=None, session_manager=None, heavy_startup_handles=None)
@@ -40,6 +41,7 @@ def isolated_openapi_lifespan(monkeypatch: pytest.MonkeyPatch):
     )
     shutdown = AsyncMock()
     monkeypatch.setattr(lifespan_shutdown_sequence, "run_lifespan_shutdown_sequence", shutdown)
+    monkeypatch.setattr(startup_auth, "refresh_provider_override_snapshot", AsyncMock())
     monkeypatch.setattr(main_module, "_run_startup_config_validation", lambda: None)
     return main_module.lifespan, FastAPI(), shutdown
 
@@ -863,7 +865,6 @@ def test_lifespan_startup_delegates_worker_bootstrap(
     from tldw_Server_API.app.services import startup_worker_bootstrap
 
     app = main_module.app
-    monkeypatch.setattr(main_module, "_TEST_MODE", True)
     recorded_calls: list[dict[str, object]] = []
 
     async def _fake_initialize_startup_worker_bootstrap(**kwargs):
@@ -904,7 +905,6 @@ def test_lifespan_startup_delegates_pre_core_helper(
     from tldw_Server_API.app.services import startup_core_initialization, startup_pre_core
 
     app = main_module.app
-    monkeypatch.setattr(main_module, "_TEST_MODE", True)
     pre_core_calls: list[dict[str, object]] = []
     core_calls: list[dict[str, object]] = []
 
@@ -959,8 +959,6 @@ def test_lifespan_startup_delegates_core_initialization(
     async def _fake_initialize_startup_core_components(**kwargs):
         recorded_calls.append(kwargs)
         return startup_core_initialization.StartupCoreInitializationHandles(
-            db_pool="db-pool",
-            session_manager="session-manager",
             heavy_startup_handles="heavy-handles",
         )
 
@@ -991,7 +989,6 @@ def test_lifespan_startup_collects_declarative_worker_specs(
     from tldw_Server_API.app.services import startup_worker_bootstrap, startup_worker_groups
 
     app = main_module.app
-    monkeypatch.setattr(main_module, "_TEST_MODE", True)
     recorded_contexts: list[object] = []
     lifecycle_session = _empty_lifecycle_session()
 
@@ -1222,7 +1219,6 @@ def test_lifespan_startup_delegates_auth_runtime(
 
     async def _fake_initialize_auth_runtime_services(**kwargs):
         recorded_calls.append(kwargs)
-        return SimpleNamespace(db_pool=None, session_manager=None)
 
     monkeypatch.setattr(
         startup_auth_runtime,
@@ -1294,9 +1290,7 @@ def test_lifespan_startup_delegates_evaluations_warmup(
     assert recorded_calls[0]["route_enabled"] is main_module.route_enabled
     assert recorded_calls[0]["logger"] is main_module.logger
     assert recorded_calls[0]["startup_guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
-    assert recorded_calls[0]["test_mode"] == (
-        bool(getattr(main_module, "_TEST_MODE", False)) or main_module._runtime_test_mode_active()
-    )
+    assert recorded_calls[0]["test_mode"] is True
 
 
 @pytest.mark.integration

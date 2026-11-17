@@ -68,8 +68,8 @@ describe("runChatPipeline conversation id handoff", () => {
       stream: async function* () { yield chunk }
     })
     let rows: Message[] = [
-      { id: "local-user", isBot: false, name: "You", message: "Hello" },
-      { id: "generated-assistant-id", isBot: true, name: "Assistant", message: "" }
+      { id: "local-user", isBot: false, name: "You", message: "Hello", sources: [] },
+      { id: "generated-assistant-id", isBot: true, name: "Assistant", message: "", sources: [] }
     ]
     mocks.setMessages.mockImplementation(next => { rows = typeof next === "function" ? next(rows) : next })
     await runChatPipeline({
@@ -133,8 +133,8 @@ describe("runChatPipeline conversation id handoff", () => {
       stream: async function* () { yield "Partial"; throw new Error("provider failed") }
     })
     let localMessages: Message[] = [
-      { id: "local-user", isBot: false, name: "You", message: "Hello" },
-      { id: "generated-assistant-id", isBot: true, name: "Assistant", message: "" }
+      { id: "local-user", isBot: false, name: "You", message: "Hello", sources: [] },
+      { id: "generated-assistant-id", isBot: true, name: "Assistant", message: "", sources: [] }
     ]
     mocks.setMessages.mockImplementation(next => {
       localMessages = typeof next === "function" ? next(localMessages) : next

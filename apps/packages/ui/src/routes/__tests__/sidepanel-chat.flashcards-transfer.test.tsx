@@ -2,6 +2,7 @@ import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import SidepanelChat from "../sidepanel-chat"
+import type { SidepanelChatOwner } from "@/hooks/useSidepanelChatOwner"
 import { loadFlashcardsTransferSnapshot, flashcardsHandoffAuthority } from "@/services/tldw/flashcards-generate-transfer"
 import { consumeFlashcardsGenerateHandoff, consumeStudyPackHandoff } from "@/services/tldw/flashcards-generate-handoff"
 
@@ -10,7 +11,7 @@ const mocks = vi.hoisted(() => {
   const message = new Proxy({ messages: [], history: [], queuedMessages: [], serverChatId: "conversation-41" }, {
     get: (target, key) => key in target ? Reflect.get(target, key) : String(key).startsWith("set") || ["clearChat", "stopStreamingRequest", "onSubmit"].includes(String(key)) ? noop : null
   })
-  const tabs = new Proxy({ tabs: [{ id: "local-tab-99", label: "Local tab" }], activeTabId: "local-tab-99", snapshotsById: {} }, {
+  const tabs = new Proxy({ storageKey: null, tabs: [{ id: "local-tab-99", label: "Local tab" }], activeTabId: "local-tab-99", snapshotsById: {} }, {
     get: (target, key) => key in target ? Reflect.get(target, key) : noop
   })
   return { noop, message, tabs, background: null as null | { type: string; text: string; payload: Record<string, unknown> }, initialize: vi.fn(), navigate: vi.fn() }
@@ -18,8 +19,8 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/hooks/useBackgroundMessage", () => ({ default: () => mocks.background }))
 // This suite exercises the capture/transfer lease inside an already-open chat.
 // The real outer route owner and account remounts are covered by ownership.test.tsx.
-vi.mock("@/hooks/useSidepanelChatOwner", () => ({ useSidepanelChatOwner: () => openedOwner }))
-const openedOwner = { ownerKey: "opened-owner", revision: 0, snapshot: {}, isCurrent: () => true }
+vi.mock("@/hooks/useSidepanelChatOwner", () => ({ useSidepanelChatOwner: () => ({ owner: openedOwner, verificationState: "ready", retryVerification: mocks.noop }) }))
+let openedOwner: SidepanelChatOwner
 vi.mock("@/hooks/useMessage", () => ({ useMessage: () => mocks.message }))
 vi.mock("@/hooks/useMigration", () => ({ useMigration: () => {} }))
 vi.mock("@/hooks/useSmartScroll", () => ({ useSmartScroll: () => ({ containerRef: { current: null }, autoScrollToBottom: mocks.noop }) }))
@@ -35,7 +36,7 @@ vi.mock("@/hooks/useSetting", () => ({ useSetting: () => [100] }))
 vi.mock("@plasmohq/storage/hook", () => ({ useStorage: (_key: unknown, fallback: unknown) => [fallback] }))
 vi.mock("@/store/sidepanel-chat-tabs", () => ({ useSidepanelChatTabsStore: Object.assign((selector: (state: unknown) => unknown) => selector(mocks.tabs), { getState: () => mocks.tabs }) }))
 vi.mock("@/store/model", () => ({ useStoreChatModelSettings: Object.assign((selector: (state: unknown) => unknown) => selector({}), { getState: () => ({}) }) }))
-vi.mock("@/store/option", () => ({ useStoreMessageOption: (selector: (state: unknown) => unknown) => selector({ setRagMediaIds: mocks.noop }) }))
+vi.mock("@/store/option", () => ({ useStoreMessageOption: Object.assign((selector: (state: unknown) => unknown) => selector(mocks.message), { getState: () => mocks.message }) }))
 vi.mock("@/store/ui-mode", () => ({ useUiModeStore: (selector: (state: unknown) => unknown) => selector({ mode: "simple" }) }))
 vi.mock("@/store/artifacts", () => ({ useArtifactsStore: (selector: (state: unknown) => unknown) => selector({ isOpen: false, closeArtifact: mocks.noop }) }))
 vi.mock("@/db/dexie/helpers", () => ({ generateID: () => "new-local-tab", getTitleById: async () => "", getRecentChatFromCopilot: async () => null }))
@@ -66,6 +67,15 @@ describe("actual sidepanel Chat private Flashcards producer", () => {
     mocks.message.serverChatId = "conversation-41"
     window.localStorage.clear()
     window.localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://chat.test", authMode: "single-user", apiKey: "synthetic-key" }))
+    openedOwner = {
+      ownerKey: "opened-owner", revision: 0, isCurrent: () => true,
+      snapshot: {
+        scopeKey: "captured-owner", capability: "unchecked", definitions: {},
+        requestScope: { config: { serverUrl: "https://chat.test", authMode: "single-user", apiKey: "synthetic-key" }, userId: null },
+        scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal,
+        release: mocks.noop
+      }
+    }
     let tail = Promise.resolve()
     const locks = { request: (_name: string, work: () => unknown) => { const next = tail.then(work); tail = next.then(() => undefined, () => undefined); return next } }
     vi.stubGlobal("navigator", new Proxy(window.navigator, { get: (target, key) => key === "locks" ? locks : Reflect.get(target, key, target) }))

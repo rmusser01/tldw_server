@@ -12,7 +12,7 @@ type UseDictionaryManagerColumnsParams = {
   useCompactDictionaryActions: boolean
   handleDictionaryActiveToggle: (record: any, checked: boolean) => Promise<void>
   validateDictionary: (dictionaryId: number) => Promise<void>
-  openChatContextFromDictionary: (chatRef: any) => void
+  openChatContextFromDictionary: (chatRef: unknown, dictionary: unknown) => void
   openDictionaryEditModal: (record: any) => void
   openDictionaryEntriesPanel: (dictionaryId: number) => void
   openQuickAssignModal: (record: any) => void

@@ -52,6 +52,106 @@ describe("tldwRequest quickstart and advanced transport", () => {
     }
   )
 
+  it.each(["unconfigured", "cookie-session"])(
+    "A01 supplies csrf for noAuth same-origin setup writes with %s config",
+    async (configState) => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      document.cookie = "csrf_token=a01-setup-csrf; Path=/"
+      const fetchMock = vi.fn().mockResolvedValue(new Response("{}"))
+      const { tldwRequest } = await import("@/services/tldw/request-core")
+
+      const result = await tldwRequest(
+        {
+          path: "/api/v1/setup/first-run/state",
+          method: "POST",
+          noAuth: true,
+          body: { step: "setup_path", data: { path: "local" } }
+        },
+        {
+          getConfig: async () => configState === "unconfigured" ? null : ({
+            serverUrl: window.location.origin,
+            authMode: "single-user",
+            authSource: "cookie-session"
+          }),
+          fetchFn: fetchMock
+        }
+      )
+
+      expect(result.ok).toBe(true)
+      const [url, init] = fetchMock.mock.calls[0]
+      const headers = new Headers(init.headers)
+      expect(url).toBe("/api/v1/setup/first-run/state")
+      expect(headers.get("X-CSRF-Token")).toBe("a01-setup-csrf")
+      expect(headers.get("X-API-KEY")).toBeNull()
+      expect(headers.get("Authorization")).toBeNull()
+    }
+  )
+
+  it("A01 supplies csrf for a noAuth absolute same-page setup write", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    document.cookie = "csrf_token=a01-setup-csrf; Path=/"
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}"))
+    const { tldwRequest } = await import("@/services/tldw/request-core")
+
+    await tldwRequest(
+      {
+        path: (window.location.origin + "/api/v1/setup/first-run/state") as PathOrUrl,
+        method: "POST",
+        noAuth: true,
+        headers: { "x-csrf-token": "stale-csrf" }
+      },
+      {
+        getConfig: async () => ({
+          serverUrl: window.location.origin,
+          authMode: "single-user",
+          authSource: "cookie-session"
+        }),
+        fetchFn: fetchMock
+      }
+    )
+
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get("X-CSRF-Token")).toBe("a01-setup-csrf")
+  })
+
+  it("A01 keeps page csrf out of noAuth writes to another configured origin", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    document.cookie = "csrf_token=a01-setup-csrf; Path=/"
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}"))
+    const { tldwRequest } = await import("@/services/tldw/request-core")
+
+    const result = await tldwRequest(
+      {
+        path: "https://api.example.test:9443/api/v1/setup/first-run/state" as PathOrUrl,
+        method: "POST",
+        noAuth: true
+      },
+      {
+        getConfig: async () => ({
+          serverUrl: "https://api.example.test:9443",
+          authMode: "single-user"
+        }),
+        fetchFn: fetchMock
+      }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get("X-CSRF-Token")).toBeNull()
+  })
+
+  it("A01 leaves noAuth safe setup reads without csrf", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    document.cookie = "csrf_token=a01-setup-csrf; Path=/"
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}"))
+    const { tldwRequest } = await import("@/services/tldw/request-core")
+
+    await tldwRequest(
+      { path: "/api/v1/setup/first-run/state", method: "GET", noAuth: true },
+      { getConfig: async () => null, fetchFn: fetchMock }
+    )
+
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get("X-CSRF-Token")).toBeNull()
+  })
+
   it("uses cookie auth and csrf for same-origin mutations without stale headers", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     document.cookie = "csrf_token=csrf-123; Path=/"

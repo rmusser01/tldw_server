@@ -3665,7 +3665,7 @@ No PRmerge/cleanup; two native inputs consumed/fullUATfalse/liveStopunproved.
 **Goal**: Correct the newly detected993a shard-routing omission without weakening coverage.
 **Success Criteria**: Official guard RED/GREEN; exactly five routing additions, all other parsed workflow semantics exact; scoped review and normal preflight/publication.
 **Tests**: Official check_shard_coverage.py, parsed YAML five-matrix comparison, source binding and normal preflight.
-**Status**: In Progress
+**Status**: Complete
 
 Actual993a Shard coverage guard114388212390/run38111618368 fails because
 test_main_reload_ownership.py is assigned to no shard. Original raw24136-byte
@@ -3681,3 +3681,360 @@ delta; retained runtime/frontend/UI executions remain source-composed with an
 explicit later NONOWNING CI-routing configuration difference, not fresh runs.
 Normal preflight/commit/publication pending; original993a failure stays failed,
 no retries/cancellations/reset. ADRrequiredNO: existing shard ownership repaired.
+
+Normal1087-file preflightPASS0/all27164sourceunchanged. Normal followupcommit
+e4482bd198b44c801e0db0c39facd189bbafe6d9/tree5ffb6dfde636a6f9d35b1d719a78c236f0cde587
+has exact singleparent993a5a6873c15737871adb9ea7f4f38ec723105d; all27164
+committed Git blob entries independently matched exact current source bytes.
+Normal fast-forward993a..e448 explicitGitHubURL/freshEXACT993alease/normalhooks.
+Actual GitHub readback head/tree/parent/dev/refs exact; bodySHA
+8fa768e9fce005ca31728cec63ed4e13e9d188a6cdeb821e05a0e6b2b9a17c7a/human740suffix exact.
+Stage45Complete ONLYbounded routing correction/local qualification/publication.
+Latest e448 actual required/owning hosted and applicable native acceptance
+pending; no stale993a/local tests qualify it. Overall task/native/Stage26 open.
+No hosted retry/reset/cancel/native/service action/PRmerge/cleanup.
+
+## Stage 46: Direct latest-dev integration and remaining CI diagnosis
+**Goal**: Address the remaining actual failures and integrate latest dev without losing the qualified corrections.
+**Success Criteria**: Conflict union preserves ownership/accounting/persistence; actual owning runtime/frontend/types/build/security/manual review and normal preflight pass before publication; fresh successor hosted qualification remains required.
+**Tests**: Finite reload ownership, model-storage error/recovery, incoming accounting/quota, official OpenAPI generation, connected frontend/runtime selections and hosted owning jobs.
+**Status**: In Progress
+
+Direct human request on 2026-10-14 authorizes addressing all failures and updating
+onto latest dev. Explicit GitHub refs and separate branch API agree published
+e4482bd and dev950404fe. Recovery ref
+codex/backup-pr3071-e448-before-direct-20261014 and exact dirty-note copies in
+/private/tmp/pr3071-direct-20261014-hSSZGf preserve the prior state. A normal
+uncommitted history-preserving merge of950404fe is active; all seven conflicts
+are resolved and recorded in the index, but no commit/push/PR merge occurred.
+
+Conflict resolution preserves originating frame/captured selection, current
+research-action builder identity, non-migrating authoritative model records,
+polling recovery and selected durable receipts. Non-stream execution also keeps
+the incoming records_itself billing marker. The incoming migration-error test
+was adapted to the existing finite callback-error fixture and read-only legacy
+contract, not retained as a migration expectation that contradicts this PR.
+Initial model run57PASS1FAIL and focused timeout/uncaught getter-only lastError
+failure remain failures; the corrected existing __failNext boundary gives
+58PASS/zeroFAIL. Experimental config-loader startup failed before tests;
+normal loader succeeded in the private source/dependency copy.
+
+Five finite AST/real-FastAPI/Loguru ownership cases pass with no app startup.
+The Python3.11 incoming accounting collection failed because inspect lacks
+markcoroutinefunction; requires-python is>=3.12, so no compatibility patch was
+made. A new owned Python3.12.13 venv uses existing dependency files read-only,
+without installation; four finite mock-boundary files pass64/zeroFAIL. These
+standalone --noconftest selections are not full repository/runtime qualification.
+Official exporter in the private full source copy exits0 (2113 paths/3281
+schemas); actual fingerprint4ec77394676cb0695bcc490d4ec113f12e69d45827991bb6fc39f949bec21425
+resolves the moved contract-package fingerprint. Installed openapi-typescript
+7.13.0 generation exits0; all2113 committed path literals match the export.
+Dependencies differ from hosted FastAPI0.142.4; no exact hosted equivalence claim.
+
+Current Writing job114390535708 still failed outer55m/exit124, with a sampled
+FastAPI schema-flattening stack. No exact interrupted case or proven cause.
+Postgres download job114390548061 failed mirror HTTP403 before checkout/tests;
+FullSuite114407251758 is dependent failure. No retries, deadline/health/schema
+warmup/GC/budget weakening or speculative failure repair. Independent reviewer
+Gibbs failed before review with HTTP429 and was closed; no reviewer approval.
+Original evidence root and owned venv target remain absent, not reconstructed.
+Full owning selections, typecheck/build/budgets/security, incoming review and
+normal publication remain pending. ADRrequiredNO: integration follows ADR059,
+ADR065 contract package and ADR067 accounting; no new durable rule proposed.
+Two native Sends remain consumed/fullUATfalse/liveStopunproved. No new native,
+browser/profile/provider/model/shared-service/protected-data action authorized.
+
+## Stage 47: Correct the two remaining CI failure sources
+**Goal**: Remove the denied image-mirror dependency and redistribute the overlong Writing selection without weakening tests or resource limits.
+**Success Criteria**: Same PostgreSQL tag/health/environment; all20 Writing files assigned exactly once across existing jobs; unchanged204shards/deadlines/guards; finite regression tests/manual review/security; normal qualified publication and actual hosted confirmation.
+**Tests**: Required-workflow contract owning file; structured before/after YAML equivalence; official shard coverage; public registry manifest lookup; bounded isolated schema observation.
+**Status**: In Progress
+
+Direct human request to investigate and fix the three failures. Actual current
+Postgres job114390548061 fails three Google-mirror manifest requests with403
+before checkout/tests. Official Docker Hub manifest lookup returns200 with
+Linuxamd64 and digest afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c.
+Only Python3.12 FullSuite service image registry changes to docker.io, same
+18-bookworm tag; structured equality proves all other workflow semantics exact.
+No container pull/run or local service action occurred.
+
+Writing114390535708 reaches unchanged55m and exits124. Five isolated application
+import/schema observations (NO lifespan/TestClient/providers) complete with
+schema4.43/4.80/4.90/4.53/5.29seconds; no observed runaway. This does NOT prove
+original hosted cause. Initial Python312 observation fails missing local
+tldw_profile_core before any schema timing; actual retry adds this copy's
+declared package src to PYTHONPATH and completes, no source/config mutation.
+Original attempted paginated comparison-job collector HTTP502 remains failed;
+distinct PR check readback provides successful gap7/8/9 durations5m15s/11m12s/
+2m17s. Redistribute14 manuscript files to existinggap7 and4 writing files to
+existinggap8;2 tokenizer files staygap10. All20 files exactlyonce, same204jobs,
+no added job/resource/time budget/test exclusion/fixture scope/warmup change.
+Only these three path lists differ in parsed YAML. FullSuite114407251758 is
+dependent failure; its aggregation/guards remain unchanged.
+
+Actual prechange image/routing assertions RED, postchange structured checks
+GREEN. Two persistent regression tests added to existing assigned CI file;
+focused2PASS and owning60PASS/zeroFAIL/exit0 (overlap). Official coverage849
+patterns/5093testfiles/4ignored/44baseline/new_uncovered0; count is patterns,
+NOT849newjobs. Normal git diff --check0. Standalone --noconftest metadata tests
+are scope-only verification, not whole repository/native/hosted qualification.
+Pytest reports11 warnings, including inherited config and default temporary
+retention cleanup errors; rawoutput retained, no manual cleanup. Future test
+invocations should use a newly owned --basetemp to avoid default shared temp
+retention. No protected-data absence/preservation readback claim implied.
+Independent Meitner workflow-only manual review completed/closed, no actionable
+P1/P2; reviewer did not execute tests/registry/hosted checks. This is not review
+of the broader integration or the later added regression tests. Bandit scans
+the touched CI test file/current+index baseline, rawexit1 inherited findings
+and standard new test assertions; no nonassert additions or scan errors, no
+suppression/globalclean claim. YAML-only production delta Bandit not applicable.
+ADRrequiredNO: existing CI partition/registry repaired, no new durable rule.
+No commit/push/retry/PRbody/PRmerge/cleanup. Stage46 broader qualification and
+independent integration review remain pending; source union/MERGE_HEAD preserved.
+
+## Stage 48: Rebase PR #3071 and Address Maintainer Feedback
+**Goal**: Integrate dev cffdc4078, preserve the October staged tree, and address current review and CI blockers.
+**Success Criteria**: No unresolved conflicts or duplicate task IDs, no dropped intended changes, passing source-bound verification, and current hosted qualification before landing.
+**Tests**: Backlog ID and format ratchets, CI workflow contracts and shard coverage, resolved frontend and backend owning tests, generated API contract, builds and bundle budgets, and touched-file security checks.
+**Status**: In Progress
+
+1. Preserve the October staged tree and inspect current review threads and current dev.
+2. Renumber the five PR-owned task families and preserve their parent links. Keep the upstream Writing shards and apply the PostgreSQL fallback without removing per-shard overrides.
+3. Reconcile application conflicts against both parents and the October staged tree. Run the owning checks, regenerate the API fingerprint, and complete manual review and preflight.
+4. Publish against a fresh PR head and dev readback, verify required and owning hosted checks, and follow the merge queue and acceptance requirements.
+
+ADR assessment: No new ADR. This follows ADR-059 and ADR-084 for task
+tracking and ADR-063 for the merge queue.
+
+2026-11-17 checkpoint:
+- Published head remains e4482bd198b44c801e0db0c39facd189bbafe6d9.
+  The queue is on and auto-merge is unarmed. Dev is
+  cffdc4078c2e25b44b9ab80411afaca8248dcb4d.
+- The isolated rebase stopped with 105 conflicts while reconstructing the
+  integration merge. This pass resolved 20 paths; 85 remain. Retain original
+  October integration MERGE_HEAD 950404fe and its staged fixes. The exact
+  October index preview is checkpoint d0e12333554f96d15479f01172d1bea431dd619a,
+  and the independent aggregate merge preview tree is
+  61df9130657a2802514d5630bd3119499fb64f74. Compare the completed rebase
+  against it, including corrections carried only by historical merges.
+- All 15 inline threads are resolved. The November maintainer comment led to
+  renumbering five parents and 39 descendants with backlog-py. The new
+  parent IDs are TASK-15564 through TASK-15568, respectively for TASK-13398,
+  TASK-13408, TASK-13417, TASK-13418, and TASK-13421. Task ID and format checks
+  pass. Recheck IDs against current dev and open PRs before publishing.
+- Upstream partitions Writing into four shards. The candidate retains the
+  stronger upstream check, adds the official PostgreSQL default with existing
+  per-shard overrides, and passes 83 workflow-contract tests. The shard
+  coverage guard finds zero newly unassigned files. Five finite reload
+  ownership tests pass. These are local scoped checks. The conflict-resolved
+  frontend, backend, API fingerprint, full review, builds, hosted CI and
+  native acceptance remain pending.
+- Preserve dev's core ownership of chat request and history selection DTOs.
+  Durable receipt validation lives alongside the core types and stays
+  available through the API exports. The two focused wire modules pass 142
+  cases on Python 3.12 and the four schema modules pass Bandit. The broader
+  run passes 170 cases and fails two imports because the chat endpoint is
+  still conflicted. Retain that failed result.
+- Storage review found four regressions in the first resolution. The
+  revised candidate preflights incoming records and retirement aliases,
+  keeps recognizable legacy rows repairable, and never removes a key just
+  written by replacement. Nine focused cases reproduced the findings and
+  all 74 mocked cases pass after the change. Storage replacement still
+  writes and removes in separate operations, and incomplete source catalog
+  rows must be corrected before fallback sync can succeed.
+- Continue the in-progress rebase. Use dev's contracts where implementation
+  ownership moved, and compare each resolution against the October index
+  checkpoint so merge-only behavior survives. Do not restart or replay whole
+  files over dev.
+- Staged five additional reconciliations: readiness gate, request body reader,
+  chat endpoint, chat service, and message store. 25 of the original 105
+  conflicted paths are staged and 80 remain. The chat projection keeps the
+  canonical saved question in inference estimates without counting active
+  persistence proofs. Selected durable streams retain completion-only
+  settlement without changing native existing-input or partial persistence.
+- On source-matching isolated copies, 30 focused readiness and 68 connected
+  readiness/request transport tests passed. The two Python 3.12 wire modules
+  passed 142 cases. The service's source-selected harness passed 17 cases.
+  The endpoint projection, both executor signatures and self-owned accounting
+  wrappers passed finite source checks. The message store passed an in-memory
+  SQLite and a recording-stub PostgreSQL query-order check, not a real
+  PostgreSQL migration. The three resolved production Python files had zero
+  Bandit findings. The new test adds only pytest assertion findings.
+- The endpoint helper pytest collection first stopped at an unwritable default
+  DB path. With isolated SQLite paths it stopped at the remaining
+  ChaChaNotes_DB catalog conflict. Keep dev's versioned quota migrations and
+  reconcile the October receipt/fingerprint bridge and insertion-order
+  migration with released catalog state and PostgreSQL grants before runtime
+  verification. No rebase continuation commit, push, native run, or merge.
+
+2026-11-17 catalog and runtime continuation:
+- Kept dev's SQLite 79 / PostgreSQL 83 quota migrations and later steps.
+  Reconciled missing order, fingerprint, receipt, and quota fields forward
+  at SQLite 86 / PostgreSQL 92 without inventing old ledger rows or quota
+  identities. ADR required: no new policy; ADR-020 and ADR-080 still govern
+  content backends, schema-owner migration, and runtime access.
+- Verified fresh SQLite and real isolated SQLite upgrades from historical PR,
+  incoming, published union, and current dev layouts, including rollback,
+  reopen, preserved records, and new insert ordering. Catalog and startup
+  scope passed 41 cases. Four final recording checks passed after tightening
+  the PostgreSQL-only privilege verifier. Live PostgreSQL migration and the
+  restricted runtime writer test remain pending in the official fixture.
+- Reviewed restricted-role startup. Check ledger/sequence rights and the
+  required message ID/owner column reads without automatically granting
+  privileges. Documented the existing schema owner's deployment step and
+  extended the restricted-role test to exercise reads and writes. Both review
+  findings and their focused regression failures are retained in evidence.
+- 204 provider-free chat tests passed from the frozen union. The later
+  catalog source difference was confined to the PostgreSQL privilege verifier.
+  The 54 Notes Sync contract/batch tests passed; seven finite HTTP preflight
+  checks passed. The final Notes provenance, protected attachment listing,
+  and VN selection passed 48 checks after fixing the shared attachment limit
+  reference. No providers, external browsers, or live shared stores were used.
+- Staged eight more conflict resolutions and their connected tests and docs.
+  Now 33 of 105 original conflicts are staged, with 72 remaining. Published
+  e4482bd and verified dev cffdc4078 are unchanged. Queue remains on and the
+  PR remains unarmed. No rebase continuation commit, push, or merge.
+
+2026-11-17 workspace and chat transport continuation:
+- The rebase still reconstructs the merge onto cffdc4078. Independent remote
+  reads showed dev advanced to b7d0b2dcb0170632d93b528b59cbdbdc25b8ff03
+  (40 changed paths, none under apps). No new base integration was attempted.
+- Staged verified workspace storage, ingest, chat transport, model catalog,
+  history persistence, and SSE resolutions. Workspace persistence fences queued
+  writes across hydration without discarding coalescing or lifecycle flushes.
+  The final 10-file storage and ingest selection passed 195 cases; the separate
+  request policy file in the same run still had four failing overlap cases.
+- The UI-package config passed 125 model, dispatch, transport, and capture
+  cases, including the installed Plasmo adapter with mocked extension storage.
+  The prior WebUI-shim attempt did not test that adapter; retain its failures.
+  The mocked Dexie and connected selection checks passed 241 cases. The
+  model catalog passed 113, including fail-closed refresh and warning logs.
+  These selections overlap. Full UI typecheck and remaining hook integration
+  are unverified.
+- The full-app SSE run first exposed a stale editable MCP package and then
+  duplicate expected-user dependencies in the Notes search decorators.
+  Binding the rebased MCP source and retaining exactly one dependency per
+  route yielded three passing SSE cases with exact cache headers. All 9,761
+  tracked Python sources compiled; scoped Bandit found zero new findings
+  relative to the previous union (47 existing B101 assertions, raw exit 1).
+  Keep the earlier failures and the separate 204-case chat result.
+- Now 49 of 105 original conflicts are staged, 56 remain. The audio-quota
+  test union preserves both read-first paths but has not run in the official
+  isolated PostgreSQL fixture. Also keep the workspace migration safety
+  failures open; do not enable unscoped deletion to satisfy them. Remaining
+  frontend conflicts, API fingerprint, current dev integration, hosted CI,
+  and native acceptance remain pending. No new native/browser/provider
+  activity or publication. ADR assessment unchanged: existing ADR-008,
+  ADR-020, ADR-059, ADR-063, ADR-077, ADR-080, and ADR-084 govern.
+- Independent scope review confirmed distinct supported operations. Keep
+  UUID-only opted-in recovery GET and scoped, versioned native Save; do not
+  add unqualified message mutation. No captured workspace-upsert caller was
+  found. Keep the owned draft-artifact POST, but it needs the same
+  expected-account guard already used by its GET counterpart. Verify
+  activation is GET-only at the caller and draft creation rejects a stale
+  expected account before a write. No scope-policy correction was staged here.
+
+2026-11-17 owner-bound scope and canonical restore checkpoint:
+- The scoped matcher requires explicit chat scope for native Save reads and
+  a single positive safe version for edits. Recovery accepts opted-in UUID
+  reads only; existing qualified leaf Delete stays supported. Captured
+  workspace upsert is no longer admitted. The exact draft artifact routes
+  remain available; create and update now share the existing expected-user
+  guard. The isolated stale-account tests reproduced both writes before
+  the fix. After it, they reject before a workspace lookup and retain the
+  exact before-state; current and unasserted account writes still succeed.
+- Actual 406 frontend scope/SDK/transport/recovery cases passed. The two
+  backend workspace suites passed 58 tests; six guard cases also passed on
+  the final source snapshot. Scoped Bandit had no production or non-assert
+  findings, six new regression assertions, and raw exit 1.
+- The official final export and type generator passed; the independent
+  canonical check matched the fingerprint and existing tracked paths file.
+  All 4,211 tracked exporter source/config/package inputs examined matched
+  before and after; 2,144 routes and 3,336 schemas. Retain the first export
+  separately: the source check found two newer backend files absent there.
+  Generated rich types remain private; regenerate on the final dev union.
+- Metadata-only migration now has passing safety and live-persistence
+  fixtures without resurrecting an unscoped local removal helper. Keep
+  unknown/shared IndexedDB content unread and no local removal, tombstone
+  creation, or deletion acknowledgement. The six-file selection passed 129.
+  The caller in index.tsx now waits for pending persistence, latches account
+  and workspace/provenance retirement, and uses the scoped cold-open install;
+  it is not staged. Its source-callback and ownership suite passed, but the
+  component route suites are blocked at imports from conflicted ChatPane
+  and useServerChatLoader. The staged runner was not changed by this caller.
+- Stage the exact 49-case Markdown union, 181-case H1 hook union, canonical
+  restore and activation, and Quick Notes save ownership (198). The composed
+  ownership run passed 113 (including the read-only activation and restored
+  note lock fixtures), and the two shell plus Knowledge QA integration suites
+  passed 151. Counts overlap. The Notes editor candidate remains unmerged:
+  two currentness cases in the adjacent suite still fail, including the
+  navigation/version-read mock ordering. Keep these results separate.
+- Now 67 of 105 original conflicts are staged; 38 remain. Fresh explicit
+  GitHub refs and separate dev API agreed on published e4482bd and latest
+  dev b7d0b2dc. Queue on, PR open and unarmed; no base update, commit, push,
+  hosted changes, or native action. Final runtime, live PostgreSQL, combined
+  typecheck/builds, review and applicable acceptance still pending.
+
+2026-11-17 workspace and history checkpoint:
+- 88 of 105 original conflicts staged, 17 unmerged. HEAD e4482bd,
+  MERGE_HEAD cffdc4078, and REBASE_HEAD d0e12333 remain intact. Actual dev
+  b7d0b2dc was confirmed independently; queue on, open PR unarmed. No
+  further base update, commit, push, or native action.
+- The scoped chat loader preserves the original account lease, never loads
+  history after metadata cannot be verified, and releases only its own
+  busy state. Focused runs passed 79 loader, 153 background proxy, 6 memory
+  client, and 119 capability cases. Real manager GET activation with a
+  correctly owned cache passed 85; canonical workspace restore passed 104.
+- SourcesPane keeps capture/version membership fences and source actions.
+  Direct Chat Workspace Browse no longer reads current media for an
+  unavailable or unusable pin. Integrated Browse preview/runtime and
+  Workspace Chat checkpoints passed 37, 6, and 24. The preview API verifies
+  the version number; it does not return a version UUID.
+- New Chat reconciles the settings and Temporary confirmation, canonical
+  workspace references, and Back navigation; 31 passed. Media Review and
+  Dexie helpers passed 209 with both selection paths covered. Notes editor
+  passed 230, including held version-read/navigation tests with an isolated
+  finite mock. No deadlines or assertions were removed.
+- A conflicting assistant ID does not acknowledge or delete a retained
+  reply. Recovery and storage tests passed 183. History Review renders a
+  single recovery card with guarded Verify and Reprepare actions; 116
+  passed when the pinned private dependencies used the same React instance.
+  The duplicate-React run remains failed. No repo dependency/config edit.
+- Research Workspace cold-open now calls the scoped atomic installer
+  with its matching restore helper. Stage 3 passed 62; ChatPane stage 1,
+  checkpoint, and input guard passed 43, 28, and 1. Retain the earlier
+  integrated 198-pass/3-fail result (wrong restore shape and shared cache
+  fixture). Reset only the fixture cache between cases.
+- Character send keeps both qualified adoption and explicit navigation
+  retirement. Mocked scene (11) and Roleplay (42) suites passed;
+  Playground research-action freshness passed 20. The message renderer
+  passed 76 direct checks plus integrated workspace checkpoints. Its
+  companion recovery test is still unstaged: the unprojected integration
+  suite cannot collect through conflicted useMessage.tsx. Keep private
+  projected runs separate. Counts overlap; full chat UI runtime remains
+  pending the remaining shared pipeline and caller conflicts.
+
+2026-11-17 final conflict-resolution checkpoint:
+- All 105 original conflict paths staged in the isolated worktree, with
+  HEAD e4482bd, MERGE_HEAD cffdc4078, and REBASE_HEAD d0e12333 preserved.
+  This is a resolved index, not a completed rebase or qualified PR head.
+- Both database upgrade paths remain preserved. Keep the actual fresh and
+  upgraded SQLite checks, PostgreSQL recording checks, and earlier 204
+  mocked backend chat plus three SSE results separate. The live PostgreSQL
+  migration and restricted-role runtime check were not run.
+- The first durable workspace turn can continue through only its exact
+  qualified load receipt. A retired or foreign receipt cannot link a local
+  mirror or dispatch. The explicit durable path refreshes through its
+  fenced mirror save; the other native path keeps its existing refreshes.
+  Preserve the owned Character qualification error before retiring its
+  load lease, and refuse tracked Persona on a fresh H1 history.
+- Seven connected mocked frontend suites passed 805 tests, including all
+  433 history-selection cases. Also passed 30 reload/checkpoint, 34
+  Playground, 127 Message recovery, and 161 SDK checks in separate runs
+  with overlapping scopes. Earlier failures remain recorded. Character
+  Manager passed six targeted cases; the 120-second outer attempt did not
+  produce a full-suite result.
+- ADR assessment unchanged: no new durable architecture rule. The current
+  remote base has advanced beyond the rebase parent. Full staged-tree
+  preflight, current-dev qualification, hosted checks and applicable
+  acceptance are still required. No push or native action.

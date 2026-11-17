@@ -209,7 +209,7 @@ function PromptAssistFeedbackOverlay({
         top: position?.top ?? 0,
         visibility: position?.visible ? undefined : "hidden"
       }}
-      className="fixed z-50 flex w-max max-w-[calc(100vw-1rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg">
+      className="fixed z-50 flex w-max max-w-[calc(100vw-1rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-elevated p-2 text-text shadow-lg">
       {children}
     </div>,
     portalTarget
@@ -498,6 +498,13 @@ export function PromptAssistComposerAction({
     },
     [onReturnFocus]
   )
+  const handlePromptActionsOpenChange = React.useCallback((open: boolean) => {
+    if (open) {
+      pendingDrawerFocusRef.current = false
+      pendingRecipeTriggerFocusRef.current = false
+    }
+    setPromptActionsOpen(open)
+  }, [])
   const start = React.useCallback((operation: () => Promise<void>) => {
     setRecipeUndo(null)
     setPanelOpen(true)
@@ -583,7 +590,7 @@ export function PromptAssistComposerAction({
         onReviewChanges={() => start(promptAssist.reviewChanges)}
         onBuildFromRecipe={openRecipeBuilder}
         onSelectModel={onSelectModel}
-        onOpenChange={setPromptActionsOpen}
+        onOpenChange={handlePromptActionsOpenChange}
         disabled={sending || promptAssist.state.status === "analyzing"}
         compact
         placement="top"
@@ -591,7 +598,7 @@ export function PromptAssistComposerAction({
 
       {promptAssist.state.status === "applied" && feedbackVisible ? (
         <PromptAssistFeedbackOverlay anchorRef={promptAssistTriggerRef}>
-          <span role="status" className="text-xs text-muted-foreground">
+          <span role="status" className="text-xs text-text-muted">
             {t("common:promptAssist.applied", "Improvement applied.")}
           </span>
           <Button
@@ -613,7 +620,7 @@ export function PromptAssistComposerAction({
 
       {recipeUndo && feedbackVisible ? (
         <PromptAssistFeedbackOverlay anchorRef={promptAssistTriggerRef}>
-          <span role="status" className="text-xs text-muted-foreground">
+          <span role="status" className="text-xs text-text-muted">
             {t("common:promptAssist.recipeApplied", "Recipe applied.")}
           </span>
           <Button variant="outline" size="sm" onClick={undoRecipe}>

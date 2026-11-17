@@ -131,6 +131,61 @@ def test_rag_batch_creates_checkpoint(client_with_overrides, monkeypatch, tmp_pa
     assert status_map.get(1) == "ok"
 
 
+def test_rag_batch_with_generation_refuses_an_over_quota_user(client_with_overrides, monkeypatch, tmp_path):
+    """A batch that generates answers is refused with the 402 before any query runs."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    _set_checkpoint_dir(monkeypatch, tmp_path)
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+
+    monkeypatch.setattr(
+        rag_ep,
+        "_trusted_credential_runtime_scope",
+        lambda *args, **kwargs: (1, [7], [11], True),  # noqa: ARG005
+    )
+    calls: list[str] = []
+
+    async def recording_pipeline(query: str, **kwargs):  # noqa: ARG001
+        calls.append(query)
+        return up.UnifiedSearchResult(documents=[], query=query, errors=[])
+
+    monkeypatch.setattr(up, "unified_rag_pipeline", recording_pipeline)
+    refuse_llm_work(monkeypatch)
+
+    resp = client_with_overrides.post("/api/v1/rag/batch", json={"queries": ["alpha"], "enable_generation": True})
+
+    assert_llm_quota_402(resp)
+    assert calls == []
+
+
+def test_rag_batch_returns_the_rag_query_quota_402_not_a_500(client_with_overrides, monkeypatch, tmp_path):
+    """Spec 2's daily RAG query refusal inside the batch handler reaches the client as a 402."""
+    _set_checkpoint_dir(monkeypatch, tmp_path)
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    monkeypatch.setattr(
+        rag_ep,
+        "_trusted_credential_runtime_scope",
+        lambda *args, **kwargs: (1, [7], [11], True),  # noqa: ARG005
+    )
+
+    async def _rag_queries_blocked(_uid, key):
+        return 0 if key == "limits.rag_queries_per_day" else None
+
+    async def _nothing_used_today(_entity, _category):
+        return 0.0
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.user_quota", _rag_queries_blocked)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.ledger_used_today", _nothing_used_today)
+
+    resp = client_with_overrides.post("/api/v1/rag/batch", json={"queries": ["alpha"]})
+
+    assert resp.status_code == 402, resp.text
+    assert resp.json()["detail"]["category"] == "rag_queries_day"
+    assert int(resp.headers["Retry-After"]) >= 1
+
+
 def test_rag_batch_ownerless_checkpoint_persists_no_credential_scope(
     client_with_overrides,
     monkeypatch,

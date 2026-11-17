@@ -107,10 +107,9 @@ def test_ocr_pdf_uses_consistent_endpoint_key_for_check_and_record(monkeypatch):
             endpoint: str,
             is_batch: bool,
             tokens_requested: int,
-            estimated_cost: float,
             evaluations_requested: int = 1,
         ):
-            _ = (is_batch, tokens_requested, estimated_cost, evaluations_requested)
+            _ = (is_batch, tokens_requested, evaluations_requested)
             self.checked_endpoints.append(endpoint)
             return True, {"retry_after": 0}
 
@@ -119,7 +118,6 @@ def test_ocr_pdf_uses_consistent_endpoint_key_for_check_and_record(monkeypatch):
             _user_id: str,
             endpoint: str,
             _tokens_used: int,
-            _cost: float = 0.0,
             reserved_tokens: int = 0,
         ):
             _ = reserved_tokens
@@ -152,9 +150,9 @@ def test_ocr_pdf_uses_consistent_endpoint_key_for_check_and_record(monkeypatch):
     app.dependency_overrides[eval_unified.get_eval_request_user] = _get_user_override
     app.dependency_overrides[eval_unified.check_evaluation_rate_limit] = _rate_limit_dep_override
 
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: limiter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: limiter)
     monkeypatch.setattr(eval_unified, "_apply_rate_limit_headers", _fake_apply_rate_limit_headers)
-    monkeypatch.setattr(eval_unified, "get_unified_evaluation_service_for_user", lambda _uid: _Service())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _uid: _Service())
 
     files = [
         ("files", ("sample.pdf", b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF", "application/pdf")),

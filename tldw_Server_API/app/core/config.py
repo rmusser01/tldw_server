@@ -31,17 +31,17 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_section_name,
     iter_custom_openai_provider_numbers,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
+    is_production_like_env,
     is_test_mode,
     is_truthy,
 )
+from tldw_Server_API.app.core.Utils.provider_identity import canonical_provider_name
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.config_sections import ConfigSections
-    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
 _CONFIG_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -77,6 +77,8 @@ def _safe_json_dict(raw: Optional[str]) -> dict:
 
 CUSTOM_OPENAI_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(1)
 CUSTOM_OPENAI2_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(2)
+
+MAX_STANDARD_MEDIA_UPLOAD_MIB = 1024
 
 DEFAULT_PARAKEET_ONNX_TRANSCRIPTION_MODEL = "parakeet-tdt-0.6b-v3-onnx"
 DEFAULT_PARAKEET_MLX_TRANSCRIPTION_MODEL = "parakeet-mlx"
@@ -933,6 +935,15 @@ def _load_claims_review_metrics_settings(parser: configparser.ConfigParser | Non
         "CLAIMS_JOBS_ENABLED": "false",
         "CLAIMS_JOBS_QUEUE": "default",
         "CLAIMS_JOBS_MAX_RETRIES_REVIEW_METRICS": "3",
+        "CLAIMS_CLUSTER_REBUILD_JOBS_ENABLED": "false",
+        "CLAIMS_JOBS_MAX_RETRIES_CLUSTER_REBUILD": "3",
+        "CLAIMS_CLUSTER_REBUILD_MAX_EXACT_CLAIMS": "50000",
+        "CLAIMS_CLUSTER_REBUILD_MAX_EMBEDDING_CLAIMS": "5000",
+        "CLAIMS_CLUSTER_REBUILD_MAX_TEXT_BYTES": "33554432",
+        "CLAIMS_CLUSTER_REBUILD_MAX_VECTOR_WIDTH": "4096",
+        "CLAIMS_CLUSTER_REBUILD_MAX_EMBEDDING_COMPONENTS": "2000000",
+        "CLAIMS_CLUSTER_REBUILD_MAX_SIMILARITY_COMPONENT_COMPARISONS": "50000000",
+        "CLAIMS_CLUSTER_REBUILD_MAX_CLEANUP_REFERENCES": "50000",
     }
     resolved: dict[str, Any] = {}
     for key, default in defaults.items():
@@ -2922,9 +2933,10 @@ def usage_quotas_enabled() -> bool:
     return _as_bool(v, False)
 
 
-def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
+def get_llamacpp_handler_settings() -> dict[str, Any] | None:
     """
-    Build a LlamaCppConfig from environment variables or [LlamaCpp] section in config.txt.
+    Return the LlamaCppConfig keyword arguments from environment variables or the
+    [LlamaCpp] section in config.txt, or None when the handler is disabled.
 
     Env overrides (precedence over config.txt):
         LLAMACPP_ENABLED
@@ -2942,12 +2954,6 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
         LLAMACPP_ALLOWED_PATHS  (comma separated)
         LLAMACPP_LOG_OUTPUT_FILE
     """
-    try:
-        from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
-    except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
-        _log_warning(f"llama.cpp handler config unavailable (import failed): {exc}")
-        return None
-
     try:
         cp = load_comprehensive_config()
     except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
@@ -2971,7 +2977,7 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
     if not enabled:
         return None
 
-    kwargs: dict[str, object] = {"enabled": True}
+    kwargs: dict[str, Any] = {"enabled": True}
 
     exe = _get("executable_path", "LLAMACPP_EXECUTABLE_PATH")
     models_dir = _get("models_dir", "LLAMACPP_MODELS_DIR")
@@ -3023,11 +3029,7 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
     if log_output_file:
         kwargs["log_output_file"] = Path(str(log_output_file))
 
-    try:
-        return LlamaCppConfig(**kwargs)
-    except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
-        _log_warning(f"llama.cpp handler config invalid; disabling handler: {exc}")
-        return None
+    return kwargs
 
 
 _GOVERNANCE_ROLLOUT_MODES = {"off", "shadow", "enforce"}
@@ -3451,20 +3453,9 @@ def should_allow_cors_credentials() -> bool:
     return value
 
 
-@lru_cache(maxsize=1)
 def is_production_environment() -> bool:
     """Return True when runtime environment should use production safety guards."""
-    if is_truthy(os.getenv("tldw_production")):
-        return True
-
-    for env_key in ("ENV", "APP_ENV", "TLDW_ENV", "ENVIRONMENT"):
-        raw_value = os.getenv(env_key)
-        if raw_value is None:
-            continue
-        normalized = str(raw_value).strip().lower()
-        if normalized in {"prod", "production"}:
-            return True
-    return False
+    return is_production_like_env()
 
 
 def _resolve_disable_cors_value_and_source() -> tuple[bool, str]:
@@ -3792,6 +3783,19 @@ def route_enabled(route_key: str, *, default_stable: bool = True) -> bool:
 
     # Fallback default behavior: stable routes are enabled unless explicitly disabled
     return bool(default_stable)
+
+
+def _load_media_upload_limits(config: configparser.ConfigParser) -> dict[str, int]:
+    section = "Media-Processing"
+    defaults = dict.fromkeys(("audio", "pdf", "video", "epub", "document"), MAX_STANDARD_MEDIA_UPLOAD_MIB)
+    # Legacy custom configs can make these policies inherit the document limit.
+    legacy_document_limit = config.getint(section, "max_document_file_size_mb", fallback=50)
+    defaults.update(dict.fromkeys(("email", "code", "unknown"), legacy_document_limit))
+    return {
+        f"max_{kind}_file_size_mb": config.getint(section, f"max_{kind}_file_size_mb", fallback=default)
+        for kind, default in defaults.items()
+    }
+
 
 def load_and_log_configs(
     *,
@@ -4395,13 +4399,7 @@ def load_and_log_configs(
         save_character_chats = config_parser_object.get('Auto-Save', 'save_character_chats', fallback='False')
         save_rag_chats = config_parser_object.get('Auto-Save', 'save_rag_chats', fallback='False')
 
-        # Media Processing Limits
-        max_audio_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_audio_file_size_mb', fallback='500'))
-        max_pdf_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_pdf_file_size_mb', fallback='50'))
-        max_video_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_video_file_size_mb', fallback='1000'))
-        max_epub_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_epub_file_size_mb', fallback='100'))
-        max_document_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_document_file_size_mb', fallback='50'))
-        max_code_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_code_file_size_mb', fallback=str(max_document_file_size_mb)))
+        media_upload_limits = _load_media_upload_limits(config_parser_object)
         # Processing timeouts
         pdf_conversion_timeout_seconds = int(config_parser_object.get('Media-Processing', 'pdf_conversion_timeout_seconds', fallback='300'))
         audio_processing_timeout_seconds = int(config_parser_object.get('Media-Processing', 'audio_processing_timeout_seconds', fallback='600'))
@@ -5332,12 +5330,7 @@ def load_and_log_configs(
             },
             'processing_choice': processing_choice,
             'media_processing': {
-                'max_audio_file_size_mb': max_audio_file_size_mb,
-                'max_pdf_file_size_mb': max_pdf_file_size_mb,
-                'max_video_file_size_mb': max_video_file_size_mb,
-                'max_epub_file_size_mb': max_epub_file_size_mb,
-                'max_document_file_size_mb': max_document_file_size_mb,
-                'max_code_file_size_mb': max_code_file_size_mb,
+                **media_upload_limits,
                 'pdf_conversion_timeout_seconds': pdf_conversion_timeout_seconds,
                 'audio_processing_timeout_seconds': audio_processing_timeout_seconds,
                 'video_processing_timeout_seconds': video_processing_timeout_seconds,
@@ -5999,7 +5992,6 @@ def refresh_config_cache() -> None:
     _route_toggle_policy.cache_clear()
     should_disable_cors.cache_clear()
     should_allow_cors_credentials.cache_clear()
-    is_production_environment.cache_clear()
 
 
 def clear_config_cache() -> None:

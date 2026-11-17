@@ -29,8 +29,8 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     await_bounded_daemon_with_timeout,
 )
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.RAG.exceptions import RAGConfigurationError, RAGError
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 from .types import DataSource, Document
 from .utils import get_float_env as _get_float_env

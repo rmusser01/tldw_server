@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -15,6 +15,7 @@ const configMocks = vi.hoisted(() => ({
 }))
 
 const acpMocks = vi.hoisted(() => ({
+  sessionOptions: null as null | { onError: (message: { session_id: string; message: string; type: string; code: string }) => void },
   constructedConfigs: [] as Array<{
     serverUrl: string
     getAuthHeaders: () => Promise<Record<string, string>>
@@ -46,11 +47,14 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => mediaMocks.isMobile
+  useMobile: () => mediaMocks.isMobile,
+  useDesktop: () => !mediaMocks.isMobile
 }))
 
 vi.mock("@/hooks/useACPSession", () => ({
-  useACPSession: () => ({
+  useACPSession: (options: typeof acpMocks.sessionOptions) => {
+    acpMocks.sessionOptions = options
+    return ({
     state: "disconnected",
     isConnected: false,
     error: null,
@@ -60,6 +64,7 @@ vi.mock("@/hooks/useACPSession", () => ({
     approvePermission: vi.fn(),
     denyPermission: vi.fn()
   })
+  }
 }))
 
 vi.mock("@/services/acp/client", async (importActual) => {
@@ -197,6 +202,33 @@ describe("ACPPlayground canonical connection config", () => {
         offset: 0
       })
     })
+  })
+
+  it.each([["prompt_failed", 0], ["prompt_busy", 1], ["permission_not_found", 1], ["cancel_failed", 1]] as const)("retires permissions only for terminal failure: %s", async (code, pendingCount) => {
+    renderPlayground()
+    await waitFor(() => expect(acpMocks.listSessions).toHaveBeenCalled())
+    let id = ""
+    act(() => {
+      const store = useACPSessionsStore.getState()
+      id = store.createSession({ cwd: "/tmp/c05-disposable" })
+      store.setActiveSession(id)
+    })
+    await waitFor(() => expect(acpMocks.getSessionDetail).toHaveBeenCalled())
+    act(() => {
+      useACPSessionsStore.getState().addPendingPermission(id, {
+        request_id: "timeout-write", tool_name: "fs/write_text_file",
+        tool_arguments: { path: "/tmp/c05-disposable/output.txt" },
+        tier: "individual", timeout_seconds: 300, requestedAt: new Date()
+      })
+    })
+    expect(useACPSessionsStore.getState().getSession(id)?.pendingPermissions).toHaveLength(1)
+    act(() => acpMocks.sessionOptions!.onError({
+      type: "error", code, session_id: id, message: "Controlled tool response deadline"
+    }))
+    const store = useACPSessionsStore.getState()
+    expect(store.getSession(id)?.state).toBe("error")
+    expect(store.getSession(id)?.pendingPermissions).toHaveLength(pendingCount)
+    expect(store.globalError).toBe("Controlled tool response deadline")
   })
 
   it("routes health through the shared cookie-aware ACP transport", async () => {

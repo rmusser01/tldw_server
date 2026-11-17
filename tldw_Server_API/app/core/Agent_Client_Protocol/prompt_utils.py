@@ -4,10 +4,74 @@ Handles @mention resolution for MCP tools.
 """
 from __future__ import annotations
 
+import copy
+import json
 import re
 from typing import Any
 
 from loguru import logger
+
+from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPResponseError
+
+
+def normalize_prompt_content(prompt: Any) -> list[dict[str, Any]]:
+    """Validate authored/native prompts and return a detached ACP v1 wire copy.
+
+    Authored roles and extra fields remain namespaced metadata; their text is
+    unchanged. Native content blocks retain every field and their exact order.
+    Callers must keep the authored input for governance, storage and bootstrap.
+    """
+    invalid = "ACP prompt requires valid content blocks or role/content messages"
+    if not isinstance(prompt, list) or not prompt:
+        raise ACPResponseError(invalid, code=-32602)
+    try:
+        encoded = json.dumps(prompt, allow_nan=False)
+        if json.loads(encoded) != prompt:
+            raise ValueError("Prompt contains values requiring JSON coercion")
+    except (TypeError, ValueError) as exc:
+        raise ACPResponseError(invalid, code=-32602) from exc
+
+    blocks: list[dict[str, Any]] = []
+    for item in prompt:
+        if not isinstance(item, dict):
+            raise ACPResponseError(invalid, code=-32602)
+        if "type" not in item:
+            if item.get("role") not in ("system", "user", "assistant") or not isinstance(item.get("content"), str):
+                raise ACPResponseError(invalid, code=-32602)
+            blocks.append({
+                "type": "text",
+                "text": item["content"],
+                "_meta": {"tldw-server/legacy-message": copy.deepcopy({
+                    key: value for key, value in item.items() if key != "content"
+                })},
+            })
+            continue
+
+        if "role" in item or "content" in item:
+            raise ACPResponseError(invalid, code=-32602)
+        if any(key in item and item[key] is not None and not isinstance(item[key], dict) for key in ("_meta", "annotations")):
+            raise ACPResponseError(invalid, code=-32602)
+        kind = item["type"]
+        if kind == "text":
+            valid = isinstance(item.get("text"), str)
+        elif kind in ("image", "audio"):
+            valid = isinstance(item.get("data"), str) and isinstance(item.get("mimeType"), str)
+        elif kind == "resource_link":
+            valid = isinstance(item.get("uri"), str) and isinstance(item.get("name"), str)
+        elif kind == "resource":
+            resource = item.get("resource")
+            valid = (
+                isinstance(resource, dict)
+                and isinstance(resource.get("uri"), str)
+                and (("text" in resource) != ("blob" in resource))
+                and isinstance(resource.get("text", resource.get("blob")), str)
+            )
+        else:
+            valid = False
+        if not valid:
+            raise ACPResponseError(invalid, code=-32602)
+        blocks.append(copy.deepcopy(item))
+    return blocks
 
 
 # Match @tool_name patterns (alphanumeric, hyphens, underscores, dots).

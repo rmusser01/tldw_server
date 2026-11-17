@@ -68,6 +68,9 @@ const {
   }
 
   const optionState = {
+    selectedModel: null,
+    setSelectedModel: vi.fn(),
+    selectedModelIsLoading: false,
     messages: [] as Array<{
       id: string
       isBot: boolean

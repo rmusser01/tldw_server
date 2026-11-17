@@ -6,6 +6,7 @@
     "prompt_studio",
     "privilege_snapshots",
     "audio",
+    "tts",
     "media_ingest",
     "reading_import",
     "reading_digest",
@@ -52,6 +53,13 @@
       "slug": "audio",
       "label": "Audio jobs worker",
       "module": "tldw_Server_API.app.services.audio_jobs_worker",
+      "optional": false
+    },
+    {
+      "key": "tts",
+      "slug": "tts",
+      "label": "Long-form TTS jobs worker",
+      "module": "tldw_Server_API.app.core.TTS.tts_jobs_worker",
       "optional": false
     },
     {

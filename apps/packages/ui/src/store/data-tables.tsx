@@ -381,8 +381,10 @@ export const useDataTablesStore = createWithEqualityFn<DataTablesState>()((set) 
       _id: `row-${index}-${Date.now()}`
     }))
     set({
-      editingTable: JSON.parse(JSON.stringify(table)), // Deep clone
-      originalTable: JSON.parse(JSON.stringify(table)),
+      // structuredClone is safe here: DataTable shapes are JSON-origin (API
+      // responses; timestamps are ISO strings, never Date objects).
+      editingTable: structuredClone(table), // Deep clone
+      originalTable: structuredClone(table),
       editingRows,
       editingState: {
         editingCellKey: null,
@@ -574,7 +576,9 @@ export const useDataTablesStore = createWithEqualityFn<DataTablesState>()((set) 
         })
       )
       return {
-        editingTable: JSON.parse(JSON.stringify(state.originalTable)),
+        // structuredClone is safe: originalTable was itself cloned from a
+        // JSON-origin DataTable (see startEditing).
+        editingTable: structuredClone(state.originalTable),
         editingRows,
         editingState: {
           editingCellKey: null,

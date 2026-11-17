@@ -27,7 +27,7 @@ from tldw_Server_API.app.core.Workflows.adapters.integration._config import S3Do
 )
 async def run_s3_upload_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Upload content to S3-compatible storage."""
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}

@@ -380,7 +380,7 @@ git commit -m "feat(web): add manual API-key remember choice"
 - Modify: `apps/packages/ui/src/routes/app-route.tsx`
 - Modify: tldw config readers under `apps/packages/ui/src/` to use extension-local storage
 - Modify: `Dockerfiles/README.md`
-- Modify: `backlog/tasks/task-12106 - Add-explicit-single-user-API-key-device-persistence-and-relaunch-coverage.md`
+- Modify: `backlog/tasks/task-15050 - Add-explicit-single-user-API-key-device-persistence-and-relaunch-coverage.md`
 
 **Interfaces:**
 - Consumes: real onboarding/settings UI and persistence policy.
@@ -458,6 +458,6 @@ Expected: tests pass; the final grep produces no output from generated artifacts
 Record exact commands/results, checked acceptance criteria, browser/extension versions, persistence fallbacks, known skips, and final summary in Backlog.md. Bandit is not applicable to the TypeScript-only task; record that scoped skip. Then run:
 
 ```bash
-git add apps/tldw-frontend/e2e apps/tldw-frontend/playwright.config.ts Dockerfiles/README.md "backlog/tasks/task-12106 - Add-explicit-single-user-API-key-device-persistence-and-relaunch-coverage.md"
+git add apps/tldw-frontend/e2e apps/tldw-frontend/playwright.config.ts Dockerfiles/README.md "backlog/tasks/task-15050 - Add-explicit-single-user-API-key-device-persistence-and-relaunch-coverage.md"
 git commit -m "test(web): cover API-key persistence lifecycle"
 ```

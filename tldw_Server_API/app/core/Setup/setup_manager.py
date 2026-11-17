@@ -690,7 +690,8 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
     Strategy:
       - Read original lines as text.
       - Track current section.
-      - For each line containing a key in the active section, replace the value portion
+      - Match updated keys case-insensitively, as the runtime config parser does.
+      - For each matching line in the active section, replace the value portion
         before any inline comment marker ('#' or ';').
       - Leave comments and spacing outside the key/value token intact where reasonable.
     """
@@ -707,6 +708,7 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
         for section, items in updates.items()
     }
 
+    update_keys = {section: {key.lower(): key for key in items} for section, items in updates.items()}
     current_section: str | None = None
     out_lines: list[str] = []
 
@@ -733,7 +735,8 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
 
         # If in a section that has updates, try to match a key line
         items = pending.get(current_section or "", {})
-        if items and "=" in line:
+        section_keys = update_keys.get(current_section or "", {})
+        if section_keys and "=" in line:
             # Separate inline comment if present (# or ;) taking the earliest marker
             hash_idx = line.find("#") if "#" in line else len(line) + 1
             semi_idx = line.find(";") if ";" in line else len(line) + 1
@@ -745,12 +748,17 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
             if "=" in code_part:
                 left, right = code_part.split("=", 1)
                 key = left.strip()
-                if key in items:
+                update_key = section_keys.get(key.lower())
+                if update_key is not None:
                     # Preserve leading indentation from the original 'left'
                     leading_ws_len = len(left) - len(left.lstrip(" \t"))
                     leading_ws = left[:leading_ws_len]
-                    new_value = items.pop(key)
                     line_ending = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else ""
+                    if update_key not in items:
+                        # Remove only updated aliases that would break the strict runtime parser.
+                        out_lines.append(leading_ws + comment_part if comment_part else line_ending)
+                        continue
+                    new_value = items.pop(update_key)
                     # Build normalized key/value token; keep one space around '='
                     new_code = f"{leading_ws}{key} = {new_value}"
                     # Ensure a space before inline comment if it exists and doesn't already start with whitespace
@@ -789,8 +797,12 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
         the current value is boolean/integer/number. String values accept any.
     """
     for section, items in updates.items():
-        section_allows_provider_catalog_fields = bool(items) and all(
-            _is_setup_provider_catalog_update(section, key) for key in items
+        if len({key.lower() for key in items}) != len(items):
+            raise ValueError(f"Duplicate config option in section '{section}'")
+        section_allows_provider_catalog_fields = (
+            not parser.has_section(section)
+            and bool(items)
+            and all(_is_setup_provider_catalog_update(section, key) for key in items)
         )
         if not parser.has_section(section) and not section_allows_provider_catalog_fields:
             raise ValueError(f"Unknown section '{section}' in updates")
@@ -800,7 +812,10 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
                 section == _INGESTION_SOURCE_ALLOWED_ROOTS_SECTION
                 and key == _INGESTION_SOURCE_ALLOWED_ROOTS_KEY
             )
-            allows_provider_catalog_field = _is_setup_provider_catalog_update(section, key)
+            allows_provider_catalog_field = (
+                not parser.has_option(section, key)
+                and _is_setup_provider_catalog_update(section, key)
+            )
             if (
                 not parser.has_option(section, key)
                 and not allows_new_ingestion_roots

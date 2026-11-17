@@ -79,13 +79,11 @@ const toAssetOption = (
   if (!value || typeof value !== "object") return null
   const record = value as Record<string, unknown>
   const rawId =
-    kind === "worldbook" ? record.world_book_id ?? record.id : record.id
+    kind === "worldbook" ? (record.world_book_id ?? record.id) : record.id
   const id = Number(rawId)
   if (!Number.isFinite(id) || id <= 0) return null
   const rawName =
-    kind === "worldbook"
-      ? record.world_book_name ?? record.name
-      : record.name
+    kind === "worldbook" ? (record.world_book_name ?? record.name) : record.name
   const name =
     typeof rawName === "string" && rawName.trim()
       ? rawName.trim()
@@ -147,7 +145,9 @@ const Section = ({
       </div>
       <span className="shrink-0 text-xs text-text-subtle">{value}</span>
     </div>
-    {detail ? <div className="mt-2 text-xs text-text-subtle">{detail}</div> : null}
+    {detail ? (
+      <div className="mt-2 text-xs text-text-subtle">{detail}</div>
+    ) : null}
   </div>
 )
 
@@ -175,8 +175,9 @@ export const ConversationContextPopover: React.FC<
     ConversationContextAssetOption[]
   >([])
   const [assetOptionsLoading, setAssetOptionsLoading] = React.useState(false)
-  const [assetOptionsError, setAssetOptionsError] =
-    React.useState<string | null>(null)
+  const [assetOptionsError, setAssetOptionsError] = React.useState<
+    string | null
+  >(null)
   const [saving, setSaving] = React.useState(false)
   const [assistantSelectOpenRequest, setAssistantSelectOpenRequest] =
     React.useState<{
@@ -196,10 +197,15 @@ export const ConversationContextPopover: React.FC<
   const worldbookValue =
     summary.worldbooks.total > 0
       ? `${summary.worldbooks.matched} ${t("sidepanel:conversationContext.matched", "matched")} / ${summary.worldbooks.total} ${t("sidepanel:conversationContext.configured", "configured")}`
-      : t("sidepanel:conversationContext.none", "None")
+      : selectedCharacterId
+        ? t(
+            "sidepanel:conversationContext.characterLoreNotPreviewed",
+            "Character lore not previewed"
+          )
+        : t("sidepanel:conversationContext.none", "None")
   const dictionaryValue =
     summary.dictionaries.total > 0
-      ? `${summary.dictionaries.active} ${t("sidepanel:conversationContext.active", "active")} / ${summary.dictionaries.total} ${t("sidepanel:conversationContext.configured", "configured")}`
+      ? `${summary.dictionaries.active} ${t("sidepanel:conversationContext.processedInPreview", "processed in preview")} / ${summary.dictionaries.total} ${t("sidepanel:conversationContext.configured", "configured")}`
       : t("sidepanel:conversationContext.none", "None")
 
   const previewSections = composition?.previewSections ?? []
@@ -214,8 +220,7 @@ export const ConversationContextPopover: React.FC<
     [composition]
   )
   const resolvedWorldBookOptions = worldBookOptions ?? loadedWorldBookOptions
-  const resolvedDictionaryOptions =
-    dictionaryOptions ?? loadedDictionaryOptions
+  const resolvedDictionaryOptions = dictionaryOptions ?? loadedDictionaryOptions
   const canEditAssets = Boolean(chatId && saveSelection && !disabled)
   const sources = React.useMemo(() => {
     const labels = new Set<string>()
@@ -302,7 +307,12 @@ export const ConversationContextPopover: React.FC<
   }, [dictionaryOptions, open, worldBookOptions])
 
   const saveAssetSelection = React.useCallback(
-    async (nextSelection: Pick<ConversationContextSelection, "worldBookIds" | "dictionaryIds">) => {
+    async (
+      nextSelection: Pick<
+        ConversationContextSelection,
+        "worldBookIds" | "dictionaryIds"
+      >
+    ) => {
       if (!canEditAssets || !saveSelection) return
       setSaving(true)
       try {
@@ -361,8 +371,7 @@ export const ConversationContextPopover: React.FC<
           return (
             <label
               key={option.id}
-              className="flex min-h-7 items-center gap-2 text-xs text-text"
-            >
+              className="flex min-h-7 items-center gap-2 text-xs text-text">
               <input
                 type="checkbox"
                 checked={checked}
@@ -382,8 +391,7 @@ export const ConversationContextPopover: React.FC<
       className="w-[320px] max-w-[calc(100vw-32px)] p-3"
       onKeyDown={(event) => {
         if (event.key === "Escape") setOpen(false)
-      }}
-    >
+      }}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Layers className="size-4 text-text-subtle" />
@@ -398,8 +406,7 @@ export const ConversationContextPopover: React.FC<
               : readiness.tone === "partial" || readiness.tone === "loading"
                 ? "bg-warning/10 text-warning"
                 : "bg-error/10 text-error"
-          }`}
-        >
+          }`}>
           {readiness.label}
         </span>
       </div>
@@ -482,7 +489,10 @@ export const ConversationContextPopover: React.FC<
               resolvedDictionaryOptions,
               selectedDictionaryIds,
               handleDictionaryToggle,
-              t("sidepanel:conversationContext.noDictionaries", "No dictionaries")
+              t(
+                "sidepanel:conversationContext.noDictionaries",
+                "No dictionaries"
+              )
             )
           )
         }
@@ -528,8 +538,7 @@ export const ConversationContextPopover: React.FC<
           {sources.map((source) => (
             <span
               key={source}
-              className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] text-text-subtle"
-            >
+              className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] text-text-subtle">
               {source}
             </span>
           ))}
@@ -553,8 +562,7 @@ export const ConversationContextPopover: React.FC<
       open={open}
       onOpenChange={setOpen}
       placement="topLeft"
-      content={content}
-    >
+      content={content}>
       <button
         type="button"
         data-testid="conversation-context-trigger"
@@ -570,8 +578,7 @@ export const ConversationContextPopover: React.FC<
         title={t(
           "sidepanel:conversationContext.tooltip",
           "Conversation context"
-        )}
-      >
+        )}>
         <Layers className={iconClassName} />
         <span className="hidden truncate sm:inline">
           {t("sidepanel:conversationContext.shortLabel", "Context")}

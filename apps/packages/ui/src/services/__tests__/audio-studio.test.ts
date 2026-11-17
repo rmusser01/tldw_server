@@ -19,6 +19,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 import {
+  getAudioStudioVoices,
   commitAudiobookMigration,
   createAudioStudioExport,
   createAudioStudioGeneration,
@@ -125,7 +126,7 @@ describe("audio-studio service", () => {
     const artifacts = await listAudioStudioArtifacts("project 1")
 
     expect(mocks.bgRequest).toHaveBeenCalledWith({
-      path: "/api/v1/audio-studio/projects/project%201/artifacts",
+      path: "/api/v1/audio-studio/projects/project%201/artifacts?limit=100&offset=0",
       method: "GET"
     })
     expect(artifacts).toEqual([
@@ -207,6 +208,50 @@ describe("audio-studio service", () => {
     expect(ticket.ticket_url).toBe(
       "https://public.example.test/api/v1/audio-studio/media-tickets/ticket-download"
     )
+  })
+
+  it("resolves a media ticket through the hosted proxy", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    try {
+      tldwClientMocks.getConfig.mockResolvedValueOnce(null)
+      mocks.bgRequest.mockResolvedValueOnce({
+        ticket_path: "/api/v1/audio-studio/media-tickets/hosted_ticket",
+        expires_at: "2026-06-24T12:00:00Z",
+        purpose: "playback",
+        artifact_id: "artifact-1"
+      })
+
+      await expect(mintAudioStudioArtifactMediaTicket("project-1", "artifact-1", "playback"))
+        .resolves.toMatchObject({ ticket_url: "/api/proxy/audio-studio/media-tickets/hosted_ticket" })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("rejects a fallback path outside the media-ticket route", async () => {
+    tldwClientMocks.getConfig.mockResolvedValueOnce(null)
+    mocks.bgRequest.mockResolvedValueOnce({
+      ticket_path: "/api/v1/audio-studio/workflows",
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "download",
+      artifact_id: "artifact-1"
+    })
+
+    await expect(mintAudioStudioArtifactMediaTicket("project-1", "artifact-1", "download"))
+      .rejects.toThrow("Invalid Audio Studio media ticket path")
+  })
+
+  it("rejects a ticket URL resolved against an invalid configured server", async () => {
+    tldwClientMocks.getConfig.mockResolvedValueOnce({ serverUrl: "unconfigured" })
+    mocks.bgRequest.mockResolvedValueOnce({
+      ticket_path: "/api/v1/audio-studio/media-tickets/ticket-playback",
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "playback",
+      artifact_id: "artifact-1"
+    })
+
+    await expect(mintAudioStudioArtifactMediaTicket("project-1", "artifact-1", "playback"))
+      .rejects.toThrow("Invalid Audio Studio media ticket URL")
   })
 
   it("fetches artifact media as a blob using the response MIME type", async () => {
@@ -404,11 +449,11 @@ describe("audio-studio service", () => {
     })
     await createAudioStudioRender("p1", {
       idempotency_key: "render-key-1234",
-      timeline_revision_id: "timeline-1"
+      target_resource_kind: "render", target_resource_id: "mix-1", target_revision_id: "rev-4", render_type: "preview_mix"
     })
     await createAudioStudioExport("p1", {
       idempotency_key: "export-key-1234",
-      format: "zip"
+      target_resource_kind: "export", target_resource_id: "export-1", target_revision_id: "rev-4", export_type: "zip_package"
     })
     await previewAudiobookMigration({
       legacy_project_id: "legacy-1",
@@ -440,7 +485,7 @@ describe("audio-studio service", () => {
       headers: { "Content-Type": "application/json" },
       body: {
         idempotency_key: "render-key-1234",
-        timeline_revision_id: "timeline-1"
+        target_resource_kind: "render", target_resource_id: "mix-1", target_revision_id: "rev-4", render_type: "preview_mix"
       }
     })
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(3, {
@@ -449,7 +494,7 @@ describe("audio-studio service", () => {
       headers: { "Content-Type": "application/json" },
       body: {
         idempotency_key: "export-key-1234",
-        format: "zip"
+        target_resource_kind: "export", target_resource_id: "export-1", target_revision_id: "rev-4", export_type: "zip_package"
       }
     })
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(4, {
@@ -472,4 +517,57 @@ describe("audio-studio service", () => {
       }
     })
   })
+  it("B06 captured owner fences a deferred project response", async () => {
+    let finish!: (value: unknown) => void
+    mocks.bgRequest.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    let current = true
+    const options = { assertCurrent: () => { if (!current) throw new Error("Audio Studio account changed") } }
+    const pending = createAudioStudioProject({ title: "Private", workflow: "narration" }, options)
+    current = false
+    finish({ project_id: "private-project" })
+    await expect(pending).rejects.toThrow("Audio Studio account changed")
+  })
+
+  it("B06 lists only compatible owned custom voices when the provider has no builtin catalog", async () => {
+    mocks.bgRequest.mockImplementation(async (request) => {
+      if (request.path === "/api/v1/audio/voices") return { voices: [
+        { voice_id: "owned-pocket", name: "Reference", provider: "PocketTTS" },
+        { voice_id: "other-provider", name: "Other", provider: "kokoro" }
+      ] };
+      throw Object.assign(new Error("No builtin catalog"), { status: 404 });
+    });
+    expect(await getAudioStudioVoices("pocket_tts", "pocket_tts")).toEqual([
+      expect.objectContaining({ voice_id: "custom:owned-pocket", name: "Custom: Reference" })
+    ]);
+  });
+
+  it("B06 fences retained custom voices when the account changes during builtin404", async () => {
+    let rejectCatalog!: (error: unknown) => void;
+    mocks.bgRequest.mockResolvedValueOnce({ voices: [{ voice_id: "owned-pocket", provider: "pocket_tts" }] });
+    mocks.bgRequest.mockReturnValueOnce(new Promise((_, reject) => { rejectCatalog = reject; }));
+    let current = true;
+    const pending = getAudioStudioVoices("pocket_tts", "pocket_tts", {
+      assertCurrent: () => { if (!current) throw new Error("Audio Studio account changed"); }
+    });
+    await vi.waitFor(() => expect(mocks.bgRequest).toHaveBeenCalledTimes(2));
+    current = false;
+    rejectCatalog(Object.assign(new Error("No builtin catalog"), { status: 404 }));
+    await expect(pending).rejects.toThrow("Audio Studio account changed");
+  });
+
+  it.each([401, 403, 500])("B06 preserves voice catalog failure %s instead of using a stale sample", async (status) => {
+    mocks.bgRequest.mockResolvedValueOnce({ voices: [{ voice_id: "owned-pocket", name: "Reference", provider: "pocket_tts" }] });
+    mocks.bgRequest.mockRejectedValueOnce(Object.assign(new Error("Catalog failed"), { status }));
+    await expect(getAudioStudioVoices("pocket_tts", "pocket_tts")).rejects.toMatchObject({ status });
+  });
+
+  it("B06 retains earlier audio across artifact pages", async () => {
+    const first = Array.from({length: 100}, (_, index) => ({ artifact_id: `a-${index}` }))
+    mocks.bgRequest.mockResolvedValueOnce({ artifacts: first, limit: 100, offset: 0 }).mockResolvedValueOnce({ artifacts: [{ artifact_id: "earlier-success" }], limit: 100, offset: 100 })
+    const artifacts = await listAudioStudioArtifacts("p")
+    expect(artifacts).toHaveLength(101)
+    expect(artifacts[100].artifact_id).toBe("earlier-success")
+    expect(mocks.bgRequest.mock.calls.map(([request]) => request.path)).toEqual(["/api/v1/audio-studio/projects/p/artifacts?limit=100&offset=0", "/api/v1/audio-studio/projects/p/artifacts?limit=100&offset=100"])
+  })
+
 })

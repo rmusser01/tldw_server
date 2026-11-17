@@ -18,6 +18,9 @@ import { invalidateRefreshSessionIfCurrent } from "@/services/tldw/single-user-c
 import { TldwConnectionSettings } from "../TldwConnectionSettings"
 import { useSettingsLoginStatus } from "../useSettingsLoginStatus"
 
+const account = vi.hoisted(() => ({ getCurrentUser: vi.fn() }))
+vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: account }))
+
 // Match the WebUI storage boundary, including same-tab and cross-tab watches.
 vi.mock("@plasmohq/storage", async () =>
   import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage")
@@ -37,6 +40,7 @@ describe("Settings auth-mode changes through the actual Form", () => {
   let storage: Storage
 
   beforeEach(async () => {
+    account.getCurrentUser.mockReset().mockResolvedValue({ id: 11, username: "Alice", is_active: true })
     localStorage.clear()
     sessionStorage.clear()
     storage = new Storage({ area: "local" })
@@ -80,6 +84,7 @@ describe("Settings auth-mode changes through the actual Form", () => {
           authMode={mode}
           setAuthMode={setMode}
           isLoggedIn={login.isLoggedIn}
+          loggedInUsername={login.loggedInUsername}
           setIsLoggedIn={login.setIsLoggedIn}
           refreshLoginStatus={login.refreshLoginStatus}
           loginMethod="password"
@@ -109,6 +114,57 @@ describe("Settings auth-mode changes through the actual Form", () => {
     )
   }
 
+  it("identifies the current signed-in account from the verified user response", async () => {
+    render(<ConfigProvider><App><Owner /></App></ConfigProvider>)
+    expect(await screen.findByText("Account: Alice")).toBeInTheDocument()
+  })
+
+  it("clears the displayed account identity when the saved session is invalidated", async () => {
+    render(<ConfigProvider><App><Owner /></App></ConfigProvider>)
+    await screen.findByText("Account: Alice")
+    await act(async () => {
+      await invalidateRefreshSessionIfCurrent(storage, signedIn)
+    })
+    await waitFor(() => expect(screen.queryByText("Account: Alice")).not.toBeInTheDocument())
+  })
+
+  it("ignores a retired account response after newer credentials select another account", async () => {
+    let release!: (user: { id: number; username: string; is_active: boolean }) => void
+    account.getCurrentUser.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    account.getCurrentUser.mockResolvedValue({ id: 12, username: "Bob", is_active: true })
+    render(<ConfigProvider><App><Owner /></App></ConfigProvider>)
+    await waitFor(() => expect(account.getCurrentUser).toHaveBeenCalled())
+    await act(async () => {
+      await storage.set("tldwConfig", { ...signedIn, accessToken: "bob-access", refreshToken: "bob-refresh" })
+    })
+    await screen.findByText("Account: Bob")
+    await act(async () => {
+      release({ id: 11, username: "Alice", is_active: true })
+    })
+    expect(screen.queryByText("Account: Alice")).not.toBeInTheDocument()
+    expect(screen.getByText("Account: Bob")).toBeInTheDocument()
+  })
+
+  it("does not invent a verified account identity when the authenticated read fails", async () => {
+    account.getCurrentUser.mockRejectedValue(new Error("Connection unavailable"))
+    render(<ConfigProvider><App><Owner /></App></ConfigProvider>)
+    await screen.findByText("Logged In")
+    await waitFor(() => expect(account.getCurrentUser).toHaveBeenCalled())
+    expect(screen.queryByText(/^Account:/)).not.toBeInTheDocument()
+  })
+
+  it.each(["tldw:auth-principal-changed", "tldw:auth-credentials-changed"])(
+    "revalidates displayed identity on %s without a storage event",
+    async event => {
+      render(<ConfigProvider><App><Owner /></App></ConfigProvider>)
+      await screen.findByText("Account: Alice")
+      account.getCurrentUser.mockResolvedValue({ id: 12, username: "Bob", is_active: true })
+      act(() => { window.dispatchEvent(new CustomEvent(event)) })
+      expect(await screen.findByText("Account: Bob")).toBeInTheDocument()
+      expect(screen.queryByText("Account: Alice")).not.toBeInTheDocument()
+    }
+  )
+
   const startModeChange = async () => {
     render(<ConfigProvider theme={{ token: { colorPrimary: "#3267ab", motion: false } }}><App><Owner /></App></ConfigProvider>)
     await screen.findByText("Logged In")
@@ -119,7 +175,7 @@ describe("Settings auth-mode changes through the actual Form", () => {
   }
 
   const closeConfirmation = async (action: "Cancel" | "Change mode") => {
-    fireEvent.click(screen.getByRole("button", { name: action, exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: action }))
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Change authentication mode?" })).not.toBeInTheDocument(), { timeout: 3000 })
   }
 

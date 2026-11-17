@@ -13,6 +13,14 @@ from tldw_Server_API.app.core.Setup.audio_readiness_store import AudioReadinessR
 from tldw_Server_API.app.core.Setup.first_chat_verifier import DEFAULT_FIRST_CHAT_PROMPT
 from tldw_Server_API.app.core.Setup.install_schema import InstallPlan
 
+# Core-owned since TASK-13950.15; re-exported for the API layer.
+from tldw_Server_API.app.core.Setup.setup_schemas import (  # noqa: F401 - re-exported (TASK-13950.15)
+    SetupProviderCatalogEntry,
+    SetupProviderCatalogResponse,
+    SetupProviderType,
+    SetupProviderValidationResponse,
+)
+
 FirstRunChatResult = first_run_models.FirstRunChatResult
 FirstRunStateResponse = first_run_models.FirstRunStateResponse
 FirstRunStatus = first_run_models.FirstRunStatus
@@ -123,39 +131,11 @@ class SetupReadinessVerifyResponse(BaseModel):
     verified_at: str
 
 
-class SetupProviderType(str, Enum):
-    """Provider setup categories supported by the first-run wizard."""
-
-    HOSTED_API_KEY = "hosted_api_key"
-    LOCAL_ENDPOINT = "local_endpoint"
-
-
 class SetupProviderSaveStatus(str, Enum):
     """Persistence status for a setup provider save request."""
 
     SAVED = "saved"
     FAILED = "failed"
-
-
-class SetupProviderCatalogEntry(BaseModel):
-    """One provider option exposed to first-run setup."""
-
-    provider_key: str
-    label: str
-    provider_type: SetupProviderType
-    config_section: str
-    api_key_field: str | None = None
-    base_url_field: str | None = None
-    model_field: str | None = None
-    default_base_url: str | None = None
-    supports_preflight: bool = False
-    recommended_for_first_chat: bool = False
-
-
-class SetupProviderCatalogResponse(BaseModel):
-    """Catalog of provider options for the first-run setup UI."""
-
-    providers: list[SetupProviderCatalogEntry] = Field(default_factory=list)
 
 
 class SetupProviderSaveRequest(BaseModel):
@@ -181,18 +161,6 @@ class SetupProviderSaveResponse(BaseModel):
     requires_restart: bool = False
     failure_category: str | None = None
     message: str | None = None
-
-
-class SetupProviderValidationResponse(BaseModel):
-    """Provider validation result safe to return to unauthenticated setup clients."""
-
-    provider_key: str
-    status: str
-    failure_category: str | None = None
-    message: str | None = None
-    models: list[str] = Field(default_factory=list)
-    validation_level: str | None = None
-    can_gate_first_chat: bool = False
 
 
 class McpToolsValidationState(str, Enum):

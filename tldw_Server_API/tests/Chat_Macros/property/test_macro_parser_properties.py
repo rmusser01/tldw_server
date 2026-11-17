@@ -4,7 +4,7 @@ Prepared ahead of the Chat_Macros merge (codex/chat-macros-v1, PR #2618):
 the importorskip below makes this file collect-and-skip until
 ``app/core/Chat_Macros`` lands on dev, then the properties activate
 automatically. They generalize the invariants of the bounds-validation
-fix c1f4e6eb95 (see audits/2026-07-04-test-suite-audit-round2.md, RA4).
+fix c1f4e6eb95 (see Docs/Audit/2026-07-04-test-suite-audit-round2.md, RA4).
 """
 
 import shlex

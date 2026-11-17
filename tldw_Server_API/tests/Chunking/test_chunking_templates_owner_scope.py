@@ -131,9 +131,9 @@ class _RoundTripDB:
         self.rows.append(row)
         return row
 
-    def get_chunking_template(self, *, name: str) -> dict:
+    def get_chunking_template(self, *, name: str, owner_user_id: str) -> dict:
         """Return the stored row by name."""
-        return next(r for r in self.rows if r["name"] == name)
+        return next(r for r in self.rows if r["name"] == name and r["user_id"] == owner_user_id)
 
     def list_chunking_templates(
         self, *, include_builtin: bool, include_custom: bool,

@@ -63,7 +63,19 @@ def _test_runs(db: PromptStudioDatabase) -> dict[str, Any]:
         tokens_used=7,
         cost_estimate=0.5,
     )
-    return {"create_test_run": run}
+    revision = db.create_prompt_version(ids["prompt"], change_description="New revision", user_prompt="Changed {x}")
+    db.update_test_case(ids["case"], {"inputs": {"x": 99}, "expected_outputs": {"y": 99}})
+    failed = db.create_test_run(project_id=ids["project"], prompt_id=revision["id"], test_case_id=ids["case"],
+                                model_name="m2", inputs={"x": 99}, outputs={}, error_message="Unavailable")
+    first = db.get_test_run(run["id"])
+    assert first["prompt_id"] == ids["prompt"]  # nosec B101 - pytest contract
+    assert first["prompt_version_number"] == 1  # nosec B101 - pytest contract
+    assert first["inputs"] == {"x": 1} and first["outputs"] == {"y": 2}  # nosec B101 - pytest contract
+    pages = [db.list_test_runs(ids["project"], page=page, per_page=1) for page in (1, 2)]
+    assert [page["test_runs"][0]["id"] for page in pages] == [failed["id"], run["id"]]  # nosec B101 - pytest contract
+    assert pages[0]["pagination"]["total"] == 2  # nosec B101 - pytest contract
+    return {"create_test_run": run, "original_snapshot": first, "pages": pages,
+            "missing": db.get_test_run(999999), "other_project": db.list_test_runs(999999)}
 
 
 def _prompt_versions(db: PromptStudioDatabase) -> dict[str, Any]:
@@ -75,6 +87,11 @@ def _prompt_versions(db: PromptStudioDatabase) -> dict[str, Any]:
         "revert_prompt_to_version": reverted,
         "list_prompt_versions": db.list_prompt_versions(ids["project"], "p"),
     }
+
+
+def test_test_run_history_sqlite(isolated_db):
+    """SQLite still qualifies when the official PostgreSQL fixture is unavailable."""
+    _test_runs(isolated_db)
 
 
 def _evaluations(db: PromptStudioDatabase) -> dict[str, Any]:

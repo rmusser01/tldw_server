@@ -24,8 +24,14 @@ import {
   AudiobookChapterAsset,
   TtsClip,
   SttRecordingRow,
-  MediaReadAlongAudioCacheEntry
+  MediaReadAlongAudioCacheEntry,
+  SearchTokenRow
 } from "./types"
+// Static by design: the v17 upgrade handler (below) runs inside the
+// version-change transaction and uses buildSearchTokenRows synchronously
+// from this import. search-tokenizer has no runtime dependencies, so this
+// cannot create a module cycle.
+import { buildSearchTokenRows } from "./search-tokenizer"
 
 export class PageAssistDexieDB extends Dexie {
   forkOperations!: Table<ForkOperation>;
@@ -62,6 +68,9 @@ export class PageAssistDexieDB extends Dexie {
 
   // Media read-along generated audio cache
   mediaReadAlongAudioCache!: Table<MediaReadAlongAudioCacheEntry>
+
+  // Message-content search token side table (WP-23 / TASK-13523)
+  searchTokens!: Table<SearchTokenRow>
 
   constructor() {
     super('PageAssistDatabase');
@@ -404,6 +413,45 @@ export class PageAssistDexieDB extends Dexie {
     });
     this.version(16).stores({
       forkOperations: "[owner_key+operation_id], source_key, candidate_key, &active_intent"
+    });
+
+    // Version 17: message-content search token side table (WP-23 / TASK-13523).
+    // Additive-only: no existing table's spec changes. Fresh installs pick the
+    // declaration up directly; existing databases get a one-time backfill so
+    // content search keeps finding messages written before this version.
+    // The tokenizer is imported statically: the upgrade runs inside the
+    // version-change transaction, which must not await non-Dexie promises
+    // (a dynamic import of an unfetched lazy chunk could auto-commit the
+    // transaction before it starts).
+    this.version(17).stores({
+      searchTokens: '&[token+history_id], token'
+    }).upgrade(async tx => {
+      const rows: Array<{ token: string; history_id: string }> = [];
+      const pairs = new Set<string>();
+      await tx.table('messages').each(message => {
+        for (const row of buildSearchTokenRows(message.history_id, message.content)) {
+          const pair = `${row.token}|${row.history_id}`;
+          if (pairs.has(pair)) continue;
+          pairs.add(pair);
+          rows.push(row);
+        }
+      });
+      // Chunked writes bound each request batch on very large databases.
+      for (let index = 0; index < rows.length; index += 5000) {
+        await tx.table('searchTokens').bulkPut(rows.slice(index, index + 5000));
+      }
+    });
+
+    // Version 18: metadata/pagination compound indexes (WP-26/WP-27 /
+    // TASK-13523). `[history_id+createdAt]` lets history-metadata reads run
+    // as index-only counts plus an O(log n) newest-message lookup instead of
+    // materializing each history's messages; `[createdAt+id]` gives the
+    // sidebar's keyset pagination an exact range cursor (no offset scan, no
+    // stateful fast-forward predicate, tie-safe). Additive-only: pure index
+    // additions, no data rewrite, empty upgrade.
+    this.version(18).stores({
+      messages: 'id, history_id, name, role, content, createdAt, messageType, modelName, clusterId, modelId, parent_message_id, [history_id+createdAt]',
+      chatHistories: 'id, title, is_rag, message_source, is_pinned, createdAt, doc_id, last_used_prompt, model_id, root_id, parent_conversation_id, server_chat_id, [createdAt+id]'
     });
   }
 }

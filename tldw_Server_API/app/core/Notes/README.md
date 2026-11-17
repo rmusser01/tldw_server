@@ -78,7 +78,8 @@ Related Schemas
   - `tldw_Server_API/app/core/Notes/Notes_Library.py` — Notes service facade for unit tests and utilities.
   - `tldw_Server_API/app/api/v1/endpoints/notes.py` — FastAPI router for notes/keywords/linking endpoints.
   - `tldw_Server_API/app/api/v1/schemas/notes_schemas.py` — Pydantic models for requests/responses.
-  - `tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py` — Per-user DB dependency, path resolution, and default character ensure.
+  - `tldw_Server_API/app/core/Character_Chat/chacha_db_provider.py` — Per-user DB provider: path resolution, default character ensure, and the accessors workers use.
+    The API layer's ChaCha dependency module wraps it as `get_chacha_db_for_user` and maps its errors to HTTP.
 - Patterns & tips
   - Always fetch the per-user DB via `get_chacha_db_for_user` (never instantiate `CharactersRAGDB` directly in endpoints).
   - Use `rbac_rate_limit("scope")` + `RateLimiter` for any new endpoints and maintain consistent scope naming.

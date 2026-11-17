@@ -75,15 +75,6 @@ The enhancement audit found design conflicts between reviewers that consolidatio
 | D10 | How many rows does the Casual composer use? | E5 (IDEA-11, N12; IDEA-12, N13) | **Two rows on desktop** (input + Send; then attach / Knowledge / Web / Model / More). **One row on phones and the narrow side panel** (+, input, model chip, Send), with the bottom-sheet composer (N13). |
 | D11 | What does Cmd/Ctrl+Enter do on a switcher result? | E4 (IDEA-01, N5) | **Cmd/Ctrl+Enter opens a result beside the current page**: notes in the Notes Dock now, chats in split view once S4 lands. **Shift+Enter opens a new browser tab.** |
 
----|---|---|---|
-| D1 | Should WebUI and side-panel chats save to the server by default, or stay local-first with explicit promotion? | G03, G04, E2 | Save to the server by default when connected; keep "Temporary chat" local. Ship honest labels ("Saved on this device") immediately either way. |
-| D2 | Canonical wikilink syntax: `[[Title]]` or `[[id:UUID]]`? | G09, E7 | Users write `[[Title]]`; the server resolves titles to ids and the graph parser accepts both forms. |
-| D3 | Permanent delete and Empty Trash for notes (NL-06)? | G15 (backend) | Add hard delete and Empty Trash, plus optional retention-based auto-purge. |
-| D4 | Compare mode (CM-05): enable it or remove its entry points? | G11, E5 | Remove the four entry points until Compare passes its own verification, then enable behind the flag. |
-| D5 | Interim WYSIWYG mode while NE-01 is open? | G01 | Hide the toggle (or label it Beta) in the first PR of Stage 1. |
-| D6 | Notes surface in the side panel (N3, XS-13)? | G08, E3 | Start with quick-save improvements (tags, open note); decide on a full mini-surface after E2's design spike. |
-| D7 | Server-side, resumable generation (S3) and one conversation model (S1/S2) | E2 | Run a design spike during Stage 2 so Stage 4 work can start on a decided model. |
-
 ---
 
 ## Stage 0: Enablers — #3125 (E1)

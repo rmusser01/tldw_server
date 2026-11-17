@@ -58,7 +58,7 @@ Notes
     - Chat orchestrator entry: `tldw_Server_API/app/core/Chat/chat_orchestrator.py:77`
     - General summarization: `tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:312`
 - Security
-  - Egress/SSRF policy: `evaluate_url_policy` `tldw_Server_API/app/core/Security/egress.py:146` is enforced before external calls in providers and scrapers.
+  - Egress/SSRF policy: `evaluate_url_policy` in `tldw_Server_API/app/core/Utils/egress.py` is enforced before external calls in providers and scrapers.
 - Configuration
   - Provider keys and knobs are read from `search_engines` in `config.txt` (via config loader). Common keys include:
     - Google: `google_search_api_key`, `google_search_engine_id`, `google_search_api_url`, `limit_google_search_to_country`

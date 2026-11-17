@@ -79,7 +79,6 @@ def _principal_override():
 
 def test_claims_clusters_endpoints():
 
-
     from tldw_Server_API.app.main import app as fastapi_app
 
     class _User:
@@ -149,3 +148,36 @@ def test_claims_clusters_endpoints():
         fastapi_app.dependency_overrides.pop(get_auth_principal, None)
         fastapi_app.dependency_overrides.pop(get_request_user, None)
         fastapi_app.dependency_overrides.pop(get_media_db_for_user, None)
+
+
+def test_default_cluster_rebuild_preserves_real_legacy_result(monkeypatch):
+    from fastapi import FastAPI
+
+    from tldw_Server_API.app.api.v1.API_Deps import DB_Deps
+    from tldw_Server_API.app.api.v1.endpoints import claims
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    from tldw_Server_API.app.core.Claims_Extraction import claims_service
+
+    monkeypatch.delenv("CLAIMS_JOBS_ENABLED", raising=False)
+    monkeypatch.delenv("CLAIMS_CLUSTER_REBUILD_JOBS_ENABLED", raising=False)
+    path, _ = _seed_cluster_db()
+    db = MediaDatabase(db_path=path, client_id="1")
+    monkeypatch.setattr(claims_service, "_get_watchlists_db", lambda user: None)
+    monkeypatch.setattr(DB_Deps, "_resolve_media_db_for_user", lambda user: db)
+    app = FastAPI()
+    app.include_router(claims.router, prefix="/api/v1")
+    app.dependency_overrides[get_request_user] = lambda: User(
+        id=1, username="cluster-admin", roles=["user"], permissions=["claims.admin"]
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/v1/claims/clusters/rebuild", params={"method": "exact", "min_size": 1})
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "clusters_created": 1,
+            "claims_assigned": 1,
+            "watchlist_notifications": {"status": "skipped", "reason": "watchlists_unavailable"},
+        }
+        assert "location" not in response.headers
+    finally:
+        db.close_connection()

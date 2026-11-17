@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.http_client import (
 from tldw_Server_API.app.core.http_client import (
     create_async_client as _create_async_client,
 )
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
 # Shared transport-exception classification, re-exported under this module's names
 # (handlers call http_utils.get_http_error_text / is_network_error).
@@ -196,13 +197,15 @@ async def wait_for_http_ready(
 
     Returns True if ready within timeout; otherwise False.
     """
+    # Callers supply the owned or server-configured local runtime origin (ADR-030).
+    configured_endpoint = ConfiguredEndpointScope.from_url(base_url)
     async with create_async_client(timeout=5.0) as client:
         deadline = asyncio.get_event_loop().time() + timeout_total
         while asyncio.get_event_loop().time() < deadline:
             for path in paths:
                 url = base_url.rstrip("/") + "/" + path.lstrip("/")
                 try:
-                    resp = await afetch(method="GET", url=url, client=client)
+                    resp = await afetch(method="GET", url=url, client=client, configured_endpoint=configured_endpoint)
                     # Default: only accept 2xx success codes
                     # Legacy mode: accept any non-5xx (for backward compatibility)
                     if accept_any_non_5xx:

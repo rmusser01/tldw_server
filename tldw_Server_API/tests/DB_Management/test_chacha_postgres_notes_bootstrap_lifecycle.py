@@ -417,10 +417,14 @@ def test_v70_upgrade_retries_after_late_failure_without_publishing_readiness(
         original_execute = backend.execute
 
         def fail_last_ensure(query: str, *args: object, **kwargs: object):
-            """Fail the final auxiliary table step at the public SQL boundary."""
-            if "CREATE TABLE IF NOT EXISTS conversation_settings(" in query:
+            """Fail after the real readiness write, before its transaction commits."""
+            result = original_execute(query, *args, **kwargs)
+            if (
+                " ".join(query.split()).startswith("INSERT INTO db_schema_version(schema_name, version)")
+                and args == ((legacy._SCHEMA_NAME, 71),)
+            ):
                 raise DatabaseError("planned final bootstrap failure")
-            return original_execute(query, *args, **kwargs)
+            return result
 
         with monkeypatch.context() as patch:
             patch.setattr(backend, "execute", fail_last_ensure)

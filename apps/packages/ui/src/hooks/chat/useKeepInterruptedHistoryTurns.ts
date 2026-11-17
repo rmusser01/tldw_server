@@ -53,10 +53,15 @@ export function useKeepInterruptedHistoryTurns({
 
   React.useEffect(() => {
     const controller = selectionRef.current
-    if (!controller || status !== "ready" || !recoveries?.length) return
+    if (!controller || !recoveries?.length) return
     const pending = recoveries
       .filter(
         (entry) =>
+          entry.turn.action === undefined &&
+          !entry.turn.roleplay_resume &&
+          (entry.turn.persistence !== 'server' || entry.turn.settled_message_id || entry.turn.existing_selection) &&
+          (status === "ready" ||
+            (status === "stale_selection" && entry.turn.existing_selection)) &&
           entry.turn.outcome &&
           !isHistoryTurnLive(entry.turn.operation_id) &&
           !keptRef.current.has(entry.turn.operation_id)
@@ -90,8 +95,10 @@ export function useKeepInterruptedHistoryTurns({
   const retainedReplies = React.useMemo(
     () =>
       ownerKind === "native"
-        ? (recoveries ?? []).filter((entry) =>
-            isRetainedPartialReply(entry.turn, ownerKind)
+        ? (recoveries ?? []).filter(
+            (entry) =>
+              entry.turn.action === undefined && !entry.turn.roleplay_resume &&
+              isRetainedPartialReply(entry.turn, ownerKind)
           )
         : [],
     [ownerKind, recoveries]
@@ -120,8 +127,15 @@ export function useKeepInterruptedHistoryTurns({
   return React.useCallback(
     (entry: HistoryTurnRecoveryEntry) =>
       isHistoryTurnLive(entry.turn.operation_id) ||
-      (Boolean(entry.turn.outcome) &&
-        messages.some((message) => message.id === entry.turn.assistant_id)),
+      (entry.turn.action === undefined &&
+        !entry.turn.existing_selection &&
+        !entry.turn.roleplay_resume &&
+        Boolean(entry.turn.outcome) &&
+        messages.some((message) => message.id === (
+          entry.turn.persistence === "server"
+            ? entry.turn.settled_message_id
+            : entry.turn.assistant_id
+        ))),
     [messages]
   )
 }

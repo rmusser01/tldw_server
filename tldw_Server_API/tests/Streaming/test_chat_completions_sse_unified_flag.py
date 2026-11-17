@@ -135,7 +135,7 @@ async def test_chat_completions_streaming_unified_sse_simple(monkeypatch):
 
             return _fake_provider_stream_simple()
 
-        monkeypatch.setattr(chat_ep, "perform_chat_api_call", _stub_perform_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_perform_chat_api_call)
 
         async with _lifespan_async_client(app) as client:
             payload = {
@@ -156,7 +156,7 @@ async def test_chat_completions_streaming_unified_sse_simple(monkeypatch):
                 # SSE headers
                 ct = resp.headers.get("content-type", "").lower()
                 assert ct.startswith("text/event-stream")
-                assert set(resp.headers.get("Cache-Control", "").replace(" ", "").split(",")) >= {"no-cache", "no-transform"}
+                assert resp.headers.get("Cache-Control") == "no-cache, no-transform"
                 assert resp.headers.get("X-Accel-Buffering") == "no"
 
                 lines = []
@@ -196,7 +196,7 @@ async def test_chat_completions_streaming_unified_sse_slow_async_heartbeat(monke
 
             return _fake_provider_stream_slow_async()
 
-        monkeypatch.setattr(chat_ep, "perform_chat_api_call", _stub_perform_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_perform_chat_api_call)
 
         async with _lifespan_async_client(app) as client:
             payload = {
@@ -216,7 +216,7 @@ async def test_chat_completions_streaming_unified_sse_slow_async_heartbeat(monke
                 assert resp.status_code == 200
                 ct = resp.headers.get("content-type", "").lower()
                 assert ct.startswith("text/event-stream")
-                assert set(resp.headers.get("Cache-Control", "").replace(" ", "").split(",")) >= {"no-cache", "no-transform"}
+                assert resp.headers.get("Cache-Control") == "no-cache, no-transform"
                 assert resp.headers.get("X-Accel-Buffering") == "no"
 
                 lines = []
@@ -257,7 +257,7 @@ async def test_chat_completions_streaming_unified_sse_provider_duplicate_done(mo
 
             return _fake_provider_stream_with_duplicate_done()
 
-        monkeypatch.setattr(chat_ep, "perform_chat_api_call", _stub_perform_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_perform_chat_api_call)
 
         async with _lifespan_async_client(app) as client:
             payload = {
@@ -277,7 +277,7 @@ async def test_chat_completions_streaming_unified_sse_provider_duplicate_done(mo
                 assert resp.status_code == 200
                 ct = resp.headers.get("content-type", "").lower()
                 assert ct.startswith("text/event-stream")
-                assert set(resp.headers.get("Cache-Control", "").replace(" ", "").split(",")) >= {"no-cache", "no-transform"}
+                assert resp.headers.get("Cache-Control") == "no-cache, no-transform"
                 assert resp.headers.get("X-Accel-Buffering") == "no"
 
                 done_count = 0

@@ -45,6 +45,7 @@ const NAMESPACES = [
   "audiobook",
   "watchlists",
   "workflows",
+  "tutorials",
 ] as const
 
 type Namespace = (typeof NAMESPACES)[number]
@@ -87,7 +88,7 @@ const normalizeLanguage = (lng: string): string => {
 }
 
 // Pre-bundled English resources
-const englishResources: Record<Namespace, object> = {
+const englishResources: Record<Exclude<Namespace, "tutorials">, object> = {
   common: commonEn,
   sidepanel: sidepanelEn,
   settings: settingsEn,
@@ -126,8 +127,10 @@ i18n
     },
     // Disable async loading - we have pre-bundled resources
     initImmediate: true,
+    i18nFormat: { bindI18nStore: "added" },
     react: {
       useSuspense: false,
+      bindI18nStore: "added",
     },
   })
 
@@ -154,39 +157,13 @@ export const ensureLanguageLoaded = async (lng: string): Promise<void> => {
 
   // Dynamic imports for non-English languages
   try {
-    const modules = await Promise.all([
-      import(`@tldw/ui/assets/locale/${normalized}/common.json`).catch(
-        () => null
-      ),
-      import(`@tldw/ui/assets/locale/${normalized}/sidepanel.json`).catch(
-        () => null
-      ),
-      import(`@tldw/ui/assets/locale/${normalized}/settings.json`).catch(
-        () => null
-      ),
-      import(`@tldw/ui/assets/locale/${normalized}/playground.json`).catch(
-        () => null
-      ),
-      import(`@tldw/ui/assets/locale/${normalized}/knowledge.json`).catch(
-        () => null
-      ),
-      import(`@tldw/ui/assets/locale/${normalized}/workflows.json`).catch(
-        () => null
-      ),
-    ])
+    const { loadLanguageResources } = await import("./i18n-language-resources")
+    const modules = await loadLanguageResources(normalized, NAMESPACES)
 
-    const namespaces: Namespace[] = [
-      "common",
-      "sidepanel",
-      "settings",
-      "playground",
-      "knowledge",
-      "workflows",
-    ]
     modules.forEach((mod, idx) => {
       if (mod) {
         const data = "default" in mod ? mod.default : mod
-        i18n.addResourceBundle(normalized, namespaces[idx], data, true, true)
+        i18n.addResourceBundle(normalized, NAMESPACES[idx], data, true, true)
       }
     })
 

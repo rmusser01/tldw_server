@@ -71,7 +71,7 @@ export const StudioPromptsTab: React.FC = () => {
 
   // Duplicate mutation
   const duplicateMutation = useMutation({
-    mutationFn: (prompt: Prompt) => {
+    mutationFn: async (prompt: Prompt) => {
       const payload: PromptCreatePayload = {
         project_id: prompt.project_id,
         name: `${prompt.name} (Copy)`,
@@ -84,7 +84,11 @@ export const StudioPromptsTab: React.FC = () => {
         modules_config: prompt.modules_config,
         change_description: `Duplicated from "${prompt.name}"`
       }
-      return createPrompt(payload, crypto.randomUUID())
+      const response = await createPrompt(payload, crypto.randomUUID())
+      if (response.ok === false || response.data?.success === false) {
+        throw new Error(response.error || response.data?.error || "Prompt could not be duplicated")
+      }
+      return response
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -98,7 +102,7 @@ export const StudioPromptsTab: React.FC = () => {
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }

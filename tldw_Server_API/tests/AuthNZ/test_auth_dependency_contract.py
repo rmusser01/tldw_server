@@ -179,7 +179,7 @@ def _real_jwt_service() -> JWTService:
 
     Replaces the former _FakeJwtService whose decode asserted its own
     hardcoded token — real signature/expiry validation was never exercised
-    (audits/2026-07-04-test-suite-audit-round2.md, RA2).
+    (Docs/Audit/2026-07-04-test-suite-audit-round2.md, RA2).
     """
     from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
     from tldw_Server_API.app.core.AuthNZ.settings import Settings
@@ -797,7 +797,7 @@ def test_token_scope_guard_alias_preserves_scoped_jwt_success_and_failures(
     assert invalid_scope_response.status_code == 403
     assert invalid_scope_response.json()["detail"] == "Forbidden: invalid token scope"
     assert missing_credentials_response.status_code == 401
-    assert missing_credentials_response.json()["detail"] == "Authentication required"
+    assert missing_credentials_response.json()["detail"] == "Not authenticated (provide Bearer token or X-API-KEY)"
     assert missing_credentials_response.headers.get("WWW-Authenticate") == "Bearer"
     assert tampered_response.status_code == 401, "tampered signature must not authenticate"
 

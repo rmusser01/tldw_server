@@ -1,7 +1,9 @@
 import "@testing-library/jest-dom/vitest"
 import { cleanup } from "@testing-library/react"
 import { webcrypto } from "node:crypto"
+import type { JSDOM } from "jsdom"
 import { afterAll, afterEach, beforeAll, vi } from "vitest"
+import { cleanupStaticRoots, restoreStaticRootRenderer } from "./vitest-static-roots"
 
 const originalGetComputedStyle = window.getComputedStyle.bind(window)
 const originalConsoleLog = console.log.bind(console)
@@ -11,79 +13,16 @@ const originalConsoleWarn = console.warn.bind(console)
 const originalConsoleError = console.error.bind(console)
 const originalMutationObserver = window.MutationObserver
 
-class MemoryStorage implements Storage {
-  private store = new Map<string, string>()
-
-  get length(): number {
-    return this.store.size
-  }
-
-  clear(): void {
-    this.store.clear()
-  }
-
-  getItem(key: string): string | null {
-    return this.store.get(String(key)) ?? null
-  }
-
-  key(index: number): string | null {
-    return Array.from(this.store.keys())[index] ?? null
-  }
-
-  removeItem(key: string): void {
-    this.store.delete(String(key))
-  }
-
-  setItem(key: string, value: string): void {
-    this.store.set(String(key), String(value))
-  }
-}
-
-const REQUIRED_STORAGE_METHODS = [
-  "clear",
-  "getItem",
-  "key",
-  "removeItem",
-  "setItem"
-] as const
-
-const hasCompleteStorageApi = (storage: unknown): storage is Storage => {
-  if (!storage || typeof storage !== "object") return false
-  const candidate = storage as Partial<
-    Record<(typeof REQUIRED_STORAGE_METHODS)[number], unknown>
-  >
-  return REQUIRED_STORAGE_METHODS.every(
-    (method) => typeof candidate[method] === "function"
-  )
-}
-
-const getWindowLocalStorage = (): Storage | null => {
-  try {
-    return hasCompleteStorageApi(window.localStorage) ? window.localStorage : null
-  } catch {
-    return null
-  }
-}
-
 const ensureLocalStorage = (): void => {
-  const windowStorage = getWindowLocalStorage()
-  const storage = windowStorage ?? new MemoryStorage()
-
-  if (!windowStorage) {
-    Object.defineProperty(window, "localStorage", {
-      configurable: true,
-      value: storage,
-      writable: true
-    })
-  }
-
-  if (!hasCompleteStorageApi(globalThis.localStorage)) {
-    Object.defineProperty(globalThis, "localStorage", {
-      configurable: true,
-      value: storage,
-      writable: true
-    })
-  }
+  // Vitest aliases window to the Node global, which may retain Node's own
+  // localStorage. Use the environment's window to preserve browser branding,
+  // key enumeration, and Storage.prototype interception.
+  const { jsdom } = globalThis as unknown as { jsdom: JSDOM }
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: jsdom.window.localStorage,
+    writable: true
+  })
 }
 
 ensureLocalStorage()
@@ -274,12 +213,17 @@ beforeAll(() => {
   ensureMutationObserver()
 })
 
-afterAll(() => {
-  console.log = originalConsoleLog
-  console.debug = originalConsoleDebug
-  console.info = originalConsoleInfo
-  console.warn = originalConsoleWarn
-  console.error = originalConsoleError
+afterAll(async () => {
+  try {
+    await cleanupStaticRoots()
+  } finally {
+    restoreStaticRootRenderer()
+    console.log = originalConsoleLog
+    console.debug = originalConsoleDebug
+    console.info = originalConsoleInfo
+    console.warn = originalConsoleWarn
+    console.error = originalConsoleError
+  }
 })
 
 const evaluateMediaQuery = (query: string): boolean => {
@@ -336,11 +280,12 @@ const clearNotesOfflineDraftQueues = () => {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   if (vi.isFakeTimers()) {
     vi.useRealTimers()
   }
   ensureMutationObserver()
   cleanup()
+  await cleanupStaticRoots()
   clearNotesOfflineDraftQueues()
 })

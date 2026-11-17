@@ -3,20 +3,20 @@ id: TASK-2311
 title: Backfill Security outbound egress policy ADR
 status: Done
 assignee: []
-created_date: '2026-06-07 17:46'
-updated_date: '2026-06-07 17:49'
+created_date: 2026-06-07 17:46
+updated_date: 2026-06-07 17:49
 labels:
-  - docs
-  - process
-  - adr
-  - security
+- docs
+- process
+- adr
+- security
 dependencies:
-  - TASK-2247
+- TASK-15024
 references:
-  - Docs/ADR/inventory/2026-06-04-security-confirmation-audit.md
-  - tldw_Server_API/app/core/Security/README.md
-  - tldw_Server_API/app/core/Security/egress.py
-  - tldw_Server_API/app/core/Security/url_validation.py
+- Docs/ADR/inventory/2026-06-04-security-confirmation-audit.md
+- tldw_Server_API/app/core/Security/README.md
+- tldw_Server_API/app/core/Security/egress.py
+- tldw_Server_API/app/core/Security/url_validation.py
 ---
 
 ## Description

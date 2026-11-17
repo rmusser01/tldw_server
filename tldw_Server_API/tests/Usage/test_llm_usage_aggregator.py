@@ -161,7 +161,7 @@ async def test_start_llm_usage_aggregator_registers_background_inventory(
 
 
 @pytest.mark.asyncio
-async def test_llm_aggregate_sqlite(monkeypatch):
+async def test_llm_aggregate_sqlite(monkeypatch, fresh_services):
     # Force SQLite single-user DB
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "agg-llm-" + uuid.uuid4().hex)
@@ -169,12 +169,9 @@ async def test_llm_aggregate_sqlite(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", dburl)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
 
     pool = await get_db_pool()
     await _ensure_llm_tables(pool)

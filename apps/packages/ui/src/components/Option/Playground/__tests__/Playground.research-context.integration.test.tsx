@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 import React from "react"
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render as renderComponent, renderHook, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+
 import { Playground } from "../Playground"
+import { useStoreMessageOption } from "@/store/option"
+import { useHistorySelection } from "@/hooks/chat/useHistorySelection"
+import { settingsTestOwner } from "@/services/__tests__/chat-settings-fixture"
+import type { NativeHistoryOwnerV1 } from "@/services/chat-history-selection"
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -86,17 +92,31 @@ const mobileViewportState = vi.hoisted(() => ({
   value: false
 }))
 
+const researchSelection = (
+  conversationId = "chat-1",
+  ownerKey = "declared-research-owner",
+  validateLease = () => true
+) => ({
+  view: { owner_key: ownerKey, conversation_id: conversationId },
+  owner: {
+    kind: "native",
+    conversation_id: conversationId,
+    owner_key: ownerKey,
+    request_scope: settingsTestOwner.requestScope,
+    validate_lease: validateLease
+  } satisfies NativeHistoryOwnerV1
+})
+
 const historySelectionState = vi.hoisted(() => ({
-  current: null as {
-    view: { owner_key: string; conversation_id: string }
-    owner: { kind: "native"; conversation_id: string; validate_lease: () => boolean }
-  } | null,
+  controller: null as ReturnType<typeof useHistorySelection> | null,
+  current: null as ReturnType<typeof researchSelection> | null,
   status: "idle",
   forkCandidate: null,
   forkSettings: null,
   settingsMode: () => historySelectionState.current?.owner.validate_lease() === false ? "pending" as const : "ordinary" as const,
   getCurrent: () => ({ status: "idle", owner: historySelectionState.current?.owner ?? null,
     view: historySelectionState.current?.view ?? null, capture: null }),
+  getSignal: () => undefined,
   getStoredReference: () => null,
   canAutomaticallyLoad: () => false,
   fence: () => {
@@ -461,9 +481,14 @@ vi.mock("@/hooks/chat/useHistorySelection", async () => {
   return {
     ...actual,
     HistorySelectionProvider: ({ children }: { children: React.ReactNode }) => children,
-    useHistorySelectionContext: () => ({ ...historySelectionState,
-      view: historySelectionState.current?.view ?? null,
-      owner: historySelectionState.current?.owner ?? null })
+    useHistorySelectionContext: () => {
+      const { controller, current } = historySelectionState
+      return React.useMemo(() => controller ?? {
+        ...historySelectionState,
+        view: current?.view ?? null,
+        owner: current?.owner ?? null
+      }, [controller, current])
+    }
   }
 })
 
@@ -504,6 +529,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
   CHAT_BACKGROUND_IMAGE_SETTING: "chatBackgroundImage",
   CHAT_WINDOW_OPACITY_SETTING: "chatWindowOpacity",
   CHAT_MESSAGE_OPACITY_SETTING: "chatMessageOpacity",
+  CHAT_MESSAGE_VIEW_SETTING: "chatMessageView",
   CHAT_CHARACTER_IMAGE_OPACITY_SETTING: "chatCharacterImageOpacity",
   resolveOpacityAlpha: (value: unknown, fallback = 35) =>
     typeof value === "number" && Number.isFinite(value)
@@ -521,12 +547,8 @@ vi.mock("../Knowledge/utils/unsupported-types", () => ({
   otherUnsupportedTypes: []
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (
-    selector: (state: typeof storeOptionState.value) => unknown
-  ) => selector(storeOptionState.value)
-}))
-
+// Actual option core owns New and command revisions. Surrounding Form, H1,
+// session/settings and research transport remain the declared doubles above.
 vi.mock("@/store/artifacts", () => ({
   useArtifactsStore: (selector: (state: typeof artifactsState.value) => unknown) =>
     selector(artifactsState.value)
@@ -535,6 +557,7 @@ vi.mock("@/store/artifacts", () => ({
 vi.mock("@/hooks/useSetting", () => ({
   useSetting: (setting: string | { key?: string; defaultValue?: unknown }) => {
     const key = typeof setting === "string" ? setting : setting?.key
+    if (key === "chatMessageView") return ["transcript", vi.fn()]
     if (key === "chatWindowOpacity") return [35]
     if (key === "chatMessageOpacity") return [60]
     if (key === "chatCharacterImageOpacity") return [100]
@@ -551,7 +574,8 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useDesktop: () => !mobileViewportState.value
 }))
 
-vi.mock("@/services/chat-settings", () => ({
+vi.mock("@/services/chat-settings", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/chat-settings")>(),
   syncChatSettingsForServerChat: (params: ChatSettingsSyncParams) =>
     chatSettingsState.syncChatSettingsForServerChat(params),
   applyChatSettingsPatch: (params: ChatSettingsPatchParams) =>
@@ -590,27 +614,45 @@ vi.mock("react-router-dom", async () => {
   }
 })
 
+let queryClient: QueryClient
+const render = (ui: React.ReactElement) => renderComponent(ui, {
+  wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+})
+vi.mock("@/services/tldw-server", async original => ({
+  ...await original<typeof import("@/services/tldw-server")>(),
+  fetchChatModels: async () => []
+}))
+
 // Integration tests render the full Playground tree (4k+ lines with many
 // children); individual tests normally take 1-3.5s but can exceed the 5s
 // default timeout under parallel CI load, so give them explicit headroom.
 describe("Playground research context integration", { timeout: 20000 }, () => {
+  afterEach(() => queryClient.clear())
   beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     vi.clearAllMocks()
-    historySelectionState.current = null
-    researchClientMocks.initialize.mockReset().mockResolvedValue(undefined)
-    researchClientMocks.getResearchBundle.mockReset().mockResolvedValue({
-      question: "Prepared follow-up question",
-      outline: { sections: [{ title: "Overview" }] },
-      claims: [{ text: "Claim one" }], unresolved_questions: ["Open question"],
-      verification_summary: { unsupported_claim_count: 0 },
-      source_trust: [{ source_id: "src_1", trust_tier: "high" }]
-    })
+    historySelectionState.controller = null
+    historySelectionState.current = researchSelection()
     vi.spyOn(globalThis, "fetch").mockImplementation(() => { throw new Error("Unexpected network request in finite parent research test") })
     window.history.replaceState({}, "", "/chat")
     mobileViewportState.value = false
     artifactsState.value.isOpen = false
-    storeOptionState.value.compareParentByHistory = {}
-    storeOptionState.value.setSelectedQuickPrompt = vi.fn()
+    useStoreMessageOption.setState({
+      historyId: "history-1", serverChatId: "chat-1", selectedQuickPrompt: null,
+      quickPromptRevision: 0, compareParentByHistory: {}
+    })
+    useStoreMessageOption.getState().setChatDraftAddress({
+      kind: "native", id: "chat-1", ownerKey: "declared-research-owner", scope: { type: "global" }
+    })
+    storeOptionState.value.setSelectedQuickPrompt = vi.fn((value: string | null | undefined) =>
+      useStoreMessageOption.getState().setSelectedQuickPrompt(value))
+    researchClientMocks.initialize.mockReset().mockResolvedValue(undefined)
+    researchClientMocks.getResearchBundle.mockReset().mockResolvedValue({
+      question: "Prepared follow-up question",
+      outline: { sections: [{ title: "Overview" }] }, claims: [{ text: "Claim one" }],
+      unresolved_questions: ["Open question"], verification_summary: { unsupported_claim_count: 0 },
+      source_trust: [{ source_id: "src_1", trust_tier: "high" }]
+    })
     messageOptionState.value.messages = []
     messageOptionState.value.history = []
     messageOptionState.value.serverChatId = "chat-1"
@@ -648,10 +690,7 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     ["revocation", "initialize"], ["revocation", "bundle"]
   ] as const)("fences attachment and composer setters after %s while follow-up %s is held", async (boundary, phase) => {
     let valid = true
-    historySelectionState.current = {
-      view: { owner_key: "owner-a", conversation_id: "chat-1" },
-      owner: { kind: "native", conversation_id: "chat-1", validate_lease: () => valid }
-    }
+    historySelectionState.current = researchSelection("chat-1", "owner-a", () => valid)
     const view = render(<Playground />)
     const form = screen.getByTestId("playground-form")
     const pending = held<unknown>()
@@ -662,15 +701,9 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     if (boundary === "chat") {
       messageOptionState.value.serverChatId = "chat-2"
       messageOptionState.value.historyId = "history-2"
-      historySelectionState.current = {
-        view: { owner_key: "owner-a", conversation_id: "chat-2" },
-        owner: { kind: "native", conversation_id: "chat-2", validate_lease: () => true }
-      }
+      historySelectionState.current = researchSelection("chat-2", "owner-a")
     } else if (boundary === "owner") {
-      historySelectionState.current = {
-        view: { owner_key: "owner-b", conversation_id: "chat-1" },
-        owner: { kind: "native", conversation_id: "chat-1", validate_lease: () => true }
-      }
+      historySelectionState.current = researchSelection("chat-1", "owner-b")
     } else valid = false
     view.rerender(<Playground />)
     expect(screen.getByTestId("playground-form")).toBe(form)
@@ -687,10 +720,7 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
   })
 
   it.each(["initialize", "bundle"] as const)("keeps same-owner follow-up attachment and composer setters while %s is held", async phase => {
-    historySelectionState.current = {
-      view: { owner_key: "owner-a", conversation_id: "chat-1" },
-      owner: { kind: "native", conversation_id: "chat-1", validate_lease: () => true }
-    }
+    historySelectionState.current = researchSelection("chat-1", "owner-a")
     render(<Playground />)
     const pending = held<unknown>()
     const method = phase === "initialize" ? researchClientMocks.initialize : researchClientMocks.getResearchBundle
@@ -724,6 +754,82 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     expect(storeOptionState.value.setSelectedQuickPrompt).toHaveBeenCalledWith(
       "Follow up on this research: Battery recycling supply chain"
     )
+  })
+
+  it("does not read a bundle or publish after actual New retires a held initialization", async () => {
+    let release!: () => void
+    researchClientMocks.initialize.mockImplementation(() => new Promise<void>(resolve => { release = resolve }))
+    render(<Playground />)
+    fireEvent.click(screen.getByRole("button", { name: "Prepare follow up" }))
+    await waitFor(() => expect(release).toBeTypeOf("function"))
+    const revision = useStoreMessageOption.getState().chatDraftRevision
+    act(() => useStoreMessageOption.getState().startNewChatDraft(false))
+    expect(useStoreMessageOption.getState().chatDraftRevision).toBeGreaterThan(revision)
+    await act(async () => { release(); await Promise.resolve() })
+    expect(researchClientMocks.getResearchBundle).not.toHaveBeenCalled()
+    expect(storeOptionState.value.setSelectedQuickPrompt).not.toHaveBeenCalled()
+    expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "")
+    expect(chatSettingsState.applyChatSettingsPatch).not.toHaveBeenCalled()
+  })
+
+  it.each(["New", "command edit and Undo"])("does not attach or publish after %s retires a held research bundle", async boundary => {
+    let release!: (bundle: Record<string, unknown>) => void
+    researchClientMocks.getResearchBundle.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    render(<Playground />)
+    fireEvent.click(screen.getByRole("button", { name: "Prepare follow up" }))
+    await waitFor(() => expect(release).toBeTypeOf("function"))
+    act(() => {
+      if (boundary === "New") useStoreMessageOption.getState().startNewChatDraft(false)
+      else {
+        useStoreMessageOption.getState().setSelectedQuickPrompt("Unrelated new prompt")
+        useStoreMessageOption.getState().setSelectedQuickPrompt(null)
+      }
+    })
+    await act(async () => {
+      release({ question: "Retired research question", outline: { sections: [] }, claims: [] })
+      await Promise.resolve()
+    })
+    expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "")
+    expect(storeOptionState.value.setSelectedQuickPrompt).not.toHaveBeenCalled()
+    expect(useStoreMessageOption.getState().selectedQuickPrompt).toBeNull()
+    expect(chatSettingsState.applyChatSettingsPatch).not.toHaveBeenCalled()
+  })
+
+  it("rejects the retained rendered follow-up after actual H1 retires the same chat before rerender", async () => {
+    // H1 itself, its epoch and fence are real for this control. Research/client,
+    // session restoration and surrounding Form UI retain their declared doubles.
+    const h1 = renderHook(() => useHistorySelection())
+    historySelectionState.controller = h1.result.current
+    render(<Playground />)
+    const retainedButton = screen.getByRole("button", { name: "Prepare follow up" })
+    const source = useStoreMessageOption.getState()
+    const originalFence = h1.result.current.fence()
+    await act(async () => {
+      h1.result.current.beginLoad()
+      expect(originalFence()).toBe(false)
+      // Dispatch against the old rendered button before React can commit a new
+      // H1 context/render. A click-time fence must not adopt this new epoch.
+      fireEvent.click(retainedButton)
+      await Promise.resolve()
+    })
+    const current = useStoreMessageOption.getState()
+    expect([current.historyId, current.serverChatId, current.chatDraftRevision, current.chatDraftAddress])
+      .toEqual([source.historyId, source.serverChatId, source.chatDraftRevision, source.chatDraftAddress])
+    expect(researchClientMocks.initialize).not.toHaveBeenCalled()
+    expect(researchClientMocks.getResearchBundle).not.toHaveBeenCalled()
+    expect(storeOptionState.value.setSelectedQuickPrompt).not.toHaveBeenCalled()
+    expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "")
+  })
+
+  it("keeps current follow-up preparation available when the current bundle read fails", async () => {
+    researchClientMocks.getResearchBundle.mockRejectedValue(new Error("Research bundle temporarily unavailable"))
+    render(<Playground />)
+    fireEvent.click(screen.getByRole("button", { name: "Prepare follow up" }))
+    await waitFor(() => expect(storeOptionState.value.setSelectedQuickPrompt).toHaveBeenCalledWith(
+      "Follow up on this research: Battery recycling supply chain"))
+    expect(useStoreMessageOption.getState().selectedQuickPrompt).toBe("Follow up on this research: Battery recycling supply chain")
+    expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "")
+    expect(chatSettingsState.applyChatSettingsPatch).not.toHaveBeenCalled()
   })
 
   it("consumes researchReturnRunId once and passes the returned run marker to PlaygroundChat", async () => {
@@ -945,6 +1051,8 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     )
 
     messageOptionState.value.serverChatId = "chat-2"
+    historySelectionState.current = researchSelection("chat-2")
+    useStoreMessageOption.setState({ serverChatId: "chat-2" })
     view.rerender(<Playground />)
     await waitFor(() =>
       expect(screen.getByTestId("playground-form")).toHaveAttribute(
@@ -966,6 +1074,7 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     )
 
     messageOptionState.value.historyId = "history-2"
+    useStoreMessageOption.setState({ historyId: "history-2" })
     view.rerender(<Playground />)
     await waitFor(() =>
       expect(screen.getByTestId("playground-form")).toHaveAttribute(
@@ -1006,6 +1115,45 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     )
   })
 
+  it("does not publish a restored attachment after synchronous New retires its source", async () => {
+    let release!: (value: unknown) => void
+    chatSettingsState.syncChatSettingsForServerChat.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    render(<Playground />)
+    await waitFor(() => expect(release).toBeTypeOf("function"))
+    await act(async () => {
+      useStoreMessageOption.getState().startNewChatDraft(false)
+      release({ deepResearchAttachment: buildPersistedAttachment("retired", "Old private research") })
+      await Promise.resolve()
+    })
+    expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "")
+  })
+
+  it("does not revive research removed in the same chat while restore is held", async () => {
+    let release!: (value: unknown) => void
+    chatSettingsState.syncChatSettingsForServerChat.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    chatSettingsState.applyChatSettingsPatch.mockImplementation(() => new Promise(() => {}))
+    render(<Playground />)
+    await waitFor(() => expect(release).toBeTypeOf("function"))
+    fireEvent.click(screen.getByRole("button", { name: "Attach run 1" }))
+    await waitFor(() => expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "run_1"))
+    fireEvent.click(screen.getByRole("button", { name: "Remove attached research" }))
+    await act(async () => release({ deepResearchAttachment: buildPersistedAttachment("old", "Removed research") }))
+    expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "")
+  })
+
+  it("does not attach a held follow-up after the user removes research in the same chat", async () => {
+    let release!: (bundle: Record<string, unknown>) => void
+    researchClientMocks.getResearchBundle.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    render(<Playground />)
+    fireEvent.click(screen.getByRole("button", { name: "Attach run 1" }))
+    fireEvent.click(screen.getByRole("button", { name: "Prepare follow up" }))
+    await waitFor(() => expect(release).toBeTypeOf("function"))
+    fireEvent.click(screen.getByRole("button", { name: "Remove attached research" }))
+    await act(async () => release({ question: "Retired follow-up", outline: { sections: [] }, claims: [] }))
+    expect(screen.getByTestId("playground-form")).toHaveAttribute("data-attached-run-id", "")
+    expect(storeOptionState.value.setSelectedQuickPrompt).not.toHaveBeenCalled()
+  })
+
   it("auto-restores persisted attached research context and bounded history for saved chats", async () => {
     chatSettingsState.syncChatSettingsForServerChat.mockResolvedValue({
       updatedAt: "2026-03-08T20:10:00Z",
@@ -1039,10 +1187,10 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
       "data-history-run-ids",
       "run_hist_1,run_hist_2"
     )
-    expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalledWith({
-      historyId: "history-1",
-      serverChatId: "chat-1"
-    })
+    expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalledWith(expect.objectContaining({
+      historyId: "history-1", serverChatId: "chat-1",
+      requestScope: settingsTestOwner.requestScope, validate_lease: expect.any(Function)
+    }))
   })
 
   it("auto-restores the pinned attachment when a saved chat has no active attachment", async () => {
@@ -1423,7 +1571,10 @@ describe("Playground research context integration", { timeout: 20000 }, () => {
     )
 
     messageOptionState.value.serverChatId = "chat-2"
+    historySelectionState.current = researchSelection("chat-2")
+    useStoreMessageOption.setState({ serverChatId: "chat-2" })
     messageOptionState.value.historyId = "history-2"
+    useStoreMessageOption.setState({ historyId: "history-2" })
     view.rerender(<Playground />)
 
     await waitFor(() =>

@@ -1,5 +1,5 @@
-import React from "react"
 import { Loader2 } from "lucide-react"
+import React from "react"
 
 type ButtonVariant =
   | "primary"
@@ -12,7 +12,7 @@ type ButtonSize = "sm" | "md" | "lg"
 type ButtonShape = "rounded" | "pill"
 type ButtonHtmlType = "button" | "submit" | "reset"
 
-type ButtonProps = {
+type ButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "type"> & {
   variant?: ButtonVariant
   size?: ButtonSize | "small"
   shape?: ButtonShape
@@ -20,11 +20,13 @@ type ButtonProps = {
   icon?: React.ReactNode
   children: React.ReactNode
   onClick?: React.MouseEventHandler<HTMLButtonElement>
+  onKeyDown?: React.KeyboardEventHandler<HTMLButtonElement>
   disabled?: boolean
   loading?: boolean
   className?: string
   type?: ButtonHtmlType | ButtonVariant
   htmlType?: ButtonHtmlType
+  "aria-describedby"?: string
   ariaLabel?: string
   title?: string
   "data-testid"?: string
@@ -32,11 +34,9 @@ type ButtonProps = {
 
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    "bg-primary text-white hover:bg-primaryStrong active:bg-primaryStrong",
-  secondary:
-    "bg-surface2 text-text hover:bg-surface active:bg-surface",
-  danger:
-    "bg-danger text-white hover:bg-danger active:bg-danger",
+    "bg-primary text-primary-foreground hover:bg-primaryStrong hover:text-primary-strong-foreground active:bg-primaryStrong active:text-primary-strong-foreground transition-none",
+  secondary: "bg-surface2 text-text hover:bg-surface active:bg-surface",
+  danger: "bg-danger text-white hover:bg-danger active:bg-danger",
   ghost:
     "bg-transparent text-text-muted hover:bg-surface2 hover:text-text active:bg-surface2",
   text: "bg-transparent text-primary hover:text-primaryStrong hover:underline",
@@ -74,14 +74,17 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       icon,
       children,
       onClick,
+      onKeyDown,
       disabled,
       loading,
       className,
       type,
       htmlType,
       ariaLabel,
+      "aria-describedby": ariaDescribedBy,
       title,
-      "data-testid": dataTestId
+      "data-testid": dataTestId,
+      ...nativeProps
     },
     ref
   ) => {
@@ -90,15 +93,17 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       (type && Object.prototype.hasOwnProperty.call(variantStyles, type)
         ? (type as ButtonVariant)
         : "secondary")
-    const resolvedSize = size === "small" ? "sm" : size ?? "md"
+    const resolvedSize = size === "small" ? "sm" : (size ?? "md")
     const resolvedType =
-      htmlType ?? (type === "button" || type === "submit" || type === "reset"
+      htmlType ??
+      (type === "button" || type === "submit" || type === "reset"
         ? type
         : "button")
     const isDisabled = disabled || loading
 
     return (
       <button
+        {...nativeProps}
         ref={ref}
         type={resolvedType}
         className={[
@@ -113,11 +118,12 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           .join(" ")}
         disabled={isDisabled}
         onClick={onClick}
-        aria-label={ariaLabel}
-        aria-busy={loading}
+        onKeyDown={onKeyDown}
+        aria-label={ariaLabel ?? nativeProps["aria-label"]}
+        aria-describedby={ariaDescribedBy}
+        aria-busy={loading ?? nativeProps["aria-busy"]}
         title={title ?? ariaLabel}
-        data-testid={dataTestId}
-      >
+        data-testid={dataTestId}>
         {loading && <Loader2 className="h-4 w-4 animate-spin" />}
         {icon}
         {children}

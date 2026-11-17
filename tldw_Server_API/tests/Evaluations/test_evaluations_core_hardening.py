@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import time
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -24,7 +25,7 @@ from tldw_Server_API.app.core.Evaluations.db_adapter import (
 from tldw_Server_API.app.core.Evaluations.eval_runner import EvaluationRunner
 from tldw_Server_API.app.core.Evaluations.synthetic_eval_service import SyntheticEvalWorkflowService
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import UnifiedEvaluationService
-from tldw_Server_API.app.core.Evaluations.user_rate_limiter import UserRateLimiter, UserTier
+from tldw_Server_API.app.core.Evaluations.user_rate_limiter import UserRateLimiter
 from tldw_Server_API.app.core.Evaluations.webhook_manager import WebhookPayload, WebhookManager
 from tldw_Server_API.app.core.Evaluations.webhook_security import WebhookSecurityValidator
 
@@ -218,6 +219,50 @@ async def test_registered_webhook_delivery_uses_resolved_safe_target(temp_db_pat
 
 
 @pytest.mark.asyncio
+async def test_registered_webhook_delivery_resolves_the_target_under_pytest(temp_db_path, monkeypatch) -> None:
+    manager = WebhookManager(str(temp_db_path))
+    original_url = "http://attacker.test/webhook"
+    monkeypatch.setenv("TESTING", "1")
+    monkeypatch.setenv("TLDW_TEST_MODE", "y")
+    webhook = {
+        "id": 1,
+        "url": original_url,
+        "secret": "test-secret",
+        "retry_count": 1,
+        "timeout_seconds": 5,
+    }
+    payload = WebhookPayload(
+        event="evaluation.completed",
+        evaluation_id="eval-safe",
+        timestamp="2026-06-23T00:00:00+00:00",
+        data={"score": 1.0},
+    )
+
+    async def _ok_fetch(**kwargs):
+        return SimpleNamespace(status_code=200, text="ok")
+
+    with (
+        patch.object(manager, "_create_delivery_record", return_value=1),
+        patch.object(manager, "_update_delivery_record", MagicMock()),
+        patch.object(manager, "_update_webhook_stats", MagicMock()),
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(None, None, None, None, ("93.184.216.34", 80))],
+        ),
+        patch(
+            "tldw_Server_API.app.core.Evaluations.webhook_manager.afetch",
+            new=AsyncMock(side_effect=_ok_fetch),
+        ) as mock_fetch,
+    ):
+        await manager._deliver_webhook(webhook, payload)
+
+    mock_fetch.assert_awaited_once()
+    _, kwargs = mock_fetch.await_args
+    assert kwargs["url"] == "http://93.184.216.34/webhook"  # nosec B101
+    assert kwargs["headers"]["Host"] == "attacker.test"  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_registered_https_webhook_delivery_preserves_hostname_for_tls(temp_db_path, monkeypatch) -> None:
     manager = WebhookManager(str(temp_db_path))
     original_url = "https://example.test/webhook"
@@ -318,48 +363,25 @@ def test_postgresql_adapter_is_not_constructible_until_implemented() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rate_limiter_cost_reservation_is_atomic(tmp_path, monkeypatch) -> None:
+async def test_daily_cap_reservation_is_atomic_under_concurrency(tmp_path, monkeypatch) -> None:
+    """Two concurrent reservations against a daily cap of 1: exactly one is admitted."""
     limiter = UserRateLimiter(db_path=str(tmp_path / "rate_limits.db"))
-    user_id = "cost-user"
-    endpoint = "/api/v1/evaluations/geval"
-    await limiter.upgrade_user_tier(
-        user_id=user_id,
-        new_tier=UserTier.CUSTOM,
-        custom_limits={
-            "evaluations_per_minute": 100,
-            "batch_evaluations_per_minute": 100,
-            "evaluations_per_day": 100,
-            "total_tokens_per_day": 100_000,
-            "burst_size": 0,
-            "max_cost_per_day": 0.05,
-            "max_cost_per_month": 10.0,
-        },
-    )
+    write = limiter._write_request_usage
 
-    barrier = asyncio.Event()
-    waiters = 0
-    original_record_request = limiter._record_request
+    def _slow_write(*args, **kwargs):
+        # Hold the write open so the second reservation runs while the first is mid-transaction;
+        # without the lock both would read 0 used and both be admitted.
+        time.sleep(0.2)
+        return write(*args, **kwargs)
 
-    async def _delayed_record_request(*args, **kwargs):
-        nonlocal waiters
-        waiters += 1
-        if waiters == 2:
-            barrier.set()
-        await asyncio.wait_for(barrier.wait(), timeout=1)
-        return await original_record_request(*args, **kwargs)
-
-    monkeypatch.setattr(limiter, "_record_request", _delayed_record_request)
-
+    monkeypatch.setattr(limiter, "_write_request_usage", _slow_write)
     results = await asyncio.gather(
-        limiter.check_rate_limit(user_id, endpoint, estimated_cost=0.04),
-        limiter.check_rate_limit(user_id, endpoint, estimated_cost=0.04),
+        limiter._reserve_request_usage("7", "/e", 0, max_evaluations_per_day=1),
+        limiter._reserve_request_usage("7", "/e", 0, max_evaluations_per_day=1),
     )
-
-    allowed_count = sum(1 for allowed, _metadata in results if allowed)
-    denied_metadata = [metadata for allowed, metadata in results if not allowed]
-    assert allowed_count == 1  # nosec B101
-    assert len(denied_metadata) == 1  # nosec B101
-    assert denied_metadata[0]["error"] == "Daily cost limit exceeded"  # nosec B101
+    assert sum(1 for allowed, _metadata in results if allowed) == 1  # nosec B101
+    denied = [metadata for allowed, metadata in results if not allowed]
+    assert len(denied) == 1 and denied[0]["error"] == "Daily evaluation limit exceeded"  # nosec B101
 
 
 def test_synthetic_workflow_requires_user_for_owner_scoped_operations(tmp_path) -> None:

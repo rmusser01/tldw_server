@@ -1,3 +1,4 @@
+import { deriveScopedUserId } from "@/utils/media-navigation-scope";
 import { connectionAuthoritiesMatch, deriveConnectionAuthorityId } from "@/services/chat-surface-scope";
 import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts";
 import { browser } from "wxt/browser";
@@ -5,7 +6,6 @@ import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage";
 import { formatErrorMessage } from "@/utils/format-error-message";
 import { sanitizeRagProviderFailure } from "@/services/rag/provider-error-contract";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
-import { tldwAuth } from "@/services/tldw/TldwAuth";
 import { tldwModels } from "@/services/tldw";
 import { apiSend } from "@/services/api-send";
 import { tldwRequest } from "@/services/tldw/request-core";
@@ -30,6 +30,7 @@ import {
   resolveEffectiveTldwConfig,
   REFRESH_ROTATION_KEY,
   REFRESH_SESSION_INVALIDATION_PREFIX,
+  refreshSessionInvalidationKey,
   storeRefreshRotationIfCurrent,
   waitForNewerCurrentAccessToken,
 } from "@/services/tldw/single-user-credential";
@@ -54,6 +55,7 @@ import {
   extractTranscriptionPieces,
   clampText,
   notify,
+  createBackgroundStatusBroadcaster,
 } from "@/services/background-helpers";
 import { buildClipDraft } from "@/services/web-clipper/draft-builder";
 import {
@@ -80,8 +82,15 @@ import {
   type QuickIngestSessionRunContext,
 } from "@/entries/shared/quick-ingest-session-runtime";
 import {
+  ACTIVE_INGEST_JOB_STATUSES,
+  TERMINAL_INGEST_JOB_STATUSES,
   createIngestJobsTracker,
+  extractIngestJobSubmitError,
+  getQuickIngestJobPollInterval,
+  isTransientIngestStatusRead,
+  type IngestJobStatusResponse,
   pollTrackedIngestJobs,
+  readIngestJobProgress,
   requireSubmittedIngestJobs,
 } from "@/services/tldw/ingest-jobs-orchestrator";
 import {
@@ -118,6 +127,7 @@ import {
   serializeQuickIngestBatches,
   serializeQuickIngestSessions,
   type PersistedQuickIngestBatch,
+  type PersistedSessionState,
 } from "@/entries/background-session-store";
 
 type BackgroundDiagnostics = {
@@ -164,6 +174,26 @@ const backgroundDiagnostics: BackgroundDiagnostics = {
 
 const logBackgroundError = (label: string, error: unknown) => {
   console.debug(`[tldw] background ${label} failed`, error);
+};
+
+// WP-36/37/38: maximum number of concurrent quick-ingest submissions. Groups
+// that cannot merge into one request (heterogeneous configs, per-entry
+// conference bindings, distinct process paths) still run concurrently, but
+// bounded so a large batch cannot saturate the server's ingest queue.
+const QUICK_INGEST_SUBMIT_POOL_SIZE = 4;
+
+// Simple bounded pool over chunks of `limit` items: `Promise.all` per chunk,
+// no shared mutable state between chunks beyond what each worker touches
+// synchronously. Deliberately dependency-free (no p-limit et al).
+const runInBoundedChunks = async <T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> => {
+  const size = Math.max(1, Math.trunc(limit) || 1);
+  for (let index = 0; index < items.length; index += size) {
+    await Promise.all(items.slice(index, index + size).map(worker));
+  }
 };
 
 type ServicePromptTargetLock = Readonly<{
@@ -375,6 +405,12 @@ type QuickIngestRemoteResultMeta = {
   type: string;
   url?: string;
   fileName?: string;
+};
+
+type QuickIngestRemoteItemResult = QuickIngestRemoteResultMeta & {
+  status: "ok" | "error";
+  data?: unknown;
+  error?: string;
 };
 
 const warmModels = async (
@@ -593,107 +629,156 @@ export default defineBackground({
       }
     ).__tldwBackgroundDiagnostics = buildBackgroundDiagnostics;
 
-    let refreshInFlight: Promise<any> | null = null;
-    const scopedRefreshes = new Map<string, Promise<void>>();
+    type TerminalRefreshPublication = {
+      epoch: string;
+      error: unknown;
+      initiators: Set<AbortController>;
+    };
+    const scopedRefreshes = new Map<string, { promise: Promise<void>; controller: AbortController; initiators: Set<AbortController> }>();
+    const connectionRequestControllers = new Set<AbortController>();
+    const terminalMarkerPublications = new Map<string, TerminalRefreshPublication>();
+    const terminalRefreshResults = new WeakMap<AbortController, { epoch: string; error: unknown }>();
+    const pruneTerminalMarkerPublications = () => {
+      for (const [key, publication] of terminalMarkerPublications) {
+        if (![...publication.initiators].some(controller => connectionRequestControllers.has(controller))) {
+          terminalMarkerPublications.delete(key);
+        }
+      }
+    };
+    const retireConnectionAuthority = (publication?: TerminalRefreshPublication) => {
+      const retiredEpoch = connectionAuthorityEpoch;
+      connectionAuthorityEpoch = crypto.randomUUID();
+      if (publication?.epoch === retiredEpoch) {
+        // A terminal refresh may report its own safe failure after retiring all IO.
+        for (const controller of publication.initiators) {
+          if (connectionRequestControllers.has(controller)) {
+            terminalRefreshResults.set(controller, { epoch: connectionAuthorityEpoch, error: publication.error });
+          }
+        }
+      }
+      for (const flight of scopedRefreshes.values()) {
+        flight.controller.abort(createServicePromptScopeChangedError());
+      }
+      for (const controller of connectionRequestControllers) {
+        controller.abort(createServicePromptScopeChangedError());
+      }
+    };
     const refreshScopedAuth = async (
       checked: ServicePromptTargetLock,
-      originalConfig?: Awaited<
-        ReturnType<typeof resolveCurrentServicePromptConfig>
-      >,
+      originalConfig?: Awaited<ReturnType<typeof resolveCurrentServicePromptConfig>>,
+      callerSignal?: AbortSignal,
+      assertRequestCurrent: () => void = () => {},
+      callerController?: AbortController,
     ): Promise<void> => {
-      const cfg = originalConfig ??
-        await resolveCurrentServicePromptConfig(checked);
+      const epoch = connectionAuthorityEpoch;
+      const assertCurrent = () => {
+        assertRequestCurrent();
+        if (epoch !== connectionAuthorityEpoch) throw createServicePromptScopeChangedError();
+      };
+      callerSignal?.throwIfAborted();
+      assertCurrent();
+      const cfg = originalConfig ?? await resolveCurrentServicePromptConfig(checked);
+      assertCurrent();
+      callerSignal?.throwIfAborted();
       const refreshToken = String(cfg.refreshToken || "").trim();
       const capturedAccessToken = String(cfg.accessToken || "").trim();
-      if (!refreshToken) {
-        throw new Error("Token refresh failed: no refresh token available");
-      }
-      if (
-        originalConfig &&
-        await hasNewerCurrentAccessToken(
-          storage,
-          checked,
-          capturedAccessToken,
-        )
-      ) {
+      if (!refreshToken) throw new Error("Token refresh failed: no refresh token available");
+      if (originalConfig && await hasNewerCurrentAccessToken(storage, checked, capturedAccessToken)) {
+        assertCurrent();
+        callerSignal?.throwIfAborted();
         return;
       }
-      const current = originalConfig
-        ? await resolveCurrentServicePromptConfig(checked)
-        : cfg;
-      if (String(current.refreshToken || "").trim() !== refreshToken) {
-        throw createServicePromptScopeChangedError();
-      }
+      assertCurrent();
+      callerSignal?.throwIfAborted();
+      const current = originalConfig ? await resolveCurrentServicePromptConfig(checked) : cfg;
+      assertCurrent();
+      callerSignal?.throwIfAborted();
+      if (String(current.refreshToken || "").trim() !== refreshToken) throw createServicePromptScopeChangedError();
       const key = JSON.stringify([
-        checked.serverUrl ?? null,
-        checked.authMode ?? null,
-        checked.authSource ?? null,
-        checked.orgId ?? null,
-        refreshToken,
+        epoch, checked.serverUrl ?? null, checked.authMode ?? null,
+        checked.authSource ?? null, checked.orgId ?? null, refreshToken,
       ]);
-      let refresh = scopedRefreshes.get(key);
-      if (!refresh) {
-        refresh = (async () => {
+      let flight = scopedRefreshes.get(key);
+      if (flight?.controller.signal.aborted) flight = undefined;
+      if (!flight) {
+        const controller = new AbortController();
+        const initiators = new Set<AbortController>();
+        const assertFlightCurrent = () => {
+          controller.signal.throwIfAborted();
+          assertCurrent();
+        };
+        const promise = Promise.resolve().then(async () => {
           try {
-            const response = await tldwRequest(
-              {
-                path: "/api/v1/auth/refresh",
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: { refresh_token: refreshToken },
-                noAuth: true,
+            assertFlightCurrent();
+            const response = await tldwRequest({
+              path: "/api/v1/auth/refresh", method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: { refresh_token: refreshToken }, noAuth: true,
+              abortSignal: controller.signal,
+            }, {
+              getConfig: async () => cfg, useRuntimeAuthOverride: false,
+              fetchFn: (input, init) => {
+                assertFlightCurrent();
+                return fetch(input, init);
               },
-              {
-                getConfig: async () => cfg,
-                useRuntimeAuthOverride: false,
-              },
-            );
-            const tokens = response.ok
-              ? (response.data as {
-                  access_token?: string;
-                  refresh_token?: string;
-                } | null)
-              : null;
-            if (!tokens?.access_token) {
-              throw createTokenRefreshError(response);
-            }
+            });
+            assertFlightCurrent();
+            const tokens = response.ok ? response.data as { access_token?: string; refresh_token?: string } | null : null;
+            if (!tokens?.access_token) throw createTokenRefreshError(response);
             const stored = await storeRefreshRotationIfCurrent(
-              storage,
-              { ...checked, accessToken: capturedAccessToken },
-              refreshToken,
-              {
-                accessToken: tokens.access_token,
-                refreshToken: tokens.refresh_token || refreshToken,
-              },
+              storage, { ...checked, accessToken: capturedAccessToken }, refreshToken,
+              { accessToken: tokens.access_token, refreshToken: tokens.refresh_token || refreshToken },
+              assertFlightCurrent,
             );
-            if (!stored) {
-              throw createServicePromptScopeChangedError();
-            }
+            assertFlightCurrent();
+            if (!stored) throw createServicePromptScopeChangedError();
           } catch (error) {
+            assertFlightCurrent();
             if (isRequestConfigScopeChangedError(error)) throw error;
-            if (
-              originalConfig &&
-              await waitForNewerCurrentAccessToken(
-                storage,
-                checked,
-                capturedAccessToken,
-              )
-            ) {
+            if (originalConfig && await waitForNewerCurrentAccessToken(storage, checked, capturedAccessToken)) {
+              assertFlightCurrent();
               return;
             }
-            if ((error as { status?: number } | null)?.status === 401 &&
-              !await invalidateRefreshSessionIfCurrent(storage, cfg)) {
-              throw createServicePromptScopeChangedError();
+            assertFlightCurrent();
+            if ((error as { status?: number } | null)?.status === 401) {
+              const markerKey = refreshSessionInvalidationKey(cfg);
+              const publicationStorage = {
+                ...storage,
+                set: async <T,>(publicationKey: string, value: T) => {
+                  assertFlightCurrent();
+                  if (!markerKey || publicationKey !== markerKey || value !== true) {
+                    throw createServicePromptScopeChangedError();
+                  }
+                  const publication = { epoch, error, initiators };
+                  terminalMarkerPublications.set(publicationKey, publication);
+                  try {
+                    await storage.set(publicationKey, value);
+                  } catch (writeError) {
+                    if (terminalMarkerPublications.get(publicationKey) === publication) {
+                      terminalMarkerPublications.delete(publicationKey);
+                    }
+                    throw writeError;
+                  }
+                },
+              };
+              if (!await invalidateRefreshSessionIfCurrent(publicationStorage, cfg, assertFlightCurrent)) {
+                throw createServicePromptScopeChangedError();
+              }
             }
             throw error;
           } finally {
-            scopedRefreshes.delete(key);
+            if (scopedRefreshes.get(key)?.promise === promise) scopedRefreshes.delete(key);
+            pruneTerminalMarkerPublications();
           }
-        })();
-        scopedRefreshes.set(key, refresh);
+        });
+        flight = { promise, controller, initiators };
+        scopedRefreshes.set(key, flight);
       }
-      await refresh;
+      if (callerController) flight.initiators.add(callerController);
+      await flight.promise;
+      assertCurrent();
     };
+
     let streamDebugEnabled = false;
     const ingestSessions = new Map<string, IngestSession>();
     const pendingAuthReplay = new Set<string>();
@@ -757,23 +842,27 @@ export default defineBackground({
 
     // Serialize the actual storage writes so that the many rapid, fire-and-forget
     // persist calls below cannot land out of order (an older Map snapshot
-    // clobbering a newer one). The snapshot is taken synchronously at call time;
-    // the writer coalesces overlapping writes so only the latest snapshot wins.
+    // clobbering a newer one). WP-19: the writer takes a snapshot BUILDER, so
+    // the Maps are only serialized when a write drains — a burst of status
+    // ticks inside one drain window serializes exactly once — and each drain
+    // diffs per-funnel shards so unchanged funnels cost zero bytes.
+    const buildSessionStateSnapshot = (): PersistedSessionState => ({
+      ingestSessions: serializeIngestSessions(ingestSessions),
+      pendingAuthReplay: serializePendingReplay(pendingAuthReplay),
+      quickIngestSessions:
+        serializeQuickIngestSessions(quickIngestModalSessions),
+      quickIngestBatches:
+        serializeQuickIngestBatches(quickIngestBatchRecords),
+    });
     const writeSessionStateSerialized = createSerializedSessionStateWriter(
       getSessionStorageArea(),
+      buildSessionStateSnapshot,
       (error) => logBackgroundError("persist session state", error),
     );
 
     const persistSessionState = (): void => {
       try {
-        writeSessionStateSerialized({
-          ingestSessions: serializeIngestSessions(ingestSessions),
-          pendingAuthReplay: serializePendingReplay(pendingAuthReplay),
-          quickIngestSessions:
-            serializeQuickIngestSessions(quickIngestModalSessions),
-          quickIngestBatches:
-            serializeQuickIngestBatches(quickIngestBatchRecords),
-        });
+        writeSessionStateSerialized();
       } catch (error) {
         logBackgroundError("persist session state", error);
       }
@@ -957,58 +1046,85 @@ export default defineBackground({
       return `/api/v1/media/metadata-search?${query.toString()}`;
     };
 
+    // WP-61: funnel events append to an in-memory pending array and flush
+    // through a coalescing drain — the same serialize-on-drain discipline as
+    // the WP-19 session writer — instead of read-modify-writing storage per
+    // event. The drain merges the pending burst into the persisted history
+    // exactly once (hydrate-on-first-flush), so a burst of events in one
+    // drain window costs a single bounded write.
+    type IngestFunnelMetricEntry = {
+      event: IngestFunnelEvent;
+      funnelId: string;
+      timestamp: string;
+      metadata: Record<string, unknown>;
+    };
+    const pendingFunnelMetrics: IngestFunnelMetricEntry[] = [];
+    let funnelMetricsHistory: IngestFunnelMetricEntry[] | null = null;
+    let ingestFunnelMetricsDirty = false;
+    let ingestFunnelMetricsFlush: Promise<void> | null = null;
+
+    const drainIngestFunnelMetrics = async (): Promise<void> => {
+      // Yield one microtask so a synchronous burst of funnel events is fully
+      // absorbed before the snapshot is written: one drain window, one write.
+      await Promise.resolve();
+      while (ingestFunnelMetricsDirty) {
+        ingestFunnelMetricsDirty = false;
+        try {
+          if (funnelMetricsHistory === null) {
+            const current = await storage.get<any>(INGEST_FUNNEL_METRICS_KEY);
+            funnelMetricsHistory = Array.isArray(current)
+              ? (current as IngestFunnelMetricEntry[])
+              : [];
+          }
+          funnelMetricsHistory.push(...pendingFunnelMetrics);
+          pendingFunnelMetrics.length = 0;
+          if (funnelMetricsHistory.length > INGEST_FUNNEL_METRICS_LIMIT) {
+            funnelMetricsHistory.splice(
+              0,
+              funnelMetricsHistory.length - INGEST_FUNNEL_METRICS_LIMIT,
+            );
+          }
+          await storage.set(INGEST_FUNNEL_METRICS_KEY, funnelMetricsHistory);
+        } catch (error) {
+          logBackgroundError("append ingest funnel metric", error);
+        }
+      }
+      ingestFunnelMetricsFlush = null;
+    };
+
     const appendIngestFunnelMetric = async (
       event: IngestFunnelEvent,
       funnelId: string,
       metadata?: Record<string, unknown>,
     ) => {
       try {
-        const current = await storage.get<any>(INGEST_FUNNEL_METRICS_KEY);
-        const entries = Array.isArray(current) ? current : [];
-        entries.push({
+        pendingFunnelMetrics.push({
           event,
           funnelId,
           timestamp: new Date().toISOString(),
           metadata: metadata || {},
         });
-        if (entries.length > INGEST_FUNNEL_METRICS_LIMIT) {
-          entries.splice(0, entries.length - INGEST_FUNNEL_METRICS_LIMIT);
+        ingestFunnelMetricsDirty = true;
+        if (ingestFunnelMetricsFlush === null) {
+          ingestFunnelMetricsFlush = drainIngestFunnelMetrics();
         }
-        await storage.set(INGEST_FUNNEL_METRICS_KEY, entries);
+        // Awaiting the in-flight drain guarantees the event is durable when
+        // the call resolves: events pushed mid-drain are picked up by the
+        // drain loop's dirty re-check.
+        await ingestFunnelMetricsFlush;
       } catch (error) {
         logBackgroundError("append ingest funnel metric", error);
       }
     };
 
-    const emitBackgroundMessage = async (
-      tabId: number | undefined,
-      type: string,
-      payload?: Record<string, unknown>,
-    ) => {
-      void ensureSidepanelOpen(tabId).catch((error) =>
-        logBackgroundError("open sidebar", error),
-      );
-      try {
-        await browser.runtime.sendMessage({
-          from: "background",
-          type,
-          payload,
-        });
-      } catch (error) {
-        logBackgroundError(`send ${type}`, error);
-        setTimeout(() => {
-          try {
-            browser.runtime.sendMessage({
-              from: "background",
-              type,
-              payload,
-            });
-          } catch (retryError) {
-            logBackgroundError(`send ${type} (retry)`, retryError);
-          }
-        }, 500);
-      }
-    };
+    // WP-60: opens the sidepanel at most once per funnel (first status emit
+    // still opens it when the panel is closed) and retries failed sends once
+    // after 500ms. See `createBackgroundStatusBroadcaster`.
+    const emitBackgroundMessage = createBackgroundStatusBroadcaster({
+      openSidepanel: ensureSidepanelOpen,
+      sendMessage: (message) => browser.runtime.sendMessage(message),
+      logError: logBackgroundError,
+    });
 
     const emitIngestStatus = async (
       session: IngestSession,
@@ -1567,19 +1683,19 @@ export default defineBackground({
         if (Array.isArray(files) && files.length > 0) {
           for (const item of files) {
             const result = appendUploadFile(item, item.fieldName || "files");
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           }
         } else if (file?.data !== undefined && file?.data !== null) {
           const trimmedFieldName =
             typeof fileFieldName === "string" ? fileFieldName.trim() : "";
           if (trimmedFieldName) {
             const result = appendUploadFile(file, trimmedFieldName);
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           } else {
             const result = appendUploadFile(file, "files", {
               appendLegacyFileAlias: true,
             });
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           }
         }
         const headers: Record<string, string> = { ...requestHeaders };
@@ -1715,8 +1831,11 @@ export default defineBackground({
       const expectedConnectionAuthority = payload?.expectedConnectionAuthority;
       const expectedConnectionEpoch = payload?.expectedConnectionEpoch;
       const hasConnectionFence = expectedConnectionAuthority !== undefined;
+      const requestEpoch = connectionAuthorityEpoch;
+      const accountAbort = new AbortController();
       const assertConnectionEpoch = () => {
-        if (hasConnectionFence && expectedConnectionEpoch !== connectionAuthorityEpoch) {
+        if (requestEpoch !== connectionAuthorityEpoch ||
+            (hasConnectionFence && expectedConnectionEpoch !== connectionAuthorityEpoch)) {
           throw createServicePromptScopeChangedError();
         }
       };
@@ -1726,9 +1845,9 @@ export default defineBackground({
       delete requestPayload.servicePromptConfig;
       delete requestPayload.requestId;
       delete requestPayload.abortSignal;
-      if (requestAbortSignal) {
-        requestPayload.abortSignal = requestAbortSignal;
-      }
+      requestPayload.abortSignal = requestAbortSignal
+        ? AbortSignal.any([requestAbortSignal, accountAbort.signal])
+        : accountAbort.signal;
       const servicePromptConfig = readServicePromptTargetLock(
         rawServicePromptConfig,
       );
@@ -1745,17 +1864,21 @@ export default defineBackground({
         ReturnType<typeof resolveCurrentServicePromptConfig>
       > | undefined;
       let recipeDelivery: RecipeDeliveryReceipt | undefined;
+      let response: Awaited<ReturnType<typeof tldwRequest>> | undefined;
+      connectionRequestControllers.add(accountAbort);
       try {
         if (servicePromptConfig && hasConnectionFence) {
           throw createServicePromptScopeChangedError();
         }
-        const response = await tldwRequest(requestPayload, {
-          ...(hasConnectionFence ? {
-            fetchFn: ((input, init) => {
-              assertConnectionEpoch();
-              return fetch(input, init);
-            }) as typeof fetch,
-          } : {}),
+        response = await tldwRequest(requestPayload, {
+          requestScopeSignal: accountAbort.signal,
+          assertRequestCurrent: assertConnectionEpoch,
+          fetchFn: (async (input, init) => {
+            assertConnectionEpoch();
+            const response = await fetch(input, init);
+            assertConnectionEpoch();
+            return response;
+          }) as typeof fetch,
           getAuthenticatedPrincipal: getRecipeAuthenticatedPrincipal,
           dispatchAuthority: {
             markDispatched: (id, ownerId) => {
@@ -1763,6 +1886,7 @@ export default defineBackground({
               const operationId = crypto.randomUUID();
               recipeRegistry.reserve(id, ownerId, operationId);
               recipeDelivery = { id, ownerId, operationId };
+              return recipeDelivery;
             },
           },
           // IMPORTANT: getConfig must fetch fresh config each time it's called
@@ -1772,9 +1896,11 @@ export default defineBackground({
           // credentials at dispatch, while the expected-user header binds them.
           getConfig: servicePromptConfig
             ? async () => {
+                assertConnectionEpoch();
                 const current = await resolveCurrentServicePromptConfig(
                   servicePromptConfig,
                 );
+                assertConnectionEpoch();
                 originalScopedConfig ??= current;
                 return current;
               }
@@ -1787,43 +1913,54 @@ export default defineBackground({
                      expectedConnectionAuthority !== deriveConnectionAuthorityId(current))) {
                   throw createServicePromptScopeChangedError();
                 }
+                originalScopedConfig ??= current ?? undefined;
                 return current;
               },
           ...(servicePromptConfig || hasConnectionFence ? { useRuntimeAuthOverride: false } : {}),
-          refreshAuth: servicePromptConfig
-            ? () => refreshScopedAuth(
-                servicePromptConfig,
-                originalScopedConfig,
-              )
-            : async () => {
-                if (!refreshInFlight) {
-                  refreshInFlight = (async () => {
-                    try {
-                      await tldwAuth.refreshToken();
-                    } finally {
-                      refreshInFlight = null;
-                    }
-                  })();
-                }
-                await refreshInFlight;
+          refreshAuth: async (signal) => {
+            assertConnectionEpoch();
+            if (!originalScopedConfig) throw new Error("Token refresh failed: account configuration unavailable");
+            const principal = deriveScopedUserId({ authMode: originalScopedConfig.authMode, accessToken: originalScopedConfig.accessToken });
+            await refreshScopedAuth(
+              servicePromptConfig ?? {
+                ...originalScopedConfig,
+                expectedUserId: principal === "user:anonymous" ? null : principal.slice("user:".length),
               },
+              originalScopedConfig, signal, assertConnectionEpoch, accountAbort,
+            );
+          },
         });
         assertConnectionEpoch();
         return recipeDelivery ? { ...response, recipeDelivery } : response;
       } catch (error) {
-        if ((servicePromptConfig || hasConnectionFence) && (error as { status?: unknown })?.status === 412) {
+        if ((error as { status?: unknown })?.status === 412) {
+          const terminal = terminalRefreshResults.get(accountAbort);
+          if (terminal?.epoch === connectionAuthorityEpoch && !requestAbortSignal?.aborted) {
+            return {
+              ok: false,
+              status: 401,
+              error: formatErrorMessage(terminal.error, "Session expired. Please log in again."),
+              ...(response?.recipePersistence ? { recipePersistence: response.recipePersistence } : {}),
+              ...(recipeDelivery ? { recipeDelivery } : {}),
+            };
+          }
           const message =
             "The server or authenticated account changed before the request was sent.";
           return {
             ok: false,
             status: 412,
             error: message,
+            ...(response?.recipePersistence ? { recipePersistence: response.recipePersistence } : {}),
+            ...(recipeDelivery ? { recipeDelivery } : {}),
             data: {
               detail: { code: "request_config_scope_changed", message },
             },
           };
         }
         throw error;
+      } finally {
+        connectionRequestControllers.delete(accountAbort);
+        pruneTerminalMarkerPublications();
       }
     };
 
@@ -1890,7 +2027,7 @@ export default defineBackground({
         return result;
       };
       return {
-        requestScope, assertCurrent, validate,
+        requestScope, assertCurrent, validate, signal: controller.signal,
         request: (payload: WorkerPayload) => dispatch(false, payload),
         upload: (payload: WorkerPayload) => dispatch(true, payload),
         release: () => { active = false; quickIngestAuthorityControllers.delete(controller); quickIngestAuthorityValidators.delete(validate); },
@@ -1951,24 +2088,45 @@ export default defineBackground({
     // Poll the remote ingest jobs held by `tracker` to terminal state. This is
     // the single implementation used by both the live quick-ingest run and the
     // resume-after-restart path, so both map results identically.
-    const pollRemoteIngestJobs = (opts: {
+    const pollRemoteIngestJobs = async (opts: {
       lease: QuickIngestLease;
       tracker: ReturnType<
         typeof createIngestJobsTracker<QuickIngestRemoteResultMeta>
       >;
-      ingestTimeoutMs: number;
       isCancelled: () => boolean;
       onPendingJobIds?: (jobIds: number[]) => void;
-    }): Promise<any[]> => {
-      return pollTrackedIngestJobs({
+      onItemResult: (result: QuickIngestRemoteItemResult) => void;
+    }) => {
+      const startedAt = Date.now();
+      const interruptedJobIds: number[] = [];
+      const invalidStatusResponse = { ok: false };
+      const hasJobStatus = (data: IngestJobStatusResponse["data"]) => {
+        const { status } = readIngestJobProgress(data);
+        return ACTIVE_INGEST_JOB_STATUSES.has(status) || TERMINAL_INGEST_JOB_STATUSES.has(status);
+      };
+      const readStatus = async (path: string): Promise<IngestJobStatusResponse | undefined> => {
+        try {
+          return await opts.lease.request({ path, method: "GET", timeoutMs: 4200 });
+        } catch (error) {
+          opts.lease.assertCurrent();
+          if (isRequestConfigScopeChangedError(error)) throw error;
+          const status = (error as { status?: number } | null)?.status;
+          return { ok: false, status: status ?? 0 };
+        }
+      };
+      const results = await pollTrackedIngestJobs<QuickIngestRemoteResultMeta, QuickIngestRemoteItemResult | null>({
         tracker: opts.tracker,
-        timeoutMs: opts.ingestTimeoutMs,
-        pollIntervalMs: 1200,
+        timeoutMs: Infinity,
+        pollIntervalMs: () => getQuickIngestJobPollInterval(startedAt, 1200),
+        signal: opts.lease.signal,
         isCancelled: opts.isCancelled,
         onCancel: async () => {
           await cancelRemoteIngestBatches(opts.lease, opts.tracker, "user_cancelled");
         },
         onPendingJobIds: opts.onPendingJobIds,
+        onResult: (result) => {
+          if (result) opts.onItemResult(result);
+        },
         fetchJobs: async (batchId, jobIds) => {
           // One batched status request per cycle instead of one request per
           // job. Follows the endpoint's offset pagination so every tracked
@@ -1977,15 +2135,9 @@ export default defineBackground({
           const limit = Math.min(500, Math.max(jobIds.length, 100));
           let offset = 0;
           for (let page = 0; page < 10; page += 1) {
-            const response = (await opts.lease.request({
-              path: `/api/v1/media/ingest/jobs?batch_id=${encodeURIComponent(
-                batchId,
-              )}&limit=${limit}&offset=${offset}`,
-              method: "GET",
-              timeoutMs: 4200,
-            })) as
-              | { ok: boolean; status?: number; data?: any; error?: string }
-              | undefined;
+            const response = await readStatus(
+              `/api/v1/media/ingest/jobs?batch_id=${encodeURIComponent(batchId)}&limit=${limit}&offset=${offset}`,
+            );
             if (!response?.ok) {
               // First page failure carries the error for the whole batch;
               // later-page failures keep whatever was already collected.
@@ -1993,13 +2145,12 @@ export default defineBackground({
               break;
             }
             if (!Array.isArray(response.data?.jobs)) {
-              // Unexpected payload shape: surface it verbatim so each job is
-              // reconciled against the raw response, exactly like the old
-              // per-job GET path did.
-              return response;
+              // Preserve the single-job status response used by older servers.
+              if (page === 0 && jobIds.length === 1 && hasJobStatus(response.data)) return response;
+              break;
             }
-            const jobs = response.data.jobs;
-            collected.push(...jobs);
+            // Missing or malformed rows are checked with the individual status endpoint.
+            collected.push(...response.data.jobs.filter(hasJobStatus));
             const hasMore =
               response.data?.has_more ??
               response.data?.pagination?.has_more;
@@ -2020,29 +2171,17 @@ export default defineBackground({
             data: { jobs: collected },
           } as { ok: boolean; status?: number; data?: any; error?: string };
         },
-        fetchJob: async (jobId) =>
-          (await opts.lease.request({
-            path: `/api/v1/media/ingest/jobs/${jobId}`,
-            method: "GET",
-            timeoutMs: 4200,
-          })) as
-            | { ok: boolean; status?: number; data?: any; error?: string }
-            | undefined,
+        fetchMissingJob: async (jobId) => {
+          const response = await readStatus(`/api/v1/media/ingest/jobs/${jobId}`);
+          return response?.ok && !hasJobStatus(response.data) ? invalidStatusResponse : response;
+        },
         mapRequestError: (item, response) => {
-          if (
-            isLikelyAuthError(Number(response?.status || 0), response?.error)
-          ) {
-            return {
-              id: item.meta.id,
-              status: "error",
-              url: item.meta.url,
-              fileName: item.meta.fileName,
-              type: item.meta.type,
-              error: response?.error || "Authentication required.",
-              data: undefined,
-            };
+          if (response !== invalidStatusResponse &&
+            (response?.status === undefined || isTransientIngestStatusRead(response.status))) {
+            return undefined;
           }
-          return undefined;
+          interruptedJobIds.push(item.jobId);
+          return null;
         },
         mapCompleted: (item, data) => ({
           id: item.meta.id,
@@ -2071,6 +2210,7 @@ export default defineBackground({
           data: details.data,
         }),
       });
+      return { results: results.filter((result) => result !== null), interruptedJobIds };
     };
 
     // Resume + finalize a quick-ingest batch's remote-job polling phase from its
@@ -2094,6 +2234,7 @@ export default defineBackground({
         ? record.collectedResults.slice()
         : [];
       let processedCount = record.processedCount;
+      let interruptedJobIds: number[] = [];
       const plannedItems = new Map<
         string,
         { collectionId: number; itemId: number; idempotencyKey?: string | null }
@@ -2144,32 +2285,33 @@ export default defineBackground({
         }
 
         if (tracker.hasItems()) {
-          const remoteResults = await pollRemoteIngestJobs({
-            lease,
-            tracker,
-            ingestTimeoutMs,
-            isCancelled,
+          const terminal = await pollRemoteIngestJobs({
+            lease, tracker, isCancelled, onItemResult: emitProgress,
           });
-          for (const result of remoteResults) {
-            await patchConferenceCollectionItem(
-              lease,
-              plannedItems.get(String(result?.id || "")),
-              {
-                status: result?.status === "ok" ? "completed" : "failed",
-                media_id:
-                  result?.status === "ok"
-                    ? extractCompletedIngestJobMediaId(result?.data)
-                    : undefined,
-                error_summary:
-                  result?.status === "ok"
-                    ? undefined
-                    : String(result?.error || "Ingest failed"),
-              },
-              ingestTimeoutMs,
-            );
-            out.push(result);
-            emitProgress(result);
-          }
+          const remoteResults = terminal.results;
+          interruptedJobIds = terminal.interruptedJobIds;
+          // Terminal PATCHes are independent per item: fan them out together (WP-38).
+          await Promise.all(
+            remoteResults.map((result) =>
+              patchConferenceCollectionItem(
+                lease,
+                plannedItems.get(String(result?.id || "")),
+                {
+                  status: result?.status === "ok" ? "completed" : "failed",
+                  media_id:
+                    result?.status === "ok"
+                      ? extractCompletedIngestJobMediaId(result?.data)
+                      : undefined,
+                  error_summary:
+                    result?.status === "ok"
+                      ? undefined
+                      : String(result?.error || "Ingest failed"),
+                },
+                ingestTimeoutMs,
+              ),
+            ),
+          );
+          out.push(...remoteResults);
         }
 
         if (isCancelled()) {
@@ -2182,7 +2324,10 @@ export default defineBackground({
           await emitBackgroundMessage(undefined, "tldw:quick-ingest/completed", {
             sessionId,
             results: out,
-            summary: { resumedAfterRestart: true },
+            summary: {
+              resumedAfterRestart: true,
+              ...(interruptedJobIds.length ? { interruptedJobIds } : {}),
+            },
           });
         }
       } catch (error) {
@@ -2365,14 +2510,23 @@ export default defineBackground({
         let anyCancelled = false;
         let maxProgressPercent = 0;
         let progressMessage = "";
-        for (const jobId of Array.from(unresolved)) {
-          const resp = (await handleTldwRequest({
-            path: `/api/v1/media/ingest/jobs/${jobId}`,
-            method: "GET",
-            timeoutMs: intervalMs + 3000,
-          })) as
-            | { ok: boolean; status?: number; data?: any; error?: string }
-            | undefined;
+        // One round-trip per poll round: every unresolved job's status GET is
+        // independent, so they all go inflight together (WP-37) and are then
+        // reconciled in job-id order exactly like the sequential loop did.
+        const roundJobIds = Array.from(unresolved);
+        const roundResponses = await Promise.all(
+          roundJobIds.map(async (jobId) => ({
+            jobId,
+            resp: (await handleTldwRequest({
+              path: `/api/v1/media/ingest/jobs/${jobId}`,
+              method: "GET",
+              timeoutMs: intervalMs + 3000,
+            })) as
+              | { ok: boolean; status?: number; data?: any; error?: string }
+              | undefined,
+          })),
+        );
+        for (const { jobId, resp } of roundResponses) {
           if (!resp?.ok) {
             if (isLikelyAuthError(Number(resp?.status || 0), resp?.error)) {
               return {
@@ -2515,17 +2669,21 @@ export default defineBackground({
           logBackgroundError(`cancel ingest batch ${session.batchId}`, error);
         });
       } else {
-        for (const jobId of session.jobIds) {
-          await handleTldwRequest({
-            path: `/api/v1/media/ingest/jobs/${jobId}?reason=${encodeURIComponent(
-              reason || "user_cancelled",
-            )}`,
-            method: "DELETE",
-            timeoutMs: 8000,
-          }).catch((error) => {
-            logBackgroundError(`cancel ingest job ${jobId}`, error);
-          });
-        }
+        // No batch id (legacy per-job submissions): the DELETEs are
+        // independent per job, so fan them out together (WP-38).
+        await Promise.all(
+          session.jobIds.map((jobId) =>
+            handleTldwRequest({
+              path: `/api/v1/media/ingest/jobs/${jobId}?reason=${encodeURIComponent(
+                reason || "user_cancelled",
+              )}`,
+              method: "DELETE",
+              timeoutMs: 8000,
+            }).catch((error) => {
+              logBackgroundError(`cancel ingest job ${jobId}`, error);
+            }),
+          ),
+        );
       }
       await emitIngestStatus(session, {
         status: "cancelled",
@@ -2941,7 +3099,7 @@ export default defineBackground({
     const runQuickIngestBatch = async (
       payload: any,
       runtimeContext?: QuickIngestSessionRunContext,
-    ): Promise<{ ok: boolean; results: any[] }> => {
+    ): Promise<{ ok: boolean; results: any[]; interruptedJobIds?: number[] }> => {
       const lease = createQuickIngestLease(payload?.requestScope);
       try {
       await lease.validate();
@@ -2987,6 +3145,7 @@ export default defineBackground({
       const totalCount = entries.length + files.length;
       let processedCount = 0;
       const out: any[] = [];
+      let interruptedJobIds: number[] = [];
       const queuedRemoteJobs =
         createIngestJobsTracker<QuickIngestRemoteResultMeta>();
       const conferenceBatchMetadata =
@@ -3156,7 +3315,10 @@ export default defineBackground({
         }
         if (collectionId === null) return;
 
-        for (const entry of selectedEntries) {
+        // Planned item POSTs are independent per entry: run them through the
+        // bounded submission pool instead of one sequential round-trip per
+        // entry (WP-38), until a [BE] bulk items endpoint exists.
+        const planConferenceItem = async (entry: any) => {
           try {
             const itemResp = (await lease.request({
               path: `/api/v1/media/collections/${encodeURIComponent(
@@ -3191,14 +3353,19 @@ export default defineBackground({
               });
             }
           } catch (error) {
-          lease.assertCurrent();
+            lease.assertCurrent();
             console.debug(
               "[tldw] conference collection item planning failed",
               { collectionId, entryId: entry?.id },
               error,
             );
           }
-        }
+        };
+        await runInBoundedChunks(
+          selectedEntries,
+          QUICK_INGEST_SUBMIT_POOL_SIZE,
+          planConferenceItem,
+        );
       };
 
       const patchPlannedConferenceItem = async (
@@ -3382,12 +3549,12 @@ export default defineBackground({
 
       // Poll the queued remote jobs to completion using the shared implementation
       // (also used by the post-restart resume path) so both map results the same.
-      const pollQueuedRemoteJobs = async (): Promise<any[]> =>
+      const pollQueuedRemoteJobs = () =>
         pollRemoteIngestJobs({
           lease,
           tracker: queuedRemoteJobs,
-          ingestTimeoutMs,
           isCancelled,
+          onItemResult: emitProgress,
           onPendingJobIds: (jobIds) => {
             runtimeContext?.setJobIds(jobIds);
           },
@@ -3433,69 +3600,244 @@ export default defineBackground({
 
       await createPlannedConferenceItems();
 
+      // WP-36 submission-phase batching. URL entries whose submit fields are
+      // identical (media type, keywords, per-type overrides, chunking…) share
+      // ONE /media/ingest/jobs submission with `urls: [u1..uk]`; entries that
+      // cannot merge (conference-bound items carry per-item collection ids,
+      // per-entry overrides, non-remote processing) run as solo submissions.
+      // All submission tasks run through a bounded pool so an N-item batch
+      // stops costing N sequential round-trips. Returned job ids map back to
+      // their entries via the job's echoed `source` url, and per-item results
+      // are flushed in input order so the wizard observes the exact event
+      // stream the sequential loop produced.
+      type UrlEntryPlan = {
+        index: number;
+        entry: any;
+        url: string;
+        type: string;
+        planned: PlannedConferenceCollectionItem | undefined;
+      };
+      const entryPlans: UrlEntryPlan[] = [];
       for (const r of entries) {
-        lease.assertCurrent();
-        if (isCancelled()) break;
         const url = String(r?.url || "").trim();
         if (!url) continue;
         const explicitType =
           r?.type && typeof r.type === "string" ? r.type : "auto";
         const t =
           explicitType === "auto" ? inferMediaTypeFromUrl(url) : explicitType;
-        const plannedConferenceItem = plannedConferenceItems.get(
-          String(r.id || ""),
-        );
+        entryPlans.push({
+          index: entryPlans.length,
+          entry: r,
+          url,
+          type: t,
+          planned: plannedConferenceItems.get(String(r.id || "")),
+        });
+      }
+      const entryOutcomes: Array<any | undefined> = entryPlans.map(() => undefined);
+      // meta id -> input position, used to order the poll-phase results.
+      const remoteResultOrder = new Map<string, number>();
+
+      const submitSingleRemoteEntry = async (plan: UrlEntryPlan): Promise<void> => {
+        const r = plan.entry;
+        const { url, index } = plan;
+        const t = plan.type;
+        const plannedConferenceItem = plan.planned;
         let jobSubmitted = false;
         let latestJobId: number | undefined;
         try {
-          let data: any;
-          if (shouldStoreRemote) {
-            const resolvedDefaults =
-              r?.defaults && typeof r.defaults === "object"
-                ? r.defaults
-                : fileDefaults;
-            const fields: Record<string, any> = buildFields(
-              t,
-              r,
-              resolvedDefaults,
-            );
-            applyPlannedConferenceFields(fields, plannedConferenceItem);
-            fields.urls = [url];
-            const resp = await lease.upload({
-              path: "/api/v1/media/ingest/jobs",
-              method: "POST",
-              fields,
-              timeoutMs: ingestTimeoutMs,
-              quickIngestSessionId: sessionId,
-            });
-            if (!resp?.ok) {
-              if (!shouldFallbackToPersistentAdd(toFallbackCandidate(resp))) {
-                const msg = resp?.error || `Upload failed: ${resp?.status}`;
-                throw new Error(msg);
-              }
-              if (typeof latestJobId === "number") {
-                fields.media_ingest_job_id = String(latestJobId);
-              }
-              data = await submitPersistentAddFallback({ fields });
-            } else {
-              const trackedCount = trackRemoteJobs(resp.data, {
-                id: String(r.id || crypto.randomUUID()),
-                url,
-                type: t,
-              });
-              const jobIds = queuedRemoteJobs.getJobIds();
-              latestJobId = jobIds[jobIds.length - trackedCount];
-              jobSubmitted = trackedCount > 0;
-              await patchPlannedConferenceItem(plannedConferenceItem, {
-                status: "processing",
-                latest_job_id:
-                  typeof latestJobId === "number"
-                    ? String(latestJobId)
-                    : undefined,
-              });
-              continue;
+          const resolvedDefaults =
+            r?.defaults && typeof r.defaults === "object"
+              ? r.defaults
+              : fileDefaults;
+          const fields: Record<string, any> = buildFields(t, r, resolvedDefaults);
+          applyPlannedConferenceFields(fields, plannedConferenceItem);
+          fields.urls = [url];
+          const resp = await lease.upload({
+            path: "/api/v1/media/ingest/jobs",
+            method: "POST",
+            fields,
+            timeoutMs: ingestTimeoutMs,
+            quickIngestSessionId: sessionId,
+          });
+          if (!resp?.ok) {
+            if (!shouldFallbackToPersistentAdd(toFallbackCandidate(resp))) {
+              const msg = resp?.error || `Upload failed: ${resp?.status}`;
+              throw new Error(msg);
             }
-          } else if (t === "html") {
+            if (typeof latestJobId === "number") {
+              fields.media_ingest_job_id = String(latestJobId);
+            }
+            const data = await submitPersistentAddFallback({ fields });
+            entryOutcomes[index] = { id: r.id, status: "ok", url, type: t, data };
+            return;
+          }
+          const entryId = String(r.id || crypto.randomUUID());
+          const trackedCount = trackRemoteJobs(resp.data, {
+            id: entryId,
+            url,
+            type: t,
+          });
+          const jobIds = queuedRemoteJobs.getJobIds();
+          latestJobId = jobIds[jobIds.length - trackedCount];
+          jobSubmitted = trackedCount > 0;
+          remoteResultOrder.set(entryId, index);
+          await patchPlannedConferenceItem(plannedConferenceItem, {
+            status: "processing",
+            latest_job_id:
+              typeof latestJobId === "number"
+                ? String(latestJobId)
+                : undefined,
+          });
+        } catch (e: any) {
+          lease.assertCurrent();
+          if (isCancelled()) return;
+          await patchPlannedConferenceItem(plannedConferenceItem, {
+            status: jobSubmitted ? "failed" : "submit_failed",
+            latest_job_id:
+              typeof latestJobId === "number" ? String(latestJobId) : undefined,
+            error_summary: e?.message || "Request failed",
+          });
+          entryOutcomes[index] = {
+            id: r.id,
+            status: "error",
+            url,
+            type: t,
+            error: e?.message || "Request failed",
+          };
+        }
+      };
+
+      const submitGroupedRemoteEntries = async (
+        groupFields: Record<string, any>,
+        plans: UrlEntryPlan[],
+      ): Promise<void> => {
+        const recordGroupError = (plan: UrlEntryPlan, message: string) => {
+          entryOutcomes[plan.index] = {
+            id: plan.entry.id,
+            status: "error",
+            url: plan.url,
+            type: plan.type,
+            error: message,
+          };
+        };
+        const fields: Record<string, any> = {
+          ...groupFields,
+          urls: plans.map((plan) => plan.url),
+        };
+        const resp = await lease.upload({
+          path: "/api/v1/media/ingest/jobs",
+          method: "POST",
+          fields,
+          timeoutMs: ingestTimeoutMs,
+          quickIngestSessionId: sessionId,
+        });
+        if (!resp?.ok) {
+          if (!shouldFallbackToPersistentAdd(toFallbackCandidate(resp))) {
+            const msg = resp?.error || `Upload failed: ${resp?.status}`;
+            for (const plan of plans) recordGroupError(plan, msg);
+            return;
+          }
+          // Concurrent-limit fallback: retry each member through the
+          // persistent-add path, exactly like the sequential loop did.
+          for (const plan of plans) {
+            const memberFields: Record<string, any> = {
+              ...groupFields,
+              urls: [plan.url],
+            };
+            try {
+              const data = await submitPersistentAddFallback({ fields: memberFields });
+              entryOutcomes[plan.index] = {
+                id: plan.entry.id,
+                status: "ok",
+                url: plan.url,
+                type: plan.type,
+                data,
+              };
+            } catch (e: any) {
+              lease.assertCurrent();
+              if (isCancelled()) return;
+              recordGroupError(plan, e?.message || "Request failed");
+            }
+          }
+          return;
+        }
+        let submitted: { batchId: string; jobIds: number[] };
+        try {
+          submitted = requireSubmittedIngestJobs(resp.data);
+        } catch (error) {
+          const msg =
+            error instanceof Error
+              ? error.message
+              : String(error || "Ingest job submission returned no job IDs.");
+          for (const plan of plans) recordGroupError(plan, msg);
+          return;
+        }
+        // Map each returned job back to its entry. The server echoes each
+        // url job's `source`, so exact matching survives per-url submit
+        // failures inside the batch; leftovers fall back to submit order.
+        const submitJobs = Array.isArray(resp.data?.jobs) ? resp.data.jobs : [];
+        const jobBySource = new Map<string, any>();
+        for (const job of submitJobs) {
+          const source = String((job as any)?.source ?? "").trim();
+          if (source && !jobBySource.has(source)) jobBySource.set(source, job);
+        }
+        const claimed = new Set<any>();
+        const assigned: Array<number | undefined> = plans.map((plan) => {
+          const job = jobBySource.get(plan.url);
+          if (job && !claimed.has(job)) {
+            const id = Math.trunc(Number((job as any)?.id));
+            if (Number.isFinite(id) && id > 0) {
+              claimed.add(job);
+              return id;
+            }
+          }
+          return undefined;
+        });
+        const claimedIds = new Set(
+          assigned.filter((id): id is number => id != null),
+        );
+        const leftoverJobIds = submitted.jobIds.filter(
+          (jobId) => !claimedIds.has(jobId),
+        );
+        let leftoverCursor = 0;
+        for (let i = 0; i < assigned.length; i += 1) {
+          if (assigned[i] == null && leftoverCursor < leftoverJobIds.length) {
+            assigned[i] = leftoverJobIds[leftoverCursor];
+            leftoverCursor += 1;
+          }
+        }
+        const unmatchedError =
+          extractIngestJobSubmitError(resp.data) ||
+          "Ingest job submission returned no job IDs.";
+        let trackedAny = false;
+        for (let i = 0; i < plans.length; i += 1) {
+          const plan = plans[i];
+          const jobId = assigned[i];
+          if (jobId == null) {
+            recordGroupError(plan, unmatchedError);
+            continue;
+          }
+          const meta = {
+            id: String(plan.entry.id || crypto.randomUUID()),
+            url: plan.url,
+            type: plan.type,
+          };
+          queuedRemoteJobs.trackJobs(submitted.batchId, [jobId], meta);
+          remoteResultOrder.set(meta.id, plan.index);
+          trackedAny = true;
+        }
+        if (trackedAny) {
+          runtimeContext?.setJobIds(queuedRemoteJobs.getJobIds());
+        }
+      };
+
+      const processNonRemoteEntry = async (plan: UrlEntryPlan): Promise<void> => {
+        const r = plan.entry;
+        const { url, index } = plan;
+        const t = plan.type;
+        try {
+          let data: any;
+          if (t === "html") {
             data = await processWebScrape(url, r);
           } else {
             const resolvedDefaults =
@@ -3517,47 +3859,126 @@ export default defineBackground({
             }
             data = resp.data;
           }
-          const result = { id: r.id, status: "ok", url, type: t, data };
-          out.push(result);
-          emitProgress(result);
+          entryOutcomes[index] = { id: r.id, status: "ok", url, type: t, data };
         } catch (e: any) {
           lease.assertCurrent();
-          if (isCancelled()) break;
-          await patchPlannedConferenceItem(plannedConferenceItem, {
-            status: jobSubmitted ? "failed" : "submit_failed",
-            latest_job_id:
-              typeof latestJobId === "number" ? String(latestJobId) : undefined,
+          if (isCancelled()) return;
+          await patchPlannedConferenceItem(plan.planned, {
+            status: "submit_failed",
             error_summary: e?.message || "Request failed",
           });
-          const result = {
+          entryOutcomes[index] = {
             id: r.id,
             status: "error",
             url,
             type: t,
             error: e?.message || "Request failed",
           };
-          out.push(result);
-          emitProgress(result);
+        }
+      };
+
+      type EntrySubmissionTask =
+        | { kind: "url-group"; fields: Record<string, any>; plans: UrlEntryPlan[] }
+        | { kind: "solo"; plan: UrlEntryPlan };
+      const entrySubmissionTasks: EntrySubmissionTask[] = [];
+      const urlGroups = new Map<
+        string,
+        { fields: Record<string, any>; plans: UrlEntryPlan[] }
+      >();
+      for (const plan of entryPlans) {
+        if (isCancelled()) break;
+        if (!shouldStoreRemote) {
+          entrySubmissionTasks.push({ kind: "solo", plan });
+          continue;
+        }
+        // Conference-bound entries carry per-item collection ids in their
+        // fields, so they can never share a submission with another entry.
+        if (plan.planned) {
+          entrySubmissionTasks.push({ kind: "solo", plan });
+          continue;
+        }
+        const resolvedDefaults =
+          plan.entry?.defaults && typeof plan.entry.defaults === "object"
+            ? plan.entry.defaults
+            : fileDefaults;
+        const fields = buildFields(plan.type, plan.entry, resolvedDefaults);
+        const groupKey = JSON.stringify(fields);
+        const existing = urlGroups.get(groupKey);
+        if (existing) {
+          existing.plans.push(plan);
+        } else {
+          const group = { fields, plans: [plan] };
+          urlGroups.set(groupKey, group);
+          entrySubmissionTasks.push({ kind: "url-group", fields, plans: group.plans });
         }
       }
+      await runInBoundedChunks(
+        entrySubmissionTasks,
+        QUICK_INGEST_SUBMIT_POOL_SIZE,
+        async (task) => {
+          if (isCancelled()) return;
+          if (task.kind === "url-group") {
+            await submitGroupedRemoteEntries(task.fields, task.plans);
+            return;
+          }
+          if (shouldStoreRemote) {
+            await submitSingleRemoteEntry(task.plan);
+          } else {
+            await processNonRemoteEntry(task.plan);
+          }
+        },
+      );
+      // Flush inline (non-remote/fallback/error) results in input order,
+      // exactly the order the sequential loop emitted them.
+      for (const plan of entryPlans) {
+        const result = entryOutcomes[plan.index];
+        if (result === undefined) continue;
+        entryOutcomes[plan.index] = undefined;
+        out.push(result);
+        emitProgress(result);
+      }
 
+      // WP-36: same treatment for uploads. Files whose submit fields are
+      // identical are appended to ONE multipart /media/ingest/jobs request
+      // (the server creates one job per file, in form order); heterogeneous
+      // or non-remote files run as solo tasks in the same bounded pool.
+      type FilePlan = {
+        index: number;
+        id: string;
+        rawId: string;
+        name: string;
+        mediaType: string;
+        file: any;
+        defaults: any;
+      };
+      const filePlans: FilePlan[] = [];
       for (const f of files) {
-        lease.assertCurrent();
-        if (isCancelled()) break;
         const id = f?.id || crypto.randomUUID();
         const name = f?.name || "upload";
-        const mediaType = inferUploadMediaTypeFromFile(name, f?.type);
-        const resolvedFileDefaults =
-          f?.defaults && typeof f.defaults === "object"
-            ? f.defaults
-            : fileDefaults;
+        filePlans.push({
+          index: filePlans.length,
+          id: String(id),
+          rawId: id,
+          name,
+          mediaType: inferUploadMediaTypeFromFile(name, f?.type),
+          file: f,
+          defaults:
+            f?.defaults && typeof f.defaults === "object" ? f.defaults : fileDefaults,
+        });
+      }
+      const fileOutcomes: Array<any | undefined> = filePlans.map(() => undefined);
+
+      const runSoloFileTask = async (plan: FilePlan): Promise<void> => {
+        const { rawId: id, name, index } = plan;
+        const mediaType = plan.mediaType;
+        const f = plan.file;
         try {
           let data: any;
           if (shouldStoreRemote) {
             const fields: Record<string, any> = buildFields(
               mediaType,
               undefined,
-              resolvedFileDefaults,
+              plan.defaults,
             );
             const resp = await lease.upload({
               path: "/api/v1/media/ingest/jobs",
@@ -3586,17 +4007,18 @@ export default defineBackground({
               });
             } else {
               trackRemoteJobs(resp.data, {
-                id: String(id),
+                id: plan.id,
                 fileName: name,
                 type: mediaType,
               });
-              continue;
+              remoteResultOrder.set(plan.id, entryPlans.length + index);
+              return;
             }
           } else {
             const fields: Record<string, any> = buildFields(
               mediaType,
               undefined,
-              resolvedFileDefaults,
+              plan.defaults,
             );
             const resp = await lease.upload({
               path: getProcessPathForType(mediaType),
@@ -3616,28 +4038,163 @@ export default defineBackground({
             }
             data = resp.data;
           }
-          const result = {
+          fileOutcomes[index] = {
             id,
             status: "ok",
             fileName: name,
             type: mediaType,
             data,
           };
-          out.push(result);
-          emitProgress(result);
         } catch (e: any) {
           lease.assertCurrent();
-          if (isCancelled()) break;
-          const result = {
+          if (isCancelled()) return;
+          fileOutcomes[index] = {
             id,
             status: "error",
             fileName: name,
             type: "file",
             error: e?.message || "Upload failed",
           };
-          out.push(result);
-          emitProgress(result);
         }
+      };
+
+      const submitGroupedRemoteFiles = async (
+        groupFields: Record<string, any>,
+        plans: FilePlan[],
+      ): Promise<void> => {
+        const recordGroupError = (plan: FilePlan, message: string) => {
+          fileOutcomes[plan.index] = {
+            id: plan.rawId,
+            status: "error",
+            fileName: plan.name,
+            type: "file",
+            error: message,
+          };
+        };
+        const resp = await lease.upload({
+          path: "/api/v1/media/ingest/jobs",
+          method: "POST",
+          fields: { ...groupFields },
+          files: plans.map((plan) => ({
+            name: plan.name,
+            type: plan.file?.type || "application/octet-stream",
+            data: plan.file?.data,
+          })),
+          timeoutMs: ingestTimeoutMs,
+          quickIngestSessionId: sessionId,
+        });
+        if (!resp?.ok) {
+          if (!shouldFallbackToPersistentAdd(toFallbackCandidate(resp))) {
+            const msg = resp?.error || `Upload failed: ${resp?.status}`;
+            for (const plan of plans) recordGroupError(plan, msg);
+            return;
+          }
+          for (const plan of plans) {
+            try {
+              const data = await submitPersistentAddFallback({
+                fields: { ...groupFields },
+                file: {
+                  name: plan.name,
+                  type: plan.file?.type || "application/octet-stream",
+                  data: plan.file?.data,
+                },
+              });
+              fileOutcomes[plan.index] = {
+                id: plan.rawId,
+                status: "ok",
+                fileName: plan.name,
+                type: plan.mediaType,
+                data,
+              };
+            } catch (e: any) {
+              lease.assertCurrent();
+              if (isCancelled()) return;
+              recordGroupError(plan, e?.message || "Upload failed");
+            }
+          }
+          return;
+        }
+        let submitted: { batchId: string; jobIds: number[] };
+        try {
+          submitted = requireSubmittedIngestJobs(resp.data);
+        } catch (error) {
+          const msg =
+            error instanceof Error
+              ? error.message
+              : String(error || "Ingest job submission returned no job IDs.");
+          for (const plan of plans) recordGroupError(plan, msg);
+          return;
+        }
+        // File jobs echo no client-correlatable source (the server reports a
+        // temp path), so positions map 1:1 with the submitted file order. A
+        // shortfall (a file failed server-side staging) reports the trailing
+        // positions as errors via the submit `errors` list.
+        const unmatchedError =
+          extractIngestJobSubmitError(resp.data) ||
+          "Ingest job submission returned no job IDs.";
+        let trackedAny = false;
+        plans.forEach((plan, position) => {
+          const jobId = submitted.jobIds[position];
+          if (jobId == null) {
+            recordGroupError(plan, unmatchedError);
+            return;
+          }
+          queuedRemoteJobs.trackJobs(submitted.batchId, [jobId], {
+            id: plan.id,
+            fileName: plan.name,
+            type: plan.mediaType,
+          });
+          remoteResultOrder.set(plan.id, entryPlans.length + plan.index);
+          trackedAny = true;
+        });
+        if (trackedAny) {
+          runtimeContext?.setJobIds(queuedRemoteJobs.getJobIds());
+        }
+      };
+
+      type FileSubmissionTask =
+        | { kind: "file-group"; fields: Record<string, any>; plans: FilePlan[] }
+        | { kind: "solo"; plan: FilePlan };
+      const fileSubmissionTasks: FileSubmissionTask[] = [];
+      const fileGroups = new Map<
+        string,
+        { fields: Record<string, any>; plans: FilePlan[] }
+      >();
+      for (const plan of filePlans) {
+        if (isCancelled()) break;
+        if (!shouldStoreRemote) {
+          fileSubmissionTasks.push({ kind: "solo", plan });
+          continue;
+        }
+        const fields = buildFields(plan.mediaType, undefined, plan.defaults);
+        const groupKey = JSON.stringify(fields);
+        const existing = fileGroups.get(groupKey);
+        if (existing) {
+          existing.plans.push(plan);
+        } else {
+          const group = { fields, plans: [plan] };
+          fileGroups.set(groupKey, group);
+          fileSubmissionTasks.push({ kind: "file-group", fields, plans: group.plans });
+        }
+      }
+      await runInBoundedChunks(
+        fileSubmissionTasks,
+        QUICK_INGEST_SUBMIT_POOL_SIZE,
+        async (task) => {
+          if (isCancelled()) return;
+          if (task.kind === "file-group") {
+            await submitGroupedRemoteFiles(task.fields, task.plans);
+            return;
+          }
+          await runSoloFileTask(task.plan);
+        },
+      );
+      for (const plan of filePlans) {
+        const result = fileOutcomes[plan.index];
+        if (result === undefined) continue;
+        fileOutcomes[plan.index] = undefined;
+        out.push(result);
+        emitProgress(result);
       }
 
       if (shouldStoreRemote && queuedRemoteJobs.hasItems()) {
@@ -3645,25 +4202,42 @@ export default defineBackground({
         // worker suspension mid-poll can be resumed from the alarm/startup path.
         persistQuickIngestBatchRecord();
         try {
-          const remoteResults = await pollQueuedRemoteJobs();
-          for (const result of remoteResults) {
-            await patchPlannedConferenceItem(
-              plannedConferenceItems.get(String(result?.id || "")),
-              {
-                status: result?.status === "ok" ? "completed" : "failed",
-                media_id:
-                  result?.status === "ok"
-                    ? extractCompletedIngestJobMediaId(result?.data)
-                    : undefined,
-                error_summary:
-                  result?.status === "ok"
-                    ? undefined
-                    : String(result?.error || "Ingest failed"),
-              },
-            );
-            out.push(result);
-            emitProgress(result);
-          }
+          const terminal = await pollQueuedRemoteJobs();
+          const remoteResults = terminal.results;
+          interruptedJobIds = terminal.interruptedJobIds;
+          // Order the per-item results by their input position so pooled
+          // submissions cannot permute the final result summary.
+          const orderedRemoteResults = remoteResults
+            .map((result, position) => ({ result, position }))
+            .sort((a, b) => {
+              const aOrder = remoteResultOrder.get(String(a.result?.id ?? ""));
+              const bOrder = remoteResultOrder.get(String(b.result?.id ?? ""));
+              if (aOrder != null && bOrder != null) return aOrder - bOrder;
+              if (aOrder != null) return -1;
+              if (bOrder != null) return 1;
+              return a.position - b.position;
+            })
+            .map((entry) => entry.result);
+          // Terminal PATCHes are independent per item: fan them out together (WP-38).
+          await Promise.all(
+            orderedRemoteResults.map((result) =>
+              patchPlannedConferenceItem(
+                plannedConferenceItems.get(String(result?.id || "")),
+                {
+                  status: result?.status === "ok" ? "completed" : "failed",
+                  media_id:
+                    result?.status === "ok"
+                      ? extractCompletedIngestJobMediaId(result?.data)
+                      : undefined,
+                  error_summary:
+                    result?.status === "ok"
+                      ? undefined
+                      : String(result?.error || "Ingest failed"),
+                },
+              ),
+            ),
+          );
+          out.push(...orderedRemoteResults);
         } finally {
           // The live poll finished (or threw) in this worker; drop the durable
           // record so the alarm/startup path does not re-poll it.
@@ -3672,7 +4246,7 @@ export default defineBackground({
       }
 
       lease.assertCurrent();
-      return { ok: true, results: out };
+      return { ok: true, results: out, ...(interruptedJobIds.length ? { interruptedJobIds } : {}) };
       } finally { lease.release(); }
     };
 
@@ -3681,6 +4255,7 @@ export default defineBackground({
         const result = await runQuickIngestBatch(payload, context);
         return {
           results: result.results,
+          summary: result.interruptedJobIds ? { interruptedJobIds: result.interruptedJobIds } : undefined,
         };
       },
       emit: async (type, payload) => {
@@ -3996,17 +4571,24 @@ export default defineBackground({
         const change = changes?.[MANUAL_SESSION_KEY];
         if (change) {
           if (!manualSessionCredentialsMatch(change.oldValue, change.newValue)) {
-            connectionAuthorityEpoch = crypto.randomUUID();
+            retireConnectionAuthority();
           }
         }
         return;
       }
       if (areaName !== "local") return;
-      if (Object.entries(changes || {}).some(([key, change]) =>
+      const retiringChanges = Object.entries(changes || {}).filter(([key, change]) =>
         ((key === "tldwConfig" || key === "tldwCookieSessionConfig") &&
         (!change.newValue || !connectionAuthoritiesMatch(change.oldValue, change.newValue))) ||
         (key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX) && change.oldValue !== change.newValue)
-      )) connectionAuthorityEpoch = crypto.randomUUID();
+      );
+      if (retiringChanges.length > 0) {
+        const [key, change] = retiringChanges[0];
+        const publication = retiringChanges.length === 1 && change.newValue === true
+          ? terminalMarkerPublications.get(key) : undefined;
+        if (publication) terminalMarkerPublications.delete(key);
+        retireConnectionAuthority(publication);
+      }
       if (Object.keys(changes || {}).some(key => key === "tldwConfig" || key === REFRESH_ROTATION_KEY || key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX))) {
         quickIngestCredentialRevision += 1;
         for (const validate of quickIngestAuthorityValidators) void validate().catch(() => {});
@@ -4546,6 +5128,14 @@ export default defineBackground({
           }
         };
         const onMsg = async (msg: any) => {
+          if (disconnected || closed) return;
+          const requestAbort = new AbortController();
+          abort = requestAbort;
+          connectionRequestControllers.add(requestAbort);
+          const streamEpoch = connectionAuthorityEpoch;
+          const assertStreamCurrent = () => {
+            if (streamEpoch !== connectionAuthorityEpoch) throw createServicePromptScopeChangedError();
+          };
           const sanitizeRagProviderStreamError =
             msg?.sanitizeRagProviderStreamError === true;
           const postStreamError = (payload: {
@@ -4605,6 +5195,8 @@ export default defineBackground({
               ? await resolveCurrentServicePromptConfig(servicePromptConfig)
               : null;
             const cfg = scopedCfg ?? (await getEffectiveConfig());
+            assertStreamCurrent();
+            requestAbort.signal.throwIfAborted();
             if (!cfg?.serverUrl) throw new Error("tldw server not configured");
             const baseUrl = String(cfg.serverUrl).replace(/\/$/, "");
             const streamAccess = evaluateAbsoluteUrlAccess(path, cfg);
@@ -4656,8 +5248,6 @@ export default defineBackground({
             headers["Accept"] = "text/event-stream";
             headers["Cache-Control"] = headers["Cache-Control"] || "no-cache";
             headers["Connection"] = headers["Connection"] || "keep-alive";
-            const requestAbort = new AbortController();
-            abort = requestAbort;
             const idleMs = deriveStreamIdleTimeout(
               cfg,
               path,
@@ -4684,6 +5274,8 @@ export default defineBackground({
             headers["Cache-Control"] = headers["Cache-Control"] || "no-cache";
             headers["Connection"] = headers["Connection"] || "keep-alive";
 
+            assertStreamCurrent();
+            requestAbort.signal.throwIfAborted();
             let resp = await fetch(url, {
               method: msg.method || "POST",
               headers,
@@ -4693,6 +5285,7 @@ export default defineBackground({
                   : JSON.stringify(msg.body),
               signal: requestAbort.signal,
             });
+            assertStreamCurrent();
             if (
               !streamAccess.skipAuth &&
               resp.status === 401 &&
@@ -4700,46 +5293,36 @@ export default defineBackground({
               cfg.refreshToken
             ) {
               try {
-                if (servicePromptConfig) {
-                  await refreshScopedAuth(
-                    servicePromptConfig,
-                    scopedCfg ?? undefined,
-                  );
-                } else {
-                  if (!refreshInFlight) {
-                    refreshInFlight = (async () => {
-                      try {
-                        await tldwAuth.refreshToken();
-                      } finally {
-                        refreshInFlight = null;
-                      }
-                    })();
-                  }
-                  await refreshInFlight;
-                }
+                const principal = deriveScopedUserId({ authMode: cfg.authMode, accessToken: cfg.accessToken });
+                await refreshScopedAuth(
+                  servicePromptConfig ?? {
+                    serverUrl: cfg.serverUrl, authMode: cfg.authMode,
+                    authSource: cfg.authSource, orgId: cfg.orgId,
+                    expectedUserId: principal === "user:anonymous" ? null : principal.slice("user:".length),
+                  },
+                  cfg,
+                  requestAbort.signal,
+                  assertStreamCurrent, requestAbort,
+                );
               } catch (error) {
-                if (
-                  servicePromptConfig &&
-                  (error as { status?: unknown })?.status === 412
-                ) {
-                  throw error;
-                }
-                logBackgroundError("refresh auth (stream)", error);
+                assertStreamCurrent();
+                throw error;
               }
+              assertStreamCurrent();
               if (disconnected || closed || requestAbort.signal.aborted) {
                 return;
               }
               const updated = servicePromptConfig
                 ? await resolveCurrentServicePromptConfig(servicePromptConfig)
                 : await getEffectiveConfig();
+              assertStreamCurrent();
               if (updated?.accessToken)
                 headers["Authorization"] = `Bearer ${updated.accessToken}`;
-              const retryController = new AbortController();
               if (disconnected || closed || requestAbort.signal.aborted) {
-                retryController.abort();
                 return;
               }
-              abort = retryController;
+              assertStreamCurrent();
+              requestAbort.signal.throwIfAborted();
               resp = await fetch(url, {
                 method: msg.method || "POST",
                 headers,
@@ -4747,9 +5330,11 @@ export default defineBackground({
                   typeof msg.body === "string"
                     ? msg.body
                     : JSON.stringify(msg.body),
-                signal: retryController.signal,
+                signal: requestAbort.signal,
               });
             }
+            assertStreamCurrent();
+            requestAbort.signal.throwIfAborted();
             if (!resp.ok) {
               const ct = resp.headers.get("content-type") || "";
               let errMsg: any = resp.statusText;
@@ -4763,6 +5348,8 @@ export default defineBackground({
                 const t = await resp.text().catch(() => null);
                 if (t) errMsg = t;
               }
+              assertStreamCurrent();
+              requestAbort.signal.throwIfAborted();
               postStreamError({
                 event: "error",
                 status: resp.status,
@@ -4780,6 +5367,8 @@ export default defineBackground({
             resetIdle();
             while (true) {
               const { done, value } = await reader.read();
+              assertStreamCurrent();
+              requestAbort.signal.throwIfAborted();
               if (done) break;
               resetIdle();
               buffer += decoder.decode(value, { stream: true });
@@ -4788,6 +5377,8 @@ export default defineBackground({
               for (const line of lines) {
                 const trimmed = line.trim();
                 if (!trimmed) continue;
+                assertStreamCurrent();
+                requestAbort.signal.throwIfAborted();
                 // Any SSE activity resets idle timer
                 resetIdle();
                 if (trimmed.startsWith("event:")) {
@@ -4814,6 +5405,8 @@ export default defineBackground({
                       logBackgroundError("stream debug data", error);
                     }
                   }
+                  assertStreamCurrent();
+                  requestAbort.signal.throwIfAborted();
                   if (data === "[DONE]") {
                     closed = true;
                     if (idleTimer) clearTimeout(idleTimer);
@@ -4834,14 +5427,30 @@ export default defineBackground({
                       logBackgroundError("stream debug json", error);
                     }
                   }
+                  assertStreamCurrent();
+                  requestAbort.signal.throwIfAborted();
                   safePost({ event: "data", data });
                 }
               }
             }
+            assertStreamCurrent();
+            requestAbort.signal.throwIfAborted();
+            // CM-03: forward a final unterminated line, and tell the page when
+            // the body ended without [DONE] so a cut-off reply is not complete.
+            const tail = buffer.trim();
+            const tailData = tail.startsWith("data:") ? tail.slice(5).trim() : tail;
+            if (tailData && tailData !== "[DONE]" && /^(data:|\{|\[)/.test(tail))
+              safePost({ event: "data", data: tailData });
             closed = true;
             if (idleTimer) clearTimeout(idleTimer);
-            safePost({ event: "done" });
-          } catch (e: any) {
+            safePost({ event: "done", ...(tailData === "[DONE]" ? {} : { incomplete: true }) });
+          } catch (caught: any) {
+            let e = caught;
+            if (streamEpoch !== connectionAuthorityEpoch) {
+              const terminal = terminalRefreshResults.get(requestAbort);
+              e = terminal?.epoch === connectionAuthorityEpoch && !disconnected && !closed
+                ? terminal.error : createServicePromptScopeChangedError();
+            }
             if (idleTimer) clearTimeout(idleTimer);
             postStreamError({
               event: "error",
@@ -4849,8 +5458,14 @@ export default defineBackground({
               ...(typeof e?.details !== "undefined"
                 ? { details: e.details }
                 : {}),
+              ...(typeof e?.headers?.["retry-after"] === "string"
+                ? { retryAfter: e.headers["retry-after"] }
+                : {}),
               message: formatErrorMessage(e, "Stream error"),
             });
+          } finally {
+            connectionRequestControllers.delete(requestAbort);
+            pruneTerminalMarkerPublications();
           }
         };
         port.onMessage.addListener(onMsg);

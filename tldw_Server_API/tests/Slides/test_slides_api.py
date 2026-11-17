@@ -1,13 +1,14 @@
 import asyncio
 import io
 import json
+import threading
 import zipfile
 
 import pytest
 from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi import HTTPException
-from fastapi import Response
+from fastapi import Response, Request
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -30,6 +31,13 @@ from tldw_Server_API.app.core.Slides.visual_styles import list_builtin_visual_st
 _SAMPLE_PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAn8B9XgU1b0AAAAASUVORK5CYII="
 )
+
+
+def _connected_request():
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return Request({"type": "http"}, receive)
 
 
 def _build_assets(tmp_path):
@@ -270,7 +278,7 @@ def _setup_rag_too_large(monkeypatch, fake_notes, fake_media):
         return SimpleNamespace(documents=[doc], generated_answer=None)
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.unified_rag_pipeline",
+        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline",
         stub_rag_pipeline,
     )
 
@@ -301,6 +309,26 @@ def _create_presentation(slides_client: TestClient):
     response = slides_client.post("/api/v1/slides/presentations", json=payload)
     assert response.status_code == 201, response.text
     return response
+
+
+@pytest.mark.parametrize("negotiated", [False, True])
+def test_structured_presentation_detail_disables_private_cache_reuse(slides_client, negotiated):
+    created = _create_presentation(slides_client).json()
+    headers = {slides_ep.CONTENT_KIND_HEADER: "structured_slides,standalone_html"} if negotiated else {}
+    response = slides_client.get(f"/api/v1/slides/presentations/{created['id']}", headers=headers)
+    vary = {token.strip().lower() for token in response.headers.get("vary", "").split(",")}
+
+    assert {  # nosec B101 -- pytest assertion for the authenticated presentation response contract.
+        "status": response.status_code,
+        "cache_control": response.headers.get("cache-control"),
+        "auth_vary": {"authorization", "x-api-key", "cookie"} <= vary,
+        "etag": response.headers.get("etag"),
+    } == {
+        "status": 200,
+        "cache_control": "private, no-store",
+        "auth_vary": True,
+        "etag": f'W/"v{created["version"]}"',
+    }
 
 
 def _presentation_update_payload() -> dict:
@@ -341,7 +369,7 @@ def test_resolve_template_sanitizes_invalid_template_error(monkeypatch):
         _ = template_id
         raise SlidesTemplateInvalidError("template parse exploded")
 
-    monkeypatch.setattr(slides_ep, "get_slide_template", _raise_invalid)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_templates.get_slide_template", _raise_invalid)
 
     with pytest.raises(HTTPException) as exc_info:
         slides_ep._resolve_template("broken-template")
@@ -357,8 +385,8 @@ def test_generate_presentation_sanitizes_generation_error(monkeypatch):
             raise SlidesGenerationError("llm backend exploded")
 
     monkeypatch.setattr(slides_ep, "_resolve_provider", lambda provider: "stub-provider")
-    monkeypatch.setattr(slides_ep, "SlidesGenerator", _RaisingGenerator)
-    monkeypatch.setattr(slides_ep, "get_metrics_registry", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", _RaisingGenerator)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: None)
 
     request = SimpleNamespace(
         visual_style_id=None,
@@ -384,6 +412,7 @@ def test_generate_presentation_sanitizes_generation_error(monkeypatch):
         asyncio.run(
             slides_ep._generate_presentation(
                 response=Response(),
+                http_request=_connected_request(),
                 db=SimpleNamespace(client_id="1"),
                 request=request,
                 source_text="Source text",
@@ -564,7 +593,7 @@ def test_slides_create_rejects_invalid_image(slides_client):
 
 def test_slides_create_and_export_markdown_with_image_asset_ref(slides_client, monkeypatch):
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.resolve_slide_asset",
+        "tldw_Server_API.app.core.Slides.slides_assets.resolve_slide_asset",
         lambda asset_ref, **kwargs: {
             "asset_ref": asset_ref,
             "mime": "image/png",
@@ -610,7 +639,7 @@ def test_slides_export_offloads_blocking_markdown_and_reveal_generation(
 
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.slides.asyncio.to_thread", _fake_to_thread)
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.resolve_slide_asset",
+        "tldw_Server_API.app.core.Slides.slides_assets.resolve_slide_asset",
         lambda asset_ref, **kwargs: {
             "asset_ref": asset_ref,
             "mime": "image/png",
@@ -701,7 +730,7 @@ def test_slides_export_reveal_passes_visual_style_snapshot(slides_client, monkey
         return b"PK\x03\x04stub"
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_bundle",
+        "tldw_Server_API.app.core.Slides.slides_export.export_presentation_bundle",
         _stub_export,
     )
     payload = {
@@ -755,7 +784,7 @@ def test_slides_export_pdf(slides_client, monkeypatch):
         captured["options"] = kwargs.get("pdf_options")
         return b"%PDF-1.4\n%stub"
 
-    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_pdf", _stub_export)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_export.export_presentation_pdf", _stub_export)
     payload = {
         "title": "Deck",
         "description": None,
@@ -787,7 +816,7 @@ def test_slides_export_pdf_passes_visual_style_snapshot(slides_client, monkeypat
         captured["visual_style_snapshot"] = kwargs.get("visual_style_snapshot")
         return b"%PDF-1.4\n%stub"
 
-    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_pdf", _stub_export)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_export.export_presentation_pdf", _stub_export)
     payload = {
         "title": "Styled Deck",
         "description": None,
@@ -816,7 +845,7 @@ def test_slides_export_pdf_input_error(slides_client, monkeypatch):
     def _stub_export(**kwargs):
         raise SlidesExportInputError("pdf_format_invalid")
 
-    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_pdf", _stub_export)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_export.export_presentation_pdf", _stub_export)
     payload = {
         "title": "Deck",
         "description": None,
@@ -838,7 +867,7 @@ def test_slides_export_pdf_failure(slides_client, monkeypatch):
     def _stub_export(**kwargs):
         raise SlidesExportError("pdf_render_failed")
 
-    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_pdf", _stub_export)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_export.export_presentation_pdf", _stub_export)
     payload = {
         "title": "Deck",
         "description": None,
@@ -861,7 +890,7 @@ def test_slides_export_markdown_failure(slides_client, monkeypatch):
         raise SlidesExportError("markdown_render_failed")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_markdown",
+        "tldw_Server_API.app.core.Slides.slides_export.export_presentation_markdown",
         _stub_export,
     )
     payload = {
@@ -886,7 +915,7 @@ def test_slides_export_reveal_failure(slides_client, monkeypatch):
         raise SlidesExportError("reveal_bundle_failed")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_bundle",
+        "tldw_Server_API.app.core.Slides.slides_export.export_presentation_bundle",
         _stub_export,
     )
     payload = {
@@ -986,7 +1015,7 @@ def test_slides_builtin_style_list_skips_custom_css_rendering(slides_client, mon
         return real_resolve_builtin_visual_style(style_id, include_custom_css=include_custom_css)
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.resolve_builtin_visual_style",
+        "tldw_Server_API.app.core.Slides.visual_style_resolver.resolve_builtin_visual_style",
         _recorded_resolve,
     )
 
@@ -1009,7 +1038,7 @@ def test_slides_builtin_style_detail_skips_custom_css_rendering(slides_client, m
         return real_resolve_builtin_visual_style(style_id, include_custom_css=include_custom_css)
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.resolve_builtin_visual_style",
+        "tldw_Server_API.app.core.Slides.visual_style_resolver.resolve_builtin_visual_style",
         _recorded_resolve,
     )
 
@@ -2107,7 +2136,7 @@ def test_slides_generate_from_rag_explicit_sources(slides_client, monkeypatch):
         return SimpleNamespace(documents=[doc], generated_answer=None)
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.unified_rag_pipeline",
+        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline",
         stub_rag_pipeline,
     )
     monkeypatch.setattr(
@@ -2365,7 +2394,7 @@ def test_slides_generate_from_document_media_uses_document_content(
         lambda _db, _media_id: None,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.get_document_version",
+        "tldw_Server_API.app.core.DB_Management.media_db.api.get_document_version",
         lambda db_instance, media_id, version_number=None, include_content=True: {
             "content": "Document body content for slide generation."
         },
@@ -2533,3 +2562,321 @@ def test_slides_generate_too_large(case, request, monkeypatch):
     detail = resp.json()["detail"]
     assert detail["code"] == "input_too_large"
     assert detail["max_source_chars"] == 10
+
+
+def test_slide_generation_keeps_event_loop_responsive(monkeypatch):
+    """A slow synchronous provider must not prevent the owning API loop from advancing."""
+    observed = []
+    release = threading.Event()
+
+    async def exercise():
+        loop = asyncio.get_running_loop()
+
+        class WaitingGenerator:
+            def generate_from_text(self, **kwargs):
+                loop.call_soon_threadsafe(release.set)
+                observed.append(release.wait(timeout=1))
+                raise SlidesGenerationError("controlled provider completion")
+
+        monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", WaitingGenerator)
+        monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: None)
+        request = slides_ep.GenerateFromPromptRequest(
+            prompt="Rowan Observatory opened in 2019.",
+            provider="llamacpp",
+            theme="black",
+        )
+        try:
+            with pytest.raises(HTTPException, match="Failed to generate presentation") as refusal:
+                await slides_ep._generate_presentation(
+                    response=Response(),
+                    http_request=_connected_request(),
+                    db=SimpleNamespace(client_id="1"),
+                    request=request,
+                    source_text=request.prompt,
+                    source_type="prompt",
+                    source_ref=None,
+                    source_query=request.prompt,
+                )
+            assert (refusal.value.status_code, refusal.value.detail) == (
+                500, "Failed to generate presentation"
+            )  # nosec B101 - the real API maps the provider failure to its fixed public error.
+        finally:
+            release.set()
+
+    asyncio.run(exercise())
+    assert observed == [True]  # nosec B101 - pytest observes a real event-loop progress receipt.
+
+
+def test_cancelled_slide_generation_does_not_persist(monkeypatch):
+    """A cancellation received during provider work must precede verification and persistence."""
+    writes = []
+    finished = threading.Event()
+
+    async def exercise():
+        loop = asyncio.get_running_loop()
+        task = None
+
+        class CancellingGenerator:
+            def generate_from_text(self, **kwargs):
+                try:
+                    loop.call_soon_threadsafe(task.cancel)
+                    return {
+                        "title": "Rowan",
+                        "slides": [{"order": 0, "layout": "title", "title": "Rowan", "content": "Opened in 2019."}],
+                    }
+                finally:
+                    finished.set()
+
+        async def verified(**kwargs):
+            return SimpleNamespace(verdict="grounded", to_dict=lambda: {"verdict": "grounded"})
+
+        def persist(**kwargs):
+            writes.append(kwargs)
+            raise AssertionError("Cancelled generation reached presentation persistence")
+
+        monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", CancellingGenerator)
+        monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: None)
+        monkeypatch.setattr(slides_ep, "_verify_slides_against_source", verified)
+        request = slides_ep.GenerateFromPromptRequest(prompt="Opened in 2019.", provider="llamacpp", theme="black")
+        task = asyncio.create_task(
+            slides_ep._generate_presentation(
+                response=Response(),
+                http_request=_connected_request(),
+                db=SimpleNamespace(client_id="1", create_presentation=persist),
+                request=request,
+                source_text=request.prompt,
+                source_type="prompt",
+                source_ref=None,
+                source_query=request.prompt,
+            )
+        )
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            assert await asyncio.to_thread(finished.wait, 1)  # nosec B101 - owned test provider must retire.
+
+    asyncio.run(exercise())
+    assert writes == []  # nosec B101 - pytest verifies the no-write cancellation boundary.
+
+
+@pytest.mark.parametrize("middleware_layers", [0, 1, 3])
+@pytest.mark.parametrize("disconnect_phase", ["before", "generation", "verification", "connected"])
+def test_disconnected_slide_generation_does_not_persist(
+    slides_client, monkeypatch, disconnect_phase, middleware_layers
+):
+    """An actual ASGI disconnect must fence persistence even when the route task stays alive."""
+    verified = []
+    dispatched = []
+
+    async def exercise():
+        loop = asyncio.get_running_loop()
+        inbound = asyncio.Queue()
+        inbound.put_nowait(
+            {
+                "type": "http.request",
+                "body": json.dumps({"prompt": "Rowan opened in 2019.", "provider": "llamacpp"}).encode(),
+                "more_body": False,
+            }
+        )
+        if disconnect_phase == "before":
+            inbound.put_nowait({"type": "http.disconnect"})
+        sent = []
+
+        class ReturningGenerator:
+            def generate_from_text(self, **kwargs):
+                dispatched.append(True)
+                if disconnect_phase == "generation":
+                    loop.call_soon_threadsafe(inbound.put_nowait, {"type": "http.disconnect"})
+                return {
+                    "title": "Rowan",
+                    "slides": [{"order": 0, "layout": "title", "title": "Rowan", "content": "Opened in 2019."}],
+                }
+
+        async def verify(**kwargs):
+            verified.append(True)
+            if disconnect_phase == "verification":
+                inbound.put_nowait({"type": "http.disconnect"})
+            return SimpleNamespace(verdict="grounded", to_dict=lambda: {"verdict": "grounded"})
+
+        async def send(message):
+            sent.append(message)
+
+        monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", ReturningGenerator)
+        monkeypatch.setattr(slides_ep, "_verify_slides_against_source", verify)
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        async def pass_through(request, call_next):
+            return await call_next(request)
+
+        app = slides_client.app
+        for _ in range(middleware_layers):
+            app = BaseHTTPMiddleware(app, dispatch=pass_through)
+        from tldw_Server_API.app.core.Slides.generation_disconnect import SlidesGenerationDisconnectMiddleware
+
+        app = SlidesGenerationDisconnectMiddleware(app)
+        await app(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "scheme": "http",
+                "method": "POST",
+                "path": "/api/v1/slides/generate",
+                "raw_path": b"/api/v1/slides/generate",
+                "query_string": b"",
+                "root_path": "",
+                "headers": [(b"content-type", b"application/json")],
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+            },
+            inbound.get,
+            send,
+        )
+        statuses = [message["status"] for message in sent if message["type"] == "http.response.start"]
+        return statuses[-1] if statuses else None
+
+    status = asyncio.run(exercise())
+    assert slides_client.get("/api/v1/slides/presentations").json()["total"] == (disconnect_phase == "connected")  # nosec B101 - only a connected caller may publish.
+    assert status in ({200} if disconnect_phase == "connected" else {None, 499} if middleware_layers else {499})  # nosec B101 - disconnected ASGI request cannot succeed.
+    assert len(dispatched) == (disconnect_phase != "before")  # nosec B101 - no provider dispatch for a disconnected caller.
+    assert len(verified) == (disconnect_phase in {"verification", "connected"})  # nosec B101 - no verification after a known disconnect.
+
+
+def test_cancelled_slide_generation_waits_for_owned_verification_exit(monkeypatch):
+    """Keep verification resources alive until the cancelled owning request drains them."""
+    writes = []
+
+    async def exercise():
+        entered, release, exited = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        class ReturningGenerator:
+            def generate_from_text(self, **kwargs):
+                return {"title": "Rowan", "slides": [{"order": 0, "layout": "title", "content": "Opened in 2019."}]}
+
+        async def verify(**kwargs):
+            entered.set()
+            try:
+                await release.wait()
+                return SimpleNamespace(verdict="grounded", to_dict=lambda: {"verdict": "grounded"})
+            finally:
+                exited.set()
+
+        monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", ReturningGenerator)
+        monkeypatch.setattr(slides_ep, "_verify_slides_against_source", verify)
+        request = slides_ep.GenerateFromPromptRequest(prompt="Rowan", provider="llamacpp", theme="black")
+        task = asyncio.create_task(
+            slides_ep._generate_presentation(
+                response=Response(),
+                http_request=_connected_request(),
+                db=SimpleNamespace(client_id="1", create_presentation=lambda **kwargs: writes.append(kwargs)),
+                request=request,
+                source_text=request.prompt,
+                source_type="prompt",
+                source_ref=None,
+                source_query=request.prompt,
+            )
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done() and not exited.is_set()  # nosec B101 - caller still owns the held verification.
+        finally:
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert exited.is_set()  # nosec B101 - verification retires before caller cancellation escapes.
+
+    asyncio.run(exercise())
+    assert writes == []  # nosec B101 - cancelled verification cannot publish a late result.
+
+
+def test_cancelled_slide_generation_waits_for_owned_provider_exit(monkeypatch):
+    """Repeated caller cancellation cannot abandon an unfinished provider or publish its result."""
+    entered, release, exited = threading.Event(), threading.Event(), threading.Event()
+    writes = []
+
+    class HeldGenerator:
+        def generate_from_text(self, **kwargs):
+            entered.set()
+            try:
+                if not release.wait(timeout=2):
+                    raise AssertionError("Test provider release was not delivered")
+                return {"title": "Late", "slides": [{"order": 0, "layout": "title", "content": "Late output"}]}
+            finally:
+                exited.set()
+
+    async def exercise():
+        monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", HeldGenerator)
+        request = slides_ep.GenerateFromPromptRequest(prompt="Rowan", provider="llamacpp", theme="black")
+        task = asyncio.create_task(
+            slides_ep._generate_presentation(
+                response=Response(),
+                http_request=_connected_request(),
+                db=SimpleNamespace(client_id="1", create_presentation=lambda **kwargs: writes.append(kwargs)),
+                request=request,
+                source_text=request.prompt,
+                source_type="prompt",
+                source_ref=None,
+                source_query=request.prompt,
+            )
+        )
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)  # nosec B101 - provider boundary actually entered.
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done() and not exited.is_set()  # nosec B101 - caller still owns held provider.
+        finally:
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert exited.is_set()  # nosec B101 - cancellation propagates only after provider exits.
+
+    asyncio.run(exercise())
+    assert writes == []  # nosec B101 - drained late output is never persisted.
+
+
+@pytest.mark.parametrize(
+    "store_unavailable,expected_status,expected_detail",
+    [
+        (False, 422, "provider_disabled"),
+        (True, 500, "Failed to generate presentation"),
+    ],
+)
+def test_slides_policy_refusal_is_typed_and_does_not_persist(
+    slides_client, monkeypatch, store_unavailable, expected_status, expected_detail
+):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as policy
+    from tldw_Server_API.app.core.Slides import slides_generator
+
+    def snapshot(provider):
+        if store_unavailable:
+            raise policy.LLMProviderOverridesRefreshError()
+        return policy.ProviderOverrideCallSnapshot(
+            provider="llama.cpp", _override=policy.LLMProviderOverride(provider="llama.cpp", is_enabled=False)
+        )
+
+    monkeypatch.setattr(policy, "capture_provider_override_call_snapshot", snapshot)
+    monkeypatch.setattr(slides_generator, "is_test_mode", lambda: False)
+    llm = Mock()
+    monkeypatch.setattr(slides_generator, "perform_chat_api_call", llm)
+    response = slides_client.post(
+        "/api/v1/slides/generate",
+        json={
+            "prompt": "Use only Rowan Observatory source facts.",
+            "provider": "llamacpp",
+            "model": "qwen",
+            "theme": "black",
+        },
+    )
+    assert response.status_code == expected_status  # nosec B101 # Pytest verifies existing policy/service error mapping.
+    assert response.json()["detail"] == expected_detail  # nosec B101 # Pytest checks sanitized API refusal.
+    assert slides_client.get("/api/v1/slides/presentations").json()["total"] == 0  # nosec B101 # Failed policy admission cannot publish a deck.
+    llm.assert_not_called()

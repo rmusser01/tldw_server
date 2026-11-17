@@ -11,7 +11,7 @@ labels:
 - buddy
 - implementation
 dependencies:
-- TASK-12123
+- TASK-15056
 documentation:
 - Docs/superpowers/specs/2026-08-23-persona-ambient-companion-transparent-video-design.md
 - Docs/superpowers/plans/2026-08-23-persona-ambient-companion-stage-1-implementation-plan.md

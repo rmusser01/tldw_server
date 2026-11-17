@@ -13,6 +13,7 @@ import {
   type ChatRequestDebugMetadata
 } from "./chat-request-debug"
 import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
+import { extractStreamingChunkError } from "@/utils/streaming-chunks"
 import type { ServicePromptRequestScope } from "./domains/service-prompts"
 import type { ChatScope } from "@/types/chat-scope"
 import { isRequestConfigScopeChangedError } from "./service-prompt-scope-error"
@@ -87,8 +88,9 @@ const hasReasoningProgress = (chunk: unknown): boolean => {
   )
 }
 
+// The native Chat display withholds typed reasoning; only answer text is visible.
 const hasVisibleAssistantProgress = (chunk: unknown): boolean =>
-  extractTokenFromChunk(chunk).length > 0 || hasReasoningProgress(chunk)
+  extractTokenFromChunk(chunk).length > 0
 
 const readErrorMessage = (error: unknown, fallback = "Aborted"): string => {
   const seen = new Set<unknown>()
@@ -145,11 +147,12 @@ const resolveStreamTimeoutError = (
 }
 
 const sanitizeUserContent = (
-  content: string | ChatCompletionContentPart[]
+  content: string | ChatCompletionContentPart[],
+  preserveTextWhitespace = false
 ): string | ChatCompletionContentPart[] | null => {
   if (typeof content === "string") {
     const trimmed = content.trim()
-    return trimmed.length > 0 ? trimmed : null
+    return trimmed.length > 0 ? content : null
   }
   if (!Array.isArray(content)) return null
 
@@ -157,8 +160,8 @@ const sanitizeUserContent = (
     .map((part) => {
       if (!part || typeof part !== "object") return null
       if (part.type === "text") {
-        const text = typeof part.text === "string" ? part.text.trim() : ""
-        return text.length > 0 ? { type: "text", text } : null
+        const text = typeof part.text === "string" ? part.text : ""
+        return (preserveTextWhitespace ? text.length : text.trim().length) > 0 ? { type: "text", text } : null
       }
       if (part.type === "image_url") {
         const candidate = part.image_url
@@ -177,7 +180,7 @@ const sanitizeUserContent = (
   return cleaned.length > 0 ? cleaned : null
 }
 
-const sanitizeMessages = (messages: ChatMessage[]): ChatMessage[] => {
+const sanitizeMessages = (messages: ChatMessage[], preserveTextWhitespace = false): ChatMessage[] => {
   return messages
     .map((message) => {
       if (message.role === "system") {
@@ -187,7 +190,7 @@ const sanitizeMessages = (messages: ChatMessage[]): ChatMessage[] => {
       }
 
       if (message.role === "user") {
-        const content = sanitizeUserContent(message.content)
+        const content = sanitizeUserContent(message.content, preserveTextWhitespace)
         if (content == null) return null
         return { ...message, content } as ChatMessage
       }
@@ -227,7 +230,9 @@ const buildRequestMessages = (
   messages: ChatMessage[],
   options: TldwChatOptions
 ): ChatMessage[] => {
-  const sanitizedMessages = sanitizeMessages(messages)
+  const savedReplyAction = !options.tldwTurn &&
+    Boolean(options.regenerateFromMessageId || options.continueFromMessageId)
+  const sanitizedMessages = sanitizeMessages(messages, savedReplyAction)
   const systemPrompt = normalizeSystemPrompt(options.systemPrompt)
   let withSystemPrompt: ChatMessage[]
   if (systemPrompt) {
@@ -247,12 +252,14 @@ const buildRequestMessages = (
     withSystemPrompt = sanitizedMessages
   }
 
-  if (options.regenerateFromMessageId) {
-    // Saved regeneration uses canonical server history. Sending the local
+  if (savedReplyAction) {
+    // Saved regeneration and continuation use canonical server history. Sending the local
     // prefix again would turn response variants into new persisted turns.
     const originalUser = withSystemPrompt.at(-1)
     if (originalUser?.role !== "user") {
-      throw new Error("Reload the saved user turn before regenerating its reply.")
+      throw new Error(options.continueFromMessageId
+        ? "Reload the saved user turn before continuing its reply."
+        : "Reload the saved user turn before regenerating its reply.")
     }
     withSystemPrompt = [...withSystemPrompt.filter(message => message.role === "system"), originalUser]
   }
@@ -268,9 +275,10 @@ const buildRequestMessages = (
 export const prepareChatCompletionRequest = (
   messages: ChatMessage[], options: TldwChatOptions, stream = true
 ): ChatCompletionRequest => {
-      // Durable identity owns retries; legacy retry/regeneration flags conflict.
+      // Durable identity cannot be combined with legacy saved-reply actions.
       const retryFailedTurn = !options.tldwTurn && options.retryFailedTurn
       const regenerateFromMessageId = options.tldwTurn ? undefined : options.regenerateFromMessageId
+      const continueFromMessageId = options.tldwTurn ? undefined : options.continueFromMessageId
       const normalizedTools =
         options.toolChoice === "none"
           ? undefined
@@ -302,6 +310,8 @@ export const prepareChatCompletionRequest = (
         top_p: options.topP,
         frequency_penalty: options.frequencyPenalty,
         presence_penalty: options.presencePenalty,
+        topk: options.topK,
+        minp: options.minP,
         reasoning_effort: options.reasoningEffort,
         ...(normalizedTools
           ? {
@@ -310,10 +320,12 @@ export const prepareChatCompletionRequest = (
             }
           : {}),
         save_to_db: options.saveToDb,
-        ...(retryFailedTurn || options.clientMessageId || regenerateFromMessageId ? { metadata: {
+        ...(retryFailedTurn || options.clientMessageId || regenerateFromMessageId ||
+          continueFromMessageId ? { metadata: {
           ...(retryFailedTurn ? { tldw_retry_failed_turn: true } : {}),
           ...(options.clientMessageId ? { tldw_client_message_id: options.clientMessageId } : {}),
-          ...(regenerateFromMessageId ? { tldw_regenerate_from_message_id: regenerateFromMessageId } : {})
+          ...(regenerateFromMessageId ? { tldw_regenerate_from_message_id: regenerateFromMessageId } : {}),
+          ...(continueFromMessageId ? { tldw_continue_from_message_id: continueFromMessageId } : {})
         } } : {}),
         conversation_id: options.conversationId,
         ...(options.tldwTurn ? { tldw_turn: options.tldwTurn } : {}),
@@ -335,7 +347,8 @@ export const prepareChatCompletionRequest = (
 }
 
 export interface TldwChatOptions {
-  preparedRequest?: ChatCompletionRequest
+  onDispatch?: () => void
+  preparedRequest?: Readonly<ChatCompletionRequest>
   model: string
   routing?: ChatCompletionRequest["routing"]
   temperature?: number
@@ -345,6 +358,9 @@ export interface TldwChatOptions {
   topP?: number
   frequencyPenalty?: number
   presencePenalty?: number
+  /** Sent only when the provider accepts it; see ChatTldw (#3283). */
+  topK?: number
+  minP?: number
   stream?: boolean
   systemPrompt?: string
   reasoningEffort?: "low" | "medium" | "high"
@@ -354,6 +370,8 @@ export interface TldwChatOptions {
   retryFailedTurn?: boolean
   clientMessageId?: string
   regenerateFromMessageId?: string
+  /** Native Continue (CM-01): extend this saved reply as a new server-settled alternative. */
+  continueFromMessageId?: string
   conversationId?: string
   tldwTurn?: ChatCompletionRequest["tldw_turn"]
   historyMessageLimit?: number
@@ -382,6 +400,7 @@ export type { ChatCompletionDebugSnapshot }
 export interface ChatStreamChunk {
   tldw_history_admission_v1?: unknown
   tldw_history_result_v1?: unknown
+  additional_kwargs?: { reasoning_content?: string }
   id?: string
   object?: string
   created?: number
@@ -391,6 +410,7 @@ export interface ChatStreamChunk {
     delta: {
       role?: string
       content?: string
+      reasoning_content?: string
       tool_calls?: Array<{
         index?: number
         id?: string
@@ -471,10 +491,22 @@ export class TldwChatService {
   /**
    * Send a streaming chat completion request
    */
+  streamMessage(
+    messages: ChatMessage[],
+    options: TldwChatOptions & { preparedRequest?: undefined; tldwTurn?: undefined },
+    onChunk?: (chunk: ChatStreamChunk) => void | Promise<void>
+  ): AsyncGenerator<string, void, unknown>
+  streamMessage(
+    messages: ChatMessage[],
+    options: TldwChatOptions,
+    onChunk?: (chunk: ChatStreamChunk) => void | Promise<void>,
+    includeReasoning?: boolean
+  ): AsyncGenerator<string | ChatStreamChunk, void, unknown>
   async *streamMessage(
     messages: ChatMessage[],
     options: TldwChatOptions,
-    onChunk?: (chunk: ChatStreamChunk) => void
+    onChunk?: (chunk: ChatStreamChunk) => void | Promise<void>,
+    includeReasoning = false
   ): AsyncGenerator<string | ChatStreamChunk, void, unknown> {
     // Per-call abort controller: concurrent streams must not cancel each other.
     const controller = new AbortController()
@@ -509,6 +541,7 @@ export class TldwChatService {
       const request =
         options.preparedRequest ??
         prepareChatCompletionRequest(messages, options)
+      const selectedDurable = request.tldw_turn?.history_v1 !== undefined
       captureChatRequestDebugSnapshot({
         endpoint: "/api/v1/chat/completions",
         method: "POST",
@@ -533,6 +566,7 @@ export class TldwChatService {
       // at least the startup budget or it cuts off a slow first token (#3107).
       const transportIdleTimeoutMs = Math.max(startupTimeoutMs, streamIdleTimeoutMs)
       const stream = tldwClient.streamChatCompletion(request, {
+        onDispatch: options.onDispatch,
         signal: controller.signal,
         streamIdleTimeoutMs: transportIdleTimeoutMs,
         debugMetadata: options.chatDebugMetadata,
@@ -595,13 +629,18 @@ export class TldwChatService {
 
             // Call the onChunk callback if provided
             if (onChunk) {
-              onChunk(chunk)
+              await onChunk(chunk)
             }
 
+            if ((selectedDurable && extractStreamingChunkError(chunk)) ||
+                (includeReasoning && hasReasoningProgress(chunk))) {
+              yield chunk
+              continue
+            }
             const token = extractTokenFromChunk(chunk)
             if (token) {
               yield token
-            } else if (request.tldw_turn?.history_v1 &&
+            } else if (selectedDurable &&
                 (chunk?.tldw_history_admission_v1 !== undefined || chunk?.tldw_history_result_v1 !== undefined)) {
               yield chunk
             }

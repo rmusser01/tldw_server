@@ -1,5 +1,6 @@
 import React from "react"
 import { useLocation, useNavigate } from "react-router-dom"
+import { captureChatDraftSource, confirmTemporaryChatDiscard } from "./chat-draft-transition"
 import { Modal } from "antd"
 import { shallow } from "zustand/shallow"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -16,6 +17,7 @@ import { updatePageTitle } from "@/utils/update-page-title"
 import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent"
 import { generateWorkspaceId, useWorkspaceStore } from "@/store/workspace"
 import { CHAT_WORKSPACE_PATH, RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
+import { planServerChatNavigation } from "@/hooks/chat/server-chat-route"
 
 type UseClearChatOptions = {
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>
@@ -38,6 +40,8 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const historySelection = useHistorySelectionContext()
+  const resetHistorySelection = historySelection?.reset
+  const captureSelectionFence = historySelection?.fence
   const currentChatModelSettings = useStoreChatModelSettings()
   const [defaultInternetSearchOn] = useStorage("defaultInternetSearchOn", false)
 
@@ -95,25 +99,35 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     shallow
   )
 
-  return React.useCallback(() => {
+  return React.useCallback((options?: { discardTemporaryConfirmed: true } | React.SyntheticEvent) => {
+    const source = captureChatDraftSource(captureSelectionFence?.())
     const destination = resolveClearChatPath()
     const workspace = pathname === CHAT_WORKSPACE_PATH || pathname === RESEARCH_WORKSPACE_PATH
       ? useWorkspaceStore.getState() : null
     const workspaceId = workspace?.workspaceId
     const referenceId = workspace?.workspaceChatReferenceId
-    if (!requestSettingsNavigation(destination)) return false
+    if (!requestSettingsNavigation(destination) || !source.isCurrent()) return false
+    const confirmed = options &&
+      "discardTemporaryConfirmed" in options &&
+      options.discardTemporaryConfirmed === true
+    if (!confirmed && !confirmTemporaryChatDiscard()) return false
+    if (!source.isCurrent()) return false
+    useStoreMessageOption.getState().startNewChatDraft()
+    resetHistorySelection?.()
     const current = useStoreMessageOption.getState()
     dispatchChatRouteReplacement({
       serverChatId: current.serverChatId,
       historyId: current.historyId,
       restoreRevision: usePlaygroundSessionStore.getState().restoreRevision
     })
-    historySelection?.reset()
     if (typeof window !== "undefined") {
       Modal.destroyAll()
       cleanupAntOverlays()
     }
-    navigate(destination)
+    // New chat is a navigation of its own: Back returns to the chat it left (#3119).
+    const target = destination === "/chat" ? planServerChatNavigation(null) : { to: destination, replace: false }
+    if (target.replace) navigate(target.to, { replace: true })
+    else navigate(target.to)
     if (workspaceId && referenceId) {
       useWorkspaceStore.setState(state => state.workspaceId === workspaceId && state.workspaceChatReferenceId === referenceId
         ? { workspaceChatReferenceId: generateWorkspaceId() } : state)
@@ -133,7 +147,7 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     setServerChatVersion(null)
     setContextFiles([])
     updatePageTitle()
-    currentChatModelSettings.reset()
+    currentChatModelSettings.reset(useStoreChatModelSettings.getState().apiProvider)
     if (defaultInternetSearchOn) {
       setWebSearch(true)
     }
@@ -165,11 +179,12 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   }, [
     clearQueuedMessages,
     clearReplyTarget,
+    captureSelectionFence,
     currentChatModelSettings,
     defaultInternetSearchOn,
-    historySelection,
     navigate,
     pathname,
+    resetHistorySelection,
     resolveClearChatPath,
     setActionInfo,
     setCompareMode,

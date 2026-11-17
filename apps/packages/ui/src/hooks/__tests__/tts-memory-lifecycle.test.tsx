@@ -184,3 +184,31 @@ it('owns external segments and revokes late updates after unmount', () => {
   act(() => hook.result.current.setSegments([{ id: 'late', index: 0, text: 'Late', url: late }]))
   expect(probe.allocated.size).toBe(0)
 })
+
+
+it('B04 cancellation aborts pending synthesis and preserves a legitimate retry against late output', async () => {
+  let finish!: (value: SynthesizedAudio) => void
+  let signal!: AbortSignal
+  probe.synthesize.mockImplementationOnce((_text: string, options: { signal: AbortSignal }) => {
+    signal = options.signal
+    return new Promise<SynthesizedAudio>(resolve => { finish = resolve })
+  })
+  const hook = renderHook(() => useTtsPlayground())
+  let pending!: ReturnType<ReturnType<typeof useTtsPlayground>['generateSegments']>
+  await act(async () => {
+    pending = hook.result.current.generateSegments('Cancelled speech.')
+    await Promise.resolve()
+  })
+  expect(hook.result.current.isGenerating).toBe(true)
+  act(() => hook.result.current.clearSegments())
+  expect(signal.aborted).toBe(true)
+  expect(hook.result.current.isGenerating).toBe(false)
+  await act(async () => { await hook.result.current.generateSegments('Legitimate retry.') })
+  const retryUrl = hook.result.current.segments[0].url
+  await act(async () => {
+    finish({ buffer: new Uint8Array([4, 5, 6]).buffer, mimeType: 'audio/mpeg', format: 'mp3' })
+    await pending
+  })
+  expect(hook.result.current.segments).toEqual([expect.objectContaining({ text: 'Legitimate retry.', url: retryUrl })])
+  expect(probe.allocated.size).toBe(1)
+})

@@ -114,6 +114,7 @@ export const useCanonicalConnectionConfig = (): {
 
   const [config, setConfig] = React.useState<TldwConfig | null>(null)
   const [loading, setLoading] = React.useState(true)
+  const [revision, setRevision] = React.useState(0)
   const [resolvedAuthority, setResolvedAuthority] = React.useState<{
     config: TldwConfig
     fallbackConfig: TldwConfig
@@ -140,6 +141,13 @@ export const useCanonicalConnectionConfig = (): {
       connectionAuthoritiesMatch(next, resolvedAuthority.config)
   }
   const authorityLoading = !resolvedAuthority || (!sameInputs && !authorityPreserved)
+
+  React.useEffect(() => {
+    if (loading || resolvedAuthority || typeof window === "undefined") return
+    const retryUnresolvedConfig = () => setRevision((current) => current + 1)
+    window.addEventListener("tldw:config-updated", retryUnresolvedConfig)
+    return () => window.removeEventListener("tldw:config-updated", retryUnresolvedConfig)
+  }, [loading, resolvedAuthority])
 
   React.useEffect(() => {
     let cancelled = false
@@ -172,7 +180,7 @@ export const useCanonicalConnectionConfig = (): {
     return () => {
       cancelled = true
     }
-  }, [fallbackConfig, refreshRotation, storedConfig])
+  }, [fallbackConfig, refreshRotation, storedConfig, revision])
 
   return { config, loading, authorityLoading }
 }

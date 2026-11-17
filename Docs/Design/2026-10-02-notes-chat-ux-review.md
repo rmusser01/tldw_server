@@ -155,7 +155,7 @@ Next in line: XP-02 (Save to Notes missing on most server chats, S), NL-03 (bulk
 ### 2.5 Verification
 
 - Every candidate issue was **re-checked adversarially**, live in the running stack, in code, or both. Claims that didn't hold were narrowed or dropped. Where verification changed a severity or a claim, the section entry says so.
-- Every issue at **severity 3 or higher** was re-checked by an **independent skeptic** who tried to refute it. Disagreements were settled by a tiebreak review.
+- Most issues at **severity 3 or higher** were re-checked by an **independent skeptic** who tried to refute them. CM-N1, CS-N2, NS-N1, CC-N1 and CS-N1 remain severity-3, single-verifier findings in this report and its JSON. Disagreements in independently reviewed findings were settled by a tiebreak review.
 - No finding was rejected outright (Appendix A). Several were narrowed. For example, the "unnamed in-bubble Stop" claim (CM-02, AX-13) and the "failures announced as status" claim (AX-13) were refuted and dropped from the write-ups, and seven Notes severities were adjusted (shown, for example, as "2 (from 3)" in §5).
 
 ### 2.6 Severity, priority and effort
@@ -1674,7 +1674,7 @@ Chrome's default side panel is about 320-360px wide. Several reports were captur
 | ID | Issue | Sev | Effort | Recommendation |
 |---|---|---|---|---|
 | XP-07 | The shortcut sheets contradict actual behaviour. "?" opens the page navigator, because `Layout.tsx:276-301` handles it before Notes can. Ctrl+B toggles the global sidebar mid-typing instead of making text bold; Notes has no Mod+B/I handler. Ctrl+K is documented as "focus notes search" but opens the palette. The WebUI sheet lists Ctrl+E and Alt+W, which exist only in the side panel. The navigator shows ⌘1-9 while the header sheet shows Alt+1-7. Lowered from 3: toolbar buttons are a workaround. | 2 | M | Short term: set `ignoreIfEditable` on `toggleSidebar`, add Mod+B/I to the Notes textarea, let a route register its own "?" help, and remove or wire the undocumented keys. Medium term: one scoped shortcut registry that generates the sheets, plus a test that every documented shortcut has a handler. |
-| XP-10 | The Alt+1…0 area shortcuts never fire from /chat. The composer is autofocused and `ignoreIfEditable` skips the shortcut (`hooks/keyboard/useKeyboardShortcuts.ts:63-73, 150`). Matching on `event.key` probably also breaks Option+digit on macOS (plausible; a headless browser cannot reproduce Mac keyboard layouts). | 2 | S | Match on `event.code` (`Digit5`, `KeyN`) and fall back to `event.key`. Allow Alt/Meta+digit chords inside editable fields. Show ⌥ on macOS. Add a unit test with `{key:'∞', code:'Digit5', altKey:true}`. |
+| XP-10 | The Alt+1…0 area shortcuts never fire from /chat. The composer is autofocused and `ignoreIfEditable` skips the shortcut (`hooks/keyboard/useKeyboardShortcuts.ts:63-73, 150`). Matching on `event.key` probably also breaks Option+digit on macOS (plausible; a headless browser cannot reproduce Mac keyboard layouts). | 2 | S | Match on `event.code` (`Digit5`, `KeyN`) and fall back to `event.key`. Allow Alt/Meta+digit chords inside editable fields only when the chord types no character there. On macOS an Option chord does type one (US Option+5 is "∞", German Option+5 is "["), so in a text field it must type it and the shortcut fires only outside text fields; Windows and Linux Alt+digit types nothing and may fire from the composer. *(Corrected after Wave 3; the first version said Alt/Meta+digit never types wanted text.)* Show ⌥ on macOS. Add unit tests with `{key:'∞', code:'Digit5', altKey:true}`: it fires outside a text field and types "∞" inside one. |
 
 #### 7.2.5 Visual system, copy, consistency and performance (severity ≤ 2)
 
@@ -2033,7 +2033,7 @@ Five shared rules hold the loop together:
 - **Sketch:**
   - ⌘K / Ctrl+K with an empty query shows Recent: the last 8 notes and chats mixed, with type icons and relative dates.
   - Typing searches, in parallel, note titles and bodies, chat titles and messages, prompts (server and local), characters and models. Results appear in grouped sections and are fully keyboard-operable.
-  - Enter opens the item's URL (N4) and ⌘Enter opens it in a new tab. Tab cycles a type filter.
+  - Enter opens the item's URL (N4). Cmd/Ctrl+Enter opens it beside the current page (Notes Dock now; chat split view after S4); Shift+Enter opens a new browser tab (D11). Tab cycles a type filter.
   - A `>` prefix shows today's commands and `@` shows entities. The last row offers 'Create note "&lt;query&gt;"' and 'New chat about "&lt;query&gt;"'.
   - ⌘P is an alias that opens pre-filtered to notes and chats.
   - The shortcut sheet describes ⌘K as "Search everything".
@@ -2087,7 +2087,7 @@ Five shared rules hold the loop together:
 - **Sketch:**
   - Row 1: [textarea] [**Send** (filled primary)].
   - Row 2: [+ Attach ▾ (Image, Document, From knowledge)] [Knowledge] [Web] [Model: mock-gpt-4o ▾] … [⋯ More: Compare models, Character, Tools, Response style, System prompt, Voice, Interactive answer]. Hovering the model chip shows the token estimate.
-  - Casual is this layout. Pro adds the full toolbar, the right panel and a token chip. The choice is remembered per user.
+  - Casual is this layout. Pro adds a persistent right panel that absorbs the cockpit rails, without adding toolbar buttons (D9). The choice is remembered per user.
   - The side panel uses the same composer and the same placeholder.
 
 **N13 · Mobile composer as a bottom sheet** (IDEA-12)

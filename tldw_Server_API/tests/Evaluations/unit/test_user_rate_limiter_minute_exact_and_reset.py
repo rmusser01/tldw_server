@@ -12,8 +12,8 @@ from tldw_Server_API.app.core.Evaluations import user_rate_limiter as evals_rl
 
 
 @pytest.mark.unit
-def test_custom_tier_enforces_cost_only(tmp_path, monkeypatch):
-    """Phase 2: CUSTOM tier skips minute/daily checks; only cost caps enforced."""
+def test_custom_tier_skips_minute_checks(tmp_path, monkeypatch):
+    """Phase 2: CUSTOM tier skips the minute checks (the local daily caps still apply)."""
     db_path = tmp_path / "evals_rate_limit.db"
     limiter = UserRateLimiter(db_path=str(db_path))
     monkeypatch.setattr(evals_rl, "_EVALS_DEPRECATION_WARNED", False)
@@ -31,8 +31,6 @@ def test_custom_tier_enforces_cost_only(tmp_path, monkeypatch):
                 "evaluations_per_day": 100,
                 "total_tokens_per_day": 100000,
                 "burst_size": 0,
-                "max_cost_per_day": 10.0,
-                "max_cost_per_month": 100.0,
             },
         )
 
@@ -49,10 +47,9 @@ def test_custom_tier_enforces_cost_only(tmp_path, monkeypatch):
                     endpoint=endpoint,
                     is_batch=False,
                     tokens_requested=0,
-                    estimated_cost=0.0,
                 )
                 assert ok is True
-                assert meta.get("rate_limit_source") == "legacy_cost_only"
+                assert meta.get("rate_limit_source") == "legacy_local"
                 assert meta.get("tier") == "custom"
 
             deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]

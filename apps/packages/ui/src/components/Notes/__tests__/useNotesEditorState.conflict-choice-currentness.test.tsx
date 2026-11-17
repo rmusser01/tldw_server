@@ -99,7 +99,13 @@ const conflict = async (view: EditorView) => {
 }
 const delayVersionRead = () => {
   const gate = deferred<Note>()
-  mocks.request.mockImplementationOnce(() => gate.promise)
+  mocks.request.mockImplementation((request: Request) => {
+    if (request.method === 'GET' && request.path.endsWith('/one')) {
+      mocks.request.mockImplementation(respond)
+      return gate.promise
+    }
+    return respond(request)
+  })
   return gate
 }
 
@@ -113,7 +119,7 @@ describe('Notes conflict choices retain their captured owner and edit', () => {
       notes.set(id, { id, title: `Note ${id}`, content: `${id} body`, version,
         last_modified: '2026-10-07T04:00:00Z', metadata: { keywords: [] } })
     }
-    mocks.request.mockImplementation(respond)
+    mocks.request.mockReset().mockImplementation(respond)
     mocks.refetch.mockResolvedValue(undefined)
     mocks.confirmDanger.mockResolvedValue(true)
     Object.defineProperty(navigator, 'clipboard', {
@@ -182,7 +188,8 @@ describe('Notes conflict choices retain their captured owner and edit', () => {
     await conflict(view)
     const version = delayVersionRead()
     let keeping!: Promise<boolean>
-    act(() => { keeping = view.result.current.keepMyVersion() })
+    await act(async () => { keeping = view.result.current.keepMyVersion() })
+    expect(requests('GET')).toHaveLength(1)
     await open(view, 'other')
     edit(view, 'Other note draft')
     let accepted!: boolean
@@ -199,7 +206,8 @@ describe('Notes conflict choices retain their captured owner and edit', () => {
     await conflict(view)
     const version = delayVersionRead()
     let keeping!: Promise<boolean>
-    act(() => { keeping = view.result.current.keepMyVersion() })
+    await act(async () => { keeping = view.result.current.keepMyVersion() })
+    expect(requests('GET')).toHaveLength(1)
     await open(view, 'other')
     await open(view, 'one')
     edit(view, 'Later draft for the same note')
@@ -216,7 +224,8 @@ describe('Notes conflict choices retain their captured owner and edit', () => {
     await conflict(view)
     const version = delayVersionRead()
     let keeping!: Promise<boolean>
-    act(() => { keeping = view.result.current.keepMyVersion() })
+    await act(async () => { keeping = view.result.current.keepMyVersion() })
+    expect(requests('GET')).toHaveLength(1)
     edit(view, 'Newer unapproved draft')
     let accepted!: boolean
     await act(async () => { version.resolve({ ...notes.get('one')! }); accepted = await keeping })
@@ -232,7 +241,8 @@ describe('Notes conflict choices retain their captured owner and edit', () => {
     const gate = choice === 'take' ? deferred<void>() : delayVersionRead()
     if (choice === 'take') vi.mocked(navigator.clipboard.writeText).mockImplementationOnce(() => gate.promise as Promise<void>)
     let choosing!: Promise<boolean>
-    act(() => { choosing = choice === 'take' ? view.result.current.takeTheirVersion() : view.result.current.keepMyVersion() })
+    await act(async () => { choosing = choice === 'take' ? view.result.current.takeTheirVersion() : view.result.current.keepMyVersion() })
+    expect(requests('GET')).toHaveLength(choice === 'keep' ? 1 : 0)
     view.rerender({ authorityScope: createNotesGraphAuthorityScope(SERVER_URL, 8) })
     const readsBefore = requests('GET').length
     let accepted!: boolean
@@ -250,7 +260,8 @@ describe('Notes conflict choices retain their captured owner and edit', () => {
     const gate = choice === 'take' ? deferred<void>() : delayVersionRead()
     if (choice === 'take') vi.mocked(navigator.clipboard.writeText).mockImplementationOnce(() => gate.promise as Promise<void>)
     let choosing!: Promise<boolean>
-    act(() => { choosing = choice === 'take' ? view.result.current.takeTheirVersion() : view.result.current.keepMyVersion() })
+    await act(async () => { choosing = choice === 'take' ? view.result.current.takeTheirVersion() : view.result.current.keepMyVersion() })
+    expect(requests('GET')).toHaveLength(choice === 'keep' ? 1 : 0)
     view.unmount()
     const readsBefore = requests('GET').length
     let accepted!: boolean

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -477,7 +478,8 @@ class McpHubRepo:
         if result is None:
             return False
         if isinstance(result, str):
-            return result.upper().startswith(("UPDATE ", "DELETE ", "INSERT "))
+            match = re.fullmatch(r"(?:(?:UPDATE|DELETE) |INSERT [0-9]+ )([0-9]+)", result.upper())
+            return bool(match and int(match[1]) > 0)
         rowcount = getattr(result, "rowcount", None)
         if isinstance(rowcount, int):
             return rowcount > 0
@@ -2201,8 +2203,8 @@ class McpHubRepo:
             SELECT id, name, description, owner_scope_type, owner_scope_id, is_active,
                    created_by, updated_by, created_at, updated_at
             FROM mcp_workspace_set_objects
-            WHERE (? IS NULL OR owner_scope_type = ?)
-              AND (? IS NULL OR owner_scope_id = ?)
+            WHERE (CAST(? AS TEXT) IS NULL OR owner_scope_type = ?)
+              AND (CAST(? AS INTEGER) IS NULL OR owner_scope_id = ?)
             ORDER BY name, id
             """,
             (
@@ -2367,9 +2369,9 @@ class McpHubRepo:
             SELECT id, workspace_id, display_name, absolute_root, owner_scope_type, owner_scope_id, is_active,
                    created_by, updated_by, created_at, updated_at
             FROM mcp_shared_workspaces
-            WHERE (? IS NULL OR owner_scope_type = ?)
-              AND (? IS NULL OR owner_scope_id = ?)
-              AND (? IS NULL OR workspace_id = ?)
+            WHERE (CAST(? AS TEXT) IS NULL OR owner_scope_type = ?)
+              AND (CAST(? AS INTEGER) IS NULL OR owner_scope_id = ?)
+              AND (CAST(? AS TEXT) IS NULL OR workspace_id = ?)
             ORDER BY owner_scope_type, owner_scope_id, workspace_id, id
             """,
             (
@@ -3553,7 +3555,15 @@ class McpHubRepo:
                 legacy_source_ref = excluded.legacy_source_ref,
                 superseded_by_server_id = excluded.superseded_by_server_id,
                 updated_by = excluded.updated_by,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                last_error_category = CASE WHEN
+                    COALESCE(mcp_external_servers.enabled, FALSE) <> excluded.enabled OR
+                    mcp_external_servers.transport <> excluded.transport OR
+                    mcp_external_servers.config_json <> excluded.config_json OR
+                    mcp_external_servers.server_source <> excluded.server_source OR
+                    COALESCE(mcp_external_servers.superseded_by_server_id, '') <>
+                        COALESCE(excluded.superseded_by_server_id, '')
+                    THEN 'config_changed' ELSE mcp_external_servers.last_error_category END
             """,
             (
                 server_id.strip(),
@@ -3621,7 +3631,12 @@ class McpHubRepo:
                 legacy_source_ref = COALESCE(?, legacy_source_ref),
                 superseded_by_server_id = COALESCE(?, superseded_by_server_id),
                 updated_by = ?,
-                updated_at = ?
+                updated_at = ?,
+                last_error_category = CASE WHEN
+                    COALESCE(enabled, FALSE) <> ? OR transport <> ? OR config_json <> ? OR
+                    server_source <> COALESCE(?, server_source) OR
+                    COALESCE(superseded_by_server_id, '') <> COALESCE(?, superseded_by_server_id, '')
+                    THEN 'config_changed' ELSE last_error_category END
             WHERE id = ?
             """,
             (
@@ -3636,13 +3651,37 @@ class McpHubRepo:
                 next_superseded_by,
                 actor_id,
                 ts,
+                enabled_value,
+                transport.strip(),
+                config_json,
+                next_source,
+                next_superseded_by,
                 server_id.strip(),
             ),
         )
-        rowcount = getattr(cursor, "rowcount", 0)
-        if not (rowcount and rowcount > 0):
+        if not self._command_touched_rows(cursor):
             return None
         return await self.get_external_server(server_id)
+
+    async def record_external_server_discovery(
+        self, server_id: str, *, expected_updated_at: datetime | str, failed: bool
+    ) -> bool:
+        """Publish an outcome only for the configuration that was actually refreshed."""
+        now = datetime.now(timezone.utc)
+        ts = now if getattr(self.db_pool, "pool", None) is not None else now.isoformat()
+        result = await self.db_pool.execute(
+            """
+            UPDATE mcp_external_servers
+            SET last_discovery_at = ?,
+                last_successful_discovery_at = CASE WHEN ? THEN last_successful_discovery_at ELSE ? END,
+                last_error_category = ?
+            WHERE id = ? AND updated_at = ?
+            """,
+            (ts, failed, ts, "discovery_failed" if failed else None, server_id, expected_updated_at),
+        )
+        if isinstance(result, str):
+            return result == "UPDATE 1"
+        return getattr(result, "rowcount", 0) == 1
 
     async def get_external_server(self, server_id: str) -> dict[str, Any] | None:
         row = await self.db_pool.fetchone(
@@ -3661,6 +3700,9 @@ class McpHubRepo:
                    s.updated_by,
                    s.created_at,
                    s.updated_at,
+                   s.last_discovery_at,
+                   s.last_successful_discovery_at,
+                   s.last_error_category,
                    CASE
                      WHEN EXISTS (
                        SELECT 1 FROM mcp_external_server_secrets sec WHERE sec.server_id = s.id
@@ -3730,6 +3772,9 @@ class McpHubRepo:
                    s.updated_by,
                    s.created_at,
                    s.updated_at,
+                   s.last_discovery_at,
+                   s.last_successful_discovery_at,
+                   s.last_error_category,
                    CASE
                      WHEN EXISTS (
                        SELECT 1 FROM mcp_external_server_secrets sec WHERE sec.server_id = s.id
@@ -3763,8 +3808,8 @@ class McpHubRepo:
                        )
                    ) AS key_hint
             FROM mcp_external_servers s
-            WHERE (? IS NULL OR s.owner_scope_type = ?)
-              AND (? IS NULL OR s.owner_scope_id = ?)
+            WHERE (CAST(? AS TEXT) IS NULL OR s.owner_scope_type = ?)
+              AND (CAST(? AS INTEGER) IS NULL OR s.owner_scope_id = ?)
             ORDER BY s.name, s.id
             """,
             (
@@ -3784,8 +3829,7 @@ class McpHubRepo:
             "DELETE FROM mcp_external_servers WHERE id = ?",
             (server_id.strip(),),
         )
-        rowcount = getattr(cursor, "rowcount", 0)
-        return bool(rowcount and rowcount > 0)
+        return self._command_touched_rows(cursor)
 
     async def upsert_external_secret(
         self,

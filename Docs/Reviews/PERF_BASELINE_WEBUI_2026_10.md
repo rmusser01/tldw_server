@@ -323,3 +323,881 @@ document, produced with the exact commands in "How to re-run", quoting deltas
 against the tables above; the PENDING-MANUAL rows are filled in by their
 consuming batches (M1/M2 → W4, M3 → W5). This file is the program's single
 accumulating record — do not fork it per batch.
+
+## Batch W1 (TASK-13521) — 2026-10-15
+
+Appended per the change protocol above. Every number in this section comes
+from an actual re-run at the W1 branch HEAD (no transcription from earlier
+stage reports — the precedence rule applied to this batch too). The frozen
+W0 tables above are untouched and remain the program baseline.
+
+- Branch / HEAD: `codex/webui-perf-w1-chat-streaming` @ `07427bd044`
+  (base: dev merge `3b68f2dbc2`, which includes the W0 harness)
+- Backlog task: TASK-13521
+- Run date: 2026-10-15 (e2e report timestamp); all commands from
+  "How to re-run every number in this document"
+
+### Family A re-run — and a binding drift note on the frozen 502 figure
+
+Re-run of `streaming-render.bench.test.ts` at HEAD:
+
+| Metric | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| seedMessages | 200 | 200 | 200 |
+| chunksStreamed | 500 | 500 | 500 |
+| storeSubscriberNotifications | 3 | 3 | 3 |
+| messageUpdateNotifications | 2 | 2 | 2 |
+| transcriptArrayMapClones | 1 | 1 | 1 |
+| streamPhaseMs | 5.19 | 5.17 | 4.09 |
+| msPerChunk | 0.0104 | 0.0103 | 0.0082 |
+| finalAssistantChars | 4890 | 4890 | 4890 |
+
+**Drift attribution (binding).** The frozen Family A figure of 502 store
+notifications / 501 message updates / 501 map clones was **stale already at
+W1's branch point**. Interim dev work on the same files (the TASK-13511
+frontend-perf-arch lineage, merged into dev via PR #3210 before W1 branched)
+had already added 80 ms streaming coalescing to the sidepanel path:
+`STREAMING_UPDATE_INTERVAL_MS = 80` in `useChatActions.ts` and
+`useCharacterChatMode.ts`, plus a `streamingScheduler` in `useMessage.tsx`
+(verified in the tree at merge base `3b68f2dbc2`). At the branch point this
+bench already read ~3 store notifications / 2 map clones — not 502/501.
+
+**W1 Stage 1's own delta** (commit `52809b6571`; attribution verified
+both-sides against the diff in stage review): transcript-array map clones
+2 → 1, with per-token (and per-flush) clones 0 — the single surviving clone
+is the once-per-stream final-text commit, reached via a last-index slice
+replacement instead of a full-transcript `.map`. Stage 1 also unified the
+inline throttles into the shared `streamingThrottle` helper adopted across
+all three chat paths (`useMessage.tsx` ×4 scheduler sites,
+`useChatActions.ts`, `useCharacterChatMode.ts`). Store notifications were
+3 → 3 across the stage — the 502→~3 notification drop predates W1 entirely.
+
+### Family B re-run at HEAD (canned 100-chunk sidepanel stream)
+
+`bunx playwright test tests/e2e/performance-streaming.spec.ts` — 3 runs:
+
+| Run | chunksServed | chunksApplied | storeSubscriberNotifications | messageUpdateNotifications | domMutations | longTasks | ttftMs | streamPhaseMs | msPerChunk | minChunkGapMs | maxChunkGapMs | domNodeCount |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 100 | 15 | 19 | 16 | 49 | 0 | 138.7 | 1196.8 | 79.79 | 55.9 | 123.5 | 196 |
+| 2 | 100 | 15 | 19 | 16 | 51 | 0 | 145.0 | 1180.0 | 78.67 | 44.0 | 110.6 | 196 |
+| 3 | 100 | 15 | 19 | 16 | 49 | 0 | 231.5 | 1232.4 | 82.16 | 75.5 | 152.7 | 196 |
+
+(`msPerChunk` is per APPLIED chunk, per the label-ambiguity note in Family B
+above.)
+
+Comparison against the frozen Family B table:
+
+- Count metrics are **identical** (100/15/19/16): the coalescing visible in
+  the packaged sidepanel path predates W1 (it was already observable at W0
+  baseline capture, per the baseline's own `chunksApplied` note), and W1 did
+  not change the throttle cadence on this path.
+- `domMutations` is the one metric that moved: **77–83 → 49–51** (~40% fewer
+  mutation records inside the stream window), consistent with Stage 2's
+  isStreaming last-row narrowing plus row memoization (unchanged rows no
+  longer re-render per flush). Recorded as an observation — the unit suites,
+  not this e2e, pin the render-count mechanics.
+- `longTasks`: **0 in every baseline run and 0 in every HEAD run.**
+
+**Stage 3's deferred success criterion, evaluated here (honest ruling).**
+Stage 3 deferred its "long-task count ≥ 50% drop vs baseline during
+streaming" criterion to this re-run. Verdict: **not-discriminating (0 → 0)**
+— the canned stream at this transcript size produced zero main-thread long
+tasks (> 50 ms) both before virtualization (frozen baseline, all 3 runs) and
+at HEAD (all 3 runs). Per the batch-final ruling this is recorded as
+not-discriminating rather than claimed as a pass. The virtualization work's
+effect is instead pinned by unit window assertions: 1,000-message ChatPane
+and 1,000-block PlaygroundChat transcripts render bounded windows (< 60
+shells) in `ChatPane.virtualization.test.tsx` and
+`VirtualChatTimeline.window.test.tsx`.
+
+### Per-stage attribution (what THIS branch landed vs pre-landed interim work)
+
+| Stage | Commit | Landed by W1 | Already at branch point (TASK-13511 lineage) |
+|---|---|---|---|
+| Task 0 | `c8c12161cb` | Extracted shared sidepanel mock-server helper for extension e2e specs (test-only; enables perf-spec reuse; no perf delta) | — |
+| Stage 1 (WP-01) | `52809b6571` | Map clones 2 → 1 (per-token clones 0; survivor = once-per-stream final commit); unified `streamingThrottle` helper across all three chat paths (3 adoption sites + 4 scheduler sites in useMessage) | The 80 ms coalescing itself (502 → ~3 notifications, clones 501 → 2) |
+| Stage 2 (WP-02/03/09) | `6747b1da64` | isStreaming narrowed to last row (both parents); highlightText memo; mount-time handler-cache guard fix | React.memo + comparator, per-row stable callbacks, EMPTY_IMAGES, previousUserMessageByIndex map (`dfa4dcc014`) |
+| Stage 3 (WP-03/04/07) | `9d73e06724` | ChatPane virtualization (> 100-row gate) + stableMessageId + per-message retrieval-diagnostics cache; SharedWorkspaceChatPane K=200 render cap + window reveal | PlaygroundChat virtualization (VirtualChatTimeline, already on dev; pinned by new window tests) |
+| Stage 4 (WP-05/06/08/10/11) | `4899049c07` | KnowledgeQA 250 ms query debounce + submit-flush; CharacterSelect derived-boolean selectors (both variants); LayoutShellContext value memo; ResultsList memoized row; PlaygroundChat O(1) prev-user lookup | body.tsx previousUserMessageByIndex O(1) map (pre-existing) |
+| Stage 5 (WP-13/14) | `07427bd044` | Trust-panel derivation memos + Set-deduped `textToStringList` (research.tsx); WP-13 no-change dispositions verified + review-signed-off | — |
+
+### Documented gaps (honest)
+
+- **(a) No web-e2e scroll-through DOM-bound spec exists.** There is no web
+  playground e2e infra in-repo (extension perf specs are sidepanel-only), so
+  transcript virtualization on the web panes is covered by unit window
+  assertions in both panes, not by a DOM-bound e2e.
+- **(b) SharedWorkspaceChatPane virtualization deferred** per the cap-first
+  ruling: the K=200 newest-message render cap bounds markdown shells to the
+  virtualized panes' worst-case expanded window; evidence and the revisit
+  trigger (profile markdown cost under the cap) are documented in-component.
+- **(c) KnowledgeQA full state/actions context split deferred** (15 consumer
+  files exceed the split threshold); the query debounce + submit-flush
+  landed.
+- **(d) WP-13 no-change dispositions** (ChatWorkflowsPage composite
+  `role-step_index-index` key with load-bearing index suffix;
+  VNScriptsWorkbench static-order id-less primitive lists) — verified and
+  signed off in Stage 5 review; recorded here for whole-branch visibility.
+- **(e) WP-12 (flashcards) deferred** per the program index; no W1 change.
+
+### Other verification at HEAD (2026-10-15)
+
+- Family C1 workspace-persist bench: green, **bit-identical** to the frozen
+  baseline — 31 stringify calls / 2,451,167 B / 2 setItem calls / 121,470 B
+  across 3 runs (durations 12.94 / 13.61 / 13.08 ms). W1 touched no
+  persistence code (that is W2's scope).
+- Family C2 history bench: not run — W2's bench per the program split.
+- Family D `bun run build:prod` at HEAD: `[bundle-budget] shared _app:
+  596.1 KB gzip (budget 600.0 KB, 35 files)`; `heaviest route:
+  /__debug__/mermaid-chat-cards 875.8 KB gzip`; `[bundle-budget] ok`. Versus
+  the frozen baseline: shared shell +2.7 KB (34 → 35 files, still inside
+  budget — headroom now 3.9 KB), heaviest route −21.4 KB. Budget gate PASS;
+  no budget raise performed.
+- tsc: `apps/tldw-frontend` `tsc --noEmit` → 0 errors; `apps/packages/ui`
+  scoped `tsc --noEmit` (8 GB heap) → 400 errors, the identical pre-existing
+  set carried since Stage 1, with 0 errors in W1-touched files.
+
+## Batch W2 (TASK-13522) — 2026-10-16
+
+Persistence write-path batch: request-history sidecar (WP-15), workspace
+persist chain (WP-16), ModelDb storage hygiene (WP-17/WP-61), legacy
+`chrome.storage` blob-DB quarantine (WP-18), background session-state +
+settings registry (WP-19/WP-20/WP-22), deep-clone cleanup (WP-21). Branch
+`codex/webui-perf-w2-persistence`, range `3b68f2dbc2..aaf09f42ef`
+(14 commits). All numbers below are from actual re-runs of the frozen
+Family C benches at HEAD `aaf09f42ef` on 2026-10-14 (same machine and
+environment as the frozen tables; the frozen tables above are untouched).
+Note: W1's appended section is not present in this branch's copy of the
+file — the branch base (`3b68f2dbc2`) predates it and W1 owns its own
+append; nothing of W1's was modified here.
+Coverage note (final-review round 1, 2026-10-16): the branch tip is now
+`3c699d4814` — 16 commits. The 14-commit range above already includes the
+Stage 2 backlog-note commits `fa77a7f56b` and `d1b91870b7`;
+`55845325a3` (this delta append) and `3c699d4814` (import-suite test fix,
+review round 2) extend it — all four are docs/test/backlog-only and change
+no measured surface, so the attribution tables and HEAD-`aaf09f42ef` bench
+numbers above remain the record for the perf range.
+
+### Family C2 — request history (WP-15, commit `3958f1e8d3`)
+
+**Like-for-like metrics (the binding framing for this family):**
+
+| Metric | Baseline (frozen) | W2 @ HEAD |
+|---|---|---|
+| setItem calls attempted per run | 50 | **1** |
+| setItem calls landed | 48 | 1 |
+| setItem quota errors | 2 | **0** |
+| Amplification vs final history | 26.54× | **1.0×** |
+| final history entries | 48 | 50 |
+| durationMs (informational) | ~97–174 | 2.79–4.84 |
+
+**Byte totals (quoted alongside, with the conflation caveat):**
+
+| Metric | Baseline (frozen) | W2 @ HEAD |
+|---|---|---|
+| setItem bytes attempted | 130,757,040 B ≈ 130.8 MB | 115,651 B |
+| setItem bytes landed | 120,698,808 B ≈ 120.7 MB | 115,651 B |
+| final history bytes | 4,926,481 B ≈ 4.93 MB | 115,651 B |
+| bytes/request (attempted) | 2,615,141 B | 2,313 B |
+
+The 130.8 MB → 115.7 KB byte delta is **not** like-for-like: it conflates
+(a) batching — one debounced flush per run instead of 50 whole-history
+rewrites, (b) 2 KB `responseBody` truncation per entry, and (c) the bench's
+`requestBody` → `responseBody` payload retarget forced in Task 1: the plan
+truncates only `responseBody` while the W0 bench carried its 100 KiB blob
+in `requestBody`, and the untouched bench's quota math (untruncated 100 KB
+bodies × whole-history rewrites against jsdom's 5,000,000-code-unit quota)
+made it unpassable for any correct fix. The retarget and the strengthened
+assertions were reviewed and approved (Task 1 review: 0 Critical/Important).
+Ratified ruling: "2 KB" = **2048 UTF-16 code units**, as implemented for a
+JS debug sidecar.
+
+### Family C1 — workspace persist (WP-16)
+
+| Metric | Baseline (frozen) | W2 @ HEAD |
+|---|---|---|
+| JSON.stringify calls | 31 | **22** |
+| JSON.stringify bytes | 2,451,167 B (~2.45 MB) | **1,915,228 B (~1.92 MB)** |
+| localStorage.setItem calls | 2 | 2 |
+| localStorage.setItem bytes | 121,470 B | 121,600 B (+130 B) |
+| durationMs (informational) | 10.01–12.15 | 12.99–21.46 |
+
+The frozen table's dev-only diagnostics caveat still applies: ~19 of the
+stringify calls per run are `NODE_ENV=test` diagnostics that do not execute
+in production builds, so the absolute serialize figures overstate
+production cost; the before/after delta remains valid because the offset
+is constant across runs of the same harness.
+
+Attribution: sub-steps 1–2 (coalescing `3751c03c22`, per-workspace revision
+diff `df3db85514`) delivered the measurable drop (31→22 stringifies,
+2.45 MB → 1.92 MB). Sub-step 3 (artifact offload dedup, `55b070bb90`) is
+unobservable in this bench — jsdom has no IndexedDB
+(`indexedDbOffloadAvailable: false`), so artifacts stay inline — and is
+pinned by unit tests instead. The +130 B setItem delta is the per-workspace
+revision/etag metadata riding the same two written keys (active snapshot +
+split index; key set unchanged from baseline).
+
+### Per-stage attribution (this branch vs pre-landed TASK-13511 work)
+
+| Stage (WP) | Commits (this branch) | This branch delivered | Pre-landed overlap |
+|---|---|---|---|
+| Task 1 — request-history sidecar (WP-15) | `3958f1e8d3` | Whole sidecar: in-memory buffer, redact + truncate exactly once at insert, 500 ms trailing debounce + idle + lifecycle flushes, `flushRequestHistory()`, bench retarget + strengthened assertions | none |
+| Stage 2 — workspace persist chain (WP-16) | `3751c03c22`, `df3db85514`, `55b070bb90`; fix round `426fc547af` (+ `d1b91870b7` backlog note) | Serialized coalescing writer (per-key pending map, literal 300 ms trailing flush, durability-mode lifecycle flush), per-workspace revision diff, artifact offload dedup with invalidation/failure handling | none |
+| Stage 3 — ModelDb hygiene (WP-17 + WP-61 alarm) | `5b63d01050` | Ledger, verbatim: "~80% pre-landed by interim `ff8803237e` (namespacing, migration, batched createMany, warm Set, 6h alarm); this stage's delta = bulkAddModelsFB replaceAll (2 sets+1 remove → 1+1) + the pinning suite" | `ff8803237e` (~80% of the stage) |
+| Stage 4 — legacy blob-DB quarantine (WP-18) | `d6421555d2`; fix round `3626e61179` | Batched legacy `deleteHistoriesByDateRange` (one `remove([...])` + one index rewrite), titles-only legacy `searchChatHistories`, module-header deprecation + complete fallback map (incl. the migration importer), quarantine/characterization/source-guard suites | The repoint was pre-landed: `messageHandlers` and both delete callers were already on Dexie at the branch base |
+| Stage 5 — session state + settings registry (WP-19/20/22) | `174b7e7bfe`, `01edfa3178`; fix round `623f8b2896` | Serialize-on-drain sharded session writer (`tldw:ingest:*` + index, migration-on-read from the monolithic key), `result.data` strip at persist, registry value cache + write-only-on-change mirror + `onChanged` invalidation, default-off chat-request-debug gate | WP-22's clone removal was pre-landed (TASK-13511's lazy clone-on-read retained; W2 added the enabled gate) |
+| Stage 6 — deep-clone cleanup (WP-21) | `aaf09f42ef` | `structuredClone` replaces JSON round-trips in store mutation paths | none |
+
+Fix-round record: Stages 2, 4 and 5 each required one review round
+(5 / 1 / 3 findings addressed respectively; 0 open after each). Task 1,
+Stage 3 and Stage 6 were approved with 0 Critical/Important findings.
+At HEAD there are zero unresolved Critical/Important review findings.
+
+### Documented gaps / follow-ups
+
+- **Import-suite residual — RESOLVED (round 2 of the batch-final task):
+  branch-caused by Stage 2's debounce (test read persisted state
+  synchronously); fixed test-side via reader-scoped flush; suite 68/68.**
+  The Stage-2 fix-round report had recorded the residual failure in
+  `apps/packages/ui/src/utils/__tests__/research-workspace-import.test.tsx`
+  ("retains two note chunks, retries only unfinished snapshots, and reopens
+  source provenance") as pre-existing; batch-final verification disproved
+  that — the suite is 68/68 green at the dev merge-base `3b68f2dbc2` vs
+  67/68 at HEAD in the same environment (merge-base run in a temporary
+  worktree sharing this branch's `node_modules`; manifests unchanged).
+  Mechanism, pinned empirically: the test snapshotted `localStorage`
+  synchronously after its final mutation (`loadNote`) while the debounced
+  write was still buffered (microtask/idle/300 ms trailing delivery), so
+  the re-seeded rehydrate restored the pre-`loadNote` envelope. Fix:
+  `await flushWorkspacePersistence()` immediately before the snapshot —
+  the same reader-scoped flush pattern `use-research-workspace-prefill.ts`
+  uses (Stage 2's Finding-4 resolution). Suite re-run 68/68 green at HEAD;
+  the only other storage reads in the suite are out-of-band `setItem`
+  seeding plus one rehydrate-after-awaits (microtask delivery lands writes;
+  green), so no other site needed the flush.
+- **Pre-existing split-storage test failure:** `workspace.split-storage.test.ts`
+  (1/8) fails at the dev base as well — jsdom instance-level storage-spy
+  pattern (the W0 ledger's jsdom note); documented since Stage 2, unchanged.
+- **replaceAll crash-orphan reclamation:** a crash between ModelDb
+  `replaceAll`'s set and remove leaves orphaned namespaced keys (storage
+  bloat only, invisible to reads) — future cleanup-pass location noted in
+  the Stage 3 review.
+- **defineSetting options-drop trap:** `defineSetting` silently drops
+  unknown options (Stage 5 review minor) — follow-up to validate or warn.
+- **Multi-tab clobber:** the in-memory history buffer clobbers concurrent
+  tab writes by design (Task 1 review minor); inherent to the sidecar
+  design as approved.
+- **In-flight-IDB-await pagehide gap (narrowed, not closed):** lifecycle
+  flushes gate all IndexedDB awaits, but a pagehide arriving while an IDB
+  await is already in flight on the flush-initiated path can still preempt;
+  out-of-scope deferral from the Stage 2 review.
+- **Registry absent-value / web-context `onChanged` limits:** the settings
+  registry's cache invalidation has reduced fidelity for absent values and
+  no `chrome.storage.onChanged` signal in web context — Stage 5 deferred
+  minors.
+
+### Verification runs (2026-10-14, HEAD `aaf09f42ef`)
+
+- Family C2: `cd apps/tldw-frontend && bun run vitest run
+  lib/__tests__/history.bench.test.ts` — passed as-is (the bench was
+  legitimately modified in Task 1 per the reviewed ruling); numbers quoted
+  above, 3 runs bit-identical on count/byte metrics.
+- Family C1: `cd apps/packages/ui && bun run vitest run
+  src/store/__tests__/workspace-persist.bench.test.ts` — passed untouched;
+  numbers quoted above, 3 runs bit-identical on count/byte metrics.
+- Scoped tsc baselines unchanged: `apps/packages/ui` `tsc --noEmit` → 400
+  pre-existing errors (0 in touched files); `apps/tldw-frontend`
+  `tsc --noEmit` → 0 errors.
+- The W0 streaming benches (Families A/B) belong to W1's remediation scope
+  and are skipped here per the batch brief.
+
+## Batch W3 (TASK-13523) — 2026-10-26
+
+Storage/indexing and data-structures batch: chat-search token side table
+(WP-23), O(n) server-chat mirror reconcile (WP-24), Dexie query-shape fixes
+(WP-25..29), folder diff-sync + bounded API caches (WP-30/31), Map/Set
+mechanical sweep (WP-32/35). Branch
+`codex/webui-perf-w3-storage-indexing`, range `617094d014..d4dd609462`
+(7 commits; base = dev incl. W1+W2). Every number below is from an actual
+run at HEAD `d4dd609462` on 2026-10-26 (same machine/environment as the
+frozen tables; the W0/W1/W2 sections above are untouched).
+
+### Family re-runs at HEAD (W3 owns no bench; the three existing ones must be untouched and green)
+
+- **Family A — streaming bench (W1's).** Untouched, green, post-W1 shape.
+  3 invocations: count metrics bit-identical — seedMessages 200,
+  chunksStreamed 500, storeSubscriberNotifications **3**,
+  messageUpdateNotifications **2**, transcriptArrayMapClones **1**,
+  finalAssistantChars 4890; streamPhaseMs 2.67 / 3.8 / 3.58 (informational).
+  W3 touched no streaming/render code (all three counts sit at W1's landed
+  values; the frozen 502/501/501 numbers were already stale at W1's branch
+  point per W1's drift note).
+- **Family C1 — workspace-persist bench (W0's).** Untouched, green, numbers
+  bit-identical to W2's appended record: 22 `JSON.stringify` calls /
+  1,915,228 B / 2 `setItem` calls / 121,600 B across all 3 in-process runs;
+  durations 9.61 / 8.03 / 10.7 ms (informational). W3 touched no persistence
+  chain (W2's scope).
+- **Family C2 — history bench (W2's).** Untouched, green, numbers
+  bit-identical to W2's appended record: 1 setItem attempted/landed, 0 quota
+  errors, 115,651 B, 50 final entries, 2,313 B/request, amplification 1.0×
+  across all 3 in-process runs; durations 2.13 / 1.8 / 2.08 ms.
+
+### Per-stage attribution (ledger verdicts, quoted)
+
+| Stage | Commit(s) | Verdict at overlap check → what this branch landed | Pre-landed at branch point |
+|---|---|---|---|
+| S1 — chat-search token index + Set dedupe (WP-23) | `04ba6911c1` + fix `472615bb53` | **All-new** (content search was a full-table `messages.toArray()`; merge was O(n²) `findIndex`): `searchTokens` side table (schema v17 additive + streaming backfill upgrade), pure tokenizer whose word definition guarantees a candidate superset, token-prefiltered candidate-only search, Set-based merge, indexing wired into all **seven** message write paths (incl. `restoreChat` in the fix round). Deviations, both forced by repo reality: memory-dexie harness instead of the plan's fake-indexeddb (not shipped, no new deps allowed), and a non-empty v17 upgrade (the plan's "empty upgrade" applied to pure index adds; a new table over pre-existing data needs the backfill). | `messages.history_id` index since v1 (plan's "add if absent" already satisfied); title-search path |
+| S2 — server-chat mirror reconcile O(n) (WP-24) | `4f0cbb30ba` | **All-new** (every plan anchor live at HEAD: `some`/`filter` scans, per-message get/put/add, final re-read): Map/Set indexes in both `recover*` helpers, one `bulkGet` + one `messages.bulkPut` + one `searchTokens.bulkPut`, final re-read replaced by constructed PK-sorted rows; plus the beyond-plan `hasServerGreeting` hoist. Golden honesty **proven empirically**: characterization captured against a base checkout with `CAPTURE_GOLDEN=1` (old code emits the embedded bytes exactly), then held byte-identical across the refactor. | none (Stage-1 token wiring only) |
+| S3 — query-shape fixes (WP-25..29) | `692dcdb207` | Five items, per-item verdicts: (1) prompts `deletedAt` **PARTIAL** — index existed since v9 but all five query sites were JS scans; rewritten on `where('deletedAt')` ranges after proving Dexie `equals(null)` throws and IndexedDB never indexes null (only the trashed side is indexable; non-deleted family stays output-proportional JS filter); (2) metadata **GAP** — schema v18 `[history_id+createdAt]` compound index (empty upgrade; no counters/backfill/staleness by construction), index-only `count()` + two-seek newest with tie semantics exactly pinned; (3) pagination **PARTIAL** — keyset variant existed **dead** at HEAD; Sidebar switched to it; rewritten as pure `[createdAt+id]` range keyset — **the dead `fastForward` predicate was provably buggy (skip/stall on same-timestamp rows); deleting it is a correctness win** — plus exact one-row-probe `hasMore` and id-based search continuation; offset variant retained (scoped `LocalChatList` contract, not caller-free); (4) nickname cache **GAP**; (5) drafts quota **GAP** — `each()` streaming. | `deletedAt` index spec (v9); dead keyset variant; `history_id`-based metadata scan shape |
+| S4 — folder diff-sync + cache bounds (WP-30/31) | `37d2e37c1e` + fix `51fe1e7dc9` | (1) folder sync **GAP** — clear-and-rewrite of all 4 tables still live; replaced by upsert-only diffs by `last_modified`/composite key with the **deletion-safety fallback** (no marker distinguishes acknowledged local creations from server deletions → per-table clear-and-rewrite when rows vanished remotely, full-rewrite when the diff is unresolvable; end state byte-identical, only write volume changes; zero writes + no transaction when nothing changed). (2) API caches **PARTIAL** — interim TASK-13450 (`f31df6bac0`, 2026-10-05) pre-landed `BoundedTtlCache` with 32-entry + 8 MiB FIFO caps, per-entry timers, read-path sweep; this branch added the plan's 100-entry cap, one module-level 60 s sweep (disarm-on-empty/re-arm-on-set), O(1) per-key expiry in `get()`, and the ~5-per-chat query-shape group cap; TASK-13450's 8 MiB byte budget and oversize/expired rejection retained as stricter secondary bounds. Fix round: the vacuous 50-vs-≤100 cap assertion replaced by a structurally non-vacuous 150-loop/exact-100 pin (proven by a temporary `MAX_ENTRIES=Infinity` flip failing exactly that test). | `BoundedTtlCache` itself incl. 8 MiB budget, recency-on-reset (TASK-13450) |
+| S5 — Map/Set mechanical sweep (WP-32/35) | `d4dd609462` | **Four GAP conversions** (Kanban `BoardView` `.find`-per-id ×2, `useMediaSearch` `includes`-in-loop ×3 via one Set snapshot, `importSessionFilesV2` merge Set, nickname `importDataV2` `bulkPut`) + **six sweep sites** (branch.ts node Map, Chatbooks jobs Map, four membership-only `includes`→Set in folder.tsx), all within the ~8 cap; the sweep validated the leave-and-list ruling by spot-checking one hazard as real (`mediaResultKey` composite-key class). | `research.tsx` `textToStringList` Set dedupe **ALREADY-DONE** — W1 landed it |
+
+### What W3 proved, and how (honest framing)
+
+**No new benchmarks exist for W3's paths, and none were run.** W3's wins are
+**complexity-class changes pinned by mechanism tests, not wall-clock
+deltas**. The benches above exist only to prove W3 broke nothing measured.
+The actual evidence, per stage:
+
+- **S1:** a no-materialization spy test — the search path fails the suite if
+  `messages.toArray`/`filter`/`each` (whole-table shapes) are ever called;
+  only `where('history_id')` candidate reads over the token-prefiltered set
+  are legal.
+- **S2:** golden **byte-identity** — a pre-refactor capture (old code,
+  `CAPTURE_GOLDEN=1`, base checkout) held byte-identical across the O(n)
+  rewrite, including row order, `localIds`, and the token side table; plus a
+  spy pinning exactly one `bulkGet` / one `messages.bulkPut` / one
+  `searchTokens.bulkPut` and zero per-message `put`/`add`.
+- **S3:** index-shape mechanism tests that **throw** if the queries regress —
+  `Table.toArray`/`filter` and `where('history_id').anyOf` are banned
+  (spy-throws) in the prompts-trash and metadata suites; the keyset suite
+  pins no-dup/no-skip across inserts incl. exact next-30.
+- **S4:** a zero-write no-change spy (no `bulkPut`, no `clear`, **no
+  `transaction`** when nothing changed) and LRU bound pins (150-loop
+  exact-100 + oldest-evicted keys; per-group cap; sweep disarm/re-arm).
+- **S5:** the capped sweep's site list — each converted site is a
+  primary-key Map or membership-only Set with the equivalence argument
+  recorded; six hazard candidates deliberately left and listed.
+
+### Documented gaps / follow-ups
+
+- **Hooks-suite fakes need `searchTokens` + PK-scan ordering — the standing
+  seam item.** Five hooks suites (780 tests) fail at HEAD; per-suite counts
+  are exactly the standing itemization recorded since Stage 2:
+  `normalChatMode.history-selection` 90, `useMessage.history-selection` 12,
+  `useChatActions.saved-normal` 7, `temporary-fork-ownership` 5,
+  `character.integration` 4 — **118 total** (the "117" in earlier stage
+  prose undercounted its own itemization; 118 is the counted number, and
+  118 names were re-extracted at final HEAD, matching the standing
+  per-suite counts exactly). Root cause, re-proved at final HEAD in the W2
+  batch-final pattern (temporary worktree at the base commit sharing this
+  branch's node_modules): the same five suites are **780/780 green at the
+  pre-W3 base `617094d014`** — the reds are branch-caused by the schema's
+  evolution (their hand-rolled fakes lack the Stage-1 `searchTokens` table
+  and PK-scan ordering), not by any regression in the suites' behavior.
+  Seam-hardening (teaching the fakes the new tables/APIs) is the open
+  follow-up; it was ruled out of scope per stage to keep the perf diffs
+  clean.
+- **Stale tokens accumulate on deletes by design** (delete-side): exact
+  verification rejects them; a compaction pass can be added if unbounded
+  growth ever matters. Edit-side staleness self-corrects via re-indexing.
+- **Real-IDB v16→v17 migration untestable in this harness** (no
+  fake-indexeddb; jsdom has no IndexedDB): the v17 declaration, backfill
+  logic, and streamed-chunk writes are pinned against the scripted-tx and
+  memory-dexie harnesses; an actual browser-profile migration smoke remains
+  open.
+- **Six Map/Set sweep candidates left unconverted with per-site hazards**
+  (duplicate-id / composite-key / find-first-vs-Map-last semantics):
+  `MediaCollectionManager.tsx`, `useMediaSelection.ts` ×2,
+  `trustState.ts`, `workspace-server-restore.ts`, `useBlocklist.ts` —
+  listed in the Stage 5 record; each needs a uniqueness proof before
+  conversion.
+- **`getHistoryMetadata` (singular) is caller-less** — rewritten alongside
+  the metadata family (shares the helper); dead-code sweep candidate.
+- **Nickname `importDataV2` invalidation is not in a `finally`** (rare
+  partial-write staleness, self-healing on next successful read) — Stage 3
+  deferred minor.
+- **`invalidateChatMessagesCache` `startsWith` over-invalidation
+  (pre-existing)** — prefix-chat-id collisions ("1" vs "12"); the new
+  `groupOf` parses groups correctly but fixing the prefix scan is a behavior
+  change that was out of scope.
+
+### Verification runs at final HEAD (2026-10-26, `d4dd609462`)
+
+- Family A / C1 / C2 benches: green, untouched, numbers quoted above.
+- Full `src/db` suite (`apps/packages/ui`): **34 files, 525/525 green**.
+- The five excluded hooks suites: 118 failed | 662 passed (780), per-suite
+  counts identical to the standing itemization (see the seam item above for
+  the base-green proof). All other verification at each stage (caller
+  suites, folder/cache suites, characterization suites) is recorded in the
+  stage reports and the TASK-13523 backlog notes.
+- Typecheck: `cd apps/tldw-frontend && bun run typecheck` → **exit 0**.
+- Whitespace: `git diff --check` clean over both the W3 range
+  (`617094d014..HEAD`, 42 files) and `origin/dev..HEAD` (origin/dev has
+  moved past the W3 base; the range check is clean).
+
+## Batch W5 (TASK-13525) — 2026-11-05
+
+Extension background/content-scripts batch: web-clipper tiered capture
+(WP-56/57), copilot popup streaming appends + chunked base64 (WP-58/59),
+sidepanel open-once guard + context-menu URL gate + funnel-metrics
+coalescing (WP-60/61/62). Branch `codex/webui-perf-w5-ext-scripts`, range
+`b2b7d5d2b0..c0393fe1f3` (3 commits; base = dev merge `b2b7d5d2b0` incl.
+W1+W2 — W3/W4 were pending merge on disjoint files at branch time). Every
+number below is from an actual run at HEAD `c0393fe1f3` on 2026-11-05
+(same machine/environment as the frozen tables; the W0/W1/W2 sections above
+are untouched). W5 touched 16 TypeScript files, all under
+`apps/packages/ui/src/{entries,services,parser,utils}` — no sidepanel,
+store, or persistence file is in the diff.
+
+### Family B re-run at HEAD (canned 100-chunk sidepanel stream)
+
+W5 owns no sidepanel/streaming code, so the expectation was an unchanged
+shape — proven, not assumed: the count metrics at the **branch base**
+`b2b7d5d2b0` are identical to HEAD (same run harness, one run at base).
+
+`bunx playwright test tests/e2e/performance-streaming.spec.ts` — 3 runs at
+HEAD, 1 at base (`msPerChunk` is per APPLIED chunk, per the label-ambiguity
+note in Family B above):
+
+| Run | chunksServed | chunksApplied | storeSubscriberNotifications | messageUpdateNotifications | domMutations | longTasks | ttftMs | streamPhaseMs | msPerChunk | minChunkGapMs | maxChunkGapMs | domNodeCount |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| HEAD 1 | 100 | 15 | 21 | 16 | 30 | 0 | 149.3 | 1118.6 | 74.57 | 22.6 | 89.2 | 241 |
+| HEAD 2 | 100 | 15 | 21 | 16 | 30 | 0 | 188.0 | 1117.8 | 74.52 | 33.2 | 90.0 | 241 |
+| HEAD 3 | 100 | 15 | 21 | 16 | 30 | 0 | 137.6 | 1147.3 | 76.49 | 42.5 | 88.8 | 241 |
+| base | 100 | 15 | 21 | 16 | 30 | 0 | 106.1 | 1171.0 | 78.07 | 68.8 | 88.7 | 214 |
+
+- **W5's delta on this family: none.** Count metrics are bit-identical at
+  base and HEAD (100/15/21/16/30); `longTasks` is 0 in all four runs (it
+  was 0 in every W0 baseline and W1 run as well).
+- The shape did drift vs the W1-era records (19 → 21 store notifications;
+  domMutations 49–51 → 30; domNodeCount 196 → 214/241), but the base run
+  attributes all of it to interim dev work merged into dev between W1's
+  branch point and this branch's base — not to W5. `domNodeCount` is the
+  one visibly jittery metric historically (196/196/215 across the frozen
+  W0 runs themselves; 214 at base, 241 ×3 at HEAD here).
+- Family A (unit streaming bench, W1's) was not re-run: its file and every
+  code path it measures are untouched by the W5 diff (see the file list
+  above); Families C1/C2 belong to W2's scope, equally untouched.
+
+### What W5 proved, and how (mechanism framing, W3 convention)
+
+**W5 landed no new benchmark, and none was needed: its wins are
+complexity-class changes on paths the existing benches do not cover,
+pinned by mechanism tests, not wall-clock deltas.** Family B above exists
+to prove W5 broke nothing measured. The actual evidence, per stage:
+
+- **S1 — tiered capture (WP-56/57):** property-getter spies on the stub
+  document prove the selection path never touches `outerHTML`,
+  `innerText`, or `textContent` and never invokes the parser
+  (`defaultExtractContent` mock unused), with positive controls proving
+  the fallback tiers do touch them; a characterization trio pins
+  visible-body/tier ordering per scenario (selection present / absent /
+  article empty). Per-clip host-main-thread work drops from
+  full-page serialize + cheerio parse + forced `innerText` layout to one
+  `getSelection().toString()` + trim. The mechanism is pinned by tests;
+  the plan's "< 10 ms capture" wall-clock criterion remains unmeasured
+  and requires real-device timing before it can be marked satisfied.
+- **S2 — copilot appends (WP-58):** a MutationObserver over the real
+  render target through a 1000-chunk stream proves **appends, not
+  replaces** — exactly one added text node per non-empty chunk and ZERO
+  records with `removedNodes.length > 0` (a `textContent` assignment always
+  removes the old child; at base the same stream produced 1009+ removal
+  records). Per-chunk DOM work drops from an O(total) whole-element
+  rewrite (O(total²) across a stream) to O(chunk). A `getBoundingClientRect`
+  spy pins **zero synchronous layout reads during the stream** and exactly
+  one after the rAF flush (1000 schedules coalesce to 1 `updatePosition`);
+  the stop-path test pins the terminal full-text call no-oping via the
+  same-rendered-length skip (one removal record at base, zero now).
+- **S2 — chunked base64 (WP-59):** property parity vs `btoa` for random
+  byte arrays across sizes 0/1/7/8191/8192/8193/65536 plus round-trip —
+  the helper is byte-identical while going from per-byte string concat to
+  8 KB `String.fromCharCode.apply` slices (O(n), no per-byte accumulation).
+  The wire-format pin: an 8493-byte audio frame (spanning the 8 KB seam)
+  posted over the real STT port produces the exact JSON
+  `{"type":"audio","data":"<btoa(reference)>"}` on the WebSocket — the
+  protocol is provably unchanged.
+- **S3 — background hygiene (WP-60/61/62):** the broadcaster suite pins
+  open-once-per-funnel across multiple broadcasts with every runtime
+  message still delivered (first emit still opens from closed;
+  uncorrelated broadcasts keep legacy behavior; 500-id capacity bound),
+  per-session correlation for quick ingests, and the 500 ms retry. The
+  funnel-metrics suite pins a 5-event synchronous burst → exactly **1**
+  storage write (5 at base) and the lost-update fix as a correctness
+  bonus: a 205-event burst persisted **1** event at base (reproduced red
+  by the reviewer); the coalescing writer persists the bounded 200 newest
+  losslessly. The URL-gate suite pins same-URL config writes no-oping the
+  context-menu sync (no capabilities call, no menu rebuild) while URL
+  changes still re-sync.
+
+### M3 disposition (W0 manual row: copilot popup host-page long tasks) — DONE BY MECHANISM
+
+M3's consuming batch is W5, and this section is the owner's disposition.
+The wall-clock number was **not** measured; the row is closed by
+mechanism evidence, stated honestly:
+
+- The W0 placeholder asked for a human DevTools recording of host-page
+  long tasks (> 50 ms) during a ≥ 100-chunk copilot stream. A
+  playwright-measured substitute would need a canned copilot-stream
+  harness (mock SSE + `tldw:popup:open` + in-page PerformanceObserver);
+  **no such harness exists in-repo** — both copilot e2e specs
+  (`copilot-popup.spec.ts`, `copilot-popup-enhanced.spec.ts`) skip without
+  a live backend, and building a new harness could not be committed under
+  this batch-final's doc+backlog-only commit rule, so any number it
+  produced would be irreproducible.
+- The mechanism evidence is the S2 pin set above: per-chunk work is an
+  O(chunk) text-node append (MutationObserver append proof, zero
+  removals), zero synchronous layout reads per chunk (spy: 0 during the
+  stream, 1 per rAF flush), terminal calls no-op. The removed behavior —
+  full accumulated-string reassignment per chunk — is exactly the
+  long-task mechanism M3 was written to catch; it is gone by construction
+  and by falsifier test, not by measured delta.
+- A wall-clock before/after for the popup on a large stream remains
+  available to a future human DevTools pass or a canned copilot harness;
+  nothing in M3 blocks W5's closure.
+
+### Per-stage attribution (what this branch landed vs pre-landed work)
+
+| Stage | Commit | Landed by W5 | Pre-landed at branch point / out of scope |
+|---|---|---|---|
+| S1 — web-clipper tiered capture (WP-56/57) | `486c653ee6` | **Gap closed** — tiering was a genuine gap despite TASK-13511's lazy parser (lazy ≠ avoided: every clip still eagerly serialized `outerHTML`, ran the parser, and forced `innerText`): `requestedType` threaded into `extractClipPageTextFromDocument`; selection clips with a live selection return immediately; article tier next; `fullPageText` only as the final fallback for tiered types (non-tiered/legacy keeps eager behavior); `parser/default.ts` per-attribute `removeAttr` loop → one in-place attribs pass preserving the exact kept-set `{href, src}`. Intended `fullExtract` delta (plan-mandated, contained): a selection clip's `fullExtract` is now its selection text, an article clip's is its article text (was whole-page); all four consumers traced in review (fallback chains, selection-first preference, or non-caller); `visibleBody`/`clipType`/`actualType`/`fallbackPath` unchanged (characterization trio). | TASK-13511's lazy parser chunk (`parser-main.js`) — made the parse deferrable, not avoidable; the resolution side's tier ORDER already existed |
+| S2 — copilot appends + chunked base64 (WP-58/59) | `b1511ccf9c` | **Both gaps closed** — popup: `appendResponseText` (one text node per chunk) + `setResponseText` same-rendered-length skip so stop/done no-op instead of O(total) rewrites; rAF position coalescing unchanged. base64: `arrayBufferToBase64` in 8 KB slices, byte-identical, drop-in for all four call sites (background STT + three WebUI voice hooks). Design ruling (on evidence): the port hop was already binary at HEAD (`useTldwStt` posts raw chunk data), so the plan's ArrayBuffer-over-port alternative would have changed nothing there; base64 exists only on the STT WebSocket JSON hop, where it is protocol-required — chunked-base64 chosen, wire format pinned unchanged (8493-byte seam frame). | Port hop already binary (pre-existing `normalizeFileData` path) |
+| S3 — background warm/keep-alive hygiene (WP-60/61/62) | `c0393fe1f3` | Sidepanel guard **gap** → `emitBackgroundMessage` extracted to `createBackgroundStatusBroadcaster` + `createSidepanelOpenOnceGuard` (open at most once per funnelId/sessionId; first emit still opens from closed; runtime message never suppressed; async retry rejections now logged). Context-menu URL gate **partial → gap closed**: `tldwConfig` watcher re-syncs the clipper menu (and forced warm) only when the server URL changes. Funnel metrics (m1, folded in) **gap** → in-memory pending array + coalescing serialize-on-drain writer (hydrate-once merge, bounded 200, one write per drain window) with the lost-update fix. | Alarm non-forcing (WP-61a) and the 5-min capabilities TTL **already done by W2 Stage 3** — verified, no duplicate work; WP-63 (effective-config per-request reads) not landed anywhere — W4 Stage 5 scope, verified only |
+
+Review record: all three stages Approved with **0 Critical/Important
+findings and zero fix rounds** — the only batch in the program with a
+perfect review record through batch-final.
+
+### Documented gaps / follow-ups
+
+- **Cross-frame selection still runs the article tier** (S1): a
+  context-menu clip whose selection lives in another frame
+  (`window.getSelection()` empty in the content-script frame) still pays
+  the article tier before the context-menu `selectionText` wins
+  resolution — wasted work, correct result; plan-faithful (only
+  `requestedType` was threaded). Follow-up if it ever shows up in
+  measurements.
+- **`fullExtract` delta extends to default article clips** (S1 review
+  minor): an article clip whose article tier succeeds now reports
+  `fullExtract = articleText` (was full-page text) — same containment
+  argument as the selection case; recorded for whole-branch visibility.
+- **Same-length-skip fallback untested** (S2): `setResponseText`'s
+  same-rendered-length skip relies on the documented caller invariant; a
+  length mismatch still falls back to a full replace (API correct for
+  arbitrary future callers), but no test exercises the mismatch branch —
+  no reachable caller today.
+- **eslint invocation note (corrected here)**: linting these files must
+  run **from `apps/`** with the workspace-installed binary —
+  `tldw-frontend/node_modules/.bin/eslint --config tldw-frontend/eslint.config.mjs
+  --suppressions-location tldw-frontend/eslint-suppressions.packages-ui.json`
+  (the `lint:ui` script shape). A bare `bunx eslint` from the wrong cwd
+  resolves a registry ESLint (10.14.0) that crashes on this config
+  (`scopeManager.addGlobals is not a function`); the Stage 3 report's
+  invocation line is superseded by this one.
+- **`scheduleModelWarmAlarm` runs on every config write** (S3 footnote):
+  only the context-menu sync and the forced `warmModels(true)` are
+  URL-gated; the alarm (re)scheduler still fires on same-URL writes —
+  idempotent bookkeeping, no network. Deferred minor.
+- **`test:e2e:perf` left to CI**: the batch-final re-ran the W0-canonical
+  Family B spec only; the other two specs in the `performance-*.ts` trio
+  (`performance-cache`, `performance-smoke-lite`) run in CI, not locally
+  here.
+
+### Verification runs at final HEAD (2026-11-05, `c0393fe1f3`)
+
+- Family B canned e2e: 3 runs at HEAD + 1 at branch base — table above;
+  all green, `longTasks` 0 everywhere.
+- Scoped suites (the batch's touched neighborhoods):
+  `bun run vitest run src/entries/__tests__/ src/entries/shared/__tests__/
+  src/services/web-clipper/__tests__/ src/parser/__tests__/
+  src/utils/__tests__/compress.test.ts
+  src/services/__tests__/background-helpers.broadcast.test.ts` in
+  `apps/packages/ui` — **29 files, 403/403 green**.
+- FE typecheck (CI-canonical): `cd apps/tldw-frontend && bun run typecheck`
+  → **exit 0**.
+- eslint (corrected invocation, from `apps/`, workspace binary, over the 16
+  touched TS files): **exit 0**.
+- Whitespace: `git diff --check b2b7d5d2b0..HEAD` → clean.
+
+## Batch W4 (TASK-13524) — 2026-11-07
+
+HTTP-architecture batch: extension quick-ingest round-trip batching
+(WP-36/37/38), polling → SSE/visibility gating (WP-39..42), media-search
+parallelism + mount fan-out deletion (WP-43), N+1 fan-out retirement
+(WP-44..48/51), auth/config read caching + event-driven token waits
+(WP-52/63), model-catalog refetch discipline (WP-49/54). Branch
+`codex/webui-perf-w4-http-arch`, range `b2b7d5d2b0..6c3c009b61`
+(8 commits: six stage commits + the S4-minors fix `4acdab88ff` + the
+micro-fix `6c3c009b61`; base = dev merge `b2b7d5d2b0` incl. W1+W2 — W3/W5
+were pending merge on disjoint files at branch time). Every number below is
+from an actual run at HEAD `6c3c009b61` on 2026-11-07 (same
+machine/environment as the frozen tables; all prior sections are untouched).
+W4 touched 49 TypeScript files — 38 under `apps/packages/ui` (12 of them
+new, all tests or the two small new modules) and 11 under
+`apps/tldw-frontend` — plus this batch's backlog task files.
+
+### Family re-runs at HEAD (W4 owns no bench; the four automated ones must be untouched and green)
+
+W4 landed no new benchmark: like W3 before it (and W5 on its branch), W4's
+wins are request-count/concurrency/no-network changes pinned by mechanism
+tests, not wall-clock deltas. The benches exist to prove W4 broke nothing
+measured. All four are green at HEAD with count metrics **bit-identical** to
+their owner batches' recorded shapes:
+
+- **Family A — streaming bench (W1's)**: 200 seedMessages / 500 chunks /
+  storeSubscriberNotifications **3** / messageUpdateNotifications **2** /
+  transcriptArrayMapClones **1** / finalAssistantChars 4890;
+  streamPhaseMs 2.79 (informational) — identical counts to W3's re-run
+  record; W4 touched no streaming/render code.
+- **Family B — canned 100-chunk sidepanel e2e (W0's table, re-run by W5)**:
+  100 served / 15 applied / **21** store notifications / **16** message
+  updates / **30** domMutations / **longTasks 0**; ttftMs 188.3,
+  streamPhaseMs 1157, domNodeCount 214 — count metrics identical to W5's
+  recorded HEAD shape on the same branch base (its section rides the W5
+  branch; domNodeCount is the historically jittery one: 196–241 across
+  W0/W5 runs); the five live-backend suites in the file skip without
+  `TLDW_E2E_*` env vars, as at W0/W5.
+- **Family C1 — workspace persist (W0's table, W2's re-run)**: 22
+  `JSON.stringify` calls / 1,915,228 B / 2 `setItem` calls / 121,600 B
+  across all 3 in-process runs; durations 8.92 / 8.96 / 10.06 ms
+  (informational) — bit-identical to the W2/W3 records, proving the S4-minors
+  store change (sourceContentCache → Map) leaves the persistence chain
+  untouched (`partialize` drops the cache; the byte counts cannot differ).
+- **Family C2 — history bench (W2's)**: 1 setItem attempted/landed, 0 quota
+  errors, 115,651 B, 50 final entries, 2,313 B/request, amplification 1.0×
+  across all 3 in-process runs — bit-identical to the W2/W3 records.
+- **Family D** (production build + bundle budget) was not re-run — neither
+  W3 nor W5 re-ran it, and no bundle-size-relevant decision is in this
+  batch.
+
+### M1/M2 disposition (W0 manual rows: quick-ingest request count; page-load + idle request counts) — DONE BY MECHANISM
+
+M1 and M2 are W4's rows per this document's footer ("M1/M2 → W4"). Neither
+wall-clock number was measured; both rows are closed by mechanism evidence,
+stated honestly, per the M3/W5 precedent:
+
+- The W0 protocol for these rows mandates **human DevTools observation**
+  ("Do not automate them with browser automation when filling") — M1 needs a
+  running backend plus the built extension's service-worker DevTools, M2 a
+  `build:prod` + `bun run start` webui against a live backend on
+  `127.0.0.1:8000`. No canned page-load request-count harness exists in-repo
+  (the closest, `e2e/chat-request-dedupe.spec.ts`, covers only four /chat GET
+  targets and needs the live backend), so a protocol-conforming number is not
+  producible in this environment; a human DevTools before/after remains
+  available and nothing in either row blocks W4's closure.
+- **M1 mechanism evidence (S1, `0da7b87b85`)**: the unit suite pins that N
+  same-config quick-ingest entries produce **one** `/media/ingest/jobs`
+  submission carrying all k URLs (10 items sharing one config → 1 submission
+  POST, far inside the "≤ 4 from 10" criterion — satisfied by construction),
+  that heterogeneous groups go through the bounded pool (4), that poll rounds
+  issue all in-flight job GETs simultaneously (deferred-promise pin), and that
+  terminal PATCHes/batch-cancel/DELETE fan out concurrently. Per-item progress
+  order and shape are pinned byte-for-byte. The wall-time half of M1's
+  criterion (≥ 60% drop) is not measurable without a live backend.
+- **M2 mechanism evidence (S2 `01b04eed9e` + S3 `ed54f5f647` + S5
+  `49d27077db`)**: S2 pins the four pollers — buddy host at 60 s while its
+  panel is closed and zero polls while `document.hidden` (BuddyInteraction's
+  4 s loop ratified into the shared schedule), research run-list refetch only
+  while a run is active with SSE terminal-event invalidation, notification
+  polling only while the stream/bootstrap is degraded, and the workspace's
+  two 5 s pollers consolidated into one visibility+processing-gated
+  scheduler; S3 deletes the mount-time type-discovery fan-out (2 searches run
+  as one `Promise.all` round; the 3 discovery page-fetches are gone — mount
+  requests drop 5 → 2); S5 removes the per-call auth/config storage reads
+  behind one cached snapshot. The removed behavior — the ~2–4-per-5 s idle
+  request families M2 was written to catch — is gone by construction and by
+  falsifier test, not by measured delta.
+
+### What W4 proved, and how (mechanism framing, W3 convention)
+
+No new benchmark exists for W4's paths, and none was needed: the wins are
+request-count, concurrency, and no-network changes pinned by mechanism
+tests. Per stage:
+
+- **S1 — ingest batching (`0da7b87b85`)**: same-config grouping pinned (one
+  submission POST with k URLs), bounded pool over heterogeneous groups,
+  all-at-once poll rounds (deferred-promise simultaneity), concurrent
+  terminal fan-out, and per-item progress events byte-identical in order and
+  shape. Overlap-heavy: batched per-batch status polling was already landed
+  via the #3210 follow-up — only real gaps were closed.
+- **S2 — polling gating (`01b04eed9e`)**: fake-timer pins per poller —
+  hidden document produces zero polls; buddy panel closed produces no 5 s
+  polls (60 s ramp); SSE terminal event triggers exactly one list
+  invalidation; the notification poll starts on stream error and stops on
+  reopen; the workspace scheduler emits nothing with no processing sources or
+  while hidden. BuddyInteraction's hidden 4 s loop was ratified (base
+  `forceRender`+`destroyOnHidden=false` kept it alive while hidden whenever
+  attached).
+- **S3 — search cost (`ed54f5f647`)**: mount fan-out deletion (the deleted
+  discovery effect fetched `/api/v1/media/` pages 1–3 at per_page=50 — its
+  removal is the first-ever real coverage of the pagination request path via
+  a real QueryClient + network-layer mock), media/notes dispatch together
+  (deferred-promise simultaneity), per-side error semantics preserved, abort
+  now transport-cancels the concurrent side.
+- **S4 — N+1 retirement (`b32ec08e54`)**: lazy row-expand fetch in the ACP
+  history modal (incl. a zero-detail-requests-on-open pin), the
+  source-content resolver fetching only cache misses (optional-capability
+  store read so partial mocks degrade instead of breaking), 60 s staleTime on
+  flashcard due-counts, retrySync rag-write deferral settled by `Promise.all`
+  (red-first), a request-shape pin on the already-server-side character list.
+  Six overlap verdicts incl. two ALREADY-DONE (WP-47 gating at base;
+  WP-51 via 2026-05-22 lineage). Finished from an interrupted predecessor's
+  uncommitted state (26 h old, ~12 dirty files).
+- **S5 — auth/config caching (`49d27077db`)**: all FE auth getters served
+  from one per-generation snapshot dropped by every invalidation signal
+  (six families verified wired at HEAD); the extension's config reads go
+  through one batched `getMany` with ≤ 1 rotation-dependent follow-up; the
+  token wait is subscription-driven with a deadline final check and a
+  byte-identical poll fallback; the JWT is decoded once per wait. The 401
+  logout decision reads uncached by design (the mid-burst-rotation race it
+  exists for is pinned by the untouched "does not clear a newer session"
+  test).
+- **S6 — model-catalog discipline (`11bfd19a9a`)**: two mounts within
+  staleTime → one fetch; unmount/revisit stays at zero requests via the
+  gcTime catch (the default 5-min gc would evict the unmounted catalog at
+  minute 5 and break the 0-requests criterion — pinned by a 6-min unmount
+  gap test); all four refresh affordances force fresh reads; the
+  invalidation chain (account watch, server-URL change, generation tokens)
+  verified in code.
+- **Fix commits**: `4acdab88ff` (true LRU: Map with delete+re-insert, evict
+  `keys().next().value`, disambiguating insert-40-first test; shared
+  `SOURCE_CONTENT_CACHE_MAX_ENTRIES`; [BE] note relocated 13515 → 15186) and
+  `6c3c009b61` (per-iteration `clearTimeout` before re-arm; strict
+  `!Array.isArray` getMany guard; `capabilitiesQuery.data ?? {}` so a
+  200-null body keeps the default endpoint).
+
+### Per-stage attribution (what this branch landed vs pre-landed work)
+
+| Stage | Commit | Verdict at overlap check → what this branch landed | Pre-landed at branch point / out of scope |
+|---|---|---|---|
+| S1 — quick-ingest batching (WP-36/37/38) | `0da7b87b85` | Same-config URL/file grouping into single `/media/ingest/jobs` submissions; bounded pool (4) for heterogeneous groups and conference planning; concurrent terminal PATCH/batch-cancel/DELETE; per-item progress preserved (order + shape pinned) | Batched per-batch status polling already landed via the #3210 follow-up; parts of the warm hygiene pre-landed by the interim TASK-13511 lineage |
+| S2 — polling → SSE/visibility gating (WP-39/40/41/42) | `01b04eed9e` | All four pollers gated (buddy 60 s closed-panel + zero hidden; research activity-gated + SSE terminal invalidation; notifications degraded-only; workspace scheduler on processing+visibility) | BuddyInteraction ratified as pre-existing hidden 4 s loop (join required); alarm non-forcing pre-landed by W2 Stage 3 |
+| S3 — media search correctness + cost (WP-43) | `ed54f5f647` | `Promise.all` dual-side search (media-before-notes order, per-side errors preserved); mount type-discovery fan-out deleted (mount requests 5 → 2); facets from first response; Set membership snapshot | The Set conversion shape landed on the W3 branch (not in this lineage) — applied here as a shape-identical port |
+| S4 — N+1 fan-outs (WP-44..48/51) | `b32ec08e54` | GAPs built: ACP lazy row-expand details; shared source-content resolver + in-memory LRU cache; flashcard due-counts staleTime; retrySync parallel rag-settle; six overlap verdicts incl. WP-47 ALREADY-DONE (pinned by test) and WP-51 ALREADY-DONE via lineage (request-shape pin added) | WP-47 WorldBooks stats gating present at plan-verified base; WP-51 `listCharactersPage` default-on rollout (2026-05-22, pre-plan); [BE] batch endpoints requested as notes |
+| S4-minors fix | `4acdab88ff` | True LRU (Map delete+re-insert; insert-40-first disambiguation test), single shared cache-cap constant exported from the slice, [BE] note relocated to the renumbered backend task | — |
+| S5 — auth/config read caching (WP-52/63) | `49d27077db` | Five verdicts, all GAP/PARTIAL→closed: per-generation StoredAuthSnapshot + six invalidation families; batched `getMany` + ≤ 1 follow-up; event-driven rotation wait; JWT decoded once per wait; 401-logout fresh-read resolution in CODE (pin untouched) | W5's deferred m2/WP-63 effective-config reads closed here |
+| S6 — model-catalog discipline (WP-49/54) | `11bfd19a9a` | WP-49 PARTIAL-by-lineage (react-query migration already in `839d7a04ee` via TASK-13511 — verified, not re-migrated); real gaps: staleTime 30 s → 15 min + gcTime 15 min (the catch), all four refresh affordances + invalidation signals pinned; WP-54 GAP→built (`['rag/capabilities']` + dependent `['vlm-backends', endpoint]`; `reload()` invalidates both) | forceRefresh removal already in lineage |
+| micro-fix | `6c3c009b61` | Timer hygiene (clearTimeout before re-arm), strict getMany guard (reject arrays), degenerate-capabilities fallback (`data ?? {}`) | — |
+
+Review record: all six stages Approved — **0 blockers/majors across the
+whole batch**. S1–S3 zero fix rounds; S4's 2 minors fixed in `4acdab88ff`;
+S5's one-line minor and S6's optional-hardening minor fixed in `6c3c009b61`.
+The user waived the AI-PR Change-summary gate for W4 (2026-11-06): merge
+proceeds on green CI without waiting for a summary; no AI-authored summary
+may be represented as human-written (W3/W5 gates unaffected).
+
+### Documented gaps / follow-ups
+
+- **[BE] requests live on TASK-15186, renumbered from the plan's
+  TASK-13515** — the plan (written 2026-10-06) predates the lineage
+  renumbering; the consolidated [BE] note (batch media-details, due-counts
+  aggregate, per-book worldbook stats, whole-tail rag payload) was relocated
+  verbatim to TASK-15186 in `4acdab88ff` (13511 → 15181 likewise).
+- **S4 reviewer NOTE-3 — version identity plumbed-unused**: the
+  source-content cache is keyed by (mediaId, version) but the resolver
+  always reads/writes with version `null`; callers hold no version identity
+  today, so the stricter key is future plumbing. Follow-up: thread the
+  version when callers gain one.
+- **S4 reviewer NOTE-4 — session-lifetime staleness**: the source-content
+  cache has no TTL; entries live until the 32-entry LRU evicts them, so
+  re-ingested content served within a session can be stale until eviction or
+  reload. Bounded (32 entries, in-memory only); acceptable for the reuse
+  case, recorded for visibility.
+- **S6 — PlaygroundChat `providersStatus` 60 s staleness left as-is** (out
+  of S6 scope; one-line whole-branch candidate for parity with the catalog's
+  15-min policy).
+- **Plan Deferred/parked items**: WP-53 (prompt bulk-actions) is already
+  client-parallel — the [BE] batch endpoint remains the follow-up; WP-55
+  (agent-loop sequential tool execution) parked pending its own design
+  discussion (behavior risk).
+- **Lint delta (found at batch-final)**: the branch leaves the
+  `eslint-suppressions.packages-ui.json` entry for
+  `Review/hooks/useMediaSearch.ts` stale (no-restricted-syntax count 15 → 11
+  after S3's deletions) — the canonical `bun run lint:ui` therefore exits 2
+  with "suppressions left that do not occur anymore" while reporting
+  **0 errors**; the fix is one `--prune-suppressions` run (config-file-only,
+  out of scope for this docs+backlog-only commit). Warning churn on touched
+  files: +22/−7, all `no-unused-vars`/`no-explicit-any` warnings, 0 errors;
+  base comparison in the batch-final report.
+- **Extension e2e `queued-requests` local environment failure (pre-verified
+  at base)**: 4/4 fail locally with the identical test names at the branch
+  base `b2b7d5d2b0` (queue panel not rendering from seeded store state —
+  first recorded at Stage 1); CI remains the adjudicator.
+  `workspace-parity` is green locally (1/1).
+- Stage-review deferred minors (open-quiet-panel buddy ramp 5 s → 60 s,
+  grouped-submit top-level catch, file-group positional misattribution →
+  [BE] `original_filename` echo, resume-path emission order,
+  `unmatchedError` message wording, buddy-poll first-read settle) are
+  itemized in the stage reports and the SDD ledger; none block closure.
+
+### Verification runs at final HEAD (2026-11-07, `6c3c009b61`)
+
+- Full `apps/tldw-frontend` suite (`bun run test:run`): **2,989 files,
+  34,153 passed | 42 failed | 21 skipped** (34,216 tests, 680.76 s). All 42
+  reds verified **pre-existing at the branch base** `b2b7d5d2b0` by direct
+  batch execution of the same 18 files there (identical test names and
+  signatures, zero HEAD-only failures; one base-side flake passed at HEAD) —
+  the W3 base-execution precedent. (A first full run executed concurrently
+  with the packages/ui suite showed 74 reds; the extra 32 were 5 s-timeout
+  flakes under dual-suite worker contention — spot-proven by TestRunHistory,
+  15/15 green in isolation at both HEAD and base.)
+- Full `apps/packages/ui` suite (`bun run test`): **2,781 files, 31,676
+  passed | 8 failed | 7 skipped** (31,691 tests, 2,481 s). The four red
+  files — `MessageActionsBar.real-popover` (×3),
+  `ServicePromptsSettings` (×2), `Studio.model-targets` (×2),
+  `chat-document-processing` (×1) — are W3's documented pre-existing dev
+  families (popover visibility / router-history / model-targets /
+  Blob-text); the same four files fail at this branch's base too
+  (6–8 reds across repeat runs — the two families' siblings are
+  timing-flaky at both commits), and none of the four is in W4's 49-file
+  touched set.
+- Extension e2e: `test:e2e:workspace-parity` **1/1 green** (1.4 m);
+  `test:e2e:queued-requests` 4/4 fail locally, **identically at the branch
+  base** (same four test names) — pre-existing environment failure, pending
+  CI adjudication (W3's base-execution precedent).
+- FE typecheck (CI-canonical): `cd apps/tldw-frontend && bun run typecheck`
+  → **exit 0**.
+- eslint (W5's corrected invocation — from `apps/`, workspace binary): the
+  11 touched FE files → **exit 0** (one pre-existing `getCookie` unused
+  warning, identical at base); the 38 touched UI files → **0 errors**,
+  257 warnings (227 identical at base on the modified set; +15 in new test
+  files; net +22/−7 branch-caused, all warnings); canonical `bun run lint:ui`
+  exits 2 solely on the stale suppression entry documented above (exit 0 at
+  base).
+- Whitespace: `git diff --check b2b7d5d2b0..HEAD` → clean (51 files,
+  +5399/−1050).
+- Bandit: N/A — TypeScript-only batch, no Python touched (per program
+  precedent).
+
+### Addendum (2026-10-29): Task 7 closes the seam; corrected final range
+
+The section above was appended at `43d49eceaa`, one commit before the
+branch's final head, and records the fakes seam-hardening as an open
+follow-up; this addendum closes that record per the doc's append-only
+protocol. The batch-final review **ruled the hooks-suite seam a pre-merge
+blocker** (W3 caused it, W3 fixes it), and Task 7 (`a2dcb23d73`,
+test-infra only, no production code changed) resolved it: the fakes in
+**eight** hooks suites were taught the Stage-1/2 schema surface — the
+`searchTokens` table (compound `[token+history_id]` PK where the fakes
+model keys) and, where the exercised paths need it, `messages`
+`bulkGet`/`bulkPut` and a `searchTokens.bulkPut` — covering the five
+itemized suites plus three the itemization missed
+(`useMessage.scene-notes` 1, `useServerChatLoader.mirror` 9,
+`chat-modes.preparation-ownership` 3). All **131 branch-caused reds
+(118 itemized + 13 discovered) → 0**, verified at head: the five suites
+**780/780 ×3** consecutive runs, the three discovered suites 92/92, full
+`src/hooks` 210 files 3658/3658, `src/db` 34 files 525/525, typecheck
+exit 0. The saved-normal suite additionally mints deterministic
+creation-ordered ids, and its five order-red assertions were re-pinned to
+the PK-order contract (exact array computed with production's own
+comparator plus the original membership assertion verbatim; one
+diagnostic located by payload instead of position) — forced by production
+minting the assistant-side row id before the user-side id
+(`useChatActions.ts:2130-2131`); the re-pins were reviewed
+**equal-or-stricter**. **Corrected final range: `617094d014..a2dcb23d73`
+(9 commits, 50 files).** The whole-branch final review also empirically
+closed the 8 out-of-scope reds (four files outside `src/hooks`/`src/db`:
+Blob-text, popover visibility ×3, router-history ×2, model-targets ×2)
+as **pre-existing at the pre-W3 base `617094d014`** by direct execution
+there — 8 failed | 134 passed, identical names and signatures — so W3
+introduces zero new reds versus its merge base.

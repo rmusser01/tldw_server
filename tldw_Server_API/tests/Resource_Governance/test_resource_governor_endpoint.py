@@ -10,10 +10,8 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     try:
-        from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-        await reset_db_pool()
         reset_settings()
     except Exception:
         _ = None
@@ -77,7 +75,7 @@ def _reset_rg_state(app) -> None:
 
 
 @pytest.mark.asyncio
-async def test_policy_snapshot_endpoint(monkeypatch, tmp_path):
+async def test_policy_snapshot_endpoint(monkeypatch, tmp_path, fresh_services):
     base = Path(__file__).resolve().parents[2]
     stub = base / "Config_Files" / "resource_governor_policies.yaml"
 
@@ -124,7 +122,7 @@ async def test_policy_snapshot_endpoint(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_policy_admin_upsert_and_delete_sqlite(monkeypatch, tmp_path):
+async def test_policy_admin_upsert_and_delete_sqlite(monkeypatch, tmp_path, fresh_services):
     # Use DB policy store so admin writes update the snapshot on refresh
     db_path = tmp_path / "authnz_rg_admin.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
@@ -197,7 +195,7 @@ async def test_policy_admin_upsert_and_delete_sqlite(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_rg_diag_media_budget_exposes_limits_and_usage(monkeypatch, tmp_path):
+async def test_rg_diag_media_budget_exposes_limits_and_usage(monkeypatch, tmp_path, fresh_services):
     db_path = tmp_path / "authnz_rg_media_budget.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     api_key = await _create_admin_user_and_key(

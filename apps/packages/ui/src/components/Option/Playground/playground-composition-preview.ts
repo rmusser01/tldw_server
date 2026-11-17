@@ -1,17 +1,19 @@
+import type { PlaygroundAssistantSummary } from "./PlaygroundAssistantContext";
 import type { ConversationContextComposition } from "@/types/conversation-context";
 import type { ChatModelUsabilityStatus } from "@/utils/chat-model-availability";
+import { formatChatModelLabel } from "@/utils/chat-model-label";
 import type {
   PlaygroundContextSource,
   PlaygroundPromptSummary,
 } from "./PlaygroundContextRail";
 import type {
-  RuntimeAssistantSummary,
   RuntimeSettingSummary,
   RuntimeToolSummary,
 } from "./PlaygroundRuntimeInspector";
 
 export type PlaygroundCompositionPreviewState =
   | "ready"
+  | "planned"
   | "degraded"
   | "unavailable";
 
@@ -42,16 +44,16 @@ export type PlaygroundCompositionPreviewEntry = {
 };
 
 export type PlaygroundCompositionPreviewFootprint = {
-  providerMessageCount: number;
-  previewSectionCount: number;
-  contextPieceCount: number;
-  warningCount: number;
+  providerMessageCount: number | null;
+  previewSectionCount: number | null;
+  contextPieceCount: number | null;
+  warningCount: number | null;
   readiness: ConversationContextComposition["readiness"] | "unavailable";
 };
 
 export type PlaygroundCompositionPreviewInput = {
   promptSummary: PlaygroundPromptSummary;
-  assistantSummary: RuntimeAssistantSummary;
+  assistantSummary: PlaygroundAssistantSummary;
   providerRoute: {
     selectedProvider: string | null;
     selectedModel: string | null;
@@ -106,15 +108,15 @@ const countActiveSources = (sources: PlaygroundContextSource[]): number =>
   sources.filter((source) => source.state !== "disabled").length;
 
 const formatSourceCount = (count: number): string =>
-  count === 1 ? "1 active source" : `${count} active sources`;
+  count === 1 ? "1 selected source" : `${count} selected sources`;
 
 const buildFootprint = (
   composition: ConversationContextComposition | null,
 ): PlaygroundCompositionPreviewFootprint => ({
-  providerMessageCount: composition?.providerMessages.length ?? 0,
-  previewSectionCount: composition?.previewSections.length ?? 0,
-  contextPieceCount: composition?.pieces.length ?? 0,
-  warningCount: composition?.warnings.length ?? 0,
+  providerMessageCount: composition?.providerMessages.length ?? null,
+  previewSectionCount: composition?.previewSections.length ?? null,
+  contextPieceCount: composition?.pieces.length ?? null,
+  warningCount: composition?.warnings.length ?? null,
   readiness: composition?.readiness ?? "unavailable",
 });
 
@@ -161,7 +163,18 @@ export const buildPlaygroundCompositionPreviewSummary = ({
   modelUnavailable = false,
   modelUnavailableDetail = null,
 }: PlaygroundCompositionPreviewInput): PlaygroundCompositionPreviewSummary => {
-  const settingsScopeLabel = providerRoute.providerRouteLabel;
+  // Name the model as "model (Provider)" (CC-06); the raw provider:model route
+  // stays out of these labels.
+  const routeModel = providerRoute.providerRouteLabel || providerRoute.selectedModel;
+  const modelDisplayLabel = routeModel
+    ? formatChatModelLabel({
+        modelId: routeModel,
+        provider: providerRoute.selectedProvider,
+      }) || null
+    : null;
+  const settingsScopeLabel = providerRoute.providerRouteLabel
+    ? modelDisplayLabel
+    : null;
   const promptEntry: PlaygroundCompositionPreviewEntry = {
     id: "prompt",
     kind: "prompt",
@@ -183,9 +196,9 @@ export const buildPlaygroundCompositionPreviewSummary = ({
       ? assistantSummary.compositionDetail
       : assistantSummary.mode === "none"
         ? null
-      : assistantSummary.detail === assistantName
-        ? null
-        : assistantSummary.detail;
+        : assistantSummary.detail === assistantName
+          ? null
+          : assistantSummary.detail;
   const assistantEntry: PlaygroundCompositionPreviewEntry = {
     id: "assistant",
     kind: "assistant",
@@ -194,10 +207,7 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     detail: assistantDetail,
     state: assistantSummary.mode === "none" ? "disabled" : "active",
   };
-  const modelTitle =
-    providerRoute.providerRouteLabel ||
-    providerRoute.selectedModel ||
-    "No model selected";
+  const modelTitle = modelDisplayLabel || "No model selected";
   const modelEntry: PlaygroundCompositionPreviewEntry = {
     id: "model",
     kind: "model",
@@ -206,7 +216,6 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     detail:
       modelUsabilityDetail ||
       (modelUnavailable ? modelUnavailableDetail : null) ||
-      providerRoute.selectedProvider ||
       null,
     state: mapModelUsabilityState(
       modelUsabilityStatus,
@@ -245,7 +254,9 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     kind: "context",
     label: "Context",
     title:
-      activeSourceCount > 0 ? formatSourceCount(activeSourceCount) : "No extra context",
+      activeSourceCount > 0
+        ? formatSourceCount(activeSourceCount)
+        : "No extra context",
     detail:
       contextSources.length > 0
         ? `${contextSources.length} configured source${
@@ -351,7 +362,9 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     ? "unavailable"
     : hasUnhealthyOptionalEntry
       ? "degraded"
-      : "ready";
+      : composition
+        ? "ready"
+        : "planned";
 
   return {
     overallState,

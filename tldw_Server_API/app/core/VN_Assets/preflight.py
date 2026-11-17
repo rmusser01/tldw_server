@@ -2,17 +2,17 @@
 
 from collections.abc import Sequence
 
-from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
-    VNAssetGenerationPreflightResponse,
-    VNAssetPackResponse,
-    VNAssetSlotPreflight,
-    VNAssetSlotResponse,
-)
 from tldw_Server_API.app.core.config import route_enabled
 from tldw_Server_API.app.core.Image_Generation.adapter_registry import get_registry
 from tldw_Server_API.app.core.Image_Generation.config import get_image_generation_config, resolve_image_generation_model
 from tldw_Server_API.app.core.Image_Generation.listing import list_image_models_for_catalog
 from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.VN_Assets.vn_asset_schemas import (
+    VNAssetGenerationPreflightResponse,
+    VNAssetPackResponse,
+    VNAssetSlotPreflight,
+    VNAssetSlotResponse,
+)
 from tldw_Server_API.app.services.worker_startup_policy import worker_route_default
 
 

@@ -71,15 +71,15 @@ def client_with_user(monkeypatch, mock_user, tmp_path):
     workflow_handler = MockVoiceWorkflowHandler()
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.voice_assistant.get_voice_command_registry",
+        "tldw_Server_API.app.core.VoiceAssistant.get_voice_command_registry",
         lambda: registry
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.voice_assistant.get_voice_command_router",
+        "tldw_Server_API.app.core.VoiceAssistant.get_voice_command_router",
         lambda: router
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.voice_assistant.get_voice_workflow_handler",
+        "tldw_Server_API.app.core.VoiceAssistant.get_voice_workflow_handler",
         lambda: workflow_handler
     )
 
@@ -219,8 +219,7 @@ async def test_voice_command_dry_run_sanitizes_unexpected_failures(monkeypatch, 
 
     monkeypatch.setattr(voice_mod, "logger", LoggerStub())
     monkeypatch.setattr(
-        voice_mod,
-        "get_voice_command_registry",
+        "tldw_Server_API.app.core.VoiceAssistant.get_voice_command_registry",
         lambda: (_ for _ in ()).throw(RuntimeError("dry-run backend exploded")),
     )
 

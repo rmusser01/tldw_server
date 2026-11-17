@@ -21,6 +21,7 @@ import {
 import {
   normalizeGraphNoteId,
   extractMarkdownHeadings,
+  continueMarkdownList,
   LARGE_NOTE_PREVIEW_THRESHOLD,
   LARGE_NOTE_PREVIEW_DELAY_MS,
 } from '../notes-manager-utils'
@@ -351,7 +352,8 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
       }),
     [content, createNoteLabel, wikilinkIndex, wikilinkResolutions]
   )
-  const tocEntries = React.useMemo(() => extractMarkdownHeadings(content), [content])
+  const tocEntries = React.useMemo(() => extractMarkdownHeadings(content).filter((entry) =>
+    entry.text.trim() !== title.trim() && entry.text.trim().toLowerCase() !== 'table of contents'), [content, title])
   const shouldShowToc = tocEntries.length >= 3
 
   const usesLargePreviewGuardrails = React.useMemo(
@@ -389,7 +391,23 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
 
   const handleEditorKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (!activeWikilinkQuery || wikilinkSuggestions.length === 0) return
+      if (editorDisabled || event.currentTarget.readOnly || event.nativeEvent.isComposing) return
+      if (!activeWikilinkQuery || wikilinkSuggestions.length === 0) {
+        if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return
+        const next = continueMarkdownList(content, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)
+        if (!next) return
+        event.preventDefault()
+        setContentDirty(next.content)
+        setEditorCursorIndex(next.cursor)
+        window.requestAnimationFrame(() => {
+          const textarea = contentTextareaRef.current
+          if (!textarea) return
+          textarea.focus({ preventScroll: true })
+          textarea.setSelectionRange(next.cursor, next.cursor)
+          resizeEditorTextarea()
+        })
+        return
+      }
       if (event.key === 'ArrowDown') {
         event.preventDefault()
         setWikilinkSelectionIndex((current) => (current + 1) % wikilinkSuggestions.length)
@@ -422,7 +440,7 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
         })
       }
     },
-    [activeWikilinkQuery, applyWikilinkSuggestion, contentTextareaRef, setEditorCursorIndex, wikilinkSelectionIndex, wikilinkSuggestions]
+    [activeWikilinkQuery, applyWikilinkSuggestion, content, contentTextareaRef, editorDisabled, resizeEditorTextarea, setContentDirty, setEditorCursorIndex, wikilinkSelectionIndex, wikilinkSuggestions]
   )
 
   // Effects

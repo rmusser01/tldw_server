@@ -8,6 +8,7 @@ from tldw_Server_API.app.api.v1.schemas.quizzes import (
     QuizGenerateRequest,
     QuizGenerationProfileDefinition,
 )
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
 from tldw_Server_API.app.services.quiz_generator import QuizProvenanceValidationError
 
 pytestmark = pytest.mark.unit
@@ -62,7 +63,7 @@ async def test_generate_quiz_legacy_media_id_maps_to_single_media_source(monkeyp
         captured.update(kwargs)
         return {"quiz": {"id": 1}, "questions": []}
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     request = QuizGenerateRequest.model_validate({"media_id": 42, "num_questions": 5, "workspace_id": "ws-1"})
     await quizzes_endpoint.generate_quiz(request=request, db=Mock(), media_db=Mock())
@@ -79,7 +80,7 @@ async def test_generate_quiz_forwards_sources_array(monkeypatch):
         captured.update(kwargs)
         return {"quiz": {"id": 1}, "questions": []}
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     request = QuizGenerateRequest.model_validate(
         {
@@ -102,7 +103,7 @@ async def test_generate_quiz_forwards_generation_profile(monkeypatch):
         captured.update(kwargs)
         return {"quiz": {"id": 1}, "questions": []}
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     request = QuizGenerateRequest.model_validate(
         {
@@ -124,7 +125,7 @@ async def test_generate_quiz_forwards_model_and_api_provider(monkeypatch):
         captured.update(kwargs)
         return {"quiz": {"id": 1}, "questions": []}
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     request = QuizGenerateRequest.model_validate(
         {
@@ -148,7 +149,7 @@ async def test_generate_quiz_forwards_claims_verification_provider_override(monk
         captured.update(kwargs)
         return {"quiz": {"id": 1}, "questions": [], "claim_verification": {"verdict": "grounded"}}
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     request = QuizGenerateRequest.model_validate(
         {
@@ -173,7 +174,7 @@ async def test_generate_quiz_maps_provenance_validation_error_to_422(monkeypatch
     async def fake_generate_quiz_from_sources(**kwargs):
         raise QuizProvenanceValidationError("invalid source citations")
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     request = QuizGenerateRequest.model_validate(
         {
@@ -193,7 +194,7 @@ async def test_generate_quiz_rejects_unknown_workspace_before_generation(monkeyp
     async def fake_generate_quiz_from_sources(**kwargs):
         raise AssertionError("generation should not run when workspace is invalid")
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     db = Mock()
     db.get_workspace.return_value = None
@@ -209,3 +210,27 @@ async def test_generate_quiz_rejects_unknown_workspace_before_generation(monkeyp
         await quizzes_endpoint.generate_quiz(request=request, db=db, media_db=Mock())
 
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_type, expected_status",
+    [
+        (quizzes_endpoint.ChatAuthenticationError, 400),
+        (quizzes_endpoint.ChatBadRequestError, 400),
+        (quizzes_endpoint.ChatRateLimitError, 429),
+        (ChatProviderError, 502),
+    ],
+)
+async def test_generate_quiz_maps_provider_failures_without_leaking_details(monkeypatch, error_type, expected_status):
+    async def fail_provider(**_kwargs):
+        raise error_type(provider="ollama", message="PROVIDER_SYNTHETIC_SECRET")
+
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fail_provider)
+    request = QuizGenerateRequest.model_validate(
+        {"sources": [{"source_type": "note", "source_id": "note-1"}], "num_questions": 1}
+    )
+    with pytest.raises(HTTPException) as caught:
+        await quizzes_endpoint.generate_quiz(request=request, db=Mock(), media_db=Mock())
+    assert caught.value.status_code == expected_status  # nosec B101 -- Pytest HTTP contract assertion.
+    assert "PROVIDER_SYNTHETIC_SECRET" not in str(caught.value.detail)  # nosec B101 -- Pytest public-error privacy assertion.

@@ -92,9 +92,9 @@ describe("TldwApiClient listAllCharacters", () => {
       .map((request) => request.path)
 
     expect(listCalls).toEqual([
-      "/api/v1/characters?limit=1000&offset=0",
-      "/api/v1/characters?limit=1000&offset=1000",
-      "/api/v1/characters?limit=1000&offset=2000"
+      "/api/v1/characters/?limit=1000&offset=0",
+      "/api/v1/characters/?limit=1000&offset=1000",
+      "/api/v1/characters/?limit=1000&offset=2000"
     ])
   })
 
@@ -123,8 +123,8 @@ describe("TldwApiClient listAllCharacters", () => {
       .map((request) => request.path)
 
     expect(listCalls).toEqual([
-      "/api/v1/characters?limit=3&offset=0",
-      "/api/v1/characters?limit=3&offset=3"
+      "/api/v1/characters/?limit=3&offset=0",
+      "/api/v1/characters/?limit=3&offset=3"
     ])
   })
 
@@ -177,8 +177,8 @@ describe("TldwApiClient listAllCharacters", () => {
       .map((request) => request.path)
 
     expect(listCalls).toEqual([
-      "/api/v1/characters?limit=2&offset=0",
-      "/api/v1/characters?limit=2&offset=2"
+      "/api/v1/characters/?limit=2&offset=0",
+      "/api/v1/characters/?limit=2&offset=2"
     ])
   })
 })
@@ -260,7 +260,7 @@ describe("TldwApiClient listCharactersPage", () => {
         throw error
       }
 
-      if (request.path.startsWith("/api/v1/characters?")) {
+      if (request.path.startsWith("/api/v1/characters/?")) {
         return [{ id: 22, name: "Legacy fallback item" }]
       }
 
@@ -288,7 +288,7 @@ describe("TldwApiClient listCharactersPage", () => {
       .map(([call]) => (call as { path?: string })?.path)
       .filter((path): path is string => typeof path === "string")
     expect(paths.some((path) => path.includes("/api/v1/characters/query?"))).toBe(true)
-    expect(paths.some((path) => path.startsWith("/api/v1/characters?"))).toBe(true)
+    expect(paths.some((path) => path.startsWith("/api/v1/characters/?"))).toBe(true)
   })
 
   it("falls back when route-conflict details are only provided on error.details", async () => {
@@ -307,7 +307,7 @@ describe("TldwApiClient listCharactersPage", () => {
         throw error
       }
 
-      if (request.path.startsWith("/api/v1/characters?")) {
+      if (request.path.startsWith("/api/v1/characters/?")) {
         return [{ id: 99, name: "Legacy from details fallback" }]
       }
 
@@ -365,21 +365,12 @@ describe("TldwApiClient createCharacter", () => {
   })
 
   it("retries create with alternate trailing-slash path when initial create path redirects", async () => {
+    mocks.tldwRequest.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: { paths: { "/api/v1/characters": { post: {} } } }
+    })
     mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
-      if (
-        request.method === "GET" &&
-        typeof request.path === "string" &&
-        request.path.includes("/openapi.json")
-      ) {
-        return {
-          paths: {
-            "/api/v1/characters": {
-              post: {}
-            }
-          }
-        }
-      }
-
       if (request.method === "POST" && request.path === "/api/v1/characters") {
         const redirectError = new Error("Request failed: 307") as Error & {
           status?: number
@@ -455,11 +446,13 @@ describe("TldwApiClient createCharacter", () => {
       }
       return {}
     })
-    mocks.tldwRequest.mockResolvedValue({
-      ok: true,
-      status: 201,
-      data: { id: 4, name: "Direct fallback" }
-    })
+    mocks.tldwRequest
+      .mockResolvedValueOnce({ ok: true, status: 200, data: { paths: {} } })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        data: { id: 4, name: "Direct fallback" }
+      })
 
     const client = createConfiguredClient()
     const created = await client.createCharacter({
@@ -469,8 +462,9 @@ describe("TldwApiClient createCharacter", () => {
 
     expect(created).toEqual({ id: 4, name: "Direct fallback" })
     expect(createAttempts).toBe(2)
-    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
-    const directRequestInit = mocks.tldwRequest.mock.calls[0]?.[0] as
+    const directCreates = mocks.tldwRequest.mock.calls.filter(([request]) => request.method === "POST")
+    expect(directCreates).toHaveLength(1)
+    const directRequestInit = directCreates[0]?.[0] as
       | { path?: string; method?: string }
       | undefined
     expect(directRequestInit?.path).toBe("/api/v1/characters/")

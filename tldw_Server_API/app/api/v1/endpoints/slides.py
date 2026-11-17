@@ -29,8 +29,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps import get_slides_db_for_user
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
     ExportFormat,
     GenerateFromChatRequest,
@@ -66,23 +65,23 @@ from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE, MEDIA_DELETE, MEDIA_READ, MEDIA_UPDATE
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
     ArtifactVerificationResult,
     ArtifactVerificationUnit,
     verify_generated_artifact_against_sources,
 )
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     MediaDbSession,
-    get_document_version,
     get_latest_transcription,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
-from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+from tldw_Server_API.app.core.Slides.generation_disconnect import generation_disconnected
 from tldw_Server_API.app.core.Slides.presentation_service import (
     CONTENT_KIND_HEADER,
     STANDALONE_HTML,
@@ -97,7 +96,6 @@ from tldw_Server_API.app.core.Slides.presentation_service import (
 )
 from tldw_Server_API.app.core.Slides.slides_assets import (
     MAX_RESOLVED_SLIDE_ASSET_BYTES,
-    resolve_slide_asset,
 )
 from tldw_Server_API.app.core.Slides.slides_db import (
     ConflictError,
@@ -111,16 +109,12 @@ from tldw_Server_API.app.core.Slides.slides_export import (
     SlidesAssetsMissingError,
     SlidesExportError,
     SlidesExportInputError,
-    export_presentation_bundle,
     export_presentation_json,
-    export_presentation_markdown,
-    export_presentation_pdf,
 )
 from tldw_Server_API.app.core.Slides.slides_generator import (
     SlidesGenerationError,
     SlidesGenerationInputError,
     SlidesGenerationOutputError,
-    SlidesGenerator,
     SlidesSourceTooLargeError,
 )
 from tldw_Server_API.app.core.Slides.slides_images import (
@@ -132,8 +126,6 @@ from tldw_Server_API.app.core.Slides.slides_templates import (
     SlidesTemplate,
     SlidesTemplateInvalidError,
     SlidesTemplateNotFoundError,
-    get_slide_template,
-    list_slide_templates,
 )
 from tldw_Server_API.app.core.Slides.standalone_html_contracts import (
     StandaloneHtmlValidationError,
@@ -147,7 +139,6 @@ from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
 )
 from tldw_Server_API.app.core.Slides.visual_style_resolver import (
     ResolvedBuiltinVisualStyle,
-    resolve_builtin_visual_style,
 )
 from tldw_Server_API.app.core.Slides.visual_styles import (
     get_builtin_visual_style,
@@ -774,7 +765,7 @@ def _resolve_template(template_id: str | None) -> SlidesTemplate | None:
     if not template_id:
         return None
     try:
-        return get_slide_template(template_id)
+        return _slides_templates.get_slide_template(template_id)
     except SlidesTemplateNotFoundError as exc:
         raise HTTPException(status_code=404, detail="template_not_found") from exc
     except SlidesTemplateInvalidError as exc:
@@ -1001,7 +992,7 @@ def _visual_style_response_from_row(row: VisualStyleRow) -> VisualStyleResponse:
 def _resolve_visual_style_response(style_id: str, db: SlidesDatabase) -> VisualStyleResponse:
     """Resolve either a builtin or stored style into the public API response shape."""
 
-    resolved_builtin = resolve_builtin_visual_style(style_id, include_custom_css=False)
+    resolved_builtin = _visual_style_resolver.resolve_builtin_visual_style(style_id, include_custom_css=False)
     if resolved_builtin is not None:
         return _visual_style_response_from_builtin(resolved_builtin)
     try:
@@ -1053,7 +1044,7 @@ def _resolve_presentation_visual_style_application(
 
     resolved_scope = visual_style_scope.strip().lower()
     if resolved_scope == "builtin":
-        resolved_builtin = resolve_builtin_visual_style(resolved_id)
+        resolved_builtin = _visual_style_resolver.resolve_builtin_visual_style(resolved_id)
         if resolved_builtin is None:
             raise HTTPException(status_code=404, detail="visual_style_not_found")
         return _visual_style_application_from_builtin(resolved_builtin)
@@ -1180,7 +1171,7 @@ def _parse_sort(sort: str | None) -> tuple[str, str]:
 
 
 def _resolve_provider(request_provider: str | None) -> str:
-    provider = (request_provider or DEFAULT_LLM_PROVIDER or "openai").strip()
+    provider = (request_provider or get_default_provider() or "openai").strip()
     return provider.lower() if provider else "openai"
 
 
@@ -1195,7 +1186,7 @@ def _resolve_media_source_text(
         return transcript.strip()
 
     try:
-        latest_document = get_document_version(
+        latest_document = _api.get_document_version(
             db_instance=media_db,
             media_id=media_id,
             version_number=None,
@@ -1269,11 +1260,14 @@ async def _generate_presentation(
     response: Response,
     db: SlidesDatabase,
     request: Any,
+    http_request: Request,
     source_text: str,
     source_type: str,
     source_ref: Any | None,
     source_query: str | None,
 ) -> PresentationResponse:
+    if await generation_disconnected(http_request):
+        raise HTTPException(status_code=499, detail="generation_cancelled")
     visual_style_application = _resolve_presentation_visual_style_application(
         visual_style_id=getattr(request, "visual_style_id", None),
         visual_style_scope=getattr(request, "visual_style_scope", None),
@@ -1290,9 +1284,9 @@ async def _generate_presentation(
     marp_theme = _validate_marp_theme(marp_theme)
     settings = _validate_settings(settings)
     provider = _resolve_provider(request.provider)
-    generator = SlidesGenerator()
+    generator = _slides_generator.SlidesGenerator()
     try:
-        metrics = get_metrics_registry()
+        metrics = _metrics_manager.get_metrics_registry()
     except _SLIDES_NONCRITICAL_EXCEPTIONS:
         logger.debug("Failed to get metrics registry, metrics disabled")
         metrics = None
@@ -1310,20 +1304,23 @@ async def _generate_presentation(
             logger.debug("Failed to record slides generation error metric")
 
     try:
-        generated = generator.generate_from_text(
-            source_text=source_text,
-            title_hint=request.title_hint,
-            provider=provider,
-            model=request.model,
-            api_key=None,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            max_source_tokens=request.max_source_tokens,
-            max_source_chars=request.max_source_chars,
-            enable_chunking=request.enable_chunking,
-            chunk_size_tokens=request.chunk_size_tokens,
-            summary_tokens=request.summary_tokens,
-            visual_style_snapshot=visual_style_snapshot_dict,
+        generated = await await_owned_worker(
+            asyncio.to_thread(
+                generator.generate_from_text,
+                source_text=source_text,
+                title_hint=request.title_hint,
+                provider=provider,
+                model=request.model,
+                api_key=None,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                max_source_tokens=request.max_source_tokens,
+                max_source_chars=request.max_source_chars,
+                enable_chunking=request.enable_chunking,
+                chunk_size_tokens=request.chunk_size_tokens,
+                summary_tokens=request.summary_tokens,
+                visual_style_snapshot=visual_style_snapshot_dict,
+            )
         )
     except SlidesSourceTooLargeError as exc:
         _record_generation_error("input_too_large")
@@ -1346,6 +1343,9 @@ async def _generate_presentation(
         _record_generation_error("generation_error")
         raise HTTPException(status_code=500, detail="Failed to generate presentation") from exc
 
+    if await generation_disconnected(http_request):
+        raise HTTPException(status_code=499, detail="generation_cancelled")
+
     try:
         slides = _normalize_slides([_slide_from_obj(s) for s in generated["slides"]])
     except HTTPException:
@@ -1353,15 +1353,17 @@ async def _generate_presentation(
     except (ValidationError, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="invalid_generated_slides") from exc
     slides_text = _flatten_slides_text(slides)
-    claim_verification = await _verify_slides_against_source(
-        slides=slides,
-        source_text=source_text,
-        source_type=source_type,
-        source_ref=source_ref,
-        generation_provider=provider,
-        generation_model=request.model,
-        verification_provider=getattr(request, "claims_verification_provider", None),
-        verification_model=getattr(request, "claims_verification_model", None),
+    claim_verification = await await_owned_worker(
+        _verify_slides_against_source(
+            slides=slides,
+            source_text=source_text,
+            source_type=source_type,
+            source_ref=source_ref,
+            generation_provider=provider,
+            generation_model=request.model,
+            verification_provider=getattr(request, "claims_verification_provider", None),
+            verification_model=getattr(request, "claims_verification_model", None),
+        )
     )
     claim_verification_payload = claim_verification.to_dict()
     if claim_verification.verdict != "grounded":
@@ -1373,6 +1375,8 @@ async def _generate_presentation(
             },
         )
     studio_data = {"claimVerification": claim_verification_payload}
+    if await generation_disconnected(http_request):
+        raise HTTPException(status_code=499, detail="generation_cancelled")
     row = db.create_presentation(
         presentation_id=None,
         title=generated["title"],
@@ -1591,10 +1595,10 @@ async def get_presentation(
         raise _map_presentation_service_error(exc) from exc
     response.headers["ETag"] = _format_etag(row.version, row.content_kind)
     response.headers["Last-Modified"] = row.last_modified
+    response.headers["Cache-Control"] = "private, no-store"
+    merge_auth_vary_header(response.headers)
     if row.content_kind == STANDALONE_HTML:
-        response.headers["Cache-Control"] = "private, no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        merge_auth_vary_header(response.headers)
     return _build_presentation_response(row, additive=STANDALONE_HTML in accepted)
 
 
@@ -2062,7 +2066,7 @@ async def restore_presentation(
 )
 async def list_templates() -> SlidesTemplateListResponse:
     try:
-        templates = list_slide_templates()
+        templates = _slides_templates.list_slide_templates()
     except SlidesTemplateInvalidError as exc:
         raise HTTPException(status_code=500, detail="Failed to list slide templates") from exc
     return SlidesTemplateListResponse(templates=[_template_to_response(t) for t in templates])
@@ -2076,7 +2080,7 @@ async def list_templates() -> SlidesTemplateListResponse:
 )
 async def get_template(template_id: str) -> SlidesTemplateResponse:
     try:
-        template = get_slide_template(template_id)
+        template = _slides_templates.get_slide_template(template_id)
     except SlidesTemplateNotFoundError as exc:
         raise HTTPException(status_code=404, detail="template_not_found") from exc
     except SlidesTemplateInvalidError as exc:
@@ -2108,7 +2112,7 @@ async def list_visual_styles(
         *(
             _visual_style_response_from_builtin(resolved)
             for resolved in (
-                resolve_builtin_visual_style(style.style_id, include_custom_css=False) for style in builtin_slice
+                _visual_style_resolver.resolve_builtin_visual_style(style.style_id, include_custom_css=False) for style in builtin_slice
             )
             if resolved is not None
         ),
@@ -2588,6 +2592,7 @@ async def list_presentation_render_artifacts(
 async def generate_from_prompt(
     request: GenerateFromPromptRequest,
     response: Response,
+    http_request: Request,
     db: SlidesDatabase = Depends(get_slides_db_for_user),
 ) -> PresentationResponse:
     prompt = request.prompt.strip()
@@ -2597,6 +2602,7 @@ async def generate_from_prompt(
         response=response,
         db=db,
         request=request,
+        http_request=http_request,
         source_text=prompt,
         source_type="prompt",
         source_ref=None,
@@ -2632,6 +2638,7 @@ async def generate_from_chat(
         response=response,
         db=db,
         request=request,
+        http_request=http_request,
         source_text=source_text,
         source_type="chat",
         source_ref=conversation_id,
@@ -2648,6 +2655,7 @@ async def generate_from_chat(
 async def generate_from_media(
     request: GenerateFromMediaRequest,
     response: Response,
+    http_request: Request,
     db: SlidesDatabase = Depends(get_slides_db_for_user),
     media_db: MediaDbSession = Depends(get_media_db_for_user),
 ) -> PresentationResponse:
@@ -2671,6 +2679,7 @@ async def generate_from_media(
         response=response,
         db=db,
         request=request,
+        http_request=http_request,
         source_text=source_text,
         source_type="media",
         source_ref=str(media_id),
@@ -2711,6 +2720,7 @@ async def generate_from_notes(
         response=response,
         db=db,
         request=request,
+        http_request=http_request,
         source_text=source_text,
         source_type="notes",
         source_ref=request.note_ids,
@@ -2727,6 +2737,7 @@ async def generate_from_notes(
 async def generate_from_rag(
     request: GenerateFromRagRequest,
     response: Response,
+    http_request: Request,
     db: SlidesDatabase = Depends(get_slides_db_for_user),
 ) -> PresentationResponse:
     query = request.query.strip()
@@ -2736,7 +2747,7 @@ async def generate_from_rag(
         user_id = int(db.client_id)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail="user_unavailable") from exc
-    rag_result = await unified_rag_pipeline(
+    rag_result = await _unified_pipeline.unified_rag_pipeline(
         query=query,
         top_k=request.top_k or 8,
         sources=["media_db", "notes", "chats"],
@@ -2754,6 +2765,7 @@ async def generate_from_rag(
         response=response,
         db=db,
         request=request,
+        http_request=http_request,
         source_text=source_text,
         source_type="rag",
         source_ref=None,
@@ -2848,7 +2860,7 @@ async def export_presentation(
         raise HTTPException(status_code=500, detail="user_unavailable") from exc
 
     def _asset_resolver(asset_ref: str) -> dict[str, Any]:
-        return resolve_slide_asset(
+        return _slides_assets.resolve_slide_asset(
             asset_ref,
             collections_db=collections_db,
             user_id=user_id,
@@ -2856,7 +2868,7 @@ async def export_presentation(
         )
 
     try:
-        metrics = get_metrics_registry()
+        metrics = _metrics_manager.get_metrics_registry()
     except _SLIDES_NONCRITICAL_EXCEPTIONS:
         metrics = None
     started_at = time.perf_counter()
@@ -2869,7 +2881,7 @@ async def export_presentation(
     elif format == ExportFormat.MARKDOWN:
         try:
             markdown_text = await asyncio.to_thread(
-                export_presentation_markdown,
+                _slides_export.export_presentation_markdown,
                 title=row.title,
                 slides=slides,
                 theme=row.theme,
@@ -2913,7 +2925,7 @@ async def export_presentation(
         }
         try:
             body = await asyncio.to_thread(
-                export_presentation_pdf,
+                _slides_export.export_presentation_pdf,
                 title=row.title,
                 slides=slides,
                 theme=row.theme,
@@ -2947,7 +2959,7 @@ async def export_presentation(
     elif format == ExportFormat.REVEAL:
         try:
             body = await asyncio.to_thread(
-                export_presentation_bundle,
+                _slides_export.export_presentation_bundle,
                 title=row.title,
                 slides=slides,
                 theme=row.theme,
@@ -3028,5 +3040,13 @@ async def slides_health(db: SlidesDatabase = Depends(get_slides_db_for_user)) ->
 from tldw_Server_API.app.api.v1.endpoints.slides_standalone_html import (  # noqa: E402
     router as standalone_html_router,
 )
+import tldw_Server_API.app.core.DB_Management.media_db.api as _api
+import tldw_Server_API.app.core.Metrics.metrics_manager as _metrics_manager
+import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as _unified_pipeline
+import tldw_Server_API.app.core.Slides.slides_assets as _slides_assets
+import tldw_Server_API.app.core.Slides.slides_export as _slides_export
+import tldw_Server_API.app.core.Slides.slides_generator as _slides_generator
+import tldw_Server_API.app.core.Slides.slides_templates as _slides_templates
+import tldw_Server_API.app.core.Slides.visual_style_resolver as _visual_style_resolver
 
 router.include_router(standalone_html_router)

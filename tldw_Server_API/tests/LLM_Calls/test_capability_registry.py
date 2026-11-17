@@ -219,3 +219,65 @@ def test_validate_payload_allows_unknown_tool_type():
     payload = {"messages": [], "model": "test", "tools": [{"type": "custom_tool", "payload": {"ok": True}}]}
     normalized = cr.validate_payload("openai", payload)
     assert normalized["tools"][0]["type"] == "custom_tool"
+
+
+@pytest.mark.parametrize("value", [True, -0.1, 3.1, float("nan"), float("inf"), "1.2"])
+def test_repetition_penalty_rejects_invalid_kobold_values(value):
+    with pytest.raises(ChatBadRequestError):
+        cr.validate_payload(
+            "kobold",
+            {"model": "saved-model", "messages": [], "repetition_penalty": value},
+        )
+
+
+def test_sampling_modifier_policy_preserves_saved_fields_and_operating_config():
+    from copy import deepcopy
+
+    config = {
+        "qwen_api": {
+            "api_key": "unit-test-key",
+            "api_timeout": 30,
+            "max_tokens": 2048,
+            "seed": 7,
+            "frequency_penalty": 0.8,
+        },
+        "deepseek_api": {"seed": 9},
+    }
+    original = deepcopy(config)
+    request = {
+        "app_config": config,
+        "temperature": 0.4,
+        "top_p": 0.8,
+        "repetition_penalty": 1.2,
+        "stop": [],
+        "seed": 7,
+        "extra_body": {"presence_penalty": 0.5, "retained": True},
+        "call_policy": cr.ProviderCallPolicy(allow_sampling_modifiers=False),
+    }
+    result = cr.apply_provider_call_policy("qwen", request)
+    assert result["app_config"]["qwen_api"] == {
+        "api_key": "unit-test-key",
+        "api_timeout": 30,
+        "max_tokens": 2048,
+    }
+    assert result["app_config"]["deepseek_api"] == {"seed": 9}
+    assert "seed" not in result
+    assert result["extra_body"] == {"retained": True}
+    assert [result[key] for key in ("temperature", "top_p", "repetition_penalty", "stop")] == [0.4, 0.8, 1.2, []]
+    assert config == original
+
+
+def test_default_policy_keeps_legacy_sampling_modifiers():
+    request = {
+        "app_config": {"qwen_api": {"seed": 7}},
+        "seed": 7,
+        "call_policy": cr.ProviderCallPolicy(),
+    }
+    result = cr.apply_provider_call_policy("qwen", request)
+    assert result["seed"] == result["app_config"]["qwen_api"]["seed"] == 7
+
+
+@pytest.mark.parametrize("value", [1, "false", {}, []])
+def test_sampling_modifier_policy_requires_real_boolean(value):
+    with pytest.raises(TypeError, match="allow_sampling_modifiers"):
+        cr.ProviderCallPolicy(allow_sampling_modifiers=value)

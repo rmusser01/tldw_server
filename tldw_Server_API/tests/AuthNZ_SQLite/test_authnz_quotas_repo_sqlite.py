@@ -6,9 +6,9 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_authnz_quotas_repo_sqlite_increment_and_check(tmp_path, monkeypatch):
+async def test_authnz_quotas_repo_sqlite_increment_and_check(tmp_path, monkeypatch, fresh_services):
     """AuthnzQuotasRepo increment helpers should work on SQLite."""
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.quotas_repo import AuthnzQuotasRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -18,7 +18,6 @@ async def test_authnz_quotas_repo_sqlite_increment_and_check(tmp_path, monkeypat
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     repo = AuthnzQuotasRepo(db_pool=pool)

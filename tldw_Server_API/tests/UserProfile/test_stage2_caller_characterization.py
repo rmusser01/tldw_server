@@ -107,6 +107,7 @@ class ObservedCallerContract:
     audit_count: int
     email_execute_count: int = 0
     email_transaction_exit_count: int = 0
+    quota_user_ids: tuple[int, ...] = ()
 
 
 def _legacy_success_body(
@@ -187,9 +188,7 @@ CALLER_CASES = (
             ("preferences.ui.theme", "midnight"),
         ),
         status_code=200,
-        body=_legacy_success_body(
-            ("preferences.ui.theme", "preferences.ui.theme")
-        ),
+        body=_legacy_success_body(("preferences.ui.theme", "preferences.ui.theme")),
         applied_keys=("preferences.ui.theme", "preferences.ui.theme"),
         headers={},
         audit_count=1,
@@ -207,9 +206,7 @@ CALLER_CASES = (
             ("preferences.ui.theme", "midnight"),
         ),
         status_code=200,
-        body=_legacy_success_body(
-            ("preferences.ui.theme", "preferences.ui.theme")
-        ),
+        body=_legacy_success_body(("preferences.ui.theme", "preferences.ui.theme")),
         applied_keys=("preferences.ui.theme", "preferences.ui.theme"),
         headers={},
         audit_count=0,
@@ -394,9 +391,7 @@ CALLER_CASES = (
             ("limits.storage_quota_mb", 8192),
         ),
         status_code=200,
-        body=_legacy_success_body(
-            ("limits.storage_quota_mb", "limits.storage_quota_mb")
-        ),
+        body=_legacy_success_body(("limits.storage_quota_mb", "limits.storage_quota_mb")),
         applied_keys=("limits.storage_quota_mb", "limits.storage_quota_mb"),
         headers={},
         audit_count=1,
@@ -429,9 +424,7 @@ CALLER_CASES = (
         dry_run=False,
         updates=(("identity.email", "not-an-email"),),
         status_code=422,
-        body={
-            "detail": "Destination rejected one or more account profile/settings values"
-        },
+        body={"detail": "Destination rejected one or more account profile/settings values"},
         applied_keys=(),
         headers={},
         audit_count=0,
@@ -497,10 +490,7 @@ CALLER_CASES = (
                 {
                     "type": "value_error",
                     "loc": ["body", "email"],
-                    "msg": (
-                        "value is not a valid email address: "
-                        "An email address must have an @-sign."
-                    ),
+                    "msg": ("value is not a valid email address: " "An email address must have an @-sign."),
                     "input": "not-an-email",
                     "ctx": {"reason": "An email address must have an @-sign."},
                 }
@@ -580,9 +570,7 @@ CALLER_CASES = (
         dry_run=False,
         updates=(("identity.email", "updated@example.com"),),
         status_code=503,
-        body={
-            "detail": "Authentication database is busy. Please retry shortly."
-        },
+        body={"detail": "Authentication database is busy. Please retry shortly."},
         applied_keys=(),
         headers={"Retry-After": "1"},
         audit_count=0,
@@ -849,12 +837,8 @@ class CallerHarness:
             self._command_service_type(case, calls),
         )
 
-        profile = {
-            key: value for key, value in case.updates if key == "identity.email"
-        }
-        overrides = {
-            key: value for key, value in case.updates if key != "identity.email"
-        }
+        profile = {key: value for key, value in case.updates if key == "identity.email"}
+        overrides = {key: value for key, value in case.updates if key != "identity.email"}
         payloads: dict[str, dict[str, Any]] = {}
         if profile:
             payloads["account_profile"] = {"profile": profile}
@@ -884,6 +868,20 @@ class CallerHarness:
     def _invoke_deprecated_email(self, case: CallerCase) -> ObservedCallerContract:
         email_execute_count = 0
         email_transaction_exit_count = 0
+        quota_user_ids: list[int] = []
+
+        class _StorageService:
+            """Quota read boundary for the isolated deprecated-email caller."""
+
+            async def user_quota_status(self, user_id: int) -> dict[str, int | float]:
+                """Return the characterized authoritative quota for exactly the synthetic user."""
+                assert user_id == 7
+                quota_user_ids.append(user_id)
+                return {"quota_mb": 5120, "used_mb": 0.0}
+
+        async def _storage_service() -> _StorageService:
+            """Declare the storage dependency independently of the fake email transaction."""
+            return _StorageService()
 
         class _Cursor:
             rowcount = case.email_rowcount
@@ -913,15 +911,8 @@ class CallerHarness:
                 query_text = str(query)
                 if query_text.lstrip().lower().startswith("with target_user as"):
                     return _Cursor(_candidate_rows())
-                if any(
-                    f"UPDATE {table} SET email" in query_text
-                    for table in ("main.users", "public.users")
-                ):
-                    return (
-                        f"UPDATE {case.email_rowcount}"
-                        if "$1" in query_text
-                        else _Cursor()
-                    )
+                if any(f"UPDATE {table} SET email" in query_text for table in ("main.users", "public.users")):
+                    return f"UPDATE {case.email_rowcount}" if "$1" in query_text else _Cursor()
                 return "UPDATE 1" if "$1" in query_text else _Cursor()
 
         class _TransactionalConnection:
@@ -933,18 +924,11 @@ class CallerHarness:
                 query_text = str(query)
                 if query_text.lstrip().lower().startswith("with target_user as"):
                     return _Cursor(_candidate_rows())
-                if any(
-                    f"UPDATE {table} SET email" in query_text
-                    for table in ("main.users", "public.users")
-                ):
+                if any(f"UPDATE {table} SET email" in query_text for table in ("main.users", "public.users")):
                     email_execute_count += 1
                     if case.email_failure == "duplicate":
                         raise users_endpoints.DatabaseError("duplicate email")
-                    return (
-                        f"UPDATE {case.email_rowcount}"
-                        if "$1" in query_text
-                        else _Cursor()
-                    )
+                    return f"UPDATE {case.email_rowcount}" if "$1" in query_text else _Cursor()
                 return "UPDATE 1" if "$1" in query_text else _Cursor()
 
         transaction_connection = _TransactionalConnection()
@@ -974,9 +958,7 @@ class CallerHarness:
             if case.email_failure == "busy":
                 raise HTTPException(
                     status_code=503,
-                    detail=(
-                        "Authentication database is busy. Please retry shortly."
-                    ),
+                    detail=("Authentication database is busy. Please retry shortly."),
                     headers={"Retry-After": "1"},
                 )
             yield _Db()
@@ -1002,6 +984,7 @@ class CallerHarness:
             _FrozenDeprecationDateTime,
         )
         self._monkeypatch.setattr(users_endpoints, "_resolve_user_context", _resolve)
+        self._monkeypatch.setattr(users_endpoints, "get_storage_service", _storage_service)
         use_normal_transaction_dependency = case.email_failure in {"duplicate", "commit"}
         if use_normal_transaction_dependency:
             self._monkeypatch.setenv("TEST_MODE", "0")
@@ -1026,9 +1009,7 @@ class CallerHarness:
             with TestClient(app, raise_server_exceptions=False) as client:
                 response = client.put("/api/v1/users/me", json=request_body)
         headers = {
-            key: response.headers[key]
-            for key in (*DEPRECATION_HEADERS, "Retry-After")
-            if key in response.headers
+            key: response.headers[key] for key in (*DEPRECATION_HEADERS, "Retry-After") if key in response.headers
         }
         applied_keys = ("identity.email",) if response.status_code == 200 else ()
         if response.headers.get("content-type", "").startswith("application/json"):
@@ -1043,6 +1024,7 @@ class CallerHarness:
             audit_count=0,
             email_execute_count=email_execute_count,
             email_transaction_exit_count=email_transaction_exit_count,
+            quota_user_ids=tuple(quota_user_ids),
         )
 
 
@@ -1064,13 +1046,12 @@ async def test_stage2_caller_contract_is_characterized(
     assert observed.applied_keys == case.applied_keys
     assert observed.headers == case.headers
     assert observed.audit_count == case.audit_count
+    if case.caller == "deprecated_email":
+        assert observed.quota_user_ids == ((7,) if case.status_code == 200 else ())
     if case.email_execute_count is not None:
         assert observed.email_execute_count == case.email_execute_count
     if case.email_transaction_exit_count is not None:
-        assert (
-            observed.email_transaction_exit_count
-            == case.email_transaction_exit_count
-        )
+        assert observed.email_transaction_exit_count == case.email_transaction_exit_count
 
 
 def test_dependency_override_scope_restores_preexisting_entries() -> None:
@@ -1096,19 +1077,10 @@ def test_dependency_override_scope_restores_preexisting_entries() -> None:
                 get_auth_principal: _replacement_principal_override,
             }
         ):
-            assert (
-                app.dependency_overrides[get_db_transaction]
-                is _replacement_db_override
-            )
-            assert (
-                app.dependency_overrides[get_auth_principal]
-                is _replacement_principal_override
-            )
+            assert app.dependency_overrides[get_db_transaction] is _replacement_db_override
+            assert app.dependency_overrides[get_auth_principal] is _replacement_principal_override
         assert app.dependency_overrides[get_db_transaction] is _prior_db_override
-        assert (
-            app.dependency_overrides[get_auth_principal]
-            is _prior_principal_override
-        )
+        assert app.dependency_overrides[get_auth_principal] is _prior_principal_override
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(original_overrides)

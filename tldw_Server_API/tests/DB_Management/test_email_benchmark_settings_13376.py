@@ -1,6 +1,7 @@
 """Benchmark evidence records the actual bounded PostgreSQL resource budget."""
 
 from contextlib import nullcontext
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -56,30 +57,46 @@ def test_settings_evidence_reads_live_transaction_memory_budget(pg_database_conf
 @pytest.mark.integration
 @pytest.mark.postgres
 def test_full_parity_verification_preserves_benchmark_parallel_budget(pg_database_config, monkeypatch):
-    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    from psycopg.conninfo import make_conninfo
+
+    # Pool check-in resets session SETs; the benchmark baseline must survive that reset.
+    config = replace(
+        pg_database_config,
+        connection_string=make_conninfo(
+            pg_database_config.postgres_connection_string(),
+            options="-c work_mem=64MB -c max_parallel_workers_per_gather=2",
+        ),
+    )
+    backend = DatabaseBackendFactory.create_backend(config)
     db = MediaDatabase(":memory:", client_id="42", backend=backend)
     try:
         with scoped_context(user_id=42):
-            with db.transaction() as conn:
-                backend.execute("SET max_parallel_workers_per_gather = 2", connection=conn)
-                backend.execute("SET work_mem = '64MB'", connection=conn)
+            before = fixture.describe_postgres_benchmark_settings(db)
+            assert before["work_mem"] == "64MB"
+            assert before["max_parallel_workers_per_gather"] == "2"
             original = db._fetchone_with_connection
             parity_workers = []
+            parity_memory = []
 
             def observe(conn, query, params=None):
                 if "AS linked" in query:
                     setting = backend.execute(
-                        "SELECT current_setting('max_parallel_workers_per_gather') AS workers",
+                        "SELECT current_setting('max_parallel_workers_per_gather') AS workers, "
+                        "current_setting('work_mem') AS work_mem",
                         connection=conn,
                     ).rows[0]
                     parity_workers.append(setting["workers"])
+                    parity_memory.append(setting["work_mem"])
                 return original(conn, query, params)
 
             monkeypatch.setattr(db, "_fetchone_with_connection", observe)
             security = fixture.describe_fixture_security(db)
             after = fixture.describe_postgres_benchmark_settings(db)
             assert parity_workers == ["0"]
+            assert parity_memory == ["64MB"]
             assert security["parity_verification_parallel_workers"] == 0
+            assert security["postgres_runtime_settings"]["work_mem"] == "64MB"
+            assert security["postgres_runtime_settings"]["max_parallel_workers_per_gather"] == "2"
             assert after["max_parallel_workers_per_gather"] == "2"
             assert after["work_mem"] == "64MB"
     finally:

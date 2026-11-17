@@ -72,7 +72,7 @@ class TestEmptyMessageFix:
         }
 
         # Process the message
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.validate_image_url") as mock_validate:
+        with patch("tldw_Server_API.app.core.Utils.image_validation.validate_image_url") as mock_validate:
             mock_validate.return_value = (False, None, None)  # Invalid image
             result = await _save_message_turn_to_db(mock_db, "conv_123", message_obj, use_transaction=False)
 

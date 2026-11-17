@@ -24,14 +24,14 @@ describe("useSplashScreen", () => {
     expect(result.current.card).toBeNull()
   })
 
-  it("shows a splash only when explicitly triggered", () => {
+  it("shows a splash only when explicitly triggered", async () => {
     const { result } = renderHook(() => useSplashScreen())
 
     act(() => {
       result.current.show()
     })
 
-    expect(result.current.visible).toBe(true)
+    await waitFor(() => expect(result.current.visible).toBe(true))
     expect(result.current.card).not.toBeNull()
     expect(result.current.message.length).toBeGreaterThan(0)
   })
@@ -51,7 +51,7 @@ describe("useSplashScreen", () => {
     expect(result.current.card).toBeNull()
   })
 
-  it("allows explicit forced splash when disabled", () => {
+  it("allows explicit forced splash when disabled", async () => {
     const { result } = renderHook(() => useSplashScreen())
 
     act(() => {
@@ -62,7 +62,7 @@ describe("useSplashScreen", () => {
       result.current.show({ force: true })
     })
 
-    expect(result.current.visible).toBe(true)
+    await waitFor(() => expect(result.current.visible).toBe(true))
     expect(result.current.card).not.toBeNull()
   })
 
@@ -72,7 +72,7 @@ describe("useSplashScreen", () => {
     act(() => {
       result.current.show()
     })
-    expect(result.current.visible).toBe(true)
+    await waitFor(() => expect(result.current.visible).toBe(true))
 
     act(() => {
       result.current.setDisabled(true)
@@ -85,7 +85,7 @@ describe("useSplashScreen", () => {
     })
   })
 
-  it("still shows splash in reduced-motion mode (static overlay path)", () => {
+  it("still shows splash in reduced-motion mode (static overlay path)", async () => {
     const originalMatchMedia = window.matchMedia
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
@@ -98,8 +98,8 @@ describe("useSplashScreen", () => {
         removeListener: () => undefined,
         addEventListener: () => undefined,
         removeEventListener: () => undefined,
-        dispatchEvent: () => false,
-      })) as typeof window.matchMedia,
+        dispatchEvent: () => false
+      })) as typeof window.matchMedia
     })
 
     try {
@@ -109,13 +109,13 @@ describe("useSplashScreen", () => {
         result.current.show()
       })
 
-      expect(result.current.visible).toBe(true)
+      await waitFor(() => expect(result.current.visible).toBe(true))
       expect(result.current.card).not.toBeNull()
     } finally {
       Object.defineProperty(window, "matchMedia", {
         configurable: true,
         writable: true,
-        value: originalMatchMedia,
+        value: originalMatchMedia
       })
     }
   })
@@ -124,24 +124,15 @@ describe("useSplashScreen", () => {
     await setSetting(SPLASH_DURATION_SECONDS_SETTING, 7)
     const { result } = renderHook(() => useSplashScreen())
 
-    await waitFor(() => {
-      act(() => {
-        result.current.show()
-      })
-      expect(result.current.visible).toBe(true)
-      expect(result.current.card?.duration).toBe(7000)
-    })
+    act(() => result.current.show())
+    await waitFor(() => expect(result.current.card?.duration).toBe(7000))
   })
 
   it("clamps configured splash duration to supported range", async () => {
     await setSetting(SPLASH_DURATION_SECONDS_SETTING, 99 as unknown as number)
     const { result } = renderHook(() => useSplashScreen())
 
-    await waitFor(() => {
-      act(() => {
-        result.current.show()
-      })
-      expect(result.current.card?.duration).toBe(10_000)
-    })
+    act(() => result.current.show())
+    await waitFor(() => expect(result.current.card?.duration).toBe(10_000))
   })
 })

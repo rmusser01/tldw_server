@@ -47,7 +47,7 @@ _DONE_SPELLINGS = ["data: [done]", "data:[DONE]", "data:  [Done]"]
 
 @pytest.mark.parametrize("line", _DONE_SPELLINGS)
 def test_anthropic_messages_parser_treats_any_done_spelling_as_done(line):
-    from tldw_Server_API.app.core.LLM_Calls.anthropic_messages import _parse_openai_sse_line
+    from tldw_Server_API.app.core.Chat.anthropic_messages import _parse_openai_sse_line
 
     assert _parse_openai_sse_line(line) == {"_done": True}
 

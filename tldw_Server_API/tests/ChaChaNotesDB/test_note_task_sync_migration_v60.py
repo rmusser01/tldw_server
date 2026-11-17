@@ -277,10 +277,14 @@ def _prepare_v59_database(db_path: Path) -> None:
     CharactersRAGDB._CURRENT_SCHEMA_VERSION = 59
     try:
         db = CharactersRAGDB(str(db_path), client_id=OWNER)
-        note_id = db.add_note("Task parent", "- [ ] Review source\n", note_id=NOTE_ID)
-        assert note_id == NOTE_ID  # nosec B101
         now = "2026-08-13T00:00:00+00:00"
         with db.transaction() as conn:
+            # Seed v59 rows without invoking current-schema semantic hooks.
+            note_id = conn.execute(
+                "INSERT INTO notes(id,title,content,client_id) VALUES (?,?,?,?) RETURNING id",
+                (NOTE_ID, "Task parent", "- [ ] Review source\n", OWNER),
+            ).fetchone()[0]
+            assert note_id == NOTE_ID  # nosec B101
             conn.execute(
                 """
                 INSERT INTO note_tasks(
@@ -530,8 +534,12 @@ def test_sqlite_v60_upgrade_rejects_mismatched_event_task_and_note(tmp_path: Pat
     CharactersRAGDB._CURRENT_SCHEMA_VERSION = 59
     try:
         legacy = CharactersRAGDB(str(db_path), client_id=OWNER)
-        assert legacy.add_note("Other", "Body", note_id=other_note_id) == other_note_id  # nosec B101
         with legacy.transaction() as conn:
+            inserted = conn.execute(
+                "INSERT INTO notes(id,title,content,client_id) VALUES (?,?,?,?) RETURNING id",
+                (other_note_id, "Other", "Body", OWNER),
+            ).fetchone()[0]
+            assert inserted == other_note_id  # nosec B101
             conn.execute("UPDATE task_events SET note_id=? WHERE id=?", (other_note_id, EVENT_ID))
         legacy.close_all_connections()
     finally:

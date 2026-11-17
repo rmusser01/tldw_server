@@ -4,13 +4,17 @@ import { getBuiltinPresets } from "@/themes/presets"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it, vi } from "vitest"
 
 import { PromptReviewSurface } from "../PromptReviewSurface"
 
 const sharedTailwindStyles = readFileSync(
-  resolve(process.cwd(), "src/assets/tailwind-shared.css"),
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../../assets/tailwind-shared.css"
+  ),
   "utf8"
 )
 

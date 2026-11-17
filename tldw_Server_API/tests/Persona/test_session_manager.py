@@ -378,9 +378,16 @@ def test_confirmation_prunes_expired_plan(confirmation_plan):
     assert error.value.reason_code == "PLAN_NOT_FOUND"
 
 
-def test_confirmation_preserves_runtime_only_sessions(confirmation_plan):
-    manager, pending = confirmation_plan
-    pending.requires_persisted_session = False
+def test_confirmation_preserves_runtime_only_sessions():
+    manager = SessionManager()
+    pending = manager.put_plan(
+        session_id="legacy",
+        user_id="owner",
+        persona_id="research_assistant",
+        plan_id="plan",
+        steps=[{"idx": 0, "tool": "rag_search"}],
+        requires_persisted_session=False,
+    )
     assert (
         manager.consume_plan_for_confirmation(
             session_id=pending.session_id,
@@ -415,3 +422,60 @@ def test_concurrent_confirmations_consume_exactly_once(confirmation_plan):
     assert sum(item is pending for item in outcomes) == 1
     assert outcomes.count("PLAN_NOT_FOUND") == 1
     assert manager.get_plan(session_id=pending.session_id, plan_id=pending.plan_id, user_id="owner") is None
+
+
+@pytest.mark.parametrize("plan_before_saved", [True, False])
+def test_confirmation_never_downgrades_a_materialized_session(plan_before_saved):
+    manager = SessionManager()
+    manager.create("owner", "research_assistant", "promoted")
+    if not plan_before_saved:
+        manager.create("owner", "research_assistant", "promoted", persisted=True)
+    pending = manager.put_plan(
+        session_id="promoted",
+        user_id="owner",
+        persona_id="research_assistant",
+        plan_id="plan",
+        steps=[{"idx": 0, "tool": "rag_search"}],
+        requires_persisted_session=False,
+    )
+    if plan_before_saved:
+        manager.create("owner", "research_assistant", "promoted", persisted=True)
+    with pytest.raises(PlanConfirmationError) as error:
+        manager.consume_plan_for_confirmation(
+            session_id="promoted", plan_id="plan", user_id="owner", session_exists=False, session_terminal=False
+        )
+    assert error.value.reason_code == "SESSION_NOT_FOUND"  # nosec B101
+    assert manager.get_plan(session_id="promoted", plan_id="plan", user_id="owner") is pending  # nosec B101
+
+
+def test_retry_approval_is_consumed_exactly_once_and_not_revived_by_another_store():
+    manager = SessionManager()
+    manager.create("owner", "persona", "legacy")
+    approval = {"args": {"query": "reviewed"}}
+    manager.put_retry_approval(session_id="legacy", user_id="owner", key="first", approval=approval)
+    start = Barrier(2)
+
+    def consume():
+        start.wait(timeout=5)
+        return manager.consume_retry_approval(session_id="legacy", user_id="owner", key="first", session_exists=False)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(lambda _: consume(), range(2)))
+    assert outcomes.count(approval) == 1 and outcomes.count(None) == 1  # nosec B101
+    manager.put_retry_approval(session_id="legacy", user_id="owner", key="second", approval={"args": {}})
+    assert set(manager.get_preferences(session_id="legacy", user_id="owner")["pending_retry_approvals"]) == {"second"}  # nosec B101
+
+
+def test_retry_approval_promotion_refusal_preserves_entry_and_owner_boundary():
+    manager = SessionManager()
+    manager.create("owner", "persona", "promoted")
+    approval = {"args": {"query": "reviewed"}}
+    manager.put_retry_approval(session_id="promoted", user_id="owner", key="key", approval=approval)
+    assert (
+        manager.consume_retry_approval(session_id="promoted", user_id="foreign", key="key", session_exists=False)
+        is None
+    )  # nosec B101
+    manager.create("owner", "persona", "promoted", persisted=True)
+    with pytest.raises(PlanConfirmationError, match="unavailable"):
+        manager.consume_retry_approval(session_id="promoted", user_id="owner", key="key", session_exists=False)
+    assert manager.get_preferences(session_id="promoted", user_id="owner")["pending_retry_approvals"]["key"] == approval  # nosec B101

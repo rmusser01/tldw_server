@@ -134,6 +134,7 @@ export function zipWithProfile({
     cwd,
     env: {
       ...env,
+      NODE_OPTIONS: env.NODE_OPTIONS ?? "--max-old-space-size=6144",
       TARGET: browserConfig.targetEnv,
     },
     stdio: "inherit",

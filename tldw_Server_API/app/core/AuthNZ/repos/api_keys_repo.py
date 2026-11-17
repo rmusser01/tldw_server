@@ -140,7 +140,19 @@ class AuthnzApiKeysRepo:
                 from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
                     ensure_api_keys_tables_pg,
                 )
+                from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+                    POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
+                    validate_postgres_api_keys_runtime,
+                )
+                from tldw_Server_API.app.core.exceptions import SchemaReadinessError
 
+                async with self.db_pool.transaction() as conn:
+                    authority = await conn.fetchval(POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL)
+                    if authority is False:
+                        await validate_postgres_api_keys_runtime(conn)
+                        return
+                    if authority is not True:
+                        raise SchemaReadinessError("PostgreSQL AuthNZ migration authority is unavailable")
                 ok = await ensure_api_keys_tables_pg(self.db_pool)
                 if not ok:
                     raise RuntimeError("PostgreSQL api_keys schema ensure failed")

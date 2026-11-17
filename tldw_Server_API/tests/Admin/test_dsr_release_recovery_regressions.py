@@ -35,40 +35,58 @@ async def test_erasure_rejects_unavailable_chroma_at_normalized_tilde_path(tmp_p
     assert sentinel.read_text() == "synthetic embedding content"
 
 
-@pytest.mark.parametrize("storage_state", ["absent", "existing", "uninspectable", "unresolved"])
-async def test_erasure_requires_confirmed_storage_absence(tmp_path, monkeypatch, storage_state):
+@pytest.fixture()
+def _isolated_storage(tmp_path, monkeypatch):
+    """Point storage settings at tmp_path and keep the chroma manager unavailable."""
     from tldw_Server_API.app.core.config import settings
     from tldw_Server_API.app.services import admin_data_subject_requests_service as service
 
     monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(tmp_path))
     monkeypatch.setenv("TLDW_DB_ALLOWED_BASE_DIRS", str(tmp_path))
-    storage = tmp_path / "7" / "chroma_storage"
-    if storage_state == "existing":
-        storage.mkdir(parents=True)
 
     def unavailable_manager(_user_id):
         raise RuntimeError("injected manager failure")
 
     monkeypatch.setattr(service, "_get_chroma_manager_for_user", unavailable_manager)
-    if storage_state == "unresolved":
+    return tmp_path / "7" / "chroma_storage"
 
-        def unresolved(*_args, **_kwargs):
-            raise ValueError("injected path resolution failure")
 
-        monkeypatch.setattr(service.DatabasePaths, "resolve_user_base_directory", unresolved)
-    elif storage_state == "uninspectable":
-        original_stat = Path.stat
+async def test_erasure_with_absent_storage_confirms_absence(_isolated_storage):
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
 
-        def unavailable_stat(path, *args, **kwargs):
-            if path == storage:
-                raise PermissionError("injected storage inspection failure")
-            return original_stat(path, *args, **kwargs)
+    assert await service._erase_embeddings(7) == 0
+    assert not _isolated_storage.exists()
 
-        monkeypatch.setattr(Path, "stat", unavailable_stat)
 
-    if storage_state == "absent":
-        assert await service._erase_embeddings(7) == 0
-        assert not storage.exists()
-    else:
-        with pytest.raises(RuntimeError, match="cannot confirm|unavailable|availability"):
-            await service._erase_embeddings(7)
+async def test_erasure_with_existing_unreachable_storage_refuses(_isolated_storage):
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    _isolated_storage.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="cannot confirm|unavailable|availability"):
+        await service._erase_embeddings(7)
+
+
+async def test_erasure_with_unresolvable_storage_base_refuses(_isolated_storage, monkeypatch):
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    def unresolved(*_args, **_kwargs):
+        raise ValueError("injected path resolution failure")
+
+    monkeypatch.setattr(service.DatabasePaths, "resolve_user_base_directory", unresolved)
+    with pytest.raises(RuntimeError, match="cannot confirm|unavailable|availability"):
+        await service._erase_embeddings(7)
+
+
+async def test_erasure_with_uninspectable_storage_refuses(_isolated_storage, monkeypatch):
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    original_stat = Path.stat
+
+    def unavailable_stat(path, *args, **kwargs):
+        if path == _isolated_storage:
+            raise PermissionError("injected storage inspection failure")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", unavailable_stat)
+    with pytest.raises(RuntimeError, match="cannot confirm|unavailable|availability"):
+        await service._erase_embeddings(7)

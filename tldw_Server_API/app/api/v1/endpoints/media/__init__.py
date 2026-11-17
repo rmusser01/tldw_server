@@ -122,6 +122,7 @@ _MEDIA_ENDPOINT_MODULES: tuple[str, ...] = (
     "document_references",
     "document_figures",
     "document_annotations",
+    "document_rendering",
     "reading_progress",
 )
 

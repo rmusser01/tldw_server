@@ -21,6 +21,7 @@ import aiosqlite
 # 3rd-party imports
 import asyncpg
 from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
 from loguru import logger
 
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
@@ -36,6 +37,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.postgres_profile_version_schema import (
     ensure_postgres_profile_version_on_connection,
+    validate_postgres_profile_version_on_connection,
 )
 from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import (
     repair_postgres_profile_candidate_timestamps,
@@ -53,6 +55,9 @@ from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
 from tldw_Server_API.app.core.AuthNZ.sqlite_profile_version_schema import (
     validate_sqlite_profile_version_database,
 )
+from tldw_Server_API.app.core.DB_Management.postgres_auth_catalog import (
+    POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
+)
 from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection_async,
@@ -63,6 +68,7 @@ from tldw_Server_API.app.core.exceptions import (
     exception_type_chain,
 )
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime, is_test_mode
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -84,6 +90,7 @@ _AUTHNZ_TRANSACTION_PASSTHROUGH_EXCEPTIONS = (
     RollbackSignal,
     UserRegistrationException,
     HTTPException,
+    RequestValidationError,
     MandatoryAuditWriteError,
     TransactionPassthroughError,
 )
@@ -657,7 +664,7 @@ def _guard_postgres_copy_target(table_name: Any) -> None:
     target = table_name.strip().rsplit(".", 1)[-1]
     if len(target) >= 2 and target[0] == target[-1] and target[0] in {'"', "'"}:
         target = target[1:-1]
-    if target.lower() == "users":
+    if target.lower() in {"users", "org_members", "team_members"}:
         raise ProfileUserWriteRejected()
 
 
@@ -787,6 +794,26 @@ class _GuardedSQLiteConnection:
 
     async def cursor(self) -> _GuardedSQLiteCursor:
         return _GuardedSQLiteCursor(await self._connection.cursor(), self)
+
+    @staticmethod
+    def _savepoint_name(name: str) -> str:
+        if type(name) is not str or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", name) is None:
+            raise ValueError("Invalid SQLite savepoint name")
+        return name
+
+    async def create_savepoint(self, name: str) -> None:
+        savepoint = self._savepoint_name(name)
+        await self._connection.execute(f'SAVEPOINT "{savepoint}"')  # nosec B608
+
+    async def rollback_savepoint(self, name: str) -> None:
+        savepoint = self._savepoint_name(name)
+        await self._connection.execute(
+            f'ROLLBACK TO SAVEPOINT "{savepoint}"'  # nosec B608
+        )
+
+    async def release_savepoint(self, name: str) -> None:
+        savepoint = self._savepoint_name(name)
+        await self._connection.execute(f'RELEASE SAVEPOINT "{savepoint}"')  # nosec B608
 
     async def commit(self) -> None:
         await self._connection.commit()
@@ -1093,6 +1120,16 @@ class DatabasePool:
                         """
                     )
 
+                    if not await conn.fetchval(POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL):
+                        from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+                            validate_postgres_auth_runtime,
+                        )
+
+                        await validate_postgres_auth_runtime(conn)
+                        await validate_postgres_profile_version_on_connection(conn)
+                        await validate_postgres_profile_candidate_schema(conn)
+                        return
+
                     if schema_available:
                         logger.info("Ensuring PostgreSQL schema...")
                         schema_sql = schema_file.read_text()
@@ -1111,6 +1148,11 @@ class DatabasePool:
                             "PostgreSQL AuthNZ bootstrap schema is unavailable"
                         )
 
+                    from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+                        native_quota_schema_statements,
+                    )
+                    for statement in native_quota_schema_statements(postgres=True):
+                        await conn.execute(statement)
                     await ensure_postgres_profile_version_on_connection(conn)
                     await repair_postgres_profile_candidate_timestamps(conn)
                     await validate_postgres_profile_candidate_schema(conn)
@@ -1154,6 +1196,12 @@ class DatabasePool:
                     logger.info("SQLite schema created successfully")
                 else:
                     logger.debug("SQLite schema already exists")
+                from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+                    native_quota_schema_statements,
+                )
+                for statement in native_quota_schema_statements(postgres=False):
+                    await conn.execute(statement)
+                await conn.commit()
 
             # Ensure AuthNZ migrations are up to date (handles legacy columns)
             try:
@@ -1748,8 +1796,6 @@ class DatabasePool:
 #
 # Dependency Injection
 
-# Global database pool instance
-_db_pool: DatabasePool | None = None
 _db_pool_lifecycle_lock = threading.Lock()
 
 
@@ -1777,13 +1823,14 @@ async def _create_initialized_db_pool(settings: Settings) -> DatabasePool:
 
 
 async def _get_db_pool_locked(current_settings: Settings) -> DatabasePool:
-    global _db_pool
+    services = app_services()
+    pool = services.db_pool
 
-    if _db_pool is None or not _db_pool._initialized:
-        _db_pool = await _create_initialized_db_pool(current_settings)
-        return _db_pool
+    if pool is None or not pool._initialized:
+        services.db_pool = await _create_initialized_db_pool(current_settings)
+        return services.db_pool
 
-    previous_settings: Settings | None = getattr(_db_pool, "settings", None)
+    previous_settings: Settings | None = getattr(pool, "settings", None)
     if previous_settings:
         auth_mode_changed = previous_settings.AUTH_MODE != current_settings.AUTH_MODE
         db_url_changed = previous_settings.DATABASE_URL != current_settings.DATABASE_URL
@@ -1799,19 +1846,19 @@ async def _get_db_pool_locked(current_settings: Settings) -> DatabasePool:
                 _database_url_backend_label(current_settings.DATABASE_URL),
             )
             try:
-                await _db_pool.close()
+                await pool.close()
             except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as exc:
                 logger.bind(exception_type=type(exc).__name__).debug(
                     "Ignoring error while closing pool during config change"
                 )
-            _db_pool = await _create_initialized_db_pool(current_settings)
-            return _db_pool
+            services.db_pool = await _create_initialized_db_pool(current_settings)
+            return services.db_pool
     else:
-        _db_pool.settings = current_settings
+        pool.settings = current_settings
 
-    if _db_pool.settings is not current_settings:
+    if pool.settings is not current_settings:
         # Keep pool's settings reference in sync with latest resolved Settings object
-        _db_pool.settings = current_settings
+        pool.settings = current_settings
 
     # Ensure the pool is compatible with the current running loop (Postgres path)
     try:
@@ -1819,19 +1866,24 @@ async def _get_db_pool_locked(current_settings: Settings) -> DatabasePool:
     except RuntimeError:
         current_loop = None
     # If an existing Postgres pool is bound to a different loop, recreate it
-    if getattr(_db_pool, 'pool', None) is not None and getattr(_db_pool, '_loop', None) is not None:
-        if _db_pool._loop is not None and current_loop is not None and _db_pool._loop is not current_loop:
+    if getattr(pool, 'pool', None) is not None and getattr(pool, '_loop', None) is not None:
+        if pool._loop is not None and current_loop is not None and pool._loop is not current_loop:
             logger.info("Detected DB pool bound to a different event loop; recreating for current loop")
             try:
-                await _db_pool.close()
+                await pool.close()
             except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Ignoring error while closing incompatible pool: {e}")
-            _db_pool = await _create_initialized_db_pool(current_settings)
-    return _db_pool
+            pool = await _create_initialized_db_pool(current_settings)
+            services.db_pool = pool
+    return pool
 
 
 async def get_db_pool() -> DatabasePool:
-    """Get the process-wide database pool singleton instance."""
+    """Get the process-wide database pool.
+
+    Fallback for code with no request or constructor argument; request handlers
+    read ``request.app.state.services.db_pool``.
+    """
     async with _db_pool_lifecycle():
         return await _get_db_pool_locked(get_settings())
 
@@ -1853,7 +1905,7 @@ def _database_url_backend_label(database_url: object) -> str:
 
 async def reset_db_pool():
     """Reset database pool (mainly for testing)"""
-    global _db_pool
+    services = app_services()
     async with _db_pool_lifecycle():
         # Ensure subsequent get_db_pool() picks up environment changes.
         try:
@@ -1872,7 +1924,7 @@ async def reset_db_pool():
                 cfg.reset()
         except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"reset_db_pool: ignoring AuthDatabaseConfig reset error: {e}")
-        pool_to_close = _db_pool
+        pool_to_close = services.db_pool
         if pool_to_close:
             try:
                 await pool_to_close.close()
@@ -1880,8 +1932,8 @@ async def reset_db_pool():
                 # The loop might already be closed by a TestClient.
                 logger.debug(f"reset_db_pool: ignoring close error: {e}")
             finally:
-                if _db_pool is pool_to_close:
-                    _db_pool = None
+                if services.db_pool is pool_to_close:
+                    services.db_pool = None
     try:
         from tldw_Server_API.app.core.MCP_unified.auth.authnz_rbac import reset_rbac_policy as _reset_rbac_policy
         _reset_rbac_policy()
@@ -1919,7 +1971,7 @@ async def reset_db_pool():
     except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"reset_db_pool: ignoring UsersDB reset error: {e}")
     try:
-        from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
             set_llm_provider_overrides_cache_for_tests as _reset_llm_overrides_cache,
         )
         _reset_llm_overrides_cache({})

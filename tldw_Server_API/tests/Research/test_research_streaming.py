@@ -229,3 +229,37 @@ def test_persisted_stream_event_includes_event_id_and_replayed_flag():
     assert event.event_id == "7"
     assert event.data["event_id"] == 7
     assert event.data["replayed"] is True
+
+
+@pytest.mark.parametrize(
+    ("event_type", "checkpoint_id"), [("checkpoint", "cp_1"), ("checkpoint", "cp_old"), ("status", "cp_1")]
+)
+def test_persisted_stream_proposal_binds_only_current_checkpoint(event_type, checkpoint_id):
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchRunEventRow
+    from tldw_Server_API.app.core.Research.streaming import persisted_event_to_stream_event
+
+    payload = {"checkpoint_id": checkpoint_id, "has_proposed_payload": True}
+    row = ResearchRunEventRow(
+        id=7,
+        session_id="rs_1",
+        owner_user_id="1",
+        event_type=event_type,
+        event_payload=payload,
+        phase="awaiting_plan_review",
+        job_id=None,
+        created_at="2026-10-30T00:00:00Z",
+    )
+    checkpoint = _snapshot(
+        checkpoint={
+            "checkpoint_id": "cp_1",
+            "checkpoint_type": "plan_review",
+            "status": "pending",
+            "proposed_payload": {"focus_areas": ["Rowan"]},
+            "resolution": None,
+        }
+    ).checkpoint
+    event = persisted_event_to_stream_event(row, replayed=True, checkpoint=checkpoint)
+    assert event.data.get("proposed_payload") == (  # nosec B101 # Pytest regression checks SSE delivery and checkpoint integrity.
+        {"focus_areas": ["Rowan"]} if event_type == "checkpoint" and checkpoint_id == "cp_1" else None
+    )
+    assert payload == {"checkpoint_id": checkpoint_id, "has_proposed_payload": True}  # nosec B101 # Pytest regression checks SSE delivery and checkpoint integrity.

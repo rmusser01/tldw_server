@@ -140,8 +140,7 @@ def _notes_app(
     app.dependency_overrides[get_auth_principal] = lambda: AuthPrincipal(kind="user", is_admin=True)
     app.dependency_overrides[notes_endpoint.get_rate_limiter_dep] = lambda: _NoopRateLimiter()
     monkeypatch.setattr(
-        notes_endpoint,
-        "get_active_server_origin_sync_service_for_user",
+        "tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user",
         lambda user_id: sync_service,
         raising=False,
     )

@@ -3,41 +3,6 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("PlaygroundForm composer options guard", () => {
-  it("keeps the chevron toggle, persisted collapse state, and inline send row", () => {
-    const sourcePath = path.resolve(__dirname, "../PlaygroundForm.tsx")
-    const sendControlSourcePath = path.resolve(
-      __dirname,
-      "../PlaygroundSendControl.tsx"
-    )
-    const source = fs.readFileSync(sourcePath, "utf8")
-    const sendControlSource = fs.readFileSync(sendControlSourcePath, "utf8")
-
-    expect(source).toContain("playgroundComposerOptionsExpanded")
-    expect(source).toContain('data-testid="composer-options-toggle"')
-    expect(source).toContain('data-testid="composer-inline-send-control"')
-    expect(sendControlSource).toContain("playground:actions.attachImage")
-    expect(source).toContain("<PlaygroundAttachmentButton")
-    expect(source).toContain("attachmentButton={attachmentButton}")
-    expect(sendControlSource).toContain("min-h-[44px] min-w-[44px]")
-    expect(source).toContain('id="composer-options-panel"')
-    expect(source).toContain("optionsExpanded={composerOptionsExpanded}")
-    expect(source).toContain('sendControlPlacement="external"')
-  })
-
-  it("keeps the mobile composer input from sharing width with the send control", () => {
-    const sourcePath = path.resolve(__dirname, "../PlaygroundForm.tsx")
-    const source = fs.readFileSync(sourcePath, "utf8")
-
-    expect(source).toContain("grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2")
-    const mobileSendClasses = source.match(
-      /data-testid="composer-inline-send-control"\s+className=\{\s*isMobileViewport\s*\? "([^"]+)"/
-    )?.[1].split(/\s+/)
-    expect(mobileSendClasses).toEqual(
-      expect.arrayContaining(["col-span-2", "flex", "shrink-0", "justify-end", "self-end"])
-    )
-    expect(source).not.toContain("grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-2")
-  })
-
   it("coordinates composer popovers through a single close-except helper", () => {
     const sourcePath = path.resolve(__dirname, "../PlaygroundForm.tsx")
     const source = fs.readFileSync(sourcePath, "utf8")

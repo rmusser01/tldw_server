@@ -23,7 +23,8 @@ import type {
   SetupHandoffConsumedAction,
   SetupLiveDetourState,
   SetupHandoffState,
-  PendingPlan
+  PendingPlan,
+  SetupLiveAttempt,
 } from "../personaTypes"
 
 export type UsePersonaIncomingPayloadArgs = {
@@ -33,6 +34,8 @@ export type UsePersonaIncomingPayloadArgs = {
   emitSetupAnalyticsEvent: (event: Record<string, unknown>) => void
   liveVoiceController: { handlePayload: (payload: Record<string, unknown> | null) => boolean | void }
   personaId?: string | null
+  setupPersonaId?: string | null
+  activeSessionPersonaId?: string | null
   personaSetupWizardCurrentStep: PersonaSetupStep
   personaSetupWizardIsSetupRequired: boolean
   resolvedApprovalSnapshot: { key: string; toolName: string } | null
@@ -49,6 +52,8 @@ export type UsePersonaIncomingPayloadArgs = {
   activeTabRef: React.MutableRefObject<string>
   setupWizardAwaitingLiveResponseRef: React.MutableRefObject<boolean>
   setupWizardLastLiveTextRef: React.MutableRefObject<string>
+  setupLiveAttemptRef?: React.MutableRefObject<SetupLiveAttempt | null>
+  wsRef?: React.MutableRefObject<WebSocket | null>
 }
 
 export const usePersonaIncomingPayload = ({
@@ -58,6 +63,8 @@ export const usePersonaIncomingPayload = ({
   emitSetupAnalyticsEvent,
   liveVoiceController,
   personaId,
+  setupPersonaId,
+  activeSessionPersonaId,
   personaSetupWizardCurrentStep,
   personaSetupWizardIsSetupRequired,
   resolvedApprovalSnapshot,
@@ -73,7 +80,8 @@ export const usePersonaIncomingPayload = ({
   setupHandoffRef,
   activeTabRef,
   setupWizardAwaitingLiveResponseRef,
-  setupWizardLastLiveTextRef,
+  setupLiveAttemptRef,
+  wsRef,
 }: UsePersonaIncomingPayloadArgs) => {
   const setVisualRuntimeOverride = usePersonaVisualRuntimeStore(
     (state) => state.setOverride
@@ -165,18 +173,29 @@ export const usePersonaIncomingPayload = ({
       }
 
       if (eventType === "assistant_delta") {
-        const textDelta = String(payload?.text_delta || "").trim()
+        const textDelta = String(payload?.text_delta || "")
+        const attempt = setupLiveAttemptRef?.current
         if (
           personaSetupWizardIsSetupRequired &&
           personaSetupWizardCurrentStep === "test" &&
-          setupWizardAwaitingLiveResponseRef.current
+          setupLiveAttemptRef &&
+          attempt &&
+          attempt.socket === wsRef?.current &&
+          Boolean(setupPersonaId) &&
+          setupPersonaId === activeSessionPersonaId &&
+          attempt.personaId === setupPersonaId &&
+          attempt.sessionId === sessionId &&
+          payload?.session_id === attempt.sessionId &&
+          payload?.client_message_id === attempt.clientMessageId
         ) {
-          if (textDelta) {
+          attempt.responseText += textDelta
+          if (payload?.done === true && attempt.responseText.trim()) {
             setSetupTestOutcome({
               kind: "live_success",
-              text: setupWizardLastLiveTextRef.current,
-              responseText: textDelta
+              text: attempt.text,
+              responseText: attempt.responseText.trim()
             })
+            setupLiveAttemptRef.current = null
             setupWizardAwaitingLiveResponseRef.current = false
             if (setupLiveDetourRef.current) {
               void emitSetupAnalyticsEvent({
@@ -192,7 +211,7 @@ export const usePersonaIncomingPayload = ({
           }
         }
         if (
-          textDelta &&
+          textDelta.trim() &&
           activeTabRef.current === "live" &&
           setupHandoffRef.current &&
           !setupHandoffRef.current.compact
@@ -308,6 +327,20 @@ export const usePersonaIncomingPayload = ({
 
       if (eventType === "notice") {
         const reasonCode = String(payload?.reason_code || "").trim().toUpperCase()
+        const attempt = setupLiveAttemptRef?.current
+        if (
+          setupLiveAttemptRef && attempt && attempt.socket === wsRef?.current &&
+          payload?.session_id === attempt.sessionId &&
+          (reasonCode === "SESSION_TERMINAL"
+            ? !payload?.client_message_id || payload.client_message_id === attempt.clientMessageId
+            : ["CONVERSATION_UNAVAILABLE", "USER_TURN_FAILED", "TURN_CANCELLED", "SESSION_UNAVAILABLE"].includes(reasonCode) &&
+              payload?.client_message_id === attempt.clientMessageId)
+        ) {
+          setupLiveAttemptRef.current = null
+          setupWizardAwaitingLiveResponseRef.current = false
+          setSetupTestOutcome({ kind: "live_failure", text: attempt.text,
+            message: String(payload?.message || "Live test failed.") })
+        }
         if (reasonCode === "VOICE_TURN_COMMITTED" && typeof payload?.transcript === "string") {
           appendLog("user", payload.transcript)
         }
@@ -332,10 +365,15 @@ export const usePersonaIncomingPayload = ({
       emitSetupAnalyticsEvent,
       liveVoiceController,
       personaId,
+      setupPersonaId,
+      activeSessionPersonaId,
       personaSetupWizardCurrentStep,
       personaSetupWizardIsSetupRequired,
       resolvedApprovalSnapshot,
       sessionId,
+      setSetupTestOutcome,
+      setupLiveAttemptRef,
+      wsRef,
       setVisualRuntimeOverride,
     ]
   )

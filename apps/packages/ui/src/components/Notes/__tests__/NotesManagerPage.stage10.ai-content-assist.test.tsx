@@ -1,6 +1,7 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
@@ -309,6 +310,7 @@ describe("NotesManagerPage stage 10 AI content assist actions", () => {
   })
 
   it("suggests keywords with explicit selection and reports latest assist after apply", async () => {
+    const user = userEvent.setup()
     renderPage()
     fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {
       target: {
@@ -317,15 +319,22 @@ describe("NotesManagerPage stage 10 AI content assist actions", () => {
       }
     })
 
-    fireEvent.click(screen.getByTestId("notes-assist-suggest-keywords"))
+    await user.click(screen.getByTestId("notes-assist-suggest-keywords"))
 
-    await waitFor(() => {
-      expect(screen.getByTestId("notes-assist-keyword-suggestions-modal")).toBeInTheDocument()
-    })
+    await screen.findByTestId("notes-assist-keyword-suggestions-modal", {}, { timeout: 10_000 })
 
     expect(mockConfirmDanger).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByTestId("notes-assist-keyword-option-checks"))
-    fireEvent.click(screen.getByRole("button", { name: "Apply selected" }))
+    // NL-17: words used once are not offered, nothing new is pre-ticked, and the
+    // modal says where the suggestions come from.
+    expect(screen.getByTestId("notes-assist-keyword-source")).toHaveTextContent(
+      "Based on word frequency in this note"
+    )
+    expect(screen.queryByTestId("notes-assist-keyword-option-checks")).not.toBeInTheDocument()
+    const quantumOption = screen.getByTestId("notes-assist-keyword-option-quantum")
+    expect(quantumOption).not.toBeChecked()
+    expect(screen.getByTestId("notes-assist-keyword-option-entanglement")).not.toBeChecked()
+    await user.click(quantumOption)
+    await user.click(screen.getByRole("button", { name: "Apply selected" }))
 
     await waitFor(() => {
       expect(mockMessageSuccess).toHaveBeenCalledWith("Applied suggested tags.")
@@ -335,7 +344,7 @@ describe("NotesManagerPage stage 10 AI content assist actions", () => {
     )
     const editorKeywordsControl = screen.getByTestId("notes-keywords-editor")
     expect(within(editorKeywordsControl).getByText("quantum")).toBeInTheDocument()
-    expect(within(editorKeywordsControl).queryByText("checks")).not.toBeInTheDocument()
+    expect(within(editorKeywordsControl).queryByText("entanglement")).not.toBeInTheDocument()
   })
 
   it("does not attach suggested keywords when the review modal is canceled", async () => {

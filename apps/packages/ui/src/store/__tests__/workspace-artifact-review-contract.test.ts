@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   DEFAULT_AUDIO_SETTINGS,
   DEFAULT_WORKSPACE_NOTE
@@ -204,4 +204,20 @@ describe("workspace artifact review contract", () => {
     ])
     expect(restoredArtifact?.exportTargets).toEqual(["docx", "chatbook"])
   })
+  it.each(["new success", "saved rollback"])("keeps the correct completion time for %s", (kind) => {
+    const now = new Date("2026-10-27T12:00:00.000Z")
+    const saved = new Date("2026-10-26T12:00:00.000Z")
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+    try {
+      const artifact = useWorkspaceStore.getState().addArtifact({
+        type: "slides", title: "Saved Rowan", status: "generating", content: "Opened in 2019."
+      })
+      useWorkspaceStore.getState().updateArtifactStatus(artifact.id, "completed", kind === "saved rollback" ? { completedAt: saved } : {})
+      expect(useWorkspaceStore.getState().generatedArtifacts[0].completedAt).toEqual(kind === "saved rollback" ? saved : now)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
 })

@@ -4,9 +4,32 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
-vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", () => ({
-  useNotesGraphAuthorityScope: () => "test-notes-authority"
+import { createNotesGraphAuthorityScope } from "../hooks/useNotesGraphAuthorityScope"
+
+const notesConnectionConfig = {
+  serverUrl: "https://notes.example.test",
+  authMode: "multi-user" as const,
+  accessToken: "test-access-token"
+}
+const notesAuthorityScope = createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig,
+    loading: false,
+    authorityLoading: false
+  })
 }))
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true })) }
+}))
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../hooks/useNotesGraphAuthorityScope")>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () => actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
 
 const {
   mockBgRequest,
@@ -260,10 +283,16 @@ describe("NotesManagerPage stage 46 list reliability", () => {
     })
 
     const latestRecentWrite = mockSetSetting.mock.calls
-      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened:test-notes-authority")
+      .filter(([setting]) => setting?.key === `tldw:notesRecentOpened:${notesAuthorityScope}`)
       .at(-1)
 
     expect(latestRecentWrite?.[1]).toEqual([])
+    expect(mockBgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/notes/note-delete?expected_version=1",
+      method: "DELETE",
+      servicePromptConfig: expect.objectContaining({ serverUrl: notesConnectionConfig.serverUrl, expectedUserId: 1 }),
+      headers: { "X-TLDW-Expected-User-ID": "1", "expected-version": "1" }
+    }))
   })
 
   it("removes bulk-deleted notes from recent notes and persisted recent state", async () => {
@@ -352,9 +381,17 @@ describe("NotesManagerPage stage 46 list reliability", () => {
     })
 
     const latestRecentWrite = mockSetSetting.mock.calls
-      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened:test-notes-authority")
+      .filter(([setting]) => setting?.key === `tldw:notesRecentOpened:${notesAuthorityScope}`)
       .at(-1)
 
     expect(latestRecentWrite?.[1]).toEqual([])
+    for (const [id, version] of [["note-one", 1], ["note-two", 2]] as const) {
+      expect(mockBgRequest).toHaveBeenCalledWith(expect.objectContaining({
+        path: `/api/v1/notes/${id}?expected_version=${version}`,
+        method: "DELETE",
+        servicePromptConfig: expect.objectContaining({ serverUrl: notesConnectionConfig.serverUrl, expectedUserId: 1 }),
+        headers: { "X-TLDW-Expected-User-ID": "1", "expected-version": String(version) }
+      }))
+    }
   })
 })

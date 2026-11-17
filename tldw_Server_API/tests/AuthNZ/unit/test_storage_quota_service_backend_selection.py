@@ -29,6 +29,11 @@ class _PoolStub:
         self._tx_conn = tx_conn
         self._acquire_conn = acquire_conn
 
+    async def fetchone(self, query: str, *args: Any) -> dict[str, int]:
+        """These backend-dispatch fixtures contain no native allocations."""
+        assert "native_chat_quota_reservations" in query
+        return {"bytes": 0, "count": 0}
+
     def transaction(self) -> _Ctx:
         assert self._tx_conn is not None
         return _Ctx(self._tx_conn)

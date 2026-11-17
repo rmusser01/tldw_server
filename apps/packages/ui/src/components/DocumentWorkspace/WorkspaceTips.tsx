@@ -34,17 +34,17 @@ export const resetTour = () => {
  * Targets header buttons and panels using data-testid selectors.
  * Automatically skips if already completed.
  */
-export const WorkspaceTour: React.FC = () => {
+export const WorkspaceTour: React.FC<{ paused?: boolean }> = ({ paused = false }) => {
   const { t } = useTranslation(["option", "common"])
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
-    if (!getFlag(TOUR_KEY)) {
+    if (!paused && !open && !getFlag(TOUR_KEY)) {
       // Delay so DOM elements are mounted
       const timer = setTimeout(() => setOpen(true), 500)
       return () => clearTimeout(timer)
     }
-  }, [])
+  }, [paused, open])
 
   const handleClose = useCallback(() => {
     setOpen(false)
@@ -96,7 +96,7 @@ export const WorkspaceTour: React.FC = () => {
     }
   ]
 
-  if (!open) return null
+  if (paused || !open) return null
 
   return (
     <Tour

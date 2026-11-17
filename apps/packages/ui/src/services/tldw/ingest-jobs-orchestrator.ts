@@ -4,12 +4,58 @@ import {
   extractCompletedIngestJobTerminalData,
 } from "@/services/tldw/ingest-job-results"
 
+export const ACTIVE_INGEST_JOB_STATUSES = new Set([
+  "pending",
+  "queued",
+  "running",
+  "processing",
+  "uploading",
+  "analyzing",
+  "storing"
+])
+
+export const getQuickIngestJobPollInterval = (
+  startedAt: number,
+  initialIntervalMs: number,
+  statusUnavailable = false
+): number =>
+  statusUnavailable || Date.now() - startedAt >= 5 * 60_000 ? 10_000 : initialIntervalMs
+
+export const INGEST_JOB_STATUS_INTERRUPTED =
+  "Quick Ingest could not confirm the final status of one or more server jobs. Check Media before importing those items again."
+
+export const isTransientIngestStatusRead = (status: unknown): boolean =>
+  typeof status === "number" && Number.isFinite(status) &&
+  (status === 0 || status === 408 || status === 429 || (status >= 500 && status < 600))
+
 export const TERMINAL_INGEST_JOB_STATUSES = new Set([
   "completed",
   "failed",
   "cancelled",
   "quarantined"
 ])
+
+export type IngestJobProgress = {
+  status: string
+  progressPercent?: number
+  progressMessage?: string
+}
+
+export const readIngestJobProgress = (data?: {
+  status?: unknown
+  progress_percent?: unknown
+  progress_message?: unknown
+}): IngestJobProgress => {
+  const percent = data?.progress_percent
+  const message = data?.progress_message
+  return {
+    status: String(data?.status || "").trim().toLowerCase(),
+    progressPercent: typeof percent === "number" && Number.isFinite(percent) && percent >= 0 && percent <= 100
+      ? percent
+      : undefined,
+    progressMessage: typeof message === "string" ? message.trim() || undefined : undefined,
+  }
+}
 
 export type IngestJobStatusResponse = {
   ok: boolean
@@ -32,7 +78,7 @@ export type IngestJobFailureDetails = {
 }
 
 export type PollSingleIngestJobResult = {
-  terminalStatus: "completed" | "failed" | "cancelled" | "timeout"
+  terminalStatus: "completed" | "failed" | "cancelled" | "timeout" | "interrupted"
   data?: any
   error?: string
   response?: IngestJobStatusResponse
@@ -158,37 +204,50 @@ export const createIngestJobsTracker = <TMeta>() => {
       for (const item of tracked.values()) {
         pending.add(item.batchId)
       }
-      for (const batchId of pending) {
-        if (!batchId || cancelledBatches.has(batchId)) continue
-        cancelledBatches.add(batchId)
-        await cancelBatch(batchId)
-      }
+      // Batch cancels are independent per batch: fan them out together
+      // instead of paying one round-trip per tracked batch (WP-38).
+      await Promise.all(
+        Array.from(pending).map(async (batchId) => {
+          if (!batchId || cancelledBatches.has(batchId)) return
+          cancelledBatches.add(batchId)
+          await cancelBatch(batchId)
+        })
+      )
     }
   }
 }
 
-type PollTrackedIngestJobsOptions<TMeta, TResult> = {
-  tracker: ReturnType<typeof createIngestJobsTracker<TMeta>>
-  /**
-   * Per-job status fetch; also reconciles ids absent from a successful batch.
-   */
-  fetchJob?: (jobId: number) => Promise<IngestJobStatusResponse | undefined>
+type LegacyPerJobFetch = {
+  /** Fetch each job when no batch endpoint is available. */
+  fetchJob: (jobId: number) => Promise<IngestJobStatusResponse | undefined>
+  fetchJobs?: never
+}
+
+type BatchedJobsFetch = {
+  fetchJob?: LegacyPerJobFetch["fetchJob"]
   /**
    * Batched status fetch: ONE request per tracked batch per poll cycle. The
    * returned response is expected to carry the reconciled status of every
    * requested job under `data.jobs` (an array of job status objects with an
    * `id` field, matching `GET /api/v1/media/ingest/jobs?batch_id=...`).
-   * Missing jobs use `fetchJob` when available, otherwise remain pending.
+   * Omitted jobs may use a scoped `fetchMissingJob` or legacy `fetchJob`.
    */
-  fetchJobs?: (
+  fetchJobs: (
     batchId: string,
     jobIds: number[]
   ) => Promise<IngestJobStatusResponse | undefined>
+}
+
+type PollTrackedIngestJobsBase<TMeta, TResult> = {
+  tracker: ReturnType<typeof createIngestJobsTracker<TMeta>>
+  fetchMissingJob?: LegacyPerJobFetch["fetchJob"]
   timeoutMs: number
-  pollIntervalMs?: number
+  pollIntervalMs?: number | (() => number)
+  signal?: AbortSignal
   isCancelled: () => boolean
   onCancel: () => Promise<void> | void
   onPendingJobIds?: (jobIds: number[]) => void
+  onResult?: (result: TResult) => void
   mapCompleted: (
     item: IngestJobTrackerItem<TMeta>,
     data: any,
@@ -206,15 +265,45 @@ type PollTrackedIngestJobsOptions<TMeta, TResult> = {
   ) => TResult | undefined
 }
 
+/**
+ * At least one fetch strategy is required; batching takes priority. Omitting both is a
+ * compile error instead of a silent spin to the poll timeout (PR #3210
+ * review follow-up).
+ */
+type PollTrackedIngestJobsOptions<TMeta, TResult> = PollTrackedIngestJobsBase<TMeta, TResult> &
+  (LegacyPerJobFetch | BatchedJobsFetch)
+
+const waitForIngestPoll = (
+  pollIntervalMs: number | (() => number) | undefined,
+  signal?: AbortSignal
+): Promise<void> => {
+  const interval = typeof pollIntervalMs === "function" ? pollIntervalMs() : pollIntervalMs
+  signal?.throwIfAborted()
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal?.reason)
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, Math.max(1, Number(interval || 1200)))
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
 export const pollTrackedIngestJobs = async <TMeta, TResult>(
   options: PollTrackedIngestJobsOptions<TMeta, TResult>
 ): Promise<TResult[]> => {
-  const pollIntervalMs = Math.max(1, Number(options.pollIntervalMs || 1200))
   const deadline = Date.now() + Math.max(10_000, Number(options.timeoutMs || 0))
   const unresolved = new Map<number, IngestJobTrackerItem<TMeta>>(
     options.tracker.getItems().map((item) => [item.jobId, item])
   )
   const results: TResult[] = []
+  const recordResult = (result: TResult) => {
+    results.push(result)
+    options.onResult?.(result)
+  }
 
   const consumeJobResponse = (
     jobId: number,
@@ -226,13 +315,13 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
       if (typeof mapped !== "undefined") {
         unresolved.delete(jobId)
         options.tracker.clearJob(jobId)
-        results.push(mapped)
+        recordResult(mapped)
         return true
       }
       return false
     }
 
-    const status = String(response.data?.status || "").toLowerCase()
+    const { status } = readIngestJobProgress(response.data)
     if (!TERMINAL_INGEST_JOB_STATUSES.has(status)) {
       return false
     }
@@ -242,7 +331,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
 
     if (status === "completed") {
       if (completedIngestJobIndicatesFailure(response.data)) {
-        results.push(
+        recordResult(
           options.mapFailure(item, {
             status: "failed",
             data: extractCompletedIngestJobTerminalData(response.data),
@@ -253,7 +342,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
           })
         )
       } else {
-        results.push(
+        recordResult(
           options.mapCompleted(
             item,
             extractCompletedIngestJobTerminalData(response.data),
@@ -264,7 +353,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
       return true
     }
     if (status === "cancelled") {
-      results.push(options.mapCancelled(item, response.data, response))
+      recordResult(options.mapCancelled(item, response.data, response))
       return true
     }
 
@@ -272,7 +361,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
       String(response.data?.error_message || "").trim() ||
       String(response.data?.cancellation_reason || "").trim() ||
       `Ingest ${status || "failed"}`
-    results.push(
+    recordResult(
       options.mapFailure(item, {
         status,
         data: response.data,
@@ -298,8 +387,16 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
       number,
       IngestJobStatusResponse | undefined
     >()
-    for (const [batchId, batchJobIds] of jobsByBatch) {
-      const response = await options.fetchJobs?.(batchId, batchJobIds)
+    // Batch status fetches are independent per batch: issue them together so
+    // a poll round costs one round-trip, not one per tracked batch (WP-37).
+    const batchEntries = Array.from(jobsByBatch.entries())
+    const batchResponses = await Promise.all(
+      batchEntries.map(([batchId, batchJobIds]) =>
+        options.fetchJobs?.(batchId, batchJobIds)
+      )
+    )
+    batchEntries.forEach(([, batchJobIds], index) => {
+      const response = batchResponses[index]
       const jobs = response?.ok ? response.data?.jobs : null
       if (Array.isArray(jobs)) {
         for (const job of jobs) {
@@ -319,19 +416,17 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
           responsesByJob.set(jobId, response)
         }
       }
-    }
+    })
 
     let observedTerminal = false
     for (const [jobId, item] of Array.from(unresolved.entries())) {
       // Idempotent replay can return a job still owned by an earlier batch.
-      const response =
-        responsesByJob.get(jobId) ??
-        (!responsesByJob.has(jobId) ? await options.fetchJob?.(jobId) : undefined) ??
-        ({
-          ok: false,
-          status: 404,
-          error: "Ingest job missing from batch status response."
-        } as IngestJobStatusResponse)
+      const fetchMissing = options.fetchMissingJob ?? options.fetchJob
+      const response = responsesByJob.has(jobId)
+        ? responsesByJob.get(jobId)
+        : fetchMissing
+          ? await fetchMissing(jobId)
+          : { ok: false, status: 404, error: "Ingest job missing from batch status response." }
       if (consumeJobResponse(jobId, item, response)) {
         observedTerminal = true
       }
@@ -340,10 +435,11 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
   }
 
   while (unresolved.size > 0) {
+    options.signal?.throwIfAborted()
     if (options.isCancelled()) {
       await options.onCancel()
       for (const item of unresolved.values()) {
-        results.push(options.mapCancelled(item))
+        recordResult(options.mapCancelled(item))
         options.tracker.clearJob(item.jobId)
       }
       unresolved.clear()
@@ -369,7 +465,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
 
     if (Date.now() >= deadline) {
       for (const item of unresolved.values()) {
-        results.push(
+        recordResult(
           options.mapFailure(item, {
             status: "timeout",
             error: "Timed out while waiting for media ingest jobs."
@@ -382,7 +478,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
     }
 
     if (!observedTerminal) {
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+      await waitForIngestPoll(options.pollIntervalMs, options.signal)
     }
   }
 
@@ -393,14 +489,16 @@ type PollSingleIngestJobOptions = {
   jobId: number
   fetchJob: (jobId: number) => Promise<IngestJobStatusResponse | undefined>
   timeoutMs: number
-  pollIntervalMs?: number
+  pollIntervalMs?: number | (() => number)
+  signal?: AbortSignal
   isCancelled: () => boolean
   onCancel: () => Promise<void> | void
+  onProgress?: (progress: IngestJobProgress) => void
   onRequestError?: (
     response: IngestJobStatusResponse | undefined
   ) =>
     | {
-        terminalStatus: "failed" | "cancelled"
+        terminalStatus: "failed" | "cancelled" | "interrupted"
         error?: string
       }
     | undefined
@@ -409,7 +507,6 @@ type PollSingleIngestJobOptions = {
 export const pollSingleIngestJob = async (
   options: PollSingleIngestJobOptions
 ): Promise<PollSingleIngestJobResult> => {
-  const pollIntervalMs = Math.max(1, Number(options.pollIntervalMs || 1200))
   const deadline = Date.now() + Math.max(10_000, Number(options.timeoutMs || 0))
 
   while (Date.now() < deadline) {
@@ -431,13 +528,15 @@ export const pollSingleIngestJob = async (
           response
         }
       }
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+      await waitForIngestPoll(options.pollIntervalMs, options.signal)
       continue
     }
 
-    const status = String(response.data?.status || "").toLowerCase()
+    const progress = readIngestJobProgress(response.data)
+    const { status } = progress
     if (!TERMINAL_INGEST_JOB_STATUSES.has(status)) {
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+      if (status && !options.isCancelled()) options.onProgress?.(progress)
+      await waitForIngestPoll(options.pollIntervalMs, options.signal)
       continue
     }
     if (status === "completed") {

@@ -32,21 +32,14 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
+from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 from .....core.DB_Management.media_db.legacy_maintenance import (
     permanently_delete_item,
 )
 
 router = APIRouter(tags=["Media Management"])
-
-
-def _is_test_mode() -> bool:
-    try:
-        from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode_impl
-
-        return bool(_is_test_mode_impl())
-    except Exception:
-        return False
 
 
 @router.get(
@@ -92,7 +85,7 @@ async def get_media_item(
 
     # TEST_MODE diagnostics
     try:
-        if _is_test_mode():
+        if is_test_mode():
             db_path = getattr(db, "db_path_str", getattr(db, "db_path", "?"))
             headers = getattr(request, "headers", {}) or {}
             logger.info(
@@ -549,12 +542,11 @@ async def update_media_keywords(
         if mode == "set":
             desired = target_keywords
         elif mode == "remove":
-            to_remove = {k.lower() for k in target_keywords}
-            desired = [k for k in current_keywords if k.lower() not in to_remove]
+            to_remove = {normalize_keyword_identity(k) for k in target_keywords}
+            desired = [k for k in current_keywords if normalize_keyword_identity(k) not in to_remove]
         else:
-            # add (default)
-            existing = {k.lower() for k in current_keywords}
-            desired = current_keywords + [k for k in target_keywords if k.lower() not in existing]
+            # add (default); the store dedupes by keyword identity and keeps the existing casing
+            desired = current_keywords + target_keywords
         db.update_keywords_for_media(media_id=media_id, keywords=desired)
         updated_keywords = fetch_keywords_for_media(db, media_id)
         return MediaKeywordsResponse(media_id=media_id, keywords=updated_keywords)

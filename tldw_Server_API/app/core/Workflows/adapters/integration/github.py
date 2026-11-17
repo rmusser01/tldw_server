@@ -11,6 +11,8 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import EgressPolicyError
+from tldw_Server_API.app.core.http_client import apost
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.integration._config import GitHubCreateIssueConfig
 
@@ -25,7 +27,7 @@ from tldw_Server_API.app.core.Workflows.adapters.integration._config import GitH
 )
 async def run_github_create_issue_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Create a GitHub issue."""
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -50,30 +52,29 @@ async def run_github_create_issue_adapter(config: dict[str, Any], context: dict[
         return {"error": "missing_github_token", "issue_url": None}
 
     try:
-        import httpx
+        # apost checks the egress policy, pins the resolved IP and does not follow redirects.
+        response = await apost(
+            url=f"https://api.github.com/repos/{repo}/issues",
+            headers={
+                "Authorization": f"token {token}",
+                "Accept": "application/vnd.github.v3+json",
+            },
+            json={
+                "title": title,
+                "body": body,
+                "labels": labels,
+                "assignees": assignees,
+            },
+            timeout=30,
+        )
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"https://api.github.com/repos/{repo}/issues",
-                headers={
-                    "Authorization": f"token {token}",
-                    "Accept": "application/vnd.github.v3+json",
-                },
-                json={
-                    "title": title,
-                    "body": body,
-                    "labels": labels,
-                    "assignees": assignees,
-                },
-                timeout=30,
-            )
+        if response.status_code == 201:
+            data = response.json()
+            return {"issue_url": data.get("html_url"), "issue_number": data.get("number"), "created": True}
+        return {"error": f"github_api_error: {response.status_code} - {response.text}", "created": False}
 
-            if response.status_code == 201:
-                data = response.json()
-                return {"issue_url": data.get("html_url"), "issue_number": data.get("number"), "created": True}
-            else:
-                return {"error": f"github_api_error: {response.status_code} - {response.text}", "created": False}
-
+    except EgressPolicyError:
+        return {"error": "github_api_blocked_egress", "issue_url": None, "created": False}
     except Exception:
         logger.exception("GitHub issue creation failed")
         return {"error": "GitHub issue creation failed", "issue_url": None, "created": False}

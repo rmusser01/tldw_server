@@ -65,7 +65,7 @@ async def test_complete_v2_streaming_unified_flag_two_providers(
 
         return _generator()
 
-    monkeypatch.setattr(chat_sessions_mod, "perform_chat_api_call", _fake_perform_chat_api_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_perform_chat_api_call)
 
     # Isolate DB/files
     tmpdir = tempfile.mkdtemp(prefix="chacha_stream_unified_")

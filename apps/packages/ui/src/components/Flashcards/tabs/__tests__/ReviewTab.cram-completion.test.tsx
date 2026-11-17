@@ -153,13 +153,13 @@ describe("ReviewTab cram completion", () => {
     vi.mocked(listFlashcards).mockReset()
     reviewMutateAsync.mockResolvedValue({ review_session_id: 77, interval_days: 1 })
     endMutateAsync.mockResolvedValue({ id: 77 })
-    vi.mocked(useEndFlashcardReviewSessionMutation).mockReturnValue({ mutateAsync: endMutateAsync } as ReturnType<typeof useEndFlashcardReviewSessionMutation>)
+    vi.mocked(useEndFlashcardReviewSessionMutation, { partial: true }).mockReturnValue({ mutateAsync: endMutateAsync })
     await clearSetting(FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING)
     await clearSetting(FLASHCARDS_REVIEW_ONBOARDING_DISMISSED_SETTING)
     vi.mocked(useDecksQuery).mockReturnValue({
       data: [{ id: 1, name: "Biology" }],
       isLoading: false
-    } as ReturnType<typeof useEndFlashcardReviewSessionMutation>)
+    } as ReturnType<typeof useDecksQuery>)
     vi.mocked(useReviewQuery).mockReturnValue({
       data: {
         uuid: "due-card-1",
@@ -214,9 +214,9 @@ describe("ReviewTab cram completion", () => {
       isLoading: false,
       isFetching: false
     } as ReturnType<typeof useCramQueueQuery>)
-    vi.mocked(useReviewFlashcardMutation).mockReturnValue({
+    vi.mocked(useReviewFlashcardMutation, { partial: true }).mockReturnValue({
       mutateAsync: reviewMutateAsync
-    } as ReturnType<typeof useReviewFlashcardMutation>)
+    })
     vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
       data: [],
       isLoading: false
@@ -226,22 +226,22 @@ describe("ReviewTab cram completion", () => {
       isLoading: false,
       isError: false
     } as ReturnType<typeof useFlashcardAssistantQuery>)
-    vi.mocked(useFlashcardAssistantRespondMutation).mockReturnValue({
+    vi.mocked(useFlashcardAssistantRespondMutation, { partial: true }).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false
-    } as ReturnType<typeof useFlashcardAssistantRespondMutation>)
-    vi.mocked(useUpdateFlashcardMutation).mockReturnValue({
+    })
+    vi.mocked(useUpdateFlashcardMutation, { partial: true }).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false
-    } as ReturnType<typeof useUpdateFlashcardMutation>)
-    vi.mocked(useResetFlashcardSchedulingMutation).mockReturnValue({
+    })
+    vi.mocked(useResetFlashcardSchedulingMutation, { partial: true }).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false
-    } as ReturnType<typeof useResetFlashcardSchedulingMutation>)
-    vi.mocked(useDeleteFlashcardMutation).mockReturnValue({
+    })
+    vi.mocked(useDeleteFlashcardMutation, { partial: true }).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false
-    } as ReturnType<typeof useDeleteFlashcardMutation>)
+    })
     vi.mocked(useGlobalFlashcardTagSuggestionsQuery).mockReturnValue({
       data: { items: [] },
       isLoading: false,
@@ -276,7 +276,7 @@ describe("ReviewTab cram completion", () => {
   })
 
   const mountQueue = async ({ count = 1, resources = true, tag = "biology" } = {}) => {
-    const template = vi.mocked(useCramQueueQuery)().data![0]
+    const template = vi.mocked(useCramQueueQuery)(undefined).data![0]
     const cards = Array.from({ length: count }, (_, index) => ({
       ...template, uuid: `completion-${index}`, front: `Card ${index + 1}`
     }))
@@ -321,7 +321,7 @@ describe("ReviewTab cram completion", () => {
     [2, true, "2 cards reviewed this session"],
     [2, false, "2 cards reviewed this session"]
   ])("renders Due completion for %i reviews (English resource=%s)", async (count, resources, expected) => {
-    const template = vi.mocked(useReviewQuery)().data!
+    const template = vi.mocked(useReviewQuery)(undefined).data!
     const cards = Array.from({ length: count as number }, (_, index) => ({
       ...template, uuid: `due-completion-${index}`, front: `Due card ${index + 1}`
     }))

@@ -10,6 +10,13 @@ DOCUMENT_READING_PROGRESS_TABLE = "document_reading_progress"
 DOCUMENT_ANNOTATIONS_TABLE = "document_annotations"
 DOCUMENT_PARSED_REFERENCES_CACHE_TABLE = "document_parsed_references_cache"
 
+# Makes POST /annotations/sync idempotent on client_id. NULL client ids stay
+# distinct on both backends, so rows created without one never conflict.
+ANNOTATION_CLIENT_ID_INDEX_SQL = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_annotations_client_id "
+    "ON document_annotations(user_id, media_id, client_id)"
+)
+
 SQLITE_DOCUMENT_WORKSPACE_SQL = """
 CREATE TABLE IF NOT EXISTS document_reading_progress (
     media_id INTEGER NOT NULL,
@@ -37,7 +44,8 @@ CREATE TABLE IF NOT EXISTS document_annotations (
     percentage REAL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    deleted INTEGER NOT NULL DEFAULT 0
+    deleted INTEGER NOT NULL DEFAULT 0,
+    client_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_annotations_media_user
 ON document_annotations(media_id, user_id, deleted);
@@ -85,7 +93,8 @@ POSTGRES_DOCUMENT_WORKSPACE_STATEMENTS = (
         percentage DOUBLE PRECISION,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        deleted INTEGER NOT NULL DEFAULT 0
+        deleted INTEGER NOT NULL DEFAULT 0,
+        client_id TEXT
     )
     """,
     """
@@ -112,6 +121,8 @@ POSTGRES_DOCUMENT_WORKSPACE_STATEMENTS = (
     "ALTER TABLE document_reading_progress ADD COLUMN IF NOT EXISTS percentage DOUBLE PRECISION",
     "ALTER TABLE document_annotations ADD COLUMN IF NOT EXISTS chapter_title TEXT",
     "ALTER TABLE document_annotations ADD COLUMN IF NOT EXISTS percentage DOUBLE PRECISION",
+    "ALTER TABLE document_annotations ADD COLUMN IF NOT EXISTS client_id TEXT",
+    ANNOTATION_CLIENT_ID_INDEX_SQL,
 )
 
 
@@ -146,6 +157,10 @@ def ensure_sqlite_document_workspace_schema(conn: Any) -> None:
     if "percentage" not in annotation_columns:
         conn.execute(f"ALTER TABLE {DOCUMENT_ANNOTATIONS_TABLE} ADD COLUMN percentage REAL")  # nosec B608
         logger.info("Added percentage column to annotations table")
+    if "client_id" not in annotation_columns:
+        conn.execute(f"ALTER TABLE {DOCUMENT_ANNOTATIONS_TABLE} ADD COLUMN client_id TEXT")  # nosec B608
+        logger.info("Added client_id column to annotations table")
+    conn.execute(ANNOTATION_CLIENT_ID_INDEX_SQL)
 
 
 def _execute_postgres_statement(conn: Any, statement: str) -> None:

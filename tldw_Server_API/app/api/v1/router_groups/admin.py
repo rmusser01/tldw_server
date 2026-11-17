@@ -1,7 +1,8 @@
 """Admin router group — administrative, billing, and org management endpoints."""
+
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from tldw_Server_API.app.api.v1.router_groups.conditional import (
     ImportedRouterSpec,
@@ -59,11 +60,12 @@ def iter_admin_router_specs() -> Iterable[RouterSpec]:
             route_key="sandbox",
             default_stable=False,
         ),
-        # Billing endpoints
+        # Billing endpoints (admin billing dashboard; legacy public
+        # /api/v1/billing mount stays removed)
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.billing",
             log_name="billing",
-            prefix=f"{API_V1_PREFIX}",
+            prefix=f"{API_V1_PREFIX}/admin",
             tags=("billing",),
             route_key="billing",
         ),
@@ -130,6 +132,15 @@ def iter_admin_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}",
             tags=("resource-governor",),
             route_key="resource-governor",
+        ),
+        # Owner reads are stable independently of Jobs administration.
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.jobs_owned",
+            log_name="jobs_owned",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("jobs",),
+            route_key="jobs-owned",
+            default_stable=True,
         ),
         # Jobs admin diagnostics
         ImportedRouterSpec(

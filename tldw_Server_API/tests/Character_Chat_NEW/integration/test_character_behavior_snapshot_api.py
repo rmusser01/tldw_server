@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Character_Chat.character_conversation_factory impo
     create_character_conversation,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_chat import (
+    load_chat_and_character,
     start_new_chat_session,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_io import (
@@ -1947,7 +1948,12 @@ def test_module_creator_greeting_seed_uses_same_stabilized_source_as_snapshot(
     assert [message["content"] for message in messages] == [
         "New accepted module greeting"
     ]
+    assert [(message["sender"], message["parent_message_id"]) for message in messages] == [("assistant", None)]
     assert history == [(None, "New accepted module greeting")]
+    _reloaded_character, reopened_history, _reloaded_image = load_chat_and_character(
+        character_db, conversation_id, "Alice"
+    )
+    assert reopened_history == history
 
 
 @pytest.mark.integration
@@ -2647,7 +2653,7 @@ def test_auto_summary_writer_uses_transactional_conversation_identity(
         return settings
 
     monkeypatch.setattr(character_db, "get_conversation_by_id", lambda *_args, **_kwargs: stale)
-    monkeypatch.setattr(sessions, "validate_chat_settings_storage", _capture)
+    monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.chat_settings_validation.validate_chat_settings_storage", _capture)
 
     sessions._persist_auto_summary_to_settings(
         character_db,
@@ -2803,7 +2809,7 @@ def test_pin_writer_uses_transactional_conversation_identity(
         return settings
 
     monkeypatch.setattr(character_db, "get_conversation_by_id", lambda *_args, **_kwargs: stale)
-    monkeypatch.setattr(messages, "validate_chat_settings_storage", _capture)
+    monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.chat_settings_validation.validate_chat_settings_storage", _capture)
 
     response = test_client.put(
         "/api/v1/messages/writer-race-message",
@@ -2817,7 +2823,7 @@ def test_pin_writer_uses_transactional_conversation_identity(
 
 
 @pytest.mark.integration
-def test_pin_edit_acquires_message_metadata_before_conversation_lock(
+def test_pin_edit_acquires_conversation_before_message_metadata_locks(
     test_client,
     auth_headers,
     character_db,
@@ -2866,7 +2872,7 @@ def test_pin_edit_acquires_message_metadata_before_conversation_lock(
     )
 
     assert response.status_code == 200, response.text
-    assert order[:3] == ["message", "metadata", "conversation"]
+    assert order[:3] == ["conversation", "message", "metadata"]
 
 
 def test_postgres_message_edit_lock_uses_for_update() -> None:
@@ -2896,7 +2902,7 @@ def test_postgres_message_edit_lock_uses_for_update() -> None:
     assert conn.calls[0][1] == ("message-1",)
 
 
-def test_postgres_pin_edit_locks_metadata_before_conversation() -> None:
+def test_postgres_pin_edit_creates_and_locks_metadata_row() -> None:
     from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 
     class _Result:
@@ -3329,8 +3335,7 @@ def test_combined_content_pin_update_rolls_back_on_materialization_failure(
         raise InputError("forced pin materialization failure")
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "materialize_roleplay_behavior_settings",
+        "tldw_Server_API.app.core.Character_Chat.character_conversation_factory.materialize_roleplay_behavior_settings",
         _fail_materialization,
     )
 
@@ -5158,3 +5163,28 @@ def test_module_creator_uses_database_owner_for_postgres_custom_preset(
         "id": "owner-only-preset",
         "version": 1,
     }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("source_change", ["rename", "delete"])
+def test_resume_detail_displays_frozen_identity_and_completion_after_source_change(
+    test_client, auth_headers, character_db, source_change,
+):
+    character_id = character_db.add_character_card({"name": "Original Ari", "description": "Private original description"})
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={"character_id": character_id, "client_id": str(character_db.client_id), "title": "Original conversation"},
+        provider="local-llm", model="original-model",
+    )
+    card = character_db.get_character_card_by_id(character_id)
+    if source_change == "rename":
+        assert character_db.update_character_card(character_id, {"name": "Changed Ari"}, expected_version=card["version"])
+    else:
+        assert character_db.soft_delete_character_card(character_id, expected_version=card["version"])
+    response = test_client.get(f"/api/v1/chats/{conversation_id}", headers=auth_headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["assistant_name"] == "Original Ari"
+    assert body["character_name"] == "Original Ari"
+    assert body["resume_completion"] == {"provider": "local-llm", "model": "original-model"}
+    assert "Private original description" not in response.text

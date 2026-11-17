@@ -28,6 +28,37 @@ from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.mark.parametrize("minimal", [False, True])
+def test_jobs_owned_registration_is_stable_without_stabilizing_administration(monkeypatch, minimal):
+    from configparser import ConfigParser
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_optional_router_specs
+    from tldw_Server_API.app.core import config
+
+    monkeypatch.setattr(config, "is_test_mode", lambda: False)
+    # The repository's developer config explicitly enables jobs; test defaults
+    # against an empty operator configuration, not that local opt-in.
+    monkeypatch.setattr(config, "load_comprehensive_config", ConfigParser)
+    monkeypatch.setattr(config, "_route_toggle_policy", config._route_toggle_policy.__wrapped__)
+    monkeypatch.setenv("ROUTES_STABLE_ONLY", "1")
+    monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+    monkeypatch.delenv("ROUTES_DISABLE", raising=False)
+    specs = list(iter_minimal_optional_router_specs() if minimal else iter_admin_router_specs())
+    owned = [s for s in specs if s.route_key == "jobs-owned"]
+    assert len(owned) == 1
+    assert owned[0].default_stable is True
+    admin = next(s for s in iter_admin_router_specs() if s.route_key == "jobs")
+    assert admin.default_stable is False
+    app = FastAPI()
+    assert register_router_specs(app, [*owned, admin]) == 1
+    paths = {r.path for r in iter_served_routes(app.routes)}
+    assert "/api/v1/jobs/owned/{job_uuid}" in paths
+    assert "/api/v1/jobs/{job_id}" not in paths
+    monkeypatch.setenv("ROUTES_DISABLE", "jobs-owned")
+    assert register_router_specs(FastAPI(), owned) == 0
+
+
 SETUP_ENDPOINT_MODULE = "tldw_Server_API.app.api.v1.endpoints.setup"
 SETUP_ENDPOINT_PACKAGE = "tldw_Server_API.app.api.v1.endpoints"
 KANBAN_ROUTER_MODULE_PREFIX = "tldw_Server_API.app.api.v1.endpoints.kanban."
@@ -11315,6 +11346,11 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.storage",
+        path="/storage/usage",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.files",
         path="/files",
     )
@@ -11408,6 +11444,8 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_first_path["/service-prompts"].prefix == "/api/v1"
     assert by_first_path["/service-prompts"].tags == ("service-prompts",)
     assert by_first_path["/service-prompts"].route_key == ""
+    assert by_key["storage"].prefix == "/api/v1"
+    assert by_key["storage"].tags == ("storage",)
     assert by_key["outputs"].prefix == "/api/v1"
     assert by_key["outputs"].tags == ("outputs",)
     assert by_key["claims"].prefix == "/api/v1"
@@ -11734,7 +11772,7 @@ def test_iter_admin_router_specs_populates_expected_specs(monkeypatch: pytest.Mo
     assert by_first_path["/sandbox/status"].tags == ("sandbox",)
     assert by_first_path["/sandbox/status"].route_key == "sandbox"
     assert by_first_path["/sandbox/status"].default_stable is False
-    assert by_key["billing"].prefix == "/api/v1"
+    assert by_key["billing"].prefix == "/api/v1/admin"
     assert by_key["billing"].tags == ("billing",)
     assert by_key["mcp-catalogs"].prefix == "/api/v1"
     assert by_key["mcp-catalogs"].tags == ()

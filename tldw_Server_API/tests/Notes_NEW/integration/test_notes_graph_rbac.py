@@ -13,7 +13,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_graph import (
     NoteLinkRestore,
     NoteLinkUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService, reset_jwt_service
+from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     SyncServerOriginBatchAppendError,
     SyncServerOriginBatchMaterializationError,
 )
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 pytestmark = pytest.mark.integration
 
@@ -60,7 +61,7 @@ def test_app(monkeypatch) -> FastAPI:
     monkeypatch.setenv("JWT_ALGORITHM", "HS256")
     monkeypatch.setenv("JWT_SECRET_KEY", "graph_rbac_tests_secret_1234567890")
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
     app = FastAPI()
     app.include_router(notes_graph_module.router, prefix="/api/v1/notes")
@@ -203,8 +204,7 @@ def test_graph_authorizes_dataset_before_cache_lookup(
         raise notes_graph_module.NotesLinkDatasetConflictError()
 
     monkeypatch.setattr(
-        notes_graph_module,
-        "resolve_notes_link_dataset_authority",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_dataset_authority",
         reject_authority,
     )
     monkeypatch.setattr(
@@ -281,8 +281,7 @@ async def test_link_detail_uses_read_authority_without_requiring_write_readiness
         lambda **_kwargs: "dataset-1",
     )
     monkeypatch.setattr(
-        notes_graph_module,
-        "resolve_notes_link_coordinator",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_coordinator",
         lambda **_kwargs: pytest.fail("read-only link detail required write readiness"),
     )
 
@@ -324,8 +323,7 @@ async def test_legacy_create_without_edge_id_skips_canonical_follow_up(
             return {"from_note_id": source_id, "to_note_id": target_id}
 
     monkeypatch.setattr(
-        notes_graph_module,
-        "resolve_notes_link_coordinator",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_coordinator",
         lambda **_kwargs: None,
     )
     result = await notes_graph_module.create_manual_link(
@@ -376,8 +374,7 @@ def test_active_link_mutations_require_expected_version(
         pass
 
     monkeypatch.setattr(
-        notes_graph_module,
-        "resolve_notes_link_coordinator",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_coordinator",
         lambda **_kwargs: _ActiveCoordinator(),
     )
     token = _make_token(scope="notes")
@@ -463,8 +460,7 @@ def test_active_link_capture_failures_have_stable_http_mapping(
             raise failure
 
     monkeypatch.setattr(
-        notes_graph_module,
-        "resolve_notes_link_coordinator",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_coordinator",
         lambda **_kwargs: _FailingCoordinator(),
     )
     token = _make_token(scope="notes")

@@ -42,6 +42,225 @@ const startQuickIngestSession = (input: Parameters<typeof startBatch>[0]) => sta
 const cancelQuickIngestSession = (input: Parameters<typeof cancelBatch>[0]) => cancelBatch({ requestScope, ...input })
 
 describe("submitQuickIngestBatch", () => {
+  it.each(["file", "url"] as const)("submits the next native file while its first accepted %s is still processing", async (firstKind) => {
+    vi.useFakeTimers()
+    const owner = new AbortController()
+    try {
+      const first = { id: "first", directFile: new File(["sample"], "first.pdf") }
+      const second = { id: "second", directFile: new File(["sample"], "second.pdf") }
+      let firstComplete = false
+      mocks.bgUpload
+        .mockResolvedValueOnce({ batch_id: "batch-first", jobs: [{ id: 50 }] })
+        .mockResolvedValueOnce({ batch_id: "batch-second", jobs: [{ id: 51 }] })
+      mocks.bgRequest.mockImplementation(({ path }) =>
+        path.endsWith("/50") && !firstComplete
+          ? { ok: true, data: { status: "processing" } }
+          : { ok: true, data: { status: "completed", result: { media_id: path.endsWith("/50") ? 450 : 451 } } }
+      )
+      const onTrackingMetadata = vi.fn()
+      const onItemResult = vi.fn()
+      const run = submitQuickIngestBatch({
+        entries: firstKind === "url" ? [{ id: "first", url: "https://example.com/first.pdf", type: "pdf" }] : [],
+        files: firstKind === "file" ? [first, second] : [second],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: "qi-direct-parallel-poll",
+        signal: owner.signal,
+        onTrackingMetadata,
+        onItemResult,
+      })
+      void run.catch(() => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.bgUpload).toHaveBeenCalledTimes(2)
+      expect(mocks.bgUpload.mock.calls[1][0].directFile).toBe(second.directFile)
+      expect(onTrackingMetadata.mock.calls.map(([item]) => [item.batchIds, item.jobIdToItemId])).toEqual([
+        [["batch-first"], { 50: "first" }],
+        [["batch-second"], { 51: "second" }],
+      ])
+      expect(onItemResult).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: "second", mediaId: 451 }))
+      firstComplete = true
+      await vi.advanceTimersByTimeAsync(1_200)
+      expect((await run).results).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "first", mediaId: 450 }),
+        expect.objectContaining({ id: "second", mediaId: 451 }),
+      ]))
+    } finally {
+      owner.abort()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([403, 404, 410])("interrupts monitoring on an authoritative HTTP %i without failing the server job", async (status) => {
+    vi.useFakeTimers()
+    const owner = new AbortController()
+    try {
+      mocks.bgUpload.mockResolvedValue({ batch_id: "inaccessible", jobs: [{ id: 77 }] })
+      mocks.bgRequest.mockResolvedValue({ ok: false, status })
+      const onItemResult = vi.fn()
+      const finished = vi.fn()
+      const run = submitQuickIngestBatch({
+        entries: [],
+        files: [{ id: "pdf", directFile: new File(["sample"], "sample.pdf") }],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: "qi-direct-interrupted",
+        signal: owner.signal,
+        onItemResult,
+      })
+      void run.then(finished, () => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(finished).toHaveBeenCalledWith(expect.objectContaining({ ok: true, results: [], interruptedJobIds: [77] }))
+      expect(onItemResult).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    } finally {
+      owner.abort()
+      vi.useRealTimers()
+    }
+  })
+
+  it("keeps an accepted native job after five minutes and recovers its last known status after an outage", async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.bgUpload.mockResolvedValue({ batch_id: "long-job-batch", jobs: [{ id: 77 }] })
+      mocks.bgRequest
+        .mockResolvedValueOnce({ ok: true, data: { status: "queued" } })
+        .mockRejectedValueOnce(Object.assign(new Error("Service unavailable"), { status: 503 }))
+        .mockResolvedValueOnce({ ok: true, data: { status: "running", progress_message: "Extracting PDF text" } })
+        .mockResolvedValueOnce({ ok: true, data: { status: "completed", result: { media_id: 42 } } })
+      const onJobProgress = vi.fn()
+      const onJobStatusUnavailable = vi.fn()
+      const onItemResult = vi.fn()
+      const startedAt = Date.now()
+      const run = submitQuickIngestBatch({
+        entries: [],
+        files: [{ id: "pdf", directFile: new File(["sample"], "sample.pdf") }],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: "qi-direct-long-job",
+        onJobProgress,
+        onJobStatusUnavailable,
+        onItemResult,
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(onJobProgress).toHaveBeenCalledWith("pdf", expect.objectContaining({ status: "queued" }))
+      vi.setSystemTime(startedAt + 6 * 60_000)
+      await vi.advanceTimersByTimeAsync(1_200)
+      expect(onJobStatusUnavailable).toHaveBeenLastCalledWith(true)
+      expect(onItemResult).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(9_999)
+      expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(onJobStatusUnavailable).toHaveBeenLastCalledWith(false)
+      expect(onJobProgress).toHaveBeenLastCalledWith("pdf", expect.objectContaining({ status: "running" }))
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect((await run).results).toEqual([expect.objectContaining({ status: "ok", mediaId: 42 })])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+
+  it.each([
+    ["doc.pdf", "application/pdf", 250 * 1024 ** 2, "250 MB"],
+    ["book.epub", "application/epub+zip", 250 * 1024 ** 2, "250 MB"],
+    ["notes.txt", "text/plain", 250 * 1024 ** 2, "250 MB"],
+    ["clip.wav", "audio/wav", 1024 ** 3, "1 GB"],
+    ["clip.mkv", "", 1024 ** 3, "1 GB"],
+  ] as const)("dispatches a native %s at the limit and rejects an oversized submission", async (name, type, limit, label) => {
+    mocks.runtimeId = "legacy-extension"
+    mocks.manifestVersion = 2
+    mocks.sendMessage.mockResolvedValue({ ok: true, sessionId: "legacy-session" })
+    mocks.bgUpload.mockResolvedValue({ batch_id: "batch", jobs: [{ id: 77 }] })
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result: { media_id: 77 } } })
+    const exact = new File([], name, { type })
+    const oversized = new File([], name, { type })
+    Object.defineProperty(exact, "size", { value: limit })
+    Object.defineProperty(oversized, "size", { value: limit + 1 })
+    const input = {
+      entries: [],
+      files: [{ id: "accepted", directFile: exact }, { id: "rejected", directFile: oversized }],
+      storeRemote: true,
+      processOnly: false,
+    }
+
+    const ack = await startQuickIngestSession(input)
+    expect(ack.sessionId).toMatch(/^qi-direct-/)
+    const result = await submitQuickIngestBatch(input)
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(mocks.bgUpload.mock.calls[0][0]).toMatchObject({
+      path: "/api/v1/media/ingest/jobs",
+      fileFieldName: "files",
+      timeoutMs: 20 * 60_000,
+      preferDirect: true,
+    })
+    expect(mocks.bgUpload.mock.calls[0][0].directFile).toBe(exact)
+    expect(result.results).toMatchObject([
+      { id: "accepted", status: "ok", fileName: name },
+      { id: "rejected", status: "error", error: `File exceeds ${label} quick-ingest limit` },
+    ])
+  })
+
+  it("aborts the in-flight native upload on Cancel All without aborting the owner signal", async () => {
+    const owner = new AbortController()
+    const first = new File([], "pending.pdf", { type: "application/pdf" })
+    Object.defineProperty(first, "size", { value: 250 * 1024 ** 2 })
+    const next = new File([], "next.pdf", { type: "application/pdf" })
+    mocks.bgUpload.mockImplementation(({ abortSignal }: { abortSignal: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        abortSignal.addEventListener("abort", () => reject(abortSignal.reason), { once: true })
+      })
+    )
+    const sessionId = "qi-direct-upload-cancel"
+    const run = submitQuickIngestBatch({
+      entries: [],
+      files: [{ id: "first", directFile: first }, { id: "next", directFile: next }],
+      storeRemote: true,
+      processOnly: false,
+      signal: owner.signal,
+      __quickIngestSessionId: sessionId,
+    })
+    await vi.waitFor(() => expect(mocks.bgUpload).toHaveBeenCalledTimes(1))
+
+    await cancelQuickIngestSession({ sessionId, signal: owner.signal })
+
+    expect(mocks.bgUpload.mock.calls[0][0].abortSignal.aborted).toBe(true)
+    expect(owner.signal.aborted).toBe(false)
+    expect(await run).toEqual({ ok: true, results: [] })
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("allows a large native job to keep processing beyond the normal polling deadline", async () => {
+    vi.useFakeTimers()
+    try {
+      const file = new File([], "clip.mkv")
+      Object.defineProperty(file, "size", { value: 1024 ** 3 })
+      mocks.bgUpload.mockResolvedValue({ batch_id: "large-batch", jobs: [{ id: 77 }] })
+      const startedAt = Date.now()
+      mocks.bgRequest
+        .mockImplementationOnce(() => {
+          vi.setSystemTime(startedAt + 6 * 60_000)
+          return { ok: true, data: { status: "running" } }
+        })
+        .mockResolvedValueOnce({ ok: true, data: { status: "completed", result: { media_id: 77 } } })
+
+      const run = submitQuickIngestBatch({
+        entries: [],
+        files: [{ id: "large", directFile: file }],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: "qi-direct-large-poll",
+      })
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect((await run).results).toEqual([expect.objectContaining({ id: "large", status: "ok" })])
+      expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("keeps conference retry identities on the shared executor in a legacy messaging runtime", async () => {
     mocks.runtimeId = "legacy-extension"
     mocks.manifestVersion = 2
@@ -388,7 +607,8 @@ describe("submitQuickIngestBatch", () => {
 
   it("marks duplicate direct HTML scrape responses as skipped", async () => {
     mocks.bgRequest.mockResolvedValue({
-      status: "duplicate",
+      status: "Skipped",
+      media_id: 37,
       media_ids: [],
       total_articles: 1,
       stored_articles: 0,
@@ -409,7 +629,7 @@ describe("submitQuickIngestBatch", () => {
       storeRemote: true,
       processOnly: false,
       common: {
-        perform_analysis: false,
+        perform_analysis: true,
         perform_chunking: false,
         overwrite_existing: false
       },
@@ -421,13 +641,15 @@ describe("submitQuickIngestBatch", () => {
     expect(mocks.bgRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         path: "/api/v1/media/process-web-scraping",
-        method: "POST"
+        method: "POST",
+        body: expect.objectContaining({ skip_existing_analysis: true })
       })
     )
     expect(result.results?.[0]).toMatchObject({
       id: "entry-duplicate-html",
       status: "ok",
       outcome: "skipped",
+      mediaId: 37,
       message: DUPLICATE_SKIP_MESSAGE
     })
   })
@@ -469,6 +691,64 @@ describe("submitQuickIngestBatch", () => {
       error: "Source access was blocked by the website or outbound access policy.",
       data: { extraction_failures: [{ code: "source_access_denied" }] }
     })
+  })
+
+  it.each([
+    { storeRemote: true, ocr: true },
+    { storeRemote: true, ocr: false },
+    { storeRemote: false, ocr: true },
+    { storeRemote: false, ocr: false }
+  ])("sends the PDF OCR toggle to processing (remote=$storeRemote, OCR=$ocr)", async ({ storeRemote, ocr }) => {
+    mocks.bgUpload.mockResolvedValue(storeRemote
+      ? { batch_id: "ocr-batch", jobs: [{ id: 205 }] }
+      : { results: [{ status: "Success", content: "Extracted source" }] })
+    mocks.bgRequest.mockResolvedValue({
+      ok: true,
+      data: { status: "completed", result: { status: "Success", media_id: 205 } }
+    })
+    await submitQuickIngestBatch({
+      entries: [],
+      files: [{ id: "scan", name: "scan.pdf", type: "application/pdf", data: [37, 80, 68, 70] }],
+      storeRemote,
+      processOnly: !storeRemote,
+      fileDefaults: { document: { ocr } }
+    })
+    expect(mocks.bgUpload).toHaveBeenCalledWith(expect.objectContaining({
+      path: storeRemote ? "/api/v1/media/ingest/jobs" : "/api/v1/media/process-pdfs",
+      fields: expect.objectContaining({ enable_ocr: ocr })
+    }))
+  })
+
+  it("retains an explicit PDF OCR override over preset defaults", async () => {
+    mocks.bgUpload.mockResolvedValue({ batch_id: "ocr-override", jobs: [{ id: 206 }] })
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: {
+      status: "completed", result: { status: "Success", media_id: 206 }
+    } })
+    await submitQuickIngestBatch({
+      entries: [{ id: "scan", url: "https://source.test/scan.pdf", type: "pdf" }],
+      files: [], storeRemote: true, processOnly: false,
+      fileDefaults: { document: { ocr: true } },
+      advancedValues: { enable_ocr: false }
+    })
+    expect(mocks.bgUpload).toHaveBeenCalledWith(expect.objectContaining({
+      fields: expect.objectContaining({ enable_ocr: false })
+    }))
+  })
+
+  it("uses per-file PDF OCR settings over the batch preset", async () => {
+    mocks.bgUpload.mockResolvedValue({ batch_id: "ocr-file", jobs: [{ id: 207 }] })
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: {
+      status: "completed", result: { status: "Success", media_id: 207 }
+    } })
+    await submitQuickIngestBatch({
+      entries: [],
+      files: [{ id: "scan", name: "scan.pdf", type: "application/pdf", data: [37, 80, 68, 70], defaults: { document: { ocr: false } } }],
+      storeRemote: true, processOnly: false,
+      fileDefaults: { document: { ocr: true } }
+    })
+    expect(mocks.bgUpload).toHaveBeenCalledWith(expect.objectContaining({
+      fields: expect.objectContaining({ enable_ocr: false })
+    }))
   })
 
   it("defaults perform_chunking to true when common options are omitted", async () => {
@@ -1006,25 +1286,53 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
-  it("stops submitting later direct items once the session is cancelled", async () => {
+  it("releases a slow accepted-job monitor when cancelling the direct session", async () => {
     vi.useFakeTimers()
+    const owner = new AbortController()
+    try {
+      const startedAt = Date.now()
+      const sessionId = "qi-direct-long-cancel"
+      mocks.bgUpload.mockResolvedValue({ batch_id: "long-cancel", jobs: [{ id: 70 }] })
+      mocks.bgRequest.mockImplementation(({ method }) => {
+        if (method === "POST") return { ok: true, data: { success: true } }
+        vi.setSystemTime(startedAt + 6 * 60_000)
+        return { ok: true, data: { status: "queued" } }
+      })
+      const settled = vi.fn()
+      const run = submitQuickIngestBatch({
+        entries: [],
+        files: [{ id: "pdf", directFile: new File(["sample"], "sample.pdf") }],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: sessionId,
+        signal: owner.signal,
+      })
+      void run.then(settled, () => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+
+      await cancelQuickIngestSession({ sessionId, signal: owner.signal })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(owner.signal.aborted).toBe(false)
+      expect(settled).toHaveBeenCalledWith(expect.objectContaining({
+        results: [expect.objectContaining({ id: "pdf", outcome: "cancelled" })],
+      }))
+    } finally {
+      owner.abort()
+      vi.useRealTimers()
+    }
+  })
+
+  it("stops submitting later direct items once the session is cancelled", async () => {
     mocks.bgUpload.mockResolvedValue({
       batch_id: "batch-stop-1",
       jobs: [{ id: 901 }]
     })
 
-    let statusPollCount = 0
     mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
       const path = String(request?.path || "")
       if (path.includes("/api/v1/media/ingest/jobs/cancel?batch_id=batch-stop-1")) {
         return { ok: true, data: { success: true } }
-      }
-      if (path === "/api/v1/media/ingest/jobs/901") {
-        statusPollCount += 1
-        return {
-          ok: true,
-          data: { status: statusPollCount > 1 ? "cancelled" : "processing" }
-        }
       }
       return { ok: false, error: "unexpected path" }
     })
@@ -1045,7 +1353,10 @@ describe("submitQuickIngestBatch", () => {
       files: [],
       storeRemote: true,
       processOnly: false,
-      __quickIngestSessionId: "direct-session-stop",
+      __quickIngestSessionId: "qi-direct-session-stop",
+      onTrackingMetadata: () => {
+        void cancelQuickIngestSession({ sessionId: "qi-direct-session-stop" })
+      },
       common: {
         perform_analysis: true,
         perform_chunking: false,
@@ -1054,23 +1365,12 @@ describe("submitQuickIngestBatch", () => {
       advancedValues: {}
     })
 
-    await vi.waitFor(() => {
-      expect(mocks.bgRequest).toHaveBeenCalledWith(
-        expect.objectContaining({
-          path: "/api/v1/media/ingest/jobs/901",
-          method: "GET"
-        })
-      )
-    })
-
-    await cancelQuickIngestSession({
-      sessionId: "direct-session-stop",
-      reason: "user_cancelled"
-    })
-    await vi.advanceTimersByTimeAsync(2_000)
     const runResult = await runPromise
 
     expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/media/ingest/jobs/cancel?batch_id=batch-stop-1&reason=user_cancelled",
+    }))
     expect(runResult.results?.map((item) => item.id)).not.toContain("entry-stop-2")
   })
 
@@ -1451,6 +1751,21 @@ describe("submitQuickIngestBatch", () => {
       auto_apply_template: true
     })
     expect(body).not.toHaveProperty("auto_chunking_goal")
+  })
+
+  it("uploads process-only files once through the canonical multipart field", async () => {
+    mocks.bgUpload.mockResolvedValue({ result: "ok" })
+    await submitQuickIngestBatch({
+      entries: [],
+      files: [{ id: "scan", name: "scan.pdf", type: "application/pdf", data: [1, 2, 3] }],
+      storeRemote: true,
+      processOnly: true,
+      common: { perform_analysis: false, perform_chunking: false, overwrite_existing: false }
+    })
+    expect(mocks.bgUpload).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/media/process-pdfs", fileFieldName: "files"
+    }))
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
   })
 
   it("routes local files through direct process endpoints in web runtime", async () => {

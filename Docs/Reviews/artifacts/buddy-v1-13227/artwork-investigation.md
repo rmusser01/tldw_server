@@ -90,3 +90,5 @@ For one reproduced historical-style burst, capture the ordered URL sequence plus
 - a full layout/remount/readiness transition.
 
 For the current build, record independent `/api/v1/buddies` and attachment endpoints separately so their expected five-second poll is not mistaken for the historical 250 ms legacy loop. Also compare burst count/timestamps with route-prefetch entries. If there is no host lifetime or Persona/surface transition, the current source does not explain a sustained paired loop and browser initiator evidence is required before proposing any production fix.
+
+> Superseded in part on 2026-10-11: the original remount/identity-only explanation predates controlled development effect-replay evidence. PR #3091 repaired that independently reproduced mechanism. The September 6 initiating trigger remains unproven because its receipt lacks browser initiator and effect-lifetime metadata. See TASK-13211 and the closeout report; no historical cause is inferred from the later repair.

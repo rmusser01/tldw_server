@@ -3,6 +3,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.main import app
 
 pytestmark = [pytest.mark.integration, pytest.mark.evaluations]
@@ -10,14 +11,13 @@ pytestmark = [pytest.mark.integration, pytest.mark.evaluations]
 
 @pytest.fixture(autouse=True)
 def _setup_env(monkeypatch):
-     # Allow tests to run without admin gating and use testing bypass
+    # Open the admin gate; requests authenticate with the real single-user key.
     monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "false")
-    monkeypatch.setenv("TESTING", "true")
 
 
 @pytest.fixture(scope="function")
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-API-KEY": get_settings().SINGLE_USER_API_KEY}) as c:
         yield c
 
 

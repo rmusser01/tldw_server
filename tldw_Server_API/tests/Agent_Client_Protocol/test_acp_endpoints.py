@@ -2,6 +2,7 @@ import importlib.machinery
 import json
 import sys
 import types
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -99,7 +100,9 @@ class StubRunnerClient:
     async def verify_session_access(self, session_id: str, user_id: int) -> bool:
         return session_id not in self.denied_sessions
 
-    async def prompt(self, session_id: str, prompt):
+    async def prompt(
+        self, session_id: str, prompt, *, on_native_text: Callable[[str], None] | None = None,
+    ):
         self.prompt_calls.append((session_id, prompt))
         return {"stopReason": "end", "detail": "ok"}
 
@@ -272,6 +275,7 @@ def test_acp_list_sessions_filters_by_workspace_id(
     tmp_path,
 ):
     import asyncio
+
     import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
 
     async def _seed_sessions() -> None:
@@ -313,6 +317,7 @@ def test_acp_session_diagnostics_includes_bounded_workspace_context(
     tmp_path,
 ):
     import asyncio
+
     import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
 
     async def _seed_session() -> None:
@@ -747,7 +752,9 @@ def test_acp_session_prompt_sanitizes_runtime_errors(client_user_only, monkeypat
     error_logs = []
 
     class ErrorRunnerClient(StubRunnerClient):
-        async def prompt(self, session_id: str, prompt):
+        async def prompt(
+            self, session_id: str, prompt, *, on_native_text: Callable[[str], None] | None = None,
+        ):
             _ = (session_id, prompt)
             raise ACPResponseError(leaked)
 
@@ -976,8 +983,12 @@ def test_acp_session_fork_creates_runtime_backed_session_and_bootstraps_first_pr
         async def verify_session_access(self, session_id: str, user_id: int) -> bool:
             return self.owners.get(session_id) == user_id
 
-        async def prompt(self, session_id: str, prompt):
+        async def prompt(
+            self, session_id: str, prompt, *, on_native_text: Callable[[str], None] | None = None,
+        ):
             self.prompt_calls.append((session_id, prompt))
+            if on_native_text is not None:
+                on_native_text("Bootstrapped reply")
             return {"content": "Bootstrapped reply"}
 
         def pop_updates(self, session_id: str, limit: int = 100):

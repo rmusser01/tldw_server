@@ -210,6 +210,9 @@ def validate_task_completion_signal(acp_result: dict[str, Any]) -> TaskCompletio
             "malformed ACP completion signal: prompt result must be an object",
         )
 
+    if acp_result.get("stopReason") == "cancelled":
+        raise CompletionSignalValidationError("cancelled", "Cancelled ACP turn cannot complete a task")
+
     payload = _extract_payload(acp_result)
     status = str(payload.get("status") or payload.get("outcome") or "").strip().lower()
     summary = str(payload.get("summary") or payload.get("result_summary") or "").strip()
@@ -257,6 +260,9 @@ def validate_review_decision_signal(acp_result: dict[str, Any]) -> TaskReviewDec
             "malformed",
             "malformed ACP review decision: prompt result must be an object",
         )
+
+    if acp_result.get("stopReason") == "cancelled":
+        _raise_review_error("cancelled", "Cancelled ACP turn cannot decide a review")
 
     payload = _extract_review_payload(acp_result)
     raw_approved = payload.get("approved")

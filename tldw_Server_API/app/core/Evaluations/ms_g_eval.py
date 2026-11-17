@@ -24,11 +24,6 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-    is_runtime_issued_provider_call_credentials,
-)
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
@@ -38,7 +33,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.custom_openai_providers import custom_openai_provider_number
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
     get_adapter_or_raise,
@@ -51,6 +46,11 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     list_registered_providers,
     provider_requires_api_key,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    is_runtime_issued_provider_call_credentials,
 )
 
 #######################################################################################################################
@@ -481,7 +481,7 @@ def geval_summarization(
             wait=wait_random_exponential(multiplier=1, min=1, max=120),
             stop=stop_after_attempt(10),
             retry=retry_if_not_exception_type(
-                (ChatAuthenticationError, ChatConfigurationError, ChatBadRequestError)
+                (ChatAuthenticationError, ChatConfigurationError, ChatBadRequestError, LLMQuotaExceededError)
             ),
         ):
             with attempt:
@@ -534,6 +534,8 @@ def geval_summarization(
                             provider=normalize_provider(api_endpoint),
                         )
                     )
+                except LLMQuotaExceededError:
+                    raise  # the user's limit: not retried, and not rewritten as an endpoint error
                 except Exception:
                     raise ValueError(f"Unsupported API endpoint: {api_endpoint}") from None
     except RetryError:

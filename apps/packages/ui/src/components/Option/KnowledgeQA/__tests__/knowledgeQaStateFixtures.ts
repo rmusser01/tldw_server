@@ -12,6 +12,7 @@ import type {
   SearchRuntimeDetails,
   CitationRef,
 } from "../types"
+import { createKnowledgeQaClient } from "../knowledgeQaClient"
 import { EMPTY_SOURCE_HEALTH_STATE } from "../sourceHealth"
 
 export type KnowledgeQaStateFixtureName =
@@ -194,6 +195,7 @@ function createBaseKnowledgeQaState(): KnowledgeQAContextValue {
     answerTrustReasonCodes: [],
     answerEvidenceOrigin: null,
     extensionFailureState: null,
+    completedGenerationEnabled: null,
     searchDetails: null,
     error: null,
     queryWarning: null,
@@ -218,6 +220,9 @@ function createBaseKnowledgeQaState(): KnowledgeQAContextValue {
     },
     sourceHealth: EMPTY_SOURCE_HEALTH_STATE,
     historyHydrated: true,
+    client: createKnowledgeQaClient(null, () => false),
+    isAuthorityCurrent: () => false,
+    storageScopeKey: null,
     setQuery: vi.fn(),
     search: vi.fn(async () => undefined),
     cancelSearch: vi.fn(),

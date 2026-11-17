@@ -129,6 +129,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     it.each([
       {
         caseName: "foreign-origin cookie marker",
+        docsInfoNoAuth: true,
         stored: {
           authMode: "single-user" as const,
           authSource: "cookie-session" as const,
@@ -140,6 +141,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
       },
       {
         caseName: "same-origin multi-user cookie marker",
+        docsInfoNoAuth: true,
         stored: {
           authMode: "multi-user" as const,
           authSource: "cookie-session" as const,
@@ -151,6 +153,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
       },
       {
         caseName: "exact-origin single-user cookie marker",
+        docsInfoNoAuth: false,
         stored: {
           authMode: "single-user" as const,
           authSource: "cookie-session" as const,
@@ -162,7 +165,13 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
       }
     ])(
       "keeps public discovery available while using actual client readiness for $caseName",
-      async ({ stored, ready, protectedRequests, localDirectoryCreation }) => {
+      async ({
+        stored,
+        ready,
+        docsInfoNoAuth,
+        protectedRequests,
+        localDirectoryCreation
+      }) => {
         mocks.storage.set("tldwConfig", stored)
         await tldwClient.initialize()
 
@@ -196,7 +205,8 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
         expect(getOpenAPISpec).toHaveBeenCalledTimes(1)
         expect(requestsForPath(docsInfoPath)).toHaveLength(1)
         expect(requestsForPath(docsInfoPath)[0]?.[0]).toMatchObject({
-          noAuth: true
+          noAuth: docsInfoNoAuth,
+          configSnapshot: stored
         })
         expect(requestsForPath(sourceCapabilityPath)).toHaveLength(
           protectedRequests

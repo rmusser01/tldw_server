@@ -89,3 +89,43 @@ def test_list_optimizations_rejects_bad_pagination(db) -> None:
         db.list_optimizations(page=0)
     with pytest.raises(InputError):
         db.list_optimizations(per_page=0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["list", "detail", "history"])
+@pytest.mark.parametrize("name", ["Rowan named optimization", None])
+async def test_optimization_read_responses_preserve_stored_name(db, operation, name):
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio import (
+        prompt_studio_optimization as endpoint,
+    )
+
+    project = db.create_project(name="name-contract", user_id="name-owner")
+    prompt = db.create_prompt(project["id"], "source", user_prompt="Source")
+    created = db.create_optimization(
+        project_id=project["id"],
+        name=name,
+        initial_prompt_id=prompt["id"],
+        optimizer_type="iterative",
+        optimization_config={},
+        max_iterations=1,
+    )
+    user = {"user_id": "name-owner", "is_admin": False}
+    if operation == "list":
+        allowed = await endpoint.require_project_access(project["id"], user_context=user, db=db)
+        response = await endpoint.list_optimizations(
+            project_id=project["id"],
+            page=1,
+            per_page=20,
+            status_filter=None,
+            _=allowed,
+            db=db,
+        )
+        record = response.model_dump(mode="json")["data"][0]
+    elif operation == "detail":
+        response = await endpoint.get_optimization(optimization_id=created["id"], db=db, user_context=user)
+        record = response.model_dump(mode="json")["data"]
+    else:
+        response = await endpoint.get_optimization_history(optimization_id=created["id"], db=db, user_context=user)
+        record = response.model_dump(mode="json")["data"]["optimization"]
+
+    assert record.get("name") == name  # nosec B101 - pytest checks the stored public response name.

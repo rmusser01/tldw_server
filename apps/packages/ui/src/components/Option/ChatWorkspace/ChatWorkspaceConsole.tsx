@@ -1,4 +1,5 @@
-import { useId, useState } from "react"
+import { useEffect, useId, useState } from "react"
+import { message } from "antd"
 import { MessageSquare, Library, Info } from "lucide-react"
 import type {
   EffectiveWorkspaceAssistantDefault,
@@ -79,11 +80,29 @@ export const ChatWorkspaceConsole = ({
   onRuntimeStateChange
 }: ChatWorkspaceConsoleProps) => {
   const [activePane, setActivePane] = useState("chat")
+  const [messageApi, messageContext] = message.useMessage()
   const paneId = useId()
   const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId)
   const browsedSource = workspaceReady && normalizedWorkspaceId
     ? sources.find((source) => source.id === browsedSourceId) ?? null
     : null
+  const pin = browsedSource?.webCapture
+  const captureUnavailable =
+    browsedSource?.statusDetails?.statusReason === "capture_unavailable" ||
+    (pin &&
+      (!Number.isSafeInteger(pin.versionNumber) ||
+        pin.versionNumber < 1 ||
+        !Number.isSafeInteger(pin.mediaId) ||
+        pin.mediaId < 1 ||
+        pin.mediaId !== browsedSource?.mediaId))
+
+  useEffect(() => {
+    if (!captureUnavailable) return
+    // A later source refresh must not reopen this Browse selection unpinned.
+    onCloseBrowseSource?.()
+    void messageApi.warning("Exact capture version unavailable")
+  }, [captureUnavailable, messageApi, onCloseBrowseSource])
+
   const stagedSourceIds = stagedSources.map((source) => source.sourceId)
   const inspectorSources = stagedSources.map((source) => ({
     sourceId: source.sourceId,
@@ -95,6 +114,7 @@ export const ChatWorkspaceConsole = ({
       data-testid="chat-workspace-console"
       className="flex h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-bg text-text [overflow-wrap:anywhere]"
     >
+      {messageContext}
       <nav
         aria-label="Workspace panels"
         className="flex shrink-0 gap-1 border-b border-border bg-surface2 p-1 xl:hidden"
@@ -198,7 +218,7 @@ export const ChatWorkspaceConsole = ({
       />
       <WorkspaceSourcePreview
         workspaceId={normalizedWorkspaceId}
-        source={browsedSource}
+        source={captureUnavailable ? null : browsedSource}
         onClose={onCloseBrowseSource ?? (() => undefined)}
       />
     </div>

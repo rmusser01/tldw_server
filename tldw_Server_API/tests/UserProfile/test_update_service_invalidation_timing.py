@@ -50,7 +50,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         recorded.append("invalidate_user")
 
     monkeypatch.setattr(update_service_module, "invalidate_user", _recording_invalidate)
-    monkeypatch.setattr(update_service_module, "VersionedUserWriteGateway", lambda _backend: _FakeGateway(recorded))
+    monkeypatch.setattr(update_service_module, "VersionedUserWriteGateway", lambda _backend, *, clock: _FakeGateway(recorded))
     monkeypatch.setattr(update_service_module, "UserProfileOverridesRepo", lambda _pool: _FakeOverridesRepo(recorded))
     return recorded
 

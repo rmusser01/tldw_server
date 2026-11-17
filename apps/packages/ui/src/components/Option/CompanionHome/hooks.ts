@@ -61,6 +61,7 @@ type UseCompanionHomeDataArgs = {
   surface: CompanionHomeSurface
   capsLoading: boolean
   hasPersonalization: boolean
+  hasCompanion: boolean
   onPersonalizationEnabled?: () => void
 }
 
@@ -79,6 +80,7 @@ export const useCompanionHomeData = ({
   surface,
   capsLoading,
   hasPersonalization,
+  hasCompanion,
   onPersonalizationEnabled
 }: UseCompanionHomeDataArgs): UseCompanionHomeDataResult => {
   const [snapshot, setSnapshot] = React.useState<CompanionHomeSnapshot | null>(null)
@@ -109,7 +111,7 @@ export const useCompanionHomeData = ({
 
     const load = async () => {
       const [snapshotResult, profileResult] = await Promise.allSettled([
-        fetchCompanionHomeSnapshot(surface),
+        fetchCompanionHomeSnapshot(surface, { companionAvailable: hasCompanion }),
         hasPersonalization ? fetchPersonalizationProfile() : Promise.resolve(null)
       ])
 
@@ -140,13 +142,17 @@ export const useCompanionHomeData = ({
     return () => {
       cancelled = true
     }
-  }, [capsLoading, hasPersonalization, refreshToken, surface])
+  }, [capsLoading, hasPersonalization, hasCompanion, refreshToken, surface])
 
   const refresh = React.useCallback(() => {
     setRefreshToken((value) => value + 1)
   }, [])
 
   const enableCompanion = React.useCallback(async () => {
+    if (!hasCompanion) {
+      setError("Companion routes are unavailable on this server.")
+      return
+    }
     setEnablingCompanion(true)
     setError(null)
     try {
@@ -163,7 +169,7 @@ export const useCompanionHomeData = ({
     } finally {
       setEnablingCompanion(false)
     }
-  }, [onPersonalizationEnabled, refresh])
+  }, [hasCompanion, onPersonalizationEnabled, refresh])
 
   return {
     snapshot,

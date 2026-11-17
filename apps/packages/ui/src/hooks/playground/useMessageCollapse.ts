@@ -7,11 +7,7 @@ export type CollapsedRange = {
   end: number
 }
 
-export type UseMessageCollapseParams = {
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>
-}
-
-export function useMessageCollapse({ textareaRef }: UseMessageCollapseParams) {
+export function useMessageCollapse() {
   const { t } = useTranslation(["playground"])
 
   const pendingCaretRef = React.useRef<number | null>(null)
@@ -154,24 +150,13 @@ export function useMessageCollapse({ textareaRef }: UseMessageCollapseParams) {
   )
 
   const expandLargeMessage = React.useCallback(
-    (options?: { caret?: number; force?: boolean }) => {
+    (options?: { force?: boolean }) => {
       if (!isMessageCollapsed && !options?.force) return
       setIsMessageCollapsed(false)
       setHasExpandedLargeText(true)
       setCollapsedRange(null)
-      requestAnimationFrame(() => {
-        const el = textareaRef.current
-        if (!el) return
-        const caret =
-          typeof options?.caret === "number"
-            ? Math.min(options.caret, el.value.length)
-            : pendingCaretRef.current ?? el.value.length
-        pendingCaretRef.current = null
-        el.focus()
-        el.setSelectionRange(caret, caret)
-      })
     },
-    [isMessageCollapsed, textareaRef]
+    [isMessageCollapsed]
   )
 
   const restoreMessageValue = React.useCallback(
@@ -179,6 +164,9 @@ export function useMessageCollapse({ textareaRef }: UseMessageCollapseParams) {
       value: string,
       metadata?: { wasExpanded?: boolean; collapsedRange?: CollapsedRange | null }
     ) => {
+      pendingCaretRef.current = null
+      lastDisplaySelectionRef.current = null
+      pendingCollapsedStateRef.current = null
       if (value.length <= PASTED_TEXT_CHAR_LIMIT) {
         setIsMessageCollapsed(false)
         setHasExpandedLargeText(false)

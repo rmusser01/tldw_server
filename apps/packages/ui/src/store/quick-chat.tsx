@@ -1,4 +1,5 @@
 import { createWithEqualityFn } from "zustand/traditional"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 export type QuickChatMessage = {
   id: string
@@ -142,3 +143,14 @@ if (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(window as any).__tldw_useQuickChatStore = useQuickChatStore
 }
+
+
+const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
+  if (!invalidated) return
+  useQuickChatStore.setState({
+    isOpen: false, messages: [], isStreaming: false, modelOverride: null,
+    assistantMode: "chat", popoutWindow: null
+  })
+})
+const hot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
+hot?.dispose(stopWatchingAccount)

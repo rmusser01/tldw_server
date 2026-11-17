@@ -1,3 +1,4 @@
+import type { ChatMessageView } from "@/services/settings/ui-settings"
 import type { ForkResultV1 } from "@/types/history-selection"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
@@ -27,6 +28,7 @@ type CompareBlock = {
 }
 
 type PlaygroundCompareClusterProps = {
+  messageView?: ChatMessageView
   block: CompareBlock
   blockIndex: number
   messages: any[]
@@ -41,6 +43,8 @@ type PlaygroundCompareClusterProps = {
   isEmbedding: boolean
   selectedCharacter: any
   characterIdentityEnabled: boolean
+  /** Role-play steering runs here: a character chat that is not a saved role-play chat (CM-01). */
+  messageSteeringEnabled: boolean
   normalizedSearchQuery: string
   historyId: string | null
   stableHistoryId: string | null
@@ -69,8 +73,15 @@ type PlaygroundCompareClusterProps = {
   handleKeepGeneratedImageVariant: (payload: any) => void
   handleDeleteGeneratedImageVariant: (payload: any) => void
   handleDeleteAllGeneratedImageVariants: (payload: any) => void
-  editMessage: (index: number, value: string, isUser: boolean, isSend?: boolean) => void
-  deleteMessage: (index: number) => void
+  editMessage: (
+    index: number,
+    value: string,
+    isUser: boolean,
+    isSend?: boolean,
+    isCurrent?: () => boolean,
+    isOriginCurrent?: () => boolean
+  ) => unknown
+  deleteMessage: (index: number) => void | boolean | Promise<void | boolean>
   toggleMessagePinned: (index: number) => Promise<void> | void
   createChatBranch: (messageId: string, comparison?: {model_id: string; cluster_id: string | null}, onOpened?: (childId: string) => void) => Promise<ForkResultV1>
   stopStreamingRequest: (...args: any[]) => void
@@ -162,6 +173,7 @@ const PerModelMiniComposer: React.FC<{
 }
 
 export const PlaygroundCompareCluster = ({
+  messageView,
   block,
   blockIndex,
   messages,
@@ -176,6 +188,7 @@ export const PlaygroundCompareCluster = ({
   isEmbedding,
   selectedCharacter,
   characterIdentityEnabled,
+  messageSteeringEnabled,
   normalizedSearchQuery,
   historyId,
   stableHistoryId,
@@ -411,6 +424,7 @@ export const PlaygroundCompareCluster = ({
   return (
     <div className="w-full max-w-5xl md:px-4 mb-4 space-y-2">
       <PlaygroundMessage
+        messageView={messageView}
         isBot={userMessage.isBot}
         message={userMessage.message}
         name={userMessage.name}
@@ -430,11 +444,18 @@ export const PlaygroundCompareCluster = ({
         isProcessing={isProcessing}
         isSearchingInternet={isSearchingInternet}
         sources={userMessage.sources}
-        onEditFormSubmit={(value, isSend) => {
-          editMessage(block.userIndex, value, !userMessage.isBot, isSend)
+        onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
+          return editMessage(
+            block.userIndex,
+            value,
+            !userMessage.isBot,
+            isSend,
+            editIsCurrent,
+            editOriginIsCurrent
+          )
         }}
         onDeleteMessage={() => {
-          deleteMessage(block.userIndex)
+          return deleteMessage(block.userIndex)
         }}
         onTogglePinned={() => {
           void toggleMessagePinned(block.userIndex)
@@ -455,7 +476,7 @@ export const PlaygroundCompareCluster = ({
         temporaryChat={temporaryChat}
         onStopStreaming={stopStreamingRequest}
         onContinue={runContinue}
-        onRunSteeredContinue={runSteeredContinue}
+        onRunSteeredContinue={messageSteeringEnabled ? runSteeredContinue : undefined}
         documents={userMessage?.documents}
         actionInfo={actionInfo}
         serverChatId={serverChatId}
@@ -495,10 +516,10 @@ export const PlaygroundCompareCluster = ({
         onSwipePrev={() => handleVariantSwipe(userMessage.id, "prev")}
         onSwipeNext={() => handleVariantSwipe(userMessage.id, "next")}
         messageSteeringMode={messageSteeringMode}
-        onMessageSteeringModeChange={setMessageSteeringMode}
+        onMessageSteeringModeChange={messageSteeringEnabled ? setMessageSteeringMode : undefined}
         messageSteeringForceNarrate={messageSteeringForceNarrate}
-        onMessageSteeringForceNarrateChange={setMessageSteeringForceNarrate}
-        onClearMessageSteering={clearMessageSteering}
+        onMessageSteeringForceNarrateChange={messageSteeringEnabled ? setMessageSteeringForceNarrate : undefined}
+        onClearMessageSteering={messageSteeringEnabled ? clearMessageSteering : undefined}
       />
       <div className="ml-10 space-y-2 border-l border-dashed border-border pl-4">
         <div className="mb-1 flex items-center justify-between text-[11px] text-text-muted">
@@ -954,6 +975,7 @@ export const PlaygroundCompareCluster = ({
                 </div>
               ) : null}
               <PlaygroundMessage
+        messageView={messageView}
                 isBot={message.isBot}
                 message={message.message}
                 name={message.name}
@@ -973,11 +995,18 @@ export const PlaygroundCompareCluster = ({
                 isProcessing={isProcessing}
                 isSearchingInternet={isSearchingInternet}
                 sources={message.sources}
-                onEditFormSubmit={(value, isSend) => {
-                  editMessage(index, value, !message.isBot, isSend)
+                onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
+                  return editMessage(
+                    index,
+                    value,
+                    !message.isBot,
+                    isSend,
+                    editIsCurrent,
+                    editOriginIsCurrent
+                  )
                 }}
                 onDeleteMessage={() => {
-                  deleteMessage(index)
+                  return deleteMessage(index)
                 }}
                 onTogglePinned={() => {
                   void toggleMessagePinned(index)
@@ -1006,7 +1035,7 @@ export const PlaygroundCompareCluster = ({
                 temporaryChat={temporaryChat}
                 onStopStreaming={stopStreamingRequest}
                 onContinue={runContinue}
-                onRunSteeredContinue={runSteeredContinue}
+                onRunSteeredContinue={messageSteeringEnabled ? runSteeredContinue : undefined}
                 documents={message?.documents}
                 actionInfo={actionInfo}
                 serverChatId={serverChatId}
@@ -1052,10 +1081,10 @@ export const PlaygroundCompareCluster = ({
                 onSwipePrev={() => handleVariantSwipe(message.id, "prev")}
                 onSwipeNext={() => handleVariantSwipe(message.id, "next")}
                 messageSteeringMode={messageSteeringMode}
-                onMessageSteeringModeChange={setMessageSteeringMode}
+                onMessageSteeringModeChange={messageSteeringEnabled ? setMessageSteeringMode : undefined}
                 messageSteeringForceNarrate={messageSteeringForceNarrate}
-                onMessageSteeringForceNarrateChange={setMessageSteeringForceNarrate}
-                onClearMessageSteering={clearMessageSteering}
+                onMessageSteeringForceNarrateChange={messageSteeringEnabled ? setMessageSteeringForceNarrate : undefined}
+                onClearMessageSteering={messageSteeringEnabled ? clearMessageSteering : undefined}
               />
 
               {threadPreviewItems.length > 1 ? (

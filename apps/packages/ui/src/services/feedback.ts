@@ -1,3 +1,4 @@
+import type { ChatScope } from "@/types/chat-scope"
 import { bgRequest } from "@/services/background-proxy"
 import { tldwClient, type ScopedRequestOptions, type ServerChatSummary } from "@/services/tldw/TldwApiClient"
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
@@ -91,12 +92,15 @@ export async function submitImplicitFeedback(
 export async function updateChatRating(
   chatId: string,
   rating: number,
-  expectedVersion?: number
+  expectedVersion?: number,
+  options?: { scope?: ChatScope } & ScopedRequestOptions
 ): Promise<ServerChatSummary> {
-  await tldwClient.initialize().catch(() => null)
+  options?.signal?.throwIfAborted()
+  if (!options?.requestScope) await tldwClient.initialize()
+  options?.signal?.throwIfAborted()
   return await tldwClient.updateChat(
     chatId,
     { rating },
-    { expectedVersion }
+    { ...options, expectedVersion }
   )
 }

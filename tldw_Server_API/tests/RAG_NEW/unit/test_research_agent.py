@@ -514,7 +514,8 @@ async def test_default_registry_passes_runtime_to_local_database_action(monkeypa
     assert paths["notes"] == "notes.sqlite"
     assert paths["characters"] == "characters.sqlite"
     assert paths["kanban"] == "kanban.sqlite"
-    assert captured["media_kwargs"] == {
+    assert captured["media_kwargs"] == {  # nosec B101 -- Pytest asserts the updated real contract.
+        "config": None,
         "user_id": "42",
         "media_db": media_adapter,
         "credential_runtime": runtime,

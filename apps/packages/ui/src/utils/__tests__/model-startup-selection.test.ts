@@ -55,4 +55,109 @@ describe("resolveStartupSelectedModel", () => {
       })
     ).toBe("gpt-4o-mini")
   })
+
+  it("uses the server default ahead of catalog order", () => {
+    expect(
+      resolveStartupSelectedModel({
+        currentModel: null,
+        models: [
+          { model: "tldw:first", provider: "ollama" },
+          { model: "tldw:default", provider: "openai", is_server_default: true }
+        ]
+      })
+    ).toBe("openai:default")
+  })
+
+  it("keeps available canonical favorites ahead of the server default", () => {
+    expect(
+      resolveStartupSelectedModel({
+        currentModel: null,
+        models: [
+          { model: "tldw:shared", provider: "ollama", is_server_default: true },
+          { model: "tldw:shared", provider: "openai" }
+        ],
+        preferredModelIds: ["openai:shared"]
+      })
+    ).toBe("openai:shared")
+  })
+
+  it("qualifies a legacy favorite with the provider of its catalog choice", () => {
+    expect(
+      resolveStartupSelectedModel({
+        currentModel: null,
+        models: [{ model: "tldw:shared", provider: "openai" }],
+        preferredModelIds: ["tldw:shared"]
+      })
+    ).toBe("openai:shared")
+  })
+
+  it("uses the existing fallback when the default is absent or invalid", () => {
+    expect(
+      resolveStartupSelectedModel({
+        currentModel: null,
+        models: [
+          { model: "first", provider: "ollama" },
+          { model: "second", provider: "openai", is_server_default: "true" }
+        ]
+      })
+    ).toBe("ollama:first")
+  })
+
+  it("CC-01: skips a server default whose provider is unreachable for one that works", () => {
+    expect(
+      resolveStartupSelectedModel({
+        currentModel: null,
+        models: [
+          { model: "tldw:gemma3:1b", provider: "ollama", is_server_default: true, provider_health: "unreachable" },
+          { model: "tldw:never-used", provider: "openai" },
+          { model: "tldw:answers", provider: "groq", provider_health: "working" }
+        ]
+      })
+    ).toBe("groq:answers")
+  })
+
+  it("CC-01: prefers a provider that has answered over catalog order", () => {
+    expect(
+      resolveStartupSelectedModel({
+        currentModel: null,
+        models: [
+          { model: "tldw:gemma3:1b", provider: "ollama" },
+          { model: "tldw:answers", provider: "groq", provider_health: "working" }
+        ]
+      })
+    ).toBe("groq:answers")
+  })
+
+  it("CC-01: falls back past unreachable providers to the first unchecked model", () => {
+    expect(
+      resolveStartupSelectedModel({
+        currentModel: null,
+        models: [
+          { model: "tldw:gemma3:1b", provider: "ollama", provider_health: "unreachable" },
+          { model: "tldw:unchecked", provider: "openai" }
+        ]
+      })
+    ).toBe("openai:unchecked")
+  })
+
+  it("CC-01: still picks an unreachable model when it is the only one", () => {
+    expect(
+      resolveStartupSelectedModel({
+        currentModel: null,
+        models: [{ model: "tldw:gemma3:1b", provider: "ollama", provider_health: "unreachable" }]
+      })
+    ).toBe("ollama:gemma3:1b")
+  })
+
+  it.each(["unknown", "default", "unrecognized-provider"])(
+    "preserves the legacy raw fallback for placeholder provider %s",
+    (provider) => {
+      expect(
+        resolveStartupSelectedModel({
+          currentModel: null,
+          models: [{ model: "tldw:legacy", provider }]
+        })
+      ).toBe("tldw:legacy")
+    }
+  )
 })

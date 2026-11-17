@@ -39,7 +39,7 @@ def _seed_run(
     workspace_group_id: str | None = None,
     scope_snapshot_id: str | None = None,
 ) -> None:
-    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
     st = RunStatus(
         id=run_id,
         phase=RunPhase(phase),
@@ -56,7 +56,7 @@ def _seed_run(
         workspace_group_id=workspace_group_id,
         scope_snapshot_id=scope_snapshot_id,
     )
-    sb._service._orch._store.put_run(user_id, st)  # type: ignore[attr-defined]
+    default_service.sandbox_service._orch._store.put_run(user_id, st)  # type: ignore[attr-defined]
 
 
 def test_admin_list_filters_and_pagination(monkeypatch):

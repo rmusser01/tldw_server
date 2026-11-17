@@ -10,6 +10,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
     CLAIMS_JOBS_DOMAIN,
+    CLAIMS_SUPPORTED_JOB_TYPES,
 )
 from tldw_Server_API.app.core.Claims_Extraction.claims_job_handlers import (
     process_claims_job,
@@ -84,7 +85,7 @@ async def start_claims_jobs_worker(stop_event: asyncio.Event | None = None) -> N
     stop_task = asyncio.create_task(_watch_stop(), name="claims_jobs_worker_stop_waiter")
     logger.info("Claims Jobs worker starting: queue={}", config.queue)
     try:
-        await sdk.run(handler=process_claims_job)
+        await sdk.run(handler=process_claims_job, job_types=CLAIMS_SUPPORTED_JOB_TYPES)
     except asyncio.CancelledError:
         sdk.stop()
         raise

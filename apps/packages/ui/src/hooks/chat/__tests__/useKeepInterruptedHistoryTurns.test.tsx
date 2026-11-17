@@ -12,6 +12,23 @@ vi.mock("@/services/history-turn-keep", async original => ({
 
 beforeEach(() => resetHistoryTurnRegistry())
 
+it("hides a server-backed recovery only after its settled reply is visible", () => {
+  const entry = {
+    scope: { profile_id: "profile-1", client_session_id: "session-1" },
+    turn: { operation_id: "stored", outcome: "complete", persistence: "server",
+      input_id: "question", assistant_id: "provisional", settled_message_id: "canonical",
+      result_text: "Stored reply", created_at: 1 }
+  } as Parameters<ReturnType<typeof useKeepInterruptedHistoryTurns>>[0]
+  const selection = { status: "ready", owner: { kind: "native" }, recoveries: [entry] } as unknown as HistorySelectionController
+  const setMessages = vi.fn()
+  const mounted = renderHook(({ rows }) =>
+    useKeepInterruptedHistoryTurns({ selection, messages: rows, setMessages }),
+    { initialProps: { rows: [{ id: "provisional" }] as Message[] } })
+  expect(mounted.result.current(entry)).toBe(false)
+  mounted.rerender({ rows: [{ id: "canonical" }] as Message[] })
+  expect(mounted.result.current(entry)).toBe(true)
+})
+
 it.each(["failed", "stopped"])("keeps original recovery after a %s replacement is released", status => {
   const entry = {
     scope: { profile_id: "profile-1", client_session_id: "session-1" },

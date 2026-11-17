@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useQuery } from "@tanstack/react-query"
 
@@ -128,24 +128,13 @@ describe("ConversationTab persona memory mode controls", () => {
     expect(screen.queryAllByText("Persona memory mode")).toHaveLength(1)
   })
 
-  it("persists read_write mode when the user opts in", async () => {
-    vi.mocked(tldwClient.updateChat).mockResolvedValueOnce({ version: 4 } as any)
-
-    renderConversationTab({
-      serverChatAssistantKind: "persona",
-      serverChatPersonaMemoryMode: "read_only"
-    })
-
-    fireEvent.change(screen.getByTestId("persona-memory-mode-select"), {
-      target: { value: "read_write" }
-    })
-
-    await waitFor(() => {
-      expect(onPersonaMemoryModeChange).toHaveBeenCalledWith("read_write")
-      expect(tldwClient.updateChat).toHaveBeenCalledWith("chat-1", {
-        persona_memory_mode: "read_write"
-      })
-      expect(onVersionChange).toHaveBeenCalledWith(4)
-    })
+  it.each(["read_only", "read_write"] as const)("shows saved %s mode without offering an unsupported write", (mode) => {
+    renderConversationTab({ serverChatAssistantKind: "persona", serverChatPersonaMemoryMode: mode })
+    expect(screen.queryByTestId("persona-memory-mode-select")).not.toBeInTheDocument()
+    expect(screen.getByTestId("persona-memory-mode-value")).toHaveTextContent(mode === "read_write" ? "Read + write" : "Read only")
+    expect(screen.getByText("This server cannot change persona memory mode here.")).toBeInTheDocument()
+    expect(tldwClient.updateChat).not.toHaveBeenCalled()
+    expect(onPersonaMemoryModeChange).not.toHaveBeenCalled()
+    expect(onVersionChange).not.toHaveBeenCalled()
   })
 })

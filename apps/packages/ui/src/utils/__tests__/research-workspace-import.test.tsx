@@ -1,6 +1,6 @@
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient";
 import type { BgRequestInit } from "@/services/background-proxy"
 import type { CitationRef, KnowledgeQAContextValue } from "@/components/Option/KnowledgeQA/types"
-import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import type { WorkspaceNote } from "@/types/workspace"
 import type { KnowledgeNoteProvenance } from "../knowledge-note-provenance"
 import {
@@ -11,17 +11,18 @@ import {
 import {
   act,
   fireEvent,
-  render,
+  render as renderUI,
   renderHook,
   screen,
   waitFor,
-} from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { AnswerPanel } from "@/components/Option/KnowledgeQA/AnswerPanel"
-import { MediaKnowledgeActions } from "@/components/Review/MediaKnowledgeActions"
-import { DEFAULT_RAG_SETTINGS } from "@/services/rag/unified-rag"
-import { ResearchWorkspace } from "@/components/Option/ResearchWorkspace"
-import { useWorkspaceStore } from "@/store/workspace"
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
+import { AnswerPanel } from "@/components/Option/KnowledgeQA/AnswerPanel";
+import { MediaKnowledgeActions } from "@/components/Review/MediaKnowledgeActions";
+import { DEFAULT_RAG_SETTINGS } from "@/services/rag/unified-rag";
+import { ResearchWorkspace } from "@/components/Option/ResearchWorkspace";
+import { flushWorkspacePersistence, useWorkspaceStore } from "@/store/workspace";
 import {
   buildKnowledgeQaWorkspacePrefill,
   consumeResearchWorkspacePrefill,
@@ -52,7 +53,15 @@ type PrefillCheckpointFixture = NonNullable<Awaited<ReturnType<typeof consumeRes
   confirmedSeedlessWrite?: NonNullable<NonNullable<Awaited<ReturnType<typeof consumeResearchWorkspacePrefill>>>["pendingNoteWrite"]>
 }
 
+// Match the router context supplied by the WebUI and extension shells.
+const render: typeof renderUI = (ui, options) =>
+  renderUI(ui, {
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    ...options,
+  })
+
 const mocks = vi.hoisted(() => ({
+  migrationMessages: [] as string[],
   owner: "alice",
   answerState: {} as AnswerPanelStateFixture,
   navigate: vi.fn(),
@@ -66,8 +75,9 @@ const mocks = vi.hoisted(() => ({
   persistent: true,
   writeError: false,
   readGate: null as Promise<void> | null,
-}))
-vi.mock("@/services/chat-surface-scope", () => ({
+}));
+vi.mock("@/services/chat-surface-scope", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/chat-surface-scope")>()),
   buildChatSurfaceScopeKeyFromConfig: (
     config: Pick<TldwConfig, "serverUrl" | "authMode" | "accessToken">,
     options?: { userId?: string | number | null },
@@ -76,7 +86,7 @@ vi.mock("@/services/chat-surface-scope", () => ({
     (config.authMode === "multi-user"
       ? `:${options?.userId ?? (config.accessToken ? "user-a" : "anonymous")}`
       : ""),
-}))
+}));
 vi.mock("@/utils/media-navigation-scope", () => ({
   deriveScopedUserId: () => "user:single",
 }))
@@ -112,28 +122,40 @@ vi.mock("@/services/service-prompts", () => ({
     userId: mocks.multiUser ? "user-a" : null,
   }),
 }))
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: async () => ({
+      id: mocks.multiUser ? "user-a" : "single-owner",
+      is_active: true,
+    }),
+  },
+}));
 vi.mock("@/utils/safe-storage", () => ({
   safeStorageSerde: { deserializer: (value: unknown) => value },
   createSafeStorage: () => ({
     get hasPersistentBackend() {
-      return mocks.persistent
+      return mocks.persistent;
     },
     get: async (key: string) => {
-      await mocks.readGate
-      return structuredClone(mocks.values.get(key))
+      await mocks.readGate;
+      return structuredClone(mocks.values.get(key));
+    },
+    getAll: async () => Object.fromEntries(mocks.values),
+    remove: async (key: string) => {
+      mocks.values.delete(key);
     },
     set: async (key: string, value: unknown) => {
-      if (mocks.writeError) throw new Error("storage full")
-      mocks.values.set(key, structuredClone(value))
+      if (mocks.writeError) throw new Error("storage full");
+      mocks.values.set(key, structuredClone(value));
     },
   }),
-}))
+}));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: string | { defaultValue?: string }) =>
       typeof options === "string" ? options : options?.defaultValue || key,
   }),
-}))
+}));
 vi.mock("@/components/Option/KnowledgeQA/KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => mocks.answerState,
 }))
@@ -166,7 +188,7 @@ vi.mock("@/services/background-proxy", () => ({
     mocks.sourceNoteIds.has(decodeURIComponent(request.path.split("/").at(-1)))
       ? mocks.sourceNoteRequest(request)
       : mocks.request(request),
-}))
+}));
 vi.mock("@/components/Option/ResearchWorkspace/WorkspaceHeader", () => ({
   WorkspaceHeader: () => null,
 }))
@@ -180,8 +202,11 @@ vi.mock("@/components/Option/ResearchWorkspace/StudioPane", () => ({
   StudioPane: () => null,
 }))
 vi.mock("@/components/Option/ResearchWorkspace/WorkspaceStatusBar", () => ({
-  WorkspaceStatusBar: () => null,
-}))
+  WorkspaceStatusBar: ({ statusMessages }: { statusMessages: string[] }) => {
+    mocks.migrationMessages = statusMessages;
+    return null;
+  },
+}));
 const payload = () =>
   buildKnowledgeQaWorkspacePrefill({
     threadId: "thread-1",
@@ -216,18 +241,38 @@ const payload = () =>
       },
       { id: "7", content: "Native excerpt", metadata: { source_type: "pdf" } },
     ],
-  })
+  });
+afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
-  mocks.navigate.mockReset()
-  mocks.persistent = true
-  mocks.multiUser = false
-  mocks.owner = "alice"
-  mocks.values.clear()
-  mocks.upload.mockReset()
-  mocks.details.mockReset()
-  mocks.request.mockReset().mockResolvedValue({})
-  mocks.sourceNoteIds.clear()
-  mocks.sourceNoteIds.add("note-uuid")
+  const tails = new Map<string, Promise<unknown>>();
+  vi.stubGlobal(
+    "navigator",
+    Object.create(window.navigator, {
+      locks: {
+        value: {
+          request: (key: string, operation: () => unknown) => {
+            const next = (tails.get(key) ?? Promise.resolve()).then(operation);
+            tails.set(
+              key,
+              next.catch(() => undefined),
+            );
+            return next;
+          },
+        },
+      },
+    }),
+  );
+  mocks.migrationMessages = [];
+  mocks.navigate.mockReset();
+  mocks.persistent = true;
+  mocks.multiUser = false;
+  mocks.owner = "alice";
+  mocks.values.clear();
+  mocks.upload.mockReset();
+  mocks.details.mockReset();
+  mocks.request.mockReset().mockResolvedValue({});
+  mocks.sourceNoteIds.clear();
+  mocks.sourceNoteIds.add("note-uuid");
   mocks.sourceNoteRequest
     .mockReset()
     .mockImplementation(async (request: BgRequestInit) => ({
@@ -237,7 +282,7 @@ beforeEach(() => {
       deleted: false,
       content:
         "First excerpt\nSecond excerpt\nComplete note ending outside retrieved chunks.",
-    }))
+    }));
   mocks.writeError = false
   mocks.readGate = null
   localStorage.clear()
@@ -285,7 +330,7 @@ describe("mounted Knowledge research import", () => {
             finish = resolve
           }),
       )
-      const view = render(<ResearchWorkspace />)
+      const view = render(<ResearchWorkspace />, { wrapper: MemoryRouter })
       await waitFor(() =>
         expect(mocks.details).toHaveBeenCalledWith(
           101,
@@ -334,7 +379,7 @@ describe("mounted Knowledge research import", () => {
       await queueResearchWorkspacePrefill(handoff, "alice")
       mocks.upload.mockResolvedValue({ media_id: 101 })
       mocks.details.mockImplementation(() => new Promise(() => {}))
-      const first = render(<ResearchWorkspace />)
+      const first = render(<ResearchWorkspace />, { wrapper: MemoryRouter })
       await waitFor(async () =>
         expect(await consumeResearchWorkspacePrefill("alice")).toBeNull(),
       )
@@ -352,7 +397,7 @@ describe("mounted Knowledge research import", () => {
             finish = resolve
           }),
       )
-      const second = render(<ResearchWorkspace />)
+      const second = render(<ResearchWorkspace />, { wrapper: MemoryRouter })
       await waitFor(() => expect(finish).toBeTypeOf("function"))
       await act(async () => {
         finish({
@@ -551,6 +596,8 @@ describe("mounted Knowledge research import", () => {
       content: firstNote,
     })
     view.unmount()
+    // Persist writes are debounced; readers of persisted state flush first.
+    await flushWorkspacePersistence()
     const persisted = new Map(
       Array.from(
         { length: localStorage.length },
@@ -785,30 +832,30 @@ it.each([false, true])(
           keywords: body.keywords.map((keyword: string) => ({ keyword })),
           conversation_id: body.conversation_id,
           version: 1,
-        }
+        };
         if (loseResponse && !droppedResponse) {
-          droppedResponse = true
-          throw new Error("response lost")
+          droppedResponse = true;
+          throw new Error("response lost");
         }
-        return canonical
+        return canonical;
       }
       if (path.startsWith("/api/v1/notes/search/"))
-        return { notes: canonical ? [canonical] : [] }
+        return { notes: canonical ? [canonical] : [] };
       if (path.startsWith("/api/v1/notes/")) {
         if (!canonical)
-          throw Object.assign(new Error("missing"), { status: 404 })
+          throw Object.assign(new Error("missing"), { status: 404 });
         if (method === "PUT") {
           if (headers?.["expected-version"] !== String(canonical.version))
             throw Object.assign(new Error("expected-version header required"), {
               status: 422,
-            })
+            });
           canonical = {
             ...canonical,
             ...body,
             version: canonical.version + 1,
-          }
+          };
         }
-        return canonical
+        return canonical;
       }
       if (path.endsWith("/context"))
         return {
@@ -1045,9 +1092,9 @@ it("retains an existing canonical note's unsaved title and body when appending t
         content: body.content,
         keywords: body.keywords.map((keyword: string) => ({ keyword })),
         version: 2,
-      }
-    return canonical
-  })
+      };
+    return canonical;
+  });
   const transfer = payload()
   transfer.sources = transfer.sources.slice(3)
   await queueResearchWorkspacePrefill(transfer)
@@ -1220,7 +1267,7 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
           },
           sources: { items: [] },
           partial_errors: [],
-        }
+        };
       if (path === "/api/v1/workspaces/workspace-a/notes")
         return [
           {
@@ -1233,7 +1280,7 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
             created_at: "2026-10-01T00:00:00Z",
             last_modified: "2026-10-01T00:00:00Z",
           },
-        ]
+        ];
       if (path === "/api/v1/notes/" && method === "POST") {
         canonical = {
           id: body.id,
@@ -1241,34 +1288,34 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
           content: body.content,
           keywords: body.keywords.map((keyword: string) => ({ keyword })),
           version: 1,
-        }
+        };
         await new Promise<void>((resolve) => {
-          finishCreate = resolve
-        })
-        return canonical
+          finishCreate = resolve;
+        });
+        return canonical;
       }
-      if (path.startsWith("/api/v1/notes/search/")) return { notes: [] }
-      if (path.startsWith("/api/v1/notes/keywords/")) return []
+      if (path.startsWith("/api/v1/notes/search/")) return { notes: [] };
+      if (path.startsWith("/api/v1/notes/keywords/")) return [];
       if (path.startsWith("/api/v1/notes/")) {
         if (
           !canonical ||
           path.split("?")[0] !== `/api/v1/notes/${canonical.id}`
         )
-          throw Object.assign(new Error("missing"), { status: 404 })
+          throw Object.assign(new Error("missing"), { status: 404 });
         if (method === "PUT") {
           if (headers?.["expected-version"] !== String(canonical.version))
             throw Object.assign(new Error("expected-version header required"), {
               status: 422,
-            })
+            });
           canonical = {
             ...canonical,
             title: body.title,
             content: body.content,
             keywords: body.keywords.map((keyword: string) => ({ keyword })),
             version: canonical.version + 1,
-          }
+          };
         }
-        return canonical
+        return canonical;
       }
       return []
     })
@@ -1524,7 +1571,7 @@ it.each([false, true])(
           keywords: ["workspace:workspace-a"],
           version: 1,
         }
-      : null
+      : null;
     if (canonical) useWorkspaceStore.getState().loadNote(canonical)
     const sources = [7, 101].map((mediaId, position) => ({
       id: `server-source-${mediaId}`,
@@ -1556,19 +1603,20 @@ it.each([false, true])(
           },
           sources: { items: sources },
           partial_errors: [],
-        }
+        };
       if (path.startsWith("/api/v1/notes/search/"))
-        return { notes: canonical ? [canonical] : [] }
-      if (!path.startsWith("/api/v1/notes/")) return []
-      if (method === "POST") canonical = { ...body, version: 1 }
+        return { notes: canonical ? [canonical] : [] };
+      if (!path.startsWith("/api/v1/notes/")) return [];
+      if (method === "POST") canonical = { ...body, version: 1 };
       if (method === "PUT") {
         if (headers?.["expected-version"] !== String(canonical.version))
-          throw Object.assign(new Error("version required"), { status: 422 })
-        canonical = { ...canonical, ...body, version: canonical.version + 1 }
+          throw Object.assign(new Error("version required"), { status: 422 });
+        canonical = { ...canonical, ...body, version: canonical.version + 1 };
       }
-      if (!canonical) throw Object.assign(new Error("missing"), { status: 404 })
-      return canonical
-    })
+      if (!canonical)
+        throw Object.assign(new Error("missing"), { status: 404 });
+      return canonical;
+    });
     mocks.upload.mockResolvedValue({ media_id: 101 })
     mocks.answerState = {
       isAuthorityCurrent: () => true,
@@ -1814,18 +1862,18 @@ it.each([false, true])(
       if (expectedUser && expectedUser !== principal)
         throw Object.assign(new Error("request_config_scope_changed"), {
           status: 412,
-        })
+        });
       if (request.method === "PUT") {
         if (request.headers?.["expected-version"] !== "2")
-          throw Object.assign(new Error("version required"), { status: 422 })
-        mutations += 1
-        canonical = { ...canonical, ...request.body, version: 3 }
+          throw Object.assign(new Error("version required"), { status: 422 });
+        mutations += 1;
+        canonical = { ...canonical, ...request.body, version: 3 };
       } else if (changePrincipal) {
-        capturedDraft = useWorkspaceStore.getState().currentNote
-        principal = "user-b"
+        capturedDraft = useWorkspaceStore.getState().currentNote;
+        principal = "user-b";
       }
-      return canonical
-    })
+      return canonical;
+    });
     await queueResearchWorkspacePrefill(transfer, "alice:user-a")
     const receiver = renderHook(() =>
       useResearchWorkspacePrefill("workspace-a", true),
@@ -2192,7 +2240,7 @@ it("waits for server workspace confirmation before starting a fresh canonical im
   )
   await queueResearchWorkspacePrefill(handoff, "alice")
   mocks.upload.mockResolvedValue({ media_id: 101 })
-  const view = render(<ResearchWorkspace />)
+  const view = render(<ResearchWorkspace />, { wrapper: MemoryRouter })
   try {
     await waitFor(() => expect(client.upsertWorkspace).toHaveBeenCalled())
     await act(async () => {
@@ -3313,3 +3361,65 @@ describe("captured-owner legacy import seed", () => {
     })
   })
 })
+
+it("retires mounted migration loading and prevents cleanup when the account changes", async () => {
+  const key = "tldw-workspace:workspace:workspace-a:snapshot";
+  const raw = JSON.stringify({
+    workspaceId: "workspace-a",
+    currentNote: { content: "Keep Alice" },
+  });
+  localStorage.setItem(key, raw);
+  let release!: () => void;
+  const methods = {
+    upsertWorkspace: vi.fn(async (id: string) => ({ id, name: "Workspace A", version: 1 })),
+    getWorkspaceSources: vi.fn(async () => []),
+    addWorkspaceSource: vi.fn(async () => ({})),
+    createWorkspaceMigration: vi.fn(async (body: { id: string }) => ({
+      id: body.id,
+      status: "created",
+      client_delete_eligible: false,
+    })),
+    putWorkspaceMigrationChunk: vi.fn(async () => ({})),
+    finalizeWorkspaceMigration: vi.fn(async (id: string) => ({
+      id,
+      status: "finalized",
+      client_delete_eligible: true,
+    })),
+    getWorkspaceMigration: vi.fn(
+      (id: string) =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({ id, status: "finalized", client_delete_eligible: true });
+        }),
+    ),
+    ackWorkspaceMigrationClientDelete: vi.fn(async () => ({})),
+  };
+  const previous = Object.getOwnPropertyDescriptors(tldwClient);
+  Object.assign(tldwClient, methods);
+  const view = render(<ResearchWorkspace />);
+  try {
+    await waitFor(() =>
+      expect(methods.getWorkspaceMigration).toHaveBeenCalledOnce(),
+    );
+    expect(mocks.migrationMessages).toContain("Checking local workspace data");
+    act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")));
+    await waitFor(() =>
+      expect(mocks.migrationMessages).not.toContain(
+        "Checking local workspace data",
+      ),
+    );
+  } finally {
+    await act(async () => {
+      release?.();
+      await Promise.resolve();
+    });
+    view.unmount();
+    for (const name of Object.keys(methods)) {
+      const descriptor = previous[name];
+      if (descriptor) Object.defineProperty(tldwClient, name, descriptor);
+      else Reflect.deleteProperty(tldwClient, name);
+    }
+  }
+  expect(localStorage.getItem(key)).toBe(raw);
+  expect(methods.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
+});

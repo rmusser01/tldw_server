@@ -1,5 +1,9 @@
+import type { ChatMessageView } from "@/services/settings/ui-settings"
+import { getMessageDeleteFeedback } from "@/utils/message-delete-feedback"
+import { replaceUserDisplayNamePlaceholders } from "@/utils/chat-display-name"
+import { ChatAttachmentImage } from "./ChatAttachmentImage"
 import React, { useEffect, useState, useRef } from "react"
-import { App, Tag, Image, Tooltip, Collapse, Avatar, Modal } from "antd"
+import { App, Tag, Tooltip, Collapse, Avatar, Modal } from "antd"
 import { LoadingStatus } from "./ActionInfo"
 import {
   AlertTriangle,
@@ -15,8 +19,9 @@ import { useTTS, type TtsClipMeta } from "@/hooks/useTTS"
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
 import { tagColors } from "@/utils/color"
 import { removeModelSuffix } from "@/db/dexie/models"
+import { formatChatMessageAuthorName } from "@/utils/chat-model-label"
 import {
-  parseReasoning, isReasoningOnlyResponse, MISSING_FINAL_ANSWER_MESSAGE
+  parseReasoning, isReasoningStarted, isReasoningOnlyResponse, MISSING_FINAL_ANSWER_MESSAGE
 } from "@/libs/reasoning"
 import {
   decodeChatErrorPayload,
@@ -24,8 +29,10 @@ import {
 } from "@/utils/chat-error-message"
 import { useStorage } from "@plasmohq/storage/hook"
 import { PlaygroundUserMessageBubble } from "./PlaygroundUserMessage"
+import { resolveAssistantDisplayName, USER_TURN_TINT_STYLE } from "./turn-presentation"
 import { DocumentProcessingTurn } from "./DocumentProcessingTurn"
 import { copyToClipboard } from "@/utils/clipboard"
+import { useCopyFeedback } from "@/components/Common/useCopyFeedback"
 import { ChatDocuments } from "@/models/ChatTypes"
 import { buildChatTextClass } from "@/utils/chat-style"
 import { highlightText } from "@/utils/text-highlight"
@@ -74,9 +81,12 @@ import { DynamicMessageRenderer } from "@/components/Common/DynamicUI/DynamicMes
 import { DynamicUISourceFallback } from "@/components/Common/DynamicUI/DynamicUISourceFallback"
 import { normalizeDynamicUIEnvelope } from "@/utils/dynamic-ui"
 import { formatCost } from "@/utils/model-pricing"
+import { isOutputLimitedReply } from "@/utils/output-limit-reply"
+import { incompleteReplyRecoveryActions } from "./incomplete-reply-actions"
 import {
   resolveMessageCostUsd,
-  resolveMessageUsage
+  resolveMessageUsage,
+  resolveSavedGenerationMetadata
 } from "./message-usage"
 import { resolvePlaygroundMessageShortcutAction } from "./playground-message-shortcuts"
 import {
@@ -116,7 +126,7 @@ export type MessageRecoveryAction = {
   label: string
   onClick: () => void
   disabled?: boolean
-  disabledReason?: string
+  disabledReason?: string | null
 }
 
 const RecoveryActionButton = ({ action, className }: {
@@ -129,7 +139,8 @@ const RecoveryActionButton = ({ action, className }: {
       <button
         type="button"
         onClick={action.onClick}
-        disabled={action.disabled}
+        disabled={action.disabled || Boolean(action.disabledReason)}
+        title={action.disabledReason || undefined}
         aria-describedby={action.disabledReason ? reasonId : undefined}
         className={`${className} disabled:cursor-not-allowed disabled:opacity-60`}
       >
@@ -142,6 +153,39 @@ const RecoveryActionButton = ({ action, className }: {
   )
 }
 
+const savedPartialStatusCopy = {
+  interrupted: [
+    "interruptedLabel",
+    "Interrupted",
+    "savedInterruptedSummary",
+    "This reply ended early. The saved content is kept."
+  ],
+  stopped: [
+    "stoppedLabel",
+    "Stopped",
+    "savedStoppedSummary",
+    "This reply was stopped. The saved content is kept."
+  ],
+  length: [
+    "lengthLabel",
+    "Output limit reached",
+    "lengthSummary",
+    "This reply reached the model's output limit. The saved content is kept."
+  ],
+  lengthLive: [
+    "lengthLabel",
+    "Output limit reached",
+    "lengthLiveSummary",
+    "The model reached its output limit, so this reply may be cut off."
+  ],
+  error: [
+    "generationFailedLabel",
+    "Generation failed",
+    "generationFailedSummary",
+    "The saved record reports a generation failure. Any saved content is kept."
+  ]
+} as const
+
 const ErrorBubble: React.FC<{
   payload: ChatErrorPayload
   toggleLabels: { show: string; hide: string }
@@ -153,6 +197,7 @@ const ErrorBubble: React.FC<{
     <div
       role="alert"
       aria-live="assertive"
+      data-chat-error-bubble=""
       className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-text">
       <p className="font-semibold">{payload.summary}</p>
       {payload.hint && (
@@ -176,10 +221,6 @@ const ErrorBubble: React.FC<{
       )}
       {recoveryActions.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="sr-only">
-            Recommended next actions:{" "}
-            {recoveryActions.map((action) => action.label).join(", ")}
-          </span>
           {recoveryActions.map((action) => (
             <RecoveryActionButton
               key={action.id}
@@ -207,10 +248,6 @@ const EmptyAssistantResponseNotice: React.FC<{
     <p className="mt-1 text-xs text-warn">{detail}</p>
     {recoveryActions.length > 0 && (
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <span className="sr-only">
-          Recommended next actions:{" "}
-          {recoveryActions.map((action) => action.label).join(", ")}
-        </span>
         {recoveryActions.map((action) => (
           <RecoveryActionButton
             key={action.id}
@@ -224,6 +261,7 @@ const EmptyAssistantResponseNotice: React.FC<{
 )
 
 type Props = {
+  messageView?: ChatMessageView
   message: string
   message_type?: string
   hideCopy?: boolean
@@ -238,7 +276,24 @@ type Props = {
   onRegenerate: () => void
   // Omit to retain the main Chat recovery behavior; [] suppresses recovery.
   recoveryActions?: MessageRecoveryAction[]
-  onEditFormSubmit: (value: string, isSend: boolean) => void
+  regenerateDisabledReason?: string | null
+  /**
+   * Why Continue can't run on this reply (CM-01). A surface whose one reason
+   * covers every generation (for example an unavailable persona) can omit it;
+   * Continue then uses `regenerateDisabledReason`.
+   */
+  continueDisabledReason?: string | null
+  /**
+   * This reply's Continue and Retry run on the server's saved reply (D7), so its
+   * recorded output-limit or interrupted status may offer them (CM-03).
+   */
+  savedStatusActions?: boolean
+  onEditFormSubmit: (
+    value: string,
+    isSend: boolean,
+    isCurrent?: () => boolean,
+    isOriginCurrent?: () => boolean
+  ) => unknown
   isProcessing: boolean
   webSearch?: Record<string, unknown>
   isSearchingInternet?: boolean
@@ -250,6 +305,11 @@ type Props = {
   isTTSEnabled?: boolean
   generationInfo?: any
   isStreaming: boolean
+  /**
+   * A request for this reply is in flight but not streaming yet (for example
+   * while the server admits the message). The reply bubble offers Stop then too.
+   */
+  isPending?: boolean
   reasoningTimeTaken?: number
   openReasoning?: boolean
   modelImage?: string
@@ -289,7 +349,9 @@ type Props = {
   discoSkillComment?: DiscoSkillComment | null
   historyId?: string
   conversationInstanceId: string
-  onDeleteMessage?: () => void
+  onDeleteMessage?:
+    | (() => void | boolean | Promise<void | boolean>)
+    | { readonly current: () => void | boolean | Promise<void | boolean> }
   suppressDeleteSuccessToast?: boolean
   onSaveToWorkspaceNotes?: (payload: {
     message: string
@@ -421,9 +483,11 @@ const arePlaygroundMessagePropsEqual = (prev: Props, next: Props): boolean => {
 }
 
 const PlaygroundMessageImpl = (props: Props) => {
+  const [sourcesExpanded, setSourcesExpanded] = useState<boolean | null>(null)
   const articleRef = useRef<HTMLElement | null>(null)
-  const [isBtnPressed, setIsBtnPressed] = React.useState(false)
+  const copyFeedback = useCopyFeedback(2000)
   const [editPresentation, setEditPresentation] = React.useState<"flat" | "bubble" | null>(null)
+  const [reasoningEditIndex, setReasoningEditIndex] = React.useState<number | null>(null)
   const editMode = editPresentation !== null
   const [checkWideMode] = useStorage("checkWideMode", false)
   const [isUserChatBubble] = useStorage("userChatBubble", true)
@@ -512,23 +576,55 @@ const PlaygroundMessageImpl = (props: Props) => {
   const isLastMessage: boolean =
     props.currentMessageIndex === props.totalMessages - 1
 
+  const detachedResponse = useStoreMessageOption(
+    (state) => state.detachedHistoryResponse
+  )
+  const responseRecoveryBusy = props.isStreaming || props.isProcessing
+  const recoveryBusyRef = useRef(responseRecoveryBusy)
+  recoveryBusyRef.current = responseRecoveryBusy
+  const continueDisabledReason =
+    props.continueDisabledReason === undefined ? props.regenerateDisabledReason : props.continueDisabledReason
+  const recoveryReasons = {
+    retry: props.regenerateDisabledReason,
+    continue: continueDisabledReason
+  }
+  const recoveryReasonsRef = useRef(recoveryReasons)
+  recoveryReasonsRef.current = recoveryReasons
+  const detachedReplyRef = useRef<{ id?: string; message: string } | null>(null)
+  const detachedReplyId = props.messageId ?? props.serverMessageId
+  const originalReply = detachedResponse?.originalReply
+  if (
+    originalReply &&
+    originalReply.isBot === props.isBot &&
+    originalReply.message === props.message &&
+    (originalReply.id ? originalReply.id === detachedReplyId : isLastMessage)
+  ) {
+    detachedReplyRef.current = { id: detachedReplyId, message: props.message }
+  }
+  const unchangedDetachedReply =
+    detachedReplyRef.current?.id === detachedReplyId &&
+    detachedReplyRef.current?.message === props.message
+  const responseStreaming = props.isStreaming && !detachedResponse
+  const responseProcessing = props.isProcessing && !detachedResponse
+  const responsePending = Boolean(props.isPending) && !detachedResponse
+
   // Track streaming completion for aria-live announcement
   const wasStreamingRef = useRef(false)
   const [streamingComplete, setStreamingComplete] = useState(false)
   useEffect(() => {
-    if (!props.isBot || !isLastMessage) {
+    if (!props.isBot || !isLastMessage || detachedResponse) {
       wasStreamingRef.current = false
       setStreamingComplete(false)
       return
     }
 
-    if (wasStreamingRef.current && !props.isStreaming && !props.isProcessing) {
+    if (wasStreamingRef.current && !responseStreaming && !responseProcessing) {
       setStreamingComplete(true)
       const timer = setTimeout(() => setStreamingComplete(false), 2000)
       return () => clearTimeout(timer)
     }
-    wasStreamingRef.current = props.isStreaming || props.isProcessing
-  }, [props.isBot, isLastMessage, props.isStreaming, props.isProcessing])
+    wasStreamingRef.current = responseStreaming || responseProcessing
+  }, [props.isBot, isLastMessage, responseStreaming, responseProcessing, detachedResponse])
 
   const errorPayload = decodeChatErrorPayload(props.message)
   const errorFriendlyText = React.useMemo(() => {
@@ -537,7 +633,30 @@ const PlaygroundMessageImpl = (props: Props) => {
     .filter(Boolean)
     .join("\n")
   }, [errorPayload])
+  const savedGeneration = React.useMemo(
+    () =>
+      props.isBot &&
+      props.role !== "system" &&
+      !isImageGenerationMessageType(props.message_type)
+        ? resolveSavedGenerationMetadata(props.metadataExtra)
+        : null,
+    [props.isBot, props.role, props.message_type, props.metadataExtra]
+  )
+  const hasSavedGenerationStatus = Boolean(savedGeneration?.status)
+  const savedPartialStatus =
+    savedGeneration?.status !== "complete" ? savedGeneration?.status : undefined
+  // CM-03: a reply the model cut off at its output limit, before any saved status.
+  const liveOutputLimited =
+    !hasSavedGenerationStatus && props.isBot && props.role !== "system" &&
+    !isImageGenerationMessageType(props.message_type) && isOutputLimitedReply(props.generationInfo)
+  const recordedIncomplete = props.savedStatusActions === true &&
+    (savedPartialStatus === "length" || savedPartialStatus === "interrupted")
+  const savedUsage = savedGeneration?.usage
+  const savedPartialCopy = savedPartialStatus
+    ? savedPartialStatusCopy[savedPartialStatus]
+    : liveOutputLimited ? savedPartialStatusCopy.lengthLive : null
   const resolvedResponseModel = React.useMemo(() => {
+    if (savedGeneration?.model) return savedGeneration.model
     const info = props.generationInfo as Record<string, unknown> | undefined
     if (!info) return null
     const raw =
@@ -548,26 +667,48 @@ const PlaygroundMessageImpl = (props: Props) => {
       (info.routing as Record<string, unknown> | undefined)?.resolved_model ??
       (info.routing as Record<string, unknown> | undefined)?.model
     if (typeof raw !== "string" || raw.trim().length === 0) return null
-    return removeModelSuffix(raw.trim().replace(/accounts\/[^/]+\/models\//g, ""))
-  }, [props.generationInfo])
+    return removeModelSuffix(
+      raw.trim().replace(/accounts\/[^/]+\/models\//g, "")
+    )
+  }, [props.generationInfo, savedGeneration])
   const messageUsage = React.useMemo(
     () => resolveMessageUsage(props.generationInfo),
     [props.generationInfo]
   )
   const messageCostUsd = React.useMemo(
-    () => resolveMessageCostUsd(props.generationInfo),
-    [props.generationInfo]
+    () =>
+      savedGeneration?.model ||
+      savedGeneration?.provider ||
+      savedGeneration?.usage
+        ? null
+        : resolveMessageCostUsd(props.generationInfo),
+    [props.generationInfo, savedGeneration]
   )
   const showUsageMetadata =
-    isProMode && props.isBot && messageUsage.totalTokens > 0
-  const missingFinalAnswer = props.isBot && props.role !== "system" &&
-    !props.isStreaming && !props.isProcessing &&
-    !props.toolCalls?.length && !props.images?.length &&
+    (isProMode || props.messageView === "research") &&
+    props.isBot &&
+    (Boolean(savedUsage) ||
+      (!savedGeneration?.model &&
+        !savedGeneration?.provider &&
+        messageUsage.totalTokens > 0))
+  const missingFinalAnswer =
+    !hasSavedGenerationStatus &&
+    props.isBot &&
+    props.role !== "system" &&
+    !responseStreaming &&
+    !responseProcessing &&
+    !props.toolCalls?.length &&
+    !props.images?.length &&
     !isImageGenerationMessageType(props.message_type) &&
     isReasoningOnlyResponse(props.message || "")
-  const interruptedGeneration = missingFinalAnswer || Boolean(
-    (props.generationInfo as Record<string, unknown> | undefined)?.interrupted
-  )
+  const interruptedGeneration =
+    !hasSavedGenerationStatus &&
+    (missingFinalAnswer ||
+      Boolean(
+        (props.generationInfo as Record<string, unknown> | undefined)
+          ?.interrupted
+      ))
+
   // The user stopped this reply on purpose; label it "Stopped", not
   // "Interrupted" (CS-04, #3104).
   const stoppedGeneration =
@@ -576,11 +717,21 @@ const PlaygroundMessageImpl = (props: Props) => {
   const interruptionReason = React.useMemo(() => {
     const raw = (props.generationInfo as Record<string, unknown> | undefined)
       ?.interruptionReason
-    if (typeof raw !== "string" || raw.trim().length === 0) {
-      return missingFinalAnswer ? MISSING_FINAL_ANSWER_MESSAGE : null
+    if (
+      typeof raw !== "string" ||
+      raw.trim().length === 0 ||
+      (missingFinalAnswer && raw.trim() === MISSING_FINAL_ANSWER_MESSAGE)
+    ) {
+      return missingFinalAnswer
+        ? t(
+            "playground:errorRecovery.missingFinalSummary",
+            "No final answer was generated."
+          )
+        : null
     }
     return raw.trim()
-  }, [props.generationInfo, missingFinalAnswer])
+  }, [props.generationInfo, missingFinalAnswer, t])
+
   const streamTransportInterrupted = Boolean(
     (props.generationInfo as Record<string, unknown> | undefined)
       ?.streamTransportInterrupted
@@ -596,6 +747,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     return raw.trim()
   }, [props.generationInfo])
   const showPartialSaveMarker =
+    !hasSavedGenerationStatus &&
     streamTransportInterrupted &&
     partialResponseSaved &&
     !interruptedGeneration &&
@@ -626,6 +778,16 @@ const PlaygroundMessageImpl = (props: Props) => {
       minute: "2-digit"
     })
   }, [props.createdAt, props.generationInfo])
+  // Search highlighting (WP-09): memoized so re-renders caused by unrelated
+  // prop changes (streaming flags, toggles, action metadata) do not re-run
+  // the regex split for unchanged message + query pairs.
+  const highlightedMessage = React.useMemo(
+    () =>
+      props.searchQuery
+        ? highlightText(props.message, props.searchQuery)
+        : props.message,
+    [props.message, props.searchQuery]
+  )
   const fallbackAudit = React.useMemo(
     () => resolveFallbackAudit(props.generationInfo),
     [props.generationInfo]
@@ -900,7 +1062,7 @@ const PlaygroundMessageImpl = (props: Props) => {
         return
       }
       if (action === "regenerate") {
-        if (!props.isBot || !props.onRegenerate) return
+        if (!props.isBot || !props.onRegenerate || props.regenerateDisabledReason) return
         event.preventDefault()
         props.onRegenerate()
         articleRef.current?.focus()
@@ -912,6 +1074,7 @@ const PlaygroundMessageImpl = (props: Props) => {
       props.isBot,
       props.onNewBranch,
       props.onRegenerate,
+      props.regenerateDisabledReason,
       props.onSwipeNext,
       props.onSwipePrev
     ]
@@ -981,7 +1144,7 @@ const PlaygroundMessageImpl = (props: Props) => {
   const resolvedModelName =
     shouldUseCharacterIdentity && props.characterIdentity?.name
       ? props.characterIdentity.name
-      : props.modelName || props.name
+      : resolveAssistantDisplayName(props.modelName || props.name, savedGeneration?.model)
   const resolvedUserPersonaImage = React.useMemo(() => {
     const raw =
       typeof userPersonaImage === "string" ? userPersonaImage.trim() : ""
@@ -1007,7 +1170,8 @@ const PlaygroundMessageImpl = (props: Props) => {
   const portraitSide: "left" | "right" = messageRenderSide
   const shouldShowPortrait =
     Boolean(showCharacterPortraits) && Boolean(portraitImage)
-  const shouldShowAvatarColumn = !shouldShowPortrait
+  const shouldShowAvatarColumn = !shouldShowPortrait &&
+    (!props.messageView || props.messageView === "conversation" || shouldUseCharacterIdentity || Boolean(props.botAvatar) || Boolean(props.userAvatar) || (!props.isBot && Boolean(resolvedUserPersonaImage)))
   const avatarColumnAlignmentClass = resolveAvatarColumnAlignment(
     messageRenderSide
   )
@@ -1055,6 +1219,12 @@ const PlaygroundMessageImpl = (props: Props) => {
     props.serverChatId,
     props.serverMessageId
   ])
+
+  useEffect(() => {
+    if (reasoningEditIndex !== null && !parseReasoning(props.message)[reasoningEditIndex]?.range) {
+      setReasoningEditIndex(null)
+    }
+  }, [props.message, reasoningEditIndex])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -1196,17 +1366,14 @@ const PlaygroundMessageImpl = (props: Props) => {
     props.isBot
   ])
 
+  const runCopy = copyFeedback.run
   const handleCopy = React.useCallback(async () => {
-    await copyToClipboard({
+    const copied = await runCopy(() => copyToClipboard({
       text: errorFriendlyText || props.message,
       formatted: copyAsFormattedText
-    })
-    trackCopy()
-    setIsBtnPressed(true)
-    setTimeout(() => {
-      setIsBtnPressed(false)
-    }, 2000)
-  }, [copyAsFormattedText, errorFriendlyText, props.message, trackCopy])
+    }))
+    if (copied) trackCopy()
+  }, [copyAsFormattedText, errorFriendlyText, props.message, runCopy, trackCopy])
 
   const handleGenerateDocument = React.useCallback(() => {
     if (!props.serverChatId || typeof window === "undefined") return
@@ -1309,6 +1476,7 @@ const PlaygroundMessageImpl = (props: Props) => {
 
   const autoCopyToClipboard = async () => {
     if (
+      !unchangedDetachedReply &&
       autoCopyResponseToClipboard &&
       props.isBot &&
       isLastMessage &&
@@ -1318,21 +1486,18 @@ const PlaygroundMessageImpl = (props: Props) => {
       !errorPayload &&
       !ttsActionDisabled
     ) {
-      await copyToClipboard({
+      const copied = await runCopy(() => copyToClipboard({
         text: props.message,
         formatted: copyAsFormattedText
-      })
-      trackCopy()
-      setIsBtnPressed(true)
-      setTimeout(() => {
-        setIsBtnPressed(false)
-      }, 2000)
+      }))
+      if (copied) trackCopy()
     }
   }
 
   useEffect(() => {
     autoCopyToClipboard()
   }, [
+    unchangedDetachedReply,
     autoCopyResponseToClipboard,
     props.isBot,
     props.currentMessageIndex,
@@ -1365,10 +1530,10 @@ const PlaygroundMessageImpl = (props: Props) => {
   const shouldRenderStreamingPlainText =
     props.isBot &&
     isLastMessage &&
-    props.isStreaming &&
+    responseStreaming &&
     !errorPayload &&
     !renderGreetingMarkdown
-  const isActiveStreamingMessage = props.isStreaming && isLastMessage
+  const isActiveStreamingMessage = responseStreaming && isLastMessage
   const enableAssistantMermaidDiagrams =
     props.isBot &&
     !isSystemMessage &&
@@ -1384,10 +1549,11 @@ const PlaygroundMessageImpl = (props: Props) => {
   const resolvedDynamicUISurface = props.dynamicUISurface ?? "artifact"
 
   const shouldShowLoadingStatus =
+    !detachedResponse &&
     props.isBot &&
     isLastMessage &&
-    (props.isProcessing ||
-      props.isStreaming ||
+    (responseProcessing ||
+      responseStreaming ||
       props.isSearchingInternet ||
       props.actionInfo ||
       props.isEmbedding)
@@ -1395,7 +1561,7 @@ const PlaygroundMessageImpl = (props: Props) => {
   const isActiveResponse =
     props.isBot &&
     isLastMessage &&
-    (props.isStreaming || props.isProcessing)
+    (responseStreaming || responseProcessing || responsePending)
   const feedbackDisabled =
     !canSubmit ||
     Boolean(errorPayload) ||
@@ -1460,7 +1626,24 @@ const PlaygroundMessageImpl = (props: Props) => {
   ])
 
   const handleDelete = React.useCallback(() => {
-    if (!props.onDeleteMessage) return
+    const rawDeleteSource = props.onDeleteMessage
+    if (!rawDeleteSource) return
+
+    // Resolve the widened union ONCE into a plain callable. Ref-like
+    // delete sources (memoized rows, e.g. SidePanelBody, whose interned
+    // source is a function carrying a `current` getter) are resolved HERE,
+    // at confirmation-open time, so the pending onOk keeps acting on the
+    // exact deleteMessage instance and row captured when the dialog
+    // opened, even if later renders replace either the source or the
+    // target. Plain per-render closure props are used as-is. Presence of
+    // `current` — not typeof — is the discriminator: the interned source
+    // is itself callable (direct calls live-dispatch per dev's
+    // pending-outcome contract) and must still resolve through `.current`
+    // here.
+    const deleteFn =
+      "current" in rawDeleteSource
+        ? rawDeleteSource.current
+        : rawDeleteSource
 
     Modal.confirm({
       title: t("common:confirmTitle", "Please confirm"),
@@ -1470,15 +1653,14 @@ const PlaygroundMessageImpl = (props: Props) => {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          await props.onDeleteMessage?.()
-          if (!props.suppressDeleteSuccessToast) {
+          const accepted = await deleteFn()
+          if (accepted !== false && !props.suppressDeleteSuccessToast) {
             messageApi.success(t("common:deleted", "Deleted"))
           }
         } catch (err) {
           console.error("Failed to delete message:", err)
-          const fallback = t("common:deleteFailed", "Delete failed")
-          const errorMessage = err instanceof Error ? err.message : ""
-          messageApi.error(errorMessage || fallback)
+          const copy = getMessageDeleteFeedback(err instanceof Error && err.cause ? err.cause : err)
+          messageApi.error(t(`common:${copy.key}`, copy.fallback))
         }
       }
     })
@@ -1621,32 +1803,47 @@ const PlaygroundMessageImpl = (props: Props) => {
       props.sources
     ]
   )
+  const runResponseRecovery = React.useCallback((action: () => void, kind?: "retry" | "continue") => {
+    const current = useStoreMessageOption.getState()
+    if ((kind && recoveryReasonsRef.current[kind]) || recoveryBusyRef.current || current.streaming || current.isProcessing) return
+    action()
+  }, [])
+  const explicitRecoveryActions = React.useMemo(
+    () => props.recoveryActions?.map(action => ({
+      ...action,
+      onClick: () => runResponseRecovery(action.onClick)
+    })),
+    [props.recoveryActions, runResponseRecovery]
+  )
   const handleEnableProviderFallback = React.useCallback(() => {
-    updateChatModelSetting("apiProvider", undefined)
-    messageApi.info(
-      apiProviderOverride
-        ? t(
-            "playground:errorRecovery.fallbackClearedProvider",
-            "Provider override cleared. Retrying with fallback routing."
-          )
-        : t(
-            "playground:errorRecovery.fallbackRetrying",
-            "Retrying with provider fallback policy."
-          )
-    )
-    props.onRegenerate()
-  }, [apiProviderOverride, props.onRegenerate, t, updateChatModelSetting])
+    runResponseRecovery(() => {
+      updateChatModelSetting("apiProvider", undefined)
+      messageApi.info(
+        apiProviderOverride
+          ? t(
+              "playground:errorRecovery.fallbackClearedProvider",
+              "Provider override cleared. Retrying with fallback routing."
+            )
+          : t(
+              "playground:errorRecovery.fallbackRetrying",
+              "Retrying with provider fallback policy."
+            )
+      )
+      props.onRegenerate()
+    }, "retry")
+  }, [apiProviderOverride, props.onRegenerate, t, updateChatModelSetting, runResponseRecovery])
   const errorRecoveryActions = React.useMemo(() => {
-    if (!errorPayload) return []
-    if (props.recoveryActions !== undefined) return props.recoveryActions
-    const actions: Array<{ id: string; label: string; onClick: () => void }> = [
+    if (!errorPayload || responseRecoveryBusy) return []
+    if (explicitRecoveryActions !== undefined) return explicitRecoveryActions
+    const actions: MessageRecoveryAction[] = [
       {
         id: "retry",
         label: t(
           "playground:errorRecovery.retrySameModel",
           "Retry same model"
         ),
-        onClick: () => props.onRegenerate()
+        disabledReason: props.regenerateDisabledReason,
+        onClick: () => runResponseRecovery(props.onRegenerate, "retry")
       },
       {
         id: "switch",
@@ -1654,7 +1851,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.switchModel",
           "Switch model"
         ),
-        onClick: handleOpenModelSettings
+        onClick: () => runResponseRecovery(handleOpenModelSettings)
       },
       {
         id: "fallback",
@@ -1662,6 +1859,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.tryProviderFallback",
           "Try provider fallback"
         ),
+        disabledReason: props.regenerateDisabledReason,
         onClick: handleEnableProviderFallback
       }
     ]
@@ -1672,7 +1870,8 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.continueFromPartial",
           "Continue from partial"
         ),
-        onClick: props.onContinue
+        disabledReason: continueDisabledReason,
+        onClick: () => runResponseRecovery(() => props.onContinue?.(), "continue")
       })
     }
     if (errorPayload.upgradeUrl) {
@@ -1704,43 +1903,45 @@ const PlaygroundMessageImpl = (props: Props) => {
     return actions
   }, [
     errorPayload,
+    explicitRecoveryActions,
+    responseRecoveryBusy,
+    runResponseRecovery,
     handleEnableProviderFallback,
     handleOpenModelSettings,
     props.hideContinue,
     props.onContinue,
     props.onRegenerate,
-    props.recoveryActions,
+    props.regenerateDisabledReason,
+    continueDisabledReason,
     t
   ])
   const interruptionRecoveryActions = React.useMemo(() => {
-    if (!interruptedGeneration || errorPayload) return []
-    if (props.recoveryActions !== undefined) return props.recoveryActions
-    const actions: Array<{ id: string; label: string; onClick: () => void }> = [
+    if (!interruptedGeneration || errorPayload || responseRecoveryBusy) return []
+    if (explicitRecoveryActions !== undefined) return explicitRecoveryActions
+    const actions: MessageRecoveryAction[] = [
       {
         id: "retry",
-        label: t(
-          "playground:errorRecovery.retrySameModel",
-          "Retry same model"
-        ),
-        onClick: () => props.onRegenerate()
+        label: t("playground:errorRecovery.retrySameModel", "Retry same model"),
+        disabledReason: props.regenerateDisabledReason,
+        onClick: () => runResponseRecovery(props.onRegenerate, "retry")
       },
       {
         id: "switch",
-        label: t(
-          "playground:errorRecovery.switchModel",
-          "Switch model"
-        ),
-        onClick: handleOpenModelSettings
-      },
-      {
+        label: t("playground:errorRecovery.switchModel", "Switch model"),
+        onClick: () => runResponseRecovery(handleOpenModelSettings)
+      }
+    ]
+    if (!stoppedGeneration) {
+      actions.push({
         id: "fallback",
         label: t(
           "playground:errorRecovery.tryProviderFallback",
           "Try provider fallback"
         ),
+        disabledReason: props.regenerateDisabledReason,
         onClick: handleEnableProviderFallback
-      }
-    ]
+      })
+    }
     if (props.onContinue && !props.hideContinue) {
       actions.push({
         id: "continue",
@@ -1748,30 +1949,56 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.continueFromPartial",
           "Continue from partial"
         ),
-        onClick: props.onContinue
+        disabledReason: continueDisabledReason,
+        onClick: () => runResponseRecovery(() => props.onContinue?.(), "continue")
       })
     }
     return actions
   }, [
     errorPayload,
+    explicitRecoveryActions,
+    responseRecoveryBusy,
+    runResponseRecovery,
     handleEnableProviderFallback,
     handleOpenModelSettings,
     interruptedGeneration,
+    stoppedGeneration,
     props.hideContinue,
     props.onContinue,
     props.onRegenerate,
-    props.recoveryActions,
+    props.regenerateDisabledReason,
+    continueDisabledReason,
     t
   ])
+
+  const outputLimitRecoveryActions = React.useMemo(
+    () =>
+      (!liveOutputLimited && !recordedIncomplete) || !isLastMessage || errorPayload || responseRecoveryBusy
+        ? []
+        : explicitRecoveryActions ?? incompleteReplyRecoveryActions({
+            t: (key, fallback) => t(key, fallback) as string,
+            disabledReason: props.regenerateDisabledReason,
+            continueDisabledReason,
+            onRetry: () => runResponseRecovery(props.onRegenerate, "retry"),
+            onSwitchModel: () => runResponseRecovery(handleOpenModelSettings),
+            onContinue: props.onContinue && !props.hideContinue
+              ? () => runResponseRecovery(() => props.onContinue?.(), "continue") : undefined
+          }),
+    [liveOutputLimited, recordedIncomplete, isLastMessage, errorPayload, responseRecoveryBusy, explicitRecoveryActions, runResponseRecovery,
+      handleOpenModelSettings, props.hideContinue, props.onContinue, props.onRegenerate,
+      props.regenerateDisabledReason, continueDisabledReason, t]
+  )
+
   const emptyResponseRecoveryActions = React.useMemo(
-    () => props.recoveryActions ?? [
+    () => responseRecoveryBusy ? [] : explicitRecoveryActions ?? [
       {
         id: "retry",
         label: t(
           "playground:errorRecovery.retrySameModel",
           "Retry same model"
         ),
-        onClick: () => props.onRegenerate()
+        disabledReason: props.regenerateDisabledReason,
+        onClick: () => runResponseRecovery(props.onRegenerate, "retry")
       },
       {
         id: "switch",
@@ -1779,7 +2006,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.switchModel",
           "Switch model"
         ),
-        onClick: handleOpenModelSettings
+        onClick: () => runResponseRecovery(handleOpenModelSettings)
       },
       {
         id: "fallback",
@@ -1787,33 +2014,36 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.tryProviderFallback",
           "Try provider fallback"
         ),
+        disabledReason: props.regenerateDisabledReason,
         onClick: handleEnableProviderFallback
       }
     ],
     [
+      responseRecoveryBusy,
+      explicitRecoveryActions,
+      runResponseRecovery,
       handleEnableProviderFallback,
       handleOpenModelSettings,
       props.onRegenerate,
-      props.recoveryActions,
+      props.regenerateDisabledReason,
       t
     ]
   )
 
-  const actionRowVisibility = isProMode
+  const actionRowVisibility = isProMode || props.messageView === "research" || (props.isBot && isLastMessage)
     ? "flex"
     : "hidden group-hover:flex group-focus-within:flex"
-  const overflowChipVisibility = isProMode
-    ? "hidden"
-    : "inline-flex group-hover:hidden"
-  const showInlineActions = !props.isProcessing && !editMode
+  const showInlineActions = !props.isProcessing && !editMode && reasoningEditIndex === null
+  const canEditReasoning = showInlineActions && !props.hideEditAndRegenerate && !responseStreaming
   const showEmptyAssistantResponse =
     props.isBot &&
     !isSystemMessage &&
-    !props.isStreaming &&
-    !props.isProcessing &&
+    !responseStreaming &&
+    !responseProcessing &&
     !errorPayload &&
     !interruptedGeneration &&
     !showPartialSaveMarker &&
+    !savedPartialCopy &&
     !isImageGenerationAssistantEvent &&
     !hasVisibleAssistantResponseContent
 
@@ -1832,6 +2062,7 @@ const PlaygroundMessageImpl = (props: Props) => {
 
   useEffect(() => {
     if (
+      !unchangedDetachedReply &&
       autoPlayTTS &&
       props.isTTSEnabled &&
       props.isBot &&
@@ -1850,6 +2081,7 @@ const PlaygroundMessageImpl = (props: Props) => {
       })
     }
   }, [
+    unchangedDetachedReply,
     autoPlayTTS,
     props.isTTSEnabled,
     props.isBot,
@@ -1909,6 +2141,7 @@ const PlaygroundMessageImpl = (props: Props) => {
   useEffect(() => {
     // Only trigger for bot messages that are complete
     if (
+      unchangedDetachedReply ||
       !discoSkillsEnabled ||
       !props.isBot ||
       !isLastMessage ||
@@ -1999,6 +2232,7 @@ const PlaygroundMessageImpl = (props: Props) => {
 
     generateComment()
   }, [
+    unchangedDetachedReply,
     discoSkillsEnabled,
     discoSkillsStats,
     discoTriggerProbability,
@@ -2045,6 +2279,7 @@ const PlaygroundMessageImpl = (props: Props) => {
   if (renderUserBubble) {
     return (
       <PlaygroundUserMessageBubble
+        key={messageKey}
         {...props}
         editMode={editMode}
         onEditModeChange={setEditMode}
@@ -2061,16 +2296,27 @@ const PlaygroundMessageImpl = (props: Props) => {
     ? `gap-2 px-4 pt-3 ${hasSources ? "pb-4" : "pb-2.5"}`
     : `gap-1.5 px-3 pt-2 ${hasSources ? "pb-3" : "pb-2"}`
   const messageCardClass = isSystemMessage
-    ? `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-dashed border-warn/30 bg-warn/10 shadow-sm ${messageSpacing}`
-    : props.isBot
-      ? `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 shadow-sm border-l-2 border-l-primary/20 ${messageSpacing}`
-      : `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 shadow-sm ${messageSpacing}`
-  const messageCardStyle = isSystemMessage
+    ? props.messageView
+      ? `flex max-w-full flex-col rounded-xl border border-dashed border-warn/30 bg-warn/10 ${messageSpacing}`
+      : `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-dashed border-warn/30 bg-warn/10 shadow-sm ${messageSpacing}`
+    : props.messageView === "transcript"
+      ? props.isBot
+        ? "flex max-w-full flex-col gap-3 py-2 text-text"
+        : "flex max-w-full flex-col gap-2 rounded-xl border border-border px-4 py-3"
+      : props.messageView === "research"
+        ? "flex max-w-full flex-col gap-2 border-b border-border/70 pb-4 pt-2"
+        : props.messageView === "conversation"
+          ? `flex ${props.isBot ? "max-w-full" : "max-w-[85%] self-end"} flex-col rounded-2xl border border-border ${messageSpacing}`
+          : props.isBot
+            ? `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 shadow-sm border-l-2 border-l-primary/20 ${messageSpacing}`
+            : `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 shadow-sm ${messageSpacing}`
+  const messageCardStyle = isSystemMessage || props.messageView === "research" || (props.messageView === "transcript" && props.isBot)
     ? undefined
     : ({
         backgroundColor: `rgb(var(${
           props.isBot ? "--color-surface" : "--color-surface2"
-        }) / ${CHAT_MESSAGE_OPACITY_ALPHA})`
+        }) / ${CHAT_MESSAGE_OPACITY_ALPHA})`,
+        ...(props.isBot ? null : USER_TURN_TINT_STYLE)
       } as React.CSSProperties)
   const chatCharacterImageOpacityStyle = {
     opacity: CHAT_CHARACTER_IMAGE_OPACITY_ALPHA
@@ -2148,6 +2394,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     <article
       ref={articleRef}
       data-testid="chat-message"
+      data-message-view={props.messageView}
       data-role={messageRole}
       data-message-type={props.message_type}
       data-index={props.currentMessageIndex}
@@ -2155,12 +2402,12 @@ const PlaygroundMessageImpl = (props: Props) => {
       data-server-message-id={props.serverMessageId}
       data-search-match={props.searchMatch || undefined}
       aria-label={messageAriaLabel}
-      aria-busy={props.isStreaming && isLastMessage ? true : undefined}
+      aria-busy={responseStreaming && props.isBot && isLastMessage ? true : undefined}
       tabIndex={hasMessageKeyboardShortcuts ? 0 : undefined}
       onKeyDown={hasMessageKeyboardShortcuts ? handleMessageShortcut : undefined}
       className={`group relative flex w-full max-w-5xl flex-col items-end justify-center text-text ${
-        isProMode ? "pb-3 md:px-5" : "pb-2 md:px-4"
-      } ${checkWideMode ? "max-w-none" : ""} ${
+        props.messageView === "transcript" ? "pb-6 px-2 md:px-4" : isProMode ? "pb-3 md:px-5" : "pb-2 md:px-4"
+      } ${props.messageView ? "[&_[data-source-feedback]]:flex-wrap [&_[data-source-feedback]_button]:min-h-11 [&_[data-source-feedback]_button]:min-w-11 [&_[data-source-feedback]_button]:text-xs [&_[data-source-feedback]_summary]:min-h-11" : ""} ${checkWideMode ? "max-w-none" : ""} ${
         props.searchMatch === "active"
           ? "rounded-lg ring-2 ring-primary/60 ring-offset-2 ring-offset-bg"
           : props.searchMatch === "match"
@@ -2168,7 +2415,7 @@ const PlaygroundMessageImpl = (props: Props) => {
             : ""
       }`}>
       {/* "Generating..." indicator while streaming on the latest assistant message */}
-      {props.isBot && (props.isStreaming || props.isProcessing) && isLastMessage && !props.message && (
+      {isActiveResponse && !props.message && (
         <div className="flex self-start items-center gap-2 px-4 py-2 text-xs text-text-muted">
           <span className="inline-flex gap-0.5">
             <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-muted [animation-delay:0ms]" />
@@ -2179,7 +2426,7 @@ const PlaygroundMessageImpl = (props: Props) => {
         </div>
       )}
       {/* Inline stop button while streaming on the latest assistant message */}
-      {props.isBot && (props.isStreaming || props.isProcessing) && isLastMessage && props.onStopStreaming && (
+      {isActiveResponse && props.onStopStreaming && (
         <div className="absolute right-2 top-0 z-10">
           <Tooltip title={t("playground:tooltip.stopStreaming") as string}>
             <button
@@ -2201,7 +2448,7 @@ const PlaygroundMessageImpl = (props: Props) => {
         }`}>
         {portraitSide === "left" ? portraitPanel : null}
         {portraitSide === "left" ? avatarColumn : null}
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className={`flex min-w-0 flex-1 flex-col gap-2 ${props.messageView === "transcript" && !checkWideMode ? "max-w-[72ch]" : ""}`}>
           <div className={messageCardClass} style={messageCardStyle}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
@@ -2212,12 +2459,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                 ) : (
                   <span className="text-caption font-semibold text-text">
                     {props.isBot
-                      ? removeModelSuffix(
-                          `${resolvedModelName || props?.name}`?.replaceAll(
-                            /accounts\/[^\/]+\/models\//g,
-                            ""
-                          )
-                        )
+                      ? formatChatMessageAuthorName(resolvedModelName || props?.name)
                       : userDisplayName.trim() || t("common:you", "You")}
                   </span>
                 )}
@@ -2230,8 +2472,11 @@ const PlaygroundMessageImpl = (props: Props) => {
                   <span
                     data-testid="message-model-badge"
                     className="inline-flex items-center rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted"
-                    title={resolvedResponseModel}
-                  >
+                    title={
+                      savedGeneration?.provider && savedGeneration?.model
+                        ? `${savedGeneration.provider} · ${resolvedResponseModel}`
+                        : resolvedResponseModel
+                    }>
                     {resolvedResponseModel}
                   </span>
                 )}
@@ -2330,27 +2575,45 @@ const PlaygroundMessageImpl = (props: Props) => {
           {/* Unified loading status indicator */}
           {shouldShowLoadingStatus && (
             <LoadingStatus
-              isProcessing={props.isProcessing}
-              isStreaming={props.isStreaming}
+              isProcessing={responseProcessing}
+              isStreaming={responseStreaming}
               isSearchingInternet={props.isSearchingInternet}
               isEmbedding={props.isEmbedding}
               actionInfo={props.actionInfo}
+              modelLabel={
+                props.isBot
+                  ? formatChatMessageAuthorName(resolvedModelName || props?.name)
+                  : undefined
+              }
+              replyStarted={props.message.replace(/▋$/, "").trim().length > 0}
             />
           )}
           {showUsageMetadata && (
             <div className="text-xs text-text-muted tabular-nums">
-              {messageUsage.promptTokens}{" "}
-              {t("playground:tokens.prompt", "prompt")} +{" "}
-              {messageUsage.completionTokens}{" "}
-              {t("playground:tokens.completion", "completion")} ={" "}
-              {messageUsage.totalTokens}{" "}
-              {t("playground:tokens.total", "tokens")}
-              {messageCostUsd != null && (
+              {savedUsage ? (
+                [
+                  savedUsage.prompt_tokens === undefined
+                    ? null
+                    : `${savedUsage.prompt_tokens} ${t("playground:tokens.prompt", "prompt")}`,
+                  savedUsage.completion_tokens === undefined
+                    ? null
+                    : `${savedUsage.completion_tokens} ${t("playground:tokens.completion", "completion")}`,
+                  savedUsage.total_tokens === undefined
+                    ? null
+                    : `${savedUsage.total_tokens} ${t("playground:tokens.total", "tokens")}`
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              ) : (
                 <>
-                  {" "}
-                  • {formatCost(messageCostUsd)}
+                  {messageUsage.promptTokens}{" "}
+                  {t("playground:tokens.prompt", "prompt")} +{" "}
+                  {messageUsage.completionTokens}{" "}
+                  {t("playground:tokens.completion", "completion")} ={" "}
+                  {messageUsage.totalTokens} {t("playground:tokens.total", "tokens")}
                 </>
               )}
+              {messageCostUsd != null && <> • {formatCost(messageCostUsd)}</>}
             </div>
           )}
           {props.isBot && !isSystemMessage && fallbackAudit && (
@@ -2628,67 +2891,6 @@ const PlaygroundMessageImpl = (props: Props) => {
               )}
             </div>
           )}
-          {showPartialSaveMarker && (
-            <div
-              role="status"
-              aria-live="polite"
-              title={streamTransportInterruptionReason || undefined}
-              className="inline-flex items-center rounded-md border border-border/60 bg-surface px-2 py-1 text-[11px] font-medium text-text-muted"
-            >
-              {t(
-                "playground:errorRecovery.partialSavedMarker",
-                "Connection dropped. Partial response saved."
-              )}
-            </div>
-          )}
-          {interruptedGeneration && !errorPayload && (
-            <div
-              role="status"
-              aria-live="polite"
-              className="rounded-md border border-warn/30 bg-warn/10 p-2 text-xs text-warn">
-              <p className="font-medium">
-                <span
-                  data-interruption-label
-                  className="mr-1.5 inline-flex items-center rounded border border-warn/40 px-1.5 py-0.5 text-[11px] font-semibold">
-                  {stoppedGeneration
-                    ? t("playground:errorRecovery.stoppedLabel", "Stopped")
-                    : t(
-                        "playground:errorRecovery.interruptedLabel",
-                        "Interrupted"
-                      )}
-                </span>
-                {stoppedGeneration
-                  ? t(
-                      "playground:errorRecovery.stoppedSummary",
-                      "You stopped this reply. What it wrote so far is kept."
-                    )
-                  : t(
-                      "playground:errorRecovery.interruptedSummary",
-                      "Generation was interrupted. You can retry, switch model, or continue from the partial response."
-                    )}
-              </p>
-              {interruptionReason && !stoppedGeneration && (
-                <p className="mt-1 opacity-90">{interruptionReason}</p>
-              )}
-              {interruptionRecoveryActions.length > 0 && (
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <span className="sr-only">
-                    Recommended next actions:{" "}
-                    {interruptionRecoveryActions
-                      .map((action) => action.label)
-                      .join(", ")}
-                  </span>
-                  {interruptionRecoveryActions.map((action) => (
-                    <RecoveryActionButton
-                      key={action.id}
-                      action={action}
-                      className="rounded border border-warn/40 bg-surface px-2 py-1 text-[11px] font-medium text-warn transition hover:bg-warn/10"
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
           <div className="flex flex-grow flex-col">
             {!editMode ? (
               props.isBot ? (
@@ -2707,14 +2909,14 @@ const PlaygroundMessageImpl = (props: Props) => {
                     }}
                     recoveryActions={errorRecoveryActions}
                   />
-                ) : shouldRenderStreamingPlainText ? (
+                ) : shouldRenderStreamingPlainText && !isReasoningStarted(props.message) ? (
                   <p
                     data-testid="playground-streaming-plain-text"
                     className={`text-body text-text-muted whitespace-pre-wrap ${assistantTextClass}`}
                   >
                     {props.message}
                   </p>
-                ) : !props.isStreaming && dynamicUIEnvelope ? (
+                ) : !responseStreaming && dynamicUIEnvelope ? (
                   props.messageId ? (
                     <DynamicMessageRenderer
                       envelope={dynamicUIEnvelope}
@@ -2744,7 +2946,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                         "The request completed, but the assistant did not return visible content."
                       ) as string
                     }
-                    recoveryActions={emptyResponseRecoveryActions}
+                    recoveryActions={hasSavedGenerationStatus ? [] : emptyResponseRecoveryActions}
                   />
                 ) : renderGreetingMarkdown ? (
                   <React.Suspense
@@ -2755,7 +2957,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                       </p>
                     }>
                     <Markdown
-                      message={props.message}
+                      message={replaceUserDisplayNamePlaceholders(props.message, userDisplayName, shouldUseCharacterIdentity ? props.characterIdentity?.name ?? "" : "")}
                       className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                       searchQuery={props.searchQuery}
                       headingOffset={props.headingOffset}
@@ -2773,7 +2975,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                           <ReasoningBlock
                             key={`reasoning-${i}`}
                             content={e.content}
-                            isStreaming={props.isStreaming}
+                            isStreaming={responseStreaming}
                             reasoningRunning={e.reasoning_running}
                             openReasoning={props.openReasoning}
                             reasoningTimeTaken={props.reasoningTimeTaken}
@@ -2782,6 +2984,19 @@ const PlaygroundMessageImpl = (props: Props) => {
                             searchQuery={props.searchQuery}
                             t={t}
                             enableMermaidDiagrams={enableAssistantMermaidDiagrams}
+                            onEdit={e.range && canEditReasoning
+                              ? () => setReasoningEditIndex(i)
+                              : undefined}
+                            editor={e.range && reasoningEditIndex === i ? (
+                              <EditMessageForm
+                                key={messageKey}
+                                value={props.message}
+                                reasoningRange={e.range}
+                                onSumbit={props.onEditFormSubmit}
+                                onClose={() => setReasoningEditIndex(null)}
+                                isBot
+                              />
+                            ) : undefined}
                           />
                         )
                         return props.headingOffset ? (
@@ -2791,6 +3006,18 @@ const PlaygroundMessageImpl = (props: Props) => {
                             </MarkdownHeadingScope>
                           </React.Suspense>
                         ) : reasoning
+                      }
+
+                      if (shouldRenderStreamingPlainText) {
+                        return (
+                          <p
+                            key={`message-${i}`}
+                            data-testid="playground-streaming-plain-text"
+                            className={`text-body text-text-muted whitespace-pre-wrap ${assistantTextClass}`}
+                          >
+                            {e.content}
+                          </p>
+                        )
                       }
 
                       return (
@@ -2824,13 +3051,12 @@ const PlaygroundMessageImpl = (props: Props) => {
                     "italic text-text-muted text-body"
                   }
                   `}>
-                  {props.searchQuery
-                    ? highlightText(props.message, props.searchQuery)
-                    : props.message}
+                  {highlightedMessage}
                 </p>
               )
             ) : (
               <EditMessageForm
+                key={messageKey}
                 value={props.message}
                 onSumbit={props.onEditFormSubmit}
                 onClose={() => setEditMode(false)}
@@ -2851,10 +3077,8 @@ const PlaygroundMessageImpl = (props: Props) => {
                   .filter((image) => image.length > 0)
                   .map((image, index) => (
                     <div key={index} className="group relative">
-                      <Image
+                      <ChatAttachmentImage
                         src={image}
-                        alt="Uploaded Image"
-                        width={180}
                         className="rounded-md relative"
                       />
                       {showInlineImageActions && (
@@ -2913,6 +3137,74 @@ const PlaygroundMessageImpl = (props: Props) => {
               </div>
             )}
 
+          {savedPartialCopy && !errorPayload && (
+            <EmptyAssistantResponseNotice
+              summary={
+                t(
+                  `playground:errorRecovery.${savedPartialCopy[0]}`,
+                  savedPartialCopy[1]
+                ) as string
+              }
+              detail={
+                t(
+                  `playground:errorRecovery.${savedPartialCopy[2]}`,
+                  savedPartialCopy[3]
+                ) as string
+              }
+              recoveryActions={outputLimitRecoveryActions}
+            />
+          )}
+          {showPartialSaveMarker && (
+            <div
+              role="status"
+              aria-live="polite"
+              title={streamTransportInterruptionReason || undefined}
+              className="inline-flex items-center rounded-md border border-border/60 bg-surface px-2 py-1 text-[11px] font-medium text-text-muted">
+              {t(
+                "playground:errorRecovery.partialSavedMarker",
+                "Connection dropped. Partial response saved."
+              )}
+            </div>
+          )}
+          {interruptedGeneration && !errorPayload && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="rounded-md border border-warn/30 bg-warn/10 p-2 text-xs text-warn">
+              <p className="font-medium">
+                <span
+                  data-interruption-label
+                  className="mr-1.5 inline-flex items-center rounded border border-warn/40 px-1.5 py-0.5 text-[11px] font-semibold">
+                  {stoppedGeneration
+                    ? t("playground:errorRecovery.stoppedLabel", "Stopped")
+                    : t("playground:errorRecovery.interruptedLabel", "Interrupted")}
+                </span>
+                {stoppedGeneration
+                  ? t(
+                      "playground:errorRecovery.stoppedSummary",
+                      "You stopped this reply. What it wrote so far is kept."
+                    )
+                  : t(
+                      "playground:errorRecovery.interruptedSummary",
+                      "Generation was interrupted. Any text received is kept."
+                    )}
+              </p>
+              {interruptionReason && !stoppedGeneration && (
+                <p className="mt-1 opacity-90">{interruptionReason}</p>
+              )}
+              {interruptionRecoveryActions.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {interruptionRecoveryActions.map((action) => (
+                    <RecoveryActionButton
+                      key={action.id}
+                      action={action}
+                      className="rounded border border-warn/40 bg-surface px-2 py-1 text-[11px] font-medium text-warn transition hover:bg-warn/10"
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {(showUseInChat || showFollowUp || researchActions?.primaryLink) && (
             <div className="mt-3 flex">
               <div className="flex items-center gap-2">
@@ -2953,6 +3245,7 @@ const PlaygroundMessageImpl = (props: Props) => {
 
           {showInlineActions && (
             <MessageActionsBar
+              messageView={props.messageView}
               t={t}
               isProMode={isProMode}
               isBot={props.isBot}
@@ -2963,7 +3256,6 @@ const PlaygroundMessageImpl = (props: Props) => {
               canSwipeNext={canSwipeNext}
               onSwipePrev={props.onSwipePrev}
               onSwipeNext={props.onSwipeNext}
-              overflowChipVisibility={overflowChipVisibility}
               actionRowVisibility={actionRowVisibility}
               isTtsEnabled={props.isTTSEnabled}
               ttsDisabledReason={ttsDisabledReason}
@@ -2971,7 +3263,9 @@ const PlaygroundMessageImpl = (props: Props) => {
               isSpeaking={isSpeaking}
               onToggleTts={handleToggleTts}
               hideCopy={props.hideCopy}
-              copyPressed={isBtnPressed}
+              copyPressed={copyFeedback.copied}
+              copyFailed={copyFeedback.failed}
+              copyAttempt={copyFeedback.attempt}
               onCopy={handleCopy}
               canReply={canReply}
               onReply={handleReply}
@@ -2987,6 +3281,7 @@ const PlaygroundMessageImpl = (props: Props) => {
               isLastMessage={isLastMessage}
               hideEditAndRegenerate={props.hideEditAndRegenerate}
               onRegenerate={props.onRegenerate}
+              regenerateDisabledReason={props.regenerateDisabledReason}
               onNewBranch={props.onNewBranch}
               temporaryChat={props.temporaryChat}
               hideContinue={props.hideContinue}
@@ -3066,12 +3361,15 @@ const PlaygroundMessageImpl = (props: Props) => {
 
           {props.isBot && props?.sources && props?.sources.length > 0 && (
             <Collapse
-              className="mt-6"
+              className={props.messageView ? "order-10 mt-2" : "mt-6"}
+              data-testid="message-sources"
+              activeKey={(sourcesExpanded ?? props.messageView === "research") ? ["1"] : []}
               ghost
               onChange={(activeKey) => {
                 const opened = Array.isArray(activeKey)
                   ? activeKey.length > 0
                   : Boolean(activeKey)
+                setSourcesExpanded(opened)
                 if (opened) {
                   trackSourcesExpanded()
                 }
@@ -3081,7 +3379,9 @@ const PlaygroundMessageImpl = (props: Props) => {
                   key: "1",
                   label: (
                     <div className="italic text-text-muted">
-                      {t("citations")}
+                      {props.messageView
+                        ? t("playground:messageViews.sourcesCount", props.sources.length === 1 ? "{{count}} source" : "{{count}} sources", { count: props.sources.length })
+                        : t("citations")}
                     </div>
                   ),
                   children: (
@@ -3233,11 +3533,19 @@ const PlaygroundMessageImpl = (props: Props) => {
           initialNotes={detail?.notes ?? ""}
         />
       )}
-      {streamingComplete && !errorPayload && !props.isStreaming && !props.isProcessing && (
-        <span aria-live="polite" className="sr-only">
-          {t("playground:message.responseComplete", { defaultValue: "Response complete" })}
-        </span>
-      )}
+      {streamingComplete &&
+        !interruptedGeneration &&
+        !showPartialSaveMarker &&
+        !savedPartialCopy &&
+        !errorPayload &&
+        !responseStreaming &&
+        !responseProcessing && (
+          <span aria-live="polite" className="sr-only">
+            {t("playground:message.responseComplete", {
+              defaultValue: "Response complete"
+            })}
+          </span>
+        )}
     </article>
   )
 }

@@ -254,7 +254,7 @@ export class TldwAuthService {
   /**
    * Logout and clear tokens
    */
-  async logout(): Promise<void> {
+  async logout(): Promise<void | "unconfirmed"> {
     const config = await tldwClient.getConfig()
     if (!config) {
       return
@@ -274,12 +274,14 @@ export class TldwAuthService {
       return
     }
 
+    let remoteLogoutConfirmed = true
     try {
       await bgRequest<any>({
         path: this.isHostedMode() ? '/api/auth/logout' : '/api/v1/auth/logout',
         method: 'POST'
       })
     } catch {
+      remoteLogoutConfirmed = false
       console.warn('Server logout unavailable; continuing local sign-out without confirmed remote revocation.')
     }
 
@@ -299,6 +301,7 @@ export class TldwAuthService {
 
     clearStandaloneHtmlSessionRecords()
     emitLogoutPrincipalBoundary()
+    if (!remoteLogoutConfirmed) return "unconfirmed"
   }
 
   /**

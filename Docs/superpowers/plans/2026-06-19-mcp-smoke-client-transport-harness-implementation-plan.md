@@ -34,7 +34,7 @@
   - Add `mcp-unified-smoke = "mcp_unified.smoke.cli:main"` after the module shape works.
 - Create `Docs/MCP/Unified/Smoke_Client.md`
   - Operator docs for in-process, live HTTP, live WebSocket, stdio subprocess, auth/profile flags, reports, and exit codes.
-- Modify `backlog/tasks/task-2387 - Design-MCP-smoke-client-transport-harness.md`
+- Modify `backlog/tasks/task-15254 - Design-MCP-smoke-client-transport-harness.md`
   - Link this plan, record validation, and close the design task when complete.
 - Modify `backlog/tasks/task-2281 - Add-LSP-backed-code-intelligence-MCP-tools.md`
   - Keep the dependency on TASK-2387; do not implement LSP in this task.
@@ -465,7 +465,7 @@ git commit -m "feat: add mcp smoke stdio transport"
 - Modify: `mcp_unified/smoke/cli.py`
 - Modify: `pyproject.toml`
 - Create: `Docs/MCP/Unified/Smoke_Client.md`
-- Modify: `backlog/tasks/task-2387 - Design-MCP-smoke-client-transport-harness.md`
+- Modify: `backlog/tasks/task-15254 - Design-MCP-smoke-client-transport-harness.md`
 - Modify: `backlog/tasks/task-2281 - Add-LSP-backed-code-intelligence-MCP-tools.md`
 
 - [x] **Step 1: Write failing tests for CLI exit codes**

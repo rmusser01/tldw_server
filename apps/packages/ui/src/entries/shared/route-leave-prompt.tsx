@@ -1,7 +1,6 @@
 import React from "react"
 import {
   UNSAFE_DataRouterContext,
-  unstable_usePrompt,
   useBlocker
 } from "react-router-dom"
 
@@ -10,17 +9,14 @@ export type RouteLeavePromptProps = {
   message: string
 }
 
-const ShimRouteLeavePrompt: React.FC<RouteLeavePromptProps> = (props) => {
-  unstable_usePrompt(props)
-  return null
-}
+const nextRouterShimCanBlock =
+  (useBlocker as unknown as { tldwNextRouterShim?: boolean }).tldwNextRouterShim === true
 
-export const RouteLeavePrompt: React.FC<RouteLeavePromptProps> = ({
+const ActiveRouteLeavePrompt: React.FC<RouteLeavePromptProps> = ({
   when,
   message
 }) => {
-  const dataRouterContext = React.useContext(UNSAFE_DataRouterContext)
-  const blocker = useBlocker(Boolean(dataRouterContext) && when)
+  const blocker = useBlocker(when)
   const blockerRef = React.useRef(blocker)
   const proceedTimerRef = React.useRef<number | null>(null)
   blockerRef.current = blocker
@@ -70,5 +66,12 @@ export const RouteLeavePrompt: React.FC<RouteLeavePromptProps> = ({
     }
   }, [cancelProceed])
 
-  return dataRouterContext ? null : <ShimRouteLeavePrompt when={when} message={message} />
+  return null
+}
+
+
+export const RouteLeavePrompt: React.FC<RouteLeavePromptProps> = (props) => {
+  const dataRouterContext = React.useContext(UNSAFE_DataRouterContext)
+  if (!dataRouterContext && !nextRouterShimCanBlock) return null
+  return <ActiveRouteLeavePrompt {...props} />
 }

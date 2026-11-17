@@ -27,8 +27,11 @@ import {
   getResearchArtifact,
   getResearchBundle,
   getResearchRun,
+  hasActiveResearchRun,
   listResearchRuns,
   pauseResearchRun,
+  RESEARCH_RUNS_ACTIVE_REFETCH_INTERVAL_MS,
+  researchRunsRefetchInterval,
   resumeResearchRun,
   subscribeResearchRunEvents,
 } from '@web/lib/api/researchRuns';
@@ -125,5 +128,21 @@ describe('researchRuns api client', () => {
     });
 
     unsubscribe();
+  });
+
+  it('refetch interval is false unless a run is still active (WP-40)', () => {
+    const run = (status: string) => ({ id: 'rs_1', status }) as never;
+
+    expect(researchRunsRefetchInterval(undefined)).toBe(false);
+    expect(researchRunsRefetchInterval([])).toBe(false);
+    expect(researchRunsRefetchInterval([run('completed'), run('failed'), run('cancelled')])).toBe(false);
+    expect(hasActiveResearchRun(undefined)).toBe(false);
+
+    for (const status of ['running', 'waiting_human', 'pending', 'queued']) {
+      expect(researchRunsRefetchInterval([run('completed'), run(status)])).toBe(
+        RESEARCH_RUNS_ACTIVE_REFETCH_INTERVAL_MS
+      );
+    }
+    expect(RESEARCH_RUNS_ACTIVE_REFETCH_INTERVAL_MS).toBe(5000);
   });
 });

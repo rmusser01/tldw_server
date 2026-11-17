@@ -31,18 +31,21 @@ export const useStoreMessageOption = createWithEqualityFn<State>()((set, get) =>
 const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
   if (!invalidated) return
   useStoreMessageOption.getState().setServerChatId(null)
-  useStoreMessageOption.setState({
+  useStoreMessageOption.setState((state) => ({
+    chatDraftAddress: null, chatDraftTransition: null, chatDraftRevision: state.chatDraftRevision + 1,
     messages: [], history: [], historyId: null, queuedMessages: [],
-    isFirstMessage: true, isLoading: false, isProcessing: false, streaming: false,
+    isFirstMessage: true, isLoading: false, isProcessing: false, streaming: false, detachedHistoryResponse: null,
     isEmbedding: false, isSearchingInternet: false,
     selectedKnowledge: null, selectedSystemPrompt: null, selectedQuickPrompt: null,
+    quickPromptRevision: state.quickPromptRevision + 1,
     documentContext: null, uploadedFiles: [], contextFiles: [], actionInfo: null,
     fileRetrievalEnabled: false, ragMediaIds: null, ragSources: [], ragPinnedResults: [],
     compareMode: false, compareSelectedModels: [], compareSelectionByCluster: {},
     compareActiveModelsByCluster: {}, compareParentByHistory: {},
     compareCanonicalByCluster: {}, compareContinuationModeByCluster: {}, compareSplitChats: {},
-    replyTarget: null, messageSteeringMode: "none", messageSteeringForceNarrate: false
-  })
+    replyTarget: null, messageSteeringMode: "none", messageSteeringForceNarrate: false,
+    messageSteeringRevision: state.messageSteeringRevision + 1
+  }))
   updatePageTitle()
 })
 const hot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot

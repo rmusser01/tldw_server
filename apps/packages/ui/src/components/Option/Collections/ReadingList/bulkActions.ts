@@ -1,13 +1,7 @@
 import type { ReadingItemsBulkResponse } from "@/types/collections"
+import { dedupeTags } from "@/utils/tag-identity"
 
-export const normalizeBulkTags = (raw: string): string[] => {
-  if (!raw) return []
-  const tags = raw
-    .split(",")
-    .map((entry) => entry.trim().toLowerCase())
-    .filter((entry) => entry.length > 0)
-  return Array.from(new Set(tags))
-}
+export const normalizeBulkTags = (raw: string): string[] => (raw ? dedupeTags(raw.split(",")) : [])
 
 export const getBulkFailureLines = (
   response: ReadingItemsBulkResponse,

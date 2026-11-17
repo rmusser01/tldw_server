@@ -135,6 +135,16 @@ export const LlamacppSnapshotsPanel = (props: LlamacppSnapshotsPanelProps) => {
     new Date(date).toLocaleString(undefined, { timeZoneName: "short" })
   const bytes = (count: number) =>
     `${(count / 1024 / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} MiB`
+  // Sort newest-first only when the catalog reference changes (admin perf
+  // C-S3 / F18): this panel re-renders under the 1.5s runtime poll, which
+  // must not re-sort (or re-diff a differently-ordered) the snapshot list.
+  const sortedSnapshots = React.useMemo(
+    () =>
+      [...(props.catalog?.snapshots ?? [])].sort(
+        (a, b) => b.commit_sequence - a.commit_sequence
+      ),
+    [props.catalog?.snapshots]
+  )
   return (
     <section
       aria-label={copy("title", "Slot snapshots")}
@@ -279,8 +289,7 @@ export const LlamacppSnapshotsPanel = (props: LlamacppSnapshotsPanelProps) => {
             )}
           </p>
         )}
-        {[...(props.catalog?.snapshots || [])]
-          .sort((a, b) => b.commit_sequence - a.commit_sequence)
+        {sortedSnapshots
           .map((snapshot) => (
             <div
               key={snapshot.snapshot_id}

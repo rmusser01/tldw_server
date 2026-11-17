@@ -9,7 +9,6 @@ from tldw_Server_API.app.core.Evaluations.audit_adapter import (
     MandatoryAuditWriteError,
     log_evaluation_created,
     log_run_started_async,
-    _in_test_mode,
     _parse_cache_size,
     shutdown_evaluations_audit_services,
 )
@@ -86,12 +85,3 @@ def test_evaluations_local_shutdown_helper_stops_loop(monkeypatch):
 def test_evaluations_audit_cache_size_clamped(monkeypatch):
     monkeypatch.setenv("EVALUATIONS_AUDIT_MAX_CACHED_SERVICES", "0")
     assert _parse_cache_size("EVALUATIONS_AUDIT_MAX_CACHED_SERVICES", 20) == 1
-
-
-def test_evaluations_audit_test_mode_parsing(monkeypatch):
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.setenv("TEST_MODE", "0")
-    monkeypatch.setenv("TLDW_TEST_MODE", "false")
-    assert _in_test_mode() is False
-    monkeypatch.setenv("TEST_MODE", "true")
-    assert _in_test_mode() is True

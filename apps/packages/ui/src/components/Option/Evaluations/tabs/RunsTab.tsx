@@ -35,6 +35,7 @@ import {
 } from "../hooks/useRuns"
 import { useEvaluationsList } from "../hooks/useEvaluations"
 import { useEvaluationsStore } from "@/store/evaluations"
+import { downloadBlob } from "@/utils/download-blob"
 import { EvaluationRecoveryCallout } from "../components/EvaluationRecoveryCallout"
 import {
   CopyButton,
@@ -141,6 +142,10 @@ export const RunsTab: React.FC = () => {
   const rateLimits = rateLimitsResp?.data
   const runs = runsListResp?.data?.data || []
   const runDetail = runDetailResp?.data
+  const provenance = runDetail?.results?.provenance
+  const datasetId = typeof provenance?.dataset_id === "string" ? provenance.dataset_id : null
+  const datasetHash = typeof provenance?.dataset_content_hash === "string"
+    ? provenance.dataset_content_hash : null
   const compareRunA = compareRunAResp?.data
   const compareRunB = compareRunBResp?.data
   const benchmarks = benchmarksResp?.data?.data || []
@@ -225,6 +230,7 @@ export const RunsTab: React.FC = () => {
       }
     }
 
+    const submittedKey = values.idempotencyKey || runIdempotencyKey
     await createRunMutation.mutateAsync({
       evalId: selectedEvalId,
       payload: {
@@ -233,9 +239,14 @@ export const RunsTab: React.FC = () => {
         dataset_override: datasetOverride,
         webhook_url: values.webhookUrl || undefined
       },
-      idempotencyKey: values.idempotencyKey || runIdempotencyKey
+      idempotencyKey: submittedKey
     })
     regenerateRunIdempotencyKey()
+    if (runForm.getFieldValue("idempotencyKey") === submittedKey) {
+      runForm.setFieldsValue({
+        idempotencyKey: useEvaluationsStore.getState().runIdempotencyKey
+      })
+    }
   }
 
   const handleAdhocRun = async () => {
@@ -399,11 +410,19 @@ export const RunsTab: React.FC = () => {
                                 </span>
                               </Tooltip>
                             }
-                            name="idempotencyKey"
-                            initialValue={runIdempotencyKey}
                           >
                             <Space.Compact className="w-full">
-                              <Input />
+                              <Form.Item
+                                name="idempotencyKey"
+                                initialValue={runIdempotencyKey}
+                                noStyle
+                              >
+                                <Input
+                                  aria-label={t("evaluations:idempotencyKeyLabel", {
+                                    defaultValue: "Idempotency key"
+                                  })}
+                                />
+                              </Form.Item>
                               <Button
                                 size="small"
                                 onClick={() => {
@@ -631,6 +650,16 @@ export const RunsTab: React.FC = () => {
               <Space>
                 <Button
                   size="small"
+                  disabled={!runDetail?.results || runDetailLoading || runDetailError || runDetailResp?.ok === false}
+                  onClick={() => runDetail && downloadBlob(
+                    new Blob([JSON.stringify(runDetail, null, 2)], { type: "application/json" }),
+                    `${runDetail.id}.json`
+                  )}
+                >
+                  {t("evaluations:exportRunJsonCta", { defaultValue: "Export JSON" })}
+                </Button>
+                <Button
+                  size="small"
                   onClick={() =>
                     void queryClient.invalidateQueries({
                       queryKey: ["evaluations", "run", selectedRunId]
@@ -704,6 +733,26 @@ export const RunsTab: React.FC = () => {
                 <Text>{runDetail.eval_id}</Text>
                 <CopyButton text={runDetail.eval_id} />
               </div>
+
+
+              {datasetHash ? (
+                <div className="space-y-1">
+                  <div>
+                    <Text type="secondary">{t("evaluations:runDatasetLabel", { defaultValue: "Dataset" })}: </Text>
+                    <Text>{datasetId || t("evaluations:runInlineDatasetLabel", { defaultValue: "Inline / run override" })}</Text>
+                  </div>
+                  <div>
+                    <Text type="secondary">{t("evaluations:runDatasetVersionLabel", { defaultValue: "Dataset version" })}: </Text>
+                    <code className="break-all">sha256:{datasetHash}</code>
+                  </div>
+                </div>
+              ) : (
+                <Text type="secondary">
+                  {t("evaluations:runProvenanceUnavailable", {
+                    defaultValue: "Dataset provenance was not captured for this run."
+                  })}
+                </Text>
+              )}
 
               {runMetrics.length > 0 && (
                 <div className="mt-3">

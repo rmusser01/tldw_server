@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+from tldw_Server_API.app.api.v1.utils.pagination import (
     build_offset_pagination_meta,
 )
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
@@ -269,7 +269,7 @@ async def get_maintenance_mode(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> MaintenanceState:
     del principal
-    state = svc_get_maintenance_state()
+    state = await asyncio.to_thread(svc_get_maintenance_state)
     return MaintenanceState(**state)
 
 
@@ -455,7 +455,8 @@ async def list_feature_flags(
     if org_ids is not None and len(org_ids) == 0:
         return FeatureFlagsResponse(items=[], total=0)
     try:
-        items = svc_list_feature_flags(
+        items = await asyncio.to_thread(
+            svc_list_feature_flags,
             scope=scope,
             org_id=org_id if org_ids is None else None,
             user_id=user_id,
@@ -566,7 +567,8 @@ async def list_incidents(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> IncidentListResponse:
     del principal
-    items, total = svc_list_incidents(
+    items, total = await asyncio.to_thread(
+        svc_list_incidents,
         status=status,
         severity=severity,
         tag=tag,
@@ -628,7 +630,8 @@ async def get_incident_sla_metrics(
 ) -> dict:
     """Compute SLA metrics across all incidents."""
     _require_platform_admin(principal)
-    incidents, _ = svc_list_incidents(
+    incidents, _ = await asyncio.to_thread(
+        svc_list_incidents,
         status=None,
         severity=None,
         tag=None,

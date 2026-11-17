@@ -42,7 +42,7 @@ export interface AudioRecorderResult {
   startRecording: (options?: AudioRecorderOptions) => Promise<void>
   stopRecording: () => void
   clearRecording: () => void
-  loadBlob: (blob: Blob, durationMs: number) => void
+  loadBlob: (blob: Blob, durationMs: number) => boolean
 }
 
 const TIMER_INTERVAL_MS = 200
@@ -59,6 +59,7 @@ export function useAudioRecorder(): AudioRecorderResult {
   const startTimeRef = useRef<number>(0)
   const captureOwnerRef = useRef(false)
   const startingRef = useRef(false)
+  const lifetimeRef = useRef<object | null>(null)
 
   const stopTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -102,7 +103,8 @@ export function useAudioRecorder(): AudioRecorderResult {
     // Synchronous re-entry guard: a rapid double-start (or a start while
     // already recording) must not run a second getUserMedia and orphan the
     // first stream. Refs are checked/set synchronously before the first await.
-    if (startingRef.current || recorderRef.current) return
+    const lifetime = lifetimeRef.current
+    if (!lifetime || startingRef.current || recorderRef.current) return
     reserveCaptureOwner()
     startingRef.current = true
     chunksRef.current = []
@@ -111,6 +113,11 @@ export function useAudioRecorder(): AudioRecorderResult {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: buildAudioConstraints(options.deviceId)
       })
+      // Permission can be granted after this recorder has been unmounted.
+      if (lifetimeRef.current !== lifetime) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
       streamRef.current = stream
 
       const recorder = new MediaRecorder(stream)
@@ -168,13 +175,17 @@ export function useAudioRecorder(): AudioRecorderResult {
   }, [])
 
   const loadBlob = useCallback((externalBlob: Blob, externalDurationMs: number) => {
+    if (startingRef.current || recorderRef.current) return false
     setBlob(externalBlob)
     setDurationMs(externalDurationMs)
+    return true
   }, [])
 
   // Cleanup on unmount
   useEffect(() => {
+    lifetimeRef.current = {}
     return () => {
+      lifetimeRef.current = null
       stopTimer()
       if (recorderRef.current && recorderRef.current.state === "recording") {
         recorderRef.current.stop()

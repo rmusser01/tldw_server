@@ -1,4 +1,3 @@
-from .source_resolver import SUPPORTED_SOURCE_TYPES, StudySourceResolver
 from .types import (
     StudyCitationDraft,
     StudySourceBundle,
@@ -7,10 +6,8 @@ from .types import (
 )
 
 __all__ = [
-    "SUPPORTED_SOURCE_TYPES",
     "StudyCitationDraft",
     "StudySourceBundle",
     "StudySourceBundleItem",
-    "StudySourceResolver",
     "StudySourceSelection",
 ]

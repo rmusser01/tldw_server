@@ -15,11 +15,13 @@ import pytest_asyncio
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSessionCreate
 from tldw_Server_API.app.core import feature_flags
+from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.Character_Chat.modules.character_chat import (
     get_conversation_metadata,
     list_character_conversations,
 )
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, decode_assistant_startup
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 from tldw_Server_API.app.core.Workspaces import assistant_defaults
 
@@ -195,7 +197,7 @@ async def test_concurrent_rest_waiter_receives_owner_bound_tenant_handle(
     created = threading.Event()
     release = threading.Event()
     waiting = threading.Event()
-    original_create = deps._create_and_prepare_db
+    original_create = chacha_db_provider.create_and_prepare_chacha_db
     handles: list[CharactersRAGDB] = []
 
     def held_create(user_id: int, client_id: str) -> CharactersRAGDB:
@@ -206,12 +208,12 @@ async def test_concurrent_rest_waiter_receives_owner_bound_tenant_handle(
         assert release.wait(30)
         return db
 
-    monkeypatch.setattr(deps, "_create_and_prepare_db", held_create)
+    monkeypatch.setattr(chacha_db_provider, "create_and_prepare_chacha_db", held_create)
     first = asyncio.create_task(deps.get_chacha_db_for_user_id(42, client_id="voice_assistant"))
     tasks = [first]
     try:
         assert await asyncio.to_thread(created.wait, 30)
-        event = deps._chacha_db_init_events[str(deps.DatabasePaths.get_user_base_directory(42))]
+        event = get_chacha_runtime()._init_events[str(deps.DatabasePaths.get_user_base_directory(42))]
         original_wait = event.wait
 
         def observed_wait(timeout: float | None = None) -> bool:

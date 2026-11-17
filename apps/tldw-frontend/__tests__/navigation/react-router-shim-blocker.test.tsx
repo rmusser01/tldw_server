@@ -73,6 +73,7 @@ describe("Next shim useBlocker", () => {
     mockRouterEvents.on.mockClear()
     mockRouterEvents.off.mockClear()
     mockRouterEvents.emit.mockClear()
+    window.history.replaceState({ url: "/notes", as: "/notes", options: {}, __N: true, key: "notes-key" }, "", "/notes")
     mockRouter.asPath = "/notes"
     mockRouter.pathname = "/notes"
     mockRouter.push.mockReset()
@@ -198,7 +199,8 @@ describe("Next shim useBlocker", () => {
       result.current.reset()
     })
 
-    expect(mockRouter.push).toHaveBeenCalledWith("/notes")
+    expect(mockRouter.push).not.toHaveBeenCalled()
+    expect(window.history.state).toEqual({ url: "/notes", as: "/notes", options: {}, __N: true, key: "notes-key" })
     expect(mockRouter.asPath).toBe("/notes")
     expect(result.current.state).toBe("unblocked")
   })

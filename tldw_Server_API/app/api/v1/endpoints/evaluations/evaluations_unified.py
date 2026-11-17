@@ -19,7 +19,8 @@ from fastapi.routing import APIRoute
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, User, get_auth_principal, rbac_rate_limit
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 
 # Import unified schemas
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
@@ -41,20 +42,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     ResponseQualityRequest,
     ResponseQualityResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_READ
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCallCredentials,
-    ProviderCredentialRuntime,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     DaemonCapacityError,
     await_owned_worker,
@@ -69,19 +57,11 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_section_name,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Evaluations.audit_adapter import (
-    log_evaluation_deleted,
-    log_evaluation_exported,
-)
-
-# Import unified service
-from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
-    get_unified_evaluation_service_for_user,
-)
 
 # Import additional services
 from tldw_Server_API.app.core.Evaluations.scoring import normalize_geval_metric
-from tldw_Server_API.app.core.Evaluations.user_rate_limiter import get_user_rate_limiter_for_user
+
+# Import unified service
 from tldw_Server_API.app.core.Evaluations.webhook_identity import webhook_user_id_from_user
 from tldw_Server_API.app.core.Evaluations.webhook_manager import WebhookEvent, WebhookManager
 from tldw_Server_API.app.core.exceptions import raise_detached_error
@@ -91,11 +71,17 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requir
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
 )
-from tldw_Server_API.app.core.testing import (
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import PROVIDER_APP_CONFIG_KEYS
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
 )
-from tldw_Server_API.app.core.testing import (
-    is_test_mode as _is_test_mode,
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
 )
 
 # Non-critical exceptions for defensive guards and best-effort flows
@@ -168,12 +154,8 @@ def _get_webhook_manager_for_user(user_id: int) -> WebhookManager:
     return mgr
 
 def get_db_for_user(user_id: int):
-    svc = get_unified_evaluation_service_for_user(user_id)
+    svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(user_id)
     return getattr(svc, 'db', None)
-
-
-def _is_eval_test_mode() -> bool:
-    return bool(_is_test_mode() or _is_explicit_pytest_runtime())
 
 
 def _normalize_eval_user_id(current_user: User) -> Optional[int]:
@@ -324,11 +306,11 @@ def _build_eval_credential_runtime(
     """Create one request-owned credential runtime from trusted AuthNZ scope."""
     try:
         user_id, team_ids, org_ids, trusted_base_url_override = (
-            derive_trusted_credential_scope(http_request, current_user)
+            _byok_helpers.derive_trusted_credential_scope(http_request, current_user)
         )
     except ByokResolutionError as exc:
         raise _eval_credential_http_exception(exc) from None
-    return ProviderCredentialRuntime(
+    return _provider_credential_runtime.ProviderCredentialRuntime(
         user_id=user_id,
         team_ids=team_ids,
         org_ids=org_ids,
@@ -364,6 +346,16 @@ async def _validate_provider_credentials(
         )
 
 
+def _eval_provider_name(api_name: Any) -> str:
+    """The judge provider an evaluation names, as its credential resolution reads it (OpenAI by default)."""
+    return canonical_provider_name(str(api_name or "").strip() or "openai")
+
+
+def _batch_eval_providers(items: Any) -> list[str]:
+    """Each batch item's judge provider, as ``batch_evaluate`` resolves it (a non-dict item is OpenAI's)."""
+    return [_eval_provider_name(item.get("api_name") if isinstance(item, dict) else None) for item in items or []]
+
+
 async def _resolve_and_validate_eval_provider(
     request: Union[GEvalRequest, RAGEvaluationRequest, ResponseQualityRequest],
     eval_type: str,
@@ -373,7 +365,7 @@ async def _resolve_and_validate_eval_provider(
     credential_runtime: Optional[ProviderCredentialRuntime] = None,
 ) -> tuple[str, str, ProviderCallCredentials, ProviderCredentialRuntime]:
     """Resolve one policy-enforced provider/model credential handle."""
-    provider_name = canonical_provider_name((request.api_name or "openai").strip() or "openai")
+    provider_name = _eval_provider_name(request.api_name)
     raw_api_key = getattr(request, "api_key", None)
     if raw_api_key:
         logger.debug("Ignoring per-request api_key override for provider={}", provider_name)
@@ -610,7 +602,7 @@ async def stream_embeddings_abtest_events(
     from tldw_Server_API.app.core.Streaming.streams import SSEStream
 
     identity = get_evaluation_identity(current_user)
-    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
 
     stream = SSEStream(
         # Use env-driven heartbeat defaults; standard labels for dashboards
@@ -679,7 +671,7 @@ async def delete_embeddings_abtest(
 ):
     """Cancel/cleanup an embeddings A/B test."""
     identity = get_evaluation_identity(current_user)
-    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
     if not svc.db.get_abtest(test_id, created_by=identity.created_by):
         raise HTTPException(status_code=404, detail="A/B test not found")
     # Idempotency: if prior mapping exists, return canonical response without side effects
@@ -706,7 +698,7 @@ async def delete_embeddings_abtest(
     except _EVALS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"A/B test cleanup failed for {test_id}: {exc}")
         raise HTTPException(status_code=500, detail="Failed to delete A/B test") from exc
-    log_evaluation_deleted(user_id=identity.user_scope, eval_id=test_id)
+    _audit_adapter.log_evaluation_deleted(user_id=identity.user_scope, eval_id=test_id)
     try:
         if idempotency_key:
             svc.db.record_idempotency("emb_abtest_delete", idempotency_key, test_id, identity.created_by)
@@ -743,7 +735,7 @@ async def export_embeddings_abtest(
     """Export AB test results (JSON or CSV). Admin-only."""
     enforce_heavy_evaluations_admin(principal)
     identity = get_evaluation_identity(current_user)
-    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
     if not svc.db.get_abtest(test_id, created_by=identity.created_by):
         raise HTTPException(status_code=404, detail="A/B test not found")
     rows, total = svc.db.list_abtest_results(test_id, limit=100000, offset=0, created_by=identity.created_by)
@@ -791,7 +783,7 @@ async def export_embeddings_abtest(
                 svc.db.record_idempotency("emb_abtest_export_json", idempotency_key, f"{test_id}:json", identity.created_by)
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
-        log_evaluation_exported(
+        _audit_adapter.log_evaluation_exported(
             user_id=identity.user_scope,
             eval_id=test_id,
             eval_type="embeddings_abtest",
@@ -815,7 +807,7 @@ async def export_embeddings_abtest(
             svc.db.record_idempotency("emb_abtest_export_csv", idempotency_key, f"{test_id}:csv", identity.created_by)
     except _EVALS_NONCRITICAL_EXCEPTIONS:
         pass
-    log_evaluation_exported(
+    _audit_adapter.log_evaluation_exported(
         user_id=identity.user_scope,
         eval_id=test_id,
         eval_type="embeddings_abtest",
@@ -842,7 +834,7 @@ async def get_rate_limit_status(
 ):
     """Get current rate limit status for the authenticated user"""
     try:
-        limiter = get_user_rate_limiter_for_user(current_user.id)
+        limiter = _user_rate_limiter.get_user_rate_limiter_for_user(current_user.id)
         summary = await limiter.get_usage_summary(str(current_user.id))
 
         # Convert the nested structure to flat structure expected by RateLimitStatusResponse
@@ -852,21 +844,15 @@ async def get_rate_limit_status(
             limits={
                 "evaluations_per_minute": summary.get("limits", {}).get("per_minute", {}).get("evaluations", 0),
                 "evaluations_per_day": summary.get("limits", {}).get("daily", {}).get("evaluations"),
-                "tokens_per_day": summary.get("limits", {}).get("daily", {}).get("tokens"),
-                "cost_per_day": int(summary.get("limits", {}).get("daily", {}).get("cost", 0)),
-                "cost_per_month": int(summary.get("limits", {}).get("monthly", {}).get("cost", 0))
+                "tokens_per_day": summary.get("limits", {}).get("daily", {}).get("tokens")
             },
             usage={
                 "evaluations_today": summary.get("usage", {}).get("today", {}).get("evaluations", 0),
-                "tokens_today": summary.get("usage", {}).get("today", {}).get("tokens", 0),
-                "cost_today": int(summary.get("usage", {}).get("today", {}).get("cost", 0)),
-                "cost_month": int(summary.get("usage", {}).get("month", {}).get("cost", 0))
+                "tokens_today": summary.get("usage", {}).get("today", {}).get("tokens", 0)
             },
             remaining={
                 "daily_evaluations": summary.get("remaining", {}).get("daily_evaluations"),
-                "daily_tokens": summary.get("remaining", {}).get("daily_tokens"),
-                "daily_cost": int(summary.get("remaining", {}).get("daily_cost", 0)),
-                "monthly_cost": int(summary.get("remaining", {}).get("monthly_cost", 0))
+                "daily_tokens": summary.get("remaining", {}).get("daily_tokens")
             },
             reset_at=datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         )
@@ -902,7 +888,7 @@ async def health_check():
         # Default to single-user instance for health when no auth context
         from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths as _DP
         uid = _DP.get_single_user_id()
-        svc = get_unified_evaluation_service_for_user(uid)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(uid)
         health = await svc.health_check()
         return HealthCheckResponse(**health)
     except _EVALS_NONCRITICAL_EXCEPTIONS as e:
@@ -936,7 +922,7 @@ async def get_metrics(
     """Get Prometheus metrics"""
     try:
         _ = user_id
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         metrics_summary = await svc.get_metrics_summary()
 
         # Handle failure from service so error message is never exposed
@@ -992,17 +978,20 @@ async def evaluate_geval(
 
     G-Eval evaluates summaries on fluency, consistency, relevance, and coherence.
     """
-    credential_runtime: Optional[ProviderCredentialRuntime] = None
+    credential_runtime: Optional[_provider_credential_runtime.ProviderCredentialRuntime] = None
     try:
+        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything. An
+        # over-limit user whose judge provider runs on their own key is let through unmarked (TASK-13956).
+        await enforce_llm_quota(current_user.id, provider=_eval_provider_name(request.api_name))
         # Per-user usage limits
-        limiter = get_user_rate_limiter_for_user(current_user.id)
+        limiter = _user_rate_limiter.get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
             request.source_text,
             request.summary,
             provider=getattr(request, "api_name", None),
             model=request.model,
         )
-        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:geval", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
+        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:geval", is_batch=False, tokens_requested=tokens_est)
         if not allowed:
             retry_after = meta.get("retry_after", 60)
             raise HTTPException(
@@ -1025,7 +1014,7 @@ async def evaluate_geval(
         import time as _time
         wm = _get_webhook_manager_for_user(current_user.id)
         start_event_id = f"geval_{int(_time.time())}_{webhook_user_id[:8]}"
-        if _is_eval_test_mode():
+        if _testing.is_test_context():
             await wm.send_webhook(
                 user_id=webhook_user_id,
                 event=WebhookEvent.EVALUATION_STARTED,
@@ -1045,7 +1034,7 @@ async def evaluate_geval(
                     "api_name": request.api_name
                 }
             ))
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         result = await _await_evaluation_and_mark_used(
             svc.evaluate_geval(
                 source_text=request.source_text,
@@ -1067,7 +1056,7 @@ async def evaluate_geval(
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
-                await limiter.record_actual_usage(str(current_user.id), "evals:geval", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0), reserved_tokens=tokens_est)
+                await limiter.record_actual_usage(str(current_user.id), "evals:geval", int(usage.get("total_tokens", 0)), reserved_tokens=tokens_est)
         except asyncio.CancelledError:
             raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
@@ -1117,7 +1106,7 @@ async def evaluate_geval(
                 )
 
         # Send webhook: evaluation completed (await in TEST_MODE)
-        if _is_eval_test_mode():
+        if _testing.is_test_context():
             await wm.send_webhook(
                 user_id=webhook_user_id,
                 event=WebhookEvent.EVALUATION_COMPLETED,
@@ -1207,10 +1196,13 @@ async def evaluate_rag(
 
     Evaluates relevance, faithfulness, answer similarity, and context precision.
     """
-    credential_runtime: Optional[ProviderCredentialRuntime] = None
+    credential_runtime: Optional[_provider_credential_runtime.ProviderCredentialRuntime] = None
     try:
+        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything. An
+        # over-limit user whose judge provider runs on their own key is let through unmarked (TASK-13956).
+        await enforce_llm_quota(current_user.id, provider=_eval_provider_name(request.api_name))
         # Per-user usage limits
-        limiter = get_user_rate_limiter_for_user(current_user.id)
+        limiter = _user_rate_limiter.get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
             request.query,
             "\n".join(request.retrieved_contexts or []),
@@ -1219,7 +1211,7 @@ async def evaluate_rag(
             provider=getattr(request, "api_name", None),
             model=request.model,
         )
-        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:rag", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
+        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:rag", is_batch=False, tokens_requested=tokens_est)
         if not allowed:
             retry_after = meta.get("retry_after", 60)
             raise HTTPException(
@@ -1242,7 +1234,7 @@ async def evaluate_rag(
         wm = _get_webhook_manager_for_user(current_user.id)
         import time as _time
         start_event_id = f"rag_{int(_time.time())}_{webhook_user_id[:8]}"
-        if _is_eval_test_mode():
+        if _testing.is_test_context():
             await wm.send_webhook(
                 user_id=webhook_user_id,
                 event=WebhookEvent.EVALUATION_STARTED,
@@ -1262,7 +1254,7 @@ async def evaluate_rag(
                     "api_name": request.api_name
                 }
             ))
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         result = await _await_evaluation_and_mark_used(
             svc.evaluate_rag(
                 query=request.query,
@@ -1285,7 +1277,7 @@ async def evaluate_rag(
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
-                await limiter.record_actual_usage(str(current_user.id), "evals:rag", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0), reserved_tokens=tokens_est)
+                await limiter.record_actual_usage(str(current_user.id), "evals:rag", int(usage.get("total_tokens", 0)), reserved_tokens=tokens_est)
         except asyncio.CancelledError:
             raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
@@ -1322,7 +1314,7 @@ async def evaluate_rag(
                 )
 
         # Send webhook: evaluation completed (await in TEST_MODE)
-        if _is_eval_test_mode():
+        if _testing.is_test_context():
             await wm.send_webhook(
                 user_id=webhook_user_id,
                 event=WebhookEvent.EVALUATION_COMPLETED,
@@ -1403,10 +1395,13 @@ async def evaluate_response_quality(
 
     Checks relevance, completeness, accuracy, and format compliance.
     """
-    credential_runtime: Optional[ProviderCredentialRuntime] = None
+    credential_runtime: Optional[_provider_credential_runtime.ProviderCredentialRuntime] = None
     try:
+        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything. An
+        # over-limit user whose judge provider runs on their own key is let through unmarked (TASK-13956).
+        await enforce_llm_quota(current_user.id, provider=_eval_provider_name(request.api_name))
         # Per-user usage limits
-        limiter = get_user_rate_limiter_for_user(current_user.id)
+        limiter = _user_rate_limiter.get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
             request.prompt,
             request.response,
@@ -1414,7 +1409,7 @@ async def evaluate_response_quality(
             provider=getattr(request, "api_name", None),
             model=request.model,
         )
-        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:response_quality", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
+        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:response_quality", is_batch=False, tokens_requested=tokens_est)
         if not allowed:
             retry_after = meta.get("retry_after", 60)
             raise HTTPException(
@@ -1437,7 +1432,7 @@ async def evaluate_response_quality(
         wm = _get_webhook_manager_for_user(current_user.id)
         import time as _time
         start_event_id = f"response_quality_{int(_time.time())}_{webhook_user_id[:8]}"
-        if _is_eval_test_mode():
+        if _testing.is_test_context():
             await wm.send_webhook(
                 user_id=webhook_user_id,
                 event=WebhookEvent.EVALUATION_STARTED,
@@ -1458,7 +1453,7 @@ async def evaluate_response_quality(
                 }
             ))
 
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         result = await _await_evaluation_and_mark_used(
             svc.evaluate_response_quality(
                 prompt=request.prompt,
@@ -1480,7 +1475,7 @@ async def evaluate_response_quality(
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
-                await limiter.record_actual_usage(str(current_user.id), "evals:response_quality", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0), reserved_tokens=tokens_est)
+                await limiter.record_actual_usage(str(current_user.id), "evals:response_quality", int(usage.get("total_tokens", 0)), reserved_tokens=tokens_est)
         except asyncio.CancelledError:
             raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
@@ -1517,7 +1512,7 @@ async def evaluate_response_quality(
                 format_compliance = None
 
         # Send webhook: evaluation completed (await in TEST_MODE)
-        if _is_eval_test_mode():
+        if _testing.is_test_context():
             await wm.send_webhook(
                 user_id=webhook_user_id,
                 event=WebhookEvent.EVALUATION_COMPLETED,
@@ -1603,7 +1598,7 @@ async def evaluate_propositions_endpoint(
     """
     try:
         # Per-user usage limits (approximate with total text tokens)
-        limiter = get_user_rate_limiter_for_user(current_user.id)
+        limiter = _user_rate_limiter.get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
             "\n".join(request.extracted or []),
             "\n".join(request.reference or []),
@@ -1613,7 +1608,6 @@ async def evaluate_propositions_endpoint(
             endpoint="evals:propositions",
             is_batch=False,
             tokens_requested=tokens_est,
-            estimated_cost=0.0,
         )
         if not allowed:
             retry_after = meta.get("retry_after", 60)
@@ -1623,7 +1617,7 @@ async def evaluate_propositions_endpoint(
                 headers={"Retry-After": str(retry_after)},
             )
 
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
         result = await svc.evaluate_propositions(
             extracted=request.extracted,
@@ -1688,11 +1682,14 @@ async def batch_evaluate(
 
     Supports running multiple evaluation types with configurable parallelism.
     """
-    credential_runtime: Optional[ProviderCredentialRuntime] = None
+    credential_runtime: Optional[_provider_credential_runtime.ProviderCredentialRuntime] = None
     active_batch_tasks: set[asyncio.Task[Any]] = set()
     try:
         start_time = time.time()
-        service = get_unified_evaluation_service_for_user(current_user.id)
+        service = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
+        if request.evaluation_type in {"geval", "rag", "response_quality"}:
+            # Usage quotas (§4a): admitted past a limit only when every item's provider is the user's own key.
+            await enforce_llm_quota(current_user.id, provider=_batch_eval_providers(request.items))
         if request.evaluation_type in {"geval", "rag", "response_quality"}:
             credential_runtime = _build_eval_credential_runtime(
                 current_user=current_user,
@@ -1724,7 +1721,7 @@ async def batch_evaluate(
             return provider_name, model_name, handle
 
         # Per-user usage limits (aggregate all items)
-        limiter = get_user_rate_limiter_for_user(current_user.id)
+        limiter = _user_rate_limiter.get_user_rate_limiter_for_user(current_user.id)
         tokens_total = 0
         etype = (request.evaluation_type or "").lower()
         for item in request.items or []:
@@ -1780,7 +1777,6 @@ async def batch_evaluate(
             endpoint=f"evals:batch:{etype}",
             is_batch=True,
             tokens_requested=tokens_total,
-            estimated_cost=0.0,
             evaluations_requested=max(1, len(request.items or [])),
         )
         if not allowed:
@@ -2229,6 +2225,12 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     OCREvaluationRequest,
     OCREvaluationResponse,
 )
+import tldw_Server_API.app.core.Evaluations.audit_adapter as _audit_adapter
+import tldw_Server_API.app.core.Evaluations.unified_evaluation_service as _unified_evaluation_service
+import tldw_Server_API.app.core.Evaluations.user_rate_limiter as _user_rate_limiter
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
+import tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime as _provider_credential_runtime
+import tldw_Server_API.app.core.testing as _testing
 
 
 @router.post("/ocr", response_model=OCREvaluationResponse, dependencies=[Depends(check_evaluation_rate_limit)])
@@ -2245,7 +2247,7 @@ async def evaluate_ocr_endpoint(
     """
     try:
         # Per-user usage limits (approximate by total text length)
-        limiter = get_user_rate_limiter_for_user(current_user.id)
+        limiter = _user_rate_limiter.get_user_rate_limiter_for_user(current_user.id)
         texts = []
         try:
             for it in request.items or []:
@@ -2256,12 +2258,12 @@ async def evaluate_ocr_endpoint(
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         tokens_est = _estimate_tokens_from_texts("\n".join(texts))
-        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:ocr", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
+        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:ocr", is_batch=False, tokens_requested=tokens_est)
         if not allowed:
             retry_after = meta.get("retry_after", 60)
             raise HTTPException(status_code=429, detail=meta.get("error", "Rate limit exceeded"), headers={"Retry-After": str(retry_after)})
 
-        service = get_unified_evaluation_service_for_user(current_user.id)
+        service = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
         result = await service.evaluate_ocr(
             items=[i.model_dump() for i in request.items],
@@ -2273,7 +2275,7 @@ async def evaluate_ocr_endpoint(
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
-                await limiter.record_actual_usage(str(current_user.id), "evals:ocr", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0), reserved_tokens=tokens_est)
+                await limiter.record_actual_usage(str(current_user.id), "evals:ocr", int(usage.get("total_tokens", 0)), reserved_tokens=tokens_est)
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         # Apply headers
@@ -2314,7 +2316,7 @@ async def evaluate_ocr_pdf_endpoint(
     """Evaluate OCR by running OCR on uploaded PDFs and comparing to provided ground-truths."""
     try:
         # Per-user usage limits (approximate by file sizes if available)
-        limiter = get_user_rate_limiter_for_user(current_user.id)
+        limiter = _user_rate_limiter.get_user_rate_limiter_for_user(current_user.id)
         size_est = 0
         try:
             for f in files:
@@ -2324,7 +2326,7 @@ async def evaluate_ocr_pdf_endpoint(
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         tokens_est = max(0, size_est // 4)
-        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:ocr_pdf", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
+        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:ocr_pdf", is_batch=False, tokens_requested=tokens_est)
         if not allowed:
             retry_after = meta.get("retry_after", 60)
             raise HTTPException(status_code=429, detail=meta.get("error", "Rate limit exceeded"), headers={"Retry-After": str(retry_after)})
@@ -2379,7 +2381,7 @@ async def evaluate_ocr_pdf_endpoint(
             "ocr_prompt_preset": ocr_prompt_preset,
         }
 
-        service = get_unified_evaluation_service_for_user(current_user.id)
+        service = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
         thresholds = None
         if thresholds_json:
@@ -2400,7 +2402,7 @@ async def evaluate_ocr_pdf_endpoint(
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
-                await limiter.record_actual_usage(str(current_user.id), "evals:ocr_pdf", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0), reserved_tokens=tokens_est)
+                await limiter.record_actual_usage(str(current_user.id), "evals:ocr_pdf", int(usage.get("total_tokens", 0)), reserved_tokens=tokens_est)
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         try:
@@ -2434,7 +2436,7 @@ async def get_evaluation_history(
     Supports filtering by date range, evaluation type, and pagination.
     """
     try:
-        service = get_unified_evaluation_service_for_user(current_user.id)
+        service = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
 
         def _user_id_variants(raw: Optional[str]) -> set[str]:

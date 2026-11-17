@@ -115,33 +115,39 @@ vi.mock("@/services/background-proxy", () => ({
   bgRequest: mocks.bgRequest
 }))
 
-vi.mock("@tanstack/react-query", () => {
-  const React = require("react") as typeof import("react")
+vi.mock("@tanstack/react-query", async () => {
+  const React = await import("react");
   return {
     keepPreviousData: {},
-    useQuery: ({ queryFn, queryKey }: { queryFn: () => Promise<unknown>; queryKey: unknown[] }) => {
-      const [data, setData] = React.useState<unknown>([])
-      const [isFetching, setIsFetching] = React.useState(false)
-      const queryFnRef = React.useRef(queryFn)
-      queryFnRef.current = queryFn
-      const queryHash = JSON.stringify(queryKey)
+    useQuery: ({
+      queryFn,
+      queryKey,
+    }: {
+      queryFn: () => Promise<unknown>;
+      queryKey: unknown[];
+    }) => {
+      const [data, setData] = React.useState<unknown>([]);
+      const [isFetching, setIsFetching] = React.useState(false);
+      const queryFnRef = React.useRef(queryFn);
+      queryFnRef.current = queryFn;
+      const queryHash = JSON.stringify(queryKey);
 
       const run = React.useCallback(async () => {
-        setIsFetching(true)
-        const result = await queryFnRef.current()
-        setData(result)
-        setIsFetching(false)
-        return { data: result }
-      }, [])
+        setIsFetching(true);
+        const result = await queryFnRef.current();
+        setData(result);
+        setIsFetching(false);
+        return { data: result };
+      }, []);
 
       React.useEffect(() => {
-        void run()
-      }, [run, queryHash])
+        void run();
+      }, [run, queryHash]);
 
-      return { data, isFetching, refetch: run }
-    }
-  }
-})
+      return { data, isFetching, refetch: run };
+    },
+  };
+});
 
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({ count }: { count: number }) => ({
@@ -171,20 +177,22 @@ vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: () => [true, mocks.setHelpDismissed, { isLoading: false }]
 }))
 
-vi.mock("@/hooks/useSetting", () => {
-  const React = require("react") as typeof import("react")
+vi.mock("@/hooks/useSetting", async () => {
+  const React = await import("react");
   return {
     useSetting: (setting: { defaultValue: unknown }) => {
-      const [value, setValue] = React.useState(setting.defaultValue)
+      const [value, setValue] = React.useState(setting.defaultValue);
       const setter = async (next: unknown | ((prev: unknown) => unknown)) => {
         setValue((prev: unknown) =>
-          typeof next === "function" ? (next as (prev: unknown) => unknown)(prev) : next
-        )
-      }
-      return [value, setter, { isLoading: false }] as const
-    }
-  }
-})
+          typeof next === "function"
+            ? (next as (prev: unknown) => unknown)(prev)
+            : next,
+        );
+      };
+      return [value, setter, { isLoading: false }] as const;
+    },
+  };
+});
 
 vi.mock("@/services/settings/registry", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/settings/registry")>()

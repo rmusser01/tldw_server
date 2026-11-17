@@ -71,7 +71,7 @@ const createMessageOptionState = () => ({
 })
 
 const messageOptionOverrides = vi.hoisted(() => ({
-  value: {} as Record<string, unknown>
+  value: {} as Record<string, unknown>, base: {} as Record<string, unknown>
 }))
 
 let capturedModeLauncherProps: { voiceChatUnavailableReason?: string | null } | null =
@@ -101,7 +101,7 @@ vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: [] }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), getQueryState: vi.fn(() => undefined) }),
   useMutation: ({
     mutationFn,
     onSuccess,
@@ -269,7 +269,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("~/hooks/useMessageOption", () => ({
   useMessageOption: () => ({
-    ...createMessageOptionState(),
+    ...messageOptionOverrides.base,
     ...messageOptionOverrides.value
   })
 }))
@@ -432,6 +432,7 @@ vi.mock("@/hooks/playground", () => ({
   }),
   useImageBackend: () => ({}),
   useActionBarVisibility: () => ({
+    composerTextareaExpanded: false,
     handlers: {
       onMouseEnter: vi.fn(),
       onMouseLeave: vi.fn(),
@@ -514,13 +515,15 @@ vi.mock("@/store/model", () => ({
     })
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      setRagMediaIds: vi.fn(),
-      setRagPinnedResults: vi.fn()
-    })
-}))
+vi.mock("@/store/option", async () => {
+  const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+  return { ...actual, useStoreMessageOption: Object.assign(
+    (selector: (state: ReturnType<typeof actual.useStoreMessageOption.getState>) => unknown, equality?: (left: unknown, right: unknown) => boolean) =>
+      actual.useStoreMessageOption(state => selector({ ...state, ...messageOptionOverrides.base, ...messageOptionOverrides.value }), equality),
+    actual.useStoreMessageOption,
+    { getState: () => ({ ...actual.useStoreMessageOption.getState(), ...messageOptionOverrides.base, ...messageOptionOverrides.value }) }
+  ) }
+})
 
 vi.mock("@/store/chat-surface-coordinator", () => ({
   shouldEnableOptionalResource: () => false,
@@ -624,7 +627,8 @@ vi.mock("../hooks", () => ({
     form: {
       values: { message: "" },
       errors: { message: null },
-      getInputProps: () => ({})
+      getInputProps: () => ({}),
+      getRevision: () => 0
     },
     typing: false,
     setMessageValue: vi.fn(),
@@ -647,6 +651,16 @@ vi.mock("../hooks", () => ({
     onComposerRenderProfile: vi.fn(),
     wrapComposerProfile: (_label: string, node: React.ReactNode) => node,
     draftSaved: false,
+    draftReady: false,
+    creationRecovery: { active: null, unavailable: false },
+    captureCompletionGuard: () => {
+      const source = messageOptionOverrides.value
+      return () => source === messageOptionOverrides.value
+    },
+    captureStopGuard: () => {
+      const source = messageOptionOverrides.value
+      return () => source === messageOptionOverrides.value
+    },
     selectedQuickPrompt: null,
     setSelectedQuickPrompt: vi.fn()
   }),
@@ -833,6 +847,7 @@ import { PlaygroundForm } from "../PlaygroundForm"
 
 describe("PlaygroundForm voice visibility", () => {
   beforeEach(() => {
+    messageOptionOverrides.base = createMessageOptionState()
     messageOptionOverrides.value = {}
     navigateMock.mockClear()
   })

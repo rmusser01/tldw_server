@@ -1,3 +1,6 @@
+import { captureNormalChatPreparation, runChatModeWithHistory, type HistoryChatModeParams } from "./normalChatMode"
+import type { ActorSceneSend } from "@/hooks/chat/actor-scene-source"
+import type { ActorSceneRead } from "@/services/actor-settings"
 import { type ChatHistory, type Message, type ToolChoice } from "~/store/option"
 import { generateHistory } from "@/utils/generate-history"
 import { humanMessageFormatter } from "@/utils/human-message"
@@ -9,7 +12,6 @@ import { maybeInjectActorMessage } from "@/utils/actor"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
   getRequiredServicePrompt,
-  runChatPipeline,
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
@@ -20,7 +22,7 @@ import {
   type ServicePromptSnapshot
 } from "@/services/service-prompts"
 
-type TabChatModeParams = {
+type TabChatModeParams = HistoryChatModeParams & {
   selectedModel: string
   useOCR: boolean
   selectedSystemPrompt: string
@@ -37,6 +39,8 @@ type TabChatModeParams = {
   historyId: string | null
   setHistoryId: (id: string) => void
   systemPromptAppendix?: string
+  actorSceneSend?: ActorSceneSend
+  actorScene?: ActorSceneRead
   actorSettings?: ActorSettings
   clusterId?: string
   userMessageType?: string
@@ -83,11 +87,13 @@ const tabChatModeDefinition: ChatModeDefinition<TabChatModeParams> = {
     parentMessageId: ctx.resolvedAssistantParentMessageId ?? null
   }),
   preparePrompt: async (ctx) => {
+    ctx.assertPreparationCurrent?.()
     const answerPrompt = getRequiredServicePrompt(
       ctx.servicePromptSnapshot,
       "chat.rag.answer"
     )
     const context = await getTabContents(ctx.documents)
+    ctx.assertPreparationCurrent?.()
     const renderedSystemPrompt = renderServicePromptPart(
       answerPrompt.definition,
       "template",
@@ -110,6 +116,7 @@ const tabChatModeDefinition: ChatModeDefinition<TabChatModeParams> = {
       useOCR: ctx.useOCR
     })
 
+    ctx.assertPreparationCurrent?.()
     let applicationChatHistory = generateHistory(
       ctx.historyForModel ?? ctx.history,
       ctx.selectedModel
@@ -122,6 +129,7 @@ const tabChatModeDefinition: ChatModeDefinition<TabChatModeParams> = {
       templatesActive
     )
 
+    ctx.assertPreparationCurrent?.()
     return {
       chatHistory: applicationChatHistory,
       humanMessage,
@@ -142,24 +150,27 @@ export const tabChatMode = async (
   params: Omit<TabChatModeParams, "documents">
 ): Promise<ChatSubmitResult> => {
   console.log("Using tabChatMode")
+  const historyPreparation = params.historySelection
+    ? params.historyPreparation ?? captureNormalChatPreparation(params)
+    : undefined
   const ownsServicePromptSnapshot = !params.servicePromptSnapshot
   const servicePromptSnapshot =
     params.servicePromptSnapshot ??
-    (await loadServicePromptSnapshot(["chat.rag.answer"], { signal }))
-  const executionSignal = servicePromptSnapshot.scopeSignal
+    (await loadServicePromptSnapshot(["chat.rag.answer"], { signal, requestScope: params.actorSceneSend?.requestScope }))
   const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal
   try {
     getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
-    return await runChatPipeline(
+    return await runChatModeWithHistory(
       tabChatModeDefinition,
       message,
       image,
       isRegenerate,
       messages,
       history,
-      executionSignal,
+      signal,
       {
         ...params,
+        historyPreparation,
         documents,
         servicePromptSnapshot,
         discardCurrentTurnOnAbort: () =>

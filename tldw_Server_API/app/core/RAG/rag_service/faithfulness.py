@@ -17,7 +17,7 @@ Ported from RAGnarok-AI's faithfulness evaluator, adapted for tldw_server2.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from loguru import logger
 
@@ -31,6 +31,12 @@ from .rag_protocols import LLMProtocol
 
 # Re-export for backwards compatibility
 LLMCallable = LLMProtocol
+
+
+class _FaithfulnessLLM(Protocol):
+    """The evaluator only sends a prompt to its LLM."""
+
+    async def generate(self, prompt: str) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -134,7 +140,7 @@ class FaithfulnessEvaluator:
 
     def __init__(
         self,
-        llm: LLMCallable,
+        llm: _FaithfulnessLLM,
         max_claims: int = 25,
         propagate_errors: bool = False,
     ) -> None:

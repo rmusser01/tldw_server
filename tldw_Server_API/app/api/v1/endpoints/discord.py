@@ -9,9 +9,9 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequireRole, User
 
-from tldw_Server_API.app.api.v1.endpoints._chatops import ingress as _chatops_ingress
-from tldw_Server_API.app.api.v1.endpoints._chatops import policy as _chatops_policy
-from tldw_Server_API.app.api.v1.endpoints.discord_oauth_admin import (
+from tldw_Server_API.app.api.v1.utils.chatops import ingress as _chatops_ingress
+from tldw_Server_API.app.api.v1.utils.chatops import policy as _chatops_policy
+from tldw_Server_API.app.api.v1.utils.chatops.discord_oauth_admin import (
     discord_admin_delete_installation_impl,
     discord_admin_get_policy_impl,
     discord_admin_list_installations_impl,
@@ -20,7 +20,7 @@ from tldw_Server_API.app.api.v1.endpoints.discord_oauth_admin import (
     discord_oauth_callback_impl,
     discord_oauth_start_impl,
 )
-from tldw_Server_API.app.api.v1.endpoints.discord_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.discord_support import (
     _INTERACTION_RECEIPTS,
     _RATE_LIMITER,
     _coerce_nonempty_string,

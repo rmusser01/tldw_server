@@ -145,6 +145,15 @@ def test_reading_digest_suggestion_scoring():
     assert "favorite" in reasons
 
 
+def test_reading_digest_suggestion_tag_overlap_compares_tag_identities():
+    now = datetime(2026, 1, 20, 8, 0, tzinfo=timezone.utc)
+    row = _make_content_item_row(1, status="saved", tags=["Straße"], favorite=False, updated_at=now.isoformat())
+
+    _score, reasons = _score_suggestion_candidate(row, {"strasse"}, now)
+
+    assert "tag_overlap:1" in reasons
+
+
 def test_reading_digest_suggestions_flags_accept_y():
     cfg = _normalize_suggestions_config(
         {

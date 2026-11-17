@@ -8,6 +8,7 @@ import { MentionsDropdown } from "./MentionsDropdown"
 
 export type ComposerTextareaProps = {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  attachTextarea?: React.RefCallback<HTMLTextAreaElement>
   value: string
   displayValue: string
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
@@ -25,7 +26,6 @@ export type ComposerTextareaProps = {
   isMobile: boolean
   isConnectionReady: boolean
   isCollapsed: boolean
-  ariaExpanded: boolean
   compactWhenInactive?: boolean
   rows?: number
   // Form bindings
@@ -51,6 +51,7 @@ export type ComposerTextareaProps = {
 
 export const ComposerTextarea = React.memo(function ComposerTextarea({
   textareaRef,
+  attachTextarea,
   value,
   displayValue,
   onChange,
@@ -65,9 +66,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
   placeholder,
   isProMode,
   isMobile,
-  isConnectionReady,
   isCollapsed,
-  ariaExpanded,
   compactWhenInactive = false,
   rows = 1,
   formInputProps,
@@ -98,7 +97,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         : "44px"
 
   return (
-    <div className="relative rounded-2xl border border-border/70 bg-surface/80 px-1 py-1.5 transition focus-within:border-focus/60 focus-within:ring-2 focus-within:ring-focus/30">
+    <div className="relative min-w-0 px-1 pb-2 pt-1">
       <SlashCommandMenu
         open={showSlashMenu}
         commands={slashCommands}
@@ -106,7 +105,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         onActiveIndexChange={onSlashActiveIndexChange}
         onSelect={onSlashSelect}
         emptyLabel={slashEmptyLabel}
-        className="absolute bottom-full left-3 right-3 mb-2"
+        className="relative mx-3 mb-2"
       />
       <textarea
         id="textarea-message"
@@ -123,12 +122,8 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
           }
         }}
         onFocus={onFocus}
-        ref={textareaRef}
-        className={`w-full resize-none bg-transparent text-base leading-6 text-text placeholder:text-text-muted/80 focus-within:outline-none focus:ring-0 focus-visible:ring-0 ring-0 border-0 ${
-          !isConnectionReady
-            ? "cursor-not-allowed text-text-muted placeholder:text-text-subtle"
-            : ""
-        } ${isProMode ? "px-3 py-2.5" : "px-3 py-2"}`}
+        ref={attachTextarea ?? textareaRef}
+        className={`w-full resize-none bg-transparent text-base leading-6 text-text placeholder:text-text-muted/80 focus-within:outline-none focus:ring-0 focus-visible:ring-0 ring-0 border-0 ${isProMode ? "px-3 py-2.5" : "px-3 py-2"}`}
         onPaste={(e) => {
           try {
             onPaste(e)
@@ -136,13 +131,13 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
             console.error("[ComposerTextarea] onPaste error:", err)
           }
         }}
-        aria-expanded={ariaExpanded}
         rows={rows}
         style={{
           minHeight
         }}
         tabIndex={0}
         placeholder={placeholder}
+        aria-label={t("sidepanel:composer.messageAriaLabel", "Message input")}
         {...formInputProps}
         value={displayValue}
         onChange={onChange}
@@ -162,7 +157,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
       {/* Draft saved indicator */}
       {draftSaved && (
         <span
-          className="absolute bottom-1 right-2 text-label text-text-subtle transition-opacity pointer-events-none"
+          className="absolute bottom-1 right-2 text-label text-text-muted transition-opacity pointer-events-none"
           role="status"
           aria-live="polite"
         >

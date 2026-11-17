@@ -200,7 +200,15 @@ class TestChatbookIntegration:
         success, message, details = result
         assert success is True
         assert message == "Successfully imported 1/1 items"
-        assert details == {"imported_items": {"note": 1}, "warnings": []}
+        assert details == {
+            "imported_items": {"note": 1},
+            "warnings": [],
+            "total_items": 1,
+            "processed_items": 1,
+            "successful_items": 1,
+            "failed_items": 0,
+            "skipped_items": 0,
+        }
         imported_notes = service.db.list_notes(limit=10, offset=0)
         assert any(note["title"] == "Imported Note" for note in imported_notes)
 
@@ -349,7 +357,15 @@ class TestChatbookIntegration:
         import_success, import_message, details = import_result
         assert import_success is True
         assert import_message == "Successfully imported 1/1 items"
-        assert details == {"imported_items": {"note": 1}, "warnings": []}
+        assert details == {
+            "imported_items": {"note": 1},
+            "warnings": [],
+            "total_items": 1,
+            "processed_items": 1,
+            "successful_items": 1,
+            "failed_items": 0,
+            "skipped_items": 0,
+        }
 
     @pytest.mark.asyncio
     async def test_async_export_job(self, service):
@@ -384,7 +400,15 @@ class TestChatbookIntegration:
         )
         assert result1[0] is True
         assert result1[1] == "Successfully imported 1/1 items"
-        assert result1[2] == {"imported_items": {"note": 1}, "warnings": []}
+        assert result1[2] == {
+            "imported_items": {"note": 1},
+            "warnings": [],
+            "total_items": 1,
+            "processed_items": 1,
+            "successful_items": 1,
+            "failed_items": 0,
+            "skipped_items": 0,
+        }
 
         result2 = await service.import_chatbook(
             file_path=sample_chatbook_file,
@@ -393,7 +417,15 @@ class TestChatbookIntegration:
 
         assert result2[0] is True
         assert result2[1] == "Import completed: All 1 items were skipped"
-        assert result2[2] == {"imported_items": {}, "warnings": []}
+        assert result2[2] == {
+            "imported_items": {},
+            "warnings": [],
+            "total_items": 1,
+            "processed_items": 1,
+            "successful_items": 0,
+            "failed_items": 0,
+            "skipped_items": 1,
+        }
 
     def test_cancel_export_job(self, service):
         """Test cancelling an export job."""

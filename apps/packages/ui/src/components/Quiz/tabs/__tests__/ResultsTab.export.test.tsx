@@ -146,10 +146,10 @@ describe("ResultsTab CSV export", () => {
       isLoading: false,
       isFetching: false
     } as ReturnType<typeof useAttemptRemediationConversionsQuery>)
-    vi.mocked(useConvertAttemptRemediationQuestionsMutation).mockReturnValue({
+    vi.mocked(useConvertAttemptRemediationQuestionsMutation, { partial: true }).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false
-    } as ReturnType<typeof useConvertAttemptRemediationQuestionsMutation>)
+    })
     vi.mocked(useGenerateRemediationQuizMutation).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false

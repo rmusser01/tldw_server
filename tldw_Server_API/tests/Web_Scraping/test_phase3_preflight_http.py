@@ -1273,10 +1273,11 @@ async def test_public_http_probe_bounds_raw_body_and_closes_owned_client(
     import httpx
 
     from tldw_Server_API.app.core.Security.egress import public_url_policy_scope
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article_models
 
     module = _adapter_module()
     assert module is not None
-    monkeypatch.setattr(module, "_PUBLIC_CAPTURE_MAX_PROBE_BYTES", 5, raising=False)
+    monkeypatch.setattr(article_models, "DEFAULT_MAX_ARTICLE_BYTES", 5)
     seen: list[bytes] = []
     accept_encoding: list[str | None] = []
 

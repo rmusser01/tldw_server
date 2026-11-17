@@ -18,7 +18,7 @@
 import json
 import os
 import threading
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
 import numpy as np
@@ -40,6 +40,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     raise_for_planned_stt_sentinel,
     require_local_execution_route,
     validate_stt_loaded_runtime,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
+    is_explicit_local_model_path as _is_explicit_local_model_path,
 )
 
 try:
@@ -581,15 +584,6 @@ def _config_declares_parakeet_tdt(model_dir: Path) -> bool:
     except (OSError, TypeError, ValueError):
         return False
     return isinstance(config, dict) and config.get("model_type") == "nemo-conformer-tdt"
-
-
-def _is_explicit_local_model_path(model_path: str) -> bool:
-    """Recognize unambiguous local paths without requiring them to exist."""
-    return bool(
-        Path(model_path).expanduser().is_absolute()
-        or PureWindowsPath(model_path).is_absolute()
-        or model_path.startswith(("./", "../", ".\\", "..\\", "~/", "~\\"))
-    )
 
 
 def _load_parakeet_features_size(config_path: Path, model_dir: Path) -> int | None:

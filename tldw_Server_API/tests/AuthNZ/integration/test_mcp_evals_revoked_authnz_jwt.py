@@ -108,3 +108,40 @@ async def test_revoked_authnz_jwt_rejected_for_evaluations(isolated_test_environ
         await verify_api_key(credentials=creds, request=request)
 
     assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_authnz_jwt_accepted_then_revoked_rejected_for_workflows_ws(isolated_test_environment, tmp_path):
+    """TASK-13950.7 AC#5 on Postgres: the workflows WebSocket used the MCP JWT manager,
+    so it refused every AuthNZ token and never consulted the blacklist."""
+    from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
+    from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
+
+    client, _db_name = isolated_test_environment
+    token = _register_and_login(client, "wf_revoke_ws_user", "Str0ngP@ssw0rd!")
+    claims = get_jwt_service().decode_access_token(token)
+    db = WorkflowsDatabase(str(tmp_path / "workflows.db"))
+    db.create_run(
+        run_id="wf-revoke",
+        tenant_id="default",
+        user_id=str(claims.get("user_id") or claims["sub"]),
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "wf-revoke", "version": 1, "steps": []},
+    )
+    client.app.dependency_overrides[wf_mod._get_db] = lambda: db
+    url, headers = "/api/v1/workflows/ws?run_id=wf-revoke", {"Authorization": f"Bearer {token}"}
+    try:
+        with client.websocket_connect(url, headers=headers) as ws:
+            assert ws.receive_json()["type"] == "snapshot"
+
+        await _revoke_access_token(token)
+
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(url, headers=headers):
+                pass
+        assert exc_info.value.code == 4401
+    finally:
+        client.app.dependency_overrides.pop(wf_mod._get_db, None)
+        db.close()

@@ -28,6 +28,40 @@ class HistorySelectionError(ValueError):
         return self.code
 
 
+# Why a saved-reply Regenerate or Continue was refused. The 409 body carries it
+# as ``reason`` next to ``unsupported_history_regeneration`` or
+# ``unsupported_history_continuation``, so the client can withdraw exactly the
+# actions that cannot run instead of guessing from the code:
+#   "question": the saved question can't be reused, so Regenerate and Continue
+#               are both refused;
+#   "reply":    only this reply has no text to continue; Regenerate still runs;
+#   "request":  the request itself is not a valid reply action (for example
+#               tools sent with Continue); the saved question and reply may be fine.
+REPLY_ACTION_REFUSED_QUESTION = "question"
+REPLY_ACTION_REFUSED_REPLY = "reply"
+REPLY_ACTION_REFUSED_REQUEST = "request"
+
+
+def reply_action_refusal(code: str, reason: str) -> HistorySelectionError:
+    """Return a saved-reply action refusal that names what was refused."""
+    return HistorySelectionError(code, details={"reason": reason})
+
+
+class HistoryEditTargetChangedError(HistorySelectionError):
+    """The original excluded Edit target changed; no input was admitted."""
+
+    def __init__(self, *, conversation_id: str, message_id: str, message_revision: str, selection_digest: str) -> None:
+        super().__init__(
+            "history_edit_target_changed",
+            details={
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+                "message_revision": message_revision,
+                "selection_digest": selection_digest,
+            },
+        )
+
+
 class HistoryBranchChangedError(HistorySelectionError):
     """A "must extend the latest message" admission found the selected tip already continued.
 
@@ -72,7 +106,7 @@ def history_branch_leaves(
     parents = {row["id"]: row.get("parent_id") for row in nodes}
     if interpretation_status.get("kind") == "legacy_linear_v1":
         path = tuple(interpretation_status.get("ordered_path_ids") or ())
-        parents.update(zip(path, (None, *path[:-1]), strict=True))
+        parents.update(zip(path, (None, *path)[:-1], strict=True))
     children: dict[str | None, list[str]] = {}
     for row in nodes:
         children.setdefault(parents[row["id"]], []).append(row["id"])
@@ -355,7 +389,6 @@ def resolve_legacy_projection(
     base = path[: positions[current_id] + 1] if current_id is not None else []
     resolved = base + list(reversed(descendants))
     return resolved if cursor["kind"] == "after_message" else resolved[:-1]
-
 
 
 def canonical_selection_tuple(selection: Mapping[str, Any]) -> list[Any]:

@@ -1,6 +1,31 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu"
+import { openModelSelector } from "@/utils/model-selector-events"
+
+/**
+ * A parsed composer submission. Resolving one never runs a command: the
+ * composer resolves the draft on every keystroke (raw request preview,
+ * role-play checks), so commands run only through `executeSlashCommand`
+ * when the user actually submits.
+ */
+export type SlashSubmissionIntent = {
+  handled: boolean
+  message: string
+  imageBackendOverride: string | undefined
+  isImageCommand: boolean
+  invalidImageCommand: boolean
+  imageCommandMissingProvider: boolean
+  /** The command a submitted `/command` draft asks to run, if any. */
+  slashCommand?: SlashCommandItem
+}
+
+/** Run the command a submitted draft resolved to. Call only on submit. */
+export const executeSlashCommand = (
+  intent: { slashCommand?: SlashCommandItem } | null | undefined
+) => {
+  intent?.slashCommand?.action?.()
+}
 
 export type UseSlashCommandsParams = {
   chatMode: string
@@ -10,7 +35,6 @@ export type UseSlashCommandsParams = {
   handleImageUpload: () => void
   imageBackendDefaultTrimmed: string
   imageBackendLabel: string
-  setOpenModelSettings: (open: boolean) => void
   currentMessage: string
 }
 
@@ -22,7 +46,6 @@ export function useSlashCommands({
   handleImageUpload,
   imageBackendDefaultTrimmed,
   imageBackendLabel,
-  setOpenModelSettings,
   currentMessage
 }: UseSlashCommandsParams) {
   const { t } = useTranslation(["playground", "common"])
@@ -95,11 +118,14 @@ export function useSlashCommands({
         command: "model",
         label: t("common:commandPalette.switchModel", "Switch Model"),
         description: t(
-          "common:currentChatModelSettings",
-          "Open current chat settings"
+          "playground:composer.slashModelDesc",
+          "Choose the model for this chat"
         ),
-        keywords: ["settings", "parameters", "temperature"],
-        action: () => setOpenModelSettings(true)
+        keywords: ["llm", "provider", "switch"],
+        // The composer's model picker, not the chat settings (AX-01).
+        action: () => {
+          openModelSelector()
+        }
       }
     ],
     [
@@ -110,8 +136,7 @@ export function useSlashCommands({
       setChatMode,
       setWebSearch,
       t,
-      webSearch,
-      setOpenModelSettings
+      webSearch
     ]
   )
 
@@ -201,24 +226,26 @@ export function useSlashCommands({
     [imageBackendDefaultTrimmed]
   )
 
-  const applySlashCommand = React.useCallback(
-    (text: string) => {
+  const parseSlashCommand = React.useCallback(
+    (
+      text: string
+    ): { handled: boolean; message: string; command?: SlashCommandItem } => {
       const parsed = parseSlashInput(text)
       if (!parsed) {
         return { handled: false, message: text }
       }
       const command = slashCommandLookup.get(parsed.command)
-      if (!command) {
+      if (!command?.action) {
         return { handled: false, message: text }
       }
-      command.action()
-      return { handled: true, message: parsed.remainder }
+      return { handled: true, message: parsed.remainder, command }
     },
     [parseSlashInput, slashCommandLookup]
   )
 
+  // Pure: parses the draft without running the command (see SlashSubmissionIntent).
   const resolveSubmissionIntent = React.useCallback(
-    (rawMessage: string) => {
+    (rawMessage: string): SlashSubmissionIntent => {
       const imageCommand = parseImageSlashCommand(rawMessage)
       if (imageCommand) {
         return {
@@ -230,17 +257,18 @@ export function useSlashCommands({
           imageCommandMissingProvider: Boolean(imageCommand.missingProvider)
         }
       }
-      const slashResult = applySlashCommand(rawMessage)
+      const slashResult = parseSlashCommand(rawMessage)
       return {
         handled: slashResult.handled,
         message: slashResult.handled ? slashResult.message : rawMessage,
         imageBackendOverride: undefined,
         isImageCommand: false,
         invalidImageCommand: false,
-        imageCommandMissingProvider: false
+        imageCommandMissingProvider: false,
+        ...(slashResult.command ? { slashCommand: slashResult.command } : {})
       }
     },
-    [applySlashCommand, parseImageSlashCommand]
+    [parseSlashCommand, parseImageSlashCommand]
   )
 
   const activeImageCommand = React.useMemo(
@@ -256,8 +284,11 @@ export function useSlashCommands({
         requestAnimationFrame(() => textareaRef.current?.focus())
         return
       }
+      const focusBefore = document.activeElement
       command.action?.()
       formSetFieldValue("message", parsed?.remainder || "")
+      // A command that moved focus (/model opens the model picker) keeps it.
+      if (document.activeElement !== focusBefore) return
       requestAnimationFrame(() => textareaRef.current?.focus())
     },
     [currentMessage, parseSlashInput]
@@ -274,7 +305,7 @@ export function useSlashCommands({
     filteredSlashCommands,
     parseSlashInput,
     parseImageSlashCommand,
-    applySlashCommand,
+    parseSlashCommand,
     resolveSubmissionIntent,
     activeImageCommand,
     handleSlashCommandSelect

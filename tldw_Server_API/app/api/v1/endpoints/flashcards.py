@@ -13,12 +13,15 @@ from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_auth_principal, get_request_user
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner, get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_auth_principal, get_request_user, require_expected_user_if_present
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
-from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import get_study_assistant_guidance
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import (
+    get_study_assistant_guidance,
+    study_assistant_own_key,
+)
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
     Deck,
     DeckCreate,
@@ -81,10 +84,6 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
     ChatRateLimitError,
 )
-from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
-    verify_generated_artifact_against_sources,
-)
-from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -119,10 +118,6 @@ from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import (
 )
 from tldw_Server_API.app.core.Flashcards.source_review import normalize_source_review_bundle
 from tldw_Server_API.app.core.Flashcards.structured_qa_import import parse_structured_qa_preview
-from tldw_Server_API.app.core.Flashcards.study_assistant import (
-    build_flashcard_assistant_context,
-    generate_study_assistant_reply,
-)
 from tldw_Server_API.app.core.Flashcards.verification import build_flashcard_verification_units
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
@@ -144,8 +139,12 @@ from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_flashcard_asset_bytes,
     validate_uploaded_image_bytes,
 )
-from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
+import tldw_Server_API.app.core.Claims_Extraction.artifact_verification as _artifact_verification
+import tldw_Server_API.app.core.Flashcards.study_assistant as _study_assistant
+import tldw_Server_API.app.core.Workflows.adapters.content as _content
+import tldw_Server_API.app.core.config as _config
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 MAX_STUDY_PACK_JOBS_OFFSET = 10_000
@@ -241,7 +240,7 @@ def _int_env(name: str, default: int) -> int:
 
 def _config_default_llm_provider() -> str | None:
     """Return the configured server default LLM provider when present."""
-    cfg = loaded_config_data
+    cfg = _config.loaded_config_data
 
     for section in ("llm_api_settings", "API"):
         try:
@@ -275,7 +274,7 @@ def _resolve_flashcard_generation_provider(request_provider: str | None) -> str:
     if is_test_mode():
         return "local-llm"
 
-    fallback = str(DEFAULT_LLM_PROVIDER or "openai").strip().lower()
+    fallback = str(get_default_provider() or "openai").strip().lower()
     return fallback or "openai"
 
 
@@ -460,7 +459,7 @@ async def _study_pack_db_for_job(
     if not owner_user_id or owner_user_id == str(current_user.id):
         return request_db
 
-    return await get_chacha_db_for_owner(int(owner_user_id))
+    return await _ChaCha_Notes_DB_Deps.get_chacha_db_for_owner(int(owner_user_id))
 
 
 def _validate_bulk_flashcard_field_lengths(data: dict[str, Any]) -> None:
@@ -819,7 +818,7 @@ def list_decks(
         raise map_db_error_to_http(exc, default_detail="Failed to list decks") from exc
 
 
-@router.patch("/decks/{deck_id}", response_model=Deck)
+@router.patch("/decks/{deck_id}", response_model=Deck, dependencies=[Depends(require_expected_user_if_present)])
 def update_deck(
     deck_id: int,
     payload: DeckUpdate,
@@ -2437,7 +2436,7 @@ def get_flashcard_assistant(
 ):
     try:
         _fetch_flashcard_or_404(card_uuid, db)
-        context = build_flashcard_assistant_context(db, card_uuid)
+        context = _study_assistant.build_flashcard_assistant_context(db, card_uuid)
         return {
             "thread": context["thread"],
             "messages": context["history"],
@@ -2459,28 +2458,33 @@ def get_flashcard_assistant(
         raise map_db_error_to_http(exc, default_detail="Failed to fetch study assistant context") from exc
 
 
-@router.post("/{card_uuid}/assistant/respond", response_model=StudyAssistantRespondResponse)
+@router.post(
+    "/{card_uuid}/assistant/respond",
+    response_model=StudyAssistantRespondResponse,
+)
 async def respond_flashcard_assistant(
     card_uuid: str,
     payload: StudyAssistantRespondRequest,
+    own_key: Any = Depends(study_assistant_own_key),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     guidance: str | None = Depends(get_study_assistant_guidance),
 ):
     try:
         _fetch_flashcard_or_404(card_uuid, db)
-        context = build_flashcard_assistant_context(db, card_uuid)
+        context = _study_assistant.build_flashcard_assistant_context(db, card_uuid)
         thread = context["thread"]
         if payload.expected_thread_version is not None and int(thread["version"]) != int(payload.expected_thread_version):
             raise HTTPException(status_code=409, detail="Study assistant thread version mismatch")
 
         user_content = str(payload.message or "").strip() or _default_study_assistant_message(payload.action, context)
-        reply = await generate_study_assistant_reply(
+        reply = await _study_assistant.generate_study_assistant_reply(
             action=payload.action,
             context=context,
             message=user_content,
             provider=payload.provider,
             model=payload.model,
             guidance=guidance,
+            provider_credentials=own_key,
         )
         context_snapshot = _build_assistant_context_snapshot(context)
         user_message = db.append_study_assistant_message(
@@ -2578,7 +2582,7 @@ async def generate_flashcards(
     """
     try:
         provider = _resolve_flashcard_generation_provider(payload.provider)
-        result = await run_flashcard_generate_adapter(
+        result = await _content.run_flashcard_generate_adapter(
             {
                 "text": payload.text,
                 "num_cards": int(payload.num_cards or 10),
@@ -2598,6 +2602,8 @@ async def generate_flashcards(
         error = result.get("error") if isinstance(result, dict) else None
         raw_flashcards = result.get("flashcards") if isinstance(result, dict) else []
         if error:
+            if error == "duplicate_flashcards":
+                raise HTTPException(status_code=422, detail=error)
             if is_test_mode() and _should_return_test_mode_flashcards(error):
                 raw_flashcards = _build_test_mode_flashcards(payload)
             else:
@@ -2613,7 +2619,7 @@ async def generate_flashcards(
                 detail="Flashcard generation returned no usable cards",
             )
 
-        claim_verification = await verify_generated_artifact_against_sources(
+        claim_verification = await _artifact_verification.verify_generated_artifact_against_sources(
             artifact_type="flashcards",
             units=build_flashcard_verification_units(generated_cards),
             source_documents=[

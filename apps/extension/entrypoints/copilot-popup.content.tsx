@@ -83,9 +83,10 @@ export default defineContentScript({
 
     browser.runtime.onMessage.addListener((message: any) => {
       if (message?.type !== "tldw:popup:open") return
-      void handlePopupMessage(message.payload || {}).catch(() => {
-        // Loading or popup failure is surfaced by the popup itself; the
-        // message acknowledgement below still satisfies the sender.
+      void handlePopupMessage(message.payload || {}).catch((error) => {
+        // Popup failures are surfaced by the popup itself, but a chunk-load
+        // failure has no popup to show anything — leave a breadcrumb.
+        console.warn("[tldw-copilot] failed to load popup chunk", error)
       })
       return Promise.resolve({ ok: true })
     })

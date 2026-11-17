@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
 import { useDataTablesStore } from "@/store/data-tables"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { consumeDataTablesPrefill } from "@/utils/data-tables-prefill"
 import { DataTablesList } from "./DataTablesList"
 import { CreateTableWizard } from "./CreateTableWizard"
@@ -29,10 +30,17 @@ export const DataTablesPage: React.FC = () => {
   const resetWizard = useDataTablesStore((s) => s.resetWizard)
 
   // Reset store on unmount — use ref to avoid re-firing if selector returns new reference
+  const wizardAuthorityRef = React.useRef(0)
   const resetStoreRef = React.useRef(resetStore)
   resetStoreRef.current = resetStore
   useEffect(() => {
+    const release = watchChatAccountChanges((invalidated) => {
+      if (!invalidated) return
+      wizardAuthorityRef.current += 1
+      resetStoreRef.current()
+    })
     return () => {
+      release()
       resetStoreRef.current()
     }
   }, [])
@@ -40,8 +48,9 @@ export const DataTablesPage: React.FC = () => {
   useEffect(() => {
     let isActive = true
     const applyPrefill = async () => {
+      const authority = wizardAuthorityRef.current
       const payload = await consumeDataTablesPrefill()
-      if (!payload || !isActive) return
+      if (!payload || !isActive || authority !== wizardAuthorityRef.current) return
 
       resetWizard()
 

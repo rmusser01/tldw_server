@@ -92,7 +92,19 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => state.isMobile
 }))
 
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => ({ ready: true, ownerId: "test-owner" })
+}))
+vi.mock("@/services/query-client", () => ({ createQueryClient: () => ({ clear: vi.fn() }) }))
+// This existing navigation fixture uses imperative standalone store controls.
+// Owner/cache isolation is exercised with the real providers in owner-privacy.
+vi.mock("@/store/prompt-studio", async importOriginal => ({
+  ...await importOriginal<typeof import("@/store/prompt-studio")>(),
+  PromptStudioStoreProvider: ({ children }: React.PropsWithChildren) => <>{children}</>
+}))
+
 vi.mock("@tanstack/react-query", () => ({
+  QueryClientProvider: ({ children }: React.PropsWithChildren) => <>{children}</>,
   useQuery: (...args: unknown[]) =>
     (useQueryMock as (...args: unknown[]) => unknown)(...args),
   useMutation: (...args: unknown[]) =>
@@ -202,7 +214,7 @@ vi.mock("@/services/prompt-studio", () => ({
 }))
 
 vi.mock("@/services/prompt-studio-settings", () => ({
-  getPromptStudioDefaults: vi.fn(async () => ({
+  getPromptStudioDefaultsForOwner: vi.fn(async () => ({
     defaultProjectId: null,
     autoSyncWorkspacePrompts: true
   })),
@@ -249,7 +261,7 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
           queue_depth: 0,
           processing: 0,
           leases: {},
-          success_rate: 1
+          success_rate: 100
         }
       }
     })
@@ -290,7 +302,7 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
                 queue_depth: 0,
                 processing: state.processing,
                 leases: {},
-                success_rate: 1
+                success_rate: 100
               }
             }
           }
@@ -538,7 +550,7 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
     await waitFor(() => {
       expect(setPromptStudioDefaultsMock).toHaveBeenCalledWith({
         defaultProjectId: 12
-      })
+      }, "test-owner")
     })
   })
 
@@ -627,7 +639,7 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
     await waitFor(() => {
       expect(setPromptStudioDefaultsMock).toHaveBeenCalledWith({
         autoSyncWorkspacePrompts: false
-      })
+      }, "test-owner")
     })
   })
 

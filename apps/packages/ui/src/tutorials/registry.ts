@@ -32,6 +32,12 @@ export interface TutorialStep {
   spotlightClicks?: boolean
   /** Whether the step target is fixed positioned */
   isFixed?: boolean
+  /**
+   * The target only exists in some page states (for example, when a note is
+   * selected). An optional step whose target is missing when the tour starts
+   * is left out, so "Step x of N" counts only steps the user will see.
+   */
+  optional?: boolean
 }
 
 /**
@@ -64,6 +70,8 @@ export interface TutorialDefinition {
   /** Optional icon to display in the tutorial list */
   icon?: LucideIcon
   /** The steps that make up this tutorial */
+  /** Wait for the intro step's page content before offering the first-visit prompt. */
+  requireFirstTargetForPrompt?: boolean
   steps: TutorialStep[]
   /** IDs of other tutorials that should be completed first (optional) */
   prerequisites?: string[]
@@ -100,6 +108,8 @@ import { sttTutorials } from "./definitions/stt"
 import { watchlistsTutorials } from "./definitions/watchlists"
 import { monitoringTutorials } from "./definitions/monitoring"
 import { documentWorkspaceTutorials } from "./definitions/document-workspace"
+import { settingsTutorials } from "./definitions/settings"
+import { collectionsTutorials } from "./definitions/collections"
 
 /**
  * Central registry of all available tutorials
@@ -124,7 +134,9 @@ export const TUTORIAL_REGISTRY: TutorialDefinition[] = [
   ...ttsTutorials,
   ...sttTutorials,
   ...watchlistsTutorials,
-  ...monitoringTutorials
+  ...monitoringTutorials,
+  ...settingsTutorials,
+  ...collectionsTutorials
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,6 +187,7 @@ const LEGACY_ROUTE_ALIASES: Record<string, string> = {
 }
 
 const PREFIX_ROUTE_ALIASES: Array<{ pattern: RegExp; canonical: string }> = [
+  { pattern: /^\/settings\/.+$/i, canonical: "/settings" },
   { pattern: /^\/knowledge\/thread(?:\/.*)?$/i, canonical: "/knowledge" },
   { pattern: /^\/knowledge\/shared(?:\/.*)?$/i, canonical: "/knowledge" }
 ]

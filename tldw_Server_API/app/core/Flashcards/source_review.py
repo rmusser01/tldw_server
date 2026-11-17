@@ -9,7 +9,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackSourceSelection
+from tldw_Server_API.app.core.StudyPacks.study_pack_schemas import StudyPackSourceSelection
 
 SourceReviewActivity = Literal["reread", "quiz", "flashcards", "cloze"]
 SourceReviewOffsetUnit = Literal["day", "month"]

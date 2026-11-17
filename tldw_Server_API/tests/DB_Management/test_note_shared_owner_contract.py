@@ -511,7 +511,6 @@ async def test_real_cold_notes_dependency_keeps_two_http_owners_separate(request
     from unittest.mock import AsyncMock
 
     import httpx
-    from cachetools import LRUCache
     from fastapi import FastAPI
 
     from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
@@ -520,6 +519,7 @@ async def test_real_cold_notes_dependency_keeps_two_http_owners_separate(request
     from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as db_module
     from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
     from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.main import app as main_app
 
     backend = (
@@ -530,16 +530,12 @@ async def test_real_cold_notes_dependency_keeps_two_http_owners_separate(request
     monkeypatch.setattr(
         deps.DatabasePaths, "get_chacha_db_path", staticmethod(lambda user: tmp_path / str(user) / "ChaChaNotes.db")
     )
-    cache = LRUCache(maxsize=4)
-    monkeypatch.setattr(deps, "_chacha_db_instances", cache)
-    monkeypatch.setattr(deps, "_chacha_db_init_events", {})
-    monkeypatch.setattr(deps, "_chacha_db_init_errors", {})
-    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", ChaChaRuntimeManager())
-    monkeypatch.setattr(deps, "_CHACHA_SHUTTING_DOWN", False)
-    monkeypatch.setattr(deps, "_chacha_default_char_tasks", set())
+    runtime = ChaChaRuntimeManager(max_cached=4)
+    cache = runtime._instances
+    monkeypatch.setattr(app_services(), "chacha_runtime", runtime)
     monkeypatch.delitem(main_app.dependency_overrides, deps.get_chacha_db_for_user, raising=False)
     executor = ThreadPoolExecutor(max_workers=2)
-    monkeypatch.setattr(deps, "_get_chacha_executor", lambda: executor)
+    monkeypatch.setattr(runtime, "executor", lambda: executor)
     monkeypatch.setattr(notes, "_active_notes_sync_service", lambda _user: None)
     principal = {"id": 2}
     app = FastAPI()
@@ -563,8 +559,8 @@ async def test_real_cold_notes_dependency_keeps_two_http_owners_separate(request
                 cold = await client.get("/api/v1/notes/")
                 assert cold.status_code == 200, cold.text
                 assert cold.json()["notes"] == []
-                if deps._chacha_default_char_tasks:
-                    await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
+                if runtime._tasks:
+                    await asyncio.gather(*tuple(runtime._tasks))
                 response = await client.post(
                     "/api/v1/notes/", json={"title": f"Owner {user} fixture", "content": "Private note body"}
                 )
@@ -591,8 +587,8 @@ async def test_real_cold_notes_dependency_keeps_two_http_owners_separate(request
                 assert reloaded.status_code == 200, reloaded.text
                 assert reloaded.json()["content"] == "Saved own body"
     finally:
-        if deps._chacha_default_char_tasks:
-            await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
+        if runtime._tasks:
+            await asyncio.gather(*tuple(runtime._tasks))
         executor.shutdown(wait=True)
         for db in tuple(cache.values()):
             db.close_all_connections()

@@ -5,6 +5,8 @@ export const createServerChatSlice: StoreSlice<
     import("@/store/option/types").State,
     | "serverChatId"
     | "setServerChatId"
+    | "serverChatRoleplaySetup"
+    | "setServerChatRoleplaySetup"
     | "serverChatTitle"
     | "setServerChatTitle"
     | "serverChatCharacterId"
@@ -36,12 +38,15 @@ export const createServerChatSlice: StoreSlice<
   >
 > = (set) => ({
   serverChatId: null,
-  setServerChatId: (id) =>
+  setServerChatId: (id, options) =>
     set(() => ({
       serverChatId: id,
+      // Saved selection retires a draft; creating a temporary session preserves it.
+      ...(id?.trim() && !options?.preserveTemporaryChat ? { temporaryChat: false } : {}),
       serverChatState: id ? "in-progress" : null,
       serverChatVersion: null,
       serverChatTitle: null,
+      serverChatRoleplaySetup: null,
       serverChatCharacterId: null,
       serverChatAssistantKind: null,
       serverChatAssistantId: null,
@@ -54,6 +59,8 @@ export const createServerChatSlice: StoreSlice<
       serverChatSource: null,
       serverChatExternalRef: null
     })),
+  serverChatRoleplaySetup: null,
+  setServerChatRoleplaySetup: (serverChatRoleplaySetup) => set({serverChatRoleplaySetup}),
   serverChatTitle: null,
   setServerChatTitle: (serverChatTitle) =>
     set({ serverChatTitle: serverChatTitle != null ? serverChatTitle : null }),

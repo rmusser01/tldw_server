@@ -47,6 +47,7 @@ export type CreateSidepanelChatHandoffInput = {
     title?: string
     url?: string
     snippets?: SidepanelChatHandoffSnippet[]
+    truncated?: boolean
   }
   routeIntent?: SidepanelChatHandoffPackage["routeIntent"]
 }
@@ -187,7 +188,7 @@ const buildPageContext = (
       ? undefined
       : truncateText(pageContext.url, SIDEPANEL_CHAT_HANDOFF_MAX_URL_CHARS)
   const truncated =
-    snippetsTruncated || Boolean(title?.truncated) || Boolean(url?.truncated)
+    pageContext.truncated === true || snippetsTruncated || Boolean(title?.truncated) || Boolean(url?.truncated)
 
   return {
     ...(title ? { title: title.text } : {}),
@@ -402,15 +403,19 @@ export const cleanupExpiredSidepanelChatHandoffs = async (): Promise<number> => 
 }
 
 export const createSidepanelChatHandoff = async (
-  input: CreateSidepanelChatHandoffInput
+  input: CreateSidepanelChatHandoffInput,
+  isCurrent: () => boolean = () => true
 ): Promise<SidepanelChatHandoffPackage> => {
+  if (!isCurrent()) throw new Error("Sidepanel chat handoff source changed.")
   await cleanupExpiredSidepanelChatHandoffs()
+  if (!isCurrent()) throw new Error("Sidepanel chat handoff source changed.")
   const now = Date.now()
   const pkg = buildPackage(input, now)
   const key = storageKey(pkg.id)
 
   try {
     await storage.set(key, pkg)
+    if (!isCurrent()) throw new Error("Sidepanel chat handoff source changed.")
   } catch (error) {
     await removeKeyQuietly(key)
     throw error
@@ -424,6 +429,11 @@ export const createSidepanelChatHandoff = async (
     throw new Error("Sidepanel chat handoff could not be saved.")
   }
 
+  if (!isCurrent()) {
+    await removeKeyQuietly(key)
+    throw new Error("Sidepanel chat handoff source changed.")
+  }
+
   if (!saved || saved.id !== pkg.id) {
     await removeKeyQuietly(key)
     throw new Error("Sidepanel chat handoff could not be saved.")
@@ -433,7 +443,8 @@ export const createSidepanelChatHandoff = async (
 }
 
 export const readSidepanelChatHandoff = async (
-  id: string
+  id: string,
+  options?: { throwOnReadError?: boolean }
 ): Promise<SidepanelChatHandoffPackage | null> => {
   const key = storageKey(id)
 
@@ -448,16 +459,19 @@ export const readSidepanelChatHandoff = async (
     }
 
     return pkg
-  } catch {
+  } catch (error) {
+    if (options?.throwOnReadError) throw error
     return null
   }
 }
 
 export const consumeSidepanelChatHandoff = async (
-  id: string
+  id: string,
+  isCurrent: () => boolean = () => true
 ): Promise<SidepanelChatHandoffPackage | null> => {
+  if (!isCurrent()) return null
   const pkg = await readSidepanelChatHandoff(id)
-  if (!pkg) return null
+  if (!pkg || !isCurrent()) return null
 
   await storage.remove(storageKey(id))
   return pkg

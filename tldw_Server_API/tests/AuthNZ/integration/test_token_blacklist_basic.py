@@ -4,8 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager, reset_session_manager
+from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist, reset_token_blacklist
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
@@ -30,7 +29,7 @@ async def test_blacklist_revoke_and_check_no_redis(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_blacklist_rebinds_pool_after_database_switch(tmp_path, monkeypatch):
+async def test_blacklist_rebinds_pool_after_database_switch(tmp_path, monkeypatch, fresh_services):
     db_a = tmp_path / "users_a.db"
     db_b = tmp_path / "users_b.db"
 
@@ -40,7 +39,6 @@ async def test_blacklist_rebinds_pool_after_database_switch(tmp_path, monkeypatc
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_a}")
     reset_settings()
     await reset_token_blacklist()
-    await reset_db_pool()
 
     bl = get_token_blacklist()
     await bl.initialize()
@@ -75,7 +73,6 @@ async def test_blacklist_rebinds_pool_after_database_switch(tmp_path, monkeypatc
     # Switch configuration to the new database and ensure the blacklist follows.
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_b}")
     reset_settings()
-    await reset_db_pool()
     await bl._ensure_db_pool()
 
     assert bl.db_pool.db_path.endswith("users_b.db"), "Blacklist should adopt the refreshed pool"
@@ -98,7 +95,6 @@ async def test_blacklist_rebinds_pool_after_database_switch(tmp_path, monkeypatc
         assert not rows_a, "New token must not be stored in the original database"
 
     await reset_token_blacklist()
-    await reset_db_pool()
     reset_settings()
 
 
@@ -119,7 +115,7 @@ async def test_blacklist_cache_expires_when_token_expires(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_session_manager_rebinds_pool_after_database_switch(tmp_path, monkeypatch):
+async def test_session_manager_rebinds_pool_after_database_switch(tmp_path, monkeypatch, fresh_services):
     db_a = tmp_path / "sessions_a.db"
     db_b = tmp_path / "sessions_b.db"
 
@@ -128,8 +124,6 @@ async def test_session_manager_rebinds_pool_after_database_switch(tmp_path, monk
 
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_a}")
     reset_settings()
-    await reset_session_manager()
-    await reset_db_pool()
 
     sm = await get_session_manager()
     assert sm.db_pool.db_path.endswith("sessions_a.db")
@@ -137,7 +131,6 @@ async def test_session_manager_rebinds_pool_after_database_switch(tmp_path, monk
     # Switch configuration and ensure the session manager tracks the new pool.
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_b}")
     reset_settings()
-    await reset_db_pool()
     await sm._ensure_db_pool()
 
     assert sm.db_pool.db_path.endswith("sessions_b.db"), "Session manager should adopt refreshed pool settings"

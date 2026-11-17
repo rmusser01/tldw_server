@@ -1,4 +1,4 @@
-import { getTokenizerWorker } from "./TokenizerWorker"
+import { getTokenizerWorker, terminateTokenizerWorker } from "./TokenizerWorker"
 
 type TreeItem = {
   name?: string
@@ -22,27 +22,29 @@ export class Formatter {
   static async formatAsync(
     tree: TreeItem[],
     fileContents: FileContentItem[],
-    onProgress?: (progress: number, current: number, total: number) => void
+    onProgress?: (progress: number, current: number, total: number) => void,
+    signal?: AbortSignal
   ): Promise<FormattedOutput> {
-    const directoryTree = this.generateDirectoryTree(tree)
-    const worker = getTokenizerWorker()
-    const batch = await worker.tokenizeBatch(
-      fileContents.map((item) => ({
-        path: item.path,
-        content: item.text
-      })),
-      onProgress
-    )
+    signal?.throwIfAborted()
+    const abort = () => terminateTokenizerWorker()
+    signal?.addEventListener("abort", abort, { once: true })
+    try {
+      const directoryTree = this.generateDirectoryTree(tree)
+      const worker = getTokenizerWorker()
+      const fileContentsText = this.generateFileContents(fileContents)
+      const fullOutput = `${directoryTree}\n\n${fileContentsText}`
+      const tokenCount = await worker.tokenize(fullOutput)
+      signal?.throwIfAborted()
+      onProgress?.(100, fileContents.length, fileContents.length)
 
-    const fileContentsText = this.generateFileContents(fileContents)
-    const treeTokens = await worker.tokenize(directoryTree)
-    const fullOutput = `${directoryTree}\n\n${fileContentsText}`
-
-    return {
-      directoryTree,
-      fileContents: fileContentsText,
-      tokenCount: treeTokens + batch.totalTokens,
-      lineCount: fullOutput.split("\n").length
+      return {
+        directoryTree,
+        fileContents: fileContentsText,
+        tokenCount,
+        lineCount: fullOutput.split("\n").length
+      }
+    } finally {
+      signal?.removeEventListener("abort", abort)
     }
   }
 

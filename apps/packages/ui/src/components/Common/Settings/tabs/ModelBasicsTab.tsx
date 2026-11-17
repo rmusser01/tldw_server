@@ -14,7 +14,7 @@ type GroupedModelOption = {
 interface ModelBasicsTabProps {
   form: FormInstance
   selectedModel: string | null
-  onModelChange: (value: string) => void
+  onModelChange: (value: string | null | undefined) => void
   modelOptions: GroupedModelOption[]
   modelsLoading: boolean
   isOCREnabled?: boolean
@@ -57,7 +57,7 @@ export function ModelBasicsTab({
       <Form.Item
         label={t("modelSettings.form.model.label", { defaultValue: "API / model" })}
         help={t("modelSettings.form.model.help", {
-          defaultValue: "Choose the API/model used for this chat."
+          defaultValue: "Changing the API/model applies immediately. Save applies your parameter edits."
         })}>
         <Select
           showSearch

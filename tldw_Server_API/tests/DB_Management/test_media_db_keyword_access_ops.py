@@ -136,60 +136,21 @@ def test_fetch_media_for_keywords_normalizes_groups_and_filters_trash(
     assert {item["id"] for item in with_trash["beta"]} == {media_a, media_c}
 
 
-def test_fetch_media_for_keywords_preserves_unexpected_keyword_rows() -> None:
+def test_fetch_media_for_keywords_keys_by_identity_and_keeps_unknown_keywords_empty(
+    tmp_path: Path,
+) -> None:
     keyword_access_ops_module = _load_keyword_access_ops_module()
+    db = _make_media_db(tmp_path)
 
-    order_calls: list[str] = []
-    query_calls: list[tuple[object, str, tuple[object, ...]]] = []
-    conn = object()
-
-    db = SimpleNamespace(
-        db_path_str=":memory:",
-        _keyword_order_expression=lambda column: (
-            order_calls.append(column),
-            "LOWER(k.keyword)",
-        )[1],
-        get_connection=lambda: conn,
+    media_id, _, _ = db.add_media_with_keywords(
+        title="Display casing",
+        media_type="doc",
+        content="D body",
+        keywords=["Alpha"],
     )
 
-    def _fetchall_with_connection(actual_conn, query, params):
-        query_calls.append((actual_conn, query, params))
-        return [
-            {
-                "keyword_text": "unexpected",
-                "media_id": 9,
-                "media_uuid": "media-uuid",
-                "media_title": "Unexpected",
-                "media_type": "doc",
-                "media_url": "https://example.com",
-                "media_content_hash": "hash",
-                "media_last_modified": "2026-03-22T18:00:00Z",
-                "media_ingestion_date": "2026-03-22T17:00:00Z",
-                "media_author": "Tester",
-            }
-        ]
+    result = keyword_access_ops_module.fetch_media_for_keywords(db, ["ALPHA", "missing"])
 
-    db._fetchall_with_connection = _fetchall_with_connection
-
-    result = keyword_access_ops_module.fetch_media_for_keywords(
-        db,
-        ["Alpha"],
-        include_trash=False,
-    )
-
-    assert order_calls == ["k.keyword"]
-    assert query_calls
-    assert result["alpha"] == []
-    assert result["unexpected"] == [
-        {
-            "id": 9,
-            "uuid": "media-uuid",
-            "title": "Unexpected",
-            "type": "doc",
-            "url": "https://example.com",
-            "content_hash": "hash",
-            "last_modified": "2026-03-22T18:00:00Z",
-            "ingestion_date": "2026-03-22T17:00:00Z",
-            "author": "Tester",
-        }
-    ]
+    assert list(result) == ["alpha", "missing"]
+    assert [item["id"] for item in result["alpha"]] == [media_id]
+    assert result["missing"] == []

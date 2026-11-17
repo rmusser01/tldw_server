@@ -104,7 +104,7 @@ export const CollectionsPlaygroundPage: React.FC = () => {
     >
       <PageShell className="py-6" maxWidthClassName="max-w-6xl">
         <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-text">
+          <h1 data-testid="collections-heading" className="text-2xl font-semibold text-text">
             {t("collections:title", "Collections")}
           </h1>
           <p className="mt-1 text-sm text-text-muted">

@@ -1,50 +1,62 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import SplashCanvas from "./SplashCanvas";
-import AsciiArtOverlay from "./AsciiArtOverlay";
-import type { SplashCard } from "./engine/types";
+import React, { useCallback, useEffect, useRef, useState } from "react"
+import SplashCanvas from "./SplashCanvas"
+import AsciiArtOverlay from "./AsciiArtOverlay"
+import type { SplashCard } from "./engine/types"
 
 interface SplashOverlayProps {
-  card: SplashCard;
-  message: string;
-  onDismiss: () => void;
+  card: SplashCard
+  message: string
+  onDismiss: () => void
 }
 
 /**
  * Full-screen splash overlay. Renders canvas effect + ASCII art + message.
  * Dismissible by click, keypress, or timeout.
  */
-const SplashOverlay: React.FC<SplashOverlayProps> = ({ card, message, onDismiss }) => {
-  const [fading, setFading] = useState(false);
-  const dismissStartedRef = useRef(false);
+const SplashOverlay: React.FC<SplashOverlayProps> = ({
+  card,
+  message,
+  onDismiss
+}) => {
+  const [fading, setFading] = useState(false)
+  const dismissStartedRef = useRef(false)
+  const fadeTimer = useRef<number | null>(null)
+  useEffect(() => {
+    dismissStartedRef.current = false
+    setFading(false)
+    return () => {
+      if (fadeTimer.current !== null) clearTimeout(fadeTimer.current)
+    }
+  }, [card])
   const prefersReducedMotion =
     typeof window !== "undefined" &&
     typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
 
   const handleDismiss = useCallback(() => {
-    if (dismissStartedRef.current) return;
-    dismissStartedRef.current = true;
-    setFading(true);
-    window.setTimeout(onDismiss, 300); // match fade-out duration
-  }, [onDismiss]);
+    if (dismissStartedRef.current) return
+    dismissStartedRef.current = true
+    setFading(true)
+    fadeTimer.current = window.setTimeout(onDismiss, 300) // match fade-out duration
+  }, [onDismiss])
 
   // Auto-dismiss after card duration (routes through fade-out)
   useEffect(() => {
-    const duration = card.duration ?? 2500;
-    const timer = window.setTimeout(handleDismiss, duration);
-    return () => clearTimeout(timer);
-  }, [card.duration, handleDismiss]);
+    const duration = card.duration ?? 2500
+    const timer = window.setTimeout(handleDismiss, duration)
+    return () => clearTimeout(timer)
+  }, [card, handleDismiss])
 
   // Keyboard dismiss
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Don't dismiss on modifier-only presses
-      if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
-      handleDismiss();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [handleDismiss]);
+      if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return
+      handleDismiss()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [handleDismiss])
 
   return (
     <div
@@ -62,11 +74,10 @@ const SplashOverlay: React.FC<SplashOverlayProps> = ({ card, message, onDismiss 
         cursor: "pointer",
         pointerEvents: fading ? "none" : "auto",
         opacity: fading ? 0 : 1,
-        transition: "opacity 0.3s ease-out",
+        transition: "opacity 0.3s ease-out"
       }}
       role="dialog"
-      aria-label="Splash screen"
-    >
+      aria-label="Splash screen">
       {/* Inline keyframe styles */}
       <style>{`
         @keyframes splashFadeIn {
@@ -94,7 +105,7 @@ const SplashOverlay: React.FC<SplashOverlayProps> = ({ card, message, onDismiss 
         reducedMotion={prefersReducedMotion}
       />
     </div>
-  );
-};
+  )
+}
 
-export default SplashOverlay;
+export default SplashOverlay

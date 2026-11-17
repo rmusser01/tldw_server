@@ -278,11 +278,11 @@ async def _resolve_runtime_embedding_call(
     if not isinstance(api_key, str) or not api_key.strip():
         raise EmbeddingCredentialError(provider)
     if str(provider or "").strip().lower() == "openai":
-        from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-            PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-        )
         from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
             OPENAI_EMBEDDING_RUNTIME_BOUNDARY_FLAG,
+        )
+        from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+            PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
         )
 
         return handle, {

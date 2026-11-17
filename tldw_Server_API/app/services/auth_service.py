@@ -339,6 +339,29 @@ async def apply_password_reset(
         raise
 
 
+async def consume_magic_link(
+    db: Any, *, jti: str, expires_at: datetime, actor_id: int | None, ip_address: str,
+) -> bool:
+    """Claim a link on the sign-in route's statement-autocommit connection."""
+    # Keep user_id NULL: deleting an account must not cascade away a live replay guard.
+    expiry = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+    result = await db.execute(
+        "INSERT INTO token_blacklist (jti, token_type, expires_at, reason, revoked_by, ip_address) "
+        "VALUES ($1, 'magic_link', $2, 'magic_link_used', $3, $4) ON CONFLICT (jti) DO NOTHING",
+        jti, expiry.isoformat() if _profile_user_backend(db) == "sqlite" else expiry, actor_id, ip_address,
+    )
+    if isinstance(result, str):  # asyncpg command tag
+        if result in ("INSERT 0 0", "INSERT 0 1"):
+            return result == "INSERT 0 1"
+    else:
+        try:
+            if result.rowcount in (0, 1):
+                return bool(result.rowcount == 1)
+        finally:
+            await result.close()
+    raise RuntimeError("Unconfirmed magic-link insert result")
+
+
 async def verify_user_email_once(
     db: Any,
     *,

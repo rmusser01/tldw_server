@@ -357,6 +357,7 @@ def test_require_token_scope_fails_closed_when_credentials_missing():
     req = SimpleNamespace(
         method="GET",
         headers={},
+        cookies={},
         scope={"path": "/protected"},
         path_params={},
         client=SimpleNamespace(host="127.0.0.1"),
@@ -369,7 +370,8 @@ def test_require_token_scope_fails_closed_when_credentials_missing():
     with pytest.raises(HTTPException) as exc:
         asyncio.run(dep(request=req, credentials=None, jwt_service=object(), db_pool=object()))
     assert exc.value.status_code == 401
-    assert exc.value.detail == "Authentication required"
+    assert exc.value.detail == "Not authenticated (provide Bearer token or X-API-KEY)"
+    assert exc.value.headers == {"WWW-Authenticate": "Bearer"}
 
 
 def test_require_token_scope_allows_missing_credentials_when_optional():

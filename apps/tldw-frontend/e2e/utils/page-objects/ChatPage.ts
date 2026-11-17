@@ -211,7 +211,7 @@ export class ChatPage {
     // A Next.js development-tools portal is present on healthy pages too.
     await this.page
       .getByRole("button", { name: /start chatting/i })
-      .or(this.page.getByPlaceholder(/type a message/i))
+      .or(this.page.getByTestId("chat-input"))
       .or(this.messageList)
       .filter({ visible: true })
       .first()
@@ -230,8 +230,8 @@ export class ChatPage {
     input = this.page.getByTestId("chat-input")
     if ((await input.count()) > 0) return input
 
-    // Try placeholder-based selector (actual: "Type a message... (/ commands, @ mentions)")
-    return this.page.getByPlaceholder(/Type a message/i)
+    // Older surfaces can lack the shared input test id.
+    return this.page.getByPlaceholder(/(?:Type|Write) a message/i)
   }
 
   /**
@@ -263,6 +263,14 @@ export class ChatPage {
     }
   }
 
+  async openConversationControls(): Promise<void> {
+    const tools = this.page.getByTestId("composer-options-toggle")
+    await expect(tools).toBeVisible()
+    await expect(tools).toBeEnabled()
+    if ((await tools.getAttribute("aria-expanded")) !== "true") await tools.click()
+    await expect(tools).toHaveAttribute("aria-expanded", "true")
+  }
+
   async selectCharacter(name: string): Promise<void> {
     const triggerCandidates = [
       this.page.getByTestId("character-select").first(),
@@ -270,6 +278,10 @@ export class ChatPage {
       this.page.getByRole("button", { name: /select character or persona/i }).first(),
       this.page.locator(".character-select").first(),
     ]
+
+    if (!(await Promise.all(triggerCandidates.map(candidate => candidate.isVisible().catch(() => false)))).some(Boolean)) {
+      await this.openConversationControls()
+    }
 
     let trigger: Locator | null = null
     await expect

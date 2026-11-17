@@ -292,6 +292,8 @@ def production_factories(
     )
     monkeypatch.setenv("SYNC_V2_BLOB_STORE_PATH", str(tmp_path / "sync_blobs"))
     monkeypatch.setenv("AUTH_MODE", "multi_user")
+    # These tests exercise sync relay behaviour, not CSRF; CSRF is on by default since TASK-13950.19 PR 4.
+    monkeypatch.setenv("CSRF_ENABLED", "false")
     _clear_factory_caches()
     from tldw_Server_API.app.api.v1.router_groups.core import iter_core_router_specs
     from tldw_Server_API.app.api.v1.router_registry import register_router_specs

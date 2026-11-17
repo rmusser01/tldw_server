@@ -2127,7 +2127,7 @@ and 1 skipped; Bandit on `completion_pipeline.py`, `chat_service.py`, and
 **Files:**
 - Modify: `tldw_Server_API/app/core/Chat/README.md`
 - Modify: `tldw_Server_API/app/core/Chat/REFACTORING_PLAN.md`
-- Modify: `backlog/tasks/task-12013 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md`
+- Modify: `backlog/tasks/task-15032 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md`
 
 - [x] **Step 1: Document service ownership in Chat README**
 
@@ -2182,8 +2182,8 @@ modified_files: include the new Chat service modules, touched Chat tests, Chat d
 Run:
 
 ```bash
-git add tldw_Server_API/app/core/Chat/README.md tldw_Server_API/app/core/Chat/REFACTORING_PLAN.md "backlog/tasks/task-12013 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md"
-git commit --only tldw_Server_API/app/core/Chat/README.md tldw_Server_API/app/core/Chat/REFACTORING_PLAN.md "backlog/tasks/task-12013 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md" -m "docs(chat): document completion pipeline split"
+git add tldw_Server_API/app/core/Chat/README.md tldw_Server_API/app/core/Chat/REFACTORING_PLAN.md "backlog/tasks/task-15032 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md"
+git commit --only tldw_Server_API/app/core/Chat/README.md tldw_Server_API/app/core/Chat/REFACTORING_PLAN.md "backlog/tasks/task-15032 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md" -m "docs(chat): document completion pipeline split"
 ```
 
 Expected: commit succeeds with only the listed files.
@@ -2193,7 +2193,7 @@ Expected: commit succeeds with only the listed files.
 ### Task 13: Final Verification and Security Scan
 
 **Files:**
-- Modify: `backlog/tasks/task-12013 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md`
+- Modify: `backlog/tasks/task-15032 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md`
 
 - [ ] **Step 1: Run targeted Chat unit tests**
 
@@ -2256,8 +2256,8 @@ If a command cannot run because the environment is missing a dependency, record 
 Run:
 
 ```bash
-git add "backlog/tasks/task-12013 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md"
-git commit --only "backlog/tasks/task-12013 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md" -m "chore(chat): record pipeline refactor verification"
+git add "backlog/tasks/task-15032 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md"
+git commit --only "backlog/tasks/task-15032 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md" -m "chore(chat): record pipeline refactor verification"
 ```
 
 Expected: commit succeeds with only the task file.

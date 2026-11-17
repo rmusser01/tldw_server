@@ -5,13 +5,12 @@ This module includes the TTS adapter for speech synthesis.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
+import subprocess
 import uuid
 from typing import Any
 
 try:
-    from tldw_Server_API.app.api.v1.schemas.audio_schemas import (  # type: ignore
+    from tldw_Server_API.app.core.TTS.speech_schemas import (  # type: ignore
         NormalizationOptions,
         OpenAISpeechRequest,
     )
@@ -39,6 +38,7 @@ from tldw_Server_API.app.core.Workflows.adapters._common import (
 )
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.audio._config import TTSConfig
+from tldw_Server_API.app.core.Workflows.subprocess_utils import run_checked_async
 
 _WORKFLOW_TTS_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -47,6 +47,7 @@ _WORKFLOW_TTS_NONCRITICAL_EXCEPTIONS = (
     OSError,
     RuntimeError,
     TimeoutError,
+    subprocess.TimeoutExpired,
     TypeError,
     UnicodeDecodeError,
     ValueError,
@@ -79,7 +80,7 @@ async def run_tts_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
         return {"error": "tts_unavailable"}
 
     # Resolve input text
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     text_t = str(config.get("input") or "").strip()
     if text_t:
@@ -232,24 +233,11 @@ async def run_tts_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
                     str(norm_out),
                 ]
                 try:
-                    proc = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        cwd=str(out_dir),
-                    )
-                    try:
-                        await asyncio.wait_for(proc.communicate(), timeout=120)
-                    except asyncio.TimeoutError:
-                        proc.kill()
-                        with contextlib.suppress(_WORKFLOW_TTS_NONCRITICAL_EXCEPTIONS):
-                            await proc.communicate()
-                    else:
-                        if proc.returncode == 0:
-                            normalized = True
-                            normalized_path = norm_out
-                        else:
-                            normalized = False
+                    # Kills and reaps ffmpeg on a timeout or a cancel (TASK-13887)
+                    proc = await run_checked_async(cmd, timeout=120, check=False)
+                    if proc.returncode == 0:
+                        normalized = True
+                        normalized_path = norm_out
                 except _WORKFLOW_TTS_NONCRITICAL_EXCEPTIONS:
                     normalized = False
             else:

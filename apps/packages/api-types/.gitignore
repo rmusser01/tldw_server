@@ -1,0 +1,8 @@
+# Regenerated artifacts — never commit (see scripts/generate-api-types.mjs)
+schema.d.ts
+openapi.json
+
+# The repo-root .gitignore ignores *.json wholesale (line 281); these two are
+# committed contract artifacts (ADR-065) and must stay tracked.
+!package.json
+!openapi.fingerprint.json

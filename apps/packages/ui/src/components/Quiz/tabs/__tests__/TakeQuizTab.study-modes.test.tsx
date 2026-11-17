@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { ASSERTION_REASONING_OPTIONS, TakeQuizTab } from "../TakeQuizTab"
 import {
@@ -212,6 +213,7 @@ describe("TakeQuizTab study modes", () => {
   }, 15000)
 
   it("grades multi-select answers in practice mode using full-set matching", async () => {
+    const user = userEvent.setup()
     window.sessionStorage.setItem(
       TAKE_QUIZ_LIST_PREFS_KEY,
       JSON.stringify({ modePreference: "practice" })
@@ -238,10 +240,28 @@ describe("TakeQuizTab study modes", () => {
 
     expect(await screen.findByRole("checkbox", { name: "2" })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "2" }))
-    expect(await screen.findByText("Incorrect")).toBeInTheDocument()
+    const firstOption = screen.getByRole("checkbox", { name: "2" }) as HTMLInputElement
+    const checkedBefore = firstOption.checked
+    const disabledBefore = firstOption.disabled
+    await user.click(screen.getByRole("checkbox", { name: "2" }))
+    try {
+      expect(await screen.findByText("Incorrect")).toBeInTheDocument()
+    } catch (error) {
+      const question = screen.queryAllByTestId("quiz-question-19")[0]
+      console.error("[TakeQuizTab practice multi-select diagnostic]", {
+        checkedBefore,
+        disabledBefore,
+        checkedAfter: firstOption.checked,
+        disabledAfter: firstOption.disabled,
+        questionMounted: Boolean(question),
+        checkedCount: question
+          ? within(question).queryAllByRole("checkbox", { checked: true }).length
+          : null
+      })
+      throw error
+    }
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "5" }))
+    await user.click(screen.getByRole("checkbox", { name: "5" }))
     expect(await screen.findByText("Correct")).toBeInTheDocument()
   }, 15000)
 

@@ -4,10 +4,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import {
   clearRuntimeAuth,
+  getApiKey,
   hasEnvApiAuth,
   setRuntimeApiBearer,
   setRuntimeApiKey
 } from "../authStorage"
+
+import { MANUAL_SESSION_KEY } from "@/services/tldw/single-user-credential"
 
 async function loadShouldIncludeBrowserCredentials() {
   process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
@@ -27,6 +30,7 @@ describe("shouldIncludeBrowserCredentials", () => {
 
   beforeEach(() => {
     localStorage.clear()
+    sessionStorage.clear()
     clearRuntimeAuth()
     delete process.env.NEXT_PUBLIC_X_API_KEY
     delete process.env.NEXT_PUBLIC_API_BEARER
@@ -35,6 +39,7 @@ describe("shouldIncludeBrowserCredentials", () => {
 
   afterEach(() => {
     localStorage.clear()
+    sessionStorage.clear()
     clearRuntimeAuth()
     if (originalApiKey === undefined) {
       delete process.env.NEXT_PUBLIC_X_API_KEY
@@ -117,6 +122,22 @@ describe("shouldIncludeBrowserCredentials", () => {
         "X-API-KEY": "stored-api-key"
       })
     })
+  })
+
+  it.each(["matching", "other-server", "missing", "malformed", "wrong-source", "wrong-persistence"])("uses only the %s canonical manual session credential", (kind) => {
+    localStorage.setItem("tldwConfig", JSON.stringify({
+      serverUrl: "https://selected.example.test", authMode: "single-user",
+      credentialSource: "manual", apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://selected.example.test"
+    }))
+    localStorage.setItem("apiKey", "unrelated-legacy-key")
+    if (kind !== "missing") sessionStorage.setItem(MANUAL_SESSION_KEY, kind === "malformed" ? "invalid-json" : JSON.stringify({
+      credentialSource: kind === "wrong-source" ? "other" : "manual",
+      apiKeyPersistence: kind === "wrong-persistence" ? "device" : "session",
+      apiKeyServerOrigin: kind === "other-server" ? "https://other.example.test" : "https://selected.example.test",
+      apiKey: "session-key"
+    }))
+    expect(getApiKey()).toBe(kind === "matching" ? "session-key" : null)
   })
 
   it("treats whitespace-only env auth values as unset", () => {

@@ -175,8 +175,7 @@ def isolate_provider_override_store(monkeypatch):
 
     snapshot = EmptyOverrideSnapshot()
     monkeypatch.setattr(
-        chunking_module,
-        "capture_provider_override_call_snapshot",
+        "tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.capture_provider_override_call_snapshot",
         lambda _provider: snapshot,
     )
 
@@ -184,9 +183,9 @@ def isolate_provider_override_store(monkeypatch):
 # --- Path for Patching `improved_chunking_process` and other direct calls ---
 # This path MUST point to where the function is imported and used
 # by your ACTUAL endpoint module (e.g., chunking.py).
-PATH_TO_ICP_IN_ENDPOINT_MODULE = "tldw_Server_API.app.api.v1.endpoints.chunking.improved_chunking_process"
-PATH_TO_LOAD_CONFIGS_IN_ENDPOINT_MODULE = "tldw_Server_API.app.api.v1.endpoints.chunking.load_server_configs"
-PATH_TO_LLM_ANALYZER_IN_ENDPOINT_MODULE = "tldw_Server_API.app.api.v1.endpoints.chunking.general_llm_analyzer"
+PATH_TO_ICP_IN_ENDPOINT_MODULE = "tldw_Server_API.app.core.Chunking.improved_chunking_process"
+PATH_TO_LOAD_CONFIGS_IN_ENDPOINT_MODULE = "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot"
+PATH_TO_LLM_ANALYZER_IN_ENDPOINT_MODULE = "tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze"
 def _install_chunking_snapshot_rotation(monkeypatch, initial_key):
     """Install an A→B (or absent→B) static credential source for one request."""
     initial_config = {"ollama_api": {"base_url": "http://snapshot-a.invalid"}}
@@ -231,7 +230,7 @@ def _install_chunking_snapshot_rotation(monkeypatch, initial_key):
     async def forbidden_low_level_resolver(*_args, **_kwargs):
         raise AssertionError("chunking bypassed ProviderCredentialRuntime")
 
-    monkeypatch.setattr(chunking_module, "ProviderCredentialRuntime", FakeRuntime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", FakeRuntime)
     monkeypatch.setattr(
         chunking_module,
         "resolve_byok_credentials",
@@ -549,8 +548,8 @@ def test_chunk_text_rolling_summarize_keeps_static_snapshot_at_analyzer_boundary
             }
         ]
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _snapshot_chunking_config)
-    monkeypatch.setattr(chunking_module, "improved_chunking_process", fake_improved_chunking_process)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _snapshot_chunking_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", fake_improved_chunking_process)
 
     response = client.post(
         "/api/v1/chunking/chunk_text",
@@ -597,8 +596,8 @@ def test_chunk_file_rolling_summarize_keeps_static_snapshot_at_analyzer_boundary
             }
         ]
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _snapshot_chunking_config)
-    monkeypatch.setattr(chunking_module, "improved_chunking_process", fake_improved_chunking_process)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _snapshot_chunking_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", fake_improved_chunking_process)
 
     response = client.post(
         "/api/v1/chunking/chunk_file",
@@ -635,7 +634,7 @@ def test_chunk_template_rolling_summarize_keeps_static_snapshot_at_analyzer_boun
     boundary_calls = []
 
     class TemplateDatabase:
-        def get_chunking_template(self, *, name):
+        def get_chunking_template(self, *, name, owner_user_id):
             assert name == "snapshot-template"
             return {
                 "name": name,
@@ -658,7 +657,7 @@ def test_chunk_template_rolling_summarize_keeps_static_snapshot_at_analyzer_boun
         )
         return ["snapshot template chunk"]
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _snapshot_chunking_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _snapshot_chunking_config)
     monkeypatch.setattr(TemplateProcessor, "process_template", fake_process_template)
     app_for_testing_with_real_router.dependency_overrides[try_get_media_db_for_user] = TemplateDatabase
     try:

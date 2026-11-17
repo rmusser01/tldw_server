@@ -29,6 +29,9 @@ Fix: security-required, coverage-required, e2e-required, frontend-required and c
 Unchanged: the pull_request path with a passing license wait, and the workflow_run path (admission declined still skips).
 
 Tests: truth table over every (event, admission, license wait, changes, cancelled) row now expects 'license' red for all gates; per-gate refusal pins; contract pins in test_license_first_workflow_contracts.py (LICENSE_RED_GATES) and test_required_workflow_contracts.py. Removing the red arm from any one gate fails 2-4 tests. tests/CI + concurrency policy: 768 passed, 0 failed. actionlint clean.
+2026-10-19 TASK-13866 retirement of superseded PR #3043: merged #3201 (94854ca3db) implements the six-gate fail-closed behavior. Current test_license_first_workflow_contracts.py and test_required_workflow_contracts.py pin all six gates, negative conditions and the first-step exit 1; truth-table and mutation tests retain regression coverage. Do not salvage the old regex checker: independent read-only review reproduced false acceptance of both an echo-only refusal and an impossible positive AND negative gate condition. The reviewed old branch remains retained for provenance; no workflow behavior changed during retirement.
+Tracking reconciliation 2026-10-06 under explicit approval to address all identified issues (TASK-13260.278.18.83.45): status is In Progress because original closeout criteria remain unfinished. Original implementation/verification narrative and AC states are retained as historical records, not revalidated by this documentation correction. DoD checks below record only that verification narrative, final summary and limits exist; application/CI execution and applicable security closeout remain unqualified here. No foreign logs, private reviews or evidence were inspected. Current source review is separate from GitHub platform or runtime acceptance.
+Integration clarification 2026-10-20: the earlier 2026-10-06 In Progress assessment above is historical; retain current dev’s newer Done disposition and 2026-10-19 superseded-PR retirement record. Recorded verification/summary/limits DoD checks are preserved without claiming new execution.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -40,9 +43,9 @@ All six required gates now report red instead of skipped when their license wait
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
+- [x] #2 Tests or verification recorded
 - [ ] #3 Documentation updated when relevant
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

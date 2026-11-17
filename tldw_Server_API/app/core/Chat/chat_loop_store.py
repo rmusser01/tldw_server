@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.chat_loop_schemas import ChatLoopEvent, ChatLoopEventType
+from tldw_Server_API.app.core.Chat.chat_loop_schemas import ChatLoopEvent, ChatLoopEventType
 
 
 @dataclass(frozen=True)

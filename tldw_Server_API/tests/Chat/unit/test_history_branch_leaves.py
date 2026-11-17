@@ -52,6 +52,11 @@ def test_empty_selection_treats_existing_roots_as_children():
     assert history_branch_leaves(nodes, GRAPH, None) == ("a1",)
 
 
+def test_empty_legacy_projection_has_no_branch_leaves():
+    status = {"kind": "legacy_linear_v1", "projection_id": "p", "ordered_path_ids": ()}
+    assert history_branch_leaves([], status, None) == ()  # nosec B101 - pytest behavior assertion
+
+
 def test_legacy_projection_uses_reviewed_order_as_parent_edges():
     status = {"kind": "legacy_linear_v1", "projection_id": "p", "ordered_path_ids": ("two", "one")}
     nodes = [node("one", None), node("two", None)]

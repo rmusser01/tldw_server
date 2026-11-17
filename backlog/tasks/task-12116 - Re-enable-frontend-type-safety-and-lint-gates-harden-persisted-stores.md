@@ -1,19 +1,19 @@
 ---
 id: TASK-12116
-title: 'Re-enable frontend type-safety and lint gates, harden persisted stores'
+title: Re-enable frontend type-safety and lint gates, harden persisted stores
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-09-14 14:07'
+updated_date: 2026-09-14 14:07
 labels:
-  - tech-debt
-  - high
-  - frontend
-  - ci
-  - packages-ui
+- tech-debt
+- high
+- frontend
+- ci
+- packages-ui
 dependencies: []
 documentation:
-  - apps/FRONTEND_AUDIT.md
+- apps/FRONTEND_AUDIT.md
 ---
 
 ## Description
@@ -89,4 +89,6 @@ PR2761 RAG input-ref boundary verified: moved the UI-only InputRef into RagSearc
 PR2761 release-specific read-only reconciliation at08946442af: required lint, nonincremental typecheck, shared-hook and five-module strict-boundary gates pass. AC1 permits separate typechecking; AC2 requires incremental strictness plus tracked expansion, not blanket immediate strict:true. AC3 remains open: four compiler-era hook rules disabled,265 findings across138files; all source/config hashes match recordedinventory. Against frozen dev6c4bdcbc,257findings are in133untouchedfiles and8in5followupfiles; no new runtime defect demonstrated by this inventory. Proposed release scope decision (NOT YET APPROVED): retain all current gates, publish no frontend binaries, leave global four-rule enforcement in this owning task without claiming full compiler-rule compliance forv0.1.42. Release plan4.2 requires explicit requester acceptance before this dependency is scope-cleared.
 
 2026-09-14 requester explicitly moved broader certification work out of PR2761. Global frontend strictness and remaining265 compiler-lint findings stay in this follow-up task and no longer block this release. This resolves the earlier pending scope question; existing frontend CI gates and diagnostic retention remain unchanged. Task remains open.
+Current correction evidence draft: Docs/Reviews/KNOWLEDGE_MECHANISM_CORRECTION_2026_10_08.md and artifacts/KNOWLEDGE_MECHANISM_CORRECTION_2026_10_08.json. TASK-13534 scoped-approved client fcd62a30890f81237286dcced27b7a798b0ebd6e/backend42b6cb9a5bc5fd491a119dd6bb4b18eb8b08f481; fresh canonical shared-UI default51files1469/1469 and distinct serial native18files531/531, both Node20 house builds pass unchanged budget; new backend source-security142/Bandit0findings/errors9282LOC. Counts across scopes/epochs are nonadditive. Current compiled native/plain/sourced/Export/capture-refresh/preview/citation proofs and whole-branch/PR/publication gates remain root-owned In Progress. Original reports/failed receipts unchanged; no current integration or merge claim. ADR required:no; existing026/031/034/042/059/065/066 and bounded post-query diagnosis contracts reused. Current diagnostics triage: Next ESLint rules lack app rootDir and print no-pages notice without JSON finding; Node26 native localStorage is experimental while supported-major Node20 default is distinct; WXT logs seven estimateStorageCost duplicate auto-import notices because storage-guard imports/re-exports the same storage-budget function. Old/current build logs preserve notices; no duplicate function implementation assumed. Earlier expanded201lint0errors1556warnings has its own epoch; later fix4/fix5 scopes remain separately compared, full-file formatting/standalone type debt stays open. Backend warning owners separately include Chat/Workflows Pydantic, MCP/passlib, pytest config/event loop and local pytest temp cleanup; they are not assigned wholesale to frontend debt.
+Final Stage5 measured verification Complete at approvedclientfa07cdf1cda79853887eacaf0c85c2ea915da868/backend42b6cb9a5bc5fd491a119dd6bb4b18eb8b08f481. Canonical default51unique-files1481/1481, serial native18files543/543, canonical types and both Node20 house builds pass unchanged592/600 budget; backend unchanged142/Bandit0findings/errors9282LOC reused by input lineage. Full128-path audit/generated-config complement and15rulings/costs published in Docs/Reviews/KNOWLEDGE_MECHANISM_CORRECTION_2026_10_08.md; JSON receipt artifact remains ignored/local/private. Real sourced explicitResume restores full laterdirty/base2 over loaded canonicalv2; canonical fullNote593/provenanceoriginalv1/snapshotMedia4, plainmergedv3 and uniqueExportv1 verified. Actual external httpbingo3566 capture exact-response-loss/replay, distinct same-textrefresh, fullpreview, reload bothpinv1 and canonicalNotev2, changed-head refusal with zeroPOST/generation pass. NN/G browser admission denial, RFC1149 negative-signature207 and classifierfinancial+medical policy limits retained. Earlier Redis429private-env stripping corrected with actual spawnedTCP63406; all ownedruntime ports nowclosed. Nativebrowserfcd epochs qualified separately fromfa07tests/builds. Counts nonadditive; all failedreceipts/reports immutable. ADR required:no; existing026/031/034/042/059/065/066. TASK13534 remains InProgress for evidence/whole-branch review, UX owner corrections, PR/Qodo, requester-written Change summary, exact-head sevenCI/currentdev-queue/merge. Widerquality scope staysopen: finalRuling15 three matched lintwarnings/sixmatchedtypes do not establish globalcleanliness; knownNext rootDir no-pages notice, experimentalnative storage, seven same-implementationWXT autoimport notices, baselinewholefilePrettier/Black and unsupported broadtypes retained. Backend current36warning occurrences investigated separately:Chat/Pydantic1,MCP/passlibcrypt1,pytestini1,WorkflowsclassConfig2,cleanupget_event_loop1,30sharedtempENOTEMPTY; suppressed historical summaries cannot be reconstructed or allassignedfrontends. No warning/rule suppression.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

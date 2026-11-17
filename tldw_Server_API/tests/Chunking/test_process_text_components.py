@@ -211,7 +211,6 @@ def test_process_text_context_protocol_accepts_chunker_shape() -> None:
         "_enforce_text_size",
         "_normalize_method_argument",
         "_resolve_method",
-        "_compute_paragraph_spans",
         "chunk_text",
         "chunk_text_with_metadata",
         "chunk_text_hierarchical_flat",
@@ -219,6 +218,7 @@ def test_process_text_context_protocol_accepts_chunker_shape() -> None:
 
     assert expected_members.issubset(ProcessTextContext.__annotations__ | ProcessTextContext.__dict__.keys())
     assert ProcessTextContext.__annotations__["config"] == "ChunkerConfig"
+    assert "_compute_paragraph_spans" not in ProcessTextContext.__dict__
 
 
 def test_process_text_models_module_does_not_import_chunker() -> None:
@@ -774,7 +774,7 @@ def test_dispatch_chunks_multi_level_metadata_result_becomes_dict_metadata(
             )
         ]
 
-    monkeypatch.setattr(chunker, "_compute_paragraph_spans", fake_spans)
+    monkeypatch.setattr(process_dispatch, "compute_paragraph_spans", fake_spans)
     monkeypatch.setattr(chunker, "chunk_text_with_metadata", fake_chunk_text_with_metadata)
 
     chunks = dispatch_chunks(chunker, text, _resolved_for_dispatch(multi_level=True))
@@ -808,7 +808,7 @@ def test_dispatch_chunks_multi_level_uses_resolved_align_text_to_source(
             )
         ]
 
-    monkeypatch.setattr(chunker, "_compute_paragraph_spans", fake_spans)
+    monkeypatch.setattr(process_dispatch, "compute_paragraph_spans", fake_spans)
     monkeypatch.setattr(chunker, "chunk_text_with_metadata", fake_chunk_text_with_metadata)
 
     dispatch_chunks(
@@ -837,7 +837,7 @@ def test_dispatch_chunks_multi_level_fallback_clamps_offsets(
         calls.append("normal")
         return ["First text that extends beyond the paragraph"]
 
-    monkeypatch.setattr(chunker, "_compute_paragraph_spans", fake_spans)
+    monkeypatch.setattr(process_dispatch, "compute_paragraph_spans", fake_spans)
     monkeypatch.setattr(chunker, "chunk_text_with_metadata", fake_chunk_text_with_metadata)
     monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
 

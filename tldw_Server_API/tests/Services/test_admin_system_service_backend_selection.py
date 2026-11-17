@@ -12,6 +12,13 @@ class _CursorStub:
     def __init__(self, *, row: Any = None, rows: list[Any] | None = None) -> None:
         self._row = row
         self._rows = list(rows or ([] if row is None else [row]))
+        self.description = [(key,) for key in ('total_used_mb', 'avg_used_mb', 'max_used_mb')]
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
 
     async def fetchone(self) -> Any:
         return self._row
@@ -66,7 +73,7 @@ class _SqliteDbWithPgTraps:
         q = str(query).lower()
         if "from users" in q and "count(*) as total_users" in q:
             return _CursorStub(row=(10, 8, 7, 1, 2))
-        if "sum(storage_used_mb) as total_used_mb" in q:
+        if "native_chat_quota_reservations" in q:
             return _CursorStub(row=(100.0, 12.5, 50.0))
         if "from sessions" in q and "count(distinct user_id) as unique_users" in q:
             return _CursorStub(row=(4, 3))
@@ -116,7 +123,7 @@ class _PostgresDbWithSqliteTraps:
                 "admin_users": 2,
                 "new_users_30d": 3,
             }
-        if "sum(storage_used_mb) as total_used_mb" in q:
+        if "native_chat_quota_reservations" in q:
             return {
                 "total_used_mb": 200.0,
                 "total_quota_mb": 1500.0,
@@ -205,11 +212,11 @@ async def test_get_system_stats_sqlite_row_objects_use_row_keys() -> None:
                         (10, 8, 7, 1, 2),
                     )
                 )
-            if "sum(storage_used_mb) as total_used_mb" in q:
+            if "native_chat_quota_reservations" in q:
                 return _CursorStub(
                     row=_SqliteRowLike(
-                        ["total_used_mb", "total_quota_mb", "avg_used_mb", "max_used_mb"],
-                        (100.0, 1000.0, 12.5, 50.0),
+                        ["total_used_mb", "avg_used_mb", "max_used_mb"],
+                        (100.0, 12.5, 50.0),
                     )
                 )
             if "from sessions" in q and "count(distinct user_id) as unique_users" in q:
@@ -288,13 +295,12 @@ async def test_get_system_stats_postgres_backend_selection_uses_fetchrow() -> No
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_get_system_stats_returns_empty_snapshot_when_queries_fail() -> None:
-    response = await svc.get_system_stats(_FailingStatsDb())
+async def test_get_system_stats_reports_unavailable_when_queries_fail() -> None:
+    from fastapi import HTTPException
 
-    assert response.users.total == 0
-    assert response.users.active == 0
-    assert response.storage.total_used_mb == 0.0
-    assert response.sessions.active == 0
+    with pytest.raises(HTTPException) as exc:
+        await svc.get_system_stats(_FailingStatsDb())
+    assert exc.value.status_code == 503
 
 
 @pytest.mark.asyncio
@@ -359,3 +365,35 @@ async def test_get_audit_log_postgres_backend_selection_uses_fetch_helpers(
     assert db.fetchval_calls
     assert db.fetch_calls
     assert not db.execute_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize("postgres", [False, True])
+async def test_explicit_zero_audit_user_filter_is_scoped_and_parameterized(monkeypatch, postgres) -> None:
+    from unittest.mock import AsyncMock
+
+    scope = AsyncMock()
+    monkeypatch.setattr(svc.admin_scope_service, "get_admin_org_ids", AsyncMock(return_value=None))
+    monkeypatch.setattr(svc.admin_scope_service, "enforce_admin_user_scope", scope)
+    db = _PostgresDbWithSqliteTraps() if postgres else _SqliteDbWithPgTraps()
+    principal = _admin_principal()
+    await svc.get_audit_log(
+        user_id=0,
+        action=None,
+        resource=None,
+        start=None,
+        end=None,
+        days=7,
+        limit=10,
+        offset=0,
+        org_id=None,
+        principal=principal,
+        db=db,
+    )
+    scope.assert_awaited_once_with(principal, 0, require_hierarchy=False)
+    queries = db.fetchval_calls + db.fetch_calls if postgres else db.execute_calls
+    selected = [(query, params) for query, params in queries if "audit_logs a" in query]
+    assert selected and all(
+        ("a.user_id = $1" if postgres else "a.user_id = ?") in query and params[0] == 0 for query, params in selected
+    )

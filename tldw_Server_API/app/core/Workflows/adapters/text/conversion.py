@@ -43,7 +43,7 @@ async def run_html_to_markdown_adapter(config: dict[str, Any], context: dict[str
     Output:
       - {"markdown": str, "text": str}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -87,7 +87,7 @@ async def run_markdown_to_html_adapter(config: dict[str, Any], context: dict[str
     Output:
       - {"html": str, "text": str}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -132,7 +132,7 @@ async def run_csv_to_json_adapter(config: dict[str, Any], context: dict[str, Any
     Output:
       - {"json": list[dict], "rows": int, "columns": int}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}

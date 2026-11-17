@@ -4,6 +4,7 @@
 
 import { bgRequest } from "@/services/background-proxy"
 import type { ApiSendResponse } from "@/services/api-send"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { appendPathQuery, toAllowedPath } from "@/services/tldw/path-utils"
 
 export type ModerationAction = "block" | "redact" | "warn" | "pass"
@@ -494,4 +495,56 @@ export async function listModerationReviewAudit(
     path: appendPathQuery("/api/v1/moderation/review/audit", query),
     method: "GET"
   })
+}
+
+export interface ModerationClassificationRequest {
+  request_id: string;
+  provider: string;
+  model: string;
+  criterion: string;
+  text: string;
+}
+
+export interface ModerationClassificationItem extends ModerationReviewItem {
+  context: {
+    input_digest: string;
+    classification: {
+      provider: string;
+      model: string;
+      criterion: string;
+      label: "benign" | "flagged";
+      reason: string;
+      evidence: string | null;
+    };
+  };
+}
+
+export async function classifyModeration(
+  payload: ModerationClassificationRequest,
+  scope: { configSnapshot: TldwConfig; abortSignal: AbortSignal },
+): Promise<ModerationClassificationItem> {
+  const item = await bgRequest<ModerationClassificationItem>({
+    path: "/api/v1/moderation/classify",
+    method: "POST",
+    body: payload,
+    ...scope,
+    timeoutMs: 150_000,
+    maxResponseBytes: 100_000,
+  });
+  const result = item?.context?.classification;
+  if (
+    !item?.id ||
+    !result ||
+    !["benign", "flagged"].includes(result.label) ||
+    typeof result.reason !== "string" ||
+    typeof result.provider !== "string" ||
+    typeof result.model !== "string" ||
+    typeof result.criterion !== "string" ||
+    !(result.evidence === null || typeof result.evidence === "string")
+  ) {
+    throw new Error(
+      "The server returned an invalid classification. Check the Review queue before retrying.",
+    );
+  }
+  return item;
 }

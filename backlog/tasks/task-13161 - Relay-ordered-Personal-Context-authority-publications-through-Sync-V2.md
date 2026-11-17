@@ -3,20 +3,19 @@ id: TASK-13161
 title: Relay ordered Personal Context authority publications through Sync V2
 status: Done
 assignee:
-  - '@codex'
-created_date: '2026-09-03 13:39'
-updated_date: '2026-09-05 02:17'
+- '@codex'
+created_date: 2026-09-03 13:39
+updated_date: 2026-09-05 02:17
 labels:
-  - personal-context
-  - sync
-  - relay
-  - security
+- personal-context
+- sync
+- relay
+- security
 dependencies:
-  - TASK-13160
+- TASK-15141
 references:
-  - >-
-    backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md
-  - Docs/superpowers/specs/2026-09-02-personal-context-ongoing-sync-design.md
+- backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md
+- Docs/superpowers/specs/2026-09-02-personal-context-ongoing-sync-design.md
 priority: high
 ---
 

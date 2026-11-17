@@ -10,15 +10,16 @@ const queryState = vi.hoisted(() => ({
   optimization: {
     id: 101,
     project_id: 7,
-    prompt_id: 55,
+    initial_prompt_id: 55,
     name: "Demo optimization",
     description: "Improves a reusable research prompt.",
     status: "completed",
-    config: { strategy: "iterative", max_iterations: 3 },
-    best_prompt_id: 56,
-    best_score: 0.91,
-    current_iteration: 3,
-    total_iterations: 3,
+    optimizer_type: "iterative",
+    optimization_config: { max_iterations: 3 },
+    optimized_prompt_id: 56,
+    final_metrics: { score: 0.91 },
+    iterations_completed: 3,
+    max_iterations: 3,
     error_message: "Provider returned an invalid score.",
     cancel_reason: "Stopped by reviewer.",
     started_at: "2026-05-30T10:00:00Z",
@@ -71,7 +72,8 @@ vi.mock("@/services/prompt-studio", () => ({
   getOptimizationIterations: vi.fn(),
   getOptimizationStrategies: vi.fn(),
   listPrompts: vi.fn(),
-  listTestCases: vi.fn()
+  listTestCases: vi.fn(),
+  getLlmProviders: vi.fn()
 }))
 
 vi.mock("@tanstack/react-query", () => ({
@@ -80,15 +82,16 @@ vi.mock("@tanstack/react-query", () => ({
       return {
         data: {
           data: {
-            data: [
+            data: { iterations: [
               {
-                iteration: 3,
-                prompt_id: 56,
-                score: 0.91,
-                changes: "Tightened evidence instructions.",
-                timestamp: "2026-05-30T10:03:00Z"
+                id: 1,
+                iteration_number: 3,
+                prompt_variant: { prompt_id: 56 },
+                metrics: { score: 0.91 },
+                note: "Tightened evidence instructions.",
+                created_at: "2026-05-30T10:03:00Z"
               }
-            ]
+            ] }
           }
         },
         isLoading: false
@@ -148,6 +151,7 @@ vi.mock("antd", () => {
     <div>{children}</div>
   )
   const Form = Object.assign(passthrough, {
+    useWatch: () => undefined,
     Item: ({ children, label }: { children?: React.ReactNode; label?: React.ReactNode }) => (
       <label>
         {label}

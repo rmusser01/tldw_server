@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import SecurityConfig
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     create_prompt_studio_database,
     get_content_backend_instance,
@@ -40,6 +41,7 @@ _db_lock = threading.Lock()
 _PromptStudioCacheKey = tuple[str, str, str]
 _active_db_leases: dict[_PromptStudioCacheKey, int] = {}
 _pending_db_close: dict[_PromptStudioCacheKey, list[PromptStudioDatabase]] = {}
+_request_connection_leases = threading.local()
 
 _PROMPT_STUDIO_DB_EXCEPTIONS = (
     DatabaseError,
@@ -214,6 +216,34 @@ def _get_or_create_prompt_studio_db(user_id: str, client_id: str) -> PromptStudi
 
 
 @contextlib.contextmanager
+def _prompt_studio_request_connection(
+    db_instance: PromptStudioDatabase,
+) -> Iterator[None]:
+    """Release this thread's PG checkout after its last scope for this instance."""
+    if getattr(db_instance, "backend_type", None) != BackendType.POSTGRESQL:
+        yield
+        return
+
+    depths = getattr(_request_connection_leases, "depths", None)
+    if depths is None:
+        depths = {}
+        _request_connection_leases.depths = depths
+    instance_key = id(db_instance)
+    depths[instance_key] = depths.get(instance_key, 0) + 1
+    try:
+        yield
+    finally:
+        remaining = depths[instance_key] - 1
+        if remaining:
+            depths[instance_key] = remaining
+        else:
+            depths.pop(instance_key)
+            # No cache lock here: a different facade may be initializing schema
+            # under that lock and waiting for this completed reader's locks.
+            _close_prompt_studio_db(db_instance)
+
+
+@contextlib.contextmanager
 def managed_prompt_studio_db(
     user_context: dict[str, Any],
 ) -> Iterator[PromptStudioDatabase]:
@@ -246,9 +276,10 @@ def managed_prompt_studio_db(
         _active_db_leases[cache_key] = _active_db_leases.get(cache_key, 0) + 1
 
     try:
-        for evicted_db in close_now:
-            _close_prompt_studio_db(evicted_db)
-        yield db_instance
+        with _prompt_studio_request_connection(db_instance):
+            for evicted_db in close_now:
+                _close_prompt_studio_db(evicted_db)
+            yield db_instance
     finally:
         deferred_close: list[PromptStudioDatabase] = []
         with _db_lock:
@@ -359,65 +390,6 @@ async def get_prompt_studio_user(
     except _PROMPT_STUDIO_CONTEXT_EXCEPTIONS:
         # Ignore and fall through to standard handling
         pass
-
-    # 2b) No patched hook and no credentials in headers => conditional handling
-    authz = request.headers.get("Authorization")
-    api_key_hdr = request.headers.get("X-API-KEY")
-    # Use exact path matching for certain endpoints (do not strip trailing slash)
-    # This allows tests to differentiate between
-    #   GET /api/v1/prompt-studio/projects  -> unauthorized
-    #   GET /api/v1/prompt-studio/projects/ -> allowed (test convenience)
-    path = (request.url.path or "")
-    method = request.method.upper()
-    if not authz and not api_key_hdr:
-        test_mode = is_test_mode()
-        # Explicitly require auth for project list endpoint (without trailing slash) to satisfy tests
-        if path == "/api/v1/prompt-studio/projects" and method == "GET":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required"
-            )
-        # Allow local test convenience only in TEST_MODE
-        if test_mode and path.startswith("/api/v1/prompt-studio/projects"):
-            user_context = {
-                "user_id": "test-user",
-                "client_id": x_client_id or "test-client",
-                "is_authenticated": True,
-                "is_admin": True,
-                "permissions": ["all"],
-                "rg_policy_id": getattr(request.state, "rg_policy_id", None),
-            }
-            request.state.user_context = user_context
-            return user_context
-        # Allow optimization endpoints for integration tests without auth headers
-        if test_mode and path.startswith("/api/v1/prompt-studio/optimizations"):
-            user_context = {
-                "user_id": "test-user",
-                "client_id": x_client_id or "test-client",
-                "is_authenticated": True,
-                "is_admin": True,
-                "permissions": ["all"],
-                "rg_policy_id": getattr(request.state, "rg_policy_id", None),
-            }
-            request.state.user_context = user_context
-            return user_context
-        # Allow prompts endpoints for integration tests without auth headers
-        if test_mode and path.startswith("/api/v1/prompt-studio/prompts"):
-            user_context = {
-                "user_id": "test-user",
-                "client_id": x_client_id or "test-client",
-                "is_authenticated": True,
-                "is_admin": True,
-                "permissions": ["all"],
-                "rg_policy_id": getattr(request.state, "rg_policy_id", None),
-            }
-            request.state.user_context = user_context
-            return user_context
-        # Otherwise, enforce auth
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required"
-        )
 
     # 3) Default path: use unified request user dependency (supports single and multi user)
     # IMPORTANT: When calling a FastAPI dependency directly, its Header/Depends defaults are not populated.

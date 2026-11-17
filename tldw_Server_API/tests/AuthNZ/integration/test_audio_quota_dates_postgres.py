@@ -296,3 +296,40 @@ async def test_postgres_audio_reads_backfill_legacy_usage_before_new_writes(
         else:
             read = audio_quota.get_daily_minutes_used if reader == "daily" else audio_quota.get_monthly_minutes_used
             assert await read(7) == 2.5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("minutes_used", [None])
+@pytest.mark.parametrize("daily_limit", [30.0])
+async def test_postgres_reporting_first_backfills_legacy_usage(configured_audio_profile_user, monkeypatch, restart_audio_ledger_caches):
+    """A profile-first upgrade reports migrated daily usage and remaining allowance."""
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.Usage import audio_quota, quota_checks
+
+    client, profile_pool, user_id, headers = configured_audio_profile_user
+    monkeypatch.setattr(audio_quota, "datetime", datetime)
+    restart_audio_ledger_caches()
+    quota_checks.reset_ledger_cache()
+    async def seed_legacy_usage() -> None:
+        pool = await get_db_pool()
+        assert pool is profile_pool
+        await pool.execute(
+            "INSERT INTO audio_usage_daily (user_id, day, minutes_used, jobs_started) VALUES ($1, $2, 2.5, 0)",
+            user_id,
+            datetime.now(timezone.utc).date(),
+        )
+
+    try:
+        client.portal.call(seed_legacy_usage)
+        response = client.get("/api/v1/users/me/profile", headers=headers)
+        assert response.status_code == 200  # nosec B101 - pytest regression assertion.
+        audio = response.json()["quotas"]["audio"]
+        assert audio["daily_minutes_used"] == 2.5  # nosec B101 - pytest regression assertion.
+        assert audio["daily_minutes_remaining"] == 27.5  # nosec B101 - pytest regression assertion.
+        # Retry migration through a fresh reporting read; the legacy op_id stays unique.
+        restart_audio_ledger_caches()
+        response = client.get("/api/v1/users/me/profile", headers=headers)
+        assert response.status_code == 200  # nosec B101 - pytest regression assertion.
+        assert response.json()["quotas"]["audio"]["daily_minutes_used"] == 2.5  # nosec B101 - pytest regression assertion.
+    finally:
+        quota_checks.reset_ledger_cache()

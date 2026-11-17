@@ -31,7 +31,7 @@ const estimateTokens = (text: string): number => {
   const trimmed = normalized.trim()
   if (!trimmed) return 0
   try {
-    return encode(trimmed).length
+    return encode(normalized).length
   } catch {
     return trimmed.split(/\s+/).length
   }
@@ -57,7 +57,11 @@ self.onmessage = (event: MessageEvent<TokenizeRequest>) => {
 
     const files = request.files ?? []
     const total = files.length
-    const results: Array<{ path: string; tokenCount: number; lineCount: number }> = []
+    const results: Array<{
+      path: string
+      tokenCount: number
+      lineCount: number
+    }> = []
     let tokenCount = 0
 
     for (let index = 0; index < files.length; index++) {

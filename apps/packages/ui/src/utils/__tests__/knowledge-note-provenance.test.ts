@@ -244,3 +244,48 @@ it("explicit capture references coexist with original references using strict v1
     )
   ).toBeNull()
 })
+
+it("S04 merges plain references with existing canonical evidence and web pins without duplication", async () => {
+  const { appendCapturedNoteProvenance } =
+    await import("../knowledge-note-provenance");
+  const pin = {
+    originalId: "clip",
+    mediaId: 71,
+    title: "Article",
+    type: "website" as const,
+    sourceType: "web_capture",
+    excerpt: "",
+    snapshotMediaId: 71,
+    originalVersion: 9,
+  };
+  const ref = {
+    originalId: 42,
+    mediaId: 42,
+    title: "Rowan",
+    type: "text" as const,
+    sourceType: "text",
+    excerpt: "Selene",
+  };
+  const original = {
+    origin: "reviewed_sources" as const,
+    thread_id: "original-thread",
+    sources: [pin],
+  };
+  const head = {
+    knowledge_provenance_state: "active" as const,
+    knowledge_provenance: original,
+  };
+  expect(appendCapturedNoteProvenance(head, [], [ref, ref])).toEqual({
+    ...original,
+    sources: [pin, ref],
+  });
+  expect(head.knowledge_provenance).toEqual(original);
+  for (const state of ["deleted", "unsupported"] as const)
+    expect(
+      appendCapturedNoteProvenance(
+        { ...head, knowledge_provenance_state: state },
+        [],
+        [ref],
+      ),
+    ).toBeNull();
+});

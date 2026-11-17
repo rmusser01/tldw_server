@@ -1,3 +1,8 @@
+import {
+  decodeText,
+  MAX_FILE_BYTES,
+  readBoundedResponse
+} from "../exportPolicy"
 import type {
   FetchTreeOptions,
   IProvider,
@@ -15,7 +20,10 @@ export abstract class BaseProvider implements IProvider {
   abstract getName(): string
   abstract validateUrl(url: string): boolean
   abstract parseUrl(url: string): ParsedRepoInfo
-  abstract fetchTree(url: string, options?: FetchTreeOptions): Promise<RepoTreeNode[]>
+  abstract fetchTree(
+    url: string,
+    options?: FetchTreeOptions
+  ): Promise<RepoTreeNode[]>
 
   requiresAuth(): boolean {
     return true
@@ -25,17 +33,25 @@ export abstract class BaseProvider implements IProvider {
     this.credentials = credentials
   }
 
-  async fetchFile(node: RepoTreeNode): Promise<RepoFileContent> {
+  async fetchFile(
+    node: RepoTreeNode,
+    signal?: AbortSignal
+  ): Promise<RepoFileContent> {
     if (!node.url) {
       throw new Error("Cannot fetch file content: missing file URL")
     }
 
-    const response = await fetch(node.url)
+    const response = await fetch(node.url, { signal })
     if (!response.ok) {
-      throw new Error(`Failed to fetch file ${node.path}: HTTP ${response.status}`)
+      throw new Error(
+        `Failed to fetch file ${node.path}: HTTP ${response.status}`
+      )
     }
 
-    const text = await response.text()
+    const text = decodeText(
+      await readBoundedResponse(response, MAX_FILE_BYTES, signal),
+      node.path
+    )
     return {
       path: node.path,
       text,

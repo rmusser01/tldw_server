@@ -364,6 +364,31 @@ class AuthnzUsersRepo:
             logger.error(f"AuthnzUsersRepo.list_users failed: {exc}")
             raise
 
+    async def list_users_for_semantic_health_sweep(
+        self,
+        *,
+        after_id: int | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """List one stable keyset page for the private semantic health sweep."""
+
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("semantic health owner limit must be bounded")
+        if after_id is not None and (type(after_id) is not int or after_id <= 0):
+            raise ValueError("semantic health owner id must be positive")
+        db = await self._users_db()
+        params: list[object] = []
+        where_clause = ""
+        if after_id is not None:
+            where_clause = " WHERE id < ?"
+            params.append(after_id)
+        rows = await db.db_pool.fetchall(
+            f"SELECT id FROM users{where_clause} ORDER BY id DESC LIMIT ?",  # nosec B608
+            *params,
+            limit,
+        )
+        return [{"id": int(dict(row)["id"])} for row in rows]
+
     async def ensure_single_user_admin_user(
         self,
         *,
@@ -535,15 +560,19 @@ class AuthnzUsersRepo:
         try:
             async with self.db_pool.transaction() as conn:
                 if self._is_postgres_backend():
+                    locked_user = await conn.fetchrow(
+                        "SELECT id FROM public.users WHERE id = $1 FOR UPDATE",
+                        int(user_id),
+                    )
+                    if locked_user is None:
+                        return False
                     row = await conn.fetchrow(
-                        """
-                        DELETE FROM user_roles ur
-                        USING roles r
-                        WHERE ur.role_id = r.id
-                          AND ur.user_id = $1
-                          AND r.name = $2
-                        RETURNING ur.user_id
-                        """,
+                        "DELETE FROM public.user_roles ur "
+                        "USING public.roles r "
+                        "WHERE ur.role_id = r.id "
+                        "AND ur.user_id = $1 "
+                        "AND r.name = $2 "
+                        "RETURNING ur.user_id",
                         int(user_id),
                         str(role_name),
                     )

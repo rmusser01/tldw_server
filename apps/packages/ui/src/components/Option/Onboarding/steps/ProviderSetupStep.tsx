@@ -11,6 +11,7 @@ import type {
 export type ProviderSelection = {
   provider: string;
   model: string;
+  base_url?: string;
   credential_configured?: boolean;
 };
 
@@ -47,7 +48,7 @@ type ProviderSetupStepProps = {
 
 type ProviderFormValues = {
   apiKey: string;
-  baseUrl: string;
+  baseUrl?: string;
   model: string;
 };
 
@@ -70,7 +71,6 @@ type ProviderEditRevisionState = Record<string, number>;
 
 const emptyValues: ProviderFormValues = {
   apiKey: "",
-  baseUrl: "",
   model: "",
 };
 
@@ -157,6 +157,7 @@ const initialSavedProvider = (
   status: "saved",
   credential_configured: Boolean(initialSelection.credential_configured),
   model: initialSelection.model,
+  base_url: initialSelection.base_url,
   make_default: true,
 });
 
@@ -211,6 +212,7 @@ export function ProviderSetupStep({
           [initialSelection.provider]: {
             ...emptyValues,
             model: initialSelection.model,
+            baseUrl: initialSelection.base_url,
           },
         }
       : {},
@@ -226,6 +228,7 @@ export function ProviderSetupStep({
                 initialSelection.credential_configured,
               ),
               model: initialSelection.model,
+              base_url: initialSelection.base_url,
               make_default: true,
             },
           }
@@ -373,7 +376,7 @@ export function ProviderSetupStep({
       const saved = savedOverride ?? savedProviders[provider.provider_key];
       const baseUrl =
         provider.provider_type === "local_endpoint"
-          ? providerValues.baseUrl.trim() || provider.default_base_url || ""
+          ? (providerValues.baseUrl ?? provider.default_base_url ?? "").trim()
           : "";
       return JSON.stringify({
         provider_key: provider.provider_key,
@@ -439,6 +442,7 @@ export function ProviderSetupStep({
   const seededInitialSavedProvider = React.useMemo(
     () => (initialSelection ? initialSavedProvider(initialSelection) : null),
     [
+      initialSelection?.base_url,
       initialSelection?.credential_configured,
       initialSelection?.model,
       initialSelection?.provider,
@@ -462,6 +466,8 @@ export function ProviderSetupStep({
       const nextValues = {
         ...emptyValues,
         ...(current[initialSelection.provider] ?? {}),
+        baseUrl:
+          current[initialSelection.provider]?.baseUrl ?? initialSelection.base_url,
         model:
           current[initialSelection.provider]?.model || initialSelection.model,
       };
@@ -475,7 +481,11 @@ export function ProviderSetupStep({
         [initialSelection.provider]: nextValues,
       };
     });
-  }, [initialSelection?.model, initialSelection?.provider]);
+  }, [
+    initialSelection?.base_url,
+    initialSelection?.model,
+    initialSelection?.provider,
+  ]);
 
   React.useEffect(() => {
     if (!initialSelection?.provider || !seededInitialSavedProvider) return;
@@ -512,7 +522,8 @@ export function ProviderSetupStep({
     const seededStateStillMatchesCurrentPayload =
       currentProviderValues.model === savedModel &&
       currentProviderValues.apiKey.trim() === "" &&
-      currentProviderValues.baseUrl.trim() === "" &&
+      currentProviderValues.baseUrl ===
+        (savedResponse.base_url ?? initialSelection.base_url) &&
       (providerEditRevisions[initialSelection.provider] ?? 0) === 0 &&
       savedResponse.make_default === true;
     if (!seededStateStillMatchesCurrentPayload) return;
@@ -534,6 +545,7 @@ export function ProviderSetupStep({
     defaultProvider,
     initialProviderSavedFingerprint,
     initialProviderSavedResponse,
+    initialSelection?.base_url,
     initialSelection?.model,
     initialSelection?.provider,
     orderedProviders,
@@ -572,7 +584,7 @@ export function ProviderSetupStep({
     const apiKey = providerValues.apiKey.trim() || null;
     const baseUrl =
       provider.provider_type === "local_endpoint"
-        ? providerValues.baseUrl.trim() || provider.default_base_url || null
+        ? (providerValues.baseUrl ?? provider.default_base_url ?? "").trim() || null
         : null;
     const model =
       provider.provider_key === defaultProvider
@@ -597,6 +609,11 @@ export function ProviderSetupStep({
     setError(null);
     try {
       const payload = buildProviderPayload(provider);
+      if (provider.provider_type === "local_endpoint" && !payload.base_url) {
+        throw new Error(
+          `${provider.label} base URL is required before validation.`,
+        );
+      }
       const providerValues = values[provider.provider_key] ?? emptyValues;
       const saved = savedProviders[provider.provider_key];
       const response =
@@ -711,8 +728,7 @@ export function ProviderSetupStep({
         }
         if (
           provider.provider_type === "local_endpoint" &&
-          !payload.base_url &&
-          !savedProviders[provider.provider_key]
+          !payload.base_url
         ) {
           throw new Error(
             `${provider.label} base URL is required before saving.`,
@@ -927,8 +943,8 @@ export function ProviderSetupStep({
                         )}
                         aria-describedby={`provider-${provider.provider_key}-base-url-help`}
                         value={
-                          providerValues.baseUrl ||
-                          provider.default_base_url ||
+                          providerValues.baseUrl ??
+                          provider.default_base_url ??
                           ""
                         }
                         onChange={(event) =>
@@ -1173,6 +1189,9 @@ export function ProviderSetupStep({
               onContinue({
                 provider: defaultProvider,
                 model: selectedDefaultModel,
+                base_url:
+                  buildProviderPayload(defaultProviderConfig!).base_url ??
+                  undefined,
                 credential_configured: hasBackendConfirmedSavedCredential(
                   savedProviders[defaultProvider],
                 ),

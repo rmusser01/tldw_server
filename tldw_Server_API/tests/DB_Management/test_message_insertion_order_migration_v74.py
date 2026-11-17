@@ -44,11 +44,20 @@ def test_v74_upgrade_preserves_legacy_and_rejects_unknown_anchor(legacy_v73):
         upstream_columns = set(conn.execute("PRAGMA table_info(conversations)"))
     db = CharactersRAGDB(path, client_id="order-owner")
     try:
-        # The fingerprint migration extends conversations; existing columns and
-        # every other upstream schema object must remain unchanged.
-        assert {row for row in upstream_schema if row[:2] != ("table", "conversations")} <= {tuple(row) for row in db.get_connection().execute(
-            "SELECT type, name, sql FROM sqlite_master"
-        )}
+        # Allow precisely dev's added native columns; keep the original DDL comparison for the rest.
+        additions = {
+            "native_chat_asset_references": (
+                ", role TEXT CHECK (role IN ('message_image','document_context','generated_image','reference_image'))"
+            ),
+            "native_chat_quota_intents": ", quota_owner_json TEXT",
+        }
+        upgraded_schema = set()
+        for kind, name, sql in db.get_connection().execute("SELECT type, name, sql FROM sqlite_master"):
+            if kind == "table" and name in additions:
+                assert additions[name] in sql
+                sql = sql.replace(additions[name], "", 1)
+            upgraded_schema.add((kind, name, sql))
+        assert {row for row in upstream_schema if row[:2] != ("table", "conversations")} <= upgraded_schema
         assert upstream_columns <= {tuple(row) for row in db.get_connection().execute("PRAGMA table_info(conversations)")}
         assert [db.get_message_by_id(mid) for mid in ids] == rows
         assert db.get_connection().execute("SELECT COUNT(*) FROM message_insertion_order").fetchone()[0] == 0

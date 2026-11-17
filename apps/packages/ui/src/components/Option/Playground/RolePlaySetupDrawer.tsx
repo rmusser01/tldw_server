@@ -1,18 +1,26 @@
 import React from "react"
-import { Button, Drawer, Input, Skeleton, Switch } from "antd"
+import { Button, Drawer, Input, Modal, Skeleton, Switch } from "antd"
 import { useTranslation } from "react-i18next"
 import { X } from "lucide-react"
-import { shallow } from "zustand/shallow"
 
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useActorStore } from "@/store/actor"
 import { createDefaultActorSettings, type ActorSettings } from "@/types/actor"
-import type { AssistantSelection } from "@/types/assistant-selection"
+import { getAssistantSelectionMode, isProtectedTrackedPersonaUnavailable, type AssistantSelection } from "@/types/assistant-selection"
+import { nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight"
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import type { ModelSettingsOperation } from "@/hooks/chat/model-settings-operation"
+import { captureCurrentActorSceneTarget, useActorSceneHistoryId } from "@/hooks/chat/actor-scene-source"
+import type { ActorSettingsTarget } from "@/utils/actor-settings-target"
+import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import {
-  getActorSettingsForChatWithCharacterFallback,
-  saveActorSettingsForChat
+  getActorSceneForChat,
+  saveActorSettingsForChat,
+  type ActorSceneRead,
+  type ActorSceneRecord
 } from "@/services/actor-settings"
 
 import { RolePlaySetupPreview } from "./RolePlaySetupPreview"
@@ -53,6 +61,28 @@ export type RolePlaySetupSavePayload = {
   rolePlay: StartupTemplateRolePlayMetadata
 }
 
+export type RolePlayApplyGuard = (() => boolean) & {
+  acceptNextAction?: (revision: number) => boolean
+  acceptRestoreCancelled?: (revision: number) => boolean
+}
+
+export type RolePlayApplyContext = {
+  /** Exact component-local proposal; never a persisted or server operation ID. */
+  applicationId?: object
+  isCurrent?: () => boolean
+  onActionStarted?: (revision: number) => boolean
+  onRestoreCancelled?: (revision: number) => boolean
+  settingsOperation?: ModelSettingsOperation
+  onDestination?: (destination: {
+    historyId: string | null
+    serverChatId: string | null
+    isCurrent: () => boolean
+    /** The producer retains its exact acknowledged destination independently of this drawer. */
+    sceneTarget?: ActorSettingsTarget
+    settingsOperation?: ModelSettingsOperation
+  }) => void
+}
+
 type RolePlaySetupDrawerProps = {
   open: boolean
   beforeState: RolePlayState
@@ -65,13 +95,14 @@ type RolePlaySetupDrawerProps = {
   savedSetupDraftName?: string
   savedSetupNameFallback?: string
   onClose: () => void
-  onApply: (payload: RolePlaySetupApplyPayload) => boolean | void | Promise<boolean | void>
-  /** Capture the initiating owner action after its synchronous identity transition. */
-  captureApplyGuard?: () => () => boolean
+  onApply: (payload: RolePlaySetupApplyPayload, context?: RolePlayApplyContext) => boolean | void | Promise<boolean | void>
+  /** Retain the initiating action; admit only its exact synchronous producer receipts. */
+  captureApplyGuard?: () => RolePlayApplyGuard
   onSavedSetupDraftNameChange?: (name: string) => void
   onSaveRolePlaySetup?: (payload: RolePlaySetupSavePayload) => void
   onPreviewSavedSetup?: (id: string) => void
-  onApplySavedSetup?: (setup: StartupTemplateBundle) => boolean | void | Promise<boolean | void>
+  onApplySavedSetup?: (setup: StartupTemplateBundle, context?: RolePlayApplyContext) => boolean | void | Promise<boolean | void>
+  onSavedSetupApplied?: () => void
   onRenameSavedSetup?: (id: string, name: string) => void
   onDeleteSavedSetup?: (id: string) => void
   returnFocusRef?: React.RefObject<HTMLElement>
@@ -113,18 +144,22 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   onSaveRolePlaySetup,
   onPreviewSavedSetup,
   onApplySavedSetup,
+  onSavedSetupApplied,
   onRenameSavedSetup,
   onDeleteSavedSetup,
   returnFocusRef
 }) => {
-  const { t } = useTranslation(["playground", "common"])
-  const { setSettings, setPreviewAndTokens } = useActorStore(
-    (state) => ({
-      setSettings: state.setSettings,
-      setPreviewAndTokens: state.setPreviewAndTokens
-    }),
-    shallow
-  )
+  const { t } = useTranslation(["playground", "common", "option"])
+  const personaGuidanceId = React.useId()
+  const applyScene = useActorStore(state => state.applyScene)
+  const [modal, modalContextHolder] = Modal.useModal()
+  const editRevisionRef = React.useRef(0)
+  const baselineSceneRef = React.useRef<string | undefined>(undefined)
+  const sceneReadRef = React.useRef<ActorSceneRead | null>(null)
+  const sceneReviewRef = React.useRef<object | null>(null)
+  const [reviewingScene, setReviewingScene] = React.useState(false)
+  const sceneAccountRef = React.useRef<ActorSettingsTarget["account"]>(undefined)
+  const [profileUnavailable, setProfileUnavailable] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const applyingRef = React.useRef(false)
@@ -132,12 +167,32 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     historyId: string | null
     serverChatId: string | null
     isCurrent: () => boolean
+    sceneTarget: ActorSettingsTarget
+    expectedRecord: ActorSceneRecord | null
   } | null>(null)
+  const acceptedSettingsRef = React.useRef<{
+    intent: string
+    destination: NonNullable<typeof applyingDestinationRef.current>
+  } | null>(null)
+  const settingsApplicationRef = React.useRef<{
+    id: object
+    intent: string
+    destination: NonNullable<typeof applyingDestinationRef.current> | null
+  } | null>(null)
+  const activeAttemptRef = React.useRef<object | null>(null)
   const mountedRef = React.useRef(true)
   const lifetimeRef = React.useRef({ open, revision: 0 })
   if (lifetimeRef.current.open !== open) {
     lifetimeRef.current = { open, revision: lifetimeRef.current.revision + 1 }
+    acceptedSettingsRef.current = null
+    settingsApplicationRef.current = null
+    applyingDestinationRef.current = null
+    activeAttemptRef.current = null
+    applyingRef.current = false
   }
+  // Copy updates must not reload the owned scene over staged edits.
+  const translationRef = React.useRef(t)
+  translationRef.current = t
   const scopeRef = React.useRef({ open, historyId, serverChatId })
   scopeRef.current = { open, historyId, serverChatId }
   React.useEffect(() => {
@@ -154,10 +209,63 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   const [resetGenerationStyle, setResetGenerationStyle] = React.useState(false)
   const [templatesOpen, setTemplatesOpen] = React.useState(false)
   const [sceneLoadError, setSceneLoadError] = React.useState<string | null>(null)
+  const [sceneReadRevision, setSceneReadRevision] = React.useState(0)
+  const readSourceRef = React.useRef<(() => boolean) | null>(null)
+  const dismissalSourceRef = React.useRef<(() => boolean) | null>(null)
+  const loadedSceneRef = React.useRef<RolePlayApplyGuard | null>(null)
+  const draftRevision = useStoreMessageOption((state) => state.chatDraftRevision)
+  const restoreRevision = usePlaygroundSessionStore(
+    (state) => state.restoreRevision
+  )
+  const selectionRevision = usePlaygroundSessionStore(
+    (state) => state.sourceSelectionRevision
+  )
+  const historySelection = useHistorySelectionContext()
+  const { sceneHistoryId, isSceneHistoryIdCurrent } = useActorSceneHistoryId(historySelection, historyId, serverChatId)
+  const personaIdentityUnavailable = isProtectedTrackedPersonaUnavailable(Boolean(historySelection), stagedIdentity?.kind, getAssistantSelectionMode(stagedIdentity))
+  const historySelectionRef = React.useRef(historySelection)
+  historySelectionRef.current = historySelection
+  const selectionSignal = historySelection?.getSignal()
+  const captureSelectionFence = historySelection?.fence
+  const sceneView = {
+    open,
+    historyId: sceneHistoryId,
+    serverChatId,
+    characterId,
+    draftRevision,
+    restoreRevision,
+    selectionRevision,
+    sceneReadRevision,
+    selectionSignal,
+    captureSelectionFence,
+    captureApplyGuard
+  }
+  const sceneViewRef = React.useRef(sceneView)
+  if (
+    Object.keys(sceneView).some(
+      (key) =>
+        sceneView[key as keyof typeof sceneView] !==
+        sceneViewRef.current[key as keyof typeof sceneView]
+    )
+  )
+    sceneViewRef.current = sceneView
+  const renderedSceneView = sceneViewRef.current
+
   const [stagedBehaviorTemplate, setStagedBehaviorTemplate] =
     React.useState<RolePlaySetupApplyPayload["behaviorTemplate"]>(null)
   const [stagedGenerationKey, setStagedGenerationKey] =
     React.useState<PresetKey | null>(null)
+
+  const dismissalSource = dismissalSourceRef.current
+  const loadedScene = loadedSceneRef.current
+  const isDraftCurrent = React.useCallback(() => mountedRef.current &&
+    !applyingRef.current && sceneViewRef.current === renderedSceneView &&
+    Boolean(loadedScene?.()), [loadedScene, renderedSceneView])
+  const stage = React.useCallback((change: () => void) => {
+    if (!isDraftCurrent()) return
+    editRevisionRef.current++
+    change()
+  }, [isDraftCurrent])
 
   const closeAndReturnFocus = React.useCallback(() => {
     if (applyingRef.current) return
@@ -166,6 +274,67 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     // has released background focus suppression.
     window.requestAnimationFrame(() => returnFocusRef?.current?.focus())
   }, [onClose, returnFocusRef])
+
+  const requestClose = React.useCallback(() => {
+    if (
+      !mountedRef.current ||
+      !scopeRef.current.open ||
+      applyingRef.current ||
+      sceneViewRef.current !== renderedSceneView ||
+      dismissalSourceRef.current !== dismissalSource ||
+      !dismissalSource?.()
+    )
+      return
+    const dirty =
+      stagedIdentity !== null ||
+      clearIdentity ||
+      clearBehavior ||
+      resetGenerationStyle ||
+      stagedBehaviorTemplate !== null ||
+      stagedGenerationKey !== null ||
+      (baselineSceneRef.current !== undefined &&
+        JSON.stringify(sceneDraft) !== baselineSceneRef.current)
+    if (!dirty) return closeAndReturnFocus()
+    const revision = editRevisionRef.current
+    const lifetimeRevision = lifetimeRef.current.revision
+    const canDismiss = () =>
+      dismissalSourceRef.current === dismissalSource &&
+      dismissalSource() &&
+      mountedRef.current &&
+      scopeRef.current.open &&
+      !applyingRef.current &&
+      sceneViewRef.current === renderedSceneView &&
+      lifetimeRef.current.revision === lifetimeRevision &&
+      editRevisionRef.current === revision
+    modal.confirm({
+      title: t(
+        "playground:composer.discardSetupTitle",
+        "Discard unsaved role-play setup?"
+      ),
+      content: t(
+        "playground:composer.discardSetupHelp",
+        "Your staged setup will be discarded. Identity and behavior already applied remain in effect."
+      ),
+      okText: t("common:discard", "Discard"),
+      cancelText: t("common:keepEditing", "Keep editing"),
+      onOk: () => {
+        if (canDismiss()) closeAndReturnFocus()
+      }
+    })
+  }, [
+    clearBehavior,
+    clearIdentity,
+    closeAndReturnFocus,
+    dismissalSource,
+    modal,
+    renderedSceneView,
+    resetGenerationStyle,
+    sceneDraft,
+    stagedBehaviorTemplate,
+    stagedGenerationKey,
+    stagedIdentity,
+    t
+  ])
 
   React.useEffect(() => {
     if (!open || saving || templatesOpen) return
@@ -180,25 +349,115 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
       if (content?.querySelector('[aria-expanded="true"]')) return
       event.preventDefault()
       event.stopPropagation()
-      closeAndReturnFocus()
+      requestClose()
     }
     window.addEventListener("keydown", handleEscape, true)
     return () => window.removeEventListener("keydown", handleEscape, true)
-  }, [open, saving, templatesOpen, closeAndReturnFocus])
+  }, [open, saving, templatesOpen, requestClose])
 
   React.useEffect(() => {
     if (!open) return
     const ownDestination = applyingDestinationRef.current
-    if (ownDestination?.historyId === historyId &&
-        ownDestination.serverChatId === serverChatId && ownDestination.isCurrent()) {
-      return
-    }
+    // The exact acknowledged destination can precede its parent props publication.
+    if (ownDestination?.isCurrent()) return
 
+    acceptedSettingsRef.current = null
+    settingsApplicationRef.current = null
+    applyingDestinationRef.current = null
+    activeAttemptRef.current = null
+    applyingRef.current = false
+    setSaving(false)
     let cancelled = false
+    const applyIsCurrent: RolePlayApplyGuard =
+      captureApplyGuard?.() ?? (() => true)
+    const hadAuthority = applyIsCurrent()
+    const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
+    const sourceView = sceneViewRef.current
+    const target = captureCurrentActorSceneTarget(historySelectionRef.current, () => true, isSceneHistoryIdCurrent)
+    const draftAccount = historySelectionRef.current?.draftAccount
+    const account =
+      draftAccount?.requestScope &&
+      draftAccount.isCurrent() &&
+      chatDraftOwnerKey(draftAccount.requestScope) === target?.accountKey
+        ? {
+            requestScope: structuredClone(draftAccount.requestScope),
+            isCurrent: draftAccount.isCurrent
+          }
+        : !draftAccount
+          ? target?.account
+          : undefined
+    const source = useStoreMessageOption.getState()
+    const propsMatchSource =
+      isSceneHistoryIdCurrent(source.historyId, scopeRef.current.historyId) && source.serverChatId === serverChatId
+    const viewIsCurrent = () =>
+      Object.keys(sourceView).every(
+        (key) =>
+          key === "restoreRevision" ||
+          sceneViewRef.current[key as keyof typeof sceneView] ===
+            sourceView[key as keyof typeof sourceView]
+      )
+    const sourceGuard = captureChatDraftSource(
+      () => !cancelled && selectionIsCurrent() && viewIsCurrent(), isSceneHistoryIdCurrent
+    )
+    const sourceIsCurrent = sourceGuard.isCurrent
+    const isCurrent: RolePlayApplyGuard = Object.assign(
+      () => sourceIsCurrent() && applyIsCurrent() && target?.isCurrent() === true,
+      {
+        ...(applyIsCurrent.acceptNextAction
+          ? {
+              acceptNextAction: (revision: number) =>
+                sourceIsCurrent() &&
+                target?.isCurrent() === true &&
+                account?.isCurrent() !== false &&
+                applyIsCurrent.acceptNextAction?.(revision) === true
+            }
+          : {}),
+        acceptRestoreCancelled: (revision: number) => {
+          if (
+            cancelled ||
+            !selectionIsCurrent() ||
+            !viewIsCurrent() ||
+            target?.isCurrent() !== true ||
+            account?.isCurrent() === false
+          )
+            return false
+          if (
+            applyIsCurrent.acceptRestoreCancelled
+              ? !applyIsCurrent.acceptRestoreCancelled(revision)
+              : !applyIsCurrent()
+          )
+            return false
+          return sourceGuard.acceptRestoreCancelled(revision) && isCurrent()
+        }
+      }
+    )
+    readSourceRef.current = isCurrent
+    // Unverified error panels can dismiss without granting settings authority.
+    dismissalSourceRef.current = () =>
+      sourceIsCurrent() && (!hadAuthority || applyIsCurrent())
+    loadedSceneRef.current = null
+    sceneReadRef.current = null
+    sceneReviewRef.current = null
+    setReviewingScene(false)
+    sceneAccountRef.current = account
+    baselineSceneRef.current = undefined
+    setProfileUnavailable(false)
+    setApplyError(null)
+    if (!target || !propsMatchSource || !isCurrent()) {
+      setLoading(false)
+      setSceneLoadError(
+        translationRef.current(
+          "playground:composer.sceneLoadError",
+          "Scene settings could not be loaded. Existing chat setup was left unchanged."
+        )
+      )
+      return () => {
+        cancelled = true
+      }
+    }
     setLoading(true)
     setSceneDraft(null)
     setStagedIdentity(null)
-    setApplyError(null)
     setClearIdentity(false)
     setClearBehavior(false)
     setResetGenerationStyle(false)
@@ -209,25 +468,29 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
 
     const load = async () => {
       try {
-        const actor = await getActorSettingsForChatWithCharacterFallback({
-          historyId,
-          serverChatId,
-          characterId
+        const read = await getActorSceneForChat({
+          target,
+          characterId,
+          validate_lease: isCurrent
         })
-        if (cancelled) return
-        setSceneDraft(actor)
+        if (!isCurrent()) return
+        sceneReadRef.current = read
+        loadedSceneRef.current = isCurrent
+        setProfileUnavailable(read.profileUnavailable)
+        baselineSceneRef.current = JSON.stringify(read.settings)
+        setSceneDraft(read.settings)
       } catch (error) {
         console.error("Failed to load role-play scene settings", error)
-        if (!cancelled) {
+        if (isCurrent()) {
           setSceneLoadError(
-            t(
+            translationRef.current(
               "playground:composer.sceneLoadError",
               "Scene settings could not be loaded. Existing chat setup was left unchanged."
             )
           )
         }
       } finally {
-        if (!cancelled) {
+        if (isCurrent()) {
           setLoading(false)
         }
       }
@@ -235,15 +498,21 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
 
     void load()
     return () => {
-      cancelled = true
+      if (!applyingDestinationRef.current?.isCurrent()) cancelled = true
     }
   }, [
     characterId,
-    historyId,
+    sceneHistoryId,
+    isSceneHistoryIdCurrent,
     open,
     serverChatId,
-    setPreviewAndTokens,
-    setSettings
+    draftRevision,
+    restoreRevision,
+    selectionRevision,
+    sceneReadRevision,
+    selectionSignal,
+    captureSelectionFence,
+    captureApplyGuard
   ])
 
   const scenePreview = React.useMemo(
@@ -304,27 +573,24 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     stagedIdentity,
     t
   ])
+  const previewChanged = (["identity", "behavior", "scene", "generationStyle", "context"] as const)
+    .some(key => JSON.stringify(beforeState[key]) !== JSON.stringify(afterState[key]))
 
   const updateSceneEnabled = React.useCallback((checked: boolean) => {
-    setSceneDraft((current) => ({
-      ...getDraft(current),
-      isEnabled: checked
-    }))
-  }, [])
+    stage(() => setSceneDraft((current) => ({ ...getDraft(current), isEnabled: checked })))
+  }, [stage])
 
   const updateSceneNotes = React.useCallback(
     (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setSceneDraft((current) => ({
-        ...getDraft(current),
-        notes: event.target.value
-      }))
+      const value = event.target.value
+      stage(() => setSceneDraft((current) => ({ ...getDraft(current), notes: value })))
     },
-    []
+    [stage]
   )
 
   const updateAspectValue = React.useCallback(
     (aspectId: string, value: string) => {
-      setSceneDraft((current) => {
+      stage(() => setSceneDraft((current) => {
         const base = getDraft(current)
         return {
           ...base,
@@ -332,94 +598,295 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
             aspect.id === aspectId ? { ...aspect, value } : aspect
           )
         }
-      })
+      }))
     },
-    []
+    [stage]
   )
 
   const applyWithScene = React.useCallback(
     async (
       scene: ActorSettings | null,
-      applySettings: () => boolean | void | Promise<boolean | void>
+      intent: string,
+      applySettings: (
+        context: RolePlayApplyContext
+      ) => boolean | void | Promise<boolean | void>,
+      onApplied?: () => void,
+      expectedCharacterId?: string | null
     ) => {
-      if (applyingRef.current || loading || sceneLoadError) return
+      if (
+        sceneViewRef.current !== renderedSceneView ||
+        applyingRef.current ||
+        loading ||
+        sceneLoadError ||
+        !loadedSceneRef.current?.()
+      )
+        return
+      const original = sceneReadRef.current
+      const originalAccount = sceneAccountRef.current
+      if (!original) return
+      const sceneProposal = scene ? structuredClone(scene) : null
+      const attempt = {}
+      sceneReviewRef.current = null
+      activeAttemptRef.current = attempt
       applyingRef.current = true
       setSaving(true)
       setApplyError(null)
       const lifetimeRevision = lifetimeRef.current.revision
       let settingsAccepted = false
-      let isCurrent = () => mountedRef.current && lifetimeRef.current.revision === lifetimeRevision && scopeRef.current.open &&
-        scopeRef.current.historyId === historyId && scopeRef.current.serverChatId === serverChatId
+      const sourceIsCurrent = loadedSceneRef.current
+      let isCurrent = () =>
+        Boolean(sourceIsCurrent?.()) &&
+        mountedRef.current &&
+        lifetimeRef.current.revision === lifetimeRevision &&
+        scopeRef.current.open &&
+        isSceneHistoryIdCurrent(scopeRef.current.historyId, historyId) &&
+        scopeRef.current.serverChatId === serverChatId
       try {
-        // Explicit identity replacement detaches synchronously in the owner.
-        // Capture its destination before awaiting persistence.
-        const applied = applySettings()
-        const ownerIsCurrent = captureApplyGuard?.() ?? (() => true)
-        const destination = useStoreMessageOption.getState()
-        const destinationHistoryId = destination.historyId
-        const destinationServerChatId = destination.serverChatId
-        const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision
-        isCurrent = () => {
-          const current = useStoreMessageOption.getState()
-          const props = scopeRef.current
-          const propsMatch =
-            (props.historyId === historyId && props.serverChatId === serverChatId) ||
-            (props.historyId === destinationHistoryId && props.serverChatId === destinationServerChatId)
-          return mountedRef.current && lifetimeRef.current.revision === lifetimeRevision &&
-            ownerIsCurrent() && props.open && propsMatch &&
-            current.historyId === destinationHistoryId && current.serverChatId === destinationServerChatId &&
-            usePlaygroundSessionStore.getState().restoreRevision === restoreRevision
+        let application = settingsApplicationRef.current
+        if (
+          !application ||
+          application.intent !== intent ||
+          (application.destination && !application.destination.isCurrent())
+        ) {
+          application = { id: {}, intent, destination: null }
+          settingsApplicationRef.current = application
         }
-        applyingDestinationRef.current = {
-          historyId: destinationHistoryId, serverChatId: destinationServerChatId, isCurrent
+        const proposal = application
+        let destination = {
+          historyId,
+          serverChatId,
+          sceneTarget: original.target,
+          expectedRecord: original.originalRecord
         }
-        if (await applied === false || !isCurrent()) return
+        let notified = false
+        const onDestination: NonNullable<
+          RolePlayApplyContext["onDestination"]
+        > = (next) => {
+          notified = true
+          const sameTarget =
+            !next.sceneTarget || next.sceneTarget.key === original.target.key
+          const target = sameTarget ? original.target : next.sceneTarget!
+          if (
+            (!sameTarget &&
+              (target.address?.kind !== "fresh" ||
+                !originalAccount ||
+                !originalAccount.isCurrent() ||
+                target.accountKey !== original.target.accountKey)) ||
+            !target.isCurrent()
+          ) {
+            isCurrent = () => false
+            return
+          }
+          destination = {
+            historyId: next.historyId,
+            serverChatId: next.serverChatId,
+            sceneTarget: target,
+            expectedRecord: sameTarget ? original.originalRecord : null
+          }
+          const destinationHistoryIdCurrent = (current: string | null, original: string | null) => target.address?.kind === "native" ? isSceneHistoryIdCurrent(current, original) : current === original
+          const restoreRevision =
+            usePlaygroundSessionStore.getState().restoreRevision
+          const acknowledgedView = sceneViewRef.current
+          const acknowledgedSignal = historySelectionRef.current?.getSignal()
+          let acknowledgedSourceIsCurrent = () => true
+          const originalCharacter =
+            characterId == null ? null : String(characterId)
+          isCurrent = () => {
+            const current = useStoreMessageOption.getState()
+            const props = scopeRef.current
+            const propsMatch =
+              (destinationHistoryIdCurrent(props.historyId, historyId) &&
+                props.serverChatId === serverChatId) ||
+              (destinationHistoryIdCurrent(props.historyId, next.historyId) &&
+                props.serverChatId === next.serverChatId)
+            return (
+              mountedRef.current &&
+              lifetimeRef.current.revision === lifetimeRevision &&
+              next.isCurrent() &&
+              target.isCurrent() &&
+              originalAccount?.isCurrent() !== false &&
+              acknowledgedSourceIsCurrent() &&
+              sceneViewRef.current.sceneReadRevision ===
+                renderedSceneView.sceneReadRevision &&
+              sceneViewRef.current.captureApplyGuard ===
+                acknowledgedView.captureApplyGuard &&
+              sceneViewRef.current.captureSelectionFence ===
+                acknowledgedView.captureSelectionFence &&
+              historySelectionRef.current?.getSignal() === acknowledgedSignal &&
+              [originalCharacter, expectedCharacterId].includes(
+                sceneViewRef.current.characterId == null
+                  ? null
+                  : String(sceneViewRef.current.characterId)
+              ) &&
+              props.open &&
+              propsMatch &&
+              destinationHistoryIdCurrent(current.historyId, next.historyId) &&
+              current.serverChatId === next.serverChatId &&
+              usePlaygroundSessionStore.getState().restoreRevision ===
+                restoreRevision
+            )
+          }
+          if (isCurrent()) {
+            // Model retirement blocks writes, but must still allow this source to dismiss.
+            const applyIsCurrent = captureApplyGuard?.() ?? (() => true)
+            const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
+            acknowledgedSourceIsCurrent = captureChatDraftSource(
+              () => applyIsCurrent() && selectionIsCurrent(), destinationHistoryIdCurrent
+            ).isCurrent
+            dismissalSourceRef.current = acknowledgedSourceIsCurrent
+          }
+          proposal.destination = { ...destination, isCurrent }
+          applyingDestinationRef.current = proposal.destination
+          loadedSceneRef.current = isCurrent
+        }
+        const accepted = acceptedSettingsRef.current
+        if (accepted?.intent === intent && accepted.destination.isCurrent()) {
+          destination = accepted.destination
+          isCurrent = accepted.destination.isCurrent
+          applyingDestinationRef.current = accepted.destination
+        } else {
+          acceptedSettingsRef.current = null
+          const applied = await applySettings({
+            applicationId: proposal.id,
+            isCurrent: () => Boolean(isCurrent()),
+            ...(sourceIsCurrent?.acceptNextAction
+              ? {
+                  onActionStarted: (() => {
+                    let accepted = false
+                    return (revision: number) => {
+                      if (
+                        accepted ||
+                        activeAttemptRef.current !== attempt ||
+                        !mountedRef.current ||
+                        lifetimeRef.current.revision !== lifetimeRevision ||
+                        !scopeRef.current.open ||
+                        sourceIsCurrent.acceptNextAction?.(revision) !== true
+                      )
+                        return false
+                      accepted = true
+                      return Boolean(isCurrent())
+                    }
+                  })()
+                }
+              : {}),
+            onRestoreCancelled: (() => {
+              let accepted = false
+              return (revision: number) => {
+                if (
+                  accepted ||
+                  activeAttemptRef.current !== attempt ||
+                  !mountedRef.current ||
+                  lifetimeRef.current.revision !== lifetimeRevision ||
+                  !scopeRef.current.open ||
+                  sourceIsCurrent?.acceptRestoreCancelled?.(revision) !== true ||
+                  !isCurrent()
+                )
+                  return false
+                accepted = true
+                proposal.destination = { ...destination, isCurrent }
+                applyingDestinationRef.current = proposal.destination
+                return true
+              }
+            })(),
+            onDestination
+          })
+          if (applied === false) return
+          // Silent callers can retain only the still-current original destination.
+          if (!notified && isCurrent()) {
+            onDestination({
+              historyId,
+              serverChatId,
+              sceneTarget: original.target,
+              isCurrent
+            })
+          }
+          if (!isCurrent()) return
+          acceptedSettingsRef.current = {
+            intent,
+            destination: { ...destination, isCurrent }
+          }
+        }
         settingsAccepted = true
-        if (scene) {
+        if (sceneProposal) {
           const saved = await saveActorSettingsForChat({
-            historyId: destinationHistoryId,
-            serverChatId: destinationServerChatId,
-            settings: scene
+            historyId: destination.historyId,
+            serverChatId: destination.serverChatId,
+            settings: sceneProposal,
+            target: destination.sceneTarget,
+            expectedRecord: destination.expectedRecord,
+            validate_lease: isCurrent
           })
           if (!isCurrent()) return
           if (!saved) throw new Error("Scene settings save failed")
-          setSettings(scene)
-          const preview = summarizeRolePlayScene(scene)
-          setPreviewAndTokens(preview.prompt, preview.tokenCount)
+          const preview = summarizeRolePlayScene(sceneProposal)
+          if (
+            !applyScene({
+              target: destination.sceneTarget,
+              settings: sceneProposal,
+              preview: preview.prompt,
+              tokenCount: preview.tokenCount
+            })
+          )
+            return
+          if (!isCurrent()) return
         }
+        if (!isCurrent()) return
+        onApplied?.()
+        if (!isCurrent()) return
+        acceptedSettingsRef.current = null
+        settingsApplicationRef.current = null
         applyingRef.current = false
         closeAndReturnFocus()
-      } catch {
+      } catch (error) {
         if (!isCurrent()) return
-        setApplyError(settingsAccepted
-          ? t(
-              "playground:composer.rolePlayScenePartialSaveError",
-              "Identity and behavior were applied, but scene settings could not be saved. Your draft is still here; retry Apply."
-            )
-          : t(
-              "playground:composer.rolePlayApplyError",
-              "Settings could not be applied. Your draft is still here; retry Apply."
-            ))
+        setApplyError(
+          nativeCharacterPreflightMessage(error, t) ??
+            (settingsAccepted
+              ? t(
+                  "playground:composer.rolePlayScenePartialSaveError",
+                  "Identity and behavior were applied, but scene settings could not be saved. Your draft is still here; retry Apply."
+                )
+              : t(
+                  "playground:composer.rolePlayApplyError",
+                  "Settings could not be applied. Your draft is still here; retry Apply."
+                ))
+        )
       } finally {
-        applyingDestinationRef.current = null
-        applyingRef.current = false
-        if (mountedRef.current) setSaving(false)
+        if (activeAttemptRef.current === attempt) {
+          activeAttemptRef.current = null
+          applyingDestinationRef.current =
+            acceptedSettingsRef.current?.destination.isCurrent()
+              ? acceptedSettingsRef.current.destination
+              : settingsApplicationRef.current?.destination?.isCurrent()
+                ? settingsApplicationRef.current.destination
+                : null
+          applyingRef.current = false
+          if (
+            mountedRef.current &&
+            lifetimeRef.current.revision === lifetimeRevision
+          )
+            setSaving(false)
+        }
       }
     },
     [
       closeAndReturnFocus,
+      isSceneHistoryIdCurrent,
       captureApplyGuard,
+      captureSelectionFence,
+      characterId,
       historyId,
       loading,
       sceneLoadError,
+      renderedSceneView,
       serverChatId,
-      setPreviewAndTokens,
-      setSettings,
+      applyScene,
       t
     ]
   )
 
   const handleApply = React.useCallback(async () => {
+    if (personaIdentityUnavailable) return
     const payload: RolePlaySetupApplyPayload = {}
     if (clearIdentity) payload.clearIdentity = true
     else if (stagedIdentity) payload.identitySelection = stagedIdentity
@@ -432,16 +899,19 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
       payload.generationPresetKey = stagedGenerationKey
     }
 
+    const intent = JSON.stringify(payload)
     if (sceneDraft) {
       payload.sceneSettings = sceneDraft
     }
 
-    await applyWithScene(sceneDraft, () => onApply(payload))
+    await applyWithScene(sceneDraft, intent, (context) => onApply(payload, context), undefined,
+      clearIdentity || stagedIdentity?.kind === "persona" ? null : stagedIdentity?.id)
   }, [
     applyWithScene,
     clearBehavior,
     clearIdentity,
     onApply,
+    personaIdentityUnavailable,
     resetGenerationStyle,
     sceneDraft,
     stagedBehaviorTemplate,
@@ -449,7 +919,89 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     stagedIdentity
   ])
 
+  const reviewSavedScene = React.useCallback(async () => {
+    const accepted = acceptedSettingsRef.current
+    const destination = accepted?.destination
+    if (
+      !accepted ||
+      !destination?.isCurrent() ||
+      !isDraftCurrent() ||
+      reviewingScene
+    )
+      return
+    const revision = editRevisionRef.current
+    const lifetime = lifetimeRef.current.revision
+    const attempt = {}
+    sceneReviewRef.current = attempt
+    const isCurrent = () =>
+      sceneReviewRef.current === attempt &&
+      acceptedSettingsRef.current === accepted &&
+      destination.isCurrent() &&
+      isDraftCurrent() &&
+      editRevisionRef.current === revision &&
+      lifetimeRef.current.revision === lifetime
+    setReviewingScene(true)
+    try {
+      const read = await getActorSceneForChat({
+        target: destination.sceneTarget,
+        validate_lease: isCurrent
+      })
+      if (!isCurrent()) return
+      modal.confirm({
+        title: t(
+          "playground:composer.sceneReviewTitle",
+          "Review the current saved scene"
+        ),
+        content: (
+          <div>
+            <p>
+              {t(
+                "playground:composer.sceneReviewHelp",
+                "Your staged edits are still in the editor. Review the saved scene below before choosing to use your edits. Save will still check for newer changes."
+              )}
+            </p>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap">
+              {
+                summarizeRolePlayScene({ ...read.settings, isEnabled: true })
+                  .prompt
+              }
+            </pre>
+          </div>
+        ),
+        okText: t(
+          "playground:composer.sceneReviewUseEdits",
+          "Use my staged edits"
+        ),
+        cancelText: t("common:keepEditing", "Keep editing"),
+        onOk: () => {
+          if (!isCurrent()) return
+          sceneReviewRef.current = null
+          destination.expectedRecord = read.originalRecord
+          sceneReadRef.current = read
+          setApplyError(null)
+        },
+        onCancel: () => {
+          if (sceneReviewRef.current === attempt) sceneReviewRef.current = null
+        }
+      })
+    } catch (error) {
+      console.error("Failed to review saved role-play scene", error)
+      if (isCurrent())
+        setApplyError(
+          t(
+            "playground:composer.sceneLoadError",
+            "Scene settings could not be loaded. Existing chat setup was left unchanged."
+          )
+        )
+      if (sceneReviewRef.current === attempt) sceneReviewRef.current = null
+    } finally {
+      if (mountedRef.current && lifetimeRef.current.revision === lifetime)
+        setReviewingScene(false)
+    }
+  }, [isDraftCurrent, modal, reviewingScene, t])
+
   const handleBehaviorTemplateSelect = React.useCallback((template: PromptTemplate) => {
+    stage(() => {
     setStagedBehaviorTemplate({
       id: template.id,
       title: template.title,
@@ -458,12 +1010,15 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     })
     setClearBehavior(false)
     setTemplatesOpen(false)
-  }, [])
+    })
+  }, [stage])
 
   const selectGenerationPreset = React.useCallback((presetKey: PresetKey) => {
-    setStagedGenerationKey(presetKey)
-    setResetGenerationStyle(false)
-  }, [])
+    stage(() => {
+      setStagedGenerationKey(presetKey)
+      setResetGenerationStyle(false)
+    })
+  }, [stage])
 
   const buildRolePlaySetupSavePayload =
     React.useCallback((): RolePlaySetupSavePayload => {
@@ -537,9 +1092,9 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     ])
 
   const handleSaveCurrentRolePlaySetup = React.useCallback(() => {
-    if (!onSaveRolePlaySetup) return
+    if (!onSaveRolePlaySetup || !isDraftCurrent()) return
     onSaveRolePlaySetup(buildRolePlaySetupSavePayload())
-  }, [buildRolePlaySetupSavePayload, onSaveRolePlaySetup])
+  }, [buildRolePlaySetupSavePayload, isDraftCurrent, onSaveRolePlaySetup])
 
   const handleApplySavedSetup = React.useCallback(
     async (setup: StartupTemplateBundle) => {
@@ -547,9 +1102,21 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
         setup.rolePlay?.source === "role-play-setup"
           ? setup.rolePlay.scene ?? createDefaultActorSettings()
           : null
-      await applyWithScene(nextScene, () => onApplySavedSetup?.(setup))
+      const intent = JSON.stringify({
+        ...setup,
+        rolePlay: setup.rolePlay ? { ...setup.rolePlay, scene: null } : null
+      })
+      await applyWithScene(
+        nextScene,
+        intent,
+        (context) => onApplySavedSetup?.(setup, context),
+        onSavedSetupApplied,
+        setup.rolePlay
+          ? setup.rolePlay.identity?.kind === "character" ? String(setup.rolePlay.identity.id) : null
+          : setup.character?.id == null ? null : String(setup.character.id)
+      )
     },
-    [applyWithScene, onApplySavedSetup]
+    [applyWithScene, onApplySavedSetup, onSavedSetupApplied]
   )
 
   const draft = getDraft(sceneDraft)
@@ -592,19 +1159,48 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
         }
       }}
       open={open}
-      onClose={closeAndReturnFocus}
+      onClose={requestClose}
       keyboard={!saving && !templatesOpen}
       afterOpenChange={(isOpen) => {
         if (!isOpen) returnFocusRef?.current?.focus()
       }}
       footer={
         <div className="space-y-2">
+          {personaIdentityUnavailable && (
+            <p id={personaGuidanceId} role="status" className="text-sm text-text-muted">
+              {t("option:assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.")}
+            </p>
+          )}
           {applyError ? (
             <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-text">
               {applyError}
             </p>
           ) : null}
-          <div className="flex justify-end gap-2">
+          {sceneLoadError && !readSourceRef.current?.() ? (
+            <p>
+              {t(
+                "playground:composer.sceneSourceUnavailable",
+                "Close this panel and check your account verification and selected chat before reopening scene settings."
+              )}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            {applyError && acceptedSettingsRef.current?.destination.isCurrent() ? (
+              <Button loading={reviewingScene} disabled={saving || !isDraftCurrent()} onClick={() => void reviewSavedScene()}>
+                {t("playground:composer.sceneReviewAction", "Review saved scene")}
+              </Button>
+            ) : null}
+            {sceneLoadError && readSourceRef.current?.() ? (
+              <Button
+                onClick={() => {
+                  if (
+                    sceneViewRef.current === renderedSceneView &&
+                    readSourceRef.current?.()
+                  ) setSceneReadRevision(value => value + 1)
+                }}>
+                {t("common:retry", "Retry")}
+              </Button>
+            ) : null}
             <Button disabled={saving} onClick={closeAndReturnFocus}>
               {t("common:cancel", "Cancel")}
             </Button>
@@ -612,7 +1208,8 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
               type="primary"
               aria-label={t("common:apply", "Apply")}
               loading={saving}
-              disabled={loading || Boolean(sceneLoadError)}
+              disabled={personaIdentityUnavailable || loading || reviewingScene || Boolean(sceneLoadError) || !loadedSceneRef.current?.()}
+              aria-describedby={personaIdentityUnavailable ? personaGuidanceId : undefined}
               onClick={handleApply}>
               {t("common:apply", "Apply")}
             </Button>
@@ -620,9 +1217,10 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
         </div>
       }
       title={t("playground:composer.rolePlaySetup", "Role-play setup")}>
+      {modalContextHolder}
       <fieldset
         ref={contentRef}
-        disabled={saving || loading || Boolean(sceneLoadError)}
+        disabled={saving || loading || Boolean(sceneLoadError) || !isDraftCurrent()}
         className="min-w-0 space-y-4"
         data-testid="role-play-setup-drawer">
         {loading && !sceneDraft ? (
@@ -642,32 +1240,14 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
           </p>
         ) : null}
 
-        <RolePlaySetupPreview before={beforeState} after={afterState} />
-
-        {onSaveRolePlaySetup &&
-        onSavedSetupDraftNameChange &&
-        onPreviewSavedSetup &&
-        onApplySavedSetup &&
-        onRenameSavedSetup &&
-        onDeleteSavedSetup ? (
-          <SavedRolePlaySetupsPanel
-            setups={savedRolePlaySetups}
-            draftName={savedSetupDraftName}
-            nameFallback={savedSetupNameFallback}
-            onDraftNameChange={onSavedSetupDraftNameChange}
-            onSaveCurrent={handleSaveCurrentRolePlaySetup}
-            onPreviewSetup={onPreviewSavedSetup}
-            onApplySetup={handleApplySavedSetup}
-            onRenameSetup={onRenameSavedSetup}
-            onDeleteSetup={onDeleteSavedSetup}
-            t={t}
-          />
+        {profileUnavailable && !sceneLoadError ? (
+          <p role="status">{t("playground:actor.defaultUnavailable",
+            "Character defaults are unavailable. You can still edit and save this scene.")}</p>
         ) : null}
-
         <section
           aria-label={t("playground:composer.rolePlayLayers", "Role-play layers")}
           className="space-y-2 rounded-md border border-border bg-surface p-3">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3">
             <div className="space-y-1">
               <div className="text-xs font-medium text-text">
                 {t("playground:composer.context.character", "Character")}
@@ -675,10 +1255,10 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
               <AssistantSelect
                 variant="dropdown"
                 selection={selectedIdentity}
-                onSelectionChange={(selection) => {
+                onSelectionChange={(selection) => stage(() => {
                   setStagedIdentity(selection)
                   setClearIdentity(false)
-                }}
+                })}
                 showLabel
                 className="inline-flex min-h-9 w-full items-center justify-start gap-2 rounded-md border border-border bg-surface2 px-3 py-2 text-text"
                 iconClassName="h-4 w-4"
@@ -688,7 +1268,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
               <div className="text-xs font-medium text-text">
                 {t("playground:composer.context.behavior", "Behavior")}
               </div>
-              <Button block onClick={() => setTemplatesOpen(true)}>
+              <Button block onClick={() => { if (isDraftCurrent()) setTemplatesOpen(true) }}>
                 {stagedBehaviorTemplate
                   ? stagedBehaviorTemplate.title
                   : t(
@@ -698,7 +1278,78 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
               </Button>
             </div>
           </div>
+        </section>
 
+        <section
+          aria-label={t("playground:composer.context.scene", "Scene")}
+          className="space-y-3 rounded-md border border-border bg-surface p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-text">
+                {t("playground:composer.context.scene", "Scene")}
+              </h3>
+              <p className="text-xs text-text-muted">
+                {scenePreview.tokenCount > 0
+                  ? `${scenePreview.tokenCount} tokens`
+                  : scenePreview.active
+                    ? t("playground:composer.sceneDraftEnabled", "Scene draft enabled")
+                    : t("playground:composer.sceneInactive", "No scene draft")}
+              </p>
+            </div>
+            <Switch
+              checked={draft.isEnabled}
+              onChange={updateSceneEnabled}
+              aria-label={t("playground:composer.sceneEnabled", "Scene enabled")}
+            />
+          </div>
+
+          <details open={draft.isEnabled} className="space-y-3">
+            <summary className="cursor-pointer text-xs font-medium text-text-muted">
+              {t("playground:composer.sceneDetails", "Scene details")}
+            </summary>
+            <Input.TextArea
+              aria-label={t("playground:composer.sceneNotes", "Scene notes")}
+              value={draft.notes}
+              onChange={updateSceneNotes}
+              rows={3}
+              placeholder={t(
+                "playground:composer.sceneNotesPlaceholder",
+                "Describe the current scene context."
+              )}
+            />
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              {visibleAspects.map((aspect) => (
+                <label key={aspect.id} className="space-y-1 text-xs text-text-muted">
+                  <span>{aspect.name}</span>
+                  <Input
+                    aria-label={aspect.name}
+                    value={aspect.value}
+                    onChange={(event) =>
+                      updateAspectValue(aspect.id, event.target.value)
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => stage(() => setSceneDraft(clearRolePlayScene(sceneDraft)))}>
+                {t("playground:composer.clearScene", "Clear scene")}
+              </Button>
+              <Button onClick={() => stage(() => setSceneDraft(resetRolePlayScene()))}>
+                {t("playground:composer.resetScene", "Reset scene")}
+              </Button>
+            </div>
+          </details>
+        </section>
+
+        <section
+          aria-label={t("playground:presets.generationStyle", "Generation style")}
+          className="space-y-3 rounded-md border border-border bg-surface p-3">
+          <h3 className="text-sm font-semibold text-text">
+            {t("playground:presets.generationStyle", "Generation style")}
+          </h3>
           <div
             role="radiogroup"
             aria-label={t(
@@ -741,85 +1392,57 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
           <div className="flex flex-wrap gap-2">
             <Button
               disabled={!afterState.identity}
-              onClick={() => setClearIdentity(true)}>
+              onClick={() => stage(() => setClearIdentity(true))}>
               {t("playground:composer.clearIdentity", "Clear identity")}
             </Button>
             <Button
               disabled={!beforeState.behavior}
-              onClick={() => setClearBehavior(true)}>
+              onClick={() => stage(() => setClearBehavior(true))}>
               {t("playground:composer.clearBehavior", "Clear behavior")}
             </Button>
             <Button
               disabled={!beforeState.generationStyle}
-              onClick={() => setResetGenerationStyle(true)}>
+              onClick={() => stage(() => setResetGenerationStyle(true))}>
               {t("playground:composer.resetGeneration", "Reset generation")}
             </Button>
           </div>
         </section>
 
-        <section
-          aria-label={t("playground:composer.context.scene", "Scene")}
-          className="space-y-3 rounded-md border border-border bg-surface p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-text">
-                {t("playground:composer.context.scene", "Scene")}
-              </h3>
-              <p className="text-xs text-text-muted">
-                {scenePreview.tokenCount > 0
-                  ? `${scenePreview.tokenCount} tokens`
-                  : scenePreview.active
-                    ? t("playground:composer.sceneActive", "Scene active")
-                    : t("playground:composer.sceneInactive", "No scene draft")}
-              </p>
-            </div>
-            <Switch
-              checked={draft.isEnabled}
-              onChange={updateSceneEnabled}
-              aria-label={t("playground:composer.sceneEnabled", "Scene enabled")}
+        <details open={previewChanged} className="space-y-2">
+          <summary className="cursor-pointer rounded-md border border-border bg-surface p-3 text-sm font-semibold text-text">
+            {t("playground:composer.previewChanges", "Preview changes")}
+          </summary>
+          <RolePlaySetupPreview before={beforeState} after={afterState} />
+        </details>
+
+        {onSaveRolePlaySetup &&
+        onSavedSetupDraftNameChange &&
+        onPreviewSavedSetup &&
+        onApplySavedSetup &&
+        onRenameSavedSetup &&
+        onDeleteSavedSetup ? (
+          <details open={savedRolePlaySetups.length > 0} className="space-y-2">
+            <summary className="cursor-pointer rounded-md border border-border bg-surface p-3 text-sm font-semibold text-text">
+              {t("playground:composer.savedRolePlaySetups", "Saved role-play setups")}
+            </summary>
+            <SavedRolePlaySetupsPanel
+              setups={savedRolePlaySetups}
+              draftName={savedSetupDraftName}
+              nameFallback={savedSetupNameFallback}
+              onDraftNameChange={onSavedSetupDraftNameChange}
+              onSaveCurrent={handleSaveCurrentRolePlaySetup}
+              onPreviewSetup={onPreviewSavedSetup}
+              onApplySetup={handleApplySavedSetup}
+              onRenameSetup={onRenameSavedSetup}
+              onDeleteSetup={onDeleteSavedSetup}
+              t={t}
             />
-          </div>
-
-          <Input.TextArea
-            aria-label={t("playground:composer.sceneNotes", "Scene notes")}
-            value={draft.notes}
-            onChange={updateSceneNotes}
-            rows={3}
-            placeholder={t(
-              "playground:composer.sceneNotesPlaceholder",
-              "Describe the current scene context."
-            )}
-          />
-
-          <div className="grid gap-2 sm:grid-cols-2">
-            {visibleAspects.map((aspect) => (
-              <label key={aspect.id} className="space-y-1 text-xs text-text-muted">
-                <span>{aspect.name}</span>
-                <Input
-                  aria-label={aspect.name}
-                  value={aspect.value}
-                  onChange={(event) =>
-                    updateAspectValue(aspect.id, event.target.value)
-                  }
-                />
-              </label>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setSceneDraft(clearRolePlayScene(sceneDraft))}>
-              {t("playground:composer.clearScene", "Clear scene")}
-            </Button>
-            <Button onClick={() => setSceneDraft(resetRolePlayScene())}>
-              {t("playground:composer.resetScene", "Reset scene")}
-            </Button>
-          </div>
-        </section>
-
+          </details>
+        ) : null}
       </fieldset>
       <SystemPromptTemplatesModal
         open={templatesOpen}
-        onClose={() => setTemplatesOpen(false)}
+        onClose={() => { if (isDraftCurrent()) setTemplatesOpen(false) }}
         onSelect={handleBehaviorTemplateSelect}
       />
     </Drawer>

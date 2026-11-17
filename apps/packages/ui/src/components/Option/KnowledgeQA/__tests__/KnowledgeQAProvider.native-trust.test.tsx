@@ -73,6 +73,16 @@ const response = {
   ],
 }
 
+vi.mock(
+  "@plasmohq/storage",
+  () =>
+    import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"),
+);
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: async () => ({ id: "test-owner", is_active: true }),
+  },
+}));
 vi.mock("@plasmohq/storage/hook", () => ({ useStorage: () => [undefined] }))
 vi.mock("@/hooks/useHomeMilestoneScope", () => ({
   useHomeMilestoneScope: () => "test-owner",
@@ -114,7 +124,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 let current: ReturnType<typeof useKnowledgeQA>
 function Probe() {
-  current = useKnowledgeQA()
+  const context = useKnowledgeQA();
+  React.useEffect(() => {
+    current = context;
+  }, [context]);
   const [exportOpen, setExportOpen] = React.useState(false)
   return (
     <>

@@ -17,12 +17,14 @@ from typing import Any, Callable
 import httpx
 from loguru import logger
 
+from tldw_Server_API.app.core.Admin_Webhooks.domain import redact_target
 from tldw_Server_API.app.core.AuthNZ.admin_webhook_secrets import (
     decrypt_admin_webhook_secret,
     encrypt_admin_webhook_secret,
 )
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
-
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, WebhookError
+from tldw_Server_API.app.core.http_client import RetryPolicy, afetch, create_async_client
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -67,9 +69,21 @@ def generate_signature(secret: str, timestamp: str, body: str) -> str:
     return f"v1={sig}"
 
 
-def _default_async_client_factory(*, timeout: int, follow_redirects: bool) -> httpx.AsyncClient:
-    """Create the outbound webhook client used for delivery attempts."""
-    return httpx.AsyncClient(timeout=timeout, follow_redirects=follow_redirects)
+def _url_for_logs(url: str) -> str:
+    """Origin only: Slack/Discord-style webhook URLs carry their secret in the path."""
+    try:
+        return redact_target(url)
+    except WebhookError:
+        return "<invalid webhook url>"
+
+
+def _default_async_client_factory(*, timeout: int) -> httpx.AsyncClient:
+    """Create the outbound webhook client used for delivery attempts.
+
+    Every attempt goes through ``afetch``, which checks the egress policy and pins the
+    resolved IP per request, so a stored URL is re-checked at delivery time.
+    """
+    return create_async_client(timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -251,10 +265,7 @@ class AdminWebhooksService:
         signature = ""
 
         max_attempts = max(1, webhook.retry_count + 1)
-        async with self.http_client_factory(
-            timeout=webhook.timeout_seconds,
-            follow_redirects=False,
-        ) as client:
+        async with self.http_client_factory(timeout=webhook.timeout_seconds) as client:
             for attempt in range(max_attempts):
                 last_attempt = attempt
                 if attempt > 0:
@@ -269,7 +280,21 @@ class AdminWebhooksService:
                         "X-Admin-Webhook-Timestamp": timestamp,
                         "X-Admin-Webhook-Signature": signature,
                     }
-                    resp = await client.post(webhook.url, content=body, headers=headers)
+                    # One attempt per loop pass; redirects are returned, not followed. The
+                    # timeout must be explicit: afetch passes timeout=None to httpx as no timeout.
+                    # sensitive_observability keeps the URL (Slack/Discord put the secret in
+                    # the path) out of http_client's logs, spans and the stdlib httpx log.
+                    resp = await afetch(
+                        method="POST",
+                        url=webhook.url,
+                        client=client,
+                        headers=headers,
+                        content=body,
+                        timeout=webhook.timeout_seconds,
+                        allow_redirects=False,
+                        retry=RetryPolicy(attempts=1),
+                        sensitive_observability=True,
+                    )
                     latency_ms = int((time.monotonic() - start) * 1000)
                     status_code = resp.status_code
                     response_body = resp.text[:4096]
@@ -277,12 +302,22 @@ class AdminWebhooksService:
                         delivered_at = datetime.now(timezone.utc).isoformat()
                         break
                     error_message = f"HTTP {resp.status_code}"
+                except EgressPolicyError as exc:
+                    # A refused target is a configuration problem, not a transient failure.
+                    latency_ms = int((time.monotonic() - start) * 1000)
+                    # Nothing was sent: drop any earlier attempt's status and body.
+                    status_code = None
+                    response_body = None
+                    # The sensitive-mode message is generic; the reason code says why.
+                    error_message = f"egress policy refused: {exc.reason_code or 'denied'}"
+                    logger.warning("Webhook delivery to {} {}", _url_for_logs(webhook.url), error_message)
+                    break
                 except Exception as exc:
                     latency_ms = int((time.monotonic() - start) * 1000)
                     error_message = str(exc)[:1024]
                     logger.warning(
                         "Webhook delivery attempt {}/{} to {} failed: {}",
-                        attempt + 1, max_attempts, webhook.url, error_message,
+                        attempt + 1, max_attempts, _url_for_logs(webhook.url), error_message,
                     )
 
         # Log the delivery

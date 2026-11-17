@@ -12,7 +12,9 @@ import pytest
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
 from tldw_Server_API.app.api.v1.endpoints import notes, persona
 from tldw_Server_API.app.core.Buddy.service import BuddyService
+from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
 pytestmark = pytest.mark.integration
@@ -30,7 +32,7 @@ def _seed(db):
 @pytest.fixture
 def pg_shell(pg_database_config, tmp_path, monkeypatch):
     """Use the official disposable PG database and real production read chains."""
-    monkeypatch.setattr(persona, "is_persona_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_persona_enabled", lambda: True)
     # Preserve actual initialization statements, only shorten their lock budget.
     monkeypatch.setattr(CharactersRAGDB, "_NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT", "100ms")
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -58,7 +60,7 @@ def _persona_endpoint(f):
 
 def _predecessor(f, kind):
     if kind == "default":
-        assert deps._ensure_default_character(f.db) == f.character
+        assert chacha_db_provider.ensure_default_character(f.db) == f.character
     elif kind == "persona":
         _persona_endpoint(f)
 
@@ -152,9 +154,9 @@ def test_actual_shell_chain_allows_replacement_initialization(pg_shell, tmp_path
 def test_actual_default_maintenance_executor_releases_existing_card_read(pg_shell, tmp_path, monkeypatch):
     f, config = pg_shell
     with ThreadPoolExecutor(max_workers=1) as executor:
-        monkeypatch.setattr(deps, "_get_chacha_executor", lambda: executor)
+        monkeypatch.setattr(get_chacha_runtime(), "executor", lambda: executor)
         try:
-            asyncio.run(deps._ensure_default_character_async(f.db, 1))
+            asyncio.run(chacha_db_provider._ensure_default_character_async(f.db, 1))
             raw = executor.submit(f.db._get_thread_connection).result()
             state = _state(f.db, raw)
             try:
@@ -215,7 +217,7 @@ def test_first_shell_read_inside_explicit_scope_preserves_scope(pg_shell, predec
 
 @pytest.mark.parametrize("predecessor", ["default", "persona"])
 def test_sqlite_shell_chain_preserves_reads_and_caller_rollback(tmp_path, monkeypatch, predecessor):
-    monkeypatch.setattr(persona, "is_persona_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_persona_enabled", lambda: True)
     db = CharactersRAGDB(tmp_path / "shell.sqlite", client_id="1")
     try:
         f = _seed(db)

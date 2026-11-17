@@ -52,10 +52,9 @@ def _install_cancellation_endpoint_dependencies(monkeypatch, runtime, service) -
 
     monkeypatch.setattr(eval_unified, "_resolve_and_validate_eval_provider", _resolve)
     monkeypatch.setattr(eval_unified, "_build_eval_credential_runtime", lambda **_kwargs: runtime)
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowingLimiter())
-    monkeypatch.setattr(eval_unified, "get_unified_evaluation_service_for_user", lambda _uid: service)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: _AllowingLimiter())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _uid: service)
     monkeypatch.setattr(eval_unified, "_get_webhook_manager_for_user", lambda _uid: _NoopWebhookManager())
-    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
 
 
 async def _await_cancelled(task: asyncio.Task) -> None:
@@ -248,7 +247,7 @@ def _install_eval_runtime(monkeypatch) -> None:
         async def close(self):
             return None
 
-    monkeypatch.setattr(eval_unified, "ProviderCredentialRuntime", _Runtime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", _Runtime)
 
 
 def test_batch_parallel_strict_fail_fast_cancels_remaining(monkeypatch):
@@ -264,10 +263,9 @@ def test_batch_parallel_strict_fail_fast_cancels_remaining(monkeypatch):
             endpoint: str,
             is_batch: bool,
             tokens_requested: int,
-            estimated_cost: float,
             evaluations_requested: int = 1,
         ):
-            _ = (endpoint, is_batch, tokens_requested, estimated_cost, evaluations_requested)
+            _ = (endpoint, is_batch, tokens_requested, evaluations_requested)
             return True, {"retry_after": 0}
 
     started_items: list[int] = []
@@ -331,9 +329,9 @@ def test_batch_parallel_strict_fail_fast_cancels_remaining(monkeypatch):
     app.dependency_overrides[eval_unified.get_eval_request_user] = _get_user_override
     app.dependency_overrides[eval_unified.check_evaluation_rate_limit] = _rate_limit_dep_override
 
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _Limiter())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: _Limiter())
     monkeypatch.setattr(eval_unified, "_apply_rate_limit_headers", _fake_apply_rate_limit_headers)
-    monkeypatch.setattr(eval_unified, "get_unified_evaluation_service_for_user", lambda _uid: _Service())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _uid: _Service())
 
     body = {
         "evaluation_type": "geval",
@@ -378,10 +376,9 @@ def test_batch_parallel_sanitizes_item_failure(monkeypatch):
             endpoint: str,
             is_batch: bool,
             tokens_requested: int,
-            estimated_cost: float,
             evaluations_requested: int = 1,
         ):
-            _ = (endpoint, is_batch, tokens_requested, estimated_cost, evaluations_requested)
+            _ = (endpoint, is_batch, tokens_requested, evaluations_requested)
             return True, {"retry_after": 0}
 
     class _Service:
@@ -430,9 +427,9 @@ def test_batch_parallel_sanitizes_item_failure(monkeypatch):
     app.dependency_overrides[eval_unified.get_eval_request_user] = _get_user_override
     app.dependency_overrides[eval_unified.check_evaluation_rate_limit] = _rate_limit_dep_override
 
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _Limiter())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: _Limiter())
     monkeypatch.setattr(eval_unified, "_apply_rate_limit_headers", _fake_apply_rate_limit_headers)
-    monkeypatch.setattr(eval_unified, "get_unified_evaluation_service_for_user", lambda _uid: _Service())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _uid: _Service())
 
     body = {
         "evaluation_type": "geval",
@@ -459,7 +456,7 @@ async def test_execute_evaluation_handles_metrics_none(tmp_path, monkeypatch):
     runner = EvaluationRunner(str(tmp_path / "evals_stage3.db"), max_concurrent_evals=2, eval_timeout=10)
 
     monkeypatch.setattr(runner.db, "update_run_status", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(runner.db, "update_run_progress", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner.db, "update_run_progress", lambda *_args, **_kwargs: True)
 
     captured_results: dict[str, object] = {}
 

@@ -30,7 +30,7 @@ export const isCompanionAvailable = (
 
 export const isCompanionConversationAvailable = (
   capabilities: ServerCapabilities | null | undefined
-): boolean => Boolean(capabilities?.hasPersonalization && capabilities?.hasPersona)
+): boolean => Boolean(capabilities?.hasPersonalization && capabilities?.hasPersona && capabilities?.hasCompanion)
 
 export const isClipperAvailable = (
   capabilities: ServerCapabilities | null | undefined

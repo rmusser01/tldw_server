@@ -39,7 +39,7 @@ from tldw_Server_API.app.core.Character_Chat.character_limits import (
 from tldw_Server_API.app.core.Character_Chat.character_limits import (
     check_soft_message_limit as _check_soft_message_limit,
 )
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode, is_truthy
+from tldw_Server_API.app.core.testing import is_production_like_env, is_test_mode, is_truthy
 
 # Optional Resource Governor integration (gated by global RG_ENABLED/config)
 RG_IMPORT_EXCEPTIONS = (ImportError, AttributeError)
@@ -223,8 +223,12 @@ class CharacterRateLimiter:
     async def check_chat_limit(self, user_id: int, current_chat_count: int) -> bool:
         return _check_chat_limit(user_id, current_chat_count, self._limits)
 
-    async def check_message_limit(self, chat_id: str, projected_message_count: int) -> bool:
+    def validate_message_limit(self, chat_id: str, projected_message_count: int) -> bool:
+        """Validate the pure message cap inside an owner write transaction."""
         return _check_message_limit(chat_id, projected_message_count, self._limits)
+
+    async def check_message_limit(self, chat_id: str, projected_message_count: int) -> bool:
+        return self.validate_message_limit(chat_id, projected_message_count)
 
     async def check_soft_message_limit(self, chat_id: str, current_message_count: int) -> bool:
         return _check_soft_message_limit(chat_id, current_message_count, self._limits)
@@ -412,9 +416,7 @@ def get_character_rate_limiter() -> CharacterRateLimiter:
 
     # Security check: warn if TEST_MODE is enabled in what looks like production
     if test_mode:
-        env_name = os.getenv("ENVIRONMENT", os.getenv("ENV", "")).lower()
-        prod_flag = env_flag_enabled("tldw_production")
-        if env_name in ("production", "prod", "live") or prod_flag:
+        if is_production_like_env():
             logger.critical(
                 "TEST_MODE is enabled in a production environment! "
                 "This disables rate limiting and is a security risk. "

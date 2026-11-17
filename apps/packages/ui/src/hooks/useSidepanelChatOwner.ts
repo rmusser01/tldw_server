@@ -1,8 +1,10 @@
 import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import {
   type ServicePromptSnapshot,
-  loadServicePromptSnapshot
+  loadServicePromptSnapshot,
+  isServicePromptScopeUnresolvedError
 } from "@/services/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { useSidepanelChatTabsStore } from "@/store/sidepanel-chat-tabs"
 import React from "react"
 
@@ -14,16 +16,21 @@ export type SidepanelChatOwner = {
 }
 
 /** Keep the route and its closures bound to the principal verified at mount. */
-export const useSidepanelChatOwner = (): SidepanelChatOwner | null => {
+export const useSidepanelChatOwner = () => {
   const revision = useSidepanelChatTabsStore((state) => state.revision)
   const [owner, setOwner] = React.useState<SidepanelChatOwner | null>(null)
+  const [verificationState, setVerificationState] = React.useState<"checking" | "retrying" | "unavailable" | "ready">("checking")
+  const retryRef = React.useRef<(() => void) | null>(null)
+  const retryVerification = React.useCallback(() => retryRef.current?.(), [])
   React.useEffect(() => {
     let mounted = true
     let generation = 0
     let current: SidepanelChatOwner | null = null
     const controller = new AbortController()
     const resolve = async () => {
+      if (!mounted || useSidepanelChatTabsStore.getState().revision !== revision) return
       const check = ++generation
+      setVerificationState(previous => previous === "unavailable" || previous === "retrying" ? "retrying" : "checking")
       let snapshot: ServicePromptSnapshot | undefined
       try {
         snapshot = await loadServicePromptSnapshot([], {
@@ -50,6 +57,7 @@ export const useSidepanelChatOwner = (): SidepanelChatOwner | null => {
           return
         }
         if (current?.ownerKey === ownerKey && current.isCurrent()) {
+          setVerificationState("ready")
           snapshot.release()
           return
         }
@@ -75,12 +83,25 @@ export const useSidepanelChatOwner = (): SidepanelChatOwner | null => {
         }
         current = next
         setOwner(next)
-      } catch {
+        setVerificationState("ready")
+      } catch (error) {
         snapshot?.release()
-        // No new owner can be established offline. Retain a still-valid lease
-        // and all durable records when a same-owner recheck fails temporarily.
+        if (!mounted || check !== generation || controller.signal.aborted ||
+          useSidepanelChatTabsStore.getState().revision !== revision) return
+        setVerificationState("unavailable")
+        const authorityLost = isServicePromptScopeUnresolvedError(error) ||
+          isRequestConfigScopeChangedError(error) ||
+          (error && typeof error === "object" && (error as { status?: unknown }).status === 401)
+        if (authorityLost && useSidepanelChatTabsStore.getState().ownerKey) {
+          current?.snapshot.release()
+          current = null
+          setOwner(null)
+          window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+        }
+        // Temporary I/O failure retains a valid lease and all durable records.
       }
     }
+    retryRef.current = resolve
     void resolve()
     window.addEventListener("focus", resolve)
     window.addEventListener("pageshow", resolve)
@@ -88,10 +109,11 @@ export const useSidepanelChatOwner = (): SidepanelChatOwner | null => {
       mounted = false
       generation++
       controller.abort()
+      if (retryRef.current === resolve) retryRef.current = null
       current?.snapshot.release()
       window.removeEventListener("focus", resolve)
       window.removeEventListener("pageshow", resolve)
     }
   }, [revision])
-  return owner?.isCurrent() ? owner : null
+  return { owner: owner?.isCurrent() ? owner : null, verificationState, retryVerification }
 }

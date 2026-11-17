@@ -16,33 +16,33 @@ that user's tenant for the life of the process.
 
 import pytest
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import _tenant_client_id
+from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import tenant_client_id
 
 pytestmark = pytest.mark.unit
 
 
 def test_absent_client_id_resolves_to_the_user():
-    assert _tenant_client_id(7, None) == "7"
+    assert tenant_client_id(7, None) == "7"
 
 
 def test_matching_client_id_is_kept():
-    assert _tenant_client_id(7, "7") == "7"
+    assert tenant_client_id(7, "7") == "7"
 
 
 def test_the_shared_voice_assistant_label_cannot_become_a_tenant():
     """The regression: every user resolved to the same tenant string."""
-    assert _tenant_client_id(7, "voice_assistant") == "7"
-    assert _tenant_client_id(9, "voice_assistant") == "9"
+    assert tenant_client_id(7, "voice_assistant") == "7"
+    assert tenant_client_id(9, "voice_assistant") == "9"
 
 
 def test_two_users_never_share_a_tenant_whatever_label_is_passed():
     labels = [None, "voice_assistant", "chat-macro-worker-7", "", "admin"]
 
     for label in labels:
-        assert _tenant_client_id(7, label) != _tenant_client_id(9, label)
+        assert tenant_client_id(7, label) != tenant_client_id(9, label)
 
 
 def test_per_worker_labels_do_not_fork_a_users_tenant():
     """These were per-user but not the user's own tenant, hiding their rows."""
-    assert _tenant_client_id(7, "chat-macro-worker-7") == "7"
-    assert _tenant_client_id(7, "chat-macro-cancel-7") == "7"
+    assert tenant_client_id(7, "chat-macro-worker-7") == "7"
+    assert tenant_client_id(7, "chat-macro-cancel-7") == "7"

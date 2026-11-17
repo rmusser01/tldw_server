@@ -25,6 +25,13 @@ const EXAMPLE_QUERIES = [
   "What are the citations for claim Y?",
 ]
 const MAX_QUERY_LENGTH = 20000
+/**
+ * Debounce for syncing the raw query into the provider reducer (Sidebar
+ * precedent). Keystrokes update SearchBar-local state only; the reducer — and
+ * therefore every `useKnowledgeQA` consumer — sees at most one update per
+ * settled typing burst (WP-08).
+ */
+const QUERY_SYNC_DEBOUNCE_MS = 250
 const SUGGESTION_SOURCE_LABELS: Record<QuerySuggestion["source"], string> = {
   history: "History",
   source_title: "Source",
@@ -49,7 +56,7 @@ export function SearchBar({
   widthMode = "compact",
 }: SearchBarProps) {
   const {
-    query,
+    query: committedQuery,
     setQuery,
     search,
     cancelSearch,
@@ -65,6 +72,58 @@ export function SearchBar({
   } = useKnowledgeQA()
   const inputRef = useRef<HTMLInputElement>(null)
   const blurTimeoutRef = useRef<number | null>(null)
+  // Raw query mirror: local state is the source of truth while typing; the
+  // reducer is synced on a trailing debounce (WP-08).
+  const [localQuery, setLocalQuery] = useState(committedQuery)
+  const querySyncTimeoutRef = useRef<number | null>(null)
+  const lastSyncedQueryRef = useRef(committedQuery)
+
+  const clearQuerySyncTimer = useCallback(() => {
+    if (querySyncTimeoutRef.current !== null) {
+      window.clearTimeout(querySyncTimeoutRef.current)
+      querySyncTimeoutRef.current = null
+    }
+  }, [])
+
+  // Adopt external query commits (history restore, thread hydration, clears)
+  // unless the change is our own pending/committed sync.
+  useEffect(() => {
+    if (committedQuery !== lastSyncedQueryRef.current) {
+      clearQuerySyncTimer()
+      lastSyncedQueryRef.current = committedQuery
+      setLocalQuery(committedQuery)
+    }
+  }, [committedQuery, clearQuerySyncTimer])
+
+  // Flush a pending debounced sync on unmount so the reducer never loses the
+  // last typed value.
+  useEffect(
+    () => () => {
+      if (querySyncTimeoutRef.current !== null) {
+        window.clearTimeout(querySyncTimeoutRef.current)
+        querySyncTimeoutRef.current = null
+        setQuery(lastSyncedQueryRef.current)
+      }
+    },
+    [setQuery]
+  )
+
+  const syncQuery = useCallback(
+    (next: string, immediate: boolean) => {
+      setLocalQuery(next)
+      lastSyncedQueryRef.current = next
+      clearQuerySyncTimer()
+      if (immediate) {
+        setQuery(next)
+        return
+      }
+      querySyncTimeoutRef.current = window.setTimeout(() => {
+        querySyncTimeoutRef.current = null
+        setQuery(next)
+      }, QUERY_SYNC_DEBOUNCE_MS)
+    },
+    [clearQuerySyncTimer, setQuery]
+  )
   const [placeholderIndex, setPlaceholderIndex] = useState(0)
   const [isFocused, setIsFocused] = useState(false)
   const [cycleCount, setCycleCount] = useState(0)
@@ -96,8 +155,8 @@ export function SearchBar({
   ]
     .filter((id): id is string => typeof id === "string")
     .join(" ")
-  const showHintEmphasis = !query && !isSearching && cycleCount === 0
-  const showCharacterCount = query.length >= Math.floor(MAX_QUERY_LENGTH * 0.8)
+  const showHintEmphasis = !localQuery && !isSearching && cycleCount === 0
+  const showCharacterCount = localQuery.length >= Math.floor(MAX_QUERY_LENGTH * 0.8)
   const historyQueries = useMemo(
     () => searchHistory.map((item) => item.query).filter((item) => item.trim().length > 0),
     [searchHistory]
@@ -114,24 +173,24 @@ export function SearchBar({
   const suggestions = useMemo(
     () =>
       buildLocalQuerySuggestions({
-        query,
+        query: localQuery,
         historyQueries,
         sourceTitles,
         exampleQueries: EXAMPLE_QUERIES,
         limit: 5,
       }),
-    [query, historyQueries, sourceTitles]
+    [localQuery, historyQueries, sourceTitles]
   )
   const shouldShowSuggestions =
     showSuggestions &&
     isFocused &&
     !isSearching &&
-    shouldShowSuggestionPrototype(query) &&
+    shouldShowSuggestionPrototype(localQuery) &&
     suggestions.length > 0
 
   // Rotate placeholder examples continuously while idle; pause on focus or when typing.
   useEffect(() => {
-    if (isFocused || query) return
+    if (isFocused || localQuery) return
 
     const interval = setInterval(() => {
       setPlaceholderIndex((prev) => {
@@ -145,7 +204,7 @@ export function SearchBar({
     }, 8000) // 8 seconds instead of 4 for better readability
 
     return () => clearInterval(interval)
-  }, [isFocused, query])
+  }, [isFocused, localQuery])
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -206,17 +265,29 @@ export function SearchBar({
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault()
-      if (query.trim() && !isSearching && !noSourcesBlocked) {
+      if (localQuery.trim() && !isSearching && !noSourcesBlocked) {
         setShowSuggestions(false)
-        search()
+        // Submission never waits on the debounce: flush the reducer sync now
+        // and pass the query text explicitly to search() (WP-08 ruling 2).
+        clearQuerySyncTimer()
+        lastSyncedQueryRef.current = localQuery
+        setQuery(localQuery)
+        void search(localQuery)
       }
     },
-    [query, isSearching, noSourcesBlocked, search]
+    [
+      localQuery,
+      isSearching,
+      noSourcesBlocked,
+      search,
+      clearQuerySyncTimer,
+      setQuery,
+    ]
   )
 
   const applySuggestion = useCallback(
     (suggestion: QuerySuggestion) => {
-      setQuery(suggestion.text)
+      syncQuery(suggestion.text, true)
       void trackKnowledgeQaSearchMetric({
         type: "suggestion_accept",
         source: suggestion.source,
@@ -225,20 +296,20 @@ export function SearchBar({
       setActiveSuggestionIndex(-1)
       requestAnimationFrame(() => inputRef.current?.focus())
     },
-    [setQuery]
+    [syncQuery]
   )
 
   const handleClear = useCallback(() => {
-    setQuery("")
+    syncQuery("", true)
     setShowSuggestions(true)
     inputRef.current?.focus()
-  }, [setQuery])
+  }, [syncQuery])
 
   const handleNewSearch = useCallback(() => {
     clearResults()
-    setQuery("")
+    syncQuery("", true)
     inputRef.current?.focus()
-  }, [clearResults, setQuery])
+  }, [clearResults, syncQuery])
 
   return (
     <form
@@ -269,8 +340,8 @@ export function SearchBar({
           id="knowledge-search-input"
           ref={inputRef}
           type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value.slice(0, MAX_QUERY_LENGTH))}
+          value={localQuery}
+          onChange={(e) => syncQuery(e.target.value.slice(0, MAX_QUERY_LENGTH), false)}
           onFocus={() => {
             if (blurTimeoutRef.current) {
               window.clearTimeout(blurTimeoutRef.current)
@@ -378,7 +449,7 @@ export function SearchBar({
         )}
 
         {/* Clear button */}
-        {query && (
+        {localQuery && (
           <button
             type="button"
             onClick={handleClear}
@@ -400,7 +471,7 @@ export function SearchBar({
           <span className="inline-flex shrink-0">
             <button
               type="submit"
-              disabled={!query.trim() || isSearching || noSourcesBlocked}
+              disabled={!localQuery.trim() || isSearching || noSourcesBlocked}
               aria-describedby={
                 noSourcesBlocked ? "knowledge-search-no-source-explanation" : undefined
               }
@@ -539,7 +610,7 @@ export function SearchBar({
 
       {showCharacterCount && (
         <div className="mt-1 text-right text-xs text-text-muted">
-          {query.length}/{MAX_QUERY_LENGTH}
+          {localQuery.length}/{MAX_QUERY_LENGTH}
         </div>
       )}
     </form>

@@ -39,6 +39,29 @@ canonical. It reads only the files changed since the merge base with the PR's
 base commit, so a PR is never failed for a file it did not touch. The
 `backlog-task-format` pre-commit hook runs the same check on changed task files.
 
+## Task ids
+
+`task create` also avoids ids held outside the checkout: without `--id` it takes the
+next id above the local tasks, `origin/dev` (fetched first, 30 s) and the `backlog/`
+files of every open PR (`gh`, 30 s; PRs past GitHub's 100-file listing are paged),
+and an explicit `--id` that one of them holds is refused, naming the source. Each
+source that cannot be read (no `gh`, not authenticated, timeout, fetch failure)
+prints a warning on stderr and allocation continues from the rest, so offline use
+still works; the AGENTS.md manual recipe is the fallback when a warning appears.
+`task renumber` runs the same check on its new id. Child ids (`P.n`) skip the
+remote check.
+
+A task id belongs to one file across `backlog/tasks`, `backlog/completed` and
+`backlog/archive/tasks`: `task create` refuses an id any of them holds and,
+without `--id`, takes the next id above all of them, and a dependency may name
+any of them. `task renumber PATH --id NEW_ID` gives one file a new id in place.
+It takes a path because two files can share an id, keeps the directory and the
+file-name tail, and `--append-notes` records why. A subtask id (`P.n`) also sets
+`parent_task_id` to `P`, which re-parents a subtask. The `changes` job of
+`backend-required` fails a PR that leaves two task files with one id (TASK-13960).
+TASK-15000 to TASK-15281 are the block the 2026-10-31 renumbering used, so new
+ids continue above TASK-15281.
+
 ## Oracle Fixtures
 
 Compatibility fixtures are pinned to explicit upstream Backlog.md release

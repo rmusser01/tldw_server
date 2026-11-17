@@ -12,6 +12,10 @@ def count_chatbook_scope_category(self: Any, category: str) -> int:
             "SELECT COUNT(*) AS count FROM Media WHERE deleted = 0 AND is_trash = 0 "
             "AND system_operation_id IS NULL"
         ),
+        "media_vector_embeddings": (
+            "SELECT COUNT(*) AS count FROM Media WHERE deleted = 0 AND is_trash = 0 "
+            "AND system_operation_id IS NULL AND vector_embedding IS NOT NULL AND length(vector_embedding) > 0"
+        ),
         "media_transcripts": (
             "SELECT COUNT(*) AS count FROM Transcripts t WHERE t.deleted = 0 "
             "AND EXISTS (SELECT 1 FROM Media m WHERE m.id = t.media_id "

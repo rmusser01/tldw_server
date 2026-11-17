@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.repos.token_blacklist_repo import (
     AuthnzTokenBlacklistRepo,
@@ -15,14 +15,13 @@ from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_tes
 
 
 @pytest.mark.asyncio
-async def test_authnz_token_blacklist_repo_sqlite(tmp_path, monkeypatch):
+async def test_authnz_token_blacklist_repo_sqlite(tmp_path, monkeypatch, fresh_services):
     """AuthnzTokenBlacklistRepo basic helpers should work on SQLite."""
     db_path = tmp_path / "users.db"
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))

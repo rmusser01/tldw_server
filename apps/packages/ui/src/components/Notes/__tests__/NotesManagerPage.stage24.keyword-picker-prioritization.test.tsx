@@ -1,6 +1,7 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
@@ -218,18 +219,22 @@ describe("NotesManagerPage stage 24 keyword picker prioritization", () => {
   })
 
   it("surfaces recently used keywords at the top of the picker", async () => {
+    const user = userEvent.setup()
     renderPage()
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
+    await user.click(screen.getByRole("button", { name: "Browse tags" }))
     await waitFor(() => {
       expect(screen.getByText("Apply filters")).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByText("beta (5)"))
-    fireEvent.click(screen.getByText("alpha (2)"))
-    fireEvent.click(screen.getByText("Apply filters"))
+    await user.click(await screen.findByRole("checkbox", { name: "beta (5)" }))
+    expect(screen.getByRole("checkbox", { name: "beta (5)" })).toBeChecked()
+    await user.click(screen.getByRole("checkbox", { name: "alpha (2)" }))
+    expect(screen.getByRole("checkbox", { name: "beta (5)" })).toBeChecked()
+    expect(screen.getByRole("checkbox", { name: "alpha (2)" })).toBeChecked()
+    await user.click(screen.getByRole("button", { name: "Apply filters" }))
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
+    await user.click(screen.getByRole("button", { name: "Browse tags" }))
     const recentSection = await screen.findByTestId("notes-keyword-picker-recent-section")
     const recentButtons = within(recentSection).getAllByRole("button")
 

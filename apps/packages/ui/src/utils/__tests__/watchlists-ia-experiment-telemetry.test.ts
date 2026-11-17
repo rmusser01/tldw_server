@@ -80,21 +80,27 @@ describe("watchlists-ia-experiment-telemetry", () => {
     expect(persisted?.visited_tabs).toContain("sources")
   })
 
-  it("flushes session heartbeat without incrementing transitions", () => {
-    const initial = trackWatchlistsIaExperimentTransition(null, "sources", "experimental")
-    const flushed = flushWatchlistsIaExperimentSession("sources", "experimental")
+  it("keeps the page-hide heartbeat local without incrementing transitions", () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date("2026-11-02T12:00:00.000Z"))
+      const initial = trackWatchlistsIaExperimentTransition(null, "sources", "experimental")
+      expect(mocks.recordWatchlistsIaExperimentTelemetryMock).toHaveBeenCalledTimes(1)
+      mocks.recordWatchlistsIaExperimentTelemetryMock.mockClear()
+      vi.setSystemTime(new Date("2026-11-02T12:03:00.000Z"))
+      const flushed = flushWatchlistsIaExperimentSession("sources", "experimental")
 
-    expect(initial).not.toBeNull()
-    expect(flushed).not.toBeNull()
-    expect(flushed?.transitions).toBe(initial?.transitions)
-    expect(mocks.recordWatchlistsIaExperimentTelemetryMock).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        variant: "experimental",
-        previous_tab: "sources",
-        current_tab: "sources",
-        transitions: initial?.transitions
-      })
-    )
-    expect(flushed?.last_seen_at).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+      expect(initial).not.toBeNull()
+      expect(flushed).not.toBeNull()
+      expect(flushed?.transitions).toBe(initial?.transitions)
+      expect(flushed?.session_id).toBe(initial?.session_id)
+      expect(flushed?.first_seen_at).toBe(initial?.first_seen_at)
+      expect(flushed?.visited_tabs).toEqual(initial?.visited_tabs)
+      expect(flushed?.last_seen_at).toBe("2026-11-02T12:03:00.000Z")
+      expect(readWatchlistsIaExperimentTelemetryState()).toEqual(flushed)
+      expect(mocks.recordWatchlistsIaExperimentTelemetryMock).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

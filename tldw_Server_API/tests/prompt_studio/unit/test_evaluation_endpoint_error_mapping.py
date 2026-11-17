@@ -43,6 +43,11 @@ class _FakePsLogger:
         self.exception_calls.append((args, kwargs))
 
 
+class _AuthorizedListDb:
+    def get_project(self, project_id):
+        return {"id": project_id, "user_id": "tester"}
+
+
 _SENSITIVE_MARKERS = (
     "byok-secret-sentinel",
     "driver failed",
@@ -275,12 +280,6 @@ async def test_create_evaluation_maps_database_error(monkeypatch):
         _BrokenCreateEvaluationManager,
         raising=True,
     )
-    monkeypatch.setattr(
-        evaluations_endpoint,
-        "_is_prompt_studio_test_mode",
-        lambda: True,
-        raising=True,
-    )
 
     _patch_no_credentials_runtime(monkeypatch)
 
@@ -327,8 +326,8 @@ async def test_list_evaluations_maps_database_error(monkeypatch):
             prompt_id=None,
             limit=100,
             offset=0,
-            db=object(),
-            user_context={"user_id": "tester"},
+            db=_AuthorizedListDb(),
+            user_context={"user_id": "tester", "is_admin": False},
         )
 
     assert exc_info.value.status_code == 500
@@ -401,12 +400,6 @@ async def test_create_evaluation_sanitizes_unexpected_error(monkeypatch):
         _UnexpectedCreateEvaluationManager,
         raising=True,
     )
-    monkeypatch.setattr(
-        evaluations_endpoint,
-        "_is_prompt_studio_test_mode",
-        lambda: True,
-        raising=True,
-    )
 
     _patch_no_credentials_runtime(monkeypatch)
 
@@ -447,8 +440,8 @@ async def test_list_evaluations_sanitizes_unexpected_error(monkeypatch):
             prompt_id=None,
             limit=100,
             offset=0,
-            db=object(),
-            user_context={"user_id": "tester"},
+            db=_AuthorizedListDb(),
+            user_context={"user_id": "tester", "is_admin": False},
         )
 
     assert exc_info.value.status_code == 500

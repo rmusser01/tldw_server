@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from typing import Any, AsyncIterator, Dict, Iterable, List, Optional
 
 import pytest
+from fastapi import WebSocketException
+from starlette.websockets import WebSocketState
 
 from tldw_Server_API.app.api.v1.endpoints import voice_assistant
 
@@ -26,13 +28,15 @@ class DummyWebSocket:
         self.sent_bytes: List[bytes] = []
         self.sent_json: List[Dict[str, Any]] = []
         self.accepted: bool = False
+        self.application_state = WebSocketState.CONNECTING
         self.closed: bool = False
         self.close_code: Optional[int] = None
         self.close_calls: List[int] = []
 
-    async def accept(self) -> None:
+    async def accept(self, subprotocol: Optional[str] = None) -> None:
         """Mark the WebSocket as accepted."""
         self.accepted = True
+        self.application_state = WebSocketState.CONNECTED
 
     async def receive_json(self) -> Dict[str, Any]:
         """Return the next queued JSON message, or raise when exhausted."""
@@ -192,11 +196,15 @@ class DummyRegistry:
 def mock_ws_dependencies(monkeypatch: pytest.MonkeyPatch) -> tuple:
     """Fixture that sets up common mocks for Voice Assistant WebSocket tests."""
 
-    # Mock authentication
-    async def _auth(websocket, token: Optional[str]) -> tuple[bool, Optional[int]]:
-        if token == "valid-token":
-            return True, 1
-        return False, None
+    # Mock authentication: the first-frame protocol, with "valid-token" as user 1's credential
+    async def _auth(websocket) -> int:
+        await websocket.accept()
+        frame = await websocket.receive_json()
+        if frame.get("type") != "auth":
+            raise WebSocketException(code=4400, reason="expected_auth_frame")
+        if frame.get("token") != "valid-token":
+            raise WebSocketException(code=4401, reason="invalid_token")
+        return 1
 
     # Create instances
     session_manager = DummySessionManager()
@@ -206,18 +214,15 @@ def mock_ws_dependencies(monkeypatch: pytest.MonkeyPatch) -> tuple:
     # Mock getters
     monkeypatch.setattr(voice_assistant, "_authenticate_websocket", _auth)
     monkeypatch.setattr(
-        voice_assistant,
-        "get_voice_session_manager",
+        "tldw_Server_API.app.core.VoiceAssistant.get_voice_session_manager",
         lambda: session_manager,
     )
     monkeypatch.setattr(
-        voice_assistant,
-        "get_voice_command_router",
+        "tldw_Server_API.app.core.VoiceAssistant.get_voice_command_router",
         lambda: command_router,
     )
     monkeypatch.setattr(
-        voice_assistant,
-        "get_voice_command_registry",
+        "tldw_Server_API.app.core.VoiceAssistant.get_voice_command_registry",
         lambda: registry,
     )
 
@@ -268,8 +273,7 @@ class TestWebSocketAuthentication:
 
         monkeypatch.setattr(voice_assistant, "logger", LoggerStub())
         monkeypatch.setattr(
-            voice_assistant,
-            "get_chacha_db_for_user_id",
+            "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id",
             _fail_get_db_for_user_id,
         )
 
@@ -279,7 +283,7 @@ class TestWebSocketAuthentication:
         ]
         ws = DummyWebSocket(messages)
 
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         assert logged_warnings == [("Voice assistant DB init failed", (), {})]
 
@@ -307,8 +311,7 @@ class TestWebSocketAuthentication:
 
         monkeypatch.setattr(voice_assistant, "logger", LoggerStub())
         monkeypatch.setattr(
-            voice_assistant,
-            "get_voice_session_manager",
+            "tldw_Server_API.app.core.VoiceAssistant.get_voice_session_manager",
             _fail_get_session_manager,
         )
 
@@ -317,7 +320,7 @@ class TestWebSocketAuthentication:
         ]
         ws = DummyWebSocket(messages)
 
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         assert logged_errors == [("Voice assistant WebSocket error", (), {})]
 
@@ -332,7 +335,7 @@ class TestWebSocketAuthentication:
         ws = DummyWebSocket(messages)
 
         # Run the websocket handler - it will exit on disconnect
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         assert ws.accepted is True
         # Check AUTH_OK was sent
@@ -349,7 +352,7 @@ class TestWebSocketAuthentication:
         ]
         ws = DummyWebSocket(messages)
 
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         assert ws.accepted is True
         # Check AUTH_ERROR was sent
@@ -366,13 +369,53 @@ class TestWebSocketAuthentication:
         ]
         ws = DummyWebSocket(messages)
 
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         assert ws.accepted is True
         auth_err = [m for m in ws.sent_json if m.get("type") == "auth_error"]
         assert len(auth_err) == 1
         assert "Expected AUTH message" in auth_err[0]["error"]
         assert ws.close_code == 4400
+
+    @pytest.mark.parametrize(
+        ("code", "reason", "error"),
+        [
+            (4403, "insufficient_scope", "Invalid credentials"),
+            (1011, "auth_unavailable", "Invalid credentials"),
+            (4401, "authentication_timeout", "Authentication timeout"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_every_credential_refusal_closes_4401_as_shipped(
+        self, monkeypatch: pytest.MonkeyPatch, mock_ws_dependencies, code: int, reason: str, error: str
+    ) -> None:
+        """The voice protocol answers AUTH_ERROR and 4401 for any refused credential (TASK-13950.7)."""
+
+        async def _refuse(websocket) -> int:
+            await websocket.accept()
+            raise WebSocketException(code=code, reason=reason)
+
+        monkeypatch.setattr(voice_assistant, "_authenticate_websocket", _refuse)
+        ws = DummyWebSocket([])
+
+        await voice_assistant.websocket_voice_assistant(ws)  # type: ignore[arg-type]
+
+        assert [m["error"] for m in ws.sent_json if m.get("type") == "auth_error"] == [error]
+        assert ws.close_code == 4401
+
+    @pytest.mark.asyncio
+    async def test_a_cookie_refused_before_accept_closes_with_its_own_code(
+        self, monkeypatch: pytest.MonkeyPatch, mock_ws_dependencies
+    ) -> None:
+        async def _cross_site(websocket) -> int:
+            raise WebSocketException(code=4403, reason="cookie_auth_rejected")
+
+        monkeypatch.setattr(voice_assistant, "_authenticate_websocket", _cross_site)
+        ws = DummyWebSocket([])
+
+        await voice_assistant.websocket_voice_assistant(ws)  # type: ignore[arg-type]
+
+        assert (ws.accepted, ws.sent_json, ws.close_code) == (False, [], 4403)
 
 
 class TestWebSocketConfiguration:
@@ -392,7 +435,7 @@ class TestWebSocketConfiguration:
         ]
         ws = DummyWebSocket(messages)
 
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         # Check CONFIG_ACK was sent
         config_ack = [m for m in ws.sent_json if m.get("type") == "config_ack"]
@@ -415,7 +458,7 @@ class TestWebSocketTextCommands:
         ]
         ws = DummyWebSocket(messages)
 
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         # Verify command was processed
         assert "search for machine learning" in command_router.processed_commands
@@ -454,7 +497,7 @@ class TestWebSocketAudioCommands:
         ]
         ws = DummyWebSocket(messages)
 
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         # Should have transcription message
         transcription_msgs = [m for m in ws.sent_json if m.get("type") == "transcription"]
@@ -475,7 +518,7 @@ class TestWebSocketAudioCommands:
         ]
         ws = DummyWebSocket(messages)
 
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         # Check ERROR was sent
         error_msgs = [m for m in ws.sent_json if m.get("type") == "error"]
@@ -500,7 +543,7 @@ class TestWebSocketCancel:
         ]
         ws = DummyWebSocket(messages)
 
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         # Cancel should trigger state change to idle
         state_msgs = [m for m in ws.sent_json if m.get("type") == "state_change"]
@@ -526,7 +569,7 @@ class TestWebSocketStateChanges:
         ]
         ws = DummyWebSocket(messages)
 
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         state_msgs = [m for m in ws.sent_json if m.get("type") == "state_change"]
         listening_states = [m for m in state_msgs if m.get("state") == "listening"]
@@ -546,7 +589,7 @@ class TestWebSocketUnknownMessage:
         ]
         ws = DummyWebSocket(messages)
 
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         error_msgs = [m for m in ws.sent_json if m.get("type") == "error"]
         assert len(error_msgs) == 1
@@ -567,7 +610,7 @@ class TestWebSocketWorkflows:
         ]
         ws = DummyWebSocket(messages)
 
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
 
         # Should return error (workflow not found)
         error_msgs = [m for m in ws.sent_json if m.get("type") == "error"]

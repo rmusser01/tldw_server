@@ -696,11 +696,13 @@ describe("ModelDb storage efficiency", () => {
 
   it("bulk replacement keeps one remove and one write without deleting unrelated values", async () => {
     area.__store.set("model:old", model("old"))
-    area.__store.set("config", { retained: true })
+    area.__store.set("old", { retained: true })
+    area.__store.set("legacy", model("legacy"))
+    area.__store.set("model:other", model("other", { db_type: "local_model" }))
     const { bulkAddModelsFB, ModelDb } = await import("@/db/models")
     await bulkAddModelsFB([model("first"), model("second")])
-    expect((await new ModelDb().getAll()).map((entry) => entry.id).sort()).toEqual(["first", "second"])
-    expect(area.__store.get("config")).toEqual({ retained: true })
+    expect((await new ModelDb().getAll()).map((entry) => entry.id).sort()).toEqual(["first", "other", "second"])
+    expect(area.__store.get("old")).toEqual({ retained: true })
     expect(area.__calls.removeCalls).toBe(1)
     expect(area.__calls.setCalls).toBe(1)
   })
@@ -716,5 +718,211 @@ describe("ModelDb storage efficiency", () => {
     ] as const) {
       expect(catalog[name]).toBe(utilities[name])
     }
+  })
+
+  it("failed writes do not migrate or hide legacy records", async () => {
+    area.__store.set("legacy-model-1", model("legacy-model-1"))
+    const { ModelDb } = await import("@/db/models")
+    const db = new ModelDb()
+    expect((await db.getAll()).map((record) => record.id)).toContain("legacy-model-1")
+    area.__failNext.set("set", "QUOTA_BYTES exceeded")
+    await expect(db.createMany([model("y-model-1")])).rejects.toEqual({ message: "QUOTA_BYTES exceeded" })
+    expect(area.__store.has("__tldwModelDbIndexV1")).toBe(false)
+    expect(area.__store.has("model:y-model-1")).toBe(false)
+    const db2 = new ModelDb()
+    const all = await db2.getAll()
+    expect(all.map((record) => record.id)).toContain("legacy-model-1")
+    expect(area.__store.has("legacy-model-1")).toBe(true)
+    expect(area.__store.has("model:legacy-model-1")).toBe(false)
+    expect(area.__store.has("__tldwModelDbIndexV1")).toBe(false)
+  })
+
+  it("createManyModels persists a 100-model catalog with O(1) storage calls", async () => {
+    const { ModelDb, createManyModels } = await import("@/db/models")
+
+    const catalog = Array.from({ length: 100 }, (_, i) => ({
+      model_id: `catalog-model-${i}`,
+      name: `Catalog Model ${i}`,
+      provider_id: "tldw_openai",
+      model_type: "chat"
+    }))
+    await createManyModels(catalog)
+
+    // Empty discovery needs only getKeys; all destinations are checked together.
+    expect(area.__calls.getKeys).toBe(1)
+    expect(area.__calls.get).toHaveLength(1)
+    expect(area.__calls.get[0]).toHaveLength(catalog.length)
+    expect(area.__calls.setCalls).toBe(1)
+    expect(area.__calls.removeCalls).toBe(0)
+    expect(area.__calls.getNull).toBe(0)
+
+    const all = await new ModelDb().getAll()
+    expect(all).toHaveLength(100)
+  })
+
+  it("isLookupExist is true for an existing lookup and false for a new one", async () => {
+    const { isLookupExist, createManyModels } = await import("@/db/models")
+    await createManyModels([
+      { model_id: "known", name: "Known", provider_id: "tldw_openai", model_type: "chat" }
+    ])
+
+    expect(await isLookupExist("known_tldw_openai")).toBe(true)
+    expect(await isLookupExist("unknown_tldw_openai")).toBe(false)
+  })
+
+  it("replaceAll keeps a record that supersedes an old one with the same id", async () => {
+    area.__store.set("model:same-id", model("same-id"))
+    area.__store.set("model:other-id", model("other-id"))
+    const { ModelDb } = await import("@/db/models")
+    const db = new ModelDb()
+
+    await db.replaceAll([model("same-id", { name: "Renamed" })], [
+      "same-id",
+      "other-id"
+    ])
+
+    expect(area.__calls.setCalls).toBe(1)
+    expect(area.__calls.removeCalls).toBe(1)
+    expect((await db.getById("same-id"))?.name).toBe("Renamed")
+    expect(await db.getById("other-id")).toBeUndefined()
+    expect((await db.getAll()).map((entry) => entry.id)).toEqual(["same-id"])
+  })
+
+  it.each(["id", "model_id", "provider_id"] as const)(
+    "rejects a fallback import missing %s without changing the catalog and allows a corrected retry",
+    async (field) => {
+      area.__store.set("model:old", model("old"))
+      const before = [...area.__store]
+      const { ModelDb, bulkAddModelsFB } = await import("@/db/models")
+      const incomplete: Partial<ReturnType<typeof model>> = model("imported")
+      delete incomplete[field]
+
+      await expect(bulkAddModelsFB([
+        model("valid"),
+        incomplete as ReturnType<typeof model>
+      ])).rejects.toThrow(new RegExp(field))
+      expect([...area.__store]).toEqual(before)
+      expect(area.__calls.setCalls).toBe(0)
+      expect(area.__calls.removeCalls).toBe(0)
+
+      await bulkAddModelsFB([model("valid"), model("imported")])
+      expect((await new ModelDb().getAll()).map((entry) => entry.id).sort()).toEqual([
+        "imported", "valid"
+      ])
+    }
+  )
+
+  it.each(["partial", "model:partial"])(
+    "reads a recognizable partial model at %s without changing storage",
+    async (key) => {
+      const partial = { id: "partial", model_id: "m", db_type: "openai_model" }
+      area.__store.set(key, partial)
+      const { ModelDb } = await import("@/db/models")
+      const db = new ModelDb()
+
+      expect(await db.getAll()).toEqual([partial])
+      expect(await db.getById("partial")).toEqual(partial)
+      expect([...area.__store]).toEqual([[key, partial]])
+      expect(area.__calls.setCalls).toBe(0)
+      expect(area.__calls.removeCalls).toBe(0)
+    }
+  )
+
+  it("updates a recognizable partial row in place with a complete record", async () => {
+    area.__store.set("model:partial", { id: "partial", model_id: "m", db_type: "openai_model" })
+    const { ModelDb } = await import("@/db/models")
+    const db = new ModelDb()
+    const repaired = model("partial", { model_id: "m" })
+
+    await db.update(repaired)
+
+    expect(await db.getById("partial")).toEqual(repaired)
+    expect(area.__calls.setCalls).toBe(1)
+  })
+
+  it("deletes both recognizable partial aliases while preserving unrelated rows", async () => {
+    const partial = { id: "partial", model_id: "m", db_type: "openai_model" }
+    const unrelated = { id: "unrelated", model_id: "m", db_type: "setting" }
+    area.__store.set("partial", partial)
+    area.__store.set("model:partial", partial)
+    area.__store.set("model:unrelated", unrelated)
+    const { ModelDb } = await import("@/db/models")
+    const db = new ModelDb()
+
+    await db.deleteMany(["partial", "unrelated"])
+
+    expect([...area.__store]).toEqual([["model:unrelated", unrelated]])
+    expect(area.__calls.removeCalls).toBe(1)
+  })
+
+  it("reclaims a destination from a retiring legacy model without removing the new record", async () => {
+    const retiring = { id: "model:x", model_id: "m", db_type: "openai_model" }
+    area.__store.set("model:x", retiring)
+    area.__store.set("model:model:x", retiring)
+    const { ModelDb } = await import("@/db/models")
+    const db = new ModelDb()
+
+    await db.replaceAll([model("x")], ["model:x"])
+
+    expect([...area.__store]).toEqual([["model:x", model("x")]])
+    expect(await db.getById("model:x")).toBeUndefined()
+    expect(area.__calls.setCalls).toBe(1)
+    expect(area.__calls.removeCalls).toBe(1)
+  })
+
+  it.each([
+    { occupant: model("model:x"), retire: ["old"] },
+    { occupant: { id: "model:x", model_id: "m", db_type: "setting" }, retire: ["old", "model:x"] }
+  ])("refuses to reclaim a key without validated retirement authority ($retire)", async ({ occupant, retire }) => {
+    area.__store.set("model:x", occupant)
+    area.__store.set("old", model("old"))
+    const before = [...area.__store]
+    const { ModelDb } = await import("@/db/models")
+
+    await expect(new ModelDb().replaceAll([model("x")], retire))
+      .rejects.toThrow(/occupied model storage key/)
+    expect([...area.__store]).toEqual(before)
+    expect(area.__calls.setCalls).toBe(0)
+    expect(area.__calls.removeCalls).toBe(0)
+  })
+
+  it("replaceAll rejects an alias-read failure before writing a replacement", async () => {
+    area.__store.set("old", model("old"))
+    const before = [...area.__store]
+    const get = area.get.bind(area)
+    area.get = ((keys: string[], callback: (items: Record<string, unknown>) => void) => {
+      if (keys.includes("old")) area.__failNext.set("get", "alias read failed")
+      get(keys, callback)
+    }) as StorageArea["get"]
+    const { ModelDb } = await import("@/db/models")
+
+    await expect(new ModelDb().replaceAll([model("new")], ["old"]))
+      .rejects.toEqual({ message: "alias read failed" })
+    expect([...area.__store]).toEqual(before)
+    expect(area.__calls.setCalls).toBe(0)
+    expect(area.__calls.removeCalls).toBe(0)
+  })
+
+  it.each(["set", "remove"] as const)("replaceAll propagates %s failure and leaves old records readable until retry", async (operation) => {
+    area.__store.set("__tldwModelDbIndexV1", ["old"])
+    area.__store.set("old", model("old"))
+    const { ModelDb } = await import("@/db/models")
+    const db = new ModelDb()
+    const replace = () => db.replaceAll([model("new")], ["old"])
+    const message = operation === "set" ? "QUOTA_BYTES exceeded" : "remove failed"
+    area.__failNext.set(operation, message)
+
+    await expect(replace()).rejects.toEqual({ message })
+    expect(area.__calls.removeCalls).toBe(operation === "remove" ? 1 : 0)
+    expect(await db.getById("old")).toEqual(model("old"))
+    expect(await db.getById("new")).toEqual(operation === "remove" ? model("new") : undefined)
+    expect((await db.getAll()).map((entry) => entry.id).sort()).toEqual(
+      operation === "remove" ? ["new", "old"] : ["old"]
+    )
+
+    await replace()
+    expect(await db.getAll()).toEqual([model("new")])
+    expect([...area.__store.keys()]).toEqual(["__tldwModelDbIndexV1", "model:new"])
+    expect(area.__store.get("__tldwModelDbIndexV1")).toEqual(["old"])
   })
 })

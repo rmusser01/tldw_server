@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest"
 import { getBulkFailureLines, normalizeBulkTags } from "@/components/Option/Collections/ReadingList/bulkActions"
 
 describe("reading bulk action helpers", () => {
-  it("normalizes comma-separated tag input", () => {
-    expect(normalizeBulkTags(" AI, research,AI ,  notes ")).toEqual([
-      "ai",
+  it("normalizes comma-separated tag input, keeping first-seen casing", () => {
+    expect(normalizeBulkTags(" AI, research,ai ,  notes ")).toEqual([
+      "AI",
       "research",
       "notes"
     ])

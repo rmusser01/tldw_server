@@ -237,3 +237,36 @@ async def test_remove_role_if_present_sqlite_propagates_transaction_exit_failure
 
     with pytest.raises(RuntimeError, match="commit failed"):
         await repo.remove_role_if_present(user_id=11, role_name="admin")
+
+
+@pytest.mark.asyncio
+async def test_remove_role_if_present_postgres_locks_user_before_revocation():
+    class _Connection:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[Any, ...]]] = []
+
+        async def fetchrow(self, query: str, *params: Any) -> dict[str, int] | None:
+            statement = str(query)
+            self.calls.append((statement, tuple(params)))
+            if statement == "SELECT id FROM public.users WHERE id = $1 FOR UPDATE":
+                return {"id": int(params[0])}
+            if "DELETE FROM public.user_roles" in statement:
+                return {"user_id": int(params[0])}
+            raise AssertionError(statement)
+
+    conn = _Connection()
+    repo = AuthnzUsersRepo(db_pool=_PoolStub(conn, postgres=True))
+
+    assert await repo.remove_role_if_present(user_id=11, role_name="admin")
+    assert conn.calls == [
+        ("SELECT id FROM public.users WHERE id = $1 FOR UPDATE", (11,)),
+        (
+            "DELETE FROM public.user_roles ur "
+            "USING public.roles r "
+            "WHERE ur.role_id = r.id "
+            "AND ur.user_id = $1 "
+            "AND r.name = $2 "
+            "RETURNING ur.user_id",
+            (11, "admin"),
+        ),
+    ]

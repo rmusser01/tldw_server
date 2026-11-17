@@ -106,13 +106,17 @@ const held = <T,>() => {
   const promise = new Promise<T>(done => { resolve = done })
   return { promise, resolve }
 }
+let queryClient: QueryClient
 const frame = (children: React.ReactNode) => (
-  <ConfigProvider theme={{ token: { motion: false } }}><App>{children}</App></ConfigProvider>
+  <QueryClientProvider client={queryClient}>
+    <ConfigProvider theme={{ token: { motion: false } }}><App>{children}</App></ConfigProvider>
+  </QueryClientProvider>
 )
 const messageControls = () => within(screen.getByTestId("chat-message"))
 
 describe("research action freshness with real memoized message controls", () => {
   beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
     state.runs = []
     state.realQueries = false
     state.selection = null
@@ -127,6 +131,7 @@ describe("research action freshness with real memoized message controls", () => 
     })
   })
   afterEach(() => {
+    queryClient.clear()
     expect(globalThis.fetch).not.toHaveBeenCalled()
     vi.restoreAllMocks()
   })

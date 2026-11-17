@@ -54,8 +54,10 @@ def _prompt_for_artifact(artifact_type: ResearchWorkspaceArtifactType, source_te
         return (
             "You are a source-grounded audio script writer. Use only the provided source content. "
             "Do not invent facts. Write plain spoken prose without speaker labels, bullets, or stage directions.",
-            "Create a spoken overview script (2-3 minutes when read aloud) that introduces the topic, "
-            "covers the main points, and concludes with key takeaways.\n\n"
+            "Create a concise spoken overview that introduces the topic, covers the supported main points, "
+            "and concludes with supported key takeaways. Use up to 2-3 minutes only when the sources support it. "
+            "For short sources, write a shorter overview. Do not pad, repeat details to fill time, "
+            "or add unsupported context.\n\n"
             f"Selected sources:\n{source_text}",
         )
     if artifact_type == "data_table":
@@ -80,10 +82,11 @@ async def _default_chat_fn(**kwargs: Any) -> Any:
 
 
 def _coerce_chat_text(response: Any) -> str:
-    content = extract_response_content(response)
-    if content is not None:
-        return str(content).strip()
-    return str(response or "").strip()
+    try:
+        content = extract_response_content(response)
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return ""
+    return content.strip() if isinstance(content, str) else ""
 
 
 def _strip_mermaid_fence(content: str) -> str:
@@ -206,7 +209,7 @@ async def generate_research_workspace_artifact(
     )
     content = _coerce_chat_text(chat_response)
     if not content:
-        raise ValueError("Generated artifact content was empty.")
+        raise ValueError("The model returned no final text. Try a larger Max Tokens value or a different model.")
 
     verifier = verify_fn or verify_generated_artifact_against_sources
     claim_verification = await verifier(

@@ -27,21 +27,30 @@ export const useSimpleForm = <T extends Record<string, any>>({
 }: UseSimpleFormOptions<T>) => {
   const initialRef = React.useRef(initialValues)
   const [values, setValuesState] = React.useState<T>(initialValues)
+  const liveValues = React.useRef(initialValues)
+  const revision = React.useRef(0)
+  const commitValues = React.useCallback((next: T) => {
+    if (!shallowEqual(liveValues.current, next)) revision.current++
+    liveValues.current = next
+    setValuesState(next)
+  }, [])
+  const getValues = React.useCallback(() => ({ ...liveValues.current }), [])
+  const getRevision = React.useCallback(() => revision.current, [])
   const [errors, setErrors] = React.useState<FormErrors<T>>({})
   const [dirtyBaseline, setDirtyBaseline] = React.useState<T>(initialValues)
 
   const setValues = React.useCallback(
     (next: Partial<T>) => {
-      setValuesState((prev) => ({ ...prev, ...next }))
+      commitValues({ ...liveValues.current, ...next })
     },
-    []
+    [commitValues]
   )
 
   const setFieldValue = React.useCallback(
     <K extends keyof T>(field: K, value: T[K]) => {
-      setValuesState((prev) => ({ ...prev, [field]: value }))
+      commitValues({ ...liveValues.current, [field]: value })
     },
-    []
+    [commitValues]
   )
 
   const setFieldError = React.useCallback(
@@ -61,10 +70,10 @@ export const useSimpleForm = <T extends Record<string, any>>({
   }, [])
 
   const reset = React.useCallback(() => {
-    setValuesState(initialRef.current)
+    commitValues(initialRef.current)
     setErrors({})
     setDirtyBaseline(initialRef.current)
-  }, [])
+  }, [commitValues])
 
   const resetDirty = React.useCallback((nextValues?: T) => {
     setDirtyBaseline(nextValues ?? values)
@@ -135,6 +144,8 @@ export const useSimpleForm = <T extends Record<string, any>>({
 
   return {
     values,
+    getValues,
+    getRevision,
     errors,
     setValues,
     setFieldValue,

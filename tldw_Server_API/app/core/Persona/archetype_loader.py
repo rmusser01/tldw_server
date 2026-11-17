@@ -12,7 +12,7 @@ import yaml
 from loguru import logger
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.schemas.archetype_schemas import (
+from tldw_Server_API.app.core.Persona.archetype_schemas import (
     ArchetypeSummary,
     ArchetypeTemplate,
 )

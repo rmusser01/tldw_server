@@ -22,6 +22,7 @@ from ..notes_link import (
 )
 from ._lineage import current_head, prior_envelopes
 
+_SERVER_ORIGIN_DEVICE_ID = "server-origin"
 _IMMUTABLE_FIELDS = (
     "source_note_id",
     "target_note_id",
@@ -182,7 +183,7 @@ def _validate_note_dependencies(
 ) -> AdapterDeferred | AdapterConflict | None:
     for note_id in (str(payload["source_note_id"]), str(payload["target_note_id"])):
         head = context.get_head("notes.note", note_id) if context and context.get_head else None
-        if head is None:
+        if head is None or _never_live_here(head):
             return AdapterDeferred(
                 client_envelope_id=envelope.client_envelope_id,
                 message="A required notes.note endpoint is not available yet",
@@ -194,6 +195,25 @@ def _validate_note_dependencies(
                 "notes.link endpoints must belong to the same dataset",
             )
     return None
+
+
+def _never_live_here(head: SyncHead) -> bool:
+    """Return whether a note's head is a device's delete of a note this dataset never had.
+
+    A ``notes.note`` tombstone without a base is accepted only when the note has
+    no head, and it is applied as satisfied (§5.4): the server may hold no row
+    for such a note, so a link cannot be projected to it. The link waits, as it
+    did while the note was unknown. The server's own delete of a note Sync never
+    saw had a row to delete, so a link can still name that note.
+    """
+
+    return (
+        head.operation == "tombstone"
+        and head.device_id != _SERVER_ORIGIN_DEVICE_ID
+        and head.base_server_cursor is None
+        and head.base_object_revision is None
+        and head.base_object_hash is None
+    )
 
 
 def _logical_duplicate(

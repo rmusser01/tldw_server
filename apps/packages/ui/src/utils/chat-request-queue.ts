@@ -78,7 +78,8 @@ export const buildQueuedRequest = (
     sourceContext: input.sourceContext ?? null,
     snapshot: {
       ...DEFAULT_SNAPSHOT,
-      ...(input.snapshot ?? {})
+      ...(input.snapshot ?? {}),
+      selectedQuickPrompt: null
     },
     status: input.status ?? "queued",
     blockedReason: input.blockedReason ?? null,
@@ -96,13 +97,9 @@ export const restoreQueuedRequests = (
   queue: QueuedRequestInput[]
 ): QueuedRequest[] =>
   normalizeQueuedRequests(queue).map((item) =>
-    item.status === "sending"
-      ? {
-          ...item,
-          status: "queued",
-          blockedReason: null
-        }
-      : item
+    item.status === "blocked"
+      ? item
+      : blockQueuedRequest(item, "restored_request")
   )
 
 export const moveQueuedRequestToFront = (

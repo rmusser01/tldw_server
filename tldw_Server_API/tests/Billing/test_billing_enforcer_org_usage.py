@@ -212,6 +212,37 @@ async def test_get_llm_tokens_month_counts_row_with_user_and_key_once(monkeypatc
         conn.close()
 
 
+@pytest.mark.asyncio
+async def test_get_llm_tokens_month_leaves_out_calls_on_a_members_own_key(monkeypatch):
+    """A member's own-key row is not plan usage; every other source is (TASK-13955, ADR-083)."""
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE org_members (user_id INTEGER NOT NULL, org_id INTEGER NOT NULL, added_at TEXT NOT NULL)")
+    conn.execute("CREATE TABLE api_keys (id INTEGER PRIMARY KEY, org_id INTEGER NOT NULL)")
+    conn.execute(
+        "CREATE TABLE llm_usage_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, key_id INTEGER, "
+        "total_tokens INTEGER NOT NULL, ts TEXT NOT NULL, credential_source TEXT)"
+    )
+    now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("INSERT INTO org_members (user_id, org_id, added_at) VALUES (101, 7, '2026-01-01 00:00:00')")
+    for source, tokens in (("user", 1000), ("user_unmetered", 40), ("server_default", 300), (None, 5)):
+        conn.execute(
+            "INSERT INTO llm_usage_log (user_id, total_tokens, ts, credential_source) VALUES (101, ?, ?, ?)",
+            (tokens, now_ts, source),
+        )
+    conn.commit()
+    fake_pool = _FakePoolSqlite(_LiveSqliteConn(conn))
+
+    async def _fake_get_db_pool():
+        return fake_pool
+
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool, raising=False)
+    try:
+        assert await BillingEnforcer()._get_llm_tokens_month(org_id=7) == 345
+    finally:
+        conn.close()
+
+
 class _FakeOrgRepo:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         pass

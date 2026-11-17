@@ -5,8 +5,7 @@ import type {
 } from "./types"
 import { normalizeUrlForDedupe } from "@/entries/shared/ingest-payloads"
 import {
-  QUICK_INGEST_MAX_FILE_SIZE,
-  QUICK_INGEST_MAX_FILE_SIZE_LABEL
+  getQuickIngestFileSizeError
 } from "./constants"
 
 const hostnameMatches = (hostname: string, host: string) =>
@@ -69,11 +68,8 @@ export const validateQueueItem = (
   }
 
   if (item.file) {
-    if (item.fileSize > QUICK_INGEST_MAX_FILE_SIZE) {
-      errors.push(
-        `File exceeds ${QUICK_INGEST_MAX_FILE_SIZE_LABEL} quick-ingest limit`
-      )
-    }
+    const sizeError = getQuickIngestFileSizeError(item.file)
+    if (sizeError) errors.push(sizeError)
   }
 
   if (item.detectedType === "unknown") {
@@ -109,7 +105,7 @@ export const getQueueItemExclusionReason = (
   item: WizardQueueItem,
   items: WizardQueueItem[]
 ): QueueExclusionReason | null => {
-  if (!item.validation.valid) return "invalid"
+  if (!item.validation.valid || (item.file && getQuickIngestFileSizeError(item.file))) return "invalid"
   if (item.conferenceOverride?.selected === false) return "unselected"
   if (item.processAgain) return null
   if (

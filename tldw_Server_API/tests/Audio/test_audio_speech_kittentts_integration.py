@@ -1,4 +1,7 @@
+import time
+import traceback
 from collections.abc import AsyncIterator, Iterator
+from contextlib import suppress
 from typing import Any
 
 import pytest
@@ -16,6 +19,7 @@ pytestmark = pytest.mark.integration
 class _RecordingKittenTTSService:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+        self.provider_override_load_failures: list[dict[str, object]] = []
 
     def generate_speech(
         self,
@@ -50,7 +54,9 @@ class _RecordingKittenTTSService:
 
 
 @pytest.fixture()
-def _client_with_kitten_overrides(bypass_api_limits: Any) -> Iterator[tuple[TestClient, _RecordingKittenTTSService]]:
+def _client_with_kitten_overrides(
+    bypass_api_limits: Any, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[TestClient, _RecordingKittenTTSService]]:
     async def _override_user() -> User:
         return User(id=1, username="tester", email="tester@example.com", is_active=True)
 
@@ -58,6 +64,29 @@ def _client_with_kitten_overrides(bypass_api_limits: Any) -> Iterator[tuple[Test
 
     async def _override_tts_service() -> _RecordingKittenTTSService:
         return service
+
+    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides
+
+    list_overrides = llm_provider_overrides.AuthnzLLMProviderOverridesRepo.list_overrides
+
+    async def observed_overrides(repo, *args, **kwargs):
+        started = time.monotonic()
+        try:
+            return await list_overrides(repo, *args, **kwargs)
+        except BaseException as exc:
+            if len(service.provider_override_load_failures) < 3:
+                service.provider_override_load_failures.append(
+                    {
+                        "type": type(exc).__name__,
+                        "elapsed_seconds": round(time.monotonic() - started, 3),
+                        "frames": [
+                            (frame.name, frame.lineno) for frame in traceback.extract_tb(exc.__traceback__)[-8:]
+                        ],
+                    }
+                )
+            raise
+
+    monkeypatch.setattr(llm_provider_overrides.AuthnzLLMProviderOverridesRepo, "list_overrides", observed_overrides)
 
     original_overrides = dict(app.dependency_overrides)
     app.dependency_overrides[get_request_user] = _override_user
@@ -89,6 +118,22 @@ def test_audio_speech_routes_kitten_tts_through_current_backend_path(
         headers={"X-API-KEY": settings.SINGLE_USER_API_KEY},
     )
 
+    if response.status_code != 200:
+        # Failure diagnostics must preserve the original response assertion.
+        with suppress(Exception):
+            from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides
+
+            with llm_provider_overrides._OVERRIDE_LOCK:
+                print(
+                    "Kitten TTS provider readiness:",
+                    {
+                        "load_failures": service.provider_override_load_failures,
+                        "cache_healthy": llm_provider_overrides._OVERRIDE_CACHE_HEALTHY,
+                        "refresh_pending": llm_provider_overrides._OVERRIDE_RECOVERY_IN_FLIGHT,
+                        "ttl_disabled": llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS,
+                        "response_status": response.status_code,
+                    },
+                )
     assert response.status_code == 200, response.text
     assert response.content == b"kitten-audio"
     assert response.headers.get("content-type", "").startswith("audio/mpeg")

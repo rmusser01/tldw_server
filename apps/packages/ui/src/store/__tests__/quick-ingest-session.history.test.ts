@@ -92,15 +92,13 @@ describe("recent import metadata", () => {
     const store = createQuickIngestSessionStore()
     store.getState().setAuthority(owner)
     start(store)
+    const extractedResult = {
+      id: "ok", status: "ok" as const, type: "web" as const,
+      mediaId: 5, content: "extracted-secret"
+    }
     store.getState().upsertSession({
       results: [
-        {
-          id: "ok",
-          status: "ok",
-          type: "web",
-          mediaId: 5,
-          content: "extracted-secret"
-        },
+        extractedResult,
         {
           id: "unsaved",
           status: "ok",

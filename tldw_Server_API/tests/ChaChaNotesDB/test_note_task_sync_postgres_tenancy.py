@@ -62,6 +62,19 @@ def test_postgres_task_operations_do_not_leak_dataset_scope_to_the_session(
 def _restore_reviewed_postgres_v59_task_source(db: CharactersRAGDB) -> None:
     """Replace the current graph with the exact reviewed empty v59 source."""
     with db.transaction() as conn:
+        # Later semantic FKs depend on the v60 notes index removed below.
+        for table in (
+            "note_semantic_operation_receipts",
+            "note_semantic_obsolete_vectors",
+            "note_semantic_work",
+            "note_semantic_chunks",
+            "note_semantic_note_state",
+            "note_semantic_generations",
+            "note_semantic_index_configs",
+        ):
+            db.backend.execute(
+                f"DROP TABLE IF EXISTS {table}", connection=conn  # nosec B608 # Fixed fixture tables.
+            )
         # The v64 concurrency fixture intentionally predates this sidecar.
         db.backend.execute("DROP TABLE IF EXISTS notes_knowledge_provenance", connection=conn)
         # Remove newer graph references before reconstructing the v59 index.
@@ -946,8 +959,12 @@ def _populate_reviewed_postgres_v59_source(
     task_id = str(uuid4())
     event_id = str(uuid4())
     timestamp = "2026-08-14T00:00:00+00:00"
-    db.add_note("Legacy task", "- [ ] Migrate this task\n", note_id=note_id)
     with db.transaction() as conn:
+        # Populate the restored v59 source without current-schema note hooks.
+        conn.execute(
+            "INSERT INTO notes(id,title,content,client_id) VALUES (?,?,?,?)",
+            (note_id, "Legacy task", "- [ ] Migrate this task\n", owner),
+        )
         conn.execute(
             """
             INSERT INTO note_tasks(
@@ -1068,6 +1085,13 @@ def _postgres_v59_source_snapshot(db: CharactersRAGDB) -> dict[str, object]:
         "task_projection_drifts",
         "note_task_scope_authority",
         "uq_notes_owner_id",
+        "note_semantic_operation_receipts",
+        "note_semantic_obsolete_vectors",
+        "note_semantic_work",
+        "note_semantic_chunks",
+        "note_semantic_note_state",
+        "note_semantic_generations",
+        "note_semantic_index_configs",
         *(f"{table}_v60" for table in CharactersRAGDB._NOTE_TASK_V60_RELATIONS),
     )
     with db.transaction() as conn:

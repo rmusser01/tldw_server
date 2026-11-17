@@ -22,6 +22,17 @@ const mocks = vi.hoisted(() => ({
   getPromptById: vi.fn(async () => undefined)
 }))
 
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => ({ ownerId: `recipe-owner:sha256:${"a".repeat(64)}`, ready: true, boundaryKey: "ux-server-library-fixture" })
+}))
+vi.mock("@/services/recipe-persistence-uncertainty", async original => ({
+  ...await original<typeof import("@/services/recipe-persistence-uncertainty")>(),
+  resolveRecipePersistenceOwnerView: async () => ({ ownerId: `recipe-owner:sha256:${"a".repeat(64)}`, authorizationRevision: "ux-server-library-fixture" })
+}))
+vi.mock("@/services/api-send", () => ({
+  apiSend: async (payload: { path?: string; method?: string }) => ({ ok: true, status: 200, data: await mocks.bgRequest(payload) })
+}))
+
 vi.mock("react-i18next", async () => {
   const { createInstance } = await import("i18next")
   const i18n = createInstance()
@@ -169,7 +180,7 @@ describe("PromptSelect UX contract reproductions (#3112)", { timeout: 60_000 }, 
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.getAllPrompts.mockResolvedValue([
-      { id: "local-1", title: "Local quick prompt", content: "Summarise this", is_system: false, createdAt: 1 }
+      { id: "local-1", ownerId: `recipe-owner:sha256:${"a".repeat(64)}`, title: "Local quick prompt", content: "Summarise this", is_system: false, createdAt: 1 }
     ])
     mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request?.path || "")

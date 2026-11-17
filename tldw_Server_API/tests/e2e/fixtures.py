@@ -104,6 +104,9 @@ def _build_inprocess_httpx_client() -> httpx.Client:
             _INPROCESS_DB_URL = f"sqlite:///{db_path}"
             os.environ["DATABASE_URL"] = _INPROCESS_DB_URL
     os.environ.setdefault("ENABLE_REGISTRATION", "true")
+    # The API client registers without a browser's CSRF double-submit; these
+    # journeys exercise the API, not CSRF, which is on by default since TASK-13950.19 PR 4.
+    os.environ.setdefault("CSRF_ENABLED", "false")
     os.environ.setdefault("REQUIRE_REGISTRATION_CODE", "false")
     os.environ.setdefault("REGISTRATION_ENABLED", os.environ["ENABLE_REGISTRATION"])
     os.environ.setdefault("REGISTRATION_REQUIRE_CODE", os.environ["REQUIRE_REGISTRATION_CODE"])

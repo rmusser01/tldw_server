@@ -1232,6 +1232,20 @@ def test_sqlite_unsafe_archive_poison_commits_before_waiting_create_rechecks(
         owner_user_id="owner-1",
         idempotency_key="unsafe-archive",
     )
+    dependent = prune_manager.create_job(
+        domain="slides",
+        queue="high",
+        job_type="presentation.generate",
+        payload={"receipt_id": "dependent"},
+        owner_user_id="owner-1",
+        idempotency_key="dependent",
+    )
+    assert prune_manager.add_job_dependency(dependent["uuid"], job["uuid"])
+    state_queries = {
+        "jobs": "SELECT * FROM jobs ORDER BY 1",
+        "jobs_archive": "SELECT * FROM jobs_archive ORDER BY 1",
+        "job_dependencies": "SELECT * FROM job_dependencies ORDER BY 1",
+    }
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             "UPDATE jobs SET status='completed', completed_at='2000-01-01 00:00:00' WHERE id=?",
@@ -1246,10 +1260,12 @@ def test_sqlite_unsafe_archive_poison_commits_before_waiting_create_rechecks(
             payload='{"receipt_id":"archive"}',
         )
         conn.commit()
+        before_prune = {table: conn.execute(query).fetchall() for table, query in state_queries.items()}
 
     collision_seen = Event()
     allow_poison = Event()
     create_waiting = Event()
+    create_finished = Event()
     original_collision_check = prune_manager._idempotent_slides_archive_collisions
 
     def pause_on_collision(*args, **kwargs):
@@ -1261,11 +1277,12 @@ def test_sqlite_unsafe_archive_poison_commits_before_waiting_create_rechecks(
             raise
 
     class SignalingConnection:
-        def __init__(self, inner):
+        def __init__(self, inner, *, pruning=False):
             self._inner = inner
+            self._pruning = pruning
 
         def execute(self, sql, *args, **kwargs):
-            if str(sql).strip().upper() == "BEGIN IMMEDIATE":
+            if not self._pruning and str(sql).strip().upper() == "BEGIN IMMEDIATE":
                 create_waiting.set()
             return self._inner.execute(sql, *args, **kwargs)
 
@@ -1274,19 +1291,42 @@ def test_sqlite_unsafe_archive_poison_commits_before_waiting_create_rechecks(
             return self
 
         def __exit__(self, *args):
-            return self._inner.__exit__(*args)
+            result = self._inner.__exit__(*args)
+            if self._pruning and args[0] is not None:
+                # Force the waiting creator through the real writer-release gap.
+                assert create_finished.wait(timeout=5)
+            return result
 
         def __getattr__(self, name):
             return getattr(self._inner, name)
 
     original_create_connect = create_manager._connect
+    original_prune_connect = prune_manager._connect
     monkeypatch.setattr(prune_manager, "_idempotent_slides_archive_collisions", pause_on_collision)
     monkeypatch.setattr(
         create_manager,
         "_connect",
         lambda: SignalingConnection(original_create_connect()),
     )
+    monkeypatch.setattr(
+        prune_manager,
+        "_connect",
+        lambda: SignalingConnection(original_prune_connect(), pruning=True),
+    )
     monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+
+    def create_while_pruning():
+        try:
+            return create_manager.create_job(
+                domain="slides",
+                queue="default",
+                job_type="presentation.generate",
+                payload={"receipt_id": receipt_id},
+                owner_user_id=create_owner,
+                idempotency_key=create_key,
+            )
+        finally:
+            create_finished.set()
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         prune_future = executor.submit(
@@ -1297,15 +1337,7 @@ def test_sqlite_unsafe_archive_poison_commits_before_waiting_create_rechecks(
             job_type="presentation.generate",
         )
         assert collision_seen.wait(timeout=5)
-        create_future = executor.submit(
-            create_manager.create_job,
-            domain="slides",
-            queue="default",
-            job_type="presentation.generate",
-            payload={"receipt_id": receipt_id},
-            owner_user_id=create_owner,
-            idempotency_key=create_key,
-        )
+        create_future = executor.submit(create_while_pruning)
         assert create_waiting.wait(timeout=5)
         allow_poison.set()
         with pytest.raises(ValueError, match="unsafe presentation.generate archive collision"):
@@ -1314,6 +1346,7 @@ def test_sqlite_unsafe_archive_poison_commits_before_waiting_create_rechecks(
             create_future.result(timeout=5)
 
     with sqlite3.connect(db_path) as conn:
+        assert {table: conn.execute(query).fetchall() for table, query in state_queries.items()} == before_prune
         expected_count = int(create_key == "unsafe-archive")
         assert (
             conn.execute(

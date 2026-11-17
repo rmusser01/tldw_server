@@ -13,6 +13,7 @@ def test_telemetry_import_fallback_with_missing_opentelemetry():
         """
         import builtins
         import importlib
+        importlib.import_module("tldw_Server_API.app.core.http_client")  # fastapi requires opentelemetry-api
 
         original_import = builtins.__import__
 

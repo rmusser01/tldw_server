@@ -1,11 +1,12 @@
-import React from "react"
 import { Button, Input, Modal, Skeleton } from "antd"
+import React from "react"
 
 type QuickAssignChatOption = {
   chat: any
   chatId: string
   title: string
   state: string
+  disabledReason?: string
 }
 
 type DictionaryQuickAssignModalProps = {
@@ -25,7 +26,9 @@ type DictionaryQuickAssignModalProps = {
   onOpenChat: (chat: any) => void
 }
 
-export const DictionaryQuickAssignModal: React.FC<DictionaryQuickAssignModalProps> = ({
+export const DictionaryQuickAssignModal: React.FC<
+  DictionaryQuickAssignModalProps
+> = ({
   dictionaryName,
   open,
   onCancel,
@@ -43,24 +46,22 @@ export const DictionaryQuickAssignModal: React.FC<DictionaryQuickAssignModalProp
 }) => {
   return (
     <Modal
-      title={dictionaryName ? `Quick assign: ${dictionaryName}` : "Quick assign dictionary"}
+      title={
+        dictionaryName
+          ? `Quick assign: ${dictionaryName}`
+          : "Quick assign dictionary"
+      }
       open={open}
       onCancel={onCancel}
       onOk={onConfirm}
-      okText={
-        selectedChatIds.length === 1
-          ? "Assign to 1 chat"
-          : `Assign to ${selectedChatIds.length} chats`
-      }
-      okButtonProps={{
-        disabled: selectedChatIds.length === 0,
-        loading: assignSaving
-      }}
-      cancelButtonProps={{ disabled: assignSaving }}
-    >
+      okText="Assignment unavailable"
+      okButtonProps={{ disabled: true }}
+      cancelButtonProps={{ disabled: assignSaving }}>
       <div className="space-y-3">
         <p className="text-xs text-text-muted">
-          Choose chat sessions to link with this dictionary.
+          This server version does not support dictionary assignment to saved
+          chats across the chat interfaces. Existing links remain unchanged;
+          Open lets you inspect a conversation.
         </p>
         <Input
           value={searchValue}
@@ -98,34 +99,42 @@ export const DictionaryQuickAssignModal: React.FC<DictionaryQuickAssignModalProp
             {chatOptions.map((option) => {
               const checked = selectedChatIds.includes(option.chatId)
               return (
-                <label
+                <div
                   key={`assign-chat-${option.chatId}`}
-                  className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-surface2/60"
-                >
+                  className="flex min-h-11 items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-surface2/60">
                   <input
+                    disabled
+                    aria-describedby={`assign-chat-reason-${option.chatId}`}
                     type="checkbox"
                     checked={checked}
                     onChange={() => onToggleChatSelection(option.chatId)}
                     aria-label={`Select chat ${option.title}`}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate">{option.title}</div>
+                    <div className="break-words">{option.title}</div>
+                    <p
+                      id={`assign-chat-reason-${option.chatId}`}
+                      className="text-xs text-text-muted">
+                      {option.disabledReason ||
+                        "Dictionary assignment is unavailable for saved chats on this server version."}
+                    </p>
                     <div className="text-[11px] text-text-muted">
                       {option.chatId} · {option.state}
                     </div>
                   </div>
                   <Button
                     type="link"
+                    className="min-h-11"
+                    aria-label={`Open chat ${option.title}`}
                     size="small"
                     onClick={(event) => {
                       event.preventDefault()
                       event.stopPropagation()
                       onOpenChat(option.chat)
-                    }}
-                  >
+                    }}>
                     Open
                   </Button>
-                </label>
+                </div>
               )
             })}
           </div>

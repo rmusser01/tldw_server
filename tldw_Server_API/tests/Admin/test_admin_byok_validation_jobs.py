@@ -136,7 +136,7 @@ def _install_real_job_validation_boundary(
         snapshot_loader,
         raising=False,
     )
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(
         byok_testing,
         "get_registry",
@@ -305,7 +305,7 @@ async def test_validation_job_classifies_real_sanitized_adapter_outcome(
             ]
         )
 
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(
         byok_testing,
         "get_registry",

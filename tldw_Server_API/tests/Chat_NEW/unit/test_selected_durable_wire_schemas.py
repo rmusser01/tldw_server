@@ -104,6 +104,9 @@ def test_accepts_approved_nested_mode_without_changing_original_user(kind):
         ("metadata", {"tldw_retry_failed_turn": True}),
         ("tldw_continuation", {"from_message_id": UID, "mode": "branch"}),
         ("tldw_history_selection_v1", selection()),
+        ("tldw_history_server_existing_input_v1", None),
+        ("tldw_history_branch", None),
+        ("tldw_history_edit_v1", None),
     ],
 )
 def test_nested_mode_rejects_inference_defaults_and_other_admission_controls(field, value):

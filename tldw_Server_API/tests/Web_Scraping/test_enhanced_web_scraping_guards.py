@@ -345,3 +345,22 @@ async def test_scrape_article_blocks_when_robots_disallows(monkeypatch):
     assert result["error"] == "Blocked by outbound policy"  # nosec B101
     assert result["policy_reason"] == "robots_disallowed"  # nosec B101
     fake_scrape.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_summarize_content_runs_analyze_off_the_event_loop_thread(monkeypatch):
+    """The summary runs on a worker thread, where it can be quota-checked (spec §4b)."""
+    import threading
+
+    seen = []
+
+    def fake_analyze(**_kwargs):
+        """Record the thread."""
+        seen.append(threading.get_ident())
+        return "summary"
+
+    monkeypatch.setattr(ews, "analyze", fake_analyze)
+    scraper = ews.EnhancedWebScraper(config={})
+
+    assert await scraper._summarize_content("body", api_name="openai") == "summary"
+    assert seen and seen[0] != threading.get_ident()

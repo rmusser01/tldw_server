@@ -102,7 +102,7 @@ vi.mock("@tanstack/react-query", () => ({
   useMutation: (options: any = {}) => ({
     isPending: false,
     mutate: vi.fn((args) => {
-      options.onSuccess?.({ data: { data: testRunResults } }, args)
+      options.onSuccess?.(testRunResults, args)
     })
   }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() })
@@ -144,9 +144,12 @@ vi.mock("antd", () => {
       ),
       useForm: () => [
         {
-          resetFields: vi.fn()
+          resetFields: vi.fn(),
+          getFieldsValue: () => ({}),
+          setFieldValue: vi.fn()
         }
-      ]
+      ],
+      useWatch: () => undefined
     }
   )
 

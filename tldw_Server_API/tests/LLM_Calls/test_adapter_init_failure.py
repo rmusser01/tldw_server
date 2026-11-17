@@ -18,7 +18,7 @@ async def test_openrouter_async_adapter_unavailable(monkeypatch):
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Chat.chat_service._get_llm_registry",
+        "tldw_Server_API.app.core.LLM_Calls.gateway._get_llm_registry",
         lambda: _FailingRegistry(),
         raising=True,
     )
@@ -36,7 +36,7 @@ def test_anthropic_adapter_unavailable(monkeypatch):
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Chat.chat_service._get_llm_registry",
+        "tldw_Server_API.app.core.LLM_Calls.gateway._get_llm_registry",
         lambda: _FailingRegistry(),
         raising=True,
     )

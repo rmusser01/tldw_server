@@ -3,6 +3,8 @@ import { fireEvent, render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 import { HeaderShortcuts } from "../HeaderShortcuts"
+import { PageHelpModalHost } from "@/components/Common/PageHelpModalHost"
+import { useTutorialStore } from "@/store/tutorials"
 import { getHeaderShortcutItems } from "../header-shortcut-items"
 import { HEADER_SHORTCUT_IDS } from "@/services/settings/ui-settings"
 
@@ -30,9 +32,8 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@/hooks/useKeyboardShortcuts", () => ({
-  useShortcut: vi.fn(),
-  formatShortcut: vi.fn(() => ""),
+vi.mock("@/hooks/useKeyboardShortcuts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/hooks/useKeyboardShortcuts")>(),
   isMac: false
 }))
 
@@ -70,6 +71,26 @@ const getShortcutLink = (
 /* ------------------------------------------------------------------ */
 
 describe("HeaderShortcuts launcher modal", () => {
+  it("names the page navigator by its purpose and leaves ? to the one help surface", async () => {
+    useTutorialStore.getState().closeHelpModal()
+    function Shell() {
+      const [expanded, setExpanded] = React.useState(false)
+      return <><button onClick={() => setExpanded(true)}>Show pages</button><HeaderShortcuts expanded={expanded} onExpandedChange={setExpanded} /><PageHelpModalHost /></>
+    }
+    renderWithRouter(<Shell />, "/chat")
+    const trigger = screen.getByRole("button", { name: "Show pages" })
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: "?", shiftKey: true })
+    expect(await screen.findByRole("dialog", { name: "Page Help" })).toBeVisible()
+    expect(screen.getAllByRole("dialog")).toHaveLength(1)
+    expect(screen.queryByRole("dialog", { name: "Pages" })).not.toBeInTheDocument()
+    fireEvent.keyDown(document, { key: "Escape" })
+    expect(trigger).toHaveFocus()
+    fireEvent.click(trigger)
+    expect(screen.getByRole("dialog", { name: "Pages" })).toBeVisible()
+    expect(screen.getByPlaceholderText("Search pages...")).toBeVisible()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     mockState.expanded = false

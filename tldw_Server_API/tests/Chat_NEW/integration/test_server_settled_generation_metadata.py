@@ -96,7 +96,7 @@ def _install_provider(monkeypatch, make_stream: Callable[[], AsyncIterator[str]]
     def provider(*_args, **_kwargs):
         return make_stream()
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
 
 
 def _drop_client_after(app, marker: bytes, delivered: list[bytes], occurrences: int = 1):
@@ -156,6 +156,102 @@ def _wait_for_assistant(db: CharactersRAGDB, cid: str) -> dict[str, Any]:
 def _extra(db: CharactersRAGDB, message_id: str) -> dict[str, Any]:
     metadata = db.get_message_metadata(message_id) or {}
     return metadata.get("extra") or {}
+
+
+def test_native_thinking_blocks_survive_save_edit_and_reload(settled_api, monkeypatch):
+    from tldw_Server_API.app.core.Chat.chat_service import _format_selected_history_messages
+
+    client, db, cid, headers = settled_api
+    monkeypatch.setenv("MODERATION_STREAM_BUFFER_CHARS", "0")
+
+    async def provider() -> AsyncIterator[str]:
+        yield _sse({"additional_kwargs": {"reasoning_content": "First </th"}})
+        yield _sse(
+            {"choices": [{"index": 0, "delta": {"reasoning_content": "ink> thought", "content": "An "}}]}
+        )
+        yield _sse({"choices": [{"index": 0, "delta": {"reasoning_content": "Second thought"}}]})
+        yield _content("answer.", "stop")
+        yield "data: [DONE]\n\n"
+
+    _install_provider(monkeypatch, provider)
+    selection = _selection(client, cid, headers, "thinking-blocks")
+    completion = client.post(
+        "/api/v1/chat/completions",
+        headers=headers,
+        json={
+            **_completion_body(cid, versioned_selection=selection),
+            "max_tokens": 128,
+            "metadata": {"tldw_retain_reasoning_history_v1": True},
+        },
+    )
+    assert completion.status_code == 200, completion.text
+    assert '"reasoning_content": "First </th"' in completion.text
+    (reply,) = _assistant_rows(db, cid)
+    original = "<think>First &#x00003c;/think> thought</think>An <think>Second thought</think>answer."
+    assert reply["content"] == original
+
+    edited = "<think>First &#x00003c;/think> thought</think>An <think>Edited thought</think>answer."
+    save = client.put(
+        f"/api/v1/messages/{reply['id']}",
+        headers=headers,
+        params={"expected_version": reply["version"]},
+        json={"content": edited},
+    )
+    assert save.status_code == 200, save.text
+
+    reload = client.post(
+        f"/api/v1/chat/conversations/{cid}/history/selection",
+        headers=headers,
+        params={"include_native_completion": "true", "include_reasoning_history_support": "true"},
+        json={
+            "purpose": "send",
+            "view": {
+                "view_session_id": "reloaded-thinking-blocks",
+                "conversation_id": cid,
+                "interpretation": {"kind": "parent_graph_v1"},
+                "cursor": {"kind": "after_message", "message_id": reply["id"]},
+                "selection_revision": 1,
+            },
+        },
+    )
+    assert reload.status_code == 200, reload.text
+    reloaded = reload.json()
+    assert reloaded["selected_content"][-1]["message"] == edited
+    assert reloaded["native_completion_v1"]["reasoning_history_supported"] is True
+
+    owner_key = reloaded["view"]["owner_key"]
+    snapshot = db.get_conversation_history_snapshot(cid, owner_client_id="1", owner_key=owner_key)
+    # Public captures omit the raw versions used by the provider formatter.
+    selected_content = [
+        {**row, "_message_version": db.get_message_by_id(row["id"])["version"]}
+        for row in reloaded["selected_content"]
+    ]
+    context = _format_selected_history_messages(snapshot, selected_content, {})
+    assert context[-1]["role"] == "assistant"
+    assert context[-1]["content"] == "An answer."
+
+
+def test_native_completion_without_thinking_opt_in_keeps_only_the_answer(settled_api, monkeypatch):
+    client, db, cid, headers = settled_api
+
+    async def provider() -> AsyncIterator[str]:
+        yield _sse({"choices": [{"index": 0, "delta": {"reasoning_content": "Thinking " * 10}}]})
+        yield _content("Short answer.", "stop")
+        yield "data: [DONE]\n\n"
+
+    _install_provider(monkeypatch, provider)
+    selection = _selection(client, cid, headers, "thinking-budget")
+    response = client.post(
+        "/api/v1/chat/completions",
+        headers=headers,
+        json={
+            **_completion_body(cid, versioned_selection=selection),
+            "max_tokens": 128,
+        },
+    )
+    assert response.status_code == 200, response.text
+    (reply,) = _assistant_rows(db, cid)
+    assert reply["content"] == "Short answer."
 
 
 def test_client_disconnect_mid_stream_saves_partial_as_interrupted(settled_api, monkeypatch):
@@ -553,3 +649,123 @@ async def test_save_function_stores_only_allow_listed_generation_metadata(chacha
         "usage": {"total_tokens": 3},
     }
     assert _extra(chacha_db, user_id) == {"sender_role": "user"}
+
+
+def test_b02_pre_stream_failure_reports_admitted_input_before_sanitized_error(settled_api, monkeypatch):
+    """A committed question remains identifiable when provider preparation fails."""
+    client, db, cid, headers = settled_api
+    calls = []
+
+    async def unavailable_provider() -> AsyncIterator[str]:
+        calls.append("called")
+        raise RuntimeError("private-upstream-b02-marker: connection refused")
+        yield  # pragma: no cover - the provider fails before its first frame
+
+    _install_provider(monkeypatch, unavailable_provider)
+    selection = _selection(client, cid, headers, "b02-pre-stream-failure")
+    response = client.post(
+        "/api/v1/chat/completions", headers=headers,
+        json=_completion_body(cid, versioned_selection=selection),
+    )
+    messages = db.get_messages_for_conversation(cid)
+    # The real owner transaction committed the input, but no answer exists.
+    assert len(messages) == 1 and messages[0]["sender"] == "user"  # nosec B101 - Pytest causal owner-state check.
+    assert calls == ["called"]  # nosec B101 - No hidden provider retry.
+    assert response.status_code == 200, response.text  # nosec B101 - Admitted native stream preserves its receipt.
+    frames = _frames(response)
+    admission = frames[0]["tldw_history_admission_v1"]
+    assert admission["input_message_id"] == messages[0]["id"]  # nosec B101 - Actual accepted input, not a synthetic token.
+    assert admission["conversation_id"] == cid  # nosec B101 - Receipt remains owner-bound.
+    assert admission["selection_digest"] == selection["selection_digest"]  # nosec B101 - Receipt belongs to this captured request.
+    assert any("error" in frame for frame in frames)  # nosec B101 - No false completion on provider failure.
+    assert not any("tldw_message_id" in frame for frame in frames)  # nosec B101 - No assistant settlement is acknowledged.
+    assert "private-upstream-b02-marker" not in response.text  # nosec B101 - Provider internals remain sanitized.
+
+
+def test_b02_legacy_pre_stream_failure_keeps_http_error(settled_api, monkeypatch):
+    """A caller without native admission keeps the existing HTTP failure contract."""
+    client, _db, cid, headers = settled_api
+
+    async def unavailable_provider() -> AsyncIterator[str]:
+        raise RuntimeError("private-upstream-b02-legacy-marker: connection refused")
+        yield  # pragma: no cover - the provider fails before its first frame
+
+    _install_provider(monkeypatch, unavailable_provider)
+    response = client.post(
+        "/api/v1/chat/completions", headers=headers,
+        json=_completion_body(cid, versioned_selection=None),
+    )
+    assert response.status_code == 502, response.text  # nosec B101 - No native receipt changes legacy HTTP semantics.
+    assert "tldw_history_admission_v1" not in response.text  # nosec B101 - Never invent native authority for a legacy request.
+    assert "private-upstream-b02-legacy-marker" not in response.text  # nosec B101 - Provider internals stay private.
+
+
+@pytest.fixture
+def governed_settled_api(settled_api, monkeypatch):
+    """Run real token accounting against an isolated deterministic memory governor."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor
+
+    client, db, cid, headers = settled_api
+    policy = {"tokens": {"per_min": 10000, "burst": 1}, "scopes": ["user"]}
+    governor = MemoryResourceGovernor(policies={"chat.default": policy}, time_source=lambda: 0)
+    monkeypatch.setattr(client.app.state, "rg_governor", governor, raising=False)
+    monkeypatch.setattr(client.app.state, "rg_policy_loader", SimpleNamespace(get_policy=lambda _policy: policy), raising=False)
+    monkeypatch.setenv("RG_ENABLED", "1")
+    return client, db, cid, headers, governor
+
+
+def test_b02_admitted_preparation_failure_refunds_and_records_failure(governed_settled_api, monkeypatch):
+    """Receipt delivery cannot turn a failed reserved request into accounting success."""
+    from tldw_Server_API.app.api.v1.endpoints import chat
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
+
+    client, db, cid, headers, governor = governed_settled_api
+    metrics = chat.get_chat_metrics()
+    original_track = metrics.track_request
+    exits = []
+
+    class ObserveRequestExit:
+        def __init__(self, **kwargs):
+            self.original = original_track(**kwargs)
+
+        async def __aenter__(self):
+            return await self.original.__aenter__()
+
+        async def __aexit__(self, exc_type, exc_value, exc_tb):
+            exits.append((exc_type, exc_value))
+            return await self.original.__aexit__(exc_type, exc_value, exc_tb)
+
+    monkeypatch.setattr(metrics, "track_request", ObserveRequestExit)
+
+    reservations = []
+
+    def fail_preparation(*_args, **_kwargs):
+        reservations.extend(governor._handles.values())
+        raise ChatConfigurationError("private-b02-configuration-marker", provider="openai")
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.apply_prompt_templating", fail_preparation)
+    provider_calls = []
+
+    def unexpected_provider(*args, **kwargs):
+        provider_calls.append((args, kwargs))
+        raise AssertionError("preparation failure must not call provider")
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", unexpected_provider)
+    selection = _selection(client, cid, headers, "b02-reserved-preparation")
+    response = client.post(
+        "/api/v1/chat/completions", headers=headers,
+        json=_completion_body(cid, versioned_selection=selection),
+    )
+    assert response.status_code == 200, response.text  # nosec B101 - Native admission is still delivered.
+    assert len(db.get_messages_for_conversation(cid)) == 1  # nosec B101 - Retain exactly the admitted question.
+    assert _frames(response)[0]["tldw_history_admission_v1"]["conversation_id"] == cid  # nosec B101 - Authentic owner receipt.
+    assert provider_calls == []  # nosec B101 - Failed preparation never enters provider dispatch.
+    reservation, = reservations
+    assert reservation.categories["tokens"] > 0  # nosec B101 - The real admission reserved a positive token budget.
+    assert reservation.state == "finalized"  # nosec B101 - Failed preparation finalized its real reservation.
+    balance = asyncio.run(governor.peek_with_policy(reservation.entity, ["tokens"], reservation.policy_id))
+    assert balance["tokens"]["remaining"] == 10000  # nosec B101 - Zero actual usage returns every reserved token.
+    assert len(exits) == 1 and exits[0][0] is not None  # nosec B101 - Actual request metrics see failure, not success.
+    assert "private-b02-configuration-marker" not in response.text  # nosec B101 - Accounting carries only sanitized failure data.

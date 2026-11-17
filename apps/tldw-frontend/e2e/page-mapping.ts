@@ -1103,9 +1103,9 @@ export const WEBUI_ONLY_PAGES: PageMapping[] = [
     name: "Claims Review",
     category: "workspace",
     webuiPath: "/claims-review",
-    extensionOptionsPath: null,
+    extensionOptionsPath: "/claims-review",
     extensionSidepanelPath: null,
-    sharedComponent: null,
+    sharedComponent: "ClaimsReviewShell",
     session: 4,
     checklistItems: CHECKLIST_TEMPLATES.workspace
   },

@@ -154,6 +154,7 @@ export interface EpubLocation {
 
 // Store state interface
 export interface DocumentWorkspaceState {
+  workspaceAuthority: string | null
   // Active document
   activeDocumentId: number | null
   activeDocumentType: DocumentType | null
@@ -258,7 +259,8 @@ export interface DocumentWorkspaceActions {
   addAnnotation: (annotation: Omit<Annotation, "id" | "createdAt" | "updatedAt">) => void
   updateAnnotation: (id: string, updates: Partial<Annotation>) => void
   removeAnnotation: (id: string) => void
-  setAnnotations: (annotations: Annotation[]) => void
+  setAnnotations: (annotations: Annotation[], mediaId?: number) => void
+  acknowledgeAnnotations: (submitted: Annotation[], saved: Annotation[], idMapping?: Record<string, string>) => void
   setAnnotationSyncStatus: (status: AnnotationSyncStatus) => void
   setAnnotationsHealth: (status: WorkspaceHealthStatus) => void
   setProgressHealth: (status: WorkspaceHealthStatus) => void
@@ -276,6 +278,7 @@ export const MAX_ZOOM_LEVEL = 400
 export const ZOOM_STEP = 25
 
 export const DEFAULT_DOCUMENT_WORKSPACE_STATE: DocumentWorkspaceState = {
+  workspaceAuthority: null,
   activeDocumentId: null,
   activeDocumentType: null,
   openDocuments: [],

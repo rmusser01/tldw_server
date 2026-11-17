@@ -214,7 +214,7 @@ describe("chat settings deep research attachment history", () => {
   it("fails cleanly when the combined active-plus-history payload exceeds the byte cap", async () => {
     const hugeClaim = "x".repeat(210_000)
 
-    const next = await applyChatSettingsPatch({
+    await expect(applyChatSettingsPatch({
       historyId: "history-too-large",
       serverChatId: null,
       patch: {
@@ -228,10 +228,9 @@ describe("chat settings deep research attachment history", () => {
           buildAttachment({ run_id: "run_hist_large_3" })
         ]
       }
-    })
+    })).rejects.toThrow("chat_settings_size_exceeded")
 
     const storageKey = getChatSettingsStorageKey("local:history-too-large")
-    expect(next).toBeNull()
     // The guarded reader may establish an empty local baseline; the oversized payload is never saved.
     expect(storageState.store.get(storageKey)).toBeNull()
   })

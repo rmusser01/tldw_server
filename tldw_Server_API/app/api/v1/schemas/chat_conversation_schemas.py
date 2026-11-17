@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, reject_assistant_startup_input
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords
 
 ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
 
@@ -117,22 +118,7 @@ class ConversationUpdateRequest(BaseModel):
     @field_validator("keywords")
     @classmethod
     def _normalize_keywords(cls, value: list[str] | None) -> list[str] | None:
-        if value is None:
-            return None
-        cleaned = []
-        seen = set()
-        for v in value:
-            if v is None:
-                continue
-            s = str(v).strip()
-            if not s:
-                continue
-            key = s.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            cleaned.append(s)
-        return cleaned
+        return None if value is None else dedupe_keywords(value)
 
 
 class ConversationMetadata(BaseModel):

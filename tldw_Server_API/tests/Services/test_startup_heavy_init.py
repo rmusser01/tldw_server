@@ -236,6 +236,7 @@ async def test_init_local_llm_manager_runs_llamacpp_runtime_reconciler(
 
     class _Manager:
         def __init__(self, _config: object) -> None:
+            self.config = _config
             self.llamacpp_supervisor = supervisor
 
     class _Reconciler:
@@ -254,9 +255,10 @@ async def test_init_local_llm_manager_runs_llamacpp_runtime_reconciler(
     from tldw_Server_API.app.core import Local_LLM as local_llm_package
     from tldw_Server_API.app.core import config as config_module
     from tldw_Server_API.app.core.Local_LLM import llamacpp_runtime_reconciler
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
     llamacpp_endpoint_module = ModuleType("tldw_Server_API.app.api.v1.endpoints.llamacpp")
-    monkeypatch.setattr(config_module, "get_llamacpp_handler_config", lambda: object())
+    monkeypatch.setattr(config_module, "get_llamacpp_handler_settings", lambda: {"enabled": True})
     monkeypatch.setattr(local_llm_package, "LLMInferenceManager", _Manager, raising=False)
     monkeypatch.setattr(local_llm_package, "LLMManagerConfig", lambda **kwargs: kwargs, raising=False)
     monkeypatch.setattr(llamacpp_runtime_reconciler, "LlamaCppRuntimeReconciler", _Reconciler)
@@ -276,8 +278,29 @@ async def test_init_local_llm_manager_runs_llamacpp_runtime_reconciler(
 
     assert calls == ["created", "reconcile"]
     assert app.state.llm_manager.llamacpp_supervisor is supervisor
+    assert isinstance(app.state.llm_manager.config["llamacpp"], LlamaCppConfig)
     assert app.state.llamacpp_runtime_reconciler.__class__ is _Reconciler
     assert llamacpp_endpoint_module.llm_manager is app.state.llm_manager
+
+
+@pytest.mark.unit
+def test_llamacpp_handler_config_is_built_from_config_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    startup_heavy = _import_startup_heavy_init()
+    from tldw_Server_API.app.core import config as config_module
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
+
+    monkeypatch.setattr(config_module, "get_llamacpp_handler_settings", lambda: {"enabled": True, "default_port": 9001})
+    cfg = startup_heavy._llamacpp_handler_config()
+    assert isinstance(cfg, LlamaCppConfig) and cfg.default_port == 9001
+
+
+@pytest.mark.unit
+def test_invalid_llamacpp_settings_disable_only_the_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+    startup_heavy = _import_startup_heavy_init()
+    from tldw_Server_API.app.core import config as config_module
+
+    monkeypatch.setattr(config_module, "get_llamacpp_handler_settings", lambda: {"enabled": True, "default_port": "not-a-port"})
+    assert startup_heavy._llamacpp_handler_config() is None
 
 
 @pytest.mark.asyncio

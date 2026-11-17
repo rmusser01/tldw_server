@@ -77,7 +77,10 @@ runs:
 
     - name: Setup uv
       if: inputs.use-uv == 'true'
-      uses: astral-sh/setup-uv@v3
+      shell: bash
+      run: |
+        # PyPI wheels avoid the GitHub release-asset download outage.
+        python -m pip install --only-binary=:all: --index-url https://pypi.org/simple uv==0.13.7
 
     - name: Upgrade pip
       if: inputs.use-uv != 'true'

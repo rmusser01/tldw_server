@@ -159,3 +159,88 @@ async def test_generate_research_workspace_artifact_rejects_needs_revision_verif
         )
 
     assert exc_info.value.claim_verification["verdict"] == "needs_revision"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"choices": [{"message": {"content": None, "reasoning_content": "private-thought"}}]},
+        {"choices": [{"message": {"content": "", "reasoning_content": "private-thought"}}]},
+        {"choices": [{"message": {"content": {"provider_metadata": "private-thought"}}}]},
+        {"choices": [{"message": {"content": 42}}]},
+        {"choices": [], "provider_metadata": "private-thought"},
+        {"choices": [{"message": None}]},
+        {"choices": "malformed-provider-envelope"},
+        {"choices": {"0": {"message": {"content": "unexpected text"}}}},
+    ],
+    ids=[
+        "reasoning-only",
+        "empty-final",
+        "object-final",
+        "numeric-final",
+        "no-choice",
+        "null-message",
+        "malformed-choices",
+        "mapping-choices",
+    ],
+)
+async def test_artifact_rejects_responses_without_final_text_before_verification(response: object):
+    async def fake_chat(**_kwargs):
+        return response
+
+    async def unexpected_verify(**_kwargs):
+        raise AssertionError("Provider envelopes and reasoning must never reach verification")
+
+    with pytest.raises(ValueError, match="final text") as error:
+        await generate_research_workspace_artifact(
+            artifact_type="audio_overview",
+            source_documents=[Document(id="media:1", content="The telescope is named Selene.", metadata={})],
+            generation_provider="llamacpp",
+            generation_model="controlled-model",
+            verification_provider=None,
+            verification_model=None,
+            temperature=0.2,
+            top_p=0.9,
+            max_tokens=4096,
+            chat_fn=fake_chat,
+            verify_fn=unexpected_verify,
+        )
+    assert "private-thought" not in str(error.value)  # nosec B101 -- A failed provider response must not leak its reasoning or metadata through the public error.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("structured", [False, True])
+async def test_audio_prompt_keeps_short_sources_short_and_verifies_only_final_text(structured: bool):
+    content = "The telescope is named Selene."
+    captured: dict[str, object] = {}
+
+    async def fake_chat(**kwargs):
+        captured["chat"] = kwargs
+        return (
+            {"choices": [{"message": {"content": content, "reasoning_content": "private-thought"}}]}
+            if structured
+            else content
+        )
+
+    async def fake_verify(**kwargs):
+        captured["verify"] = kwargs
+        return ArtifactVerificationResult(verdict="grounded", report={}, unit_results=[], metadata={})
+
+    result = await generate_research_workspace_artifact(
+        artifact_type="audio_overview",
+        source_documents=[Document(id="media:1", content=content, metadata={})],
+        generation_provider="llamacpp",
+        generation_model="controlled-model",
+        verification_provider=None,
+        verification_model=None,
+        temperature=0.2,
+        top_p=0.9,
+        max_tokens=4096,
+        chat_fn=fake_chat,
+        verify_fn=fake_verify,
+    )
+    assert result["content"] == content  # nosec B101 -- Preserve the actual final answer for both supported response shapes.
+    assert all(unit.text == content for unit in captured["verify"]["units"])  # nosec B101 -- Reasoning is excluded from the real verification-unit input.
+    prompt = captured["chat"]["messages_payload"][0]["content"].lower()
+    assert "shorter" in prompt and "do not pad" in prompt  # nosec B101 -- The audio request must explicitly permit a source-proportionate script instead of inventing a minimum length.

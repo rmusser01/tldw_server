@@ -11,18 +11,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
-from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import require_eval_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_rate_limiter_dep
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota_on_own_key
+from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
+    get_eval_request_user,
+    get_evaluation_identity,
+    require_eval_permissions,
+)
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
-from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
-from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
-from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+import tldw_Server_API.app.core.Evaluations.benchmark_loaders as _benchmark_loaders
+import tldw_Server_API.app.core.Evaluations.benchmark_registry as _benchmark_registry
+import tldw_Server_API.app.core.Evaluations.evaluation_manager as _evaluation_manager
 
 # Create router
 router = APIRouter(prefix="/benchmarks", tags=["benchmarks"])
-
-# Initialize components
-evaluation_manager = EvaluationManager()
 
 
 # Request/Response schemas
@@ -79,7 +82,7 @@ async def list_benchmarks():
     their types, descriptions, and metadata.
     """
     try:
-        registry = get_registry()
+        registry = _benchmark_registry.get_registry()
         benchmark_names = registry.list_benchmarks()
 
         benchmarks = []
@@ -117,7 +120,7 @@ async def get_benchmark_info(benchmark_name: str):
         Detailed benchmark information including configuration and metadata.
     """
     try:
-        registry = get_registry()
+        registry = _benchmark_registry.get_registry()
         config = registry.get(benchmark_name)
 
         if not config:
@@ -161,7 +164,7 @@ async def get_benchmark_samples(
         Sample items from the benchmark dataset.
     """
     try:
-        registry = get_registry()
+        registry = _benchmark_registry.get_registry()
         config = registry.get(benchmark_name)
 
         if not config:
@@ -171,10 +174,10 @@ async def get_benchmark_samples(
             )
 
         # Load limited samples
-        dataset = load_benchmark_dataset(benchmark_name, limit=limit)
+        dataset = _benchmark_loaders.load_benchmark_dataset(benchmark_name, limit=limit)
 
         # Get total count (load 1 more to check if there are more)
-        full_dataset = load_benchmark_dataset(benchmark_name, limit=limit + 1)
+        full_dataset = _benchmark_loaders.load_benchmark_dataset(benchmark_name, limit=limit + 1)
         total_available = len(full_dataset) if len(full_dataset) <= limit else f"{limit}+"
 
         return BenchmarkSampleResponse(
@@ -201,7 +204,7 @@ async def get_benchmark_samples(
 async def run_benchmark(
     benchmark_name: str,
     request: BenchmarkRunRequest,
-    user_id: str = Depends(get_rate_limiter_dep)
+    current_user: User = Depends(get_eval_request_user),
 ):
     """
     Run a benchmark evaluation.
@@ -212,13 +215,19 @@ async def run_benchmark(
     Args:
         benchmark_name: Name of the benchmark to run
         request: Run configuration
-        user_id: User ID from auth
+        current_user: The authenticated user; the run is stored in their evaluations database
 
     Returns:
         Summary of benchmark results.
     """
+    # Usage quotas (LLM usage accounting spec §4a): checked before any work, as the evaluations route does, and
+    # on the user's own key, if any. A raw ``api_key`` counts, so its run names no provider.
+    provider = None if request.api_key else canonical_provider_name(request.api_name)
+    own_key = await enforce_llm_quota_on_own_key(getattr(current_user, "id", None), provider)
     try:
-        registry = get_registry()
+        identity = get_evaluation_identity(current_user)
+        evaluation_manager = _evaluation_manager.EvaluationManager(user_id=identity.user_scope)
+        registry = _benchmark_registry.get_registry()
         config = registry.get(benchmark_name)
 
         if not config:
@@ -236,7 +245,7 @@ async def run_benchmark(
             )
 
         # Load dataset
-        dataset = load_benchmark_dataset(benchmark_name, limit=request.limit)
+        dataset = _benchmark_loaders.load_benchmark_dataset(benchmark_name, limit=request.limit)
         if not dataset:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -273,6 +282,7 @@ async def run_benchmark(
                     scoring_criteria=eval_data['scoring_criteria'],
                     api_name=request.api_name,
                     api_key=request.api_key,
+                    provider_credentials=own_key,
                 )
                 tasks.append(task)
 
@@ -295,14 +305,17 @@ async def run_benchmark(
                         "explanation": result.get("explanation", "")
                     })
 
-        # Calculate summary statistics
-        successful_results = [r for r in results if "error" not in r]
+        # Calculate summary statistics. An item with no score (its model or judge call failed, or the reply held
+        # none) is neither successful nor failed: it is unscored, outside every average (owner, 2026-11-10).
+        successful_results = [r for r in results if "error" not in r and r["score"] is not None]
+        failed = sum("error" in r for r in results)
         scores = [r["score"] for r in successful_results]
 
         summary = {
             "total_evaluated": len(results),
             "successful": len(successful_results),
-            "failed": len(results) - len(successful_results),
+            "failed": failed,
+            "unscored": len(results) - len(successful_results) - failed,
             "average_score": sum(scores) / len(scores) if scores else 0.0,
             "min_score": min(scores) if scores else 0.0,
             "max_score": max(scores) if scores else 0.0
@@ -337,7 +350,7 @@ async def run_benchmark(
                 },
                 metadata={
                     "api_name": request.api_name,
-                    "user_id": user_id,
+                    "user_id": identity.created_by,
                     "total_samples": len(dataset)
                 }
             )

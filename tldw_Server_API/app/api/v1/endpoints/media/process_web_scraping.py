@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+from asyncio import to_thread
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
@@ -19,8 +20,11 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     get_usage_event_logger,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
 from tldw_Server_API.app.api.v1.schemas.media_request_models import WebScrapingRequest
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
+from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_url
+from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import DUPLICATE_ANALYSIS_WARNING
 from tldw_Server_API.app.core.Web_Scraping.summary_prompts import resolve_web_summary_overrides
 from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
 
@@ -73,6 +77,25 @@ async def process_web_scraping_endpoint(
     can patch deterministic task resolution.
     """
     try:
+        if payload.summarize_checkbox:
+            url = payload.url_input.strip()
+            if (
+                payload.skip_existing_analysis
+                and payload.mode == "persist"
+                and payload.scrape_method == "Individual URLs"
+                and len(url.splitlines()) == 1
+            ):
+                existing = await to_thread(get_media_by_url, db, url)
+                if existing is not None:
+                    return {
+                        "status": "Skipped",
+                        "media_id": existing["id"],
+                        "db_message": "Media already exists. Overwrite not enabled.",
+                        "warnings": [DUPLICATE_ANALYSIS_WARNING],
+                    }
+            # Summaries may use a default provider. Admit analysis before any page is fetched.
+            await usage_quota_deps.enforce_llm_quota(current_user.id)
+
         # Usage logging is best-effort; never fail the request.
         with contextlib.suppress(Exception):
             usage_log.log_event(

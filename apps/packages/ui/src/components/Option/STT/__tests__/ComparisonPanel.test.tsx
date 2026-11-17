@@ -77,9 +77,34 @@ describe("ComparisonPanel", () => {
     }
   })
 
+  it("B05 source handoff carries immutable provenance with reviewed text", () => {
+    const metadata={createdAt:"2026-10-16T22:59:32.000Z",audioSourceLabel:"New Recording 6.m4a"}
+    hookReturnRef.current={...hookReturnRef.current,results:[{id:"source-result",model:"parakeet",text:"Provider text",status:"done",metadata}]}
+    const save=vi.fn()
+    render(<ComparisonPanel isCurrentOwner={()=>true} blob={new Blob(["unit audio"])} availableModels={["parakeet"]} sttOptions={{}} onSaveToNotes={save} />)
+    fireEvent.change(screen.getByRole("textbox",{name:"Transcript from parakeet"}),{target:{value:"Reviewed exact text"}})
+    fireEvent.click(screen.getByRole("button",{name:"Save to Notes",exact:true}))
+    expect(save).toHaveBeenCalledWith("Reviewed exact text","parakeet",metadata)
+  })
+
+  it("B05 no speech result explains recovery and blocks empty handoffs until edited", () => {
+    hookReturnRef.current = { ...hookReturnRef.current, results: [
+      { id: "silent-result", model: "parakeet", text: "", status: "done", wordCount: 0 }
+    ] }
+    const save = vi.fn()
+    render(<ComparisonPanel isCurrentOwner={() => true} blob={new Blob(["unit audio"])} availableModels={["parakeet"]} sttOptions={{}} onSaveToNotes={save} />)
+    expect(screen.getByRole("status")).toHaveTextContent("No speech detected. Try a recording with clear speech.")
+    expect(screen.getByRole("button", { name: "Copy", exact: true })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Save to Notes", exact: true })).toBeDisabled()
+    fireEvent.change(screen.getByRole("textbox", { name: "Transcript from parakeet" }), { target: { value: "Reviewed manual text" } })
+    expect(screen.getByRole("button", { name: "Save to Notes", exact: true })).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes", exact: true }))
+    expect(save).toHaveBeenCalledWith("Reviewed manual text", "parakeet", undefined)
+  })
+
   it("renders model select and disabled transcribe button when no blob", () => {
     render(
-      <ComparisonPanel
+      <ComparisonPanel isCurrentOwner={() => true}
         blob={null}
         availableModels={["whisper-1", "whisper-large-v3"]}
         sttOptions={{}}
@@ -97,7 +122,7 @@ describe("ComparisonPanel", () => {
 
   it("enables transcribe button when blob and models selected", () => {
     render(
-      <ComparisonPanel
+      <ComparisonPanel isCurrentOwner={() => true}
         blob={new Blob(["audio"], { type: "audio/webm" })}
         availableModels={["whisper-1", "whisper-large-v3"]}
         selectedModels={["whisper-1"]}
@@ -112,7 +137,7 @@ describe("ComparisonPanel", () => {
 
   it("shows empty state message when no results", () => {
     render(
-      <ComparisonPanel
+      <ComparisonPanel isCurrentOwner={() => true}
         blob={null}
         availableModels={["whisper-1"]}
         sttOptions={{}}
@@ -144,7 +169,7 @@ describe("ComparisonPanel", () => {
     }
 
     render(
-      <ComparisonPanel
+      <ComparisonPanel isCurrentOwner={() => true}
         blob={new Blob(["audio"], { type: "audio/webm" })}
         availableModels={["whisper-large"]}
         sttOptions={{}}
@@ -184,7 +209,7 @@ describe("ComparisonPanel", () => {
     }
 
     render(
-      <ComparisonPanel
+      <ComparisonPanel isCurrentOwner={() => true}
         blob={new Blob(["audio"], { type: "audio/webm" })}
         availableModels={["whisper-1", "distil-v3"]}
         sttOptions={{}}
@@ -232,7 +257,7 @@ describe("ComparisonPanel", () => {
     }
 
     render(
-      <ComparisonPanel
+      <ComparisonPanel isCurrentOwner={() => true}
         blob={new Blob(["audio"], { type: "audio/webm" })}
         availableModels={["whisper-large"]}
         sttOptions={{}}
@@ -257,4 +282,16 @@ describe("ComparisonPanel", () => {
     expect(mockDuplicateResult).toHaveBeenCalledWith("result-1")
     expect(mockSetResultDisabled).toHaveBeenCalledWith("result-1", true)
   })
+  it("B05 replacing or clearing the audio retires the comparison request", () => {
+    const props={ availableModels:["parakeet"], sttOptions:{}, onSaveToNotes:vi.fn() };
+    const first=new Blob(["first source"]);
+    const view=render(<ComparisonPanel isCurrentOwner={() => true} {...props} blob={first} />);
+    mockClearResults.mockClear();
+    view.rerender(<ComparisonPanel isCurrentOwner={() => true} {...props} blob={null} />);
+    expect(mockClearResults).toHaveBeenCalledTimes(1);
+    view.rerender(<ComparisonPanel isCurrentOwner={() => true} {...props} blob={new Blob(["second source"])} />);
+    expect(mockClearResults).toHaveBeenCalledTimes(2);
+    view.unmount();
+  })
+
 })

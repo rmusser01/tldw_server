@@ -30,7 +30,7 @@ Storage defines shared storage abstractions and local filesystem helpers used by
 ## How It Connects
 
 - Storage endpoint modules in `app/api/v1/endpoints/storage.py`, `storage_user_files.py`, `storage_user_folders.py`, `storage_download.py`, `storage_usage.py`, and `storage_trash.py` expose user-facing storage operations.
-- `app/api/v1/endpoints/storage_helpers.py` contains shared conversion and authorization helpers used by storage endpoints.
+- `app/api/v1/utils/storage_helpers.py` contains shared conversion and authorization helpers used by storage endpoints.
 - `app/api/v1/endpoints/storage_admin_quotas.py` and `app/api/v1/endpoints/admin/admin_storage_quotas.py` expose storage quota administration.
 - AuthNZ quota repositories provide quota state used by `quota_enforcement.py`.
 - `app/core/File_Artifacts/`, `app/core/Image_Generation/`, `app/core/TTS/`, `app/core/VoiceAssistant/`, and `app/core/VN_Assets/` use storage helpers for file persistence and cleanup.
@@ -49,6 +49,29 @@ Storage defines shared storage abstractions and local filesystem helpers used by
 - Before accepting quota-bound writes, endpoints and feature modules should call
   `check_storage_quota()` with the user/org/team context and projected byte
   delta.
+
+### Persistent Root And Upgrades
+
+The factory defaults to `DatabasePaths.get_user_db_base_dir() / "user_files"`,
+under the configured `USER_DB_BASE_DIR`. Set that database root to persistent
+storage outside a replaceable installation. `FILE_STORAGE_PATH` takes precedence
+over an explicit `settings.file_storage_path`; otherwise the profile default is
+used. Backend reuse follows the resolved root, so a profile change cannot retain
+the first profile's backend. Relative keys remain `<owner>/media/<id>/<filename>`.
+
+Older versions defaulted to `<installation>/Databases/user_files`. Before replacing
+that installation, stop its writers and back up both its MediaFiles metadata and
+blob tree. Confirm which deployment owns that tree: independent profiles may have
+reused numeric IDs there. For an unambiguously owned tree, either set
+`FILE_STORAGE_PATH` to its preserved absolute root, or copy the complete verified
+tree to the new profile's `user_files` root without changing relative keys. Verify
+file counts, hashes and authenticated downloads before retiring the old copy.
+If ownership is mixed or uncertain, keep the source intact and reconcile against
+each profile's file records first. There is no automatic legacy-root fallback,
+copy or deletion. A path change cannot recover an already-missing blob.
+
+The optional orphan cleanup service has its own root configuration; this factory
+change does not redirect or enable that deletion service.
 
 ### State And Operations
 

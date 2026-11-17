@@ -149,7 +149,7 @@ def test_llamacpp_auto_mode_prefers_remote_for_invocation(monkeypatch):
 
     captured: dict[str, object] = {}
 
-    def fake_fetch_json(*, method, url, json, timeout):
+    def fake_fetch_json(*, method, url, json, timeout, configured_endpoint=None):
         captured["method"] = method
         captured["url"] = url
         captured["timeout"] = timeout
@@ -203,7 +203,7 @@ def test_llamacpp_auto_mode_prefers_managed_when_managed_start_is_configured(mon
 
     captured: dict[str, object] = {}
 
-    def fake_fetch_json(*, method, url, json, timeout):
+    def fake_fetch_json(*, method, url, json, timeout, configured_endpoint=None):
         captured["url"] = url
         return {"choices": [{"message": {"content": "auto managed text"}}]}
 
@@ -281,7 +281,7 @@ def test_llamacpp_remote_request_uses_openai_compatible_data_url(monkeypatch):
 
     captured: dict[str, object] = {}
 
-    def fake_fetch_json(*, method, url, json, timeout):
+    def fake_fetch_json(*, method, url, json, timeout, configured_endpoint=None):
         captured.update(
             {
                 "method": method,
@@ -345,7 +345,7 @@ def test_llamacpp_remote_request_cleans_up_temp_file_when_not_using_data_url(mon
     def fake_tempfile(*args, **kwargs):
         return _TempFile()
 
-    def fake_fetch_json(*, method, url, json, timeout):
+    def fake_fetch_json(*, method, url, json, timeout, configured_endpoint=None):
         captured["image_url"] = json["messages"][0]["content"][1]["image_url"]["url"]
         assert created_path.exists()  # nosec B101
         return {"choices": [{"message": {"content": "remote text"}}]}
@@ -712,3 +712,131 @@ def test_llamacpp_describe_reports_active_managed_runtime(monkeypatch):
     assert description["managed_running"] is True  # nosec B101
     assert description["allow_managed_start"] is False  # nosec B101
     reset_managed_process_registry()
+
+
+@pytest.fixture
+def checked_ocr_transport(monkeypatch):
+    """Replace only model I/O while retaining central egress validation."""
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends import llamacpp_ocr
+
+    monkeypatch.setenv("LLAMACPP_OCR_HOST", "127.0.0.1")
+    monkeypatch.setenv("LLAMACPP_OCR_PORT", "19090")
+    monkeypatch.setenv("LLAMACPP_OCR_MODEL_PATH", "vision.gguf")
+    monkeypatch.setenv("LLAMACPP_OCR_USE_DATA_URL", "true")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_PROFILE", "permissive")
+    for key in ("EGRESS_ALLOWLIST", "EGRESS_DENYLIST", "WORKFLOWS_EGRESS_ALLOWLIST", "WORKFLOWS_EGRESS_DENYLIST"):
+        monkeypatch.delenv(key, raising=False)
+    wire = {"urls": [], "redirect": None, "managed_endpoint": ("127.0.0.1", 19090)}
+
+    def handler(request):
+        wire["urls"].append(str(request.url))
+        if wire["redirect"]:
+            return httpx.Response(307, headers={"Location": wire["redirect"]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "configured OCR text"}}]})
+
+    original_fetch_json = http_client.fetch_json
+    with http_client.create_client(transport=httpx.MockTransport(handler)) as client:
+        def checked_fetch_json(**kwargs):
+            return original_fetch_json(client=client, **kwargs)
+
+        monkeypatch.setattr(http_client, "fetch_json", checked_fetch_json)
+        monkeypatch.setattr(llamacpp_ocr, "_ensure_managed_runtime", lambda: wire["managed_endpoint"])
+        yield llamacpp_ocr, wire
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["remote", "managed"])
+def test_llamacpp_configured_ocr_origin_uses_checked_private_endpoint(monkeypatch, checked_ocr_transport, mode):
+    backend, wire = checked_ocr_transport
+    monkeypatch.setenv("LLAMACPP_OCR_MODE", mode)
+    call = backend._ocr_via_remote if mode == "remote" else backend._ocr_via_managed
+    text = call(b"unit-image", "Extract visible text")
+    assert (text, wire["urls"]) == ("configured OCR text", ["http://127.0.0.1:19090/v1/chat/completions"])  # nosec B101 - Unit behavior oracle, external model wire only is mocked.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["remote", "managed"])
+def test_llamacpp_configured_ocr_origin_keeps_global_denylist(monkeypatch, checked_ocr_transport, mode):
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    backend, wire = checked_ocr_transport
+    monkeypatch.setenv("LLAMACPP_OCR_MODE", mode)
+    monkeypatch.setenv("EGRESS_DENYLIST", "127.0.0.1")
+    call = backend._ocr_via_remote if mode == "remote" else backend._ocr_via_managed
+    with pytest.raises(EgressPolicyError):
+        call(b"unit-image", "Extract visible text")
+    assert wire["urls"] == []  # nosec B101 - A denied endpoint must never reach model transport.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["remote", "managed"])
+def test_llamacpp_configured_ocr_origin_rejects_cross_origin_redirect(monkeypatch, checked_ocr_transport, mode):
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    backend, wire = checked_ocr_transport
+    monkeypatch.setenv("LLAMACPP_OCR_MODE", mode)
+    wire["redirect"] = "http://127.0.0.1:19091/v1/chat/completions"
+    call = backend._ocr_via_remote if mode == "remote" else backend._ocr_via_managed
+    with pytest.raises(EgressPolicyError) as denied:
+        call(b"unit-image", "Extract visible text")
+    assert (denied.value.reason_code, wire["urls"]) == ("origin_mismatch", ["http://127.0.0.1:19090/v1/chat/completions"])  # nosec B101 - Redirect cannot widen configured authority.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["remote", "managed"])
+def test_llamacpp_configured_ocr_origin_cannot_bypass_public_capture(monkeypatch, checked_ocr_transport, mode):
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+    from tldw_Server_API.app.core.Security.egress import public_url_policy_scope
+
+    backend, wire = checked_ocr_transport
+    monkeypatch.setenv("LLAMACPP_OCR_MODE", mode)
+    call = backend._ocr_via_remote if mode == "remote" else backend._ocr_via_managed
+    with public_url_policy_scope(), pytest.raises(EgressPolicyError):
+        call(b"unit-image", "Extract visible text")
+    assert wire["urls"] == []  # nosec B101 - Public capture retains private-destination denial.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["remote", "managed"])
+def test_llamacpp_configured_ocr_origin_rejects_metadata_destination(monkeypatch, checked_ocr_transport, mode):
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    backend, wire = checked_ocr_transport
+    monkeypatch.setenv("LLAMACPP_OCR_MODE", mode)
+    monkeypatch.setenv("LLAMACPP_OCR_HOST", "169.254.169.254")
+    wire["managed_endpoint"] = ("169.254.169.254", 19090)
+    call = backend._ocr_via_remote if mode == "remote" else backend._ocr_via_managed
+    with pytest.raises(EgressPolicyError):
+        call(b"unit-image", "Extract visible text")
+    assert wire["urls"] == []  # nosec B101 - Even configured metadata origins are denied.
+
+
+@pytest.mark.unit
+def test_llamacpp_configured_ocr_origin_rejects_stale_managed_endpoint(monkeypatch, checked_ocr_transport):
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    backend, wire = checked_ocr_transport
+    monkeypatch.setenv("LLAMACPP_OCR_MODE", "managed")
+    wire["managed_endpoint"] = ("127.0.0.1", 19091)
+    with pytest.raises(EgressPolicyError) as denied:
+        backend._ocr_via_managed(b"unit-image", "Extract visible text")
+    assert (denied.value.reason_code, wire["urls"]) == ("origin_mismatch", [])  # nosec B101 - Cached runtime cannot grant a different origin.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["remote", "managed"])
+def test_llamacpp_ocr_scope_does_not_authorize_later_user_url(monkeypatch, checked_ocr_transport, mode):
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    backend, wire = checked_ocr_transport
+    monkeypatch.setenv("LLAMACPP_OCR_MODE", mode)
+    call = backend._ocr_via_remote if mode == "remote" else backend._ocr_via_managed
+    call(b"unit-image", "Extract visible text")
+    with pytest.raises(EgressPolicyError):
+        http_client.fetch_json(method="GET", url="http://127.0.0.1:19090/private")
+    assert wire["urls"] == ["http://127.0.0.1:19090/v1/chat/completions"]  # nosec B101 - Authority stays on the OCR call, not later user navigation.

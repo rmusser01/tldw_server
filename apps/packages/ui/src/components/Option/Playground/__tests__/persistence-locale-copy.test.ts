@@ -17,16 +17,19 @@ const readJson = (relative: string) =>
 
 const assetsPersistence = readJson("assets/locale/en/playground.json").composer
   .persistence as Record<string, string>
-const publicPlayground = readJson("public/_locales/en/playground.json") as Record<
-  string,
-  { message: string }
->
+const publicPlayground = readJson(
+  "public/_locales/en/playground.json"
+) as Record<string, { message: string }>
 const publicMessages = readJson("public/_locales/en/messages.json") as Record<
   string,
   { message: string }
 >
 
 const expectedCopy: Record<string, string> = {
+  temporaryModeHelp:
+    "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device.",
+  ephemeral:
+    "Temporary chat can stay on this device across reloads until closed or cleared. It is not added to server history.",
   local: "Saved on this device only. This chat is not on your tldw server.",
   localPill: "Saved on this device",
   server: "Saved on your tldw server and on this device.",
@@ -47,7 +50,9 @@ describe("chat persistence English copy", () => {
     "ships plain copy for composer.persistence.%s",
     (key, value) => {
       expect(assetsPersistence[key]).toBe(value)
-      expect(publicPlayground[`composer_persistence_${key}`]?.message).toBe(value)
+      expect(publicPlayground[`composer_persistence_${key}`]?.message).toBe(
+        value
+      )
       expect(
         publicMessages[`playground_composer_persistence_${key}`]?.message
       ).toBe(value)

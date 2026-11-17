@@ -8,18 +8,15 @@ const readSource = (relativePath: string) =>
   readFileSync(path.resolve(__dirname, "..", relativePath), "utf8")
 
 describe("stage 5 route alias contract", () => {
-  it("allows the claims-review alias route to satisfy the gate via the redirect panel", () => {
+  it("requires the Claims decision workspace at its own route", () => {
     const source = readSource("e2e/smoke/stage5-release-gate.spec.ts")
+    const claimsRoute = source.match(/path: "\/claims-review",[\s\S]*?\}/)?.[0]
 
-    expect(source).toContain("allowRedirectPanel?: boolean")
-    expect(source).toContain('path: "/claims-review"')
-    expect(source).toContain('name: "Claims Review"')
-    expect(source).toContain('expectedPath: "/content-review"')
-    expect(source).toContain("allowRedirectPanel: true")
-    expect(source).toContain('const redirectPanel = page.getByTestId("route-redirect-panel")')
-    expect(source).toContain("let resolvedViaRedirectPanel = false")
-    expect(source).toContain("resolvedViaRedirectPanel =")
-    expect(source).toContain("await redirectPanel.isVisible().catch(() => false)")
+    expect(claimsRoute).toContain('name: "Claims Review"')
+    expect(claimsRoute).not.toContain("expectedPath")
+    expect(claimsRoute).not.toContain("allowRedirectPanel")
+    expect(readSource("e2e/smoke/page-inventory.ts")).toMatch(/path: "\/claims-review",\s*name: "Claims Review",\s*category: "workspace"\s*\}/)
+    expect(readSource("e2e/workflows/tier-5-specialized/claims-review.spec.ts")).toContain('name: "Approve selected claims"')
   })
 
   it("preserves moderation playground as a redirect alias to content rules", () => {

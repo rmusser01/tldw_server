@@ -91,11 +91,13 @@ class ExplainerDatabase:
     def transaction(self) -> Iterable[sqlite3.Connection]:
         """Run operations in a SQLite transaction."""
         conn = self.get_connection()
+        conn.execute("SAVEPOINT explainer_write")
         try:
             yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
+            conn.execute("RELEASE SAVEPOINT explainer_write")
+        except BaseException:
+            conn.execute("ROLLBACK TO SAVEPOINT explainer_write")
+            conn.execute("RELEASE SAVEPOINT explainer_write")
             raise
 
     @staticmethod

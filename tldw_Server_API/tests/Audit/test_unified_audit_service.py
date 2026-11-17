@@ -2136,14 +2136,8 @@ class TestFallbackQueueAtomicity:
         await service.stop()
 
 
-def test_stop_safe_when_owner_loop_closed(monkeypatch):
-
-
+def test_stop_safe_when_owner_loop_closed():
     """stop() should not await tasks attached to a closed/different event loop."""
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.delenv("TEST_MODE", raising=False)
-    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
-
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
 
@@ -2154,6 +2148,7 @@ def test_stop_safe_when_owner_loop_closed(monkeypatch):
         enable_risk_scoring=False,
         buffer_size=10,
         flush_interval=60.0,
+        inline_io=False,
     )
 
     loop1 = asyncio.new_event_loop()
@@ -3023,3 +3018,24 @@ async def test_hash_chain_uses_latest_persisted_head_for_multiple_instances(tmp_
     finally:
         await service2.stop()
         await service1.stop()
+
+
+@pytest.mark.asyncio
+async def test_audit_background_loops_follow_inline_io_not_the_test_flags(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "1")  # PYTEST_CURRENT_TEST is set by pytest as well
+    service = UnifiedAuditService(db_path=str(tmp_path / "audit.db"), inline_io=False)
+    await service.initialize()
+    try:
+        assert service._flush_task is not None
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_suite_audit_services_use_inline_io(tmp_path):
+    service = UnifiedAuditService(db_path=str(tmp_path / "audit.db"))
+    await service.initialize()
+    try:
+        assert service._flush_task is None  # the root conftest's _audit_inline_io fixture
+    finally:
+        await service.stop()

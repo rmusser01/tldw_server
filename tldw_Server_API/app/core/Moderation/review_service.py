@@ -120,12 +120,12 @@ class ModerationReviewService:
     def get_item(self, item_id: str) -> dict[str, Any] | None:
         return self.store.get_item(item_id, include_history=True)
 
-    def record_item(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def record_item(self, payload: dict[str, Any], *, actor_id: str | None = None) -> dict[str, Any]:
         safe_payload = dict(payload)
         safe_payload["effective_policy"] = _sanitize_effective_policy(
             safe_payload.get("effective_policy") if isinstance(safe_payload.get("effective_policy"), dict) else None
         )
-        return self.store.upsert_item(safe_payload)
+        return self.store.upsert_item(safe_payload, actor_id=actor_id)
 
     def record_decision(
         self,

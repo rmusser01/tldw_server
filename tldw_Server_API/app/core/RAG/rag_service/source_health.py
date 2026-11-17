@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
+from tldw_Server_API.app.core.RAG.rag_schemas_unified import (
     KnowledgeSourceHealthEntry,
 )
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource

@@ -18,7 +18,7 @@ async def test_legacy_document_version_callers_use_extracted_wrapper(
         "tldw_Server_API.app.api.v1.endpoints.outputs_templates"
     )
     media_embeddings = importlib.import_module(
-        "tldw_Server_API.app.api.v1.endpoints.media_embeddings"
+        "tldw_Server_API.app.core.Embeddings.media_embeddings"
     )
     jobs_worker = importlib.import_module(
         "tldw_Server_API.app.core.Embeddings.services.jobs_worker"

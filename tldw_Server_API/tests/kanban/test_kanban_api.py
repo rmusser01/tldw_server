@@ -4,9 +4,9 @@ Integration tests for Kanban API endpoints using a real Kanban DB.
 No mocking of internal functions; only dependency override to inject a temp DB.
 """
 
-import importlib
 import sqlite3
 from datetime import datetime, timezone, timedelta
+from functools import cache
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,13 +19,24 @@ from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     NotFoundError,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.tests.helpers.app_main_state import (
+    app_main_isolated,
+    reload_app_main,
+    set_app_main,
+)
 
 
 pytestmark = pytest.mark.integration
 
 
+@pytest.fixture(scope="module")
+def kanban_app_factory():
+    # Build the full app once, under the first case's normal fixture environment.
+    return cache(reload_app_main)
+
+
 @pytest.fixture()
-def client_with_kanban_db(tmp_path, monkeypatch):
+def client_with_kanban_db(tmp_path, monkeypatch, kanban_app_factory):
     """Create a test client with a temporary Kanban database."""
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
     auth_db_path = (tmp_path / "auth_users.db").resolve()
@@ -47,18 +58,14 @@ def client_with_kanban_db(tmp_path, monkeypatch):
     monkeypatch.setenv("MINIMAL_TEST_APP", "0")
     monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
 
-    from tldw_Server_API.app import main as app_main
+    # Keep real startup and shutdown for each case; reuse the assembled routes.
+    with app_main_isolated(), monkeypatch.context() as overrides:
+        fastapi_app = set_app_main(kanban_app_factory()).app
+        overrides.setitem(fastapi_app.dependency_overrides, get_request_user, override_user)
+        overrides.setitem(fastapi_app.dependency_overrides, get_kanban_db_for_user, override_db_dep)
 
-    importlib.reload(app_main)
-    fastapi_app = app_main.app
-
-    fastapi_app.dependency_overrides[get_request_user] = override_user
-    fastapi_app.dependency_overrides[get_kanban_db_for_user] = override_db_dep
-
-    with TestClient(fastapi_app) as client:
-        yield client, db
-
-    fastapi_app.dependency_overrides.clear()
+        with TestClient(fastapi_app) as client:
+            yield client, db
 
 
 # =============================================================================
@@ -3818,3 +3825,46 @@ def test_card_link_target_validation_when_content_db_available(client_with_kanba
         json={"linked_type": "note", "linked_id": "note-missing"},
     )
     assert missing_note.status_code == 404
+
+
+# Generated drafts retain the existing authenticated import response contract.
+def test_generated_draft_import_and_replay(client_with_kanban_db, draft):
+    client, db = client_with_kanban_db
+    first = client.post("/api/v1/kanban/boards/import", json={"data": draft})
+    assert first.status_code == 201, first.text  # nosec B101 - normal API create acknowledgement.
+    replay = client.post("/api/v1/kanban/boards/import", json={"data": draft})
+    assert replay.status_code == 201 and replay.json()["board"]["id"] == first.json()["board"]["id"]  # nosec B101 - API retry resolves the same board.
+    saved = client.get("/api/v1/kanban/boards/" + str(first.json()["board"]["id"])).json()
+    assert (
+        [row["name"] for row in saved["lists"]] == ["To Do", "Done"]
+        and saved["total_cards"] == 3
+        and db.list_boards()[1] == 1
+    )  # nosec B101 - public loader reads complete canonical content.
+
+
+def test_generated_draft_changed_identity_is_http_conflict(client_with_kanban_db, draft):
+    client, db = client_with_kanban_db
+    saved = client.post("/api/v1/kanban/boards/import", json={"data": draft})
+    assert saved.status_code == 201  # nosec B101 - establish one actual acknowledged save.
+    draft["board"]["name"] = "Changed intent"
+    response = client.post("/api/v1/kanban/boards/import", json={"data": draft})
+    assert response.status_code == 409  # nosec B101 - conflict remains a controlled API outcome.
+    assert db.get_board(saved.json()["board"]["id"])["name"] == "Rowan Tasks"  # nosec B101 - conflict cannot rewrite the first board.
+
+
+def test_generated_draft_late_failure_is_sanitized_and_atomic(client_with_kanban_db, draft, monkeypatch):
+    client, db = client_with_kanban_db
+    original = db._log_activity_internal
+    calls = []
+
+    def fail(conn, board_id, action, entity_type, *args, **kwargs):
+        original(conn, board_id, action, entity_type, *args, **kwargs)
+        if entity_type == "card":
+            calls.append(True)
+            if len(calls) == 2:
+                raise sqlite3.OperationalError("Controlled private storage details")
+
+    monkeypatch.setattr(db, "_log_activity_internal", fail)
+    response = client.post("/api/v1/kanban/boards/import", json={"data": draft})
+    assert response.status_code == 500 and response.json()["detail"] == "Failed to import board"  # nosec B101 - do not expose storage internals.
+    assert len(calls) == 2 and db.list_boards()[1] == 0  # nosec B101 - late real failure leaves no partial board.

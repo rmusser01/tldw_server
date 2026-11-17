@@ -149,6 +149,31 @@ class TestRunResponse(TestRunBase, UUIDMixin):
 
     model_config = ConfigDict(from_attributes=True)
 
+class TestRunHistoryResponse(TestRunResponse):
+    """Read existing snapshots honestly and expose only recorded public parameters."""
+    inputs: Optional[dict[str, Any]] = None
+    outputs: Optional[dict[str, Any]] = None
+    scores: Optional[dict[str, Any]] = None
+    created_at: Optional[datetime] = None
+    prompt_name: Optional[str] = None
+    prompt_version_number: Optional[int] = None
+    prompt_system_prompt: Optional[str] = None
+    prompt_user_prompt: Optional[str] = None
+    prompt_format: Optional[str] = None
+    prompt_schema_version: Optional[int] = None
+    prompt_definition: Optional[dict[str, Any]] = None
+    prompt_deleted: Optional[bool] = None
+
+    @field_validator("model_params", mode="before")
+    @classmethod
+    def _public_model_params(cls, value: Any) -> Optional[dict[str, Any]]:
+        if not isinstance(value, dict):
+            return None
+        return {key: item for key, item in value.items()
+                if (key == "provider" and isinstance(item, str))
+                or (key == "temperature" and type(item) in (int, float))
+                or (key == "max_tokens" and type(item) is int)}
+
 class BatchTestRequest(BaseModel):
     """Batch test execution request"""
     project_id: int

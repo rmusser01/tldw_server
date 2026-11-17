@@ -1,4 +1,4 @@
-import { resolveRecipePersistenceOwnerView } from "@/services/recipe-persistence-uncertainty"
+import { resolvePromptOwnerId } from "@/services/prompt-local-owner"
 import React, { useRef, useState } from "react"
 import { useMutation, type QueryClient } from "@tanstack/react-query"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
@@ -47,6 +47,7 @@ const INITIAL_BATCH_SYNC_STATE: BatchSyncState = {
 }
 
 export interface UsePromptSyncDeps {
+  expectedOwnerId?: string | null
   queryClient: QueryClient
   isOnline: boolean
   t: (key: string, opts?: Record<string, any>) => string
@@ -54,7 +55,7 @@ export interface UsePromptSyncDeps {
 
 export function usePromptSync(deps: UsePromptSyncDeps) {
   const notification = useAntdNotification()
-  const { queryClient, isOnline, t } = deps
+  const { expectedOwnerId, queryClient, isOnline, t } = deps
 
   const [projectSelectorOpen, setProjectSelectorOpen] = useState(false)
   const [promptToSync, setPromptToSync] = useState<string | null>(null)
@@ -80,9 +81,9 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
           }
         }
 
-        const owner = await resolveRecipePersistenceOwnerView()
+        const ownerId = await resolvePromptOwnerId(expectedOwnerId)
         const result = await autoSyncPrompt(
-          localId, undefined, owner ? { expectedOwnerId: owner.ownerId } : undefined
+          localId, undefined, ownerId ? { expectedOwnerId: ownerId } : undefined
         )
         if (!result.success && notifyOnFailure) {
           notification.warning({
@@ -129,14 +130,14 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         }
       }
     },
-    [t, notification]
+    [expectedOwnerId, t, notification]
   )
 
   const { mutate: pushToStudioMutation, isPending: isPushing } = useMutation({
     mutationFn: async ({ localId, projectId }: { localId: string; projectId: number }) => {
-      const owner = await resolveRecipePersistenceOwnerView()
+      const ownerId = await resolvePromptOwnerId(expectedOwnerId)
       const result = await pushToStudio(
-        localId, projectId, owner ? { expectedOwnerId: owner.ownerId } : undefined
+        localId, projectId, ownerId ? { expectedOwnerId: ownerId } : undefined
       )
       if (!result.success) {
         throw new Error(result.error || t("managePrompts.notification.someError"))
@@ -165,7 +166,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
 
   const { mutate: pullFromStudioMutation, isPending: isPulling } = useMutation({
     mutationFn: async ({ serverId, localId }: { serverId: number; localId?: string }) => {
-      const result = await pullFromStudio(serverId, localId)
+      const result = await pullFromStudio(serverId, localId, expectedOwnerId)
       if (!result.success) {
         throw new Error(result.error || t("managePrompts.notification.someError"))
       }
@@ -190,7 +191,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
 
   const { mutate: unlinkPromptMutation } = useMutation({
     mutationFn: async (localId: string) => {
-      const result = await unlinkPromptFromServer(localId)
+      const result = await unlinkPromptFromServer(localId, expectedOwnerId)
       if (!result.success) {
         throw new Error(result.error || t("managePrompts.notification.someError"))
       }
@@ -218,7 +219,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
     isPending: isLoadingConflictInfo
   } = useMutation({
     mutationFn: async (localId: string) => {
-      return await getConflictInfo(localId)
+      return await getConflictInfo(localId, expectedOwnerId)
     },
     onSuccess: (info) => {
       if (!info) {
@@ -262,9 +263,9 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
       localId: string
       resolution: ConflictResolution
     }) => {
-      const owner = resolution === "keep_server" ? null : await resolveRecipePersistenceOwnerView()
+      const ownerId = await resolvePromptOwnerId(expectedOwnerId)
       return await resolveConflict(
-        localId, resolution, owner ? { expectedOwnerId: owner.ownerId } : undefined
+        localId, resolution, ownerId ? { expectedOwnerId: ownerId } : undefined
       )
     },
     onSuccess: (result, variables) => {
@@ -319,7 +320,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
 
   const { mutate: importFromStudioMutation, isPending: isImporting } = useMutation({
     mutationFn: async ({ serverId }: { serverId: number }) => {
-      const result = await pullFromStudio(serverId)
+      const result = await pullFromStudio(serverId, undefined, expectedOwnerId)
       if (!result.success)
         throw new Error(result.error || "Prompt Studio import failed")
       return result
@@ -369,6 +370,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
 
       batchSyncRunningRef.current = true
       try {
+        const ownerId = await resolvePromptOwnerId(expectedOwnerId)
         const plan = retryTasks
           ? {
               tasks: retryTasks,
@@ -409,8 +411,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         })
 
         // One opaque owner per user-initiated batch; never persisted in its tasks.
-        const owner = await resolveRecipePersistenceOwnerView()
-        const persistenceInput = owner ? { expectedOwnerId: owner.ownerId } : undefined
+        const persistenceInput = ownerId ? { expectedOwnerId: ownerId } : undefined
         let completed = 0
         let succeeded = 0
         const failed: BatchSyncFailure[] = []
@@ -445,7 +446,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
           try {
             const result =
               task.direction === "pull"
-                ? await pullFromStudio(task.serverId!, task.promptId)
+                ? await pullFromStudio(task.serverId!, task.promptId, ownerId)
                 : task.serverId
                   ? await pushToStudio(task.promptId, task.preferredProjectId || 1, persistenceInput)
                   : await autoSyncPrompt(task.promptId, task.preferredProjectId, persistenceInput)
@@ -530,7 +531,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         batchSyncRunningRef.current = false
       }
     },
-    [isOnline, queryClient, t, notification]
+    [expectedOwnerId, isOnline, queryClient, t, notification]
   )
 
   const handleBatchSyncAction = React.useCallback(() => {

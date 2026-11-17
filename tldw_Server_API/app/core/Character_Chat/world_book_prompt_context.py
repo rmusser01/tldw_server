@@ -4,8 +4,10 @@ World-book prompt context helpers for character chat.
 This module centralizes prompt assembly and bounded diagnostics for lorebook
 injection. It does not change provider dispatch behavior.
 """
+
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -91,6 +93,11 @@ def build_world_book_prompt_context(
         character_id=character_id,
         include_diagnostics=True,
     )
+    return world_book_prompt_context_from_result(result)
+
+
+def world_book_prompt_context_from_result(result: Any) -> WorldBookPromptContext:
+    """Format already matched lore through the shared bounded diagnostics contract."""
     if not isinstance(result, Mapping):
         return _empty_context()
 
@@ -119,6 +126,115 @@ def build_world_book_prompt_context(
         fingerprint=fingerprint,
         estimated_tokens=estimated_tokens,
     )
+
+
+@dataclass(frozen=True)
+class FrozenWorldBookPlan:
+    """Immutable, detached lore accepted under the native owner transaction."""
+
+    canonical_books: bytes
+
+
+def build_frozen_world_book_plan(
+    participant_books: Any,
+    explicit_books: Any = (),
+) -> FrozenWorldBookPlan:
+    """Validate complete saved matching inputs without reading current sources.
+
+    Disabled attachments apply only to inherited books; an explicit accepted
+    selection may still use that same enabled book. Conflicting copies cannot
+    silently select a newer definition.
+    """
+    from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+        MAX_MATERIALIZED_WORLD_BOOK_ENTRIES,
+        MAX_MATERIALIZED_WORLD_BOOK_ENTRY_BYTES,
+        MAX_MATERIALIZED_WORLD_BOOKS,
+        _materialized_world_book_entry_usage,
+    )
+
+    book_keys = {"id", "name", "description", "scan_depth", "token_budget", "recursive_scanning", "enabled",
+                 "created_at", "last_modified", "version", "attachment_enabled", "attachment_priority", "entries"}
+    entry_keys = {"id", "world_book_id", "keywords", "content", "priority", "enabled", "case_sensitive", "regex_match",
+                  "whole_word_match", "metadata", "created_at", "last_modified"}
+    books: dict[int, dict[str, Any]] = {}
+    active: set[int] = set()
+
+    def require_flag(value: Any) -> None:
+        if type(value) not in (bool, int) or value not in (0, 1):
+            raise ValueError("Saved lore requires a complete boolean policy")
+
+    for group, inherited in ((participant_books, True), (explicit_books, False)):
+        if not isinstance(group, (list, tuple)):
+            raise ValueError("Saved lore must contain a book list")
+        for book in group:
+            if not isinstance(book, dict) or set(book) - book_keys:
+                raise ValueError("Saved lore contains an unsupported book")
+            for policy_key in ("id", "version", "scan_depth", "token_budget"):
+                value = book.get(policy_key)
+                minimum = 1 if policy_key in ("id", "version") else 0
+                if type(value) is not int or value < minimum:
+                    raise ValueError("Saved lore has invalid identity or numeric policy")
+            for policy_key in ("enabled", "recursive_scanning"):
+                require_flag(book.get(policy_key))
+            if inherited:
+                require_flag(book.get("attachment_enabled"))
+                if type(book.get("attachment_priority")) is not int:
+                    raise ValueError("Saved lore has an invalid attachment policy")
+            entries = book.get("entries")
+            if not isinstance(entries, list):
+                raise ValueError("Saved lore is missing its captured entries")
+            seen_entries: set[int] = set()
+            for entry in entries:
+                if not isinstance(entry, dict) or set(entry) - entry_keys:
+                    raise ValueError("Saved lore contains an unsupported entry")
+                if (type(entry.get("id")) is not int or entry["id"] <= 0 or entry["id"] in seen_entries
+                        or type(entry.get("world_book_id")) is not int or entry["world_book_id"] != book["id"]):
+                    raise ValueError("Saved lore entry identity is invalid")
+                seen_entries.add(entry["id"])
+                if (not isinstance(entry.get("keywords"), list)
+                        or not all(isinstance(keyword, str) for keyword in entry["keywords"])
+                        or not isinstance(entry.get("content"), str)
+                        or type(entry.get("priority")) is not int or not isinstance(entry.get("metadata"), dict)):
+                    raise ValueError("Saved lore entry matching inputs are incomplete")
+                for policy_key in ("enabled", "case_sensitive", "regex_match", "whole_word_match"):
+                    require_flag(entry.get(policy_key))
+            detached = {key: value for key, value in book.items() if key not in {"attachment_enabled", "attachment_priority"}}
+            previous = books.get(book["id"])
+            if previous is not None and previous != detached:
+                raise ValueError("Saved lore contains conflicting book revisions")
+            books[book["id"]] = detached
+            if book["enabled"] and (not inherited or book["attachment_enabled"]):
+                active.add(book["id"])
+    entry_count, entry_bytes = _materialized_world_book_entry_usage(list(books.values()))
+    if (len(books) > MAX_MATERIALIZED_WORLD_BOOKS or entry_count > MAX_MATERIALIZED_WORLD_BOOK_ENTRIES
+            or entry_bytes > MAX_MATERIALIZED_WORLD_BOOK_ENTRY_BYTES):
+        raise ValueError("Saved lore exceeds its materialization bounds")
+    canonical = json.dumps([book for book_id, book in books.items() if book_id in active],
+                           allow_nan=False, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return FrozenWorldBookPlan(canonical)
+
+
+def build_frozen_world_book_prompt_context(
+    messages: Sequence[Mapping[str, Any]],
+    plan: FrozenWorldBookPlan,
+) -> WorldBookPromptContext:
+    """Compose the accepted catalog over the exact selected/current message text."""
+    from tldw_Server_API.app.core.Character_Chat.world_book_manager import (
+        WorldBookEntry,
+        process_loaded_world_book_context,
+    )
+
+    recent_text = build_recent_world_book_scan_text(messages)
+    if not recent_text.strip():
+        return _empty_context()
+    books = json.loads(plan.canonical_books)
+    entries_by_book = {book["id"]: [WorldBookEntry.from_dict(entry) for entry in book["entries"]] for book in books}
+    from tldw_Server_API.app.core.Utils.tokenizer import count_tokens
+
+    result, _matched = process_loaded_world_book_context(
+        recent_text, books, entries_by_book, count_tokens=count_tokens, include_diagnostics=True
+    )
+    return world_book_prompt_context_from_result(result)
 
 
 def apply_world_book_prompt_context(

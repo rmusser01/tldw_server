@@ -15,6 +15,7 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
     StudyAssistantThreadSummary,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -35,6 +36,7 @@ def study_db(request, tmp_path):
 @pytest.fixture
 def study_client(study_db):
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(endpoint.router, prefix="/api/v1")
     app.dependency_overrides[endpoint.get_chacha_db_for_user] = lambda: study_db
     app.dependency_overrides[endpoint.get_request_user] = lambda: SimpleNamespace(id=1)

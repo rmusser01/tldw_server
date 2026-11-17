@@ -1,5 +1,6 @@
 export type PlaygroundRestoreDecisionInput = {
   hasPersistedSession: boolean
+  hasPersistedDraftHandle?: boolean
   persistedHistoryId: string | null
   persistedServerChatId: string | null
   initialHistoryId?: string | null
@@ -18,6 +19,7 @@ export type PlaygroundRestoreDecisionInput = {
  */
 export const shouldRestorePersistedPlaygroundSession = ({
   hasPersistedSession,
+  hasPersistedDraftHandle,
   persistedHistoryId,
   persistedServerChatId,
   initialHistoryId,
@@ -42,6 +44,7 @@ export const shouldRestorePersistedPlaygroundSession = ({
       initialHistoryLength !== currentHistoryLength)
 
   if (conversationChangedAfterMount) return false
+  if (hasPersistedDraftHandle) return true
 
   const hasCurrentConversation =
     currentMessagesLength > 0 ||

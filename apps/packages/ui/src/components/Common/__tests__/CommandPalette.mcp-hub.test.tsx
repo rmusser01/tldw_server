@@ -43,7 +43,7 @@ describe("CommandPalette MCP Hub discoverability", () => {
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
 
-    const searchInput = screen.getByPlaceholderText(/Type a command or search/i)
+    const searchInput = screen.getByRole("textbox", { name: "Search commands" })
     fireEvent.change(searchInput, { target: { value: "mcp" } })
 
     expect(screen.getAllByRole("option", { name: /MCP Hub/i })).toHaveLength(1)
@@ -79,7 +79,7 @@ describe("CommandPalette MCP Hub discoverability", () => {
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
 
-    const searchInput = screen.getByPlaceholderText(/Type a command or search/i)
+    const searchInput = screen.getByRole("textbox", { name: "Search commands" })
     fireEvent.change(searchInput, { target: { value: "theme" } })
 
     expect(screen.getByRole("option", { name: /Theme/i })).toBeInTheDocument()
@@ -99,7 +99,7 @@ describe("CommandPalette MCP Hub discoverability", () => {
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
 
-    const searchInput = screen.getByPlaceholderText(/Type a command or search/i)
+    const searchInput = screen.getByRole("textbox", { name: "Search commands" })
     fireEvent.change(searchInput, { target: { value: "language" } })
 
     expect(screen.getAllByRole("option")).toHaveLength(3)

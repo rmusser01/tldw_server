@@ -45,6 +45,10 @@ vi.mock(
 
 vi.mock("../chat", () => ({
   PageAssistDatabase: class {
+    async getPromptById(id: string) {
+      const config = await Promise.resolve(mocks.getConfig()).catch(() => null);
+      return { id, title: "Original recipe", content: "Original", is_system: true, createdAt: 11, ...(config ? { ownerId: "recipe-owner:sha256:" + "a".repeat(64) } : {}) };
+    }
     permanentlyDeletePrompt(id: string) {
       return mocks.deleteDexie(id);
     }
@@ -57,7 +61,10 @@ vi.mock("../chat", () => ({
 vi.mock("../..", () => ({
   deletePromptByIdFB: mocks.deleteFirefox,
   getAllPromptsFB: vi.fn(),
-  getPromptByIdFB: vi.fn(),
+  getPromptByIdFB: async (id: string) => {
+    const config = await Promise.resolve(mocks.getConfig()).catch(() => null);
+    return { id, title: "Original recipe", content: "Original", is_system: true, createdAt: 11, ...(config ? { ownerId: "recipe-owner:sha256:" + "a".repeat(64) } : {}) };
+  },
   savePromptFB: vi.fn(),
   restorePromptSnapshotFB: mocks.updateFirefox,
   updatePromptFB: mocks.updateFirefox,
@@ -66,11 +73,13 @@ vi.mock("../..", () => ({
 describe("restorePromptSnapshot", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getConfig.mockResolvedValue({ serverUrl: "https://a.test", authMode: "single-user", apiKey: "test-key" });
   });
 
   it("restores one exact prompt snapshot in both local stores", async () => {
     const snapshot = {
       id: "recipe-exact-id",
+      ownerId: "recipe-owner:sha256:" + "a".repeat(64),
       title: "Original recipe",
       name: "Original recipe",
       content: "  exact 🧪\n",
@@ -103,6 +112,7 @@ describe("permanent prompt deletion uncertainty ownership", () => {
   const scope = "recipe-owner:sha256:" + "a".repeat(64);
   afterEach(async () => {
     for (const id of ["recipe-exact-id", "other-id"]) {
+      await forgetRecipePersistenceUnknown(id);
       await clearRecipePersistenceScoped(id, scope);
       await clearRecipePersistenceScoped(
         id,

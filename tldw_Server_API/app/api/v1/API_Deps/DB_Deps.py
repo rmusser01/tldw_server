@@ -4,8 +4,9 @@
 # Imports
 import os
 import threading
-from collections.abc import AsyncGenerator, Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -24,6 +25,7 @@ except ImportError:
 # Import the settings dictionary
 # Import the primary user identification dependency and User model
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Claims_Extraction.claims_jobs import claims_cluster_rebuild_jobs_enabled
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.factory import (
@@ -248,6 +250,27 @@ async def get_media_db_for_user(
                 db_instance.release_context_connection()
         except (DatabaseError, OSError, RuntimeError, TypeError, ValueError):
             pass
+
+
+@dataclass(frozen=True)
+class ClaimsClusterRebuildRouteContext:
+    """One request's routing decision and optional legacy request session."""
+
+    async_enabled: bool
+    db: MediaDbSession | None
+
+
+async def get_claim_cluster_rebuild_context(
+    request: Request,
+    current_user: User = Depends(get_request_user),
+) -> AsyncIterator[ClaimsClusterRebuildRouteContext]:
+    """Capture routing once; Jobs admission must never provision Media storage."""
+    async_enabled = claims_cluster_rebuild_jobs_enabled()
+    if async_enabled:
+        yield ClaimsClusterRebuildRouteContext(async_enabled=True, db=None)
+    else:
+        async with asynccontextmanager(get_media_db_for_user)(request, current_user) as db:
+            yield ClaimsClusterRebuildRouteContext(async_enabled=False, db=db)
 
 
 def get_media_db_for_owner(owner_user_id: int) -> MediaDbSession:

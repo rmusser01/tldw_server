@@ -7,8 +7,8 @@ import pytest
 
 
 @pytest.fixture()
-async def maintenance_rotation_repo(tmp_path, monkeypatch: pytest.MonkeyPatch):
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def maintenance_rotation_repo(tmp_path, monkeypatch: pytest.MonkeyPatch, fresh_services):
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.maintenance_rotation_runs_repo import (
         AuthnzMaintenanceRotationRunsRepo,
@@ -22,7 +22,6 @@ async def maintenance_rotation_repo(tmp_path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("JOBS_DB_PATH", str(jobs_db_path))
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))

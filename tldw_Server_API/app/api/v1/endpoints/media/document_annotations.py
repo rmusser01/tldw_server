@@ -20,6 +20,7 @@ from tldw_Server_API.app.api.v1.schemas.document_annotations import (
     AnnotationUpdate,
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository import (
     DocumentWorkspaceRepository,
 )
@@ -331,6 +332,7 @@ async def delete_annotation(
     responses={
         200: {"description": "Annotations synced successfully"},
         404: {"description": "Media item not found"},
+        409: {"description": "Annotation creation intent changed or is no longer active"},
     },
 )
 async def sync_annotations(
@@ -346,7 +348,9 @@ async def sync_annotations(
     useful for offline-first scenarios where changes are queued locally.
 
     If client_ids are provided, the response includes a mapping from
-    client IDs to server-generated IDs.
+    client IDs to server-generated IDs. The sync is idempotent on client_id:
+    exact replays return the stored annotations instead of duplicating them. Changed
+    creation intents or deleted annotations are rejected without overwriting data.
     """
     user_id = str(getattr(current_user, "id", current_user))
     logger.debug(
@@ -366,15 +370,15 @@ async def sync_annotations(
         )
 
     annotation_rows: list[dict[str, Any]] = []
-    id_mapping: dict = {}
+    client_ids = body.client_ids or []
 
     try:
         for i, annotation in enumerate(body.annotations):
-            annotation_id = _generate_annotation_id()
             now = _now_iso()
             annotation_rows.append(
                 {
-                    "id": annotation_id,
+                    "id": _generate_annotation_id(),
+                    "client_id": client_ids[i] if i < len(client_ids) else None,
                     "location": annotation.location,
                     "text": annotation.text,
                     "color": annotation.color.value,
@@ -386,16 +390,17 @@ async def sync_annotations(
                     "updated_at": now,
                 }
             )
-            if body.client_ids and i < len(body.client_ids):
-                id_mapping[body.client_ids[i]] = annotation_id
 
         repo = DocumentWorkspaceRepository.from_media_db(db)
         synced_rows = repo.sync_annotations(
             media_id=media_id,
             user_id=user_id,
             annotation_rows=annotation_rows,
+            allow_replay=body.client_ids is not None,
         )
 
+    except ConflictError as exc:
+        raise HTTPException(status_code=409, detail="Annotation creation intent changed or is no longer active") from exc
     except Exception as e:
         logger.error("Error syncing annotations")
         raise HTTPException(
@@ -404,6 +409,7 @@ async def sync_annotations(
         ) from e
 
     synced_annotations = [_row_to_response(dict(row), media_id) for row in synced_rows]
+    id_mapping = {row["client_id"]: row["id"] for row in map(dict, synced_rows) if row.get("client_id")}
 
     return AnnotationSyncResponse(
         media_id=media_id,

@@ -85,6 +85,17 @@ const buildWorkspaceSnapshot = (overrides: Record<string, unknown> = {}) => ({
 })
 
 describe("fetchCompanionHomeSnapshot", () => {
+  it("preserves reading and notes without requesting an absent Companion router", async () => {
+    const snapshot = await fetchCompanionHomeSnapshot("options", { companionAvailable: false })
+    expect(mocks.fetchCompanionWorkspaceSnapshot).not.toHaveBeenCalled()
+    expect(mocks.getReadingList).toHaveBeenCalledTimes(1)
+    expect(mocks.listNotes).toHaveBeenCalledTimes(1)
+    expect(snapshot.readingQueue).toEqual(expect.arrayContaining([expect.objectContaining({ entityId: "reading-1" })]))
+    expect(snapshot.resumeWork).toEqual(expect.arrayContaining([expect.objectContaining({ entityId: "note-1" })]))
+    expect(snapshot.goalsFocus).toEqual([])
+    expect(snapshot.degradedSources).toContain("workspace")
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()

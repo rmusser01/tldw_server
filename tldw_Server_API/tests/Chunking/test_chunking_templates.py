@@ -488,7 +488,8 @@ class TestAPIEndpoints:
 
         # Create template
         db.create_chunking_template(
-            name="get_api_test", template_json='{"chunking": {"method": "words"}}', description="Get API test"
+            name="get_api_test", template_json='{"chunking": {"method": "words"}}', description="Get API test",
+            user_id="1",
         )
 
         # Get existing template
@@ -535,7 +536,8 @@ class TestAPIEndpoints:
 
         # Create template first
         db.create_chunking_template(
-            name="update_api_test", template_json='{"chunking": {"method": "words"}}', description="Original"
+            name="update_api_test", template_json='{"chunking": {"method": "words"}}', description="Original",
+            user_id="1",
         )
 
         # Update via API
@@ -558,7 +560,8 @@ class TestAPIEndpoints:
 
         # Create template first
         db.create_chunking_template(
-            name="delete_api_test", template_json='{"chunking": {"method": "words"}}', description="To delete"
+            name="delete_api_test", template_json='{"chunking": {"method": "words"}}', description="To delete",
+            user_id="1",
         )
 
         # Delete via API
@@ -777,6 +780,7 @@ class TestIntegration:
                 }
             ),
             description="Template for apply test",
+            user_id="1",
         )
 
         # Apply it to text
@@ -787,7 +791,7 @@ class TestIntegration:
         }
 
         # Mock the TemplateProcessor to avoid complex setup
-        with patch("tldw_Server_API.app.api.v1.endpoints.chunking_templates.TemplateProcessor") as mock_processor:
+        with patch("tldw_Server_API.app.core.Chunking.templates.TemplateProcessor") as mock_processor:
             mock_instance = MagicMock()
             mock_instance.process_template.return_value = [
                 "This is a long text",
@@ -821,6 +825,7 @@ class TestIntegration:
                 }
             ),
             description="Real processor apply test",
+            user_id="1",
         )
 
         req = {

@@ -77,6 +77,16 @@ class AuthnzTokenBlacklistRepo:
         try:
             async with self.db_pool.transaction() as conn:
                 if self._is_postgres_backend():
+                    from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+                        POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
+                    )
+
+                    if not await conn.fetchval(POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL):
+                        await conn.fetch(
+                            "SELECT id, jti, user_id, token_type, revoked_at, expires_at, reason, revoked_by, ip_address "
+                            "FROM public.token_blacklist LIMIT 0"
+                        )
+                        return
                     # IF NOT EXISTS does not serialize concurrent catalog writes.
                     # The transaction releases this lock on commit or rollback.
                     await acquire_schema_lock(

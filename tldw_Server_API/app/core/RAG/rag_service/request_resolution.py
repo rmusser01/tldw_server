@@ -197,6 +197,7 @@ class ResolvedRAGRequest:
     rag_profile: Optional[str]
     user_id: Optional[str]
     feedback_user_id: Optional[str]
+    explicit_fields: frozenset[str] = frozenset()
 
 
 def resolve_rag_request(
@@ -292,6 +293,7 @@ def resolve_rag_request(
         rag_profile=resolved_profile,
         user_id=resolved_storage_user_id,
         feedback_user_id=resolved_feedback_user_id,
+        explicit_fields=frozenset(explicit_fields),
     )
 
 

@@ -21,7 +21,9 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import propagate_billing_headers, require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
+    admit_media_analysis,
     get_process_videos_form,
+    media_analysis_requested,
 )
 from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
     media_create_dependencies,
@@ -34,11 +36,11 @@ from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_f
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
-from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
+from tldw_Server_API.app.api.v1.utils.media_deprecation_signals import (
     apply_media_legacy_headers,
     build_media_legacy_signal,
 )
-from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
+from tldw_Server_API.app.api.v1.utils.media_input_contracts import (
     normalize_urls_field,
     validate_media_inputs,
 )
@@ -53,6 +55,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
+    first_saved_filename,
     save_uploaded_files,
 )
 
@@ -131,6 +134,10 @@ async def process_videos_endpoint(
         form_data.urls,
         files,
     )
+
+    if media_analysis_requested(form_data):
+        # Usage quotas (LLM usage accounting spec §4a), before any download or processing.
+        await admit_media_analysis(current_user.id, form_data)
 
     final_summary_prompt = await resolve_video_summary_prompts(
         form_data, lambda: get_prompts_db_for_user(request, current_user)
@@ -302,10 +309,8 @@ async def process_videos_endpoint(
     try:
         if form_data.perform_chunking:
             first_url = (form_data.urls or [None])[0]
-            first_filename = None
             try:
-                if saved_files_info:
-                    first_filename = saved_files_info[0].get("original_filename")
+                first_filename = first_saved_filename(saved_files_info)
             except Exception:
                 first_filename = None
 
@@ -324,6 +329,7 @@ async def process_videos_endpoint(
                     form_data=form_data,
                     db=db,
                     chunking_options_dict=chunk_options_dict,
+                    owner_user_id=getattr(current_user, "id", None),
                     TemplateClassifier=TemplateClassifier,
                     first_url=first_url,
                     first_filename=first_filename,

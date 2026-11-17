@@ -1,4 +1,5 @@
 import type { TldwTtsProvidersInfo } from "@/services/tldw/audio-providers"
+import { toServerTtsProviderKey } from "@/services/tldw/tts-provider-keys"
 
 export type ReadinessState = "ready" | "warning" | "blocked" | "unknown"
 export type CapabilityValue = "supported" | "unsupported" | "unknown"
@@ -401,7 +402,7 @@ export function buildTtsReadinessItems({
     return appendFfmpegWarning()
   }
 
-  const providerInfo = providersInfo?.providers?.[provider]
+  const providerInfo = providersInfo?.providers?.[toServerTtsProviderKey(provider)]
   const formats = providerInfo?.formats?.length
     ? ` Formats: ${providerInfo.formats.join(", ")}.`
     : ""

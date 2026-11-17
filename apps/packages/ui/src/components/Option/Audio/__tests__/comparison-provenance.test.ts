@@ -12,6 +12,25 @@ import {
 } from "../comparison-provenance"
 
 describe("comparison provenance helpers", () => {
+  it.each([
+    "[No speech detected]",
+    { text: "[No speech detected]", duration: 3, segments: [{ text: "[No speech detected]" }] },
+    { segments: [{ text: "[No speech detected]" }] }
+  ])("B05 no speech status is not normalized as spoken words: %j", (response) => {
+    const normalized = normalizeSttResponse(response)
+    expect(normalized.text).toBe("")
+    expect(normalized.metadata.wordCount).toBe(0)
+    if (typeof response === "object" && "duration" in response) {
+      expect(normalized.metadata.durationSeconds).toBe(3)
+      expect(normalized.metadata.segmentCount).toBe(0)
+    }
+  })
+
+  it("B05 no speech normalization preserves ordinary text that mentions the phrase", () => {
+    const text = "The screen said [No speech detected], then I spoke."
+    expect(normalizeSttResponse({ text }).text).toBe(text)
+  })
+
   it("formats stable display metadata", () => {
     expect(formatByteSize(1536)).toBe("1.5 KB")
     expect(formatClientLatency(1234)).toBe("Client measured 1.2s")

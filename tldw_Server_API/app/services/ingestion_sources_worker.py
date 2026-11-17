@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 from typing import Any, Protocol
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.Ingestion_Sources.archive_snapshot import (
     build_archive_snapshot_from_bytes_with_failures,
     load_archive_artifact_bytes,
@@ -532,6 +535,7 @@ async def _apply_snapshot_changes(
     return result_summary
 
 
+@owns_chacha_checkouts
 async def _process_sync_job(
     jm,
     jid: int,
@@ -697,15 +701,38 @@ async def run_ingestion_sources_worker(stop_event: asyncio.Event | None = None) 
                 await asyncio.sleep(poll_sleep)
                 continue
 
+            owner = job.get("owner_user_id")
+            if (
+                isinstance(owner, bool)
+                or not isinstance(owner, (str, int))
+                or (isinstance(owner, int) and not 0 < owner < 2**63)
+                or (
+                    isinstance(owner, str)
+                    and (
+                        not re.fullmatch(r"[0-9]{1,19}", owner)
+                        or not 0 < int(owner) < 2**63
+                    )
+                )
+            ):
+                jm.fail_job(
+                    int(job["id"]),
+                    error="Missing or invalid ingestion source job owner",
+                    retryable=False,
+                    worker_id=worker_id,
+                    lease_id=str(job.get("lease_id") or "") or None,
+                    completion_token=str(job.get("lease_id") or "") or None,
+                )
+                continue
             payload = job.get("payload") or {}
-            await _process_sync_job(
-                jm,
-                jid=int(job["id"]),
-                lease_id=str(job.get("lease_id") or ""),
-                worker_id=worker_id,
-                source_id=int(payload.get("source_id")),
-                user_id=int(job.get("owner_user_id") or payload.get("user_id") or 0),
-            )
+            with scoped_context(user_id=int(owner), is_admin=False):
+                await _process_sync_job(
+                    jm,
+                    jid=int(job["id"]),
+                    lease_id=str(job.get("lease_id") or ""),
+                    worker_id=worker_id,
+                    source_id=int(payload.get("source_id")),
+                    user_id=int(owner),
+                )
         except _NONCRITICAL_EXCEPTIONS:
             await asyncio.sleep(poll_sleep)
 

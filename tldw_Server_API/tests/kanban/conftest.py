@@ -69,3 +69,22 @@ def sample_card(kanban_db: KanbanDB, sample_list: dict[str, Any]) -> dict[str, A
         client_id="card-client-1",
         description="A test card"
     )
+
+
+@pytest.fixture
+def draft():
+    return {
+        "format": "tldw_kanban_draft_v1",
+        "client_id": "s03-controlled-generated-draft",
+        "board": {"name": "Rowan Tasks", "description": "Controlled source"},
+        "lists": [
+            {
+                "name": "To Do",
+                "cards": [
+                    {"title": "Calibrate Selene", "description": "Telescope named Selene"},
+                    {"title": "Prepare Friday tours", "description": "Tours begin at 18:00"},
+                ],
+            },
+            {"name": "Done", "cards": [{"title": "Record 2019 opening", "description": "Rowan Observatory"}]},
+        ],
+    }

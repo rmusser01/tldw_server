@@ -11,7 +11,6 @@ import type { MenuProps } from "antd"
 import {
   Plus,
   Sparkles,
-  Trash2,
   MoreHorizontal,
   Clock,
   CheckCircle2,
@@ -26,12 +25,12 @@ import { usePromptStudioStore } from "@/store/prompt-studio"
 import {
   listOptimizations,
   cancelOptimization,
-  deleteOptimization,
   type Optimization
 } from "@/services/prompt-studio"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import { Button } from "@/components/Common/Button"
+import { Alert } from "@/components/ui/primitives"
 import { CreateOptimizationWizard } from "./CreateOptimizationWizard"
 import { OptimizationProgressPanel } from "./OptimizationProgressPanel"
 
@@ -57,12 +56,12 @@ export const OptimizationsTab: React.FC = () => {
     queryFn: () =>
       listOptimizations({
         project_id: selectedProjectId!,
-        limit: 100
+        per_page: 100
       }),
     enabled: selectedProjectId !== null,
     refetchInterval: (query) => {
       const data = query.state.data as any
-      const optimizations = data?.data?.optimizations ?? []
+      const optimizations = data?.data?.data ?? []
       const hasRunning = optimizations.some((o: Optimization) =>
         ["running", "pending"].includes(o.status?.toLowerCase())
       )
@@ -71,7 +70,7 @@ export const OptimizationsTab: React.FC = () => {
   })
 
   const optimizations: Optimization[] =
-    (optimizationsResponse as any)?.data?.optimizations ?? []
+    optimizationsResponse?.data?.data ?? []
 
   // Cancel mutation
   const cancelMutation = useMutation({
@@ -88,28 +87,7 @@ export const OptimizationsTab: React.FC = () => {
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
-        description: error?.message || t("common:unknownError")
-      })
-    }
-  })
-
-  // Delete mutation
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => deleteOptimization(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["prompt-studio", "optimizations", selectedProjectId]
-      })
-      notification.success({
-        message: t("managePrompts.studio.optimizations.deleted", {
-          defaultValue: "Optimization deleted"
-        })
-      })
-    },
-    onError: (error: any) => {
-      notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -131,23 +109,6 @@ export const OptimizationsTab: React.FC = () => {
     })
     if (ok) {
       cancelMutation.mutate(optimization.id)
-    }
-  }
-
-  const handleDelete = async (optimization: Optimization) => {
-    const ok = await confirmDanger({
-      title: t("managePrompts.studio.optimizations.deleteConfirmTitle", {
-        defaultValue: "Delete optimization?"
-      }),
-      content: t("managePrompts.studio.optimizations.deleteConfirmContent", {
-        defaultValue:
-          "This will permanently delete this optimization and its history."
-      }),
-      okText: t("common:delete", { defaultValue: "Delete" }),
-      cancelText: t("common:cancel", { defaultValue: "Cancel" })
-    })
-    if (ok) {
-      deleteMutation.mutate(optimization.id)
     }
   }
 
@@ -249,15 +210,7 @@ export const OptimizationsTab: React.FC = () => {
               onClick: () => handleCancel(optimization)
             }
           ]
-        : []),
-      { type: "divider" as const },
-      {
-        key: "delete",
-        icon: <Trash2 className="size-4" />,
-        label: t("common:delete", { defaultValue: "Delete" }),
-        danger: true,
-        onClick: () => handleDelete(optimization)
-      }
+        : [])
     ]
   }
 
@@ -283,6 +236,12 @@ export const OptimizationsTab: React.FC = () => {
     return <Skeleton paragraph={{ rows: 8 }} />
   }
 
+  if (optimizationsStatus === "error") {
+    return <Alert variant="error" title={t("managePrompts.studio.optimizations.loadError", {
+      defaultValue: "Unable to load optimizations"
+    })} />
+  }
+
   if (optimizationsStatus === "success" && optimizations.length === 0) {
     return (
       <>
@@ -304,7 +263,7 @@ export const OptimizationsTab: React.FC = () => {
             }),
             t("managePrompts.studio.optimizations.emptyExample2", {
               defaultValue:
-                "Choose from strategies like iterative, genetic, beam search, and more."
+                "Choose from the optimization strategies available on this server."
             })
           ]}
           primaryActionLabel={t(
@@ -385,7 +344,7 @@ export const OptimizationsTab: React.FC = () => {
             width: 140,
             render: (_, record) => (
               <Tag color="purple">
-                {getStrategyLabel(record.config?.strategy)}
+                {getStrategyLabel(record.optimizer_type)}
               </Tag>
             )
           },
@@ -404,10 +363,12 @@ export const OptimizationsTab: React.FC = () => {
             key: "progress",
             width: 150,
             render: (_, record) => {
-              if (!record.total_iterations) return "-"
-              const current = record.current_iteration ?? 0
-              const total = record.total_iterations
-              const percent = Math.round((current / total) * 100)
+              if (!record.max_iterations) return "-"
+              const current = record.iterations_completed ?? 0
+              const total = record.max_iterations
+              const percent = record.status?.toLowerCase() === "completed"
+                ? 100
+                : Math.round((current / total) * 100)
               return (
                 <div>
                   <Progress
@@ -431,9 +392,9 @@ export const OptimizationsTab: React.FC = () => {
             key: "best_score",
             width: 100,
             render: (_, record) =>
-              record.best_score !== undefined && record.best_score !== null ? (
+              typeof record.final_metrics?.score === "number" && Number.isFinite(record.final_metrics.score) ? (
                 <span className="font-medium text-success">
-                  {(record.best_score * 100).toFixed(1)}%
+                  {(record.final_metrics.score * 100).toFixed(1)}%
                 </span>
               ) : (
                 <span className="text-text-muted">-</span>

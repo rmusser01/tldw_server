@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import subprocess
 import sys
 import typing
@@ -30,11 +29,17 @@ _SERVICE_MODULE = "tldw_Server_API.app.core.Moderation.moderation_service"
     [
         f"""
 import sys
-from tldw_Server_API.app.core.Moderation.policy_compiler import PolicyCompiler
+from tldw_Server_API.app.core.Moderation.models import ModerationPolicy
+from tldw_Server_API.app.core.Moderation.policy_compiler import (
+    PolicyCompilationInput,
+    PolicyCompiler,
+    ResolvedModerationConfig,
+)
 assert {_SERVICE_MODULE!r} not in sys.modules
-types = PolicyCompiler.policy_types()
-assert [item.__name__ for item in types] == ["ModerationPolicy", "PatternRule"]
-assert all(item.__module__ == "tldw_Server_API.app.core.Moderation.models" for item in types)
+result = PolicyCompiler().compile_global(
+    PolicyCompilationInput(config=ResolvedModerationConfig())
+)
+assert type(result.policy) is ModerationPolicy
 assert {_SERVICE_MODULE!r} not in sys.modules
 from tldw_Server_API.app.core.Moderation import models, moderation_service
 assert moderation_service.ModerationPolicy is models.ModerationPolicy
@@ -42,11 +47,23 @@ assert moderation_service.PatternRule is models.PatternRule
 """,
         f"""
 import sys
-from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
+from tldw_Server_API.app.core.Moderation.models import (
+    ModerationEvaluationResult,
+    ModerationPolicy,
+)
+from tldw_Server_API.app.core.Moderation.policy_evaluator import (
+    EvaluationLimits,
+    PolicyEvaluator,
+)
 assert {_SERVICE_MODULE!r} not in sys.modules
-types = PolicyEvaluator.policy_types()
-assert [item.__name__ for item in types] == ["ModerationPolicy", "PatternRule", "ModerationEvaluationResult"]
-assert all(item.__module__ == "tldw_Server_API.app.core.Moderation.models" for item in types)
+result = PolicyEvaluator().evaluate_text(
+    "",
+    ModerationPolicy(enabled=False),
+    "input",
+    EvaluationLimits(1024, 128, 4096, None),
+    include_redacted_text=False,
+)
+assert type(result) is ModerationEvaluationResult
 assert {_SERVICE_MODULE!r} not in sys.modules
 from tldw_Server_API.app.core.Moderation import models, moderation_service
 assert moderation_service.ModerationPolicy is models.ModerationPolicy
@@ -55,7 +72,7 @@ assert moderation_service.ModerationEvaluationResult is models.ModerationEvaluat
 """,
     ],
 )
-def test_policy_types_do_not_load_service(script):
+def test_representative_operations_do_not_load_service(script):
     completed = subprocess.run(
         [sys.executable, "-c", script],
         cwd=_REPO_ROOT,
@@ -105,20 +122,6 @@ for name in ("ModerationPolicy", "PatternRule", "ModerationEvaluationResult"):
     assert completed.returncode == 0, completed.stderr
 
 
-def test_compiler_policy_types_remains_staticmethod():
-    assert isinstance(
-        inspect.getattr_static(policy_compiler.PolicyCompiler, "policy_types"),
-        staticmethod,
-    )
-
-
-def test_evaluator_policy_types_remains_staticmethod():
-    assert isinstance(
-        inspect.getattr_static(policy_evaluator.PolicyEvaluator, "policy_types"),
-        staticmethod,
-    )
-
-
 @pytest.mark.parametrize("name", ("ModerationPolicy", "PatternRule"))
 def test_compiler_public_namespace_excludes_canonical_model(name):
     assert not hasattr(policy_compiler, name)
@@ -142,7 +145,7 @@ def test_evaluator_runtime_type_hints_remain_unresolved():
         typing.get_type_hints(policy_evaluator.PolicyEvaluator.evaluate_text)
 
 
-def test_service_export_rebinding_does_not_replace_canonical_policy_types(monkeypatch):
+def test_service_export_rebinding_does_not_replace_canonical_operation_types(monkeypatch):
     monkeypatch.setattr(moderation_service, "ModerationPolicy", type("Policy", (), {}))
     monkeypatch.setattr(moderation_service, "PatternRule", type("Rule", (), {}))
     monkeypatch.setattr(
@@ -151,12 +154,21 @@ def test_service_export_rebinding_does_not_replace_canonical_policy_types(monkey
         type("Result", (), {}),
     )
 
-    assert policy_compiler.PolicyCompiler.policy_types() == (
-        ModerationPolicy,
-        PatternRule,
+    compilation = policy_compiler.PolicyCompiler().compile_global(
+        policy_compiler.PolicyCompilationInput(
+            config=policy_compiler.ResolvedModerationConfig(enabled=True),
+            blocklist_lines=["secret -> block"],
+        )
     )
-    assert policy_evaluator.PolicyEvaluator.policy_types() == (
-        ModerationPolicy,
-        PatternRule,
-        ModerationEvaluationResult,
+    evaluation = policy_evaluator.PolicyEvaluator().evaluate_text(
+        "secret",
+        compilation.policy,
+        "input",
+        policy_evaluator.EvaluationLimits(1024, 128, 4096, None),
+        include_redacted_text=False,
     )
+
+    assert type(compilation.policy) is ModerationPolicy
+    assert len(compilation.policy.block_patterns) == 1
+    assert type(compilation.policy.block_patterns[0]) is PatternRule
+    assert type(evaluation) is ModerationEvaluationResult

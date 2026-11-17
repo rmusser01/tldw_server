@@ -3,7 +3,8 @@ import {
   clearWorkspaceUndoActionsForTests,
   getWorkspaceUndoPendingCount,
   scheduleWorkspaceUndoAction,
-  undoWorkspaceAction
+  undoWorkspaceAction,
+  finalizeWorkspaceUndoAction
 } from "../undo-manager"
 
 describe("workspace undo manager", () => {
@@ -48,4 +49,16 @@ describe("workspace undo manager", () => {
     expect(getWorkspaceUndoPendingCount()).toBe(0)
     vi.useRealTimers()
   })
+  it("finalizes one exact editor removal while retaining unrelated Undo", () => {
+    const finalize = vi.fn()
+    const own = scheduleWorkspaceUndoAction({ apply: vi.fn(), undo: vi.fn(), finalize })
+    const otherUndo = vi.fn()
+    const other = scheduleWorkspaceUndoAction({ apply: vi.fn(), undo: otherUndo })
+    expect(finalizeWorkspaceUndoAction(own.id)).toBe(true)
+    expect(finalize).toHaveBeenCalledTimes(1)
+    expect(undoWorkspaceAction(own.id)).toBe(false)
+    expect(undoWorkspaceAction(other.id)).toBe(true)
+    expect(otherUndo).toHaveBeenCalledTimes(1)
+  })
+
 })

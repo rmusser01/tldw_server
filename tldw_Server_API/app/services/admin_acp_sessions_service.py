@@ -164,15 +164,17 @@ def _normalize_prompt_messages(prompt: list[dict[str, Any]], timestamp: str) -> 
     return entries, bootstrap_ready
 
 
-def _normalize_result_message(result: dict[str, Any], timestamp: str) -> tuple[dict[str, Any], bool]:
-    content = _normalize_text_content(result)
+def _normalize_result_message(
+    result: dict[str, Any], timestamp: str, assistant_text: str | None = None,
+) -> tuple[dict[str, Any], bool]:
+    content = ACPSessionsDB.select_assistant_text(result, assistant_text)
     entry: dict[str, Any] = {
         "role": "assistant",
         "content": content,
         "timestamp": timestamp,
         "raw_result": copy.deepcopy(result),
     }
-    return entry, content is not None
+    return entry, bool(content.strip())
 
 
 def _messages_bootstrap_ready(messages: list[dict[str, Any]]) -> bool:
@@ -573,18 +575,19 @@ class ACPSessionStore:
         session_id: str,
         prompt: list[dict[str, Any]],
         result: dict[str, Any],
+        *, assistant_text: str | None = None,
     ) -> SessionTokenUsage | None:
         """Record a prompt+response exchange and accumulate token usage."""
         async with self._lock:
             # 1. Persist to DB
-            usage_dict = self._db.record_prompt(session_id, prompt, result)
+            usage_dict = self._db.record_prompt(session_id, prompt, result, assistant_text=assistant_text)
             if usage_dict is None:
                 return None
 
             # 2. Handle bootstrap_ready tracking (DB doesn't track this)
             now = datetime.now(timezone.utc).isoformat()
             _, prompt_bootstrap_ready = _normalize_prompt_messages(prompt, now)
-            _, result_bootstrap_ready = _normalize_result_message(result, now)
+            _, result_bootstrap_ready = _normalize_result_message(result, now, assistant_text)
 
             if not (prompt_bootstrap_ready and result_bootstrap_ready):
                 self._db.set_bootstrap_ready(session_id, False)

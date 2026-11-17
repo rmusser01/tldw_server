@@ -2,44 +2,12 @@
 
 from typing import Literal
 
-from pydantic import Field, field_validator
+from tldw_Server_API.app.api.v1.schemas.buddies import BuddyModel
 
-from tldw_Server_API.app.api.v1.schemas.buddies import BuddyModel, ResourceId
-
-
-class BuddyTurnCreate(BuddyModel):
-    """Accept one plain-text turn for an exact authorized conversation.
-
-    Text is limited to 12,000 characters and excludes blank input and slash
-    commands. The request key is bounded and idempotent; attachment version must
-    be positive. Optional provider/model overrides have bounded nonempty values."""
-
-    conversation_id: ResourceId
-    text: str = Field(min_length=1, max_length=12000)
-    client_request_id: ResourceId
-    expected_attachment_version: int = Field(ge=1)
-    model: str | None = Field(None, min_length=1, max_length=512)
-    provider: str | None = Field(None, min_length=1, max_length=128)
-
-    @field_validator("text")
-    @classmethod
-    def validate_text(cls, value: str) -> str:
-        """Validate plain chat text while preserving the submitted content.
-
-        Args:
-            value: Length-validated message text.
-
-        Returns:
-            The original text, including intentional whitespace.
-
-        Raises:
-            ValueError: The message is blank or requests a slash command.
-        """
-        if not value.strip():
-            raise ValueError("Enter a message")
-        if value.lstrip().startswith("/"):
-            raise ValueError("Use Chat to run slash commands")
-        return value
+# Core-owned since TASK-13950.15; re-exported for the API layer.
+from tldw_Server_API.app.core.Buddy.buddy_schemas import (  # noqa: F401 - re-exported (TASK-13950.15)
+    BuddyTurnCreate,
+)
 
 
 class BuddyTurn(BuddyModel):

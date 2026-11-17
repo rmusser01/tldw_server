@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from functools import cached_property
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -14,6 +16,10 @@ from tldw_Server_API.app.core.MCP_unified.external_servers.config_schema import 
 )
 
 
+if TYPE_CHECKING:
+    from tldw_Server_API.app.services.mcp_hub_service import McpHubService
+
+
 _EXTERNAL_SERVER_CONFIG_INVALID = "external_server_config_invalid"
 
 
@@ -22,6 +28,21 @@ class McpHubExternalRegistryService:
     """Build executable external server configs from managed MCP Hub state."""
 
     repo: McpHubRepo
+
+    @cached_property
+    def _hub_service(self) -> McpHubService:
+        """Keep config-only registry loading independent of discovery and Sandbox startup."""
+        from tldw_Server_API.app.services.mcp_hub_service import McpHubService
+
+        return McpHubService(self.repo)
+
+    async def refresh_external_server_discovery(
+        self,
+        server_id: str | None,
+        executor: Callable[[str | None], Awaitable[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """Publish discovery through the registry-owned service and its existing authority checks."""
+        return await self._hub_service.refresh_external_server_discovery(server_id, executor)
 
     async def list_runtime_servers(self) -> list[ExternalMCPServerConfig]:
         rows = await self.repo.list_external_servers()

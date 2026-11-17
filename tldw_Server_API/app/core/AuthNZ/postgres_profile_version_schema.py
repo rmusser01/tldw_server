@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from tldw_Server_API.app.core.exceptions import SchemaReadinessError
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     _mint_profile_user_sql,
     _profile_user_backend,
     _profile_user_connection_identity,
     _revoke_profile_user_sql,
 )
+from tldw_Server_API.app.core.exceptions import SchemaReadinessError
 
 _USERS_EXISTS_SQL = """
 SELECT EXISTS (
@@ -176,6 +176,34 @@ _NULL_PROFILE_COUNT_SQL = (
 _NULL_UPDATED_AT_COUNT_SQL = (
     "SELECT COUNT(*) AS invalid_count FROM public.users WHERE updated_at IS NULL"
 )
+
+
+async def validate_postgres_profile_version_on_connection(conn: Any) -> None:
+    """Validate an already migrated profile anchor without changing its schema."""
+    if not await conn.fetchval(_USERS_EXISTS_SQL):
+        raise SchemaReadinessError("AuthNZ profile_version requires owner migration")
+    await _audit_indirect_writes_async(conn)
+    _validate_ready_metadata(await conn.fetchrow(_PROFILE_METADATA_SQL))
+    if await conn.fetchval(_UPDATED_AT_METADATA_SQL) != "timestamp with time zone" or int(
+        await conn.fetchval(_NULL_PROFILE_COUNT_SQL)
+    ):
+        raise SchemaReadinessError("AuthNZ profile_version requires owner migration")
+
+
+def validate_postgres_profile_version_sync(executor: Any, *, connection: Any) -> None:
+    """Validate the synchronous serving path without anchor repair or writes."""
+    row = _sync_first(executor, _USERS_EXISTS_SQL, connection=connection)
+    if not row or not row.get("exists"):
+        raise SchemaReadinessError("AuthNZ profile_version requires owner migration")
+    _audit_indirect_writes_sync(executor, connection=connection)
+    _validate_ready_metadata(_sync_first(executor, _PROFILE_METADATA_SQL, connection=connection))
+    updated = _sync_first(executor, _UPDATED_AT_METADATA_SQL, connection=connection)
+    if (
+        not updated
+        or updated.get("data_type") != "timestamp with time zone"
+        or _sync_count(executor, _NULL_PROFILE_COUNT_SQL, connection=connection)
+    ):
+        raise SchemaReadinessError("AuthNZ profile_version requires owner migration")
 
 
 async def ensure_postgres_profile_version_on_connection(conn: Any) -> None:
@@ -422,6 +450,8 @@ def _sync_count(executor: Any, statement: str, *, connection: Any) -> int:
 
 
 __all__ = [
+    "validate_postgres_profile_version_on_connection",
+    "validate_postgres_profile_version_sync",
     "ensure_postgres_profile_version_on_connection",
     "ensure_postgres_profile_version_sync",
 ]

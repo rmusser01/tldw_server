@@ -77,6 +77,10 @@ async def test_concurrent_blacklist_bootstrap_preserves_revocation(
             """Borrow a fixture-managed connection without owning its cleanup."""
             self.connection = connection
 
+        async def fetchval(self, query: str, *args: Any) -> Any:
+            """Forward the real authority probe before testing owner DDL contention."""
+            return await self.connection.fetchval(query, *args)
+
         async def execute(self, query: str, *args: Any) -> str:
             """Execute real SQL, then hold the chosen DDL; propagate errors and cancellation."""
             result = await self.connection.execute(query, *args)

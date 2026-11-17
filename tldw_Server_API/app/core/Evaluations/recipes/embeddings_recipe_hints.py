@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
+from tldw_Server_API.app.core.Evaluations.run_state import RunStatus
 
 RECIPE_ID = "embeddings_model_selection"
 APPLY_AUDIT_METADATA_KEY = "embedding_recipe_apply_audit"

@@ -101,12 +101,12 @@ def test_persona_companion_context_ranking_prefers_query_matching_items(tmp_path
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            connected = json.loads(ws.receive_text())
             ws.send_text(
                 json.dumps(
                     {
                         "type": "user_message",
-                        "session_id": "sess_companion_ranked",
+                        "session_id": connected["session_id"],
                         "text": "help me resume the backlog review",
                     }
                 )

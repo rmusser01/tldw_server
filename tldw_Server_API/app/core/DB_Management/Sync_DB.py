@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Sync.v2.errors import (
+from tldw_Server_API.app.core.Sync_Contracts.errors import (
     SyncConflictNotFoundError,
     SyncDatasetNotFoundError,
     SyncHeadConflictError,
@@ -28,7 +28,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncMaterializationPredecessorError,
     SyncStoreError,
 )
-from tldw_Server_API.app.core.Sync.v2.models import (
+from tldw_Server_API.app.core.Sync_Contracts.models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     MEDIA_SYNC_DOMAINS,
@@ -91,10 +91,10 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     normalize_sync_timestamp,
     resolve_personal_context_ingress_result_revision,
 )
-from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
+from tldw_Server_API.app.core.Sync_Contracts.mutation_group_validation import (
     SYNC_MUTATION_GROUP_MAX_SIZE,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_readiness import (
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_readiness import (
     NOTES_MOODBOARD_STUDIO_READINESS_REASON_CODES_BY_KEY,
     NOTES_MOODBOARD_STUDIO_READINESS_STATES,
     NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS,
@@ -102,7 +102,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_readiness import (
     default_notes_moodboard_studio_readiness_record,
     parse_notes_moodboard_studio_readiness_record,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_task_readiness import (
+from tldw_Server_API.app.core.Sync_Contracts.notes_task_readiness import (
     NOTES_TASK_READINESS_REASON_CODES_BY_KEY,
     NOTES_TASK_READINESS_STATES,
     NOTES_TASK_SERVER_METADATA_KEYS,
@@ -132,6 +132,12 @@ SYNC_APPLY_STATUSES: set[str] = {
     "superseded",
 }
 _WHOLE_OBJECT_DOMAINS = {"notes.note", "notes.provenance", "chat.conversation"}
+# A tombstone of one of these may come without a base. It names an object the
+# dataset never held: the head check accepts it only when the object has no head,
+# and the materializer applies it as already satisfied (the object is gone). One
+# without a base for an object that has a head is refused by the head check.
+# Provenance is deleted with its note, from the note's own head, and keeps the rule.
+_BASELESS_TOMBSTONE_DOMAINS = {"notes.note", "chat.conversation"}
 _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS = {
     "attachment_id",
     "parent_domain",
@@ -2544,7 +2550,7 @@ class SyncDatabase:
                 self._ensure_key_record_user_id_column(connection=conn)
                 self._ensure_key_record_rotation_columns(connection=conn)
             self._preflight_notes_attachment_bootstrap_tables(connection=conn)
-            self.backend.create_tables(schema, connection=conn)
+            self._create_schema_tables(schema, connection=conn)
             self._ensure_device_lifecycle_columns(connection=conn)
             self._ensure_device_lifecycle_tables(connection=conn)
             self._ensure_background_sync_tables(connection=conn)
@@ -2563,6 +2569,21 @@ class SyncDatabase:
             self._ensure_key_record_user_id_index(connection=conn)
         with self.backend.transaction() as conn:
             self._migrate_versioned_device_state(connection=conn)
+
+    def _create_schema_tables(self, schema: str, *, connection: Any) -> None:
+        """Create fixed Sync tables and indexes without committing SQLite bootstrap.
+
+        Sync schemas contain no triggers or semicolons inside quoted values.
+        Keep SQLite's existing write transaction; other backends retain their
+        schema creation API.
+        """
+        if self.backend_type == BackendType.SQLITE:
+            # executescript would commit the transaction and release its write lock.
+            for statement in schema.split(";"):
+                if statement.strip():
+                    self.execute(statement, connection=connection)
+        else:
+            self.backend.create_tables(schema, connection=connection)
 
     def execute(
         self,
@@ -3682,6 +3703,7 @@ class SyncDatabase:
                 envelope.operation == "tombstone"
                 and not has_all_base
                 and not has_prebootstrap_product_base
+                and envelope.domain not in _BASELESS_TOMBSTONE_DOMAINS
             ):
                 raise SyncStoreError(
                     f"Sync v2 M1 {envelope.domain} tombstones require base metadata"
@@ -4708,14 +4730,16 @@ class SyncDatabase:
         user_id: str,
         *,
         include_archived: bool = False,
+        connection: Any | None = None,
     ) -> list[SyncDataset]:
-        """List Sync v2 datasets owned by a user."""
+        """List Sync v2 datasets owned by a user, inside ``connection``'s transaction when given."""
 
         archived_predicate = "" if include_archived else " AND archived_at IS NULL"
         result = self.execute(
             "SELECT * FROM sync_datasets WHERE owner_user_id = ?"
             f"{archived_predicate} ORDER BY created_at ASC, dataset_id ASC",  # nosec B608
             (user_id,),
+            connection=connection,
         )
         return [_dataset_from_row(row) for row in result.rows]
 
@@ -8120,7 +8144,7 @@ class SyncDatabase:
             return
         overlay = planned_heads or {}
         if envelope.domain == "notes.provenance":
-            from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import notes_provenance_object_hash
+            from tldw_Server_API.app.core.Sync_Contracts.notes_provenance_contract import notes_provenance_object_hash
             row = self._require_dataset(envelope.dataset_id, connection=connection)
             readiness = decode_json(row.get("metadata_json"), default={}).get("notes_provenance_v1", {})
             if readiness.get("state") != "ready" and not (verified_bootstrap and readiness.get("state") == "initializing"):
@@ -13975,7 +13999,7 @@ class SyncDatabase:
                 PRIMARY KEY(dataset_id, device_id, attachment_id)
             );
             """
-        self.backend.create_tables(schema, connection=connection)
+        self._create_schema_tables(schema, connection=connection)
         statements = [
             """
             CREATE INDEX IF NOT EXISTS idx_sync_device_authorizations_dataset_device
@@ -14050,7 +14074,7 @@ class SyncDatabase:
                 PRIMARY KEY(dataset_id, device_id)
             );
             """
-        self.backend.create_tables(schema, connection=connection)
+        self._create_schema_tables(schema, connection=connection)
         for statement in (
             """
             CREATE INDEX IF NOT EXISTS idx_sync_background_policies_device
@@ -14219,7 +14243,7 @@ class SyncDatabase:
                 PRIMARY KEY (dataset_id, domain, object_id)
             )
             """
-        self.backend.create_tables(schema, connection=connection)
+        self._create_schema_tables(schema, connection=connection)
         self.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_sync_object_state_dataset_domain_object
@@ -14232,7 +14256,7 @@ class SyncDatabase:
         self, *, connection: Any, projection_exists: bool
     ) -> None:
         cursor_type = "BIGINT" if self.backend_type == BackendType.POSTGRESQL else "INTEGER"
-        self.backend.create_tables(
+        self._create_schema_tables(
             f"""
             CREATE TABLE IF NOT EXISTS sync_current_heads (
                 dataset_id TEXT NOT NULL,
@@ -14328,7 +14352,7 @@ class SyncDatabase:
         timestamp_type = (
             "TIMESTAMPTZ" if self.backend_type == BackendType.POSTGRESQL else "TEXT"
         )
-        self.backend.create_tables(
+        self._create_schema_tables(
             f"""
             CREATE TABLE IF NOT EXISTS sync_materialization_locks (
                 dataset_id TEXT NOT NULL,
@@ -14424,7 +14448,7 @@ class SyncDatabase:
                 CHECK (storage_namespace_id NOT GLOB '*[^0-9a-f]*')
             );
             """
-        self.backend.create_tables(schema, connection=connection)
+        self._create_schema_tables(schema, connection=connection)
         for statement in (
             """
             CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_unresolved

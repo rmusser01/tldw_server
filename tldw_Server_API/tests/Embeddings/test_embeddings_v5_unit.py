@@ -537,7 +537,7 @@ class TestErrorHandling:
                 allowlisted=True,
             )
 
-        monkeypatch.setattr(emb_ep, "resolve_byok_credentials", _missing)
+        monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_runtime.resolve_byok_credentials", _missing)
 
         response = setup.client.post(
             "/api/v1/embeddings",
@@ -589,7 +589,7 @@ class TestErrorHandling:
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="expired oauth access token")
             return [[0.1, 0.2, 0.3] for _ in texts]
 
-        monkeypatch.setattr(emb_ep, "resolve_byok_credentials", _resolve, raising=True)
+        monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_runtime.resolve_byok_credentials", _resolve, raising=True)
         monkeypatch.setattr(emb_ep, "create_embeddings_batch_async", _fake_batch_async, raising=True)
 
         response = setup.client.post(
@@ -634,7 +634,7 @@ class TestErrorHandling:
             _ = (texts, provider, model_id, dimensions, api_key, metadata)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="oauth auth failure")
 
-        monkeypatch.setattr(emb_ep, "resolve_byok_credentials", _resolve, raising=True)
+        monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_runtime.resolve_byok_credentials", _resolve, raising=True)
         monkeypatch.setattr(emb_ep, "create_embeddings_batch_async", _fake_batch_async, raising=True)
 
         response = setup.client.post(
@@ -1015,7 +1015,7 @@ async def test_mlx_adapter_runtime_error_is_sanitized(monkeypatch):
             return FakeAdapter()
 
     monkeypatch.setattr(mod, "get_or_create_circuit_breaker", lambda provider: FakeBreaker())
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
 
     with pytest.raises(HTTPException) as exc:
         await mod.create_embeddings_with_circuit_breaker(
@@ -1072,7 +1072,7 @@ async def test_adapter_builder_copies_runtime_config_and_preserves_endpoint_prov
             return _Adapter()
 
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: _Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: _Registry())
     executor = mod._EndpointEmbeddingExecutor(
         request=MagicMock(),
         current_user=MagicMock(),
@@ -1181,9 +1181,11 @@ def test_adapter_builder_selects_endpoint_atomically_with_stable_precedence(
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["huggingface", "google"])
+@pytest.mark.parametrize("native_flag", [None, "0", "false"])
 async def test_disabled_embedding_native_adapter_falls_back_to_legacy(
     monkeypatch,
     provider,
+    native_flag,
 ):
     """Opt-in adapters that are disabled remain a clean legacy fallback signal."""
     import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as mod
@@ -1204,9 +1206,24 @@ async def test_disabled_embedding_native_adapter_falls_back_to_legacy(
             return adapters[selected]
 
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
-    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", raising=False)
-    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE", raising=False)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: _Registry())
+    for flag in (
+        "LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE",
+        "LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE",
+    ):
+        if native_flag is None:
+            monkeypatch.delenv(flag, raising=False)
+        else:
+            monkeypatch.setenv(flag, native_flag)
+    native_client = MagicMock(side_effect=AssertionError("Unexpected native HTTP dispatch"))
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter.create_client",
+        native_client,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.LLM_Calls.providers.huggingface_embeddings_adapter.create_client",
+        native_client,
+    )
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: _Registry())
     credentials = mod.ResolvedByokCredentials(
         provider=provider,
         api_key="runtime-key",
@@ -1228,6 +1245,7 @@ async def test_disabled_embedding_native_adapter_falls_back_to_legacy(
         dimensions=None,
         credentials=credentials,
     ) is None
+    native_client.assert_not_called()
 
 
 @pytest.mark.unit
@@ -1253,7 +1271,7 @@ async def test_plain_not_implemented_adapter_failure_never_triggers_legacy_repla
             return _Adapter()
 
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: _Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: _Registry())
     credentials = mod.ResolvedByokCredentials(
         provider="huggingface",
         api_key="runtime-key",
@@ -1317,7 +1335,7 @@ async def test_adapter_provider_failure_becomes_bounded_embedding_error_without_
             return _Adapter()
 
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: _Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: _Registry())
     credentials = mod.ResolvedByokCredentials(
         provider=provider,
         api_key="runtime-key",
@@ -1382,7 +1400,7 @@ async def test_raw_adapter_auth_http_failure_becomes_detached_upstream_502(
             return _Adapter()
 
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: _Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: _Registry())
     credentials = mod.ResolvedByokCredentials(
         provider="google",
         api_key="runtime-key",
@@ -1495,7 +1513,7 @@ async def test_openai_oauth_adapter_refreshes_once_only_after_401(
 
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", _resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: _Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: _Registry())
     executor = mod._EndpointEmbeddingExecutor(
         request=MagicMock(),
         current_user=MagicMock(),
@@ -1656,7 +1674,7 @@ async def test_provider_http_error_body_is_sanitized(
 
     monkeypatch.setattr(mod, "get_or_create_circuit_breaker", lambda selected: FakeBreaker())
     monkeypatch.setattr(mod.connection_manager, "get_session", AsyncMock(return_value=object()))
-    monkeypatch.setattr(mod, "_http_afetch", fake_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", fake_afetch)
 
     with pytest.raises(HTTPException) as exc:
         await mod.create_embeddings_with_circuit_breaker(
@@ -1763,7 +1781,7 @@ async def test_google_batch_embeddings_encodes_model_and_uses_header_auth(
 
     monkeypatch.setattr(mod, "get_or_create_circuit_breaker", lambda _provider: FakeBreaker())
     monkeypatch.setattr(mod.connection_manager, "get_session", AsyncMock(return_value=object()))
-    monkeypatch.setattr(mod, "_http_afetch", fake_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", fake_afetch)
 
     result = await mod.create_embeddings_with_circuit_breaker(
         ["alpha"],
@@ -1803,7 +1821,7 @@ async def test_google_batch_embeddings_rejects_unsafe_model_before_transport(
 
     monkeypatch.setattr(mod, "get_or_create_circuit_breaker", lambda _provider: FakeBreaker())
     monkeypatch.setattr(mod.connection_manager, "get_session", AsyncMock(return_value=object()))
-    monkeypatch.setattr(mod, "_http_afetch", fail_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", fail_afetch)
 
     with pytest.raises(HTTPException, match="model identifier") as exc_info:
         await mod.create_embeddings_with_circuit_breaker(
@@ -1863,7 +1881,7 @@ async def test_concurrent_google_batch_embeddings_keep_model_key_and_payload_req
 
     monkeypatch.setattr(mod, "get_or_create_circuit_breaker", lambda _provider: FakeBreaker())
     monkeypatch.setattr(mod.connection_manager, "get_session", AsyncMock(return_value=object()))
-    monkeypatch.setattr(mod, "_http_afetch", gated_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", gated_afetch)
 
     async def invoke(model, key, text):
         return await mod.create_embeddings_with_circuit_breaker(
@@ -1940,7 +1958,7 @@ async def test_explicit_remote_fallback_reaches_http_with_exact_key_base_model_a
 
     monkeypatch.setattr(mod, "get_or_create_circuit_breaker", lambda _provider: FakeBreaker())
     monkeypatch.setattr(mod.connection_manager, "get_session", AsyncMock(return_value=object()))
-    monkeypatch.setattr(mod, "_http_afetch", fake_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", fake_afetch)
     monkeypatch.setattr(mod, "batching_create_embeddings_batch_async", fail_local_batcher)
 
     config = mod.build_provider_config(
@@ -2030,7 +2048,7 @@ async def test_concurrent_explicit_remote_fallback_keeps_credential_snapshot_req
 
     monkeypatch.setattr(mod, "get_or_create_circuit_breaker", lambda _provider: FakeBreaker())
     monkeypatch.setattr(mod.connection_manager, "get_session", AsyncMock(return_value=object()))
-    monkeypatch.setattr(mod, "_http_afetch", gated_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", gated_afetch)
     monkeypatch.setattr(mod, "batching_create_embeddings_batch_async", fail_local_batcher)
 
     async def invoke(label):
@@ -2119,7 +2137,7 @@ async def test_key_only_remote_fallback_uses_same_adapter_default_base(
 
     monkeypatch.setattr(mod, "get_or_create_circuit_breaker", lambda _provider: FakeBreaker())
     monkeypatch.setattr(mod.connection_manager, "get_session", AsyncMock(return_value=object()))
-    monkeypatch.setattr(mod, "_http_afetch", fake_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", fake_afetch)
     monkeypatch.setattr(mod, "batching_create_embeddings_batch_async", fail_local_batcher)
 
     config = mod.build_provider_config(
@@ -2189,7 +2207,7 @@ async def test_concurrent_keyless_local_and_key_only_remote_hf_do_not_exchange_m
     monkeypatch.delenv("HUGGINGFACE_INFERENCE_BASE_URL", raising=False)
     monkeypatch.setattr(mod, "get_or_create_circuit_breaker", lambda _provider: FakeBreaker())
     monkeypatch.setattr(mod.connection_manager, "get_session", AsyncMock(return_value=object()))
-    monkeypatch.setattr(mod, "_http_afetch", gated_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", gated_afetch)
     monkeypatch.setattr(mod, "batching_create_embeddings_batch_async", gated_local_batcher)
 
     local_config = mod.build_provider_config(

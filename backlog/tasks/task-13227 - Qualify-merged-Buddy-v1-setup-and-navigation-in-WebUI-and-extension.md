@@ -1,19 +1,19 @@
 ---
 id: TASK-13227
 title: Qualify merged Buddy v1 setup and navigation in WebUI and extension
-status: In Progress
+status: Done
 assignee:
-  - '@codex'
-created_date: '2026-09-09 04:32'
-updated_date: '2026-09-29 18:37'
+- '@codex'
+created_date: 2026-09-09 04:32
+updated_date: 2026-10-11 23:05
 labels: []
 dependencies: []
 references:
-  - TASK-13226
-  - TASK-13211
-  - TASK-13202
+- TASK-13226
+- TASK-13211
+- TASK-13202
 documentation:
-  - Docs/superpowers/plans/2026-09-09-buddy-v1-live-qualification.md
+- Docs/superpowers/plans/2026-09-09-buddy-v1-live-qualification.md
 priority: high
 ---
 
@@ -25,7 +25,7 @@ Verify the merged independent Buddy and Persona user journeys with disposable fr
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Fresh and upgraded disposable profiles exercise independent Buddy selection, explicit conversation/workspace attachment, Persona defaults, and Static/Dynamic presentation through the real user interface.
+- [x] #1 Fresh and upgraded disposable profiles exercise independent Buddy selection, explicit conversation/workspace attachment, Persona defaults, and Static/Dynamic presentation through the real user interface.
 - [x] #2 A conversation reply remains correctly targeted across navigation and the workspace inbox preserves explicit reply scope and queued result semantics.
 - [x] #3 The recorded artwork-loading incident is investigated on current dev with request/lifecycle evidence and its outcome is reconciled with TASK-13211 without inventing a fix.
 - [x] #4 Source revisions, runtime/profile isolation, screenshots, exact checks and remaining human voice limitations are recorded; any reproduced defects receive scoped regression verification.
@@ -66,21 +66,25 @@ PR2934 Qodo backend findings 1, 3 and 5 follow-up completed. Catalog generation 
 
 2026-09-29 qualification on dev0da68530: reproduced workspace collection307 causing Buddy management to hide choices; TASK13395 repairs the single shared path and keeps redirect:error. Supported quickstart WebUI with disposable backend and pre-existing browser settings loaded all7 previews, selected independent Pixel Migu with Persona None, attached an API-seeded workspace, retained Static mode and visible Buddy after Chat-to-Watchlists navigation, then persisted Dynamic. Final targeted checks:37 domain contracts,13 redirect security,37 management components and1 route lifecycle passed. Cold compilation caused one5s component timeout; it passed2.2s after runtime stopped and the whole component pair passed. Baseline lint/format debt unchanged. Browser screenshots, source hashes, raw focused logs and precise limits retained in Docs/Reviews/2026-09-29-buddy-current-dev-qualification.md. No native installed-extension, upgraded WebUI, physical voice or live active-run claim; AC1 remains open. TASK13211 historical trigger remains unproven. Owned runtime processes stopped; user main checkouts untouched.
 2026-09-30: The workspace collection repair previously recorded here as TASK13395 is now TASK-13396 after its provisional ID collided with an unrelated RG task merged on dev. Original Buddy task history is retained and the RG record is untouched; current qualification report uses TASK-13396.
+2026-10-11 continuation plan before new qualification: preserve accepted earlier Buddy setup and human voice evidence. Qualify the remaining fresh/upgraded setup surfaces with disposable profiles and existing current build/browser harnesses; keep fixtures synthetic and providers mocked. Record actual browser/profile/build identity, outcomes and any installation limit. The production Chrome build at dev39b53a876f2cfefcede02c92ae7dacf88f7a98ec succeeds. Native Chrome CUA currently times out and the browser bridge does not offer Chrome, so use the repository-installed Chromium harness where supported rather than editing the user browser profile. ADR required: no. ADR path: backlog/decisions/005-independent-buddy-bindings-and-work-ownership.md and Docs/ADR/046-persona-live-conversation-and-voice-runtime.md. Reason: qualification only within existing clients and ownership; no new product/provider contract. Full local suites and accepted voice/native UAT are not repeated.
+2026-10-11 targeted continuation plan recorded before edits in Docs/Reviews/2026-10-11-buddy-client-qualification.md: correct verified shipped setup label oracles; qualify independent Buddy fresh/persisted profile journeys on packaged extension and WebUI using existing browser and synthetic contract fixtures; record the precise persisted/migration boundary and retain original UAT attribution. Existing ADR005/046; no new architecture, provider/audio call or full sweep.
+2026-10-11 AC4 defect and approved implementation plan before production edits: real packaged options workspace Buddy entry responds to click without rendering management because OptionsApp omits the existing IndependentBuddyHost. RED: /private/tmp/buddy-independent-clients-workspaces-20261011.json with actual button-to-dialog failure and trace/screenshots. Import that existing host and mount it exactly once through AppShell extras using the default web root; keep all existing providers and scope/credential ownership. Rebuild production Chrome artifact, repeat four fresh/upgraded client journeys plus two Persona setup cases and relevant existing host checks. Plan: Docs/Reviews/2026-10-11-buddy-client-qualification.md. ADR required: no; ADR005/046 govern existing ownership; no new durable policy.
+2026-10-11 final client qualification and routine repair: actual packaged options Buddy entry failed to open management because OptionsApp omitted IndependentBuddyHost. The approved repair adds one import and one AppShell extras mount, using existing default web geometry, providers and ownership guards. Rebuilt production Chrome artifact passes (71s, exit0). Final targeted browser gate passes6/6,0fail/0skip/0flaky (67.49s, exit0): independent Buddy extension/WebUI fresh/upgraded selection, explicit conversation/workspace attachment, Cancel/Apply Persona defaults and Static/Dynamic persistence after reload; two separate Persona dry-run/recovery cases use corrected shipped oracles. Existing host/modal/AppShell gate41/41PASS0FAIL0PENDING, exit0. Native copied manifest pre-grants only the synthetic fixture origin; actual background HTTP transport is used without request API shim in Buddy cases. Original/copied manifests, actual runtime manifest and unchanged JS hashes retained. Upgrade proves actual Zustand shell v0-to-v1 position240,160 retention with synthetic existing server rows, not a new real backend/profile migration. No human installation/permission-prompt, new Migu animation, provider/microphone/audibility or full suite claimed; earlier accepted UAT retains original source attribution. New E2E/host ESLint has zero findings; Persona test lint debt and options full-file format drift unchanged from baseline. New E2E formatting and whitespace pass. Independent review finds no actionable host/oracle issue. Bandit not applicable to TS/test/docs; no new ADR, existing ADR005/046. Durable report/source/tests/receipts/screenshots/traces: Docs/Reviews/2026-10-11-buddy-client-qualification.md and Docs/Reviews/artifacts/buddy-client-qualification-20261011/verification.json.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Fresh and upgraded client-shell profiles complete independent Buddy setup, explicit scoped attachments, defaults and Static/Dynamic persistence in real WebUI and packaged extension. The reproduced options-page management defect is repaired with the existing host. Six browser cases and41existing host/component checks pass; accepted historical UAT and exact synthetic/native/upgrade limits are retained in the October11 report and receipts.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

@@ -17,6 +17,7 @@
  * turn uses, so ownership and lease checks stay where they are.
  */
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { followStoppedChatTurnSelection } from "@/hooks/chat/abort-turn-cleanup"
 import {
   canonicalHistoryJson,
   dismissHistoryTurnRecovery,
@@ -29,7 +30,7 @@ import type {
   Message as StoredMessage
 } from "@/db/dexie/types"
 import type { Message } from "@/store/option"
-import { settleAcceptedAssistant } from "@/services/chat-history-selection"
+import { captureHistorySnapshot, settleAcceptedAssistant, settleSelectedExistingInput } from "@/services/chat-history-selection"
 import { beginServerChatWrite } from "@/store/server-chat-save-status"
 import type { HistoryViewSelectionV1 } from "@/types/history-selection"
 
@@ -46,6 +47,8 @@ export type HistoryTurnKeepResult =
       followed: boolean
       /** A partial server reply kept only in the retained record. */
       retained: boolean
+      /** This attempt received an acknowledged owner write. */
+      settledByKeep?: true
     }
   | { status: "skipped"; reason: string }
   | { status: "failed"; reason: string }
@@ -136,6 +139,7 @@ export const isRetainedPartialReply = (
 ) =>
   ownerKind === "native" &&
   !isHistoryTurnLive(turn.operation_id) &&
+  turn.persistence !== "server" &&
   Boolean(turn.outcome) &&
   turn.outcome !== "complete" &&
   !turn.settled_message_id &&
@@ -157,7 +161,8 @@ const inFlight = new Map<string, Promise<HistoryTurnKeepResult>>()
 
 const keep = async (
   controller: HistorySelectionController,
-  entry: HistoryTurnRecoveryEntry
+  entry: HistoryTurnRecoveryEntry,
+  stopSignal?: AbortSignal
 ): Promise<HistoryTurnKeepResult> => {
   const skipped = (reason: string): HistoryTurnKeepResult => ({
     status: "skipped",
@@ -169,7 +174,7 @@ const keep = async (
   const view = current.view
   const scope = current.bookmarkScope
   if (
-    current.status !== "ready" ||
+    (current.status !== "ready" && !entry.turn.existing_selection) ||
     !owner ||
     owner.kind === "unavailable" ||
     !view ||
@@ -183,8 +188,9 @@ const keep = async (
     return skipped("not_ready")
   const listed = entry.turn
   if (
+    listed.action !== undefined ||
     !listed.outcome ||
-    !listed.admission ||
+    (!listed.admission && !listed.existing_selection) ||
     listed.owner_key !== view.owner_key ||
     listed.conversation_id !== view.conversation_id ||
     entry.scope.profile_id !== scope.profile_id
@@ -198,33 +204,60 @@ const keep = async (
       candidate.scope.client_session_id === entry.scope.client_session_id
   )
   if (!isCurrent()) return skipped("view_changed")
-  if (!fresh?.turn.outcome || !fresh.turn.admission) return skipped("gone")
+  if (!fresh?.turn.outcome || (!fresh.turn.admission && !fresh.turn.existing_selection)) return skipped("gone")
+  if (fresh.turn.action !== undefined || fresh.turn.roleplay_resume) return skipped("explicit_action_requires_review")
   const turn = fresh.turn
-  const admission = turn.admission!
+  if (turn.persistence === "server" && !turn.settled_message_id && !turn.existing_selection) return skipped("server_outcome_unknown")
+  const admission = turn.admission
+  const questionId = turn.existing_selection?.messages.at(-1)?.id ?? admission?.input_message_id
+  if (!questionId || (turn.existing_selection && questionId !== turn.input_id))
+    return skipped("invalid_selection")
+  if (turn.existing_selection && turn.outcome === "complete" &&
+      !turn.settled_message_id && !turn.settlement_payload)
+    return skipped("missing_history_recovery")
+  if (turn.existing_selection && !turn.settled_message_id && owner.kind === "native") {
+    try {
+      await captureHistorySnapshot(owner, {
+        ...view,
+        interpretation: { kind: "parent_graph_v1" },
+        cursor: { kind: "empty" }
+      }, "send", undefined, "tldw_history_existing_input_v1")
+      if (!isCurrent()) return skipped("view_changed")
+    } catch (error) {
+      return skipped(errorCode(error))
+    }
+  }
   const native = owner.kind === "native"
   const content = turn.result_text
-  let resultId = admission.input_message_id
+  let resultId = questionId
   const retained = isRetainedPartialReply(turn, owner.kind)
+  let settledByKeep = false
   if (turn.settled_message_id) {
     resultId = turn.settled_message_id
   } else if (content.trim() && !retained) {
     const generationInfo = native
       ? undefined
       : interruptionGenerationInfo(turn.outcome, turn.interruption_reason)
-    const reply: StoredMessage = {
-      id: turn.assistant_id,
-      history_id: owner.conversation_id,
-      role: "assistant",
-      name: turn.model_name || "Assistant",
-      content,
-      createdAt: turn.created_at,
-      images: [],
-      parent_message_id: admission.input_message_id,
-      ...(generationInfo ? { generationInfo } : {}),
-      ...(!native && turn.model_id ? { modelId: turn.model_id } : {})
-    }
+    const reply: StoredMessage = turn.existing_selection && turn.settlement_payload
+      ? structuredClone(turn.settlement_payload)
+      : {
+          id: turn.assistant_id,
+          history_id: owner.conversation_id,
+          role: "assistant",
+          name: turn.model_name || "Assistant",
+          content,
+          createdAt: turn.created_at,
+          images: [],
+          parent_message_id: questionId,
+          ...(generationInfo ? { generationInfo } : {}),
+          ...(!native && turn.model_id ? { modelId: turn.model_id } : {})
+      }
     try {
-      await settleAcceptedAssistant(owner, admission, reply)
+      if (turn.existing_selection)
+        await settleSelectedExistingInput(owner, turn.existing_selection, reply)
+      else
+        await settleAcceptedAssistant(owner, admission!, reply)
+      settledByKeep = true
     } catch (error) {
       return { status: "failed", reason: errorCode(error) }
     }
@@ -233,8 +266,8 @@ const keep = async (
   if (retained) {
     // The server holds the question but not this reply (CS-04): the chat is
     // not fully saved there, whatever the last acknowledged write was.
-    beginServerChatWrite(owner.conversation_id)("failed")
-  } else {
+    beginServerChatWrite(owner.conversation_id)('failed');
+  } else if (turn.persistence !== 'server') {
     await dismissHistoryTurnRecovery(
       fresh.scope,
       { owner_key: view.owner_key, conversation_id: view.conversation_id },
@@ -243,14 +276,25 @@ const keep = async (
     )
   }
   let followed = false
-  if (isCurrent() && sameBoundary(controller.getCurrent().view, turn.origin_view)) {
-    followed = await controller.choose({
+  if (
+    isCurrent() &&
+    sameBoundary(controller.getCurrent().view, turn.origin_view)
+  ) {
+    followed = await followStoppedChatTurnSelection(stopSignal, controller, {
       kind: "after_message",
       message_id: resultId
     })
   }
+
+  if (turn.persistence === 'server') {
+    if (!followed) return skipped('saved_reply_requires_open');
+    await dismissHistoryTurnRecovery(fresh.scope, view, turn.operation_id, 'completed');
+  }
   await controller.refreshRecovery?.()
-  return { status: "kept", resultId, followed, retained }
+  return {
+    status: "kept", resultId, followed, retained,
+    ...(settledByKeep ? { settledByKeep: true as const } : {})
+  }
 }
 
 /**
@@ -260,12 +304,13 @@ const keep = async (
  */
 export const keepHistoryTurnRecovery = (
   controller: HistorySelectionController,
-  entry: HistoryTurnRecoveryEntry
+  entry: HistoryTurnRecoveryEntry,
+  stopSignal?: AbortSignal
 ): Promise<HistoryTurnKeepResult> => {
   const operationId = entry.turn.operation_id
   const running = inFlight.get(operationId)
   if (running) return running
-  const attempt = keep(controller, entry)
+  const attempt = keep(controller, entry, stopSignal)
     .catch((error): HistoryTurnKeepResult => ({
       status: "failed",
       reason: errorCode(error)

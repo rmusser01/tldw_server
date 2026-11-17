@@ -15,10 +15,18 @@ existing one is expected to shrink the baseline.
 It is deliberately a static scan rather than a live `information_schema` query
 so that it runs in ordinary CI with no database, which is where new tables
 actually arrive.
+
+Python sources are also read through the AST, because policies are often built
+from f-string placeholders: ``add_tenant_policy("notes", ...)`` or
+``for table in ("a", "b"): add(f"CREATE POLICY ... ON {table}")``. A regex over
+the text never sees the table name next to CREATE POLICY there, so those tables
+would read as unprotected forever.
 """
 
 from __future__ import annotations
 
+import ast
+import itertools
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,6 +74,14 @@ _DYNAMIC_CREATE_TABLE_RE = re.compile(
 )
 
 SCANNED_SUFFIXES = (".py", ".sql")
+
+# Only modules mentioning RLS can build a policy; skipping the rest keeps the
+# AST pass off the thousands of files that cannot matter.
+_RLS_HINT_RE = re.compile(r"CREATE\s+POLICY|ROW\s+LEVEL\s+SECURITY", re.IGNORECASE)
+# Rendered in place of a placeholder the scan cannot resolve. No identifier
+# pattern above matches it, so an unknown name never counts as coverage.
+_UNRESOLVED = "\x00"
+_PARAM_SENTINEL = "__rls_param_{}__"
 
 
 class RatchetError(AssertionError):
@@ -116,6 +132,172 @@ def _column_list(text: str, open_paren_index: int) -> str:
     return text[open_paren_index + 1 :]
 
 
+def _literal_strings(node: ast.AST | None, scopes: list[ast.AST]) -> list[str] | None:
+    """String constants of a tuple/list/set literal or dict keys; None if not all literal."""
+    if isinstance(node, ast.Name):
+        node = _assigned_value(node.id, scopes)
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        items: list[ast.expr | None] = list(node.elts)
+    elif isinstance(node, ast.Dict):
+        items = list(node.keys)
+    else:
+        return None
+    values = [
+        item.value
+        for item in items
+        if isinstance(item, ast.Constant) and isinstance(item.value, str)
+    ]
+    return values if len(values) == len(items) else None
+
+
+def _assigned_value(name: str, scopes: list[ast.AST]) -> ast.AST | None:
+    """The value of the single assignment to ``name``, innermost scope first."""
+    for scope in scopes:
+        nodes = ast.walk(scope) if not isinstance(scope, ast.Module) else iter(scope.body)
+        values = [
+            node.value
+            for node in nodes
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            and node.value is not None
+            and any(
+                isinstance(target, ast.Name) and target.id == name
+                for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+            )
+        ]
+        if values:
+            return values[0] if len(values) == 1 else None
+    return None
+
+
+def _loop_bindings(loop: ast.For, scopes: list[ast.AST]) -> list[dict[str, str]] | None:
+    """One {name: value} per iteration of a loop over literal strings, else None.
+
+    Handles ``for t in (...)`` and ``for t, p in d.items()``, where the iterable
+    is a literal or a name assigned one.
+    """
+    target, source = loop.target, loop.iter
+    if (
+        isinstance(source, ast.Call)
+        and isinstance(source.func, ast.Attribute)
+        and source.func.attr == "items"
+        and isinstance(target, ast.Tuple)
+    ):
+        source, target = source.func.value, target.elts[0]
+    values = _literal_strings(source, scopes)
+    if values is None or not isinstance(target, ast.Name):
+        return None
+    return [{target.id: value} for value in values]
+
+
+def _render(node: ast.JoinedStr, binding: dict[str, str]) -> str:
+    parts = []
+    for value in node.values:
+        if isinstance(value, ast.Constant):
+            parts.append(str(value.value))
+        elif isinstance(value, ast.FormattedValue) and isinstance(value.value, ast.Name):
+            parts.append(binding.get(value.value.id, _UNRESOLVED))
+        else:
+            parts.append(_UNRESOLVED)
+    return "".join(parts)
+
+
+_POLICY_KINDS = (
+    ("policy", _CREATE_POLICY_RE),
+    ("enabled", _ENABLE_RLS_RE),
+    ("forced", _FORCE_RLS_RE),
+)
+
+
+def _scan_python_policies(text: str, path: Path, found: dict[str, set[str]]) -> None:
+    """Add tables whose policy DDL is built from f-string placeholders.
+
+    Two shapes are resolved: an f-string inside loops over literal names, and
+    a helper whose f-strings put a parameter in the table position, credited
+    with each literal (or loop-bound) argument it is called with in the module.
+    Anything else stays unresolved and earns no coverage.
+    """
+    try:
+        tree = ast.parse(text, filename=str(path))
+    except SyntaxError as exc:
+        raise RatchetError(
+            f"Could not parse {path} while scanning for RLS policies. Coverage "
+            "cannot be established from partial input."
+        ) from exc
+
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+
+    def context(
+        node: ast.AST,
+    ) -> tuple[list[dict[str, str]], list[ast.AST], ast.FunctionDef | ast.AsyncFunctionDef | None]:
+        """Loop bindings around ``node``, its enclosing scopes, and its function."""
+        loops: list[ast.For] = []
+        scopes: list[ast.AST] = []
+        function: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+        current = parents.get(node)
+        while current is not None:
+            if isinstance(current, ast.For) and not scopes:
+                loops.append(current)
+            elif isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+                scopes.append(current)
+                if function is None and not isinstance(current, ast.Module):
+                    function = current
+            current = parents.get(current)
+        per_loop = [b for b in (_loop_bindings(loop, scopes) for loop in loops) if b is not None]
+        bindings = [
+            {key: value for binding in combo for key, value in binding.items()}
+            for combo in itertools.product(*per_loop)
+        ]
+        return bindings, scopes, function
+
+    # helper name -> [(parameter index, parameter name, kind)]
+    helpers: dict[str, list[tuple[int, str, str]]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.JoinedStr):
+            continue
+        bindings, _scopes, function = context(node)
+        # sentinel -> (index, name) for the enclosing function's positional parameters
+        params: dict[str, tuple[int, str]] = {}
+        if function is not None:
+            positional = function.args.posonlyargs + function.args.args
+            params = {
+                _PARAM_SENTINEL.format(i): (i, arg.arg) for i, arg in enumerate(positional)
+            }
+        as_placeholders = {name: sentinel for sentinel, (_i, name) in params.items()}
+        for binding in bindings:
+            rendered = _render(node, {**as_placeholders, **binding})
+            for kind, pattern in _POLICY_KINDS:
+                for match in pattern.finditer(rendered):
+                    table = _normalise(match.group(1))
+                    if table in params and function is not None:
+                        index, name = params[table]
+                        helpers.setdefault(function.name, []).append((index, name, kind))
+                    elif not table.startswith("__rls_param_"):
+                        found[kind].add(table)
+
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        facts = helpers.get(node.func.id)
+        if not facts:
+            continue
+        bindings, _scopes, _function = context(node)
+        for index, name, kind in facts:
+            argument = node.args[index] if index < len(node.args) else next(
+                (kw.value for kw in node.keywords if kw.arg == name), None
+            )
+            if isinstance(argument, ast.Starred):
+                continue
+            if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                found[kind].add(_normalise(argument.value))
+            elif isinstance(argument, ast.Name):
+                found[kind].update(
+                    _normalise(b[argument.id]) for b in bindings if argument.id in b
+                )
+
+
 def scan_source(roots: list[Path]) -> CoverageReport:
     """Collect tenant-owned table names and tables carrying an RLS policy."""
     owned: set[str] = set()
@@ -149,6 +331,13 @@ def scan_source(roots: list[Path]) -> CoverageReport:
 
             for match in _FORCE_RLS_RE.finditer(text):
                 rls_forced.add(_normalise(match.group(1)))
+
+            if path.suffix == ".py" and _RLS_HINT_RE.search(text):
+                _scan_python_policies(
+                    text,
+                    path,
+                    {"policy": with_policy, "enabled": rls_enabled, "forced": rls_forced},
+                )
 
             for match in _CREATE_TABLE_RE.finditer(text):
                 body = _column_list(text, match.end() - 1)

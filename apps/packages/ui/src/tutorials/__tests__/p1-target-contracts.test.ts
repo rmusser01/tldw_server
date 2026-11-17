@@ -11,6 +11,40 @@ const readSource = (relativePath: string): string =>
   readFileSync(path.resolve(srcRoot, relativePath), "utf8")
 
 describe("P0/P1 tutorial selector contracts", () => {
+  it("keeps Basics actionable when Casual chat hides its prompt row and the global header", () => {
+    const steps = getTutorialById("playground-basics")!.steps
+    // The actual default Casual composer has these permanent entry controls.
+    const controls = [
+      '[data-testid="model-selector"]',
+      '[data-testid="chat-input"]',
+      '[data-testid="composer-options-toggle"]'
+    ]
+    const collapsedProControls = ['[data-testid="chat-input"]']
+    expect(
+      steps.every((step) =>
+        step.target
+          .split(",")
+          .some((target) => collapsedProControls.includes(target.trim()))
+      )
+    ).toBe(true)
+    const proMobileControls = [
+      '[data-testid="model-selector"]',
+      '[data-testid="chat-input"]'
+    ]
+    expect(
+      steps.every((step) =>
+        step.target
+          .split(",")
+          .some((target) => proMobileControls.includes(target.trim()))
+      )
+    ).toBe(true)
+    expect(
+      steps.every((step) =>
+        step.target.split(",").some((target) => controls.includes(target.trim()))
+      )
+    ).toBe(true)
+  })
+
   it("keeps every Watchlists tutorial target on a permanent reachable page region", () => {
     const tutorial = getTutorialById("watchlists-basics")
     const pageContent = readSource(
@@ -75,7 +109,10 @@ describe("P0/P1 tutorial selector contracts", () => {
   })
 
   it("keeps required playground tutorial anchors in source", () => {
-    const formContent = readSource("components/Option/Playground/PlaygroundForm.tsx")
+    const formContent = [
+      "PlaygroundForm.tsx", "ChatModelSelectorDropdown.tsx", "PlaygroundToolsPopover.tsx",
+      "PlaygroundSendControl.tsx", "PlaygroundMcpControl.tsx"
+    ].map(file => readSource(`components/Option/Playground/${file}`)).join("\n")
     const toolbarContent = readSource("components/Option/Playground/ComposerToolbar.tsx")
     const textareaContent = readSource("components/Option/Playground/ComposerTextarea.tsx")
     const promptSelectContent = readSource("components/Common/PromptSelect.tsx")
@@ -151,7 +188,7 @@ describe("P0/P1 tutorial selector contracts", () => {
   })
 
   it("keeps required characters tutorial anchors in source", () => {
-    const managerContent = readSource("components/Option/Characters/Manager.tsx")
+    const managerContent = ["Manager.tsx", "CharacterListToolbar.tsx", "CharacterListContent.tsx"].map(file => readSource(`components/Option/Characters/${file}`)).join("\n")
     const anchors = [
       'data-testid="characters-new-button"',
       'data-testid="characters-search-input"',
@@ -237,7 +274,7 @@ describe("P0/P1 tutorial selector contracts", () => {
     const reviewContent = readSource("components/Flashcards/tabs/ReviewTab.tsx")
     const manageContent = readSource("components/Flashcards/tabs/ManageTab.tsx")
     const importExportContent = readSource(
-      "components/Flashcards/tabs/ImportExportTab.tsx"
+      "components/Flashcards/tabs/ImportExport/ImportPanel.tsx"
     )
 
     expect(managerContent).toContain('data-testid="flashcards-tabs"')
@@ -256,7 +293,7 @@ describe("P0/P1 tutorial selector contracts", () => {
     const workspaceContent = readSource(
       "components/Option/WorldBooks/WorldBooksWorkspace.tsx"
     )
-    const managerContent = readSource("components/Option/WorldBooks/Manager.tsx")
+    const managerContent = ["Manager.tsx", "WorldBookToolbar.tsx", "WorldBookListPanel.tsx"].map(file => readSource(`components/Option/WorldBooks/${file}`)).join("\n")
 
     expect(workspaceContent).toContain('data-testid="world-books-tutorial-shell"')
     expect(managerContent).toContain('data-testid="world-books-search-input"')

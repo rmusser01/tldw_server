@@ -593,7 +593,7 @@ Workflow conflict codes:
 | File | Description |
 |------|-------------|
 | `app/core/DB_Management/Kanban_DB.py` | Database layer with all CRUD operations |
-| `app/core/DB_Management/kanban_vector_search.py` | ChromaDB vector search integration |
+| `app/core/Kanban/vector_search.py` | ChromaDB vector search integration |
 | `app/api/v1/endpoints/kanban_*.py` | API endpoint handlers |
 | `app/api/v1/endpoints/kanban/kanban_workflow.py` | Workflow policy/state/lease/transition/recovery endpoints |
 | `app/api/v1/schemas/kanban_schemas.py` | Pydantic models |

@@ -193,6 +193,8 @@ export interface ACPWSUpdateMessage {
   type: "update"
   session_id: string
   update_type: string
+  /** Server-computed RPC activity; absent on older servers. */
+  prompt_active?: boolean
   data: Record<string, unknown>
 }
 
@@ -228,6 +230,11 @@ export interface ACPWSPromptCompleteMessage {
   usage?: ACPTokenUsage | null
 }
 
+export interface ACPWSPromptSettledMessage {
+  type: "prompt_settled"
+  session_id: string
+}
+
 export interface ACPWSDoneMessage {
   type: "done"
 }
@@ -238,6 +245,7 @@ export type ACPWSServerMessage =
   | ACPWSPermissionRequestMessage
   | ACPWSErrorMessage
   | ACPWSPromptCompleteMessage
+  | ACPWSPromptSettledMessage
   | ACPWSDoneMessage
 
 // -----------------------------------------------------------------------------
@@ -378,6 +386,7 @@ export interface ACPSessionListItem {
   usage: ACPTokenUsage
   tags: string[]
   has_websocket: boolean
+  runtime_available?: boolean | null
   persona_id?: string | null
   workspace_id?: string | null
   workspace_group_id?: string | null
@@ -452,6 +461,7 @@ export interface ACPSession {
   sshWsUrl?: string | null
   sshUser?: string | null
   backendStatus?: ACPBackendSessionStatus | null
+  runtimeAvailable?: boolean | null
   messageCount?: number
   usage?: ACPTokenUsage | null
   lastActivityAt?: Date | null
@@ -474,7 +484,7 @@ export interface ACPUpdate {
 export type ParsedUpdateMessage =
   | { role: "user"; content: string }
   | { role: "assistant"; content: string }
-  | { role: "tool"; toolName: string; toolArgs: Record<string, unknown> }
+  | { role: "tool"; toolName: string; toolArgs: Record<string, unknown>; toolStatus?: string; toolResult?: unknown }
   | { role: "tool_result"; toolName: string; result: unknown }
   | { role: "error"; content: string }
   | { role: "system"; content: string }

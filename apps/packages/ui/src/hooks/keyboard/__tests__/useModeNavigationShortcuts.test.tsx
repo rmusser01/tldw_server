@@ -51,7 +51,7 @@ describe("useModeNavigationShortcuts", () => {
     expect(useRouteTransitionStore.getState().pendingPath).toBeNull()
   })
 
-  it("does not navigate while an editable element is focused", () => {
+  it("still navigates from an editable element when Alt+digit types no text, as on Windows and Linux (XP-10)", () => {
     const navigate = vi.fn()
     const input = document.createElement("input")
     document.body.appendChild(input)
@@ -65,7 +65,7 @@ describe("useModeNavigationShortcuts", () => {
       )
     })
 
-    expect(navigate).not.toHaveBeenCalled()
-    expect(useRouteTransitionStore.getState().pendingPath).toBeNull()
+    expect(navigate).toHaveBeenCalledWith("/sources")
+    expect(useRouteTransitionStore.getState().pendingPath).toBe("/sources")
   })
 })

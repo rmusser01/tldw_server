@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PresentationStudioPage } from "../PresentationStudioPage"
@@ -18,7 +18,9 @@ const routerMocks = vi.hoisted(() => ({
 }))
 
 const clientMocks = vi.hoisted(() => ({
+  exportPresentation: vi.fn(),
   createPresentation: vi.fn(),
+  patchPresentation: vi.fn(),
   getPresentationMetadata: vi.fn(),
   getSlidesCapabilities: vi.fn(),
   getPresentation: vi.fn(),
@@ -27,6 +29,9 @@ const clientMocks = vi.hoisted(() => ({
   patchVisualStyle: vi.fn(),
   deleteVisualStyle: vi.fn()
 }))
+
+const downloadMock = vi.hoisted(() => vi.fn())
+vi.mock("@/utils/download-blob", () => ({ downloadBlob: downloadMock }))
 
 const standaloneWorkspaceMocks = vi.hoisted(() => ({
   rendered: vi.fn(),
@@ -57,7 +62,9 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   clonePresentationVisualStyleSnapshot: (style: Record<string, unknown> | null | undefined) =>
     style ? { ...style } : null,
   tldwClient: {
+    exportPresentation: (...args: unknown[]) => clientMocks.exportPresentation(...args),
     createPresentation: (...args: unknown[]) => clientMocks.createPresentation(...args),
+    patchPresentation: (...args: unknown[]) => clientMocks.patchPresentation(...args),
     getPresentationMetadata: (...args: unknown[]) => clientMocks.getPresentationMetadata(...args),
     getSlidesCapabilities: (...args: unknown[]) => clientMocks.getSlidesCapabilities(...args),
     getPresentation: (...args: unknown[]) => clientMocks.getPresentation(...args),
@@ -172,7 +179,10 @@ describe("PresentationStudioPage", () => {
   beforeEach(() => {
     usePresentationStudioStore.getState().reset()
     routerMocks.navigate.mockReset()
+    clientMocks.exportPresentation.mockReset()
+    downloadMock.mockReset()
     clientMocks.createPresentation.mockReset()
+    clientMocks.patchPresentation.mockReset()
     clientMocks.getPresentationMetadata.mockReset()
     clientMocks.getSlidesCapabilities.mockReset()
     clientMocks.getPresentation.mockReset()
@@ -230,6 +240,102 @@ describe("PresentationStudioPage", () => {
       content_kinds: { standalone_html: { read: true } },
       generation_modes: { standalone_html: { enabled: true } }
     })
+  })
+
+  it("exports a reopened saved deck without a workspace output card", async () => {
+    const record = structuredRecord("presentation-export", "Saved deck")
+    clientMocks.getPresentation.mockResolvedValue({ record, etag: 'W/"v1"' })
+    render(<PresentationStudioPage mode="detail" projectId={record.id} />)
+    await screen.findByLabelText("Slide title")
+
+    expect(screen.getByRole("button", { name: "Export saved presentation" })).toBeEnabled()
+  })
+
+  it("releases a pending export when account authority changes", async () => {
+    const record = structuredRecord("presentation-export-authority", "Saved deck")
+    clientMocks.getPresentation.mockResolvedValue({ record, etag: 'W/"v1"' })
+    let resolve!: (blob: Blob) => void
+    clientMocks.exportPresentation.mockReturnValueOnce(new Promise(done => { resolve = done }))
+    render(<PresentationStudioPage mode="detail" projectId={record.id} />)
+    await screen.findByLabelText("Slide title")
+    fireEvent.click(screen.getByRole("button", { name: "Export saved presentation" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "JSON" }))
+    const signal = clientMocks.exportPresentation.mock.calls[0][2].abortSignal
+    clientMocks.getPresentationMetadata.mockReturnValue(new Promise(() => {}))
+
+    act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
+    expect(signal.aborted).toBe(true)
+    await act(async () => resolve(new Blob(["previous account export"])))
+    expect(downloadMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps saved-deck style settings collapsed while the editor remains available", async () => {
+    const record = structuredRecord("presentation-layout", "Saved deck")
+    clientMocks.getPresentation.mockResolvedValue({ record, etag: 'W/"v1"' })
+    render(<PresentationStudioPage mode="detail" projectId={record.id} />)
+    expect(await screen.findByLabelText("Slide title")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Export saved presentation" })).toBeVisible()
+    const search = await screen.findByLabelText("Search visual styles")
+    expect(search).not.toBeVisible()
+    const settings = screen.getByText("Visual style settings", { exact: true })
+    fireEvent.click(settings)
+    expect(screen.getByLabelText("Search visual styles")).toBeVisible()
+    fireEvent.click(settings)
+    expect(screen.getByLabelText("Search visual styles")).not.toBeVisible()
+  })
+
+  it("keeps input focus inside the editor and autosaves the real draft", async () => {
+    const record = structuredRecord("presentation-focus", "Focus deck")
+    clientMocks.getPresentation.mockResolvedValue({ record, etag: 'W/"v1"' })
+    clientMocks.patchPresentation.mockImplementation(
+      async (_id: string, payload: Record<string, unknown>) => ({
+        ...record,
+        ...payload,
+        version: 2
+      })
+    )
+    render(<PresentationStudioPage mode="detail" projectId={record.id} />)
+    const title = await screen.findByLabelText("Slide title")
+
+    fireEvent.focus(title)
+    expect(clientMocks.getPresentationMetadata).toHaveBeenCalledTimes(1)
+    fireEvent.change(title, { target: { value: "Edited heading" } })
+    const content = screen.getByLabelText("Slide content")
+    fireEvent.focus(content)
+    fireEvent.change(content, { target: { value: "Edited body" } })
+
+    await waitFor(
+      () => expect(clientMocks.patchPresentation).toHaveBeenCalledTimes(1),
+      { timeout: 3000 }
+    )
+    expect(clientMocks.patchPresentation).toHaveBeenCalledWith(
+      record.id,
+      expect.objectContaining({
+        slides: [
+          expect.objectContaining({
+            title: "Edited heading",
+            content: "Edited body"
+          })
+        ]
+      }),
+      { ifMatch: 'W/"v1"' }
+    )
+    expect(clientMocks.getPresentation).toHaveBeenCalledTimes(1)
+    expect(usePresentationStudioStore.getState().isDirty).toBe(false)
+  })
+
+  it("revalidates when the browser window itself receives focus", async () => {
+    const record = structuredRecord("presentation-window-focus", "Focus deck")
+    clientMocks.getPresentation.mockResolvedValue({ record, etag: 'W/"v1"' })
+    render(<PresentationStudioPage mode="detail" projectId={record.id} />)
+    await screen.findByLabelText("Slide title")
+
+    fireEvent(window, new FocusEvent("focus"))
+
+    await waitFor(() =>
+      expect(clientMocks.getPresentation).toHaveBeenCalledTimes(2)
+    )
+    expect(screen.getByLabelText("Slide title")).toHaveValue("Focus deck slide")
   })
 
   it("creates a blank project from the precreate form and redirects to its detail route", async () => {
@@ -791,6 +897,7 @@ describe("PresentationStudioPage", () => {
     render(<PresentationStudioPage mode="detail" projectId="presentation-style" />)
 
     await screen.findByText("Timeline")
+    fireEvent.click(screen.getByText("Visual style settings", { exact: true }))
     fireEvent.click(screen.getByRole("button", { name: /Timeline/ }))
 
     const state = usePresentationStudioStore.getState()
@@ -975,6 +1082,7 @@ describe("PresentationStudioPage", () => {
 
     render(<PresentationStudioPage mode="detail" projectId="presentation-custom-style" />)
 
+    fireEvent.click(await screen.findByText("Visual style settings", { exact: true }))
     fireEvent.click(await screen.findByTestId("presentation-studio-edit-custom-style"))
     fireEvent.change(screen.getByLabelText("Custom style name"), {
       target: { value: "CGPSC Rapid Review" }

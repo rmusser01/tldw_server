@@ -26,6 +26,19 @@ class _RecordingJobs:
         return True
 
 
+def _seed_pending_authority(db, session):
+    from tldw_Server_API.app.core.Research.phase_dispatch import new_phase_dispatch
+
+    db.compare_and_set_phase(
+        session,
+        phase=session.phase,
+        status=session.status,
+        control_state=session.control_state,
+        active_job_id=None,
+        phase_dispatch_json=new_phase_dispatch(session.phase),
+    )
+
+
 def _set_user_db_base(monkeypatch: pytest.MonkeyPatch, base_dir) -> str | None:
     from tldw_Server_API.app.core.config import settings
 
@@ -190,9 +203,7 @@ def test_get_session_returns_validated_chat_id_for_linked_run(tmp_path, monkeypa
     assert loaded.chat_id == "chat_123"
 
 
-def test_create_session_rolls_back_persisted_run_when_enqueue_fails(tmp_path, monkeypatch):
-    import sqlite3
-
+def test_create_session_retains_pending_authority_when_enqueue_ack_fails(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.Research.service import ResearchService
@@ -227,14 +238,11 @@ def test_create_session_rolls_back_persisted_run_when_enqueue_fails(tmp_path, mo
         _restore_user_db_base(previous_user_db_base)
 
     db = ResearchSessionsDB(tmp_path / "research.db")
-    assert db.list_sessions("1") == []
-
-    with sqlite3.connect(tmp_path / "research.db") as conn:
-        remaining_handoffs = conn.execute(
-            "SELECT COUNT(*) FROM research_chat_handoffs"
-        ).fetchone()[0]
-
-    assert remaining_handoffs == 0
+    sessions = db.list_sessions("1")
+    assert len(sessions) == 1  # nosec B101 -- Unknown admission acknowledgement retains one owned run.
+    assert sessions[0].active_job_id is None  # nosec B101 -- The pending run must not invent a Job binding.
+    assert sessions[0].phase_dispatch_json["dispatch_id"]  # nosec B101 -- Recovery retains one stable dispatch nonce.
+    assert db.get_chat_handoff(sessions[0].id).chat_id == "chat_123"  # nosec B101 -- Unknown acknowledgement preserves the originating Chat association.
 
 
 def test_get_session_returns_null_chat_id_for_unlinked_run(tmp_path):
@@ -1443,6 +1451,7 @@ def test_resume_run_reenqueues_executable_phase_and_restores_checkpoint_wait(tmp
         phase="synthesizing",
         status="queued",
     )
+    _seed_pending_authority(db, queued)
     db.update_control_state(queued.id, control_state="paused")
     checkpoint = db.create_session(
         owner_user_id="1",
@@ -1558,8 +1567,10 @@ def test_pause_and_resume_record_status_events(tmp_path):
         phase="collecting",
         status="queued",
     )
+    _seed_pending_authority(db, resumed)
     db.update_control_state(resumed.id, control_state="paused")
 
+    resume_before_id = db.get_latest_run_event_id(owner_user_id="1", session_id=resumed.id)
     service.pause_run(owner_user_id="1", session_id=paused.id)
     service.resume_run(owner_user_id="1", session_id=resumed.id)
 
@@ -1571,13 +1582,15 @@ def test_pause_and_resume_record_status_events(tmp_path):
     resume_events = service.list_run_events_after(
         owner_user_id="1",
         session_id=resumed.id,
-        after_id=0,
+        after_id=resume_before_id,
     )
 
     assert [event.event_type for event in pause_events] == ["status"]
     assert pause_events[0].event_payload["control_state"] == "pause_requested"
-    assert [event.event_type for event in resume_events] == ["status"]
+    assert [event.event_type for event in resume_events] == ["status", "status"]  # nosec B101 -- Resume records its pending and exact bound state once each.
     assert resume_events[0].event_payload["control_state"] == "running"
+
+    assert resume_events[-1].event_payload["active_job_id"] == "100"  # nosec B101 -- The final event exposes the actual admitted binding.
 
 
 def test_approve_plan_review_records_checkpoint_artifact_and_status_events(tmp_path):
@@ -1632,7 +1645,7 @@ def test_approve_plan_review_records_checkpoint_artifact_and_status_events(tmp_p
         after_id=before_id,
     )
 
-    assert [event.event_type for event in events] == ["checkpoint", "artifact", "status"]
+    assert [event.event_type for event in events] == ["checkpoint", "artifact", "status", "status"]  # nosec B101 -- Atomic approval retains event order plus the subsequent exact Job binding.
     assert events[0].event_payload["status"] == "resolved"
     assert events[1].event_payload["artifact_name"] == "approved_plan.json"
     assert events[2].event_payload["phase"] == "collecting"

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
 pytestmark = pytest.mark.integration
@@ -103,6 +104,7 @@ def quota_client(quota_db, monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as endpoint
 
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(endpoint.router, prefix="/api/v1/chats")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: quota_db
     app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)

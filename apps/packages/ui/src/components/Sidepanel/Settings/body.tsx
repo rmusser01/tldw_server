@@ -3,7 +3,11 @@ import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
 
 import { ThemePicker } from "@/components/Common/Settings/ThemePicker"
-import { getBrowserRuntime } from "@/utils/browser-runtime"
+import { resolveOptionsHref } from "@/utils/browser-runtime"
+import {
+  SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT,
+  SIDEPANEL_STICKY_CHAT_INPUT_KEY
+} from "@/types/chat-settings"
 
 const shortcuts = [
   {
@@ -53,19 +57,6 @@ const shortcuts = [
   }
 ] as const
 
-const resolveOptionsHref = (path: string) => {
-  try {
-    const runtime = getBrowserRuntime()
-    if (runtime?.getURL) {
-      return runtime.getURL(`/options.html#${path}`)
-    }
-  } catch {
-    // Fall back to the hosted WebUI path when extension APIs are unavailable.
-  }
-
-  return path
-}
-
 export const SettingsBody = () => {
   const { t } = useTranslation("settings")
   const [copilotResumeLastChat, setCopilotResumeLastChat] = useStorage(
@@ -74,6 +65,14 @@ export const SettingsBody = () => {
   )
   const [hideCurrentChatModelSettings, setHideCurrentChatModelSettings] =
     useStorage("hideCurrentChatModelSettings", false)
+  const [stickyChatInput, setStickyChatInput] = useStorage(
+    SIDEPANEL_STICKY_CHAT_INPUT_KEY,
+    SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT
+  )
+  const stickyChatInputLabel = t(
+    "generalSettings.settings.sidepanelStickyChatInput.label",
+    "Keep the side panel chat input visible while scrolling"
+  )
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -136,6 +135,14 @@ export const SettingsBody = () => {
           <Switch
             checked={hideCurrentChatModelSettings}
             onChange={setHideCurrentChatModelSettings}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-text">{stickyChatInputLabel}</span>
+          <Switch
+            checked={stickyChatInput}
+            onChange={setStickyChatInput}
+            aria-label={stickyChatInputLabel}
           />
         </div>
       </section>

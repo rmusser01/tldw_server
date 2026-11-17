@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import RecipeManifest
+from tldw_Server_API.app.core.Evaluations.evaluation_recipe_schemas import RecipeManifest
 
 from .base import RecipeDefinition
 from .embeddings_retrieval import EmbeddingsRetrievalRecipe

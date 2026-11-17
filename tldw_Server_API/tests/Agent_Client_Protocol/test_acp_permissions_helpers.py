@@ -17,6 +17,6 @@ def test_get_acp_db_falls_back_when_shared_store_get_db_fails(monkeypatch):
             return fallback_db
 
     monkeypatch.setattr(admin_acp_sessions_service, "_store", _ExplodingStore())
-    monkeypatch.setattr(acp_permissions, "ACPSessionsDB", _FallbackACPSessionsDB)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB.ACPSessionsDB", _FallbackACPSessionsDB)
 
     assert acp_permissions._get_acp_db() is fallback_db

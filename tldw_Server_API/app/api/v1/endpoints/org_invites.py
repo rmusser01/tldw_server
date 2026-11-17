@@ -13,13 +13,22 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
     get_or_create_audit_service_for_user_id,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_db_transaction
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    _authnz_busy_http_exception,
+    get_auth_principal,
+    get_db_transaction,
+)
 from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
     OrgInvitePreviewResponse,
     OrgInviteRedeemRequest,
     OrgInviteRedeemResponse,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventType
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
+    DatabaseLockError,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.services.auth_service import fetch_active_user_by_id
 from tldw_Server_API.app.services.org_invite_service import get_invite_service
@@ -101,13 +110,21 @@ async def redeem_invite(
             detail="User not found",
         )
 
-    result = await invite_service.redeem_invite(
-        code=body.code,
-        user_id=principal.user_id,
-        user_email=user_record.get("email"),
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
+    try:
+        result = await invite_service.redeem_invite(
+            code=body.code,
+            user_id=principal.user_id,
+            user_email=user_record.get("email"),
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+    except (
+        ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
+        DatabaseLockError,
+        TimeoutError,
+    ) as exc:
+        raise _authnz_busy_http_exception() from exc
 
     if not result.success:
         # Determine appropriate status code based on the failure reason

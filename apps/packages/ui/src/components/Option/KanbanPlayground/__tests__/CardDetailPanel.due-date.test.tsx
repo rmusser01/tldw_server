@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import type { Card, ListWithCards } from "@/types/kanban"
 import { CardDetailPanel } from "../CardDetailPanel"
+import { KanbanScopeProvider } from "../KanbanScope"
 import { formatKanbanDateTimeLocalValue } from "../kanbanDateTime"
 
 vi.mock("@tanstack/react-query", () => ({
@@ -13,6 +14,7 @@ vi.mock("@tanstack/react-query", () => ({
 }))
 
 vi.mock("@/services/kanban", () => ({
+  createKanbanClient: () => ({ copyCard: vi.fn(), listComments: vi.fn(), createComment: vi.fn() }),
   copyCard: vi.fn(),
   listComments: vi.fn(),
   createComment: vi.fn(),
@@ -73,6 +75,7 @@ const renderPanel = ({
   onSave?: (cardId: number, data: any) => void
 } = {}) => {
   render(
+    <KanbanScopeProvider config={{ serverUrl: "https://kanban.example.test", authMode: "single-user", apiKey: "fixture-key" }}>
     <CardDetailPanel
       card={card}
       boardId={1}
@@ -83,6 +86,7 @@ const renderPanel = ({
       onDelete={vi.fn()}
       onMove={vi.fn()}
     />
+    </KanbanScopeProvider>
   )
   return { card, onSave }
 }
@@ -109,7 +113,7 @@ describe("CardDetailPanel due-date editing", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(useQueryClient).mockReturnValue({
-      invalidateQueries: vi.fn()
+      invalidateQueries: vi.fn(), removeQueries: vi.fn()
     } as any)
     vi.mocked(useQuery).mockReturnValue({
       data: [],

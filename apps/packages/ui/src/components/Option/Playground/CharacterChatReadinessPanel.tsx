@@ -9,7 +9,7 @@ import {
 
 export type MissingCharacterRecovery = {
   id: string;
-  reason: "missing" | "load-error";
+  reason: "missing" | "load-error" | "setup-failed";
 };
 
 type CharacterChatReadinessPanelProps = {
@@ -41,14 +41,18 @@ export const CharacterChatReadinessPanel = ({
   );
 
   if (missingCharacter) {
-    const title = t(
+    const title = missingCharacter.reason === "setup-failed" ? t(
+      "characterChatReadiness.routeSetupFailed.title", "Character setup was not applied"
+    ) : t(
       "characterChatReadiness.missingRestoredCharacter.title",
       {
         id: missingCharacter.id,
         defaultValue: "Character {{id}} could not be loaded",
       },
     ) as string;
-    const description = t(
+    const description = missingCharacter.reason === "setup-failed" ? t(
+      "characterChatReadiness.routeSetupFailed.description", "Your current chat and draft are still here. Review the setup error, then retry."
+    ) : t(
       "characterChatReadiness.missingRestoredCharacter.description",
       "Choose another character or retry loading it.",
     ) as string;

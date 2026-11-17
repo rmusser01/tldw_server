@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import { useStoreMessageOption } from "@/store/option"
 
 import {
   DEFAULT_PERSONA_MEMORY_MODE,
@@ -30,6 +31,40 @@ const deferred = <T,>() => {
 }
 
 describe("ensurePersonaServerChat", () => {
+  it("keeps a newly created temporary Persona session temporary", async () => {
+    const previous = useStoreMessageOption.getState()
+    useStoreMessageOption.setState({ temporaryChat: true, serverChatId: null })
+    const ensureServerChatHistoryId = vi.fn()
+    try {
+      await ensurePersonaServerChat({
+        assistant: { kind: "persona", id: "garden-helper", name: "Garden Helper" },
+        serverChatId: null,
+        serverChatTitle: null,
+        serverChatAssistantKind: null,
+        serverChatAssistantId: null,
+        serverChatPersonaMemoryMode: null,
+        serverChatState: "in-progress",
+        serverChatTopic: null,
+        serverChatClusterId: null,
+        serverChatSource: null,
+        serverChatExternalRef: null,
+        historyId: null,
+        temporaryChat: true,
+        createChat: vi.fn().mockResolvedValue({ id: "temporary-persona-session" }),
+        ensureServerChatHistoryId,
+        invalidateServerChatHistory: vi.fn(),
+        ...createSetterBundle(),
+        setServerChatId: useStoreMessageOption.getState().setServerChatId
+      })
+      expect(useStoreMessageOption.getState()).toMatchObject({
+        serverChatId: "temporary-persona-session", temporaryChat: true
+      })
+      expect(ensureServerChatHistoryId).not.toHaveBeenCalled()
+    } finally {
+      useStoreMessageOption.setState(previous, true)
+    }
+  })
+
   it("creates a persona-backed chat with read_only default and updates chat state", async () => {
     const setters = createSetterBundle()
     const createChat = vi.fn().mockResolvedValue({
@@ -79,7 +114,7 @@ describe("ensurePersonaServerChat", () => {
       }),
       undefined
     )
-    expect(setters.setServerChatId).toHaveBeenCalledWith("persona-chat-1")
+    expect(setters.setServerChatId).toHaveBeenCalledWith("persona-chat-1", { preserveTemporaryChat: false })
     expect(setters.setServerChatAssistantKind).toHaveBeenCalledWith("persona")
     expect(setters.setServerChatAssistantId).toHaveBeenCalledWith("garden-helper")
     expect(setters.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(
@@ -432,6 +467,15 @@ describe("ensurePersonaServerChat", () => {
     expect(setters.setServerChatAssistantId.mock.calls[0]).toEqual([null])
     expect(setters.setServerChatPersonaMemoryMode.mock.calls[0]).toEqual([null])
     expect(setters.setServerChatMetaLoaded.mock.calls[0]).toEqual([false])
+    expect(setters.setServerChatState.mock.calls[0]).toEqual(["in-progress"])
+    expect(setters.setServerChatVersion.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatTopic.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatClusterId.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatSource.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatExternalRef.mock.calls[0]).toEqual([null])
+    for (const setter of Object.values(setters)) {
+      expect(setter.mock.invocationCallOrder[0]).toBeLessThan(createChat.mock.invocationCallOrder[0])
+    }
     expect(createChat).toHaveBeenCalledWith(
       {
         assistant_kind: "persona",
@@ -445,7 +489,7 @@ describe("ensurePersonaServerChat", () => {
       },
       undefined
     )
-    expect(setters.setServerChatId).toHaveBeenLastCalledWith("persona-chat-4")
+    expect(setters.setServerChatId).toHaveBeenLastCalledWith("persona-chat-4", { preserveTemporaryChat: false })
     expect(setters.setServerChatAssistantKind).toHaveBeenLastCalledWith(
       "persona"
     )
@@ -555,5 +599,276 @@ describe("ensurePersonaServerChat", () => {
       historyId: "history-restored",
       personaMemoryMode: "read_write"
     })
+  })
+})
+
+// Create/mirror I/O are declared callbacks; the actual helper writes retained
+// metadata so an obsolete publication tail can corrupt replacement state.
+const ownedFixture = () => {
+  let current = true
+  let metadata: Record<string, unknown> = {}
+  const setters = createSetterBundle()
+  for (const [name, setter] of Object.entries(setters))
+    setter.mockImplementation((value) => {
+      metadata[name] = value
+    })
+  const createChat = vi.fn().mockResolvedValue({
+    id: "created-persona",
+    title: "Original title",
+    assistant_kind: "persona",
+    assistant_id: "original-persona",
+    persona_memory_mode: "read_only",
+    version: 3
+  })
+  const mirror = vi.fn().mockResolvedValue("owned-mirror")
+  const invalidate = vi.fn()
+  const args = {
+    assistant: {
+      kind: "persona" as const,
+      id: "original-persona",
+      name: "Original"
+    },
+    serverChatId: null as string | null,
+    serverChatTitle: null,
+    serverChatAssistantKind: null as "persona" | "character" | null,
+    serverChatAssistantId: null as string | null,
+    serverChatPersonaMemoryMode: null,
+    serverChatMetaLoaded: false,
+    serverChatState: "in-progress",
+    serverChatTopic: null,
+    serverChatClusterId: null,
+    serverChatSource: null,
+    serverChatExternalRef: null,
+    historyId: null,
+    temporaryChat: false,
+    scope: { type: "workspace" as const, workspaceId: "original-workspace" },
+    requestScope: {
+      config: {
+        serverUrl: "https://original.test",
+        authMode: "multi-user" as const
+      },
+      userId: "alice"
+    },
+    isCurrent: () => current,
+    createChat,
+    ensureServerChatHistoryId: mirror,
+    invalidateServerChatHistory: invalidate,
+    ...setters
+  }
+  const retire = () => {
+    current = false
+    metadata = { replacement: "Keep replacement metadata" }
+  }
+  return {
+    args,
+    setters,
+    createChat,
+    mirror,
+    invalidate,
+    retire,
+    metadata: () => metadata
+  }
+}
+
+const publicationNames = [
+  "setServerChatId",
+  "setServerChatState",
+  "setServerChatVersion",
+  "setServerChatTopic",
+  "setServerChatClusterId",
+  "setServerChatSource",
+  "setServerChatExternalRef",
+  "setServerChatTitle",
+  "setServerChatCharacterId",
+  "setServerChatAssistantKind",
+  "setServerChatAssistantId",
+  "setServerChatPersonaMemoryMode",
+  "setServerChatMetaLoaded"
+] as const
+
+describe("Persona original command ownership", () => {
+  it("refuses an expired original source before create or mirror I/O", async () => {
+    const fixture = ownedFixture()
+    fixture.retire()
+    await expect(ensurePersonaServerChat(fixture.args)).rejects.toMatchObject({
+      status: 412
+    })
+    expect(fixture.createChat).not.toHaveBeenCalled()
+    expect(fixture.mirror).not.toHaveBeenCalled()
+    expect(fixture.metadata()).toEqual({
+      replacement: "Keep replacement metadata"
+    })
+  })
+
+  it("does not link or publish a held create after its original source retires", async () => {
+    const fixture = ownedFixture()
+    const held = deferred<{ id: string }>()
+    fixture.createChat.mockReturnValue(held.promise)
+    const result = ensurePersonaServerChat(fixture.args).then(
+      () => null,
+      (error) => error
+    )
+    await vi.waitFor(() => expect(fixture.createChat).toHaveBeenCalledOnce())
+    fixture.retire()
+    held.resolve({ id: "late-original" })
+    expect(await result).toMatchObject({ status: 412 })
+    expect(fixture.mirror).not.toHaveBeenCalled()
+    expect(fixture.metadata()).toEqual({
+      replacement: "Keep replacement metadata"
+    })
+  })
+
+  it.each(["created", "reused"] as const)(
+    "does not publish %s metadata after held mirror I/O retires its source",
+    async (kind) => {
+      const fixture = ownedFixture()
+      const held = deferred<string | null>()
+      fixture.mirror.mockReturnValue(held.promise)
+      const result = ensurePersonaServerChat({
+        ...fixture.args,
+        ...(kind === "reused"
+          ? {
+              serverChatId: "existing-persona",
+              serverChatMetaLoaded: true,
+              serverChatAssistantKind: "persona" as const,
+              serverChatAssistantId: "original-persona"
+            }
+          : {})
+      }).then(
+        () => null,
+        (error) => error
+      )
+      await vi.waitFor(() => expect(fixture.mirror).toHaveBeenCalledOnce())
+      fixture.retire()
+      held.resolve("late-mirror")
+      expect(await result).toMatchObject({ status: 412 })
+      expect(fixture.metadata()).toEqual({
+        replacement: "Keep replacement metadata"
+      })
+      expect(fixture.invalidate).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(publicationNames)(
+    "retires the created metadata tail after %s synchronously replaces its source",
+    async (name) => {
+      const fixture = ownedFixture()
+      fixture.setters[name].mockImplementation(() => fixture.retire())
+      await expect(ensurePersonaServerChat(fixture.args)).rejects.toMatchObject(
+        { status: 412 }
+      )
+      expect(fixture.metadata()).toEqual({
+        replacement: "Keep replacement metadata"
+      })
+      expect(fixture.invalidate).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(publicationNames)(
+    "retires the reset tail after %s synchronously replaces its source",
+    async (name) => {
+      const fixture = ownedFixture()
+      fixture.setters[name].mockImplementation(() => fixture.retire())
+      await expect(
+        ensurePersonaServerChat({
+          ...fixture.args,
+          serverChatId: "old-character",
+          serverChatMetaLoaded: true,
+          serverChatAssistantKind: "character",
+          serverChatAssistantId: "old-card"
+        })
+      ).rejects.toMatchObject({ status: 412 })
+      expect(fixture.metadata()).toEqual({
+        replacement: "Keep replacement metadata"
+      })
+      expect(fixture.createChat).not.toHaveBeenCalled()
+      expect(fixture.mirror).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    "setServerChatAssistantKind",
+    "setServerChatAssistantId",
+    "setServerChatPersonaMemoryMode",
+    "setServerChatCharacterId"
+  ] as const)(
+    "retires the reused metadata tail after %s synchronously replaces its source",
+    async (name) => {
+      const fixture = ownedFixture()
+      fixture.setters[name].mockImplementation(() => fixture.retire())
+      await expect(
+        ensurePersonaServerChat({
+          ...fixture.args,
+          serverChatId: "existing-persona",
+          serverChatMetaLoaded: true,
+          serverChatAssistantKind: "persona",
+          serverChatAssistantId: "original-persona"
+        })
+      ).rejects.toMatchObject({ status: 412 })
+      expect(fixture.metadata()).toEqual({
+        replacement: "Keep replacement metadata"
+      })
+    }
+  )
+
+  it("retains the original account and workspace request while creation is held", async () => {
+    const fixture = ownedFixture()
+    const held = deferred<{ id: string }>()
+    fixture.createChat.mockReturnValue(held.promise)
+    const result = ensurePersonaServerChat(fixture.args)
+    const sentOptions = fixture.createChat.mock.calls[0][1]
+    fixture.args.requestScope.config.serverUrl = "https://replacement.test"
+    fixture.args.requestScope.userId = "bob"
+    fixture.args.scope.workspaceId = "replacement-workspace"
+    expect(sentOptions).toEqual({
+      scope: { type: "workspace", workspaceId: "original-workspace" },
+      requestScope: {
+        config: { serverUrl: "https://original.test", authMode: "multi-user" },
+        userId: "alice"
+      },
+      signal: undefined
+    })
+    held.resolve({ id: "created-persona" })
+    expect(await result).toEqual({
+      chatId: "created-persona",
+      historyId: "owned-mirror",
+      personaMemoryMode: "read_only"
+    })
+  })
+
+  it("does not link or publish after execution cancellation during creation", async () => {
+    const fixture = ownedFixture()
+    const held = deferred<{ id: string }>()
+    const controller = new AbortController()
+    fixture.createChat.mockReturnValue(held.promise)
+    const result = ensurePersonaServerChat({
+      ...fixture.args,
+      signal: controller.signal
+    }).then(
+      () => null,
+      (error) => error
+    )
+    await vi.waitFor(() => expect(fixture.createChat).toHaveBeenCalledOnce())
+    controller.abort()
+    held.resolve({ id: "cancelled-persona" })
+    expect(await result).toMatchObject({ name: "AbortError" })
+    expect(fixture.mirror).not.toHaveBeenCalled()
+    expect(fixture.metadata()).toEqual({})
+  })
+
+  it("publishes a current source without converting an absent mirror into H1 acceptance", async () => {
+    const fixture = ownedFixture()
+    fixture.mirror.mockResolvedValue(null)
+    expect(await ensurePersonaServerChat(fixture.args)).toEqual({
+      chatId: "created-persona",
+      historyId: null,
+      personaMemoryMode: "read_only"
+    })
+    expect(fixture.metadata()).toMatchObject({
+      setServerChatId: "created-persona",
+      setServerChatAssistantKind: "persona",
+      setServerChatMetaLoaded: true
+    })
+    expect(fixture.invalidate).toHaveBeenCalledOnce()
   })
 })

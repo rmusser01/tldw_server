@@ -5,6 +5,8 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: end-of-file-fixer
+        # ESLint writes this file without a final newline on every --suppress-all/--prune-suppressions.
+        exclude: ^apps/tldw-frontend/eslint-suppressions\.packages-ui\.json$
       - id: trailing-whitespace
       - id: mixed-line-ending
       - id: debug-statements

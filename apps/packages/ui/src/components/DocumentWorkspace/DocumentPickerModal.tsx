@@ -1,3 +1,4 @@
+import { extractMediaId, extractUploadResult, extractWarnings, getDocumentUploadProblem } from "./document-utils"
 import { quickIngestAuthority, useQuickIngestAuthority, type QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import React from "react"
@@ -283,14 +284,19 @@ const OwnedDocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
       }, operation)
       if (!operation.isCurrent()) return
 
-      const mediaId = extractMediaId(response)
-      if (!mediaId) {
+      const mediaId = Number(extractMediaId(response))
+      if (!Number.isSafeInteger(mediaId) || mediaId < 1) {
         throw new Error(
           t("option:documentWorkspace.uploadMissingMediaId", "Upload succeeded but no media ID was returned")
         )
       }
 
       const result = extractUploadResult(response)
+      const importProblem = getDocumentUploadProblem(result)
+      if (importProblem) {
+        setUploadWarning({ message: importProblem + " A Media record remains. Open Media to inspect it before creating another copy.", mediaId })
+        return
+      }
       const warnings = extractWarnings(result)
       const hasStorageWarning =
         warnings.some((warning) => warning.includes("original file")) ||
@@ -612,66 +618,6 @@ const OwnedDocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
       />
     </Modal>
   )
-}
-
-function extractMediaId(data: unknown): string | number | null {
-  const visited = new WeakSet<object>()
-  return extractMediaIdInternal(data, visited)
-}
-
-function extractMediaIdInternal(
-  data: unknown,
-  visited: WeakSet<object>
-): string | number | null {
-  if (!data || typeof data !== "object") return null
-  const record = data as Record<string, unknown>
-  if (Array.isArray(data)) {
-    return data.length > 0 ? extractMediaIdInternal(data[0], visited) : null
-  }
-  if (visited.has(record)) return null
-  visited.add(record)
-
-  if ("results" in record && Array.isArray(record.results) && record.results.length > 0) {
-    return extractMediaIdInternal(record.results[0], visited)
-  }
-  if ("result" in record && record.result) {
-    return extractMediaIdInternal(record.result, visited)
-  }
-  if ("media" in record && record.media) {
-    return extractMediaIdInternal(record.media, visited)
-  }
-
-  const direct =
-    record.id ??
-    record.media_id ??
-    record.db_id ??
-    record.pk ??
-    record.uuid
-  if (typeof direct === "string" || typeof direct === "number") return direct
-
-  return null
-}
-
-function extractUploadResult(data: unknown): Record<string, unknown> | null {
-  if (!data || typeof data !== "object") return null
-  const record = data as Record<string, unknown>
-  if (Array.isArray(record.results) && record.results.length > 0) {
-    return record.results[0] as Record<string, unknown>
-  }
-  if (record.result && typeof record.result === "object") {
-    return record.result as Record<string, unknown>
-  }
-  if (record.media && typeof record.media === "object") {
-    return record.media as Record<string, unknown>
-  }
-  return record
-}
-
-function extractWarnings(result: Record<string, unknown> | null): string[] {
-  if (!result) return []
-  const warnings = result?.warnings
-  if (!Array.isArray(warnings)) return []
-  return warnings.map((warning) => String(warning || "").toLowerCase())
 }
 
 export default DocumentPickerModal

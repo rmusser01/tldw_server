@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.DB_Management.Watchlists_DB import (
     WatchlistsDatabase,
 )
 from tldw_Server_API.app.core.Monitoring.notification_service import get_notification_service
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 CONTENT_ALERT_REGEX_TIMEOUT_SECONDS = 0.05
 
@@ -118,8 +119,8 @@ def _source_constraints_match(rule: WatchlistContentAlertRuleRow, source: Source
             return False
     source_tags = constraints.get("source_tags")
     if isinstance(source_tags, list) and source_tags:
-        required_tags = {str(value).strip().lower() for value in source_tags if str(value).strip()}
-        actual_tags = {str(value).strip().lower() for value in source.tags}
+        required_tags = {normalize_keyword_identity(str(value)) for value in source_tags if str(value).strip()}
+        actual_tags = {normalize_keyword_identity(str(value)) for value in source.tags}
         if not required_tags.intersection(actual_tags):
             return False
     url_contains = constraints.get("url_contains")

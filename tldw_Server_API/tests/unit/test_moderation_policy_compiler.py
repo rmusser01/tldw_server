@@ -9,6 +9,8 @@ from tldw_Server_API.app.core.Moderation.moderation_service import (
 )
 from tldw_Server_API.app.core.Moderation.policy_compiler import (
     PolicyCompilationInput,
+    PolicyCompilationIssue,
+    PolicyCompilationReport,
     PolicyCompiler,
     ResolvedModerationConfig,
 )
@@ -197,6 +199,56 @@ def test_service_resolved_config_falls_back_to_env_when_categories_are_none(monk
     resolved = svc._resolve_moderation_config({"categories_enabled": None})
 
     assert resolved.compiler_config.categories_enabled == {"pii", "confidential"}
+
+
+def test_compile_user_rule_rejects_dangerous_regex_with_sanitized_issue() -> None:
+    """Reject unsafe regexes without exposing the pattern or rule ID in reports."""
+    report = PolicyCompilationReport()
+
+    compiled = PolicyCompiler().compile_user_rule(
+        {
+            "id": "private-rule-id-92741",
+            "pattern": "(a+)+$",
+            "is_regex": True,
+            "action": "block",
+            "phase": "both",
+        },
+        report,
+        7,
+    )
+
+    assert compiled is None
+    assert report.issues == [PolicyCompilationIssue(source="user_rule", reason="dangerous_regex", index=7)]
+    rendered = repr(report)
+    assert "(a+)+$" not in rendered
+    assert "private-rule-id-92741" not in rendered
+
+
+def test_compile_user_rule_preserves_phase_action_and_literal_matching() -> None:
+    """Preserve quick-rule metadata and case-insensitive literal matching."""
+    report = PolicyCompilationReport()
+
+    compiled = PolicyCompiler().compile_user_rule(
+        {
+            "id": "warn-1",
+            "pattern": "heads up",
+            "is_regex": False,
+            "action": "warn",
+            "phase": "input",
+        },
+        report,
+        0,
+    )
+
+    assert isinstance(compiled, PatternRule)
+    assert compiled is not None
+    assert compiled.action == "warn"
+    assert compiled.phase == "input"
+    assert compiled.categories == {"*"}
+    assert compiled.replacement is None
+    assert report.issues == []
+    assert compiled.regex.search("please heads up now")
+    assert compiled.regex.search("please HEADS UP now")
 
 
 def test_compile_user_policy_preserves_empty_category_override():

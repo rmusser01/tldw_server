@@ -1101,15 +1101,15 @@ export const ROUTE_METADATA = [
   }),
   defineRoute({
     path: "/claims-review",
-    canonicalPath: "/content-review",
-    redirectsTo: "/content-review",
     label: "Claims Review",
     group: "safety",
-    surface: "redirect",
-    smoke: "exclude",
-    commandPalette: "alias_only",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    smoke: "manual",
     requiresBackend: true,
-    rationale: "Legacy alias that redirects to the content review queue."
+    nav: "secondary",
+    commandPalette: "show",
+    rationale: "Review extracted Claims, save versioned decisions, and inspect their audit history."
   }),
   defineRoute({
     path: "/data-tables",
@@ -1224,11 +1224,12 @@ export const ROUTE_METADATA = [
     path: "/companion/conversation",
     canonicalPath: "/companion",
     label: "Companion Conversation",
-    group: "extension",
-    surface: "extension_sidepanel",
-    availability: sidepanel,
-    smoke: "exclude",
-    rationale: "Extension-only companion conversation sidepanel route."
+    group: "chat",
+    surface: "default_self_hosted",
+    availability: ["web", "extension_options", "extension_sidepanel"],
+    requiresBackend: true,
+    smoke: "manual",
+    rationale: "Companion conversation requires an enabled profile and configured provider."
   }),
   defineRoute({
     path: "/error-boundary-test",

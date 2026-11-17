@@ -5,7 +5,7 @@ import {
   coerceString,
   defineSetting
 } from "@/services/settings/registry"
-import { DEFAULT_SPLASH_CARD_NAMES } from "@/data/splash-cards"
+import { DEFAULT_SPLASH_CARD_NAMES } from "@/data/splash-card-names"
 import {
   normalizeMediaChatHandoffPayload,
   type MediaChatHandoffPayload
@@ -105,6 +105,17 @@ export const CHAT_WINDOW_OPACITY_SETTING = defineSetting(
   "chatWindowOpacity",
   35,
   (value) => coerceOpacityPercent(value, 35)
+)
+
+export const CHAT_MESSAGE_VIEWS = ["transcript", "conversation", "research"] as const
+export type ChatMessageView = (typeof CHAT_MESSAGE_VIEWS)[number]
+
+export const CHAT_MESSAGE_VIEW_SETTING = defineSetting(
+  "chatMessageView",
+  "transcript" as ChatMessageView,
+  value => CHAT_MESSAGE_VIEWS.includes(value as ChatMessageView)
+    ? value as ChatMessageView
+    : "transcript"
 )
 
 export const CHAT_MESSAGE_OPACITY_SETTING = defineSetting(
@@ -367,17 +378,17 @@ export const UI_MODE_SETTING = defineSetting(
   }
 )
 
-const SIDEBAR_TAB_VALUES = ["server", "folders"] as const
+const SIDEBAR_TAB_VALUES = ["all", "server", "local", "folders"] as const
 type SidebarTabValue = (typeof SIDEBAR_TAB_VALUES)[number]
 
 export const SIDEBAR_ACTIVE_TAB_SETTING = defineSetting(
   "tldw:sidebar:activeTab",
-  "server" as SidebarTabValue,
+  "all" as SidebarTabValue,
   (value) => {
     const normalized = String(value || "").toLowerCase()
     return SIDEBAR_TAB_VALUES.includes(normalized as SidebarTabValue)
       ? (normalized as SidebarTabValue)
-      : "server"
+      : "all"
   },
   {
     area: "local",
@@ -410,6 +421,13 @@ export const SIDEBAR_SERVER_CHAT_FILTER_SETTING = defineSetting(
     validate: (value) =>
       SIDEBAR_SERVER_CHAT_FILTER_VALUES.includes(value)
   }
+)
+
+export const SIDEBAR_RECENT_COLLAPSED_SETTING = defineSetting(
+  "tldw:sidebar:recentCollapsed",
+  false,
+  (value) => coerceBoolean(value, false),
+  { area: "local" }
 )
 
 export const SIDEBAR_SHORTCUTS_COLLAPSED_SETTING = defineSetting(

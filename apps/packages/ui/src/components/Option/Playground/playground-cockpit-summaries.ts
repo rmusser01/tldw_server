@@ -1,8 +1,8 @@
+import type { PlaygroundAssistantSummary } from "./PlaygroundAssistantContext";
 import type { AssistantSelection } from "@/types/assistant-selection";
 import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider";
 import type { PlaygroundPromptSummary } from "./PlaygroundContextRail";
 import type {
-  RuntimeAssistantSummary,
   RuntimeToolStateCount,
   RuntimeToolSummary,
 } from "./PlaygroundRuntimeInspector";
@@ -34,12 +34,11 @@ type AssistantSummaryCopy = Partial<{
 
 type PromptSummaryCopy = Partial<{
   customPromptLabel: string;
-  inlineSystemPromptActiveDetail: string;
+  inlineSystemPromptSelectedDetail: string;
   loadingPromptDetail: string;
   noPromptContextDetail: string;
   noPromptSelectedLabel: string;
   selectedPromptUnavailableDetail: string;
-  quickPromptLabel: string;
   selectedPromptDetail: string;
   systemPromptLabel: string;
 }>;
@@ -94,12 +93,11 @@ const defaultAssistantCopy = {
 
 const defaultPromptCopy = {
   customPromptLabel: "Custom prompt",
-  inlineSystemPromptActiveDetail: "Inline system prompt active",
+  inlineSystemPromptSelectedDetail: "Inline system prompt selected",
   loadingPromptDetail: "Loading prompt details...",
-  noPromptContextDetail: "No prompt context will be added.",
+  noPromptContextDetail: "No additional system prompt selected.",
   noPromptSelectedLabel: "No prompt selected",
   selectedPromptUnavailableDetail: "Prompt details unavailable",
-  quickPromptLabel: "Quick prompt",
   selectedPromptDetail: "System prompt",
   systemPromptLabel: "System prompt",
 } satisfies Required<PromptSummaryCopy>;
@@ -203,7 +201,7 @@ export function buildCockpitAssistantSummary(input: {
   selectedCharacter: LegacyCharacterSelection | null | undefined;
   personaMemoryMode?: PersonaMemoryMode | null;
   copy?: AssistantSummaryCopy;
-}): RuntimeAssistantSummary {
+}): PlaygroundAssistantSummary {
   const copy = { ...defaultAssistantCopy, ...input.copy };
   const selectedAssistant = input.selectedAssistant;
   if (selectedAssistant?.kind === "persona") {
@@ -289,20 +287,11 @@ export function buildCockpitPromptSummary(input: {
     };
   }
 
-  const selectedQuickPrompt = normalizeText(input.selectedQuickPrompt);
-  if (selectedQuickPrompt) {
-    return {
-      state: "quick",
-      label: copy.quickPromptLabel,
-      detail: selectedQuickPrompt,
-    };
-  }
-
   if (normalizeText(input.systemPrompt)) {
     return {
       state: "custom",
       label: copy.customPromptLabel,
-      detail: copy.inlineSystemPromptActiveDetail,
+      detail: copy.inlineSystemPromptSelectedDetail,
     };
   }
 
@@ -329,7 +318,8 @@ export function buildCockpitMcpSummary(input: {
       ? input.toolCounts
       : null;
   const toolStateCounts = buildMcpToolStateCounts(resolvedToolCounts, copy);
-  const discoveredCount = resolvedToolCounts?.discovered ?? input.discoveredCount;
+  const discoveredCount =
+    resolvedToolCounts?.discovered ?? input.discoveredCount;
   const chatToolCount = resolvedToolCounts?.chatEnabled ?? input.chatToolCount;
   if (!input.hasMcp || input.healthState === "unavailable") {
     return {

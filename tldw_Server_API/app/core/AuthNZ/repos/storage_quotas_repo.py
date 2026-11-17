@@ -14,6 +14,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import NativeQuotaReservationStore
 
 # Default quota values (in MB)
 DEFAULT_ORG_QUOTA_MB = 10240  # 10 GB
@@ -410,7 +411,7 @@ class AuthnzStorageQuotasRepo:
                         """,
                         offset, limit,
                     )
-                    return [self._normalize_record(row) for row in rows]
+                    records = [self._normalize_record(row) for row in rows]
                 else:
                     cursor = await conn.execute(
                         """
@@ -425,7 +426,15 @@ class AuthnzStorageQuotasRepo:
                     )
                     rows = await cursor.fetchall()
                     cols = [desc[0] for desc in cursor.description] if cursor.description else []
-                    return [self._normalize_record(dict(zip(cols, row))) for row in rows]
+                    records = [self._normalize_record(dict(zip(cols, row))) for row in rows]
+            for record in records:
+                native = await NativeQuotaReservationStore(self.db_pool).usage(
+                    org_id=record.get('org_id'), team_id=record.get('team_id'),
+                )
+                record['legacy_used_mb'] = record['used_mb']
+                record['native_used_mb'] = native['bytes'] / 1048576
+                record['used_mb'] += record['native_used_mb']
+            return records
         except Exception as exc:
             logger.error(f"AuthnzStorageQuotasRepo.list_all_quotas failed: {exc}")
             raise
@@ -449,11 +458,15 @@ class AuthnzStorageQuotasRepo:
         elif team_id:
             quota = await self.get_team_quota(team_id)
 
+        native = await NativeQuotaReservationStore(self.db_pool).usage(org_id=org_id, team_id=team_id)
+        native_mb = native['bytes'] / 1048576
         if not quota:
             # Return default status (no quota set = unlimited)
             return {
                 "quota_mb": None,
-                "used_mb": 0.0,
+                "used_mb": native_mb,
+                "legacy_used_mb": 0.0,
+                "native_used_mb": native_mb,
                 "remaining_mb": None,
                 "usage_pct": 0.0,
                 "at_soft_limit": False,
@@ -462,7 +475,8 @@ class AuthnzStorageQuotasRepo:
             }
 
         quota_mb = quota.get("quota_mb", 0)
-        used_mb = quota.get("used_mb", 0.0)
+        legacy_mb = quota.get('used_mb', 0.0)
+        used_mb = legacy_mb + native_mb
         soft_limit_pct = quota.get("soft_limit_pct", DEFAULT_SOFT_LIMIT_PCT)
         hard_limit_pct = quota.get("hard_limit_pct", DEFAULT_HARD_LIMIT_PCT)
 
@@ -472,6 +486,8 @@ class AuthnzStorageQuotasRepo:
         return {
             "quota_mb": quota_mb,
             "used_mb": used_mb,
+            "legacy_used_mb": legacy_mb,
+            "native_used_mb": native_mb,
             "remaining_mb": remaining_mb,
             "usage_pct": round(usage_pct, 2),
             "at_soft_limit": usage_pct >= soft_limit_pct,

@@ -155,7 +155,7 @@ class _FailingOverridePool:
 
 class _FailingOrgSecretPool(_FailingOverridePool):
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(self, *, acquire_timeout_seconds: float | None = None):
         raise TransactionError("org provider secret write", _LEAK)
         yield
 

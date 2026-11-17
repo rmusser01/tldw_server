@@ -36,7 +36,7 @@ type UseDictionaryManagerWorkspaceControlsParams = {
   capsLoading: boolean
   capabilities: any
   useMobileEntriesDrawer: boolean
-  openChatContextFromDictionary: (chatRef: any) => void
+  openChatContextFromDictionary: (chatRef: unknown, dictionary: unknown) => void
   openDictionaryEntriesPanel: (dictionaryId: number) => void
 }
 

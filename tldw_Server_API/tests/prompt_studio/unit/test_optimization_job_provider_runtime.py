@@ -4256,7 +4256,7 @@ async def test_concurrent_same_and_different_owner_jobs_use_distinct_runtimes(
 def _install_owned_worker_cancellation_ack(
     monkeypatch: pytest.MonkeyPatch,
 ) -> asyncio.Event:
-    from tldw_Server_API.app.core.Chat import bounded_daemon
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon
 
     entered = asyncio.Event()
     original = bounded_daemon._drain_owned_task
@@ -4839,3 +4839,15 @@ async def test_exhausted_retryable_optimization_attempt_ends_failed(
         assert factory.instances[0].close_count == 1
     finally:
         db.close_connection()
+
+
+def test_llm_quota_refusal_is_bounded_and_not_retryable() -> None:
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    bounded = jobs_worker._bounded_optimization_error(
+        LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+    )
+
+    _assert_safe_job_error(bounded, code="llm_quota_exceeded", retryable=False)

@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import RecipeRunRecord
-from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
+from tldw_Server_API.app.core.Evaluations.evaluation_recipe_schemas import RecipeRunRecord
+from tldw_Server_API.app.core.Evaluations.run_state import RunStatus
 from tldw_Server_API.app.core.exceptions import RecipeEnqueueError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 

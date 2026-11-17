@@ -26,7 +26,7 @@
 ## 2. Technical Details of Features
 
 - Architecture & Data Flow:
-  - Primary entrypoints: `perform_chat_api_call` / `perform_chat_api_call_async` — tldw_Server_API/app/core/Chat/chat_service.py:668
+  - Primary entrypoints: `perform_chat_api_call` / `perform_chat_api_call_async` — tldw_Server_API/app/core/LLM_Calls/gateway.py
   - Routing/dispatch: adapter registry maps provider name → adapter — tldw_Server_API/app/core/LLM_Calls/adapter_registry.py:1
   - Adapters: per-provider implementations under `providers/`
   - Compatibility and legacy embedding helpers: `tldw_Server_API/app/core/LLM_Calls/chat_calls.py`; local/gateway adapters: `tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py`
@@ -93,7 +93,7 @@
 
 Example (OpenAI via adapter registry)
 ```python
-from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
 
 resp = perform_chat_api_call(
     provider="openai",

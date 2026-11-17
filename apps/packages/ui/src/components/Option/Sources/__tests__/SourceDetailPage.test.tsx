@@ -44,6 +44,7 @@ vi.mock("@/components/Option/Sources/SourceForm", () => ({
 }))
 
 import { SourceDetailPage } from "@/components/Option/Sources/SourceDetailPage"
+import { normalizeIngestionSource } from "@/services/tldw/collections-normalizers"
 
 const renderDetail = (ui: React.ReactElement) =>
   render(<MemoryRouter initialEntries={["/sources/42"]}>{ui}</MemoryRouter>)
@@ -108,6 +109,33 @@ describe("SourceDetailPage", () => {
       mutateAsync: vi.fn(async () => ({ id: "501" })),
       isPending: false
     })
+  })
+
+  it("keeps a normalized fresh source free of the successful-sync lock hint", async () => {
+    const source = normalizeIngestionSource({
+      id: 42,
+      user_id: 7,
+      source_type: "local_directory",
+      sink_type: "media",
+      policy: "canonical",
+      enabled: true,
+      schedule_enabled: false,
+      config: { path: "/controlled/imports" },
+      last_successful_snapshot_id: null,
+      last_successful_sync_summary: {},
+      last_error: null
+    })
+    hookMocks.useIngestionSourceDetailQuery.mockReturnValue({
+      data: source,
+      isLoading: false
+    })
+    renderDetail(<SourceDetailPage sourceId="42" />)
+    expect(await screen.findByText("source-form-edit")).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        "Source identity is locked after the first successful sync."
+      )
+    ).not.toBeInTheDocument()
   })
 
   it("shows detached items and allows reattach without hiding degraded state", async () => {

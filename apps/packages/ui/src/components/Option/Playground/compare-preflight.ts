@@ -1,3 +1,5 @@
+import { getCanonicalModelKey } from "@/hooks/playground/modelSelectorUtils"
+
 export type CompareModelMeta = {
   capabilities: Set<string>
   contextLength: number | null
@@ -35,14 +37,16 @@ export const buildCompareModelMetaById = (
       toFinitePositiveNumber(model?.details?.contextLength) ??
       toFinitePositiveNumber(model?.details?.context_window)
 
-    map.set(modelId, {
+    const metadata: CompareModelMeta = {
       capabilities: new Set(
         capabilitiesRaw.map((capability: unknown) =>
           String(capability || "").toLowerCase()
         )
       ),
       contextLength
-    })
+    }
+    map.set(modelId, metadata)
+    map.set(getCanonicalModelKey(model), metadata)
   }
 
   return map

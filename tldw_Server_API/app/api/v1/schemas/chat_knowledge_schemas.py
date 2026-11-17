@@ -3,6 +3,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from tldw_Server_API.app.core.Chat.knowledge_save import visible_knowledge_text
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords
 
 
 class KnowledgeSaveRequest(BaseModel):
@@ -36,22 +37,7 @@ class KnowledgeSaveRequest(BaseModel):
     @field_validator("tags")
     @classmethod
     def _normalize_tags(cls, value: Optional[list[str]]) -> Optional[list[str]]:
-        if value is None:
-            return None
-        cleaned = []
-        seen = set()
-        for v in value:
-            if v is None:
-                continue
-            s = str(v).strip()
-            if not s:
-                continue
-            key = s.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            cleaned.append(s)
-        return cleaned or None
+        return (dedupe_keywords(value) or None) if value is not None else None
 
     @model_validator(mode="after")
     def _validate_scope(self) -> "KnowledgeSaveRequest":

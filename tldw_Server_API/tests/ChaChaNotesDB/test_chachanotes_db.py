@@ -1347,6 +1347,40 @@ class TestSyncLog:
 
 
 class TestTransactions:
+    @pytest.mark.parametrize(
+        ("body_failure", "rollback_failure"),
+        [(True, False), (True, True), (False, False), (False, True)],
+    )
+    def test_transaction_failure_logs_exclude_exception_content(self, body_failure, rollback_failure):
+        from unittest.mock import MagicMock
+
+        from loguru import logger
+
+        private_marker = "PRIVATE_TRANSACTION_CONTENT"
+        conn = MagicMock()
+        conn.in_transaction = False
+        if not body_failure:
+            conn.commit.side_effect = sqlite3.OperationalError(private_marker)
+        if rollback_failure:
+            conn.rollback.side_effect = sqlite3.OperationalError(private_marker)
+        db = MagicMock()
+        db.get_connection.return_value = conn
+        messages = []
+        sink = logger.add(messages.append, format="{message}")
+        try:
+            with pytest.raises(ValueError if body_failure else CharactersRAGDBError):
+                with TransactionContextManager(db):
+                    if body_failure:
+                        raise ValueError(private_marker)
+        finally:
+            logger.remove(sink)
+
+        rendered = "".join(str(message) for message in messages)
+        assert private_marker not in rendered
+        assert ("ValueError" if body_failure else "OperationalError") in rendered
+        conn.rollback.assert_called_once_with()
+        assert conn.commit.call_count == (0 if body_failure else 1)
+
     def test_transaction_commit(self, db_instance: CharactersRAGDB):
         card_data1_name = "Trans1 Character"
         card_data2_name = "Trans2 Character"

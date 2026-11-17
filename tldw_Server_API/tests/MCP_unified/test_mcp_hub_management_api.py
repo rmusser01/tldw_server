@@ -43,6 +43,9 @@ def _make_principal(
 
 
 class _FakeService:
+    async def refresh_external_server_discovery(self, server_id, executor):
+        return await executor(server_id)
+
     async def list_acp_profiles(self, **_kwargs: Any) -> list[dict[str, Any]]:
         return []
 
@@ -651,6 +654,13 @@ class _ConfigurableExternalServerService(_FakeService):
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self.rows = rows
 
+    async def refresh_external_server_discovery(self, server_id, executor):
+        result = await executor(server_id)
+        for row in self.rows:
+            if server_id is None or row["id"] == server_id:
+                row["last_error_category"] = "discovery_failed" if row["id"] in result.get("errors", {}) else None
+        return result
+
     async def list_external_servers(self, **kwargs: Any) -> list[dict[str, Any]]:
         owner_scope_type = kwargs.get("owner_scope_type")
         owner_scope_id = kwargs.get("owner_scope_id")
@@ -728,8 +738,7 @@ def _build_app(
 @pytest.mark.unit
 async def test_refresh_external_server_discovery_requires_mutation_permission(monkeypatch) -> None:
     monkeypatch.setattr(
-        mcp_hub_management,
-        "get_mcp_server",
+        "tldw_Server_API.app.core.MCP_unified.server.get_mcp_server",
         lambda: _FakeMcpServer(module=None),
         raising=False,
     )
@@ -759,7 +768,7 @@ async def test_refresh_external_server_discovery_reconciles_live_runtime(monkeyp
     )
     module = _FakeExternalFederationModule(manager)
     server = _FakeMcpServer(module=module, initialized=False)
-    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.server.get_mcp_server", lambda: server, raising=False)
 
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
@@ -798,7 +807,7 @@ async def test_refresh_external_server_discovery_accepts_query_server_id(monkeyp
         }
     )
     module = _FakeExternalFederationModule(manager)
-    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.server.get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
         fail_with_401=False,
@@ -824,7 +833,7 @@ async def test_refresh_external_server_discovery_normalizes_body_server_id_befor
         }
     )
     module = _FakeExternalFederationModule(manager)
-    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.server.get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
         fail_with_401=False,
@@ -854,7 +863,7 @@ async def test_refresh_external_server_discovery_rejects_unknown_body_fields(mon
         }
     )
     module = _FakeExternalFederationModule(manager)
-    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.server.get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
         fail_with_401=False,
@@ -883,7 +892,7 @@ async def test_refresh_external_server_discovery_rejects_conflicting_query_and_b
         }
     )
     module = _FakeExternalFederationModule(manager)
-    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.server.get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
         fail_with_401=False,
@@ -912,7 +921,7 @@ async def test_refresh_external_server_discovery_rejects_blank_body_server_id(mo
         }
     )
     module = _FakeExternalFederationModule(manager)
-    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.server.get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
         fail_with_401=False,
@@ -931,7 +940,7 @@ async def test_refresh_external_server_discovery_rejects_blank_body_server_id(mo
 @pytest.mark.unit
 async def test_refresh_external_server_discovery_returns_503_when_runtime_module_unavailable(monkeypatch) -> None:
     server = _FakeMcpServer(module=None, initialized=True)
-    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.server.get_mcp_server", lambda: server, raising=False)
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
         fail_with_401=False,
@@ -961,7 +970,7 @@ async def test_refresh_external_server_discovery_returns_503_when_module_registr
     module = _FakeExternalFederationModule(manager)
     registry = _FakeModuleRegistry(module, raise_lookup=True)
     server = _FakeMcpServer(module=module, registry=registry)
-    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.server.get_mcp_server", lambda: server, raising=False)
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
         fail_with_401=False,
@@ -991,7 +1000,7 @@ async def test_refresh_external_server_discovery_surfaces_module_registry_refres
     module = _FakeExternalFederationModule(manager)
     registry = _FakeModuleRegistry(module, refresh_ok=False)
     server = _FakeMcpServer(module=module, registry=registry)
-    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.server.get_mcp_server", lambda: server, raising=False)
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
         fail_with_401=False,
@@ -1077,8 +1086,8 @@ async def test_mcp_hub_event_stream_permission_replay_is_tenant_scoped(monkeypat
     async def _fake_bus() -> mcp_hub_service.McpHubEventBus:
         return mcp_hub_service.McpHubEventBus(max_events=4)
 
-    monkeypatch.setattr(mcp_hub_management, "replay_mcp_hub_audit_events", _fake_replay)
-    monkeypatch.setattr(mcp_hub_management, "get_mcp_hub_event_bus", _fake_bus)
+    monkeypatch.setattr("tldw_Server_API.app.services.mcp_hub_service.replay_mcp_hub_audit_events", _fake_replay)
+    monkeypatch.setattr("tldw_Server_API.app.services.mcp_hub_service.get_mcp_hub_event_bus", _fake_bus)
 
     response = await mcp_hub_management.stream_mcp_hub_events(
         request=_NeverDisconnectedRequest(),  # type: ignore[arg-type]
@@ -1124,8 +1133,8 @@ async def test_mcp_hub_event_stream_subscribes_before_replay(monkeypatch) -> Non
     async def _fake_replay(**_kwargs: Any) -> list[dict[str, Any]]:
         return []
 
-    monkeypatch.setattr(mcp_hub_management, "get_mcp_hub_event_bus", _fake_bus)
-    monkeypatch.setattr(mcp_hub_management, "replay_mcp_hub_audit_events", _fake_replay)
+    monkeypatch.setattr("tldw_Server_API.app.services.mcp_hub_service.get_mcp_hub_event_bus", _fake_bus)
+    monkeypatch.setattr("tldw_Server_API.app.services.mcp_hub_service.replay_mcp_hub_audit_events", _fake_replay)
 
     response = await mcp_hub_management.stream_mcp_hub_events(
         request=_NeverDisconnectedRequest(),  # type: ignore[arg-type]
@@ -1826,22 +1835,25 @@ async def test_mcp_hub_refresh_rejects_non_operational_visible_servers_without_e
 
 @pytest.mark.unit
 async def test_mcp_hub_refresh_executor_initializes_server_before_module_lookup(monkeypatch) -> None:
-    class _RefreshModule:
-        async def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-            return {"tool_name": tool_name, "arguments": arguments}
+    manager = _FakeExternalFederationManager({
+        "server_id": "docs", "reconciled_servers": 1, "refreshed_servers": 1,
+        "total_servers": 1, "virtual_tools": 1, "errors": {},
+    })
 
-        async def execute_with_circuit_breaker(self, operation: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    class _RefreshModule(_FakeExternalFederationModule):
+        async def execute_with_circuit_breaker(self, operation: Any, *args: Any, **kwargs: Any) -> Any:
             return await operation(*args, **kwargs)
 
-    class _ModuleRegistry:
+    class _ModuleRegistry(_FakeModuleRegistry):
         def __init__(self, server: "_McpServer") -> None:
+            super().__init__(_RefreshModule(manager))
             self.server = server
             self.lookup_before_initialize = False
 
         async def find_module_for_tool(self, tool_name: str) -> _RefreshModule:
             assert tool_name == "external.tools.refresh"
             self.lookup_before_initialize = not self.server.initialized
-            return _RefreshModule()
+            return self.module
 
     class _McpServer:
         def __init__(self) -> None:
@@ -1854,13 +1866,15 @@ async def test_mcp_hub_refresh_executor_initializes_server_before_module_lookup(
             self.initialized = True
 
     server = _McpServer()
-    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.server.get_mcp_server", lambda: server)
 
     result = await mcp_hub_management._execute_external_refresh_tool("docs")
 
     assert server.initialize_calls == 1
     assert server.module_registry.lookup_before_initialize is False
-    assert result["arguments"] == {"server_id": "docs"}
+    assert result["server_id"] == "docs"  # nosec B101 - pytest behavioral oracle, not a runtime guard.
+    assert manager.calls == ["docs"]  # nosec B101 - pytest behavioral oracle, not a runtime guard.
+    assert server.module_registry.refresh_calls == ["external_federation"]  # nosec B101 - pytest behavioral oracle, not a runtime guard.
 
 
 @pytest.mark.unit

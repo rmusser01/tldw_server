@@ -89,7 +89,7 @@ export const TokenProgressBar: React.FC<TokenProgressBarProps> = ({
         <button
           type="button"
           onClick={onClick}
-          className="inline-flex items-center gap-1.5 rounded-sm bg-transparent p-0 text-[11px] text-text-muted transition hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          className="inline-flex items-center gap-1.5 rounded-sm bg-transparent p-0 text-[11px] text-text-muted transition hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           aria-label={t(
             "playground:tokens.configureContextWindow",
             "Configure context window size"
@@ -129,7 +129,7 @@ export const TokenProgressBar: React.FC<TokenProgressBarProps> = ({
           <button
             type="button"
             onClick={onClick}
-            className="inline-flex items-center gap-2 rounded-sm bg-transparent p-0 text-left transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            className="inline-flex items-center gap-2 rounded-sm bg-transparent p-0 text-left transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
             aria-label={t(
               "playground:tokens.configureContextWindow",
               "Configure context window size"
@@ -174,7 +174,7 @@ export const TokenProgressBar: React.FC<TokenProgressBarProps> = ({
         <button
           type="button"
           onClick={onClick}
-          className="inline-flex flex-col gap-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-left transition hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          className="inline-flex flex-col gap-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-left transition hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           aria-label={t(
             "playground:tokens.configureContextWindow",
             "Configure context window size"

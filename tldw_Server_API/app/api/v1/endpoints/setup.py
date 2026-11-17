@@ -14,11 +14,12 @@ from configparser import ConfigParser
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, Field, model_validator
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
@@ -173,6 +174,7 @@ _FIRST_RUN_STEP_DATA_ALLOWED_KEYS = {
             "acknowledged",
             "default_provider",
             "default_model",
+            "default_base_url",
             *_FIRST_RUN_NON_SECRET_BOOLEAN_STEP_DATA_KEYS["providers"],
         }
     ),
@@ -387,6 +389,8 @@ def _is_unsafe_public_step_data_key(key: object) -> bool:
 
 def _is_explicitly_allowed_unsafe_named_step_key(step: str, key: object) -> bool:
     return (step == "optional_advanced" and key == "values") or (
+        step == "providers" and key == "default_base_url"
+    ) or (
         key in _FIRST_RUN_NON_SECRET_BOOLEAN_STEP_DATA_KEYS.get(step, frozenset())
     )
 
@@ -406,6 +410,30 @@ def _is_unsafe_public_step_data_value(value: object) -> bool:
     )
 
 
+def _is_public_provider_base_url(value: object) -> bool:
+    """Allow only nonsecret HTTP(S) endpoint metadata in resumable progress."""
+    if value is None:
+        return True
+    # URL parsers discard tabs/newlines; never persist those raw characters.
+    if not isinstance(value, str) or any(character in value for character in "\t\r\n"):
+        return False
+    try:
+        AnyHttpUrl(value)
+        parsed = urlsplit(value)
+        _ = parsed.port
+        return bool(
+            parsed.scheme in {"http", "https"}
+            and parsed.hostname
+            and not parsed.username
+            and not parsed.password
+            and not parsed.query
+            and not parsed.fragment
+            and not _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE.search(value.strip())
+        )
+    except ValueError:
+        return False
+
+
 def _is_local_setup_provider(provider: object) -> bool:
     entry = get_setup_provider_entry(provider) if isinstance(provider, str) else None
     return entry is not None and entry.provider_type == SetupProviderType.LOCAL_ENDPOINT
@@ -415,6 +443,8 @@ def _allows_path_like_first_run_step_value(step: str, key: object, value: object
     # Local inference servers can use a filesystem-shaped string as their model
     # ID. It is opaque metadata here, not permission to read that filesystem path.
     return (step == "ingest_defaults" and key == "allowed_local_roots") or (
+        step == "providers" and key == "default_base_url" and _is_public_provider_base_url(value)
+    ) or (
         step == "providers"
         and key == "default_model"
         and isinstance(value, str)
@@ -522,6 +552,11 @@ def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> di
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
         )
+    if step == "providers" and "default_base_url" in data and not _is_public_provider_base_url(data["default_base_url"]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
+        )
     if step == "ingest_defaults":
         _validate_ingest_allowed_local_roots(data)
     if not all(
@@ -563,6 +598,8 @@ def _public_first_run_step_data(
         if key in _FIRST_RUN_NON_SECRET_BOOLEAN_STEP_DATA_KEYS.get(step, frozenset()) and not isinstance(value, bool):
             continue
         if _is_unsafe_public_step_data_key(key) and not _is_explicitly_allowed_unsafe_named_step_key(step, key):
+            continue
+        if step == "providers" and key == "default_base_url" and not _is_public_provider_base_url(value):
             continue
         if step == "providers" and key == "default_model":
             if _is_path_like_model_identifier(value) and not (
@@ -1490,6 +1527,15 @@ async def save_first_run_provider(
     entry = get_setup_provider_entry(provider_key)
     if entry is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="unknown_setup_provider")
+    if entry.base_url_field and payload.base_url is not None:
+        base_url = payload.base_url.strip()
+        if not _is_public_provider_base_url(base_url):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Provider base URL must use HTTP(S) without credentials, query parameters, or fragments.",
+            )
+        payload = payload.model_copy(update={"base_url": base_url})
+
     credential_configured = False
     if entry.api_key_field:
         normalized_api_key = payload.api_key.strip() if payload.api_key is not None else ""

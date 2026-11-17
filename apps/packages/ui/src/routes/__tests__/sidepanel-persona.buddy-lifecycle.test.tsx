@@ -38,11 +38,11 @@ const mocks = vi.hoisted(() => ({
     | "unconfigured",
   hasCompletedFirstRun: true,
   capabilitiesState: {
-    capabilities: { hasPersona: true, hasPersonalization: true },
+    capabilities: { hasPersona: true, hasPersonalization: true, hasCompanion: true },
     loading: false
   } as {
     capabilities: {
-      hasPersona: boolean
+      hasCompanion?: boolean; hasPersona: boolean
       hasPersonalization?: boolean
       hasPersonaLiveControl?: boolean
     } | null
@@ -386,7 +386,7 @@ describe("SidepanelPersona", () => {
     mocks.hasCompletedFirstRun = true
     mocks.capabilitiesState.capabilities = {
       hasPersona: true,
-      hasPersonalization: true
+      hasPersonalization: true, hasCompanion: true
     }
     mocks.capabilitiesState.loading = false
     mocks.navigate.mockReset()
@@ -476,7 +476,7 @@ describe("SidepanelPersona", () => {
     mocks.capabilitiesState.capabilities = {
       hasPersona: true,
       hasPersonalization: true,
-      hasPersonaLiveControl: true
+      hasPersonaLiveControl: true, hasCompanion: true
     }
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",

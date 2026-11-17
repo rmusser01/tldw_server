@@ -1,0 +1,495 @@
+"""Validate an owner-migrated Media schema without granting runtime DDL."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from sqlglot import exp, parse_one
+from sqlglot.errors import ParseError
+
+from tldw_Server_API.app.core.DB_Management.media_db.errors import SchemaError
+from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
+    _EXPECTED_MEDIA_COLUMNS,
+    _POSTGRES_REQUIRED_TABLES,
+    ensure_postgres_keyword_identity,
+    ensure_postgres_media_owner_identity,
+    ensure_postgres_sync_log_contract,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.features.postgres_rls import (
+    POSTGRES_CLAIMS_PUBLICATION_TABLES,
+    postgres_policy_sets,
+)
+
+_REQUIRED_TABLES = set(_POSTGRES_REQUIRED_TABLES) | {
+    "schema_version",
+    "mediafiles",
+    "visualdocuments",
+    "tts_history",
+    "data_tables",
+    "data_table_columns",
+    "data_table_rows",
+    "data_table_sources",
+    "output_templates",
+    "reading_highlights",
+    "collection_tags",
+    "content_items",
+    "content_item_tags",
+    "document_reading_progress",
+    "document_annotations",
+    "document_parsed_references_cache",
+    "claims_review_log",
+    "claims_review_extractor_metrics_daily",
+    "claims_review_rules",
+    "claims_monitoring_settings",
+    "claims_monitoring_alerts",
+    "claims_monitoring_config",
+    "claims_monitoring_events",
+    "claims_monitoring_health",
+    "claims_analytics_exports",
+    "claims_notifications",
+    "claim_clusters",
+    "claim_cluster_membership",
+    "claim_cluster_links",
+    *POSTGRES_CLAIMS_PUBLICATION_TABLES,
+    "email_sources",
+    "email_messages",
+    "email_attachments",
+    "email_participants",
+    "email_message_participants",
+    "email_labels",
+    "email_message_labels",
+    "email_sync_state",
+    "email_backfill_state",
+}
+_ADDITIVE_COLUMNS = {
+    "media": _EXPECTED_MEDIA_COLUMNS,
+    "document_reading_progress": {"cfi", "percentage"},
+    "document_annotations": {"chapter_title", "percentage", "client_id"},
+    "claims": {
+        "review_status",
+        "reviewer_id",
+        "review_group",
+        "reviewed_at",
+        "review_notes",
+        "review_version",
+        "review_reason_code",
+        "claim_cluster_id",
+    },
+    "claims_monitoring_events": {"delivered_at"},
+    "claims_analytics_exports": {"job_id", "error_code", "snapshot_at", "snapshot_event_id"},
+    "data_tables": {
+        "workspace_tag",
+        "column_hints_json",
+        "generation_job_json",
+        "last_modified",
+        "version",
+        "client_id",
+        "deleted",
+        "prev_version",
+        "merge_parent_uuid",
+    },
+    "data_table_columns": {
+        "format",
+        "last_modified",
+        "version",
+        "client_id",
+        "deleted",
+        "prev_version",
+        "merge_parent_uuid",
+    },
+    "data_table_rows": {
+        "row_hash",
+        "last_modified",
+        "version",
+        "client_id",
+        "deleted",
+        "prev_version",
+        "merge_parent_uuid",
+    },
+    "data_table_sources": {"last_modified", "version", "client_id", "deleted", "prev_version", "merge_parent_uuid"},
+}
+_FTS = (
+    ("media_fts", "media", ("title", "content")),
+    ("keyword_fts", "keywords", ("keyword",)),
+    ("claims_fts", "claims", ("claim_text",)),
+    ("unvectorized_chunks_fts", "unvectorizedmediachunks", ("chunk_text",)),
+)
+
+
+_OWNER_ENSURED_INDEXES = {
+    "idx_annotations_media_user",
+    "idx_audio_presets_user_kind_default",
+    "idx_audio_presets_user_kind_favorite",
+    "idx_audio_presets_user_kind_updated",
+    "idx_claim_cluster_membership_claim",
+    "idx_claim_clusters_updated",
+    "idx_claim_clusters_user",
+    "idx_claims_analytics_exports_job_id",
+    "idx_claims_analytics_exports_user",
+    "idx_claims_analytics_exports_user_status_export_id",
+    "idx_claims_analytics_exports_user_status_updated_export_id",
+    "idx_claims_cluster_id",
+    "idx_claims_monitoring_alerts_user",
+    "idx_claims_monitoring_events_delivered",
+    "idx_claims_monitoring_events_type",
+    "idx_claims_monitoring_events_user",
+    "idx_claims_monitoring_events_user_created_id",
+    "idx_claims_monitoring_events_user_id",
+    "idx_claims_monitoring_health_user",
+    "idx_claims_monitoring_settings_user",
+    "idx_claims_monitoring_user",
+    "idx_claims_notifications_delivered",
+    "idx_claims_notifications_kind",
+    "idx_claims_notifications_resource",
+    "idx_claims_notifications_review_group",
+    "idx_claims_notifications_target_user",
+    "idx_claims_notifications_user",
+    "idx_claims_review_group",
+    "idx_claims_review_log_claim",
+    "idx_claims_review_log_created",
+    "idx_claims_review_log_reviewer",
+    "idx_claims_review_metrics_date",
+    "idx_claims_review_metrics_extractor",
+    "idx_claims_review_metrics_user",
+    "idx_claims_review_rules_active",
+    "idx_claims_review_rules_user",
+    "idx_claims_review_status",
+    "idx_claims_reviewer_id",
+    "idx_content_items_job",
+    "idx_content_items_run",
+    "idx_content_items_user_domain",
+    "idx_content_items_user_updated",
+    "idx_data_table_columns_table_position",
+    "idx_data_table_rows_table_index",
+    "idx_data_table_sources_table",
+    "idx_data_tables_deleted",
+    "idx_data_tables_status",
+    "idx_data_tables_updated",
+    "idx_data_tables_workspace_tag",
+    "idx_doc_refs_cache_lookup",
+    "idx_email_attachments_message_id",
+    "idx_email_backfill_state_status",
+    "idx_email_label_reverse",
+    "idx_email_labels_tenant_name",
+    "idx_email_media_visibility",
+    "idx_email_message_count_cover",
+    "idx_email_message_labels_label",
+    "idx_email_message_participants_message_role",
+    "idx_email_message_participants_role",
+    "idx_email_messages_identity_cover",
+    "idx_email_messages_source_id",
+    "idx_email_messages_tenant_date",
+    "idx_email_messages_tenant_date_id",
+    "idx_email_messages_tenant_has_attachments_date",
+    "idx_email_messages_tenant_message_id",
+    "idx_email_messages_tenant_source_message",
+    "idx_email_participant_reverse",
+    "idx_email_participants_tenant_email",
+    "idx_email_sources_tenant_provider",
+    "idx_email_sync_state_tenant_source",
+    "idx_highlights_user_item",
+    "idx_media_source_hash",
+    "idx_tts_history_user_created",
+    "idx_tts_history_user_favorite",
+    "idx_tts_history_user_model",
+    "idx_tts_history_user_provider",
+    "idx_tts_history_user_text_hash",
+    "idx_tts_history_user_voice_id",
+    "ux_audio_presets_user_kind_default_active",
+    "ux_audio_presets_user_kind_name_active",
+    "ux_content_items_user_canonical",
+    "ux_content_items_user_hash",
+    "ux_data_table_columns_table_column",
+    "ux_data_table_columns_table_position_live",
+    "ux_data_table_rows_table_index_live",
+    "ux_data_table_rows_table_row",
+    "ux_output_templates_user_name",
+}
+_OWNER_OBSOLETE_INDEXES = {
+    "ux_data_table_columns_table_position_active",
+    "ux_data_table_rows_table_index_active",
+}
+
+
+def validate_postgres_annotation_replay_index(db: Any, conn: Any) -> None:
+    """Require the complete unique client-intent arbiter without changing schema."""
+    valid = db.backend.execute(
+        "SELECT i.indisunique AND i.indisvalid AND i.indisready AND i.indislive AND i.indimmediate "
+        "AND i.indpred IS NULL AND i.indexprs IS NULL AND i.indnatts=3 AND i.indnkeyatts=3 "
+        "AND am.amname='btree' "
+        # The JSON lookup supports PostgreSQL 13, before indnullsnotdistinct existed.
+        "AND NOT COALESCE((to_jsonb(i)->>'indnullsnotdistinct')::boolean,FALSE) "
+        "AND ARRAY(SELECT a.attname::text FROM unnest(i.indkey::smallint[]) WITH ORDINALITY AS k(attnum,pos) "
+        "JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum ORDER BY k.pos) "
+        "= ARRAY[%s,%s,%s]::text[] "
+        "FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid "
+        "JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_am am ON am.oid=c.relam "
+        "WHERE n.nspname=current_schema() AND c.relname=%s "
+        "AND i.indrelid=to_regclass('document_annotations')",
+        ("user_id", "media_id", "client_id", "idx_annotations_client_id"),
+        connection=conn,
+    ).scalar
+    if valid is not True:
+        raise SchemaError("PostgreSQL annotation replay index requires schema-owner reconciliation")
+
+
+def canonical_policy_expression(expression: str, table: str) -> exp.Expression:
+    """Normalize deparser decoration without changing Boolean or correlated scope."""
+
+    def normalize(node: exp.Expression) -> exp.Expression:
+        for key, value in list(node.args.items()):
+            if isinstance(value, exp.Expression):
+                node.set(key, normalize(value))
+            elif isinstance(value, list):
+                node.set(key, [normalize(item) if isinstance(item, exp.Expression) else item for item in value])
+        if isinstance(node, exp.Paren):
+            return node.this
+        if isinstance(node, exp.Alias) and isinstance(node.parent, exp.Select):
+            select = node.parent
+            if (
+                len(select.expressions) == 1
+                and isinstance(node.this, exp.Anonymous)
+                and node.this.name.lower() == "current_setting"
+                and node.alias == "current_setting"
+                and not any(
+                    select.args.get(key)
+                    for key in (
+                        "from",
+                        "from_",
+                        "joins",
+                        "where",
+                        "group",
+                        "having",
+                        "order",
+                        "limit",
+                        "offset",
+                        "distinct",
+                    )
+                )
+            ):
+                return node.this
+        if isinstance(node, exp.Cast) and isinstance(node.this, exp.Literal) and node.this.is_string:
+            if node.to.is_type(exp.DataType.Type.TEXT):
+                return node.this
+            if node.to.is_type(exp.DataType.Type.ARRAY) and node.this.this == "{}":
+                node.set("this", parse_one("ARRAY[]", read="postgres"))
+        if isinstance(node, exp.Column) and node.table == table and node.find_ancestor(exp.Select) is None:
+            node.set("table", None)
+        if isinstance(node, exp.Identifier) and node.name.isascii() and node.name == node.name.lower():
+            node.set("quoted", False)
+        if isinstance(node, exp.Between) and not node.args.get("symmetric"):
+            node = exp.And(
+                this=exp.GTE(this=node.this.copy(), expression=node.args["low"].copy()),
+                expression=exp.LTE(this=node.this.copy(), expression=node.args["high"].copy()),
+            )
+        if isinstance(node, (exp.And, exp.Or)):
+            kind = type(node)
+            parts = []
+
+            def flatten(child: exp.Expression) -> None:
+                if isinstance(child, kind):
+                    flatten(child.this)
+                    flatten(child.expression)
+                else:
+                    parts.append(child)
+
+            flatten(node)
+            node = parts[0]
+            for part in parts[1:]:
+                node = kind(this=node, expression=part)
+        return node
+
+    try:
+        return normalize(parse_one(expression, read="postgres"))
+    except ParseError as exc:
+        raise SchemaError("PostgreSQL runtime RLS policy cannot be parsed") from exc
+
+
+def validate_postgres_runtime_schema(db: Any, conn: Any) -> None:
+    """Refuse incomplete catalogs; leave all schema repair to the owner."""
+    backend = db.backend
+    writable_version = backend.execute(
+        "SELECT has_table_privilege(current_user,'schema_version','INSERT,UPDATE,DELETE,TRUNCATE') "
+        "OR has_any_column_privilege(current_user,'schema_version','INSERT,UPDATE')",
+        connection=conn,
+    ).scalar
+    if writable_version:
+        raise SchemaError("PostgreSQL runtime migration-version authority is unsafe")
+    validate_postgres_schema_catalog(db, conn)
+
+
+def validate_postgres_schema_catalog(db: Any, conn: Any) -> None:
+    """Inspect the complete current Media catalog without changing schema."""
+    backend = db.backend
+    tables = backend.execute(
+        "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname=current_schema() AND c.relkind IN ('r','p') AND c.relname=ANY(%s)",
+        (sorted(_REQUIRED_TABLES),),
+        connection=conn,
+    ).rows
+    if {row["relname"] for row in tables} != _REQUIRED_TABLES:
+        raise SchemaError("PostgreSQL runtime schema is incomplete; run schema-owner migration")
+    names = ", ".join(backend.escape_identifier(name) for name in sorted(_REQUIRED_TABLES))
+    # Fixed package table names, individually escaped; locks prevent concurrent catalog replacement.
+    backend.execute(f"LOCK TABLE {names} IN ACCESS SHARE MODE", connection=conn)  # nosec B608
+    for table, expected_columns in _ADDITIVE_COLUMNS.items():
+        columns = {row["name"] for row in backend.get_table_info(table, connection=conn)}
+        if not expected_columns <= columns:
+            raise SchemaError(f"PostgreSQL runtime columns are incomplete for {table}")
+    ensure_postgres_sync_log_contract(db, conn, validate_only=True)
+    ensure_postgres_keyword_identity(db, conn, validate_only=True)
+    ensure_postgres_media_owner_identity(db, conn, validate_only=True)
+    validate_postgres_annotation_replay_index(db, conn)
+
+    for alias, table, columns in _FTS:
+        field = alias + "_tsv"
+        row = backend.execute(
+            "SELECT a.atttypid='tsvector'::regtype AS vector_type, "
+            "i.indisvalid AND i.indisready AND i.indpred IS NULL AND i.indnkeyatts=1 "
+            "AND i.indkey[0]=a.attnum AND am.amname='gin' AS valid_index, "
+            "t.tgtype=23 AND t.tgenabled IN ('O','A') AND NOT t.tgisinternal "
+            "AND t.tgqual IS NULL AND t.tgattr::text='' AND t.tgnargs=0 AND octet_length(t.tgargs)=0 "
+            "AND p.pronargs=0 AND p.prorettype='trigger'::regtype AND NOT p.prosecdef "
+            "AND NOT p.proretset AND p.proconfig IS NULL AND p.provolatile='v' "
+            "AND (SELECT lanname FROM pg_language WHERE oid=p.prolang)='plpgsql' "
+            "AS valid_trigger, p.prosrc "
+            "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname=%s AND NOT a.attisdropped "
+            "JOIN pg_index i ON i.indrelid=c.oid "
+            "JOIN pg_class ix ON ix.oid=i.indexrelid AND ix.relname=%s "
+            "JOIN pg_am am ON am.oid=ix.relam "
+            "JOIN pg_trigger t ON t.tgrelid=c.oid AND t.tgname=%s "
+            "JOIN pg_proc p ON p.oid=t.tgfoid AND p.proname=%s AND p.pronamespace=n.oid "
+            "WHERE n.nspname=current_schema() AND c.relname=%s",
+            (field, f"idx_{table}_{field}", f"update_{field}_trigger", f"update_{field}_function", table),
+            connection=conn,
+        ).first
+        joined = " || ' ' || ".join(f"coalesce(NEW.{backend.escape_identifier(column)}, '')" for column in columns)
+        body = f"""
+                BEGIN
+                    NEW.{backend.escape_identifier(field)} :=
+                        to_tsvector('english', {joined});
+                    RETURN NEW;
+                END;
+        """
+        if (
+            not row
+            or not all(row[key] for key in ("vector_type", "valid_index", "valid_trigger"))
+            or row["prosrc"].strip() != body.strip()
+        ):
+            raise SchemaError(f"PostgreSQL runtime FTS catalog drifted for {table}")
+        backend.register_fts_table(alias, table)
+
+    policies = postgres_policy_sets(backend)
+    states = backend.execute(
+        "SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity "
+        "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname=current_schema() AND c.relname=ANY(%s)",
+        (list(policies),),
+        connection=conn,
+    ).rows
+    if len(states) != len(policies) or any(
+        not row["relrowsecurity"] or not row["relforcerowsecurity"] for row in states
+    ):
+        raise SchemaError("PostgreSQL runtime RLS catalog drifted")
+    rows = backend.execute(
+        "SELECT tablename,policyname,permissive,roles::text,cmd,qual,with_check FROM pg_policies "
+        "WHERE schemaname=current_schema() AND tablename=ANY(%s)",
+        (list(policies),),
+        connection=conn,
+    ).rows
+    expected = {(table, name): predicate for table, definitions in policies.items() for name, predicate in definitions}
+    actual = {(row["tablename"], row["policyname"]) for row in rows}
+    # Conversation storage shares sync_log and installs this additional owner-only policy.
+    conversation_policy = ("sync_log", "sync_log_tenant_isolation")
+    if conversation_policy in actual:
+        expected[conversation_policy] = "client_id = current_setting('app.current_user_id', true)"
+    if actual != set(expected):
+        raise SchemaError("PostgreSQL runtime RLS policy catalog drifted")
+    for row in rows:
+        table = row["tablename"]
+        predicate = canonical_policy_expression(expected[table, row["policyname"]], table)
+        if (
+            row["permissive"] != "PERMISSIVE"
+            or row["roles"] != "{public}"
+            or row["cmd"] != "ALL"
+            or not row["qual"]
+            or not row["with_check"]
+            or canonical_policy_expression(row["qual"], table) != predicate
+            or canonical_policy_expression(row["with_check"], table) != predicate
+        ):
+            raise SchemaError(f"PostgreSQL runtime RLS policy authority drifted for {table}/{row['policyname']}")
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.backends.postgres_helpers import (
+        _SAFE_TRANSCRIPT_TEXT_FUNCTION_SQL,
+    )
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_claims_json_helpers import (
+        POSTGRES_CLAIMS_JSON_HELPER_DDL,
+    )
+
+    helpers = (
+        (
+            "public.tldw_try_extract_normalized_transcript_text(text)",
+            _SAFE_TRANSCRIPT_TEXT_FUNCTION_SQL,
+            "text",
+            True,
+            "u",
+            ["search_path=pg_catalog"],
+        ),
+        ("tldw_claims_safe_json(text)", POSTGRES_CLAIMS_JSON_HELPER_DDL[0], "json", False, "s", None),
+        ("tldw_claims_compact_json(json)", POSTGRES_CLAIMS_JSON_HELPER_DDL[1], "text", False, "s", None),
+    )
+    for signature, ddl, returns, strict, parallel, settings in helpers:
+        row = backend.execute(
+            "SELECT p.prosrc, p.provolatile, p.proisstrict, p.prosecdef, p.proparallel, p.proconfig, "
+            "p.proretset, p.pronargdefaults, p.provariadic, p.prorettype=%s::regtype AS return_type, "
+            "l.lanname FROM pg_proc p JOIN pg_language l ON l.oid=p.prolang "
+            "WHERE p.oid=to_regprocedure(%s)",
+            (returns, signature),
+            connection=conn,
+        ).first
+        body = ddl.split("AS $function$", 1)[1].split("$function$", 1)[0].strip()
+        if (
+            not row
+            or row["prosrc"].strip() != body
+            or row["provolatile"] != "i"
+            or row["proisstrict"] != strict
+            or row["prosecdef"]
+            or row["proparallel"] != parallel
+            or row["proconfig"] != settings
+            or row["proretset"]
+            or row["pronargdefaults"]
+            or row["provariadic"]
+            or not row["return_type"]
+            or row["lanname"] != "plpgsql"
+        ):
+            raise SchemaError(f"PostgreSQL runtime content helper catalog drifted for {signature}")
+
+
+def validate_postgres_owner_reopen(db: Any, conn: Any) -> None:
+    """Keep mandatory owner repairs observable before skipping reconciliation."""
+    backend = db.backend
+    rows = backend.execute(
+        "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname=current_schema() AND c.relkind IN ('i','I') AND c.relname=ANY(%s)",
+        (sorted(_OWNER_ENSURED_INDEXES | _OWNER_OBSOLETE_INDEXES),),
+        connection=conn,
+    ).rows
+    if {row["relname"] for row in rows} != _OWNER_ENSURED_INDEXES:
+        raise SchemaError("PostgreSQL indexes require schema-owner reconciliation")
+    pending = backend.execute(
+        "SELECT EXISTS(SELECT 1 FROM claims WHERE review_status IS NULL OR review_version IS NULL) "
+        "OR EXISTS(SELECT 1 FROM data_tables WHERE client_id IS NULL OR client_id='' OR last_modified IS NULL)",
+        connection=conn,
+    ).scalar
+    if pending:
+        raise SchemaError("PostgreSQL scoped fields require schema-owner backfill")
+    for alias, table, columns in _FTS:
+        ident = backend.escape_identifier
+        text = " || ' ' || ".join(f"coalesce({ident(column)}, '')" for column in columns)
+        stale = backend.execute(
+            f"SELECT EXISTS(SELECT 1 FROM {ident(table)} WHERE {ident(alias + '_tsv')} "
+            f"IS DISTINCT FROM to_tsvector('english', {text}))",  # nosec B608 -- Fixed schema table/columns are escaped by the actual backend.
+            connection=conn,
+        ).scalar
+        if stale:
+            raise SchemaError(f"PostgreSQL scoped FTS rows require schema-owner backfill for {table}")

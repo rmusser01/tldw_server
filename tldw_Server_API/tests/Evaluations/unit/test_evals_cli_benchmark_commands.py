@@ -65,6 +65,39 @@ def test_benchmark_run_command_executes(monkeypatch):
     assert called["loaded"] is True
 
 
+def test_benchmark_run_summary_leaves_an_unscored_item_out(monkeypatch, tmp_path):
+    """An unscored item (score None) is counted apart and left out of the average and accuracy, on screen and in
+    the saved results (owner, 2026-11-10; TASK-15485)."""
+    import json
+
+    class _Registry:
+        def get(self, name):
+            return type("Cfg", (), {"evaluation_type": "bullshit_detection"})()
+
+        def create_evaluator(self, name):
+            return type("Eval", (), {"format_for_custom_metric": lambda self, item: {}})()
+
+    cli = "tldw_Server_API.app.core.Evaluations.cli.benchmark_cli"
+    monkeypatch.setattr(f"{cli}.get_registry", lambda: _Registry())
+    monkeypatch.setattr(f"{cli}.load_benchmark_dataset", lambda *a, **k: [{"id": "q1"}, {"id": "q2"}])
+    # "category" sends the summary through calculate_accuracy_by_category too
+    monkeypatch.setattr(
+        f"{cli}.run_async_safely",
+        lambda coro: coro.close() or [
+            {"score": 0.8, "explanation": "ok", "category": "c"},
+            {"score": None, "explanation": "Error: 429 rate limited", "category": "c"},
+        ],
+    )
+    out = tmp_path / "results.json"
+
+    result = CliRunner().invoke(main, ["benchmark", "run", "bullshit_benchmark", "--output", str(out)])
+
+    assert result.exit_code == 0, result.output
+    for line in ("Unscored: 1", "Accuracy: 100.0%", "Average Score: 0.800", "c: 100.0% (1/1)"):
+        assert line in result.output
+    assert json.loads(out.read_text())["summary"] == {"total": 2, "unscored": 1, "average_score": 0.8}
+
+
 def test_cli_log_sink_does_not_error_after_clirunner_teardown(capsys):
     runner = CliRunner()
     result = runner.invoke(main, ["--help"])

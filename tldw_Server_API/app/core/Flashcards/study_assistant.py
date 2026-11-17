@@ -433,12 +433,20 @@ async def generate_study_assistant_reply(
     provider: str | None = None,
     model: str | None = None,
     guidance: str | None = None,
+    provider_credentials: Any = None,
 ) -> dict[str, Any]:
-    """Generate an assistant reply for the provided card/question context."""
-    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+    """Generate an assistant reply for the provided card/question context.
+
+    A ``provider_credentials`` handle (the user's own key, TASK-15426) runs the call on that key;
+    without one it runs on the server's.
+    """
     from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
     from tldw_Server_API.app.core.Chat.chat_target_resolution import resolve_chat_target
     from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
+    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+    from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    )
 
     prompt_package = build_study_assistant_prompt_package(
         action=action,
@@ -465,6 +473,7 @@ async def generate_study_assistant_reply(
         call_policy=ProviderCallPolicy(privacy_safe_errors=True),
         max_tokens=1000,
         temperature=0.3,
+        **({PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials} if provider_credentials is not None else {}),
     )
     response_text = (extract_openai_content(response) or "").strip()
 

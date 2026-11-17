@@ -276,16 +276,30 @@ class TestV2Chunker:
             )
         assert any(call.args and call.args[0] == "code_ast" for call in spy.call_args_list)
 
-    def test_process_text_tokenizer_override(self):
+    @pytest.mark.unit
+    def test_process_text_tokenizer_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """tokenizer_name_or_path should use per-call strategy without mutating cached tokens."""
+        from tldw_Server_API.app.core.Chunking.strategies import tokens
+
+        tokenizer_names: list[str] = []
+
+        def tokenizer(model_name: str) -> tokens.FallbackTokenizer:
+            tokenizer_names.append(model_name)
+            return tokens.FallbackTokenizer(model_name)
+
+        monkeypatch.setattr(tokens, "TiktokenTokenizer", tokenizer)
         chunker = Chunker()
+        cached_strategy = chunker.get_strategy("tokens")
         text = "one two three four five six seven eight nine ten"
-        chunker.process_text(
+        result = chunker.process_text(
             text,
             options={"method": "tokens", "max_size": 5},
             tokenizer_name_or_path="test-tokenizer",
         )
         token_strategy = chunker.get_strategy("tokens")
+        assert result
+        assert tokenizer_names == ["test-tokenizer"]
+        assert token_strategy is cached_strategy
         assert getattr(token_strategy, "tokenizer_name", None) != "test-tokenizer"
 
     def test_process_text_rejects_non_string_input(self):

@@ -65,7 +65,7 @@ export const TestCaseBulkPanel: React.FC<TestCaseBulkPanelProps> = ({
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -112,7 +112,7 @@ export const TestCaseBulkPanel: React.FC<TestCaseBulkPanelProps> = ({
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }

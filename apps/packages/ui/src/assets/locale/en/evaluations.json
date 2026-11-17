@@ -1,5 +1,6 @@
 {
   "title": "Evaluations playground",
+  "recoveryPermissionMessage": "Use an account with access to Evaluations API.",
   "subtitle": "Define evaluations against your tldw server and inspect recent runs.",
   "listTitle": "Recent evaluations",
   "newEvaluationCta": "New evaluation",
@@ -293,5 +294,8 @@
   "compareEmpty": "Select two runs with metrics to compare.",
   "sampleInputRequired": "Provide a sample input or upload samples JSON.",
   "invalidJsonError": "Invalid JSON",
-  "errorLabel": "Error"
+  "errorLabel": "Error",
+  "recipePersonaSetupTitle": "Persona scenario setup",
+  "recipePersonaSetupDescription": "Use Advanced JSON to define scenarios and at least one Persona or Character target. This recipe runs offline without candidate models or a judge.",
+  "recipePersonaJsonInvalidDescription": "Correct the JSON in Advanced JSON before validating or running."
 }

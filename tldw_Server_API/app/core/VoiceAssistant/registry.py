@@ -344,15 +344,35 @@ class VoiceCommandRegistry:
         Returns:
             List of loaded commands
         """
+        commands = self.load_user_commands(db, user_id, include_disabled=include_disabled, persona_id=persona_id)
+        self.apply_user_commands(user_id, commands, persona_id=persona_id)
+        return commands
+
+    def load_user_commands(
+        self,
+        db,
+        user_id: int,
+        include_disabled: bool = True,
+        persona_id: str | None = None,
+    ) -> list[VoiceCommand]:
+        """Read a user's commands from the database without touching the cache (safe off the event loop)."""
         from .db_helpers import get_user_voice_commands
 
-        commands = get_user_voice_commands(
+        return get_user_voice_commands(
             db,
             user_id=user_id,
             include_system=False,
             enabled_only=not include_disabled,
             persona_id=persona_id,
         )
+
+    def apply_user_commands(
+        self,
+        user_id: int,
+        commands: list[VoiceCommand],
+        persona_id: str | None = None,
+    ) -> None:
+        """Replace the cached user commands; call it on the event loop, which owns the cache."""
         if persona_id is not None:
             self._user_commands[self._persona_bucket_key(user_id, persona_id)] = {cmd.id: cmd for cmd in commands}
         else:
@@ -364,7 +384,6 @@ class VoiceCommandRegistry:
                 if bucket_key not in self._user_commands:
                     self._user_commands[bucket_key] = {}
                 self._user_commands[bucket_key][command.id] = command
-        return commands
 
     def find_matching_commands(
         self,

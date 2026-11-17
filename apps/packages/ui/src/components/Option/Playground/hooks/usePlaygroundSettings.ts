@@ -47,7 +47,6 @@ export function usePlaygroundSettings(deps: UsePlaygroundSettingsDeps) {
   const {
     selectedCharacterName,
     selectedSystemPrompt,
-    selectedQuickPrompt,
     systemPrompt,
     ragPinnedResultsLength,
     webSearch,
@@ -77,9 +76,8 @@ export function usePlaygroundSettings(deps: UsePlaygroundSettingsDeps) {
   const compareHasPromptContext = React.useMemo(
     () =>
       Boolean(selectedSystemPrompt) ||
-      Boolean(selectedQuickPrompt) ||
       String(systemPrompt || "").trim().length > 0,
-    [selectedQuickPrompt, selectedSystemPrompt, systemPrompt]
+    [selectedSystemPrompt, systemPrompt]
   )
 
   const compareSharedContextLabels = React.useMemo(() => {
@@ -168,15 +166,14 @@ export function usePlaygroundSettings(deps: UsePlaygroundSettingsDeps) {
 
     const hasCustomPrompt =
       Boolean(selectedSystemPrompt) ||
-      Boolean(selectedQuickPrompt) ||
       String(systemPrompt || "").trim().length > 0
 
     if (selectedCharacterName && ragPinnedResultsLength > 0) {
       warnings.push({
         id: "character-rag",
         text: t(
-          "playground:composer.conflict.characterRag",
-          "Character mode and pinned RAG sources are both active. Responses may blend persona and retrieval context."
+          "playground:composer.conflict.characterRagSelected",
+          "Character and pinned sources are selected. Review this combination; saved character chats may refuse it."
         ),
         actionLabel: t(
           "playground:composer.conflict.reviewContext",
@@ -190,8 +187,8 @@ export function usePlaygroundSettings(deps: UsePlaygroundSettingsDeps) {
       warnings.push({
         id: "character-prompt",
         text: t(
-          "playground:composer.conflict.characterPrompt",
-          "Character mode and custom prompt steering are both active. Verify intended behavior before sending."
+          "playground:composer.conflict.characterPromptSelected",
+          "Character and custom system prompt are selected. Review this combination; saved character chats may refuse it."
         ),
         actionLabel: t(
           "playground:composer.conflict.reviewModes",
@@ -295,10 +292,7 @@ export function usePlaygroundSettings(deps: UsePlaygroundSettingsDeps) {
           )
         ),
         actionLabel: largestContextContributor
-          ? t(
-              "playground:composer.conflict.trimLargest",
-              "Trim largest"
-            )
+          ? t("playground:composer.conflict.trimLargest", "Trim largest")
           : t("playground:composer.conflict.reviewContext", "Review context"),
         onAction: largestContextContributor
           ? trimLargestContextContributor
@@ -319,7 +313,6 @@ export function usePlaygroundSettings(deps: UsePlaygroundSettingsDeps) {
     trimLargestContextContributor,
     ragPinnedResultsLength,
     selectedCharacterName,
-    selectedQuickPrompt,
     selectedSystemPrompt,
     openModelApiSelector,
     setOpenModelSettings,
@@ -343,4 +336,6 @@ export function usePlaygroundSettings(deps: UsePlaygroundSettingsDeps) {
   }
 }
 
-export type UsePlaygroundSettingsReturn = ReturnType<typeof usePlaygroundSettings>
+export type UsePlaygroundSettingsReturn = ReturnType<
+  typeof usePlaygroundSettings
+>

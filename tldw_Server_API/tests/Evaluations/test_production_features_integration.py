@@ -206,7 +206,7 @@ class TestUserRateLimiter:
 
     @pytest.mark.asyncio
     async def test_rate_limit_enforcement(self, rate_limiter):
-        """Test current Phase-2 behavior for CUSTOM tier (legacy cost-only path)."""
+        """Test current Phase-2 behavior for CUSTOM tier (legacy local path)."""
         user_id = "test_user"
         endpoint = "/api/v1/evaluations"
 
@@ -218,13 +218,13 @@ class TestUserRateLimiter:
             custom_limits={"evaluations_per_minute": 2}
         )
 
-        # All requests should be allowed in legacy_cost_only mode.
+        # All requests should be allowed in legacy_local mode.
         for i in range(3):
             allowed, metadata = await rate_limiter.check_rate_limit(
                 user_id, endpoint
             )
             assert allowed is True
-            assert metadata.get("rate_limit_source") == "legacy_cost_only"
+            assert metadata.get("rate_limit_source") == "legacy_local"
 
     @pytest.mark.asyncio
     async def test_tier_upgrade(self, rate_limiter):
@@ -256,8 +256,7 @@ class TestUserRateLimiter:
         for _ in range(3):
             await rate_limiter.check_rate_limit(
                 user_id, "/api/v1/evaluations",
-                tokens_requested=100,
-                estimated_cost=0.01
+                tokens_requested=100
             )
 
         # Get usage summary
@@ -266,7 +265,6 @@ class TestUserRateLimiter:
         assert summary["user_id"] == user_id
         assert summary["usage"]["today"]["evaluations"] == 3
         assert summary["usage"]["today"]["tokens"] == 300
-        assert summary["usage"]["today"]["cost"] == pytest.approx(0.03)
 
     @pytest.mark.asyncio
     async def test_burst_allowance(self, rate_limiter):
@@ -289,7 +287,7 @@ class TestUserRateLimiter:
                 user_id, "/api/v1/evaluations"
             )
             assert allowed is True
-            assert metadata.get("rate_limit_source") == "legacy_cost_only"
+            assert metadata.get("rate_limit_source") == "legacy_local"
 
 
 @pytest_asyncio.fixture
@@ -749,8 +747,7 @@ class TestIntegration:
         allowed, rate_metadata = await rate_limiter.check_rate_limit(
             user_id,
             "/api/v1/evaluations",
-            tokens_requested=1000,
-            estimated_cost=0.10
+            tokens_requested=1000
         )
         assert allowed is True
 
@@ -797,7 +794,7 @@ class TestIntegration:
         # 5. Check usage
         usage = await rate_limiter.get_usage_summary(user_id)
         assert usage["usage"]["today"]["evaluations"] == 1
-        assert usage["usage"]["today"]["cost"] == pytest.approx(0.10)
+        assert usage["usage"]["today"]["tokens"] == 1000
 
 
 # Run tests with pytest

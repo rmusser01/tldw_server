@@ -4,10 +4,7 @@ import { useStorage } from "@plasmohq/storage/hook"
 import { Tooltip } from "antd"
 import { Star } from "lucide-react"
 import { getProviderDisplayName } from "@/utils/provider-registry"
-import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
-import { tldwModels } from "@/services/tldw"
-import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability"
 import { useStoreChatModelSettings } from "@/store/model"
 import {
   LOCAL_PROVIDERS,
@@ -16,6 +13,9 @@ import {
   getCanonicalModelKey,
   getModelId,
   getModelProvider,
+  isConfiguredUsableModel,
+  mergeCatalogModels,
+  resolveModelSelectorSelection,
   hasFavoriteModelKey,
   modelMatchesSearch,
   sortModelsForSelector,
@@ -24,6 +24,15 @@ import {
   type ModelSortMode,
   type ModelUsageStats
 } from "./modelSelectorUtils"
+import { formatChatProviderName } from "@/utils/chat-model-label"
+import {
+  getChatModelsCacheGeneration,
+  subscribeChatModelsInvalidation
+} from "@/services/chat-models-invalidation"
+
+// Loaded on demand: the server service pulls in much of the app.
+const loadServerChatModelCatalog = async (): Promise<ModelSelectorDescriptor[]> =>
+  (await import("@/services/tldw-server")).fetchChatModelCatalog()
 
 export type { ModelListScope, ModelSortMode } from "./modelSelectorUtils"
 
@@ -33,6 +42,13 @@ export type UseModelSelectorParams = {
   setSelectedModel: (model: string) => void
   navigate: (path: string) => void
   modelsLoading?: boolean
+  modelsError?: boolean
+  onRetryModels?: () => void
+  /**
+   * Loads every chat model the server knows, including models whose provider
+   * is not set up, for the picker's "All models" scope (CC-06).
+   */
+  loadCatalogModels?: () => Promise<ModelSelectorDescriptor[]>
 }
 
 export function useModelSelector({
@@ -40,12 +56,23 @@ export function useModelSelector({
   selectedModel,
   setSelectedModel,
   navigate,
-  modelsLoading = false
+  modelsLoading = false,
+  modelsError = false,
+  onRetryModels,
+  loadCatalogModels = loadServerChatModelCatalog
 }: UseModelSelectorParams) {
   const { t } = useTranslation(["playground", "common"])
   const apiProvider = useStoreChatModelSettings((state) => state.apiProvider)
+  const activeSettingsScope = useStoreChatModelSettings(state => state.activeSettingsScope)
+  const scopedApiProvider = useStoreChatModelSettings(state => state.activeSettingsScope ? state.scopedSettingsByModelKey?.[state.activeSettingsScope]?.apiProvider : undefined)
 
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false)
+  const favoriteFocusRef = React.useRef<{
+    key: string
+    button: HTMLButtonElement
+    menu: HTMLElement
+  } | null>(null)
+  React.useEffect(() => () => { favoriteFocusRef.current = null }, [modelDropdownOpen])
   const [modelSearchQuery, setModelSearchQuery] = React.useState("")
   const [favoriteModels, setFavoriteModels, favoriteModelsMeta] = useStorage<string[]>(
     "favoriteChatModels",
@@ -66,13 +93,44 @@ export function useModelSelector({
 
   const modelListScope: ModelListScope =
     storedModelListScope === "catalog" ? "catalog" : "configured"
-  const selectedProviderHint =
-    typeof apiProvider === "string" && apiProvider.trim()
-      ? apiProvider.trim().toLowerCase()
-      : null
-  const selectedIdentity = React.useMemo(
-    () => parseProviderQualifiedModelSelection(selectedModel),
-    [selectedModel]
+  const [catalogModels, setCatalogModels] = React.useState<ModelSelectorDescriptor[]>([])
+  const [catalogLoadFailed, setCatalogLoadFailed] = React.useState(false)
+  const [catalogAttempt, setCatalogAttempt] = React.useState(0)
+  // An account or server change invalidates the chat models; the catalog of
+  // the old one must not linger in "All models" (#3343).
+  const chatModelsGeneration = React.useSyncExternalStore(
+    subscribeChatModelsInvalidation,
+    getChatModelsCacheGeneration,
+    getChatModelsCacheGeneration
+  )
+  React.useEffect(() => {
+    setCatalogModels((models) => (models.length > 0 ? [] : models))
+    setCatalogLoadFailed(false)
+  }, [chatModelsGeneration])
+  React.useEffect(() => {
+    if (modelListScope !== "catalog") return
+    let current = true
+    void Promise.resolve()
+      .then(() => loadCatalogModels())
+      .then((models) => {
+        if (!current) return
+        setCatalogModels(Array.isArray(models) ? models : [])
+        setCatalogLoadFailed(false)
+      })
+      .catch(() => {
+        if (current) setCatalogLoadFailed(true)
+      })
+    return () => {
+      current = false
+    }
+  }, [catalogAttempt, chatModelsGeneration, loadCatalogModels, modelListScope])
+  const retryCatalogModels = React.useCallback(() => {
+    setCatalogLoadFailed(false)
+    setCatalogAttempt((attempt) => attempt + 1)
+  }, [])
+  const selectedSelection = React.useMemo(
+    () => resolveModelSelectorSelection(composerModels, selectedModel, apiProvider, { scope: activeSettingsScope, providerOverride: scopedApiProvider }),
+    [composerModels, selectedModel, apiProvider, activeSettingsScope, scopedApiProvider]
   )
 
   const normalizedModelUsageByKey = React.useMemo<Record<string, ModelUsageStats>>(() => {
@@ -89,49 +147,9 @@ export function useModelSelector({
     return normalized
   }, [modelUsageByKey])
 
-  const selectedModelMeta = React.useMemo(() => {
-    if (!selectedModel) return null
-    const models = (composerModels as any[]) || []
-    if (selectedIdentity.provider) {
-      const provider = normalizeProviderAvailabilityKey(
-        getModelProvider({ provider: selectedIdentity.provider })
-      )
-      return models.find(
-        (model) => normalizeProviderAvailabilityKey(getModelProvider(model)) === provider &&
-          getModelId(model) === selectedIdentity.modelId
-      ) || null
-    }
-    const selected = selectedModel.trim()
-    const selectedLower = selected.toLowerCase()
-    const canonicalMatch = models.find(
-      (model) => getCanonicalModelKey(model).toLowerCase() === selectedLower
-    )
-    if (canonicalMatch) return canonicalMatch
-
-    const providerMatch = selectedProviderHint
-      ? models.find((model) => {
-          const modelId = getModelId(model)
-          return modelId === selected && getModelProvider(model) === selectedProviderHint
-        })
-      : null
-    if (providerMatch) return providerMatch
-
-    return (
-      models.find((model) => {
-        const modelId = getModelId(model)
-        return modelId === selected || String(model.model || "") === selected
-      }) || null
-    )
-  }, [composerModels, selectedModel, selectedProviderHint, selectedIdentity])
-
-  const selectedModelKey = React.useMemo(() => {
-    if (selectedModelMeta) return getCanonicalModelKey(selectedModelMeta)
-    if (!selectedModel) return null
-    return getCanonicalModelKey(
-      selectedIdentity.provider || selectedProviderHint || "custom",
-      selectedIdentity.modelId
-    )
-  }, [selectedModel, selectedModelMeta, selectedProviderHint, selectedIdentity])
+  const selectedModelMeta = selectedSelection.model
+  const selectedModelKey = selectedSelection.key
+  const selectedModelSettingsScope = selectedSelection.settingsScope
 
   const modelContextLength = React.useMemo(() => {
     const candidates = [
@@ -182,18 +200,13 @@ export function useModelSelector({
     return null
   }, [modelContextLength, requestedNumCtx])
 
-  const resolvedProviderKey = React.useMemo(() => {
-    if (selectedModelMeta) return getModelProvider(selectedModelMeta)
-    if (selectedIdentity.provider) {
-      return getModelProvider({ provider: selectedIdentity.provider })
-    }
-    return selectedProviderHint || "custom"
-  }, [selectedModelMeta, selectedProviderHint, selectedIdentity])
-
-  const providerLabel = React.useMemo(
-    () => tldwModels.getProviderDisplayName(resolvedProviderKey || "custom"),
-    [resolvedProviderKey]
-  )
+  const resolvedProviderKey = selectedSelection.provider || "custom"
+  // "" for the tldw transport and placeholder providers: no provider to name.
+  const resolvedProviderName = selectedSelection.provider
+    ? formatChatProviderName(selectedSelection.provider)
+    : ""
+  const providerLabel =
+    resolvedProviderName || t("playground:composer.chooseProvider", "Choose provider")
 
   const modelSummaryLabel = React.useMemo(() => {
     if (!selectedModel) {
@@ -205,10 +218,11 @@ export function useModelSelector({
     return (
       selectedModelMeta?.nickname ||
       getModelId(selectedModelMeta as ModelSelectorDescriptor) ||
-      selectedIdentity.modelId
+      selectedSelection.modelId
     )
-  }, [selectedModel, selectedModelMeta, selectedIdentity, t])
+  }, [selectedModel, selectedModelMeta, selectedSelection.modelId, t])
 
+  // One format for the selected model (CC-06): "model (Provider)".
   const apiModelLabel = React.useMemo(() => {
     if (!selectedModel) {
       return t(
@@ -216,10 +230,12 @@ export function useModelSelector({
         "Select a model"
       )
     }
-    return `${providerLabel} / ${modelSummaryLabel}`
-  }, [modelSummaryLabel, providerLabel, selectedModel, t])
+    return resolvedProviderName
+      ? `${modelSummaryLabel} (${resolvedProviderName})`
+      : modelSummaryLabel
+  }, [modelSummaryLabel, resolvedProviderName, selectedModel, t])
 
-  const modelSelectorWarning = !selectedModel
+  const modelSelectorWarning = !selectedSelection.key || !selectedSelection.provider
 
   const favoriteModelSet = React.useMemo(
     () => new Set((favoriteModels || []).map((value) => String(value))),
@@ -274,7 +290,9 @@ export function useModelSelector({
   )
 
   const filteredModels = React.useMemo(() => {
-    const list = (composerModels as any[]) || []
+    const ready = (composerModels as any[]) || []
+    const list =
+      modelListScope === "catalog" ? mergeCatalogModels(ready, catalogModels) : ready
     const scoped = filterModelsForScope(list, modelListScope)
     const q = modelSearchQuery.trim().toLowerCase()
     const searched = q
@@ -288,6 +306,7 @@ export function useModelSelector({
       sortMode: modelSortMode
     })
   }, [
+    catalogModels,
     composerModels,
     favoriteModelSet,
     modelListScope,
@@ -298,11 +317,19 @@ export function useModelSelector({
     selectedModel
   ])
 
-  const modelDropdownMenuItems = React.useMemo(() => {
+  const scopeMenuItems = React.useMemo(() => {
     const models = filteredModels || []
     const allModels = (composerModels as any[]) || []
 
     if (allModels.length === 0) {
+      if (modelsError) {
+        return [{
+          key: "models-retry",
+          label: <span>{t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")} — {t("playground:characterChatReadiness.model.retryAction", "Try again")}</span>,
+          onClick: onRetryModels
+        }]
+      }
+
       // While the catalog is still being fetched, show a loading affordance
       // rather than the terminal "connect your server" error — the server may
       // be perfectly reachable and models simply haven't arrived yet.
@@ -477,11 +504,14 @@ export function useModelSelector({
       return parts.join(" ")
     }
 
-    const buildItem = (model: any) => {
+    // Rows outside a provider group name their provider after the model (CC-06).
+    const buildItem = (model: any, showProvider = false) => {
       const providerRaw = getModelProvider(model)
       const modelId = getModelId(model)
       const modelKey = getCanonicalModelKey(model)
       const modelLabel = model.nickname || modelId
+      const providerName = showProvider ? formatChatProviderName(providerRaw) : ""
+      const notSetUp = !isConfiguredUsableModel(model)
       const isFavorite = isFavoriteModel(model)
       const isRecommended = firstFavoriteModelKey === modelKey
       const favoriteTitle = isFavorite
@@ -538,14 +568,30 @@ export function useModelSelector({
             styles={{ root: { maxWidth: 280 } }}
           >
             <div
-              className="flex items-center gap-2 text-sm"
+              className="flex min-w-0 flex-wrap items-center gap-2 text-sm"
               data-testid="model-selector-option"
               data-model-key={modelKey}
               data-model-id={modelId}
               data-provider={providerRaw}
             >
               <ProviderIcons provider={providerRaw} className="h-3 w-3 text-text-subtle" />
-              <span className="truncate flex-1">{modelLabel}</span>
+              <span className="min-w-0 flex-1 basis-40 truncate" title={modelLabel}>{modelLabel}</span>
+              {providerName ? (
+                <span className="min-w-0 max-w-[8rem] shrink truncate text-[11px] text-text-muted" title={providerName}>
+                  {providerName}
+                </span>
+              ) : null}
+              {notSetUp ? (
+                <span
+                  className="rounded-full border border-border px-1.5 py-0.5 text-[10px] text-text-muted"
+                  title={t(
+                    "playground:composer.modelNotSetUpTitle",
+                    "This model's provider is not set up on your server yet."
+                  )}
+                >
+                  {t("playground:composer.modelNotSetUp", "Not set up")}
+                </span>
+              ) : null}
               {isRecommended && (
                 <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
                   {t("playground:composer.recommended", "Recommended")}
@@ -558,7 +604,17 @@ export function useModelSelector({
               ))}
               <button
                 type="button"
-                className="rounded p-0.5 text-text-subtle transition hover:bg-surface2"
+                ref={(button) => {
+                  const pending = favoriteFocusRef.current
+                  if (!button || !pending || pending.key !== modelKey || button === pending.button) return
+                  favoriteFocusRef.current = null
+                  if (modelDropdownOpen && pending.menu.isConnected && pending.menu.contains(button) &&
+                    (document.activeElement === document.body || document.activeElement === pending.button)) button.focus()
+                }}
+                className="shrink-0 rounded p-0.5 text-text-subtle transition hover:bg-surface2"
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") event.stopPropagation()
+                }}
                 onMouseDown={(event) => {
                   event.preventDefault()
                   event.stopPropagation()
@@ -566,6 +622,10 @@ export function useModelSelector({
                 onClick={(event) => {
                   event.preventDefault()
                   event.stopPropagation()
+                  const button = event.currentTarget
+                  const menu = button.closest<HTMLElement>('[role="menu"]')
+                  favoriteFocusRef.current = document.activeElement === button && menu
+                    ? { key: modelKey, button, menu } : null
                   toggleFavoriteModel(model)
                 }}
                 aria-label={favoriteTitle}
@@ -582,13 +642,15 @@ export function useModelSelector({
         ),
         onClick: () => {
           recordModelUsage(model)
-          setSelectedModel(modelKey)
+          void Promise.resolve(setSelectedModel(modelKey)).catch(() => undefined)
         }
       }
     }
 
+    const buildItemWithProvider = (model: any) => buildItem(model, true)
+
     if (modelSortMode === "az") {
-      return models.slice().sort(byLabel).map(buildItem)
+      return models.slice().sort(byLabel).map(buildItemWithProvider)
     }
 
     if (modelSortMode === "favorites") {
@@ -600,10 +662,10 @@ export function useModelSelector({
           type: "group" as const,
           key: "favorites",
           label: t("playground:composer.favorites", "Favorites"),
-          children: favorites.slice().sort(byLabel).map(buildItem)
+          children: favorites.slice().sort(byLabel).map(buildItemWithProvider)
         })
       }
-      items.push(...others.slice().sort(byLabel).map(buildItem))
+      items.push(...others.slice().sort(byLabel).map(buildItemWithProvider))
       return items
     }
 
@@ -625,7 +687,7 @@ export function useModelSelector({
         type: "group" as const,
         key,
         label,
-        children: uniqueModels.map(buildItem)
+        children: uniqueModels.map(buildItemWithProvider)
       })
     }
 
@@ -659,7 +721,7 @@ export function useModelSelector({
       const providerRaw = getModelProvider(model)
       const groupKey = toGroupKey(providerRaw)
       if (!groups.has(groupKey)) groups.set(groupKey, [])
-      groups.get(groupKey)!.push(buildItem(model))
+      groups.get(groupKey)!.push(buildItem(model, false))
     }
 
     const entries = Array.from(groups.entries())
@@ -678,7 +740,7 @@ export function useModelSelector({
         type: "group" as const,
         key: `group-${key}`,
         label: (
-          <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-text-subtle">
+          <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-text-muted">
             <ProviderIcons provider={key} className="h-3 w-3" />
             <span>{getProviderDisplayName(key)}</span>
           </div>
@@ -693,7 +755,10 @@ export function useModelSelector({
     filteredModels,
     isFavoriteModel,
     modelsLoading,
+    modelsError,
+    onRetryModels,
     modelSortMode,
+    modelDropdownOpen,
     navigate,
     normalizedModelUsageByKey,
     recordModelUsage,
@@ -702,6 +767,28 @@ export function useModelSelector({
     t,
     toggleFavoriteModel
   ])
+  // "All models" says when the catalog could not load, above what it has (#3343).
+  const modelDropdownMenuItems = React.useMemo(
+    () =>
+      modelListScope === "catalog" && catalogLoadFailed
+        ? [
+            {
+              key: "model-catalog-retry",
+              label: (
+                <span>
+                  {t("playground:composer.modelCatalogLoadFailed", "Couldn't load all models")}
+                  {" · "}
+                  {t("playground:characterChatReadiness.model.retryAction", "Try again")}
+                </span>
+              ),
+              onClick: retryCatalogModels
+            },
+            { type: "divider" as const, key: "model-catalog-retry-divider" },
+            ...scopeMenuItems
+          ]
+        : scopeMenuItems,
+    [catalogLoadFailed, modelListScope, retryCatalogModels, scopeMenuItems, t]
+  )
 
   const isSmallModel =
     modelCapabilities.includes("fast") ||
@@ -718,6 +805,7 @@ export function useModelSelector({
     setModelListScope,
     selectedModelMeta,
     selectedModelKey,
+    selectedModelSettingsScope,
     modelContextLength,
     modelCapabilities,
     resolvedMaxContext,

@@ -74,7 +74,7 @@ export const ProjectsTab: React.FC = () => {
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -93,7 +93,7 @@ export const ProjectsTab: React.FC = () => {
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -116,7 +116,7 @@ export const ProjectsTab: React.FC = () => {
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -241,35 +241,49 @@ export const ProjectsTab: React.FC = () => {
     ]
   }
 
+  const projectFormModal = (
+    <ProjectFormModal
+      open={isProjectModalOpen}
+      projectId={editingProjectId}
+      onClose={() => {
+        setProjectModalOpen(false)
+        setEditingProjectId(null)
+      }}
+    />
+  )
+
   if (projectsStatus === "pending") {
     return <Skeleton paragraph={{ rows: 8 }} />
   }
 
   if (projectsStatus === "success" && projects.length === 0) {
     return (
-      <FeatureEmptyState
-        title={t("managePrompts.studio.projects.emptyTitle", {
-          defaultValue: "No projects yet"
-        })}
-        description={t("managePrompts.studio.projects.emptyDescription", {
-          defaultValue:
-            "Create a project to organize your prompts, test cases, and evaluations."
-        })}
-        examples={[
-          t("managePrompts.studio.projects.emptyExample1", {
+      <>
+        <FeatureEmptyState
+          title={t("managePrompts.studio.projects.emptyTitle", {
+            defaultValue: "No projects yet"
+          })}
+          description={t("managePrompts.studio.projects.emptyDescription", {
             defaultValue:
-              "Projects help you group related prompts for different use cases or teams."
-          }),
-          t("managePrompts.studio.projects.emptyExample2", {
-            defaultValue:
-              "Each project has its own test cases and evaluation history."
-          })
-        ]}
-        primaryActionLabel={t("managePrompts.studio.projects.createBtn", {
-          defaultValue: "Create Project"
-        })}
-        onPrimaryAction={handleOpenCreate}
-      />
+              "Create a project to organize your prompts, test cases, and evaluations."
+          })}
+          examples={[
+            t("managePrompts.studio.projects.emptyExample1", {
+              defaultValue:
+                "Projects help you group related prompts for different use cases or teams."
+            }),
+            t("managePrompts.studio.projects.emptyExample2", {
+              defaultValue:
+                "Each project has its own test cases and evaluation history."
+            })
+          ]}
+          primaryActionLabel={t("managePrompts.studio.projects.createBtn", {
+            defaultValue: "Create Project"
+          })}
+          onPrimaryAction={handleOpenCreate}
+        />
+        {projectFormModal}
+      </>
     )
   }
 
@@ -435,7 +449,10 @@ export const ProjectsTab: React.FC = () => {
             width: 50,
             render: (_, record) => (
               <Dropdown
-                menu={{ items: getProjectActions(record) }}
+                menu={{
+                  items: getProjectActions(record),
+                  onClick: ({ domEvent }) => domEvent.stopPropagation()
+                }}
                 trigger={["click"]}
                 placement="bottomRight"
               >
@@ -451,15 +468,7 @@ export const ProjectsTab: React.FC = () => {
         ]}
       />
 
-      {/* Project form modal */}
-      <ProjectFormModal
-        open={isProjectModalOpen}
-        projectId={editingProjectId}
-        onClose={() => {
-          setProjectModalOpen(false)
-          setEditingProjectId(null)
-        }}
-      />
+      {projectFormModal}
     </div>
   )
 }

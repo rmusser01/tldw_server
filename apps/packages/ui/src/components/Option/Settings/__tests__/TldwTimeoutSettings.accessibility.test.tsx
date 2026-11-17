@@ -44,7 +44,7 @@ it.each(labels)("names and focuses the numeric input through its visible label: 
   render(<ConfigProvider theme={{ token: { motion: false } }}><TldwTimeoutSettings {...props()} /></ConfigProvider>)
   await user.click(screen.getByRole("button", { name: /Advanced Timeouts/ }))
 
-  const input = screen.getByRole("spinbutton", { name: label, exact: true })
+  const input = screen.getByRole("spinbutton", { name: label })
   expect(screen.getByLabelText(label, { exact: true })).toBe(input)
   await user.click(screen.getByText(label, { selector: "label", exact: true }))
   expect(input).toHaveFocus()
@@ -72,10 +72,10 @@ it("keeps labels scoped to their own instance and stable when controlled values 
 
   view.rerender(renderSettings(42))
   expect(inputIds()).toEqual(ids)
-  expect(first.getByRole("spinbutton", { name: labels[0], exact: true })).toHaveValue(42)
-  expect(second.getByRole("spinbutton", { name: labels[0], exact: true })).toHaveValue(10)
+  expect(first.getByRole("spinbutton", { name: labels[0] })).toHaveValue(42)
+  expect(second.getByRole("spinbutton", { name: labels[0] })).toHaveValue(10)
   for (const label of labels) {
-    const input = second.getByRole("spinbutton", { name: label, exact: true })
+    const input = second.getByRole("spinbutton", { name: label })
     expect(second.getByLabelText(label, { exact: true })).toBe(input)
     await user.click(second.getByText(label, { selector: "label", exact: true }))
     expect(input).toHaveFocus()

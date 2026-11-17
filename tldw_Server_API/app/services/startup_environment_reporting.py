@@ -7,6 +7,8 @@ from __future__ import annotations
 import os
 from typing import Any, Callable
 
+from tldw_Server_API.app.core.testing import is_production_like_env
+
 
 async def report_startup_environment(
     *,
@@ -85,7 +87,7 @@ async def _log_preflight_environment_report(
     startup_guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
     settings = _get_auth_settings()
-    prod = os.getenv("tldw_production", "false").lower() in {"true", "1", "yes", "y", "on"}
+    prod = is_production_like_env()
     auth_mode = settings.AUTH_MODE
     db_url = settings.DATABASE_URL
 

@@ -1,82 +1,86 @@
-import { fireEvent, render, screen } from "@testing-library/react"
-import React from "react"
-import { describe, expect, it, vi } from "vitest"
+import { fireEvent, render, screen } from "@testing-library/react";
+import React from "react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 
-import { ComposerToolbar } from "../ComposerToolbar"
+import { ComposerToolbar } from "../ComposerToolbar";
 
-const assistantSelectMock = vi.hoisted(() => vi.fn())
-const promptSelectMock = vi.hoisted(() => vi.fn())
+const assistantSelectMock = vi.hoisted(() => vi.fn());
+const promptSelectMock = vi.hoisted(() => vi.fn());
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string | { defaultValue?: string }) =>
-      (typeof fallback === "string" ? fallback : fallback?.defaultValue) || key
-  })
-}))
+      (typeof fallback === "string" ? fallback : fallback?.defaultValue) || key,
+  }),
+}));
 
 vi.mock("antd", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   Modal: ({ open, children }: { open?: boolean; children: React.ReactNode }) =>
-    open ? <div data-testid="toolbar-modal">{children}</div> : null
-}))
+    open ? <div data-testid="toolbar-modal">{children}</div> : null,
+}));
 
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (_key: string, defaultValue: unknown) =>
-    React.useState(defaultValue)
-}))
+    React.useState(defaultValue),
+}));
 
 vi.mock("@/components/Common/PromptSelect", () => ({
   PromptSelect: (props: unknown) => {
-    promptSelectMock(props)
-    return <div data-testid="prompt-select" />
-  }
-}))
+    promptSelectMock(props);
+    return <div data-testid="prompt-select" />;
+  },
+}));
 
 vi.mock("@/components/Common/AssistantSelect", () => ({
   AssistantSelect: (props: { variant?: string }) => {
-    assistantSelectMock(props)
+    assistantSelectMock(props);
     return (
       <div data-testid="character-select" data-variant={props.variant ?? ""} />
-    )
-  }
-}))
+    );
+  },
+}));
 
 vi.mock("@/components/Layouts/ConnectionStatus", () => ({
-  ConnectionStatus: () => <div data-testid="connection-status" />
-}))
+  ConnectionStatus: () => <div data-testid="connection-status" />,
+}));
 
 vi.mock("@/components/Common/Button", () => ({
   Button: ({
     children,
-    onClick
+    onClick,
   }: {
-    children: React.ReactNode
-    onClick?: () => void
+    children: React.ReactNode;
+    onClick?: () => void;
   }) => (
     <button type="button" onClick={onClick}>
       {children}
     </button>
-  )
-}))
+  ),
+}));
 
 vi.mock("../playground-features", () => ({
-  ParameterPresets: () => <div data-testid="parameter-presets" />,
+  ParameterPresets: ({ compact }: { compact?: boolean }) => (
+    <div data-testid="parameter-presets" data-compact={String(Boolean(compact))} />
+  ),
   ParameterPresetsDropdown: () => (
     <div data-testid="parameter-presets-dropdown" />
   ),
   SystemPromptTemplatesButton: () => <button type="button">Templates</button>,
   SystemPromptTemplatesModal: () => null,
-  SessionCostEstimation: () => <div data-testid="session-cost" />
-}))
+  SessionCostEstimation: () => <div data-testid="session-cost" />,
+}));
 
 vi.mock("../ComposerToolbarOverflow", () => ({
-  ComposerToolbarOverflow: () => <div data-testid="toolbar-overflow" />
-}))
+  ComposerToolbarOverflow: () => <div data-testid="toolbar-overflow" />,
+}));
 
 const createProps = (
-  overrides: Partial<React.ComponentProps<typeof ComposerToolbar>> = {}
+  overrides: Partial<React.ComponentProps<typeof ComposerToolbar>> = {},
 ): React.ComponentProps<typeof ComposerToolbar> => ({
   isProMode: false,
+  onToggleOptions: vi.fn(),
   isMobile: false,
   isConnectionReady: true,
   isSending: false,
@@ -99,6 +103,7 @@ const createProps = (
   persistenceTooltip: "Persist",
   contextToolsOpen: false,
   onToggleKnowledgePanel: vi.fn(),
+  onOpenKnowledgePanel: vi.fn(),
   webSearch: false,
   onToggleWebSearch: vi.fn(),
   hasWebSearch: true,
@@ -131,760 +136,510 @@ const createProps = (
       label: "Model",
       value: "deepseek-chat",
       tone: "active",
-      onClick: vi.fn()
-    }
+      onClick: vi.fn(),
+    },
   ],
-  ...overrides
-})
+  ...overrides,
+});
 
-describe("ComposerToolbar web search", () => {
-  it.each([
-    {
-      label: "legacy casual",
-      isProMode: false,
-      isMobile: false,
-      optionsExpanded: true
-    },
-    {
-      label: "desktop pro",
+const ToolbarHarness = (
+  props: Partial<React.ComponentProps<typeof ComposerToolbar>>,
+) => {
+  const [expanded, setExpanded] = React.useState(
+    props.optionsExpanded ?? false,
+  );
+  return (
+    <ComposerToolbar
+      {...createProps(props)}
+      optionsExpanded={expanded}
+      onToggleOptions={() => setExpanded(!expanded)}
+    />
+  );
+};
+
+describe("calm composer", () => {
+  it("forwards settled tracked model discovery to the existing assistant control", () => {
+    const tracked = vi.fn();
+    const props = createProps({
       isProMode: true,
-      isMobile: false,
-      optionsExpanded: true
-    },
-    {
-      label: "mobile",
-      isProMode: false,
-      isMobile: true,
-      optionsExpanded: true
-    },
-    {
-      label: "collapsed mobile",
-      isProMode: false,
-      isMobile: true,
-      optionsExpanded: false
-    }
-  ])("does not render the external composer action for $label", (layout) => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          isProMode: layout.isProMode,
-          isMobile: layout.isMobile,
-          optionsExpanded: layout.optionsExpanded
-        })}
-      />
-    )
+      onTrackedAssistantSelection: tracked,
+      trackedAssistantSelectionLoading: true,
+    });
+    const f = render(<ComposerToolbar {...props} />);
+    expect(assistantSelectMock.mock.lastCall?.[0]).toMatchObject({
+      onTrackedSelection: tracked,
+      trackedSelectionLoading: true,
+    });
+    f.rerender(
+      <ComposerToolbar {...props} trackedAssistantSelectionLoading={false} />,
+    );
+    expect(assistantSelectMock.mock.lastCall?.[0]).toMatchObject({
+      onTrackedSelection: tracked,
+      trackedSelectionLoading: false,
+    });
+  });
 
+  it.each([
+    { label: "desktop", isMobile: false, isProMode: false },
+    { label: "pro", isMobile: false, isProMode: true },
+    { label: "mobile", isMobile: true, isProMode: false },
+  ])(
+    "keeps essential actions available with tools closed on $label",
+    (layout) => {
+      render(<ToolbarHarness {...layout} />);
+      for (const name of ["Model selector", "Attach", "Tools", "Send"]) {
+        expect(screen.getByRole("button", { name, exact: true })).toBeVisible();
+      }
+      expect(
+        screen.queryByRole("region", { name: "Composer tools" }),
+      ).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Search & Context" }),
+      ).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Advanced controls" }),
+      ).toBeNull();
+    },
+  );
+
+  it("reveals the tool groups with one labelled disclosure", () => {
+    render(
+      <ToolbarHarness
+        modeLauncherButton={<button type="button">Modes</button>}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: "Tools", exact: true });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(
-      screen.queryByRole("button", { name: "Improve prompt" })
-    ).not.toBeInTheDocument()
-  })
+      screen.getByRole("region", { name: "Composer tools" }),
+    ).toHaveAttribute("id", toggle.getAttribute("aria-controls"));
+    expect(screen.getByRole("button", { name: "Modes" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Search & Context" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Formatting guide" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Advanced controls" }),
+    ).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.queryByRole("region", { name: "Composer tools" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Model selector" }),
+    ).toBeVisible();
+  });
 
-  it("passes the active chat route to system prompt assist", () => {
+  it("honors an already expanded preference", () => {
+    render(<ToolbarHarness optionsExpanded />);
+    expect(
+      screen.getByRole("region", { name: "Composer tools" }),
+    ).toBeVisible();
+  });
+
+  it("closes Tools with Escape and restores focus to its trigger", () => {
+    render(<ToolbarHarness optionsExpanded />);
+    fireEvent.keyDown(screen.getByRole("region", { name: "Composer tools" }), {
+      key: "Escape",
+    });
+    expect(screen.queryByRole("region", { name: "Composer tools" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Tools", exact: true }),
+    ).toHaveFocus();
+  });
+
+  it.each([false, true])(
+    "keeps active context and warnings actionable while tools are closed (mobile %s)",
+    (isMobile) => {
+      const onWeb = vi.fn();
+      const onWarning = vi.fn();
+      render(
+        <ToolbarHarness
+          isMobile={isMobile}
+          contextItems={[
+            {
+              id: "web",
+              label: "Web",
+              value: "On",
+              tone: "active",
+              onClick: onWeb,
+            },
+            {
+              id: "truncationRisk",
+              label: "Context",
+              value: "Near limit",
+              tone: "warning",
+              onClick: onWarning,
+            },
+            {
+              id: "messageCount",
+              label: "Messages",
+              value: "0",
+              tone: "neutral",
+            },
+          ]}
+        />,
+      );
+      fireEvent.click(screen.getByTitle("Web: On"));
+      fireEvent.click(screen.getByTitle("Context: Near limit"));
+      expect(onWeb).toHaveBeenCalledOnce();
+      expect(onWarning).toHaveBeenCalledOnce();
+      expect(screen.queryByTitle("Messages: 0")).toBeNull();
+    },
+  );
+
+  it("leaves a warning visible even when its ordinary status is hidden", () => {
     render(
-      <ComposerToolbar
-        {...createProps({
-          selectedModel: "gpt-5-mini",
-          currentProvider: "custom-openai",
-          serverChatId: null,
-          promptAssistContextKey: "local:history-42"
-        })}
-      />
-    )
+      <ToolbarHarness
+        contextItems={[
+          {
+            id: "providerStatus",
+            label: "Provider",
+            value: "Unavailable",
+            tone: "warning",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByTitle("Provider: Unavailable")).toBeVisible();
+  });
 
+  it("keeps temporary-chat state visible and respects its privacy lock", () => {
+    const onToggleTemporaryChat = vi.fn();
+    render(
+      <ToolbarHarness
+        temporaryChat
+        privateChatLocked
+        onToggleTemporaryChat={onToggleTemporaryChat}
+      />,
+    );
+    const temporary = screen.getByRole("button", {
+      name: "Chat history: Temporary",
+    });
+    expect(temporary).toBeVisible();
+    expect(temporary).toBeDisabled();
+    fireEvent.click(temporary);
+    expect(onToggleTemporaryChat).not.toHaveBeenCalled();
+  });
+
+  it("opens prompt assistance only from Tools", () => {
+    render(
+      <ToolbarHarness
+        promptAssistAction={<button type="button">Improve prompt</button>}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Improve prompt" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Tools", exact: true }));
+    expect(
+      screen.getByRole("button", { name: "Improve prompt" }),
+    ).toBeVisible();
+  });
+
+  it("keeps active dictation visible so it can be stopped with Tools closed", () => {
+    const onDictationToggle = vi.fn();
+    render(
+      <ToolbarHarness
+        hasDictation
+        speechAvailable
+        isListening
+        onDictationToggle={onDictationToggle}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
+    expect(onDictationToggle).toHaveBeenCalledOnce();
+  });
+
+  it("toggles the formatting guide inside Tools", () => {
+    render(<ToolbarHarness optionsExpanded />);
+    const toggle = screen.getByRole("button", { name: "Formatting guide" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("uses the active conversation route for prompt assistance", () => {
+    render(
+      <ToolbarHarness
+        optionsExpanded
+        selectedModel="gpt-5-mini"
+        currentProvider="custom-openai"
+        promptAssistContextKey="local:history-42"
+      />,
+    );
     expect(promptSelectMock).toHaveBeenCalledWith(
       expect.objectContaining({
         selectedModel: "gpt-5-mini",
         currentProvider: "custom-openai",
-        promptAssistContextKey: "local:history-42"
-      })
-    )
-  })
+        promptAssistContextKey: "local:history-42",
+      }),
+    );
+  });
 
-  it("hands prompt model recovery to the existing Playground selector", () => {
-    const openListener = vi.fn()
-    window.addEventListener("tldw:open-model-selector", openListener)
-    render(<ComposerToolbar {...createProps()} />)
+  it("reuses the model recovery event from prompt selection", () => {
+    const listener = vi.fn();
+    window.addEventListener("tldw:open-model-selector", listener);
+    render(<ToolbarHarness optionsExpanded />);
+    const props = promptSelectMock.mock.calls.at(-1)?.[0] as {
+      onSelectModel?: () => void;
+    };
+    props.onSelectModel?.();
+    expect(listener).toHaveBeenCalledOnce();
+    window.removeEventListener("tldw:open-model-selector", listener);
+  });
 
-    const promptProps = promptSelectMock.mock.calls.at(-1)?.[0] as {
-      onSelectModel?: () => void
-    }
-    promptProps.onSelectModel?.()
-
-    expect(openListener).toHaveBeenCalledTimes(1)
-    window.removeEventListener("tldw:open-model-selector", openListener)
-  })
-
-  it("owns the dropdown assistant selector used by chat starter events", () => {
-    render(<ComposerToolbar {...createProps()} />)
-
-    expect(screen.getByTestId("character-select")).toHaveAttribute(
-      "data-variant",
-      "dropdown"
-    )
-    expect(assistantSelectMock).toHaveBeenCalledWith(
-      expect.objectContaining({ variant: "dropdown" })
-    )
-  })
-
-  it("keeps the desktop status chip row when controls are collapsed for external send placement", () => {
+  it("keeps the existing web-search handler behind Tools", () => {
+    const onToggleWebSearch = vi.fn();
     render(
-      <ComposerToolbar
-        {...({
-          ...createProps(),
-          optionsExpanded: false,
-          sendControlPlacement: "external"
-        } as any)}
-      />
-    )
+      <ToolbarHarness optionsExpanded onToggleWebSearch={onToggleWebSearch} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Web search" }));
+    expect(onToggleWebSearch).toHaveBeenCalledOnce();
+  });
 
-    const panel = screen.getByTestId("composer-options-panel")
-    expect(panel.className).toBe("mt-2 flex flex-col gap-1")
-    expect(screen.getByText("Model selector")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
-  })
+  it("does not offer web search without the server capability", () => {
+    render(<ToolbarHarness optionsExpanded hasWebSearch={false} />);
+    expect(screen.queryByRole("button", { name: "Web search" })).toBeNull();
+  });
 
-  it("opens casual advanced controls from the collapsed desktop context strip", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          optionsExpanded: false,
-          sendControlPlacement: "external"
-        })}
-      />
-    )
+  // CC-09: the Pro presets read as named styles, not four bare icons; on a
+  // phone they stay compact (named for assistive tech) so Tools fits.
+  it("names the Pro generation-style presets inside Tools", () => {
+    const { unmount } = render(<ToolbarHarness isProMode optionsExpanded />);
+    expect(screen.getByTestId("parameter-presets")).toHaveAttribute(
+      "data-compact",
+      "false",
+    );
+    unmount();
 
-    fireEvent.click(screen.getByTestId("composer-casual-advanced-chip"))
+    render(<ToolbarHarness isProMode isMobile optionsExpanded />);
+    expect(screen.getByTestId("parameter-presets")).toHaveAttribute(
+      "data-compact",
+      "true",
+    );
+  });
 
+  // CC-11: '@' mentions work only in the extension with tab mentions on.
+  it("names '@' mentions in the shortcut hint only where they work", () => {
+    const { unmount } = render(<ToolbarHarness />);
+    expect(screen.getByText("/ commands")).toBeVisible();
+    expect(screen.queryByText(/@ mentions/)).toBeNull();
+    unmount();
+
+    render(<ToolbarHarness mentionsAvailable />);
+    expect(screen.getByText("/ commands · @ mentions")).toBeVisible();
+  });
+});
+
+describe("composer starter events", () => {
+  it.each(["tldw:open-assistant-select", "tldw:open-prompt-select"])(
+    "reveals a hidden selector for %s",
+    (name) => {
+      render(<ToolbarHarness />);
+      fireEvent(window, new CustomEvent(name));
+      expect(
+        screen.getByRole("region", { name: "Composer tools" }),
+      ).toBeVisible();
+    },
+  );
+});
+
+describe("composer keyboard disclosure", () => {
+  it("closes Tools when Escape is pressed on its opening trigger", () => {
+    render(<ToolbarHarness />);
+    const toggle = screen.getByRole("button", { name: "Tools", exact: true });
+    fireEvent.click(toggle);
+    toggle.focus();
+    fireEvent.keyDown(toggle, { key: "Escape" });
     expect(
-      screen.getByTestId("composer-casual-advanced-controls-row")
-    ).toBeInTheDocument()
-  })
+      screen.getByRole("button", { name: "Tools", exact: true }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+});
 
-  it("keeps mobile image attachment discoverable when options are collapsed", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          isMobile: true,
-          optionsExpanded: false,
-          sendControlPlacement: "external",
-          attachmentButton: <button type="button">Attach image</button>
-        })}
-      />
-    )
-
-    expect(screen.getByRole("button", { name: "Attach image" })).toBeVisible()
-    expect(screen.queryByText("Model selector")).toBeNull()
-    expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
-  })
-
-  it("uses casual focus-first layout by default", () => {
-    render(<ComposerToolbar {...createProps()} />)
-
-    expect(
-      screen.getByRole("button", { name: "Advanced controls" })
-    ).toBeInTheDocument()
-    expect(screen.getByText("Send")).toBeInTheDocument()
-    expect(screen.getByText("Model selector")).toBeInTheDocument()
-    expect(screen.queryByText("Provider")).toBeNull()
-    expect(screen.queryByText("Routing")).toBeNull()
-    expect(
-      screen.getByTestId("composer-casual-model-selector-chip")
-    ).toBeInTheDocument()
-    expect(screen.queryByTestId("composer-session-status-chip")).toBeNull()
-    expect(
-      screen.getByTestId("composer-casual-persistence-chip")
-    ).toHaveTextContent("Saved")
-    expect(
-      screen
-        .getByTestId("composer-casual-advanced-chip")
-        .closest('[data-testid="composer-context-strip"]')
-    ).not.toBeNull()
-    expect(
-      screen.queryByTestId("composer-casual-runtime-context-chip")
-    ).toBeNull()
-    expect(screen.queryByTestId("web-search-toggle")).toBeNull()
-    expect(screen.getByText("MCP")).toBeInTheDocument()
-    expect(screen.getByTestId("prompt-select")).toBeInTheDocument()
-    expect(screen.getByTestId("character-select")).toBeInTheDocument()
-  })
-
-  it("labels casual composer control groups for scanning and keyboard focus", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          modeLauncherButton: <button type="button">Modes</button>,
-          voiceChatButton: <button type="button">Start voice chat</button>
-        })}
-      />
-    )
-
-    const contextGroup = screen.getByRole("group", {
-      name: "Mode and context controls"
-    })
-    const runGroup = screen.getByRole("group", {
-      name: "Run input controls"
-    })
-
-    expect(contextGroup).toContainElement(
-      screen.getByRole("button", { name: "Modes" })
-    )
-    expect(contextGroup).toContainElement(
-      screen.getByRole("button", { name: "MCP" })
-    )
-    expect(runGroup).toContainElement(
-      screen.getByRole("button", { name: "Start voice chat" })
-    )
-    expect(runGroup).toContainElement(
-      screen.getByRole("button", { name: "Chat Settings" })
-    )
-    expect(runGroup).toContainElement(
-      screen.getByRole("button", { name: "Send" })
-    )
-  })
-
-  it("only exposes casual advanced aria-controls when the controlled group is mounted", () => {
-    render(<ComposerToolbar {...createProps()} />)
-
-    const toggle = screen.getByTestId("composer-casual-advanced-chip")
-    expect(toggle).not.toHaveAttribute("aria-controls")
-
-    fireEvent.click(toggle)
-
-    expect(toggle).toHaveAttribute(
-      "aria-controls",
-      "composer-casual-advanced-controls-row"
-    )
-    expect(
-      screen.getByRole("group", { name: "Advanced composer controls" })
-    ).toHaveAttribute("id", "composer-casual-advanced-controls-row")
-  })
-
-  it("exposes role-play setup directly in the desktop casual toolbar", () => {
-    const onOpenRolePlaySetup = vi.fn()
-    render(
-      <ComposerToolbar
-        {...createProps({
-          rolePlayActions: {
-            onOpenRolePlaySetup
-          }
-        })}
-      />
-    )
-
-    const setupButton = screen.getByRole("button", {
-      name: "Role-play setup"
-    })
-    fireEvent.click(setupButton)
-
-    expect(onOpenRolePlaySetup).toHaveBeenCalledTimes(1)
-    expect(
-      setupButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-  })
-
-  it("places token usage in the casual bottom context chip row", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          modelUsageBadge: <span data-testid="model-usage">~0 tokens</span>
-        })}
-      />
-    )
-
-    const usageBadge = screen.getByTestId("model-usage")
-    expect(
-      usageBadge.closest('[data-testid="composer-casual-token-chip"]')
-    ).not.toBeNull()
-    expect(
-      usageBadge.closest('[data-playground-toolbar-row="actions"]')
-    ).toBeNull()
-  })
-
-  it("keeps Modes first and MCP immediately to its right in the casual controls row", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          modeLauncherButton: <button type="button">Modes</button>
-        })}
-      />
-    )
-
-    const actionsRow = document.querySelector<HTMLElement>(
-      '[data-playground-toolbar-row="actions"]'
-    )
-    expect(actionsRow).not.toBeNull()
-    const buttons = actionsRow?.querySelectorAll("button")
-    expect(buttons?.[0]).not.toBeNull()
-    expect(buttons?.[0]).toHaveTextContent("Modes")
-    expect(buttons?.[1]).not.toBeNull()
-    expect(buttons?.[1]).toHaveTextContent("MCP")
-  })
-
-  it("places voice chat, attachment, and send controls in the casual middle actions row", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          voiceChatButton: <button type="button">Start voice chat</button>
-        })}
-      />
-    )
-
-    const voiceButton = screen.getByRole("button", {
-      name: "Start voice chat"
-    })
-    const attachmentButton = screen.getByRole("button", { name: "Attach" })
-    const sendButton = screen.getByRole("button", { name: "Send" })
-    expect(
-      voiceButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      attachmentButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      sendButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      voiceButton.closest('[data-playground-toolbar-row="primary"]')
-    ).toBeNull()
-    expect(
-      attachmentButton.closest('[data-playground-toolbar-row="primary"]')
-    ).toBeNull()
-    expect(
-      sendButton.closest('[data-playground-toolbar-row="primary"]')
-    ).toBeNull()
-  })
-
-  it("keeps advanced controls below the casual actions row", () => {
-    render(<ComposerToolbar {...createProps()} />)
-
-    const actionsRow = document.querySelector<HTMLElement>(
-      '[data-playground-toolbar-row="actions"]'
-    )
-    const contextStrip = screen.getByTestId("composer-context-strip")
-    fireEvent.click(screen.getByTestId("composer-casual-advanced-chip"))
-    const advancedRow = screen.getByTestId(
-      "composer-casual-advanced-controls-row"
-    )
-
-    expect(actionsRow).not.toBeNull()
-    expect(contextStrip.compareDocumentPosition(actionsRow as Node)).toBe(
-      Node.DOCUMENT_POSITION_PRECEDING
-    )
-    expect(advancedRow.compareDocumentPosition(actionsRow as Node)).toBe(
-      Node.DOCUMENT_POSITION_PRECEDING
-    )
-    expect(advancedRow.compareDocumentPosition(contextStrip)).toBe(
-      Node.DOCUMENT_POSITION_PRECEDING
-    )
-  })
-
-  it("places Advanced controls immediately to the right of Saved in the casual context strip", () => {
-    render(<ComposerToolbar {...createProps()} />)
-
-    const contextStrip = screen.getByTestId("composer-context-strip")
-    const contextButtons = contextStrip.querySelectorAll("button")
-    const savedButton = screen.getByTestId(
-      "composer-casual-persistence-chip"
-    ) as HTMLButtonElement
-    const advancedButton = screen.getByTestId(
-      "composer-casual-advanced-chip"
-    ) as HTMLButtonElement
-
-    const savedIndex = Array.from(contextButtons).indexOf(savedButton)
-    const advancedIndex = Array.from(contextButtons).indexOf(advancedButton)
-
-    expect(savedIndex).toBeGreaterThanOrEqual(0)
-    expect(advancedIndex).toBe(savedIndex + 1)
-  })
-
-  it("renders a deep research launch control in the casual actions row when provided", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          researchLaunchButton: <button type="button">Deep Research</button>
-        })}
-      />
-    )
-
-    const researchButton = screen.getByRole("button", {
-      name: "Deep Research"
-    })
-    expect(
-      researchButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-  })
-
-  it("does not render a standalone Generate control in the toolbar row", () => {
-    render(<ComposerToolbar {...createProps()} />)
-
-    expect(screen.queryByRole("button", { name: "Generate" })).toBeNull()
-  })
-
-  it("places current chat model settings control in the casual middle actions row", () => {
-    render(<ComposerToolbar {...createProps()} />)
-
-    const chatSettingsButton = screen.getByRole("button", {
-      name: "Chat Settings"
-    })
-    expect(
-      chatSettingsButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      chatSettingsButton.closest('[data-playground-toolbar-row="advanced"]')
-    ).toBeNull()
-  })
-
-  it("wraps casual control groups to the available pane width at desktop sizes too", () => {
-    render(<ComposerToolbar {...createProps()} />)
-
-    const actionsRow = document.querySelector<HTMLElement>(
-      '[data-playground-toolbar-row="actions"]'
-    )
-    expect(actionsRow).not.toBeNull()
-    expect(actionsRow?.className).toContain("flex-wrap")
-    expect(actionsRow?.className).not.toContain("lg:flex-nowrap")
-    expect(actionsRow?.className).not.toContain("overflow-x-auto")
-    for (const name of ["Mode and context controls", "Run input controls"]) {
-      const group = screen.getByRole("group", { name })
-      expect(group).toHaveClass("flex-wrap", "[&>*]:shrink-0")
-      expect(group.className).not.toContain("lg:flex-nowrap")
-    }
-  })
-
-  it("keeps MCP in the casual actions row when advanced controls are expanded", () => {
-    render(<ComposerToolbar {...createProps()} />)
-
-    fireEvent.click(screen.getByTestId("composer-casual-advanced-chip"))
-
-    const mcpButton = screen.getByRole("button", { name: "MCP" })
-    expect(screen.getByTestId("prompt-select")).toBeInTheDocument()
-    expect(screen.getByTestId("character-select")).toBeInTheDocument()
-    expect(
-      mcpButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      mcpButton.closest('[data-playground-toolbar-row="advanced"]')
-    ).toBeNull()
-    expect(
-      screen
-        .getByTestId("prompt-select")
-        .closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      screen
-        .getByTestId("character-select")
-        .closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      screen.getAllByRole("button", { name: "Chat Settings" })
-    ).toHaveLength(1)
-    expect(
-      screen.getByTestId("composer-formatting-guide-toggle")
-    ).toBeInTheDocument()
-    const advancedRow = screen.getByTestId(
-      "composer-casual-advanced-controls-row"
-    )
-    expect(advancedRow.className).toContain("flex-nowrap")
-    expect(advancedRow.className).toContain("overflow-x-auto")
-    expect(advancedRow.className).not.toContain("flex-wrap")
-  })
-
-  it("toggles output formatting guide prompt appending from advanced controls", () => {
-    render(<ComposerToolbar {...createProps()} />)
-
-    fireEvent.click(screen.getByTestId("composer-casual-advanced-chip"))
-    const toggle = screen.getByTestId("composer-formatting-guide-toggle")
-    expect(toggle).toHaveAttribute("aria-pressed", "false")
-
-    fireEvent.click(toggle)
-
-    expect(toggle).toHaveAttribute("aria-pressed", "true")
-  })
-
-  it("uses split context/generation panels in pro mode", () => {
-    render(<ComposerToolbar {...createProps({ isProMode: true })} />)
-
-    expect(screen.getByTestId("composer-pro-context-panel")).toBeInTheDocument()
-    expect(
-      screen.getByTestId("composer-pro-generation-panel")
-    ).toBeInTheDocument()
-    expect(screen.getByText("MCP")).toBeInTheDocument()
-    expect(screen.getByTestId("prompt-select")).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: "Advanced controls" })
-    ).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
-    expect(
-      screen.getByTestId("composer-formatting-guide-toggle")
-    ).toBeInTheDocument()
-  })
-
-  it("only exposes pro advanced aria-controls when the controlled group is mounted", () => {
-    render(<ComposerToolbar {...createProps({ isProMode: true })} />)
-
-    const toggle = screen.getByTestId("composer-advanced-toggle")
-    expect(toggle).not.toHaveAttribute("aria-controls")
-
-    fireEvent.click(toggle)
-
-    expect(toggle).toHaveAttribute(
-      "aria-controls",
-      "composer-pro-advanced-controls-row"
-    )
-    expect(
-      screen.getByRole("group", { name: "Advanced composer controls" })
-    ).toHaveAttribute("id", "composer-pro-advanced-controls-row")
-  })
-
-  it("labels pro cockpit panels by task area without hiding existing controls", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          isProMode: true,
-          modeLauncherButton: <button type="button">Modes</button>,
-          compareControl: <button type="button">Compare</button>,
-          researchLaunchButton: <button type="button">Deep Research</button>
-        })}
-      />
-    )
-
-    const contextPanel = screen.getByRole("group", {
-      name: "Context setup"
-    })
-    const generationPanel = screen.getByRole("group", {
-      name: "Model, tools, and run"
-    })
-
-    expect(
-      screen.getByRole("heading", { name: "Context setup" })
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("heading", { name: "Model, tools, and run" })
-    ).toBeInTheDocument()
-    expect(contextPanel).toContainElement(
-      screen.getByRole("button", { name: "Modes" })
-    )
-    expect(contextPanel).toContainElement(
-      screen.getByRole("button", { name: "Compare" })
-    )
-    expect(generationPanel).toContainElement(
-      screen.getByRole("button", { name: "MCP" })
-    )
-    expect(generationPanel).toContainElement(
-      screen.getByRole("button", { name: "Deep Research" })
-    )
-    expect(generationPanel).toContainElement(
-      screen.getByRole("button", { name: "Send" })
-    )
-  })
-
-  it("labels mobile composer groups without moving controls into a bottom bar", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          isMobile: true,
-          modeLauncherButton: <button type="button">Modes</button>
-        })}
-      />
-    )
-
-    const primaryGroup = screen.getByRole("group", {
-      name: "Mobile mode and model controls"
-    })
-    const contextGroup = screen.getByRole("group", {
-      name: "Mobile context controls"
-    })
-    const runGroup = screen.getByRole("group", {
-      name: "Mobile run input controls"
-    })
-
-    expect(primaryGroup).toContainElement(
-      screen.getByRole("button", { name: "Modes" })
-    )
-    expect(primaryGroup).toContainElement(screen.getByText("Model selector"))
-    expect(contextGroup).toContainElement(
-      screen.getByRole("button", { name: "Saved" })
-    )
-    expect(contextGroup).toContainElement(
-      screen.getByRole("button", { name: "Search & Context" })
-    )
-    expect(runGroup).toContainElement(screen.getByTestId("toolbar-overflow"))
-    expect(runGroup).toContainElement(
-      screen.getByRole("button", { name: "Attach" })
-    )
-    expect(screen.queryByTestId("composer-bottom-bar")).toBeNull()
-  })
-
-  it("invokes toggle callback when web search button is clicked", () => {
-    const onToggleWebSearch = vi.fn()
-    render(
-      <ComposerToolbar
-        {...createProps({
-          isProMode: true,
-          onToggleWebSearch,
-          hasWebSearch: true,
-          webSearch: false
-        })}
-      />
-    )
-
-    fireEvent.click(screen.getByTestId("web-search-toggle"))
-
-    expect(onToggleWebSearch).toHaveBeenCalledTimes(1)
-  })
-
-  it("does not render web search button when capability is unavailable", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({ isProMode: true, hasWebSearch: false })}
-      />
-    )
-
-    expect(screen.queryByTestId("web-search-toggle")).toBeNull()
-  })
-
-  it("renders mode launcher, compare control, and context strip when provided", () => {
-    const onClick = vi.fn()
-    render(
-      <ComposerToolbar
-        {...createProps({
-          modelSelectButton: null,
-          modeLauncherButton: <button type="button">Modes</button>,
-          compareControl: <button type="button">Compare</button>,
-          contextItems: [
+describe("composer context review actions", () => {
+  it.each([
+    {
+      id: "rolePlayIdentity",
+      label: "Character",
+      value: "Mira",
+      opensSetup: true,
+    },
+    { id: "character", label: "Character", value: "Mira", opensSetup: true },
+    {
+      id: "rolePlayBehavior",
+      label: "System prompt",
+      value: "Story instructions",
+      opensSetup: false,
+    },
+    {
+      id: "rolePlayScene",
+      label: "Scene draft",
+      value: "A quiet library",
+      opensSetup: false,
+    },
+  ])(
+    "keeps neutral selected $id visible and actionable with Tools closed",
+    (selection) => {
+      const action = vi.fn();
+      const setup = vi.fn();
+      render(
+        <ToolbarHarness
+          rolePlayActions={{ onOpenRolePlaySetup: setup }}
+          contextItems={[
             {
-              id: "model",
-              label: "Model",
-              value: "gpt-4.1",
-              tone: "active",
-              onClick
-            }
-          ]
-        })}
-      />
-    )
-
-    expect(screen.getByText("Modes")).toBeInTheDocument()
-    expect(screen.getByText("Compare")).toBeInTheDocument()
-    const contextStrip = screen.getByTestId("composer-context-strip")
-    const modelChipButton = screen.getByTitle("Model: gpt-4.1")
-    fireEvent.click(modelChipButton)
-    expect(onClick).toHaveBeenCalledTimes(1)
-    expect(contextStrip).toBeInTheDocument()
-  })
-
-  it("renders session status chip when provided and keeps other context actions", () => {
-    const onSessionStatusClick = vi.fn()
-    const onRiskClick = vi.fn()
-
-    render(
-      <ComposerToolbar
-        {...createProps({
-          contextItems: [
-            {
-              id: "sessionStatus",
-              label: "Session status",
-              value: "Degraded",
-              tone: "warning",
-              onClick: onSessionStatusClick
+              id: selection.id,
+              label: selection.label,
+              value: selection.value,
+              tone: "neutral",
+              onClick: action,
             },
-            {
-              id: "truncationRisk",
-              label: "Truncation",
-              value: "Medium risk",
-              tone: "warning",
-              onClick: onRiskClick
-            }
-          ]
-        })}
-      />
-    )
+          ]}
+        />,
+      );
+      const chip = screen.getByTitle(`${selection.label}: ${selection.value}`);
+      expect(chip).toBeVisible();
+      fireEvent.click(chip);
+      expect(selection.opensSetup ? setup : action).toHaveBeenCalledOnce();
+      fireEvent.click(screen.getByTestId("composer-options-toggle"));
+      expect(screen.getAllByText(selection.value)).toHaveLength(1);
+      if (selection.opensSetup) expect(action).not.toHaveBeenCalled();
+    },
+  );
 
-    fireEvent.click(screen.getByTestId("composer-session-status-chip"))
-    fireEvent.click(screen.getByRole("button", { name: /Truncation/i }))
-
-    expect(onSessionStatusClick).toHaveBeenCalledTimes(1)
-    expect(onRiskClick).toHaveBeenCalledTimes(1)
-    expect(
-      screen.getByTestId("composer-session-status-chip")
-    ).toHaveTextContent("Session status")
-    expect(
-      screen.getByTestId("composer-session-status-chip")
-    ).toHaveTextContent("Degraded")
-    expect(screen.getByText("Medium risk")).toBeInTheDocument()
-  })
-
-  it("applies warning styling for degraded session status", () => {
+  it("opens attached context instead of closing an already open search panel", () => {
+    const onOpenKnowledgePanel = vi.fn();
+    const onToggleKnowledgePanel = vi.fn();
     render(
-      <ComposerToolbar
-        {...createProps({
-          contextItems: [
-            {
-              id: "sessionStatus",
-              label: "Session status",
-              value: "Degraded",
-              tone: "warning"
-            }
-          ]
-        })}
-      />
-    )
+      <ToolbarHarness
+        contextToolsOpen
+        uploadedFilesCount={2}
+        onOpenKnowledgePanel={onOpenKnowledgePanel}
+        onToggleKnowledgePanel={onToggleKnowledgePanel}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /files/ }));
+    expect(onOpenKnowledgePanel).toHaveBeenCalledExactlyOnceWith("context");
+    expect(onToggleKnowledgePanel).not.toHaveBeenCalled();
+  });
 
-    const sessionChip = screen.getByTestId("composer-session-status-chip")
-    expect(sessionChip).toHaveTextContent("Session status")
-    expect(sessionChip).toHaveTextContent("Degraded")
-    expect(sessionChip.className).toContain("border-warn/40")
-  })
-
-  it("renders session status chip in pro and mobile context strips", () => {
-    const degradedItem = [
-      {
-        id: "sessionStatus",
-        label: "Session status",
-        value: "Offline",
-        tone: "warning"
-      } as const
-    ]
-
-    const { rerender } = render(
-      <ComposerToolbar
-        {...createProps({
-          isProMode: true,
-          contextItems: degradedItem
-        })}
-      />
-    )
-
-    expect(
-      screen.getByTestId("composer-session-status-chip")
-    ).toHaveTextContent("Offline")
-
-    rerender(
-      <ComposerToolbar
-        {...createProps({
-          isMobile: true,
-          contextItems: degradedItem
-        })}
-      />
-    )
-
-    expect(
-      screen.getByTestId("composer-session-status-chip")
-    ).toHaveTextContent("Offline")
-  })
-
-  it("uses a bottom persistence chip to toggle saved vs temporary", () => {
-    const onToggleTemporaryChat = vi.fn()
+  it("keeps session insights actionable inside Tools", () => {
+    const onClick = vi.fn();
     render(
-      <ComposerToolbar
-        {...createProps({
-          onToggleTemporaryChat
-        })}
-      />
-    )
+      <ToolbarHarness
+        optionsExpanded
+        contextItems={[
+          {
+            id: "sessionUsage",
+            label: "Session",
+            value: "120 tokens",
+            tone: "neutral",
+            onClick,
+          },
+        ]}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Session: 120 tokens" }),
+    );
+    expect(onClick).toHaveBeenCalledOnce();
+  });
+});
 
-    fireEvent.click(screen.getByTestId("composer-casual-persistence-chip"))
+const AudioHarness = ({ mode }: { mode: "dictation" | "voice" }) => {
+  const [active, setActive] = React.useState(false);
+  return (
+    <ToolbarHarness
+      optionsExpanded
+      {...(mode === "dictation"
+        ? {
+            hasDictation: true,
+            speechAvailable: true,
+            isListening: active,
+            onDictationToggle: () => setActive(!active),
+          }
+        : {
+            voiceChatEnabled: active,
+            voiceChatButton: (
+              <button type="button" onClick={() => setActive(!active)}>
+                {active ? "Stop voice chat" : "Start voice chat"}
+              </button>
+            ),
+          })}
+    />
+  );
+};
 
-    expect(onToggleTemporaryChat).toHaveBeenCalledWith(true)
-  })
-})
+describe("composer audio focus", () => {
+  it.each(["dictation", "voice"] as const)(
+    "keeps focus through %s start and stop",
+    (mode) => {
+      render(<AudioHarness mode={mode} />);
+      const startName =
+        mode === "dictation" ? "Start dictation" : "Start voice chat";
+      const stopName =
+        mode === "dictation" ? "Stop dictation" : "Stop voice chat";
+      const start = screen.getByRole("button", { name: startName });
+      start.focus();
+      fireEvent.click(start);
+      const stop = screen.getByRole("button", { name: stopName });
+      expect(stop).toHaveFocus();
+      fireEvent.click(stop);
+      expect(screen.getByRole("button", { name: startName })).toHaveFocus();
+    },
+  );
+
+  it.each(["dictation", "voice"] as const)(
+    "returns focus to Tools when stopping %s with Tools closed",
+    (mode) => {
+      render(<AudioHarness mode={mode} />);
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: mode === "dictation" ? "Start dictation" : "Start voice chat",
+        }),
+      );
+      fireEvent.click(screen.getByTestId("composer-options-toggle"));
+      const stop = screen.getByRole("button", {
+        name: mode === "dictation" ? "Stop dictation" : "Stop voice chat",
+      });
+      stop.focus();
+      fireEvent.click(stop);
+      expect(screen.getByTestId("composer-options-toggle")).toHaveFocus();
+    },
+  );
+});
+
+describe("history mode labels", () => {
+  it.each(
+    [
+      { name: "Casual desktop", isMobile: false, isProMode: false },
+      { name: "Pro desktop", isMobile: false, isProMode: true },
+      { name: "mobile", isMobile: true, isProMode: false },
+    ].flatMap((layout) =>
+      [false, true].map((temporaryChat) => ({ ...layout, temporaryChat })),
+    ),
+  )(
+    "$name history toggle agrees with Temporary=$temporaryChat and responds to keyboard",
+    async (layout) => {
+      const onToggleTemporaryChat = vi.fn();
+      render(
+        <ComposerToolbar
+          {...createProps({ ...layout, onToggleTemporaryChat })}
+        />,
+      );
+      const stateLabel = layout.temporaryChat ? "Temporary" : "History on";
+      const toggle = screen.getByRole("button", {
+        name: `Chat history: ${stateLabel}`,
+      });
+      expect(toggle).toHaveTextContent(stateLabel);
+      expect(toggle).toHaveAttribute(
+        "aria-pressed",
+        String(!layout.temporaryChat),
+      );
+      toggle.focus();
+      await userEvent.setup().keyboard("{Enter}");
+      expect(onToggleTemporaryChat).toHaveBeenCalledWith(!layout.temporaryChat);
+    },
+  );
+});

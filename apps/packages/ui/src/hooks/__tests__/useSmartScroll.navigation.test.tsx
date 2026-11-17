@@ -1,5 +1,6 @@
 import { act, fireEvent, renderHook } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
+import { mockReducedMotion } from "@/test-utils/reducedMotion"
 import { useSmartScroll } from "../useSmartScroll"
 
 afterEach(() => {
@@ -57,6 +58,7 @@ it.each(["messages", "streaming"])(
 )
 
 it("explicit return to bottom resumes automatic streaming after navigation", () => {
+  const restoreMatchMedia = mockReducedMotion(false)
   const view = setup()
   view.rerender({ messages: [{ id: "m1" }], streaming: false, threshold: 100 })
   act(() => {
@@ -77,6 +79,25 @@ it("explicit return to bottom resumes automatic streaming after navigation", () 
     top: 2000,
     behavior: "auto"
   })
+  restoreMatchMedia()
+})
+
+// AX-19 (#3124): "scroll to latest" smooth-scrolled under reduced motion.
+it("returns to the bottom without smooth scrolling under reduced motion", () => {
+  const restoreMatchMedia = mockReducedMotion(true)
+  try {
+    const view = setup()
+    view.rerender({ messages: [{ id: "m1" }], streaming: false, threshold: 100 })
+    act(() => {
+      view.result.current.autoScrollToBottom()
+    })
+    expect(view.element.scrollTo).toHaveBeenLastCalledWith({
+      top: 2000,
+      behavior: "auto"
+    })
+  } finally {
+    restoreMatchMedia()
+  }
 })
 
 it("explicit navigation clears a queued bottom re-enable from an earlier scroll", () => {

@@ -553,10 +553,10 @@ const closeMobileNotesList = async (page: Page) => {
 const closeDesktopNotesList = async (page: Page) => {
   const toggle = page.getByTestId("notes-desktop-sidebar-toggle")
   await expect(toggle).toBeVisible()
-  if ((await toggle.getAttribute("aria-label")) === "Collapse sidebar") {
+  if ((await toggle.getAttribute("aria-label")) === "Collapse notes sidebar") {
     await toggle.click()
   }
-  await expect(toggle).toHaveAttribute("aria-label", "Expand sidebar")
+  await expect(toggle).toHaveAttribute("aria-label", "Expand notes sidebar")
   const list = page.getByTestId("notes-list-region")
   await expect(list).toHaveClass(/w-0/)
   await expect.poll(async () => (await list.boundingBox())?.width ?? 0).toBeLessThanOrEqual(1)
@@ -1511,8 +1511,8 @@ test.describe("Notes graph suggestions", () => {
     visualEvidence.desktopScreenshotTarget = await prepareSuggestionsScreenshot(page)
     visualEvidence.desktopScreenshot = await screenshot(page, "desktop")
 
-    await page.getByRole("button", { name: "Collapse sidebar" }).click()
-    await expect(page.getByRole("button", { name: "Expand sidebar" }).last()).toBeVisible()
+    await page.getByRole("button", { name: "Collapse notes sidebar" }).click()
+    await expect(page.getByRole("button", { name: "Expand notes sidebar" })).toBeVisible()
     await page.setViewportSize({ width: 320, height: 900 })
     await closeMobileNotesList(page)
     await openSuggestions(page)

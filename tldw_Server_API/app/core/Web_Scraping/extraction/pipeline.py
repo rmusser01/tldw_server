@@ -39,7 +39,10 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.llm import (
     _extract_llm_entities_with_dependencies,
     schema_rules_to_field_specs,
 )
-from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.trafilatura import extract_with_trafilatura
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.trafilatura import (
+    _arxiv_abstract,
+    extract_with_trafilatura,
+)
 from tldw_Server_API.app.core.Web_Scraping.extraction.throttles import (
     cancellable_semaphore,
     get_strategy_semaphore,
@@ -352,6 +355,16 @@ def _extract_article_with_pipeline_with_dependencies(
     order, unknown, default_regex_enrichment = _normalize_strategy_order(strategy_order)
     if not allow_llm_extraction:
         order = [strategy for strategy in order if strategy != "llm"]
+
+    if (
+        strategy_order is None
+        and handler is None
+        and fallback_extractor is None
+        and all(value is None for value in (schema_rules, llm_settings, regex_settings, cluster_settings))
+        and _arxiv_abstract(html, url) is not None
+    ):
+        order.remove("trafilatura")
+        order.insert(0, "trafilatura")
 
     def finalize(result: dict[str, Any], *, strategy: Optional[str]) -> dict[str, Any]:
         final_result = _copy_result(result)

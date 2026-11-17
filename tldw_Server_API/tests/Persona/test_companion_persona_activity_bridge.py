@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.DB_Management.Personalization_DB import Personaliz
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.tests.Persona.test_persona_ws import _seed_persona_session
 
 
 pytestmark = pytest.mark.unit
@@ -40,7 +41,7 @@ def _recv_until(client, predicate, timeout=2.0):
 @pytest.fixture()
 def persona_client_with_companion_opt_in(monkeypatch, tmp_path):
     user_id = 1
-    base_dir = tmp_path / "user_dbs"
+    base_dir = tmp_path / "user_db"
     base_dir.mkdir(parents=True, exist_ok=True)
     prev_base_dir = settings.get("USER_DB_BASE_DIR")
     settings.USER_DB_BASE_DIR = str(base_dir)
@@ -54,7 +55,7 @@ def persona_client_with_companion_opt_in(monkeypatch, tmp_path):
     personalization_db = PersonalizationDB(str(DatabasePaths.get_personalization_db_path(user_id)))
     personalization_db.update_profile(str(user_id), enabled=1)
     session_manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: session_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: session_manager)
 
     async def override_user():
         return User(id=user_id, username="user-1", email=None, is_active=True)
@@ -120,6 +121,7 @@ def test_persona_session_creation_accepts_companion_surface_override(
 
 def test_persona_stream_records_companion_summary_and_tool_activity(
     monkeypatch,
+    tmp_path,
     persona_client_with_companion_opt_in,
 ):
     client, personalization_db = persona_client_with_companion_opt_in
@@ -145,9 +147,12 @@ def test_persona_stream_records_companion_summary_and_tool_activity(
     async def _fake_resolve(*args, **kwargs):
         return "1", True, True
 
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
 
+    _seed_persona_session(
+        tmp_path, monkeypatch, user_id="1", session_id="sess_companion_bridge", mode="session_scoped",
+    )
     with client.websocket_connect("/api/v1/persona/stream") as ws:
         _ = json.loads(ws.receive_text())
         session_id = "sess_companion_bridge"
@@ -219,7 +224,7 @@ def test_companion_session_surface_propagates_to_persona_stream_activity(
     async def _fake_resolve(*args, **kwargs):
         return "1", True, True
 
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
 
     created = client.post(
@@ -327,7 +332,7 @@ def test_companion_session_surface_survives_restart_when_persona_stream_resumes(
     async def _fake_resolve(*args, **kwargs):
         return "1", True, True
 
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
 
     created = client.post(
@@ -341,7 +346,7 @@ def test_companion_session_surface_survives_restart_when_persona_stream_resumes(
     session_id = created.json()["session_id"]
 
     restarted_session_manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: restarted_session_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: restarted_session_manager)
 
     with client.websocket_connect("/api/v1/persona/stream") as ws:
         _ = json.loads(ws.receive_text())

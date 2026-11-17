@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter import (
     CustomOpenAIAdapter,
     CustomOpenAIAdapter2,
@@ -92,7 +93,7 @@ def test_resolved_numbered_custom_adapter_fails_closed_when_snapshot_has_no_endp
     adapter = adapter_type()
     _set_late_endpoint_env(monkeypatch, adapter)
 
-    with pytest.raises(RuntimeError, match="requires an explicit base URL"):
+    with pytest.raises(ChatConfigurationError, match="requires an explicit base URL"):
         adapter._resolve_base(
             _request(adapter, None, include_section=include_section),
         )

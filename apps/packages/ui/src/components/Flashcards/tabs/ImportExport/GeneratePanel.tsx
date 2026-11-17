@@ -1,5 +1,5 @@
 import React from "react"
-import { extractFlashcardsErrorStatus, mapFlashcardsUiError } from "../../utils/error-taxonomy"
+import { extractFlashcardsErrorStatus, mapFlashcardsUiError, type FlashcardsGroundingDiagnostics } from "../../utils/error-taxonomy"
 import { Link } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button, Card, Form, Input, Select, Space, Switch, Tooltip, Typography } from "antd"
@@ -34,6 +34,11 @@ type GeneratedSaveStatus = {
   title: string
   detail: string
   retryable: boolean
+}
+
+type GenerationFailure = GeneratePanelProps & {
+  message: string
+  grounding?: FlashcardsGroundingDiagnostics
 }
 
 type CardPlanDraftItem = FlashcardPlanItem & {
@@ -186,7 +191,18 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   )
   const [reviewPromptSide, setReviewPromptSide] = React.useState<DeckReviewPromptSide>("front")
   const [generatedCards, setGeneratedCards] = React.useState<GeneratedCardDraft[]>([])
-  const [generationError, setGenerationError] = React.useState<string | null>(null)
+  const [generationError, setGenerationError] = React.useState<GenerationFailure | null>(null)
+  const generationAttempt = React.useRef(0)
+  const currentGenerationContext = React.useRef({ generationScope, initialIntent, sourceReviewIntent })
+  currentGenerationContext.current = { generationScope, initialIntent, sourceReviewIntent }
+  const visibleGenerationError =
+    generationError?.generationScope === generationScope &&
+    generationError?.initialIntent === initialIntent &&
+    generationError?.sourceReviewIntent === sourceReviewIntent &&
+    generationScope !== null &&
+    !generationScope?.scopeSignal.aborted &&
+    !generationScope?.scopeInvalidatedSignal.aborted
+      ? generationError : null
   const [saveStatus, setSaveStatus] = React.useState<GeneratedSaveStatus | null>(null)
   const [isSaving, setIsSaving] = React.useState(false)
   const generatedDeckSchedulerDraft = useDeckSchedulerDraft()
@@ -238,6 +254,17 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   }, [sourceReviewIntent])
 
   React.useEffect(() => {
+    const clearFailure = () => {
+      generationAttempt.current += 1
+      setGenerationError(null)
+    }
+    clearFailure()
+    const signals = new Set([generationScope?.scopeSignal, generationScope?.scopeInvalidatedSignal])
+    signals.forEach(signal => signal?.addEventListener("abort", clearFailure))
+    return () => signals.forEach(signal => signal?.removeEventListener("abort", clearFailure))
+  }, [generationScope, initialIntent, sourceReviewIntent])
+
+  React.useEffect(() => {
     if (!deckListReady || targetDeckId === NEW_DECK_OPTION_VALUE) return
     if (typeof targetDeckId === "number" && decks.some(deck => deck.id === targetDeckId)) return
     if (decks.length > 0) {
@@ -279,6 +306,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   }, [])
 
   const handleGenerate = React.useCallback(async () => {
+    const attempt = ++generationAttempt.current
     try {
       assertCurrentScope()
       setGenerationError(null)
@@ -304,6 +332,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         model: model.trim() || undefined
       })
       assertCurrentScope()
+      if (generationAttempt.current !== attempt) return
       const drafts = normalizeGeneratedCards(result.flashcards)
       setGeneratedCards(drafts)
       if (drafts.length === 0) {
@@ -311,7 +340,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
           defaultValue:
             "No cards were generated. Try reducing card count, simplifying text, or adjusting provider/model."
         })
-        setGenerationError(warningCopy)
+        setGenerationError({ generationScope, initialIntent, sourceReviewIntent, message: warningCopy })
         onTransferAction?.({
           area: "generate",
           status: "warning",
@@ -331,11 +360,15 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
       })
     } catch (e: unknown) {
       if (!mounted.current || currentScope.current !== generationScope || generationScope?.scopeSignal.aborted) return
-      const errorCopy = mapFlashcardsUiError(e, {
+      const context = currentGenerationContext.current
+      if (generationAttempt.current !== attempt ||
+        context.initialIntent !== initialIntent || context.sourceReviewIntent !== sourceReviewIntent) return
+      const mapped = mapFlashcardsUiError(e, {
         operation: "generating cards",
         fallback: "Generation failed. Check provider/model settings and try shorter source text."
-      }).message
-      setGenerationError(errorCopy)
+      })
+      const errorCopy = mapped.message
+      setGenerationError({ generationScope, initialIntent, sourceReviewIntent, message: errorCopy, grounding: mapped.grounding })
       onTransferAction?.({
         area: "generate",
         status: "error",
@@ -345,6 +378,8 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   }, [
     assertCurrentScope,
     generationScope,
+    initialIntent,
+    sourceReviewIntent,
     requestOptions,
     activeCardPlan,
     advancedMixEnabled,
@@ -824,11 +859,37 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
           data-testid="flashcards-generate-focus-topics"
         />
       </Form.Item>
-      {generationError && (
+      {visibleGenerationError && (
         <Alert
           variant="error"
-          title={generationError}
+          title={visibleGenerationError.message}
         >
+          {visibleGenerationError.grounding && (
+            <details className="mb-2">
+              <summary className="cursor-pointer font-medium">
+                Why these cards were not saved
+              </summary>
+              <div className="mt-2 space-y-2">
+                <p>Verification verdict: {visibleGenerationError.grounding.verdict}</p>
+                <p>Generation model: {visibleGenerationError.grounding.generationModel ?? "Not reported"}</p>
+                <p>Verification model: {visibleGenerationError.grounding.verificationModel ?? "Not reported"}</p>
+                <ol className="space-y-3">
+                  {visibleGenerationError.grounding.claims.map((claim, index) => (
+                    <li key={index}>
+                      <p className="font-medium">Card {claim.cardNumber} · {claim.field}: {claim.status}</p>
+                      <p className="whitespace-pre-wrap">{claim.claim}</p>
+                      {claim.rationale && <p className="whitespace-pre-wrap">{claim.rationale}</p>}
+                      {claim.evidence.map((snippet, evidenceIndex) => (
+                        <blockquote key={evidenceIndex} className="mt-1 border-l-2 pl-2 whitespace-pre-wrap">
+                          Source evidence: {snippet}
+                        </blockquote>
+                      ))}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </details>
+          )}
           <span className="text-xs">
             {t("option:flashcards.generateProviderKeyHint", {
               defaultValue: "If this is a provider or API key issue, "

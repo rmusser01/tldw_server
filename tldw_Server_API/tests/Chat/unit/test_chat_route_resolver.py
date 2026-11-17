@@ -173,3 +173,130 @@ async def test_auto_route_requires_an_injected_provider_listing(router_dependenc
 
     with pytest.raises(TypeError, match="configured_providers_getter"):
         await resolve_chat_route(request, **dependencies)
+
+
+@pytest.mark.asyncio
+async def test_router_call_is_marked_self_recorded():
+    """The router's provider call runs with records_itself=True (usage accounting spec §3)."""
+    from tldw_Server_API.app.core.Chat.chat_route_resolver import _select_auto_llm_router_choice
+    from tldw_Server_API.app.core.LLM_Calls.routing.models import RouterRequest, RoutingPolicy
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+
+    seen: list[bool] = []
+
+    async def _probe(**kwargs):
+        seen.append(current_llm_call_context().records_itself)
+        return {
+            "choices": [{"message": {"content": '{"provider":"openai","model":"gpt-test"}'}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    async def _byok(*args, **kwargs):
+        async def _touch():
+            return None
+
+        return SimpleNamespace(api_key="k", app_config={}, touch_last_used=_touch)
+
+    async def _log(**kwargs):
+        return None
+
+    await _select_auto_llm_router_choice(
+        router_request=RouterRequest(model="auto", surface="chat", latest_user_turn="route me", scope="chat-1"),
+        policy=RoutingPolicy(
+            request_model="auto", server_default_provider="openai", boundary_mode="server_default_provider"
+        ),
+        candidates=[
+            {"provider": "openai", "model": "gpt-test"},
+            {"provider": "openai", "model": "gpt-alt"},
+        ],
+        provider_listing={
+            "default_provider": "openai",
+            "providers": [
+                {
+                    "name": "openai",
+                    "default_model": "router-model",
+                    "is_configured": True,
+                    "models_info": [{"name": "router-model"}],
+                }
+            ],
+        },
+        request=SimpleNamespace(state=SimpleNamespace(user_id="user-1", api_key_id="key-1")),
+        current_user=SimpleNamespace(id="user-1", id_int=1),
+        request_id="request-1",
+        surface="chat",
+        endpoint="POST:/api/v1/chat/completions",
+        resolve_provider_api_key_fn=lambda *a, **k: ("k", {}),
+        resolve_byok_credentials_fn=_byok,
+        perform_chat_api_call_async_fn=_probe,
+        log_model_router_usage_fn=_log,
+    )
+
+    assert seen == [True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "app_config", "expected"),
+    [
+        ("user", {}, "user"),
+        ("server_default", {}, "server_default"),
+        ("user", {"openai_api": {"api_base_url": "http://models.internal:8000/v1"}}, "user_unmetered"),
+    ],
+    ids=["own-key", "server-key", "own-key-on-operator-endpoint"],
+)
+async def test_the_router_call_and_its_usage_row_carry_whose_key_it_used(monkeypatch, source, app_config, expected):
+    """The router's raw-key call marks its context, and its row records the same source (TASK-13956)."""
+    from tldw_Server_API.app.core.Chat import chat_route_resolver
+    from tldw_Server_API.app.core.LLM_Calls.routing.models import RouterRequest, RoutingPolicy
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+
+    seen: list[str | None] = []
+    rows: list[dict] = []
+
+    async def _probe(**_kwargs):
+        seen.append(current_llm_call_context().credential_source)
+        return {
+            "choices": [{"message": {"content": '{"provider":"openai","model":"gpt-test"}'}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    async def _byok(*_args, **_kwargs):
+        async def _touch():
+            return None
+
+        return SimpleNamespace(api_key="k", app_config=app_config, source=source, touch_last_used=_touch)
+
+    async def _log(**kwargs):
+        rows.append(kwargs)
+
+    monkeypatch.setattr(chat_route_resolver, "load_server_config_snapshot", lambda: {}, raising=False)
+    await chat_route_resolver._select_auto_llm_router_choice(
+        router_request=RouterRequest(model="auto", surface="chat", latest_user_turn="route me", scope="chat-1"),
+        policy=RoutingPolicy(
+            request_model="auto", server_default_provider="openai", boundary_mode="server_default_provider"
+        ),
+        candidates=[{"provider": "openai", "model": "gpt-test"}, {"provider": "openai", "model": "gpt-alt"}],
+        provider_listing={
+            "default_provider": "openai",
+            "providers": [
+                {
+                    "name": "openai",
+                    "default_model": "router-model",
+                    "is_configured": True,
+                    "models_info": [{"name": "router-model"}],
+                }
+            ],
+        },
+        request=SimpleNamespace(state=SimpleNamespace(user_id="user-1", api_key_id="key-1")),
+        current_user=SimpleNamespace(id="user-1", id_int=1),
+        request_id="request-1",
+        surface="chat",
+        endpoint="POST:/api/v1/chat/completions",
+        resolve_provider_api_key_fn=lambda *a, **k: ("k", {}),
+        resolve_byok_credentials_fn=_byok,
+        perform_chat_api_call_async_fn=_probe,
+        log_model_router_usage_fn=_log,
+    )
+
+    assert seen == [expected]
+    assert [row.get("credential_source") for row in rows] == [expected]

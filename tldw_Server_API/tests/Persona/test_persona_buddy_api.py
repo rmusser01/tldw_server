@@ -9,7 +9,6 @@ from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-
 pytestmark = pytest.mark.unit
 
 fastapi_app = FastAPI()
@@ -48,15 +47,16 @@ async def _prepare_real_authnz_users(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("JWT_SECRET_KEY", "persona-buddy-auth-test-secret-0123456789")
 
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service, reset_jwt_service
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB, reset_users_db
+    from tldw_Server_API.app.core.Utils.app_services import app_services
 
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
     await reset_db_pool()
     await reset_users_db()
     pool = await get_db_pool()
@@ -97,9 +97,9 @@ async def _prepare_real_authnz_users(tmp_path, monkeypatch):
 async def _restore_real_authnz_environment(state, monkeypatch) -> None:
     """Close the isolated auth pool and invalidate setting caches after the test."""
     from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
+    from tldw_Server_API.app.core.Utils.app_services import app_services
 
     await reset_db_pool()
     await reset_users_db()
@@ -109,7 +109,7 @@ async def _restore_real_authnz_environment(state, monkeypatch) -> None:
         else:
             monkeypatch.setenv(name, value)
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
 
 def test_get_buddy_lazily_creates_for_preexisting_persona_without_row(persona_db: CharactersRAGDB):
@@ -162,7 +162,7 @@ def test_api_create_rolls_back_visible_profile_when_buddy_upkeep_fails(persona_d
     def _raise_buddy_failure(*_args, **_kwargs):
         raise ValueError("buddy unavailable")
 
-    monkeypatch.setattr(persona_ep, "ensure_persona_buddy_for_profile", _raise_buddy_failure)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.buddy.ensure_persona_buddy_for_profile", _raise_buddy_failure)
 
     with _client_for_user(1, persona_db) as client:
         created = client.post(
@@ -250,7 +250,7 @@ def test_api_update_reverts_profile_when_buddy_upkeep_fails(persona_db: Characte
     def _raise_buddy_failure(*_args, **_kwargs):
         raise ValueError("buddy unavailable")
 
-    monkeypatch.setattr(persona_ep, "ensure_persona_buddy_for_profile", _raise_buddy_failure)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.buddy.ensure_persona_buddy_for_profile", _raise_buddy_failure)
 
     with _client_for_user(1, persona_db) as client:
         updated = client.patch(
@@ -275,7 +275,7 @@ def test_api_create_surfaces_rollback_failures_after_buddy_validation_error(
     def _raise_buddy_failure(*_args, **_kwargs):
         raise ValueError("buddy unavailable")
 
-    monkeypatch.setattr(persona_ep, "ensure_persona_buddy_for_profile", _raise_buddy_failure)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.buddy.ensure_persona_buddy_for_profile", _raise_buddy_failure)
     monkeypatch.setattr(
         persona_db,
         "soft_delete_persona_profile",
@@ -319,7 +319,7 @@ def test_api_update_surfaces_rollback_failures_after_buddy_validation_error(
             return real_update(*args, **kwargs)
         return False
 
-    monkeypatch.setattr(persona_ep, "ensure_persona_buddy_for_profile", _raise_buddy_failure)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.buddy.ensure_persona_buddy_for_profile", _raise_buddy_failure)
     monkeypatch.setattr(persona_db, "update_persona_profile", _fail_second_update)
 
     with _client_for_user(1, persona_db) as client:

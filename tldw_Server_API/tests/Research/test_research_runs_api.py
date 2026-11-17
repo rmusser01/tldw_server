@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -74,3 +75,72 @@ def test_delete_research_run_removes_it_from_server_listing(tmp_path):
         list_response = client.get("/api/v1/research/runs", params={"limit": 10})
         assert list_response.status_code == 200
         assert all(item["id"] != created["id"] for item in list_response.json())
+
+
+def test_research_stream_disables_intermediary_compression(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("RESEARCH_RUNS_SSE_TEST_MAX_SECONDS", "0.02")
+    client, _service = _research_client(tmp_path)
+    with client:
+        run = client.post("/api/v1/research/runs", json={"query": "Rowan Observatory"}).json()
+        response = client.get(f"/api/v1/research/runs/{run['id']}/events/stream")
+        assert response.status_code == 200  # nosec B101 # Pytest regression checks SSE delivery and checkpoint integrity.
+        assert "no-cache" in response.headers["cache-control"]  # nosec B101 # Pytest regression checks SSE delivery and checkpoint integrity.
+        assert "no-transform" in response.headers["cache-control"]  # nosec B101 # Pytest regression checks SSE delivery and checkpoint integrity.
+        assert response.headers["x-accel-buffering"] == "no"  # nosec B101 # Pytest regression checks SSE delivery and checkpoint integrity.
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_research_stream_current_checkpoint_keeps_reviewable_proposal(tmp_path, monkeypatch, live):
+    import json
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("RESEARCH_RUNS_SSE_TEST_MAX_SECONDS", "0.2")
+    monkeypatch.setenv("RESEARCH_RUNS_SSE_POLL_INTERVAL", "0.01")
+    client, service = _research_client(tmp_path)
+    proposal = {"query": "Rowan Observatory", "focus_areas": ["telescope"], "stop_criteria": {"min_cited_sections": 1}}
+    with client:
+        run = client.post("/api/v1/research/runs", json={"query": proposal["query"]}).json()
+        db = service._db_for_user("1")
+        checkpoints = []
+
+        def publish():
+            checkpoint = db.create_checkpoint(
+                session_id=run["id"], checkpoint_type="plan_review", proposed_payload=proposal
+            )
+            db.update_phase(run["id"], phase="awaiting_plan_review", status="waiting_human", active_job_id=None)
+            db.record_run_event(
+                owner_user_id="1",
+                session_id=run["id"],
+                event_type="checkpoint",
+                event_payload=service._checkpoint_event_payload(checkpoint=checkpoint, phase="awaiting_plan_review"),
+                phase="awaiting_plan_review",
+            )
+            checkpoints.append(checkpoint)
+
+        if live:
+            list_events = service.list_run_events_after
+            reads = 0
+
+            def events_after(**kwargs):
+                nonlocal reads
+                reads += 1
+                if reads == 2:
+                    publish()
+                return list_events(**kwargs)
+
+            monkeypatch.setattr(service, "list_run_events_after", events_after)
+        else:
+            publish()
+        response = client.get(f"/api/v1/research/runs/{run['id']}/events/stream")
+        events = [
+            json.loads(line.removeprefix("data: "))
+            for frame in response.text.split("\n\n")
+            if "event: checkpoint" in frame
+            for line in frame.splitlines()
+            if line.startswith("data: ")
+        ]
+        assert len(events) == len(checkpoints) == 1  # nosec B101 # Pytest regression checks SSE delivery and checkpoint integrity.
+        assert events[0]["checkpoint_id"] == checkpoints[0].id  # nosec B101 # Pytest regression checks SSE delivery and checkpoint integrity.
+        assert events[0].get("proposed_payload") == proposal  # nosec B101 # Pytest regression checks SSE delivery and checkpoint integrity.
+        assert db.get_checkpoint(checkpoints[0].id).status == "pending"  # nosec B101 # Pytest regression checks SSE delivery and checkpoint integrity.

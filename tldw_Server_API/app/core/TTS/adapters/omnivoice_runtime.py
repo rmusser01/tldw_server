@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..utils import hold_tts_engine
 from .omnivoice_sidecar_protocol import OmniVoiceSynthesizeRequest
 
 
@@ -56,7 +57,7 @@ class OmniVoiceRuntime:
         if self.model is not None:
             return self.model
 
-        async with self._load_lock:
+        async with hold_tts_engine(self._load_lock) as run:
             if self.model is not None:
                 return self.model
 
@@ -79,7 +80,7 @@ class OmniVoiceRuntime:
                 if key in self.config and self.config[key] is not None
             }
             try:
-                self.model = await asyncio.to_thread(
+                self.model = await run(
                     omnivoice_cls.from_pretrained,
                     str(model_path),
                     **load_kwargs,
@@ -110,9 +111,9 @@ class OmniVoiceRuntime:
                 retryable=False,
             )
 
-        async with self._generate_lock:
+        async with hold_tts_engine(self._generate_lock) as run:
             try:
-                generated = await asyncio.to_thread(model.generate, **generate_kwargs)
+                generated = await run(model.generate, **generate_kwargs)
             except OmniVoiceRuntimeError:
                 raise
             except Exception as exc:

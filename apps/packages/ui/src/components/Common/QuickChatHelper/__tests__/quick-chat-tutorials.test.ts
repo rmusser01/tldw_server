@@ -111,8 +111,13 @@ describe("quick chat per-page tutorials", () => {
     expect(unlockedToolsTutorial?.isLocked).toBe(false)
   })
 
-  it("returns empty tutorial list for routes without definitions", () => {
+  it("lists the Settings tour on the Health subroute", () => {
     const entries = buildQuickChatPageTutorialEntries("/settings/health", [])
+    expect(entries.map(({ tutorial }) => tutorial.id)).toContain("settings-basics")
+  })
+
+  it("returns empty tutorial list for routes without definitions", () => {
+    const entries = buildQuickChatPageTutorialEntries("/unregistered-route", [])
     expect(entries).toEqual([])
   })
 
@@ -123,15 +128,13 @@ describe("quick chat per-page tutorials", () => {
     )
   })
 
-  it("still resolves tutorials when runtime path is sidepanel", () => {
+  it("suppresses options tours when the compact runtime has no runner", () => {
     const originalPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
 
     try {
       window.history.replaceState({}, "", "/sidepanel.html")
       const entries = buildQuickChatPageTutorialEntries("/chat", [])
-      expect(entries.some((entry) => entry.tutorial.id === "playground-basics")).toBe(
-        true
-      )
+      expect(entries).toEqual([])
     } finally {
       window.history.replaceState({}, "", originalPath || "/")
     }

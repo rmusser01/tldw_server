@@ -400,7 +400,10 @@ class ResearchSynthesizer:
             if unresolved not in unresolved_questions:
                 unresolved_questions.append(unresolved)
 
-        summary = dict(parsed.get("summary") or {})
+        summary_payload = parsed.get("summary")
+        if summary_payload is not None and not isinstance(summary_payload, dict):
+            raise ValueError("synthesis_summary_must_be_object")
+        summary = dict(summary_payload or {})
         summary.update(
             {
                 "mode": "llm_backed",

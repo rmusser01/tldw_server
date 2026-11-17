@@ -177,14 +177,24 @@ export const encodeSidepanelChatWebUiHandoff = (
   payload: SidepanelChatWebUiHandoffPayload
 ) => encodeBase64Url(JSON.stringify(payload))
 
+const parseEncodedHandoff = (value: string | null | undefined): Record<string, unknown> | null => {
+  const encoded = normalizeOptionalString(value)
+  if (!encoded) return null
+  try {
+    const parsed: unknown = JSON.parse(decodeBase64Url(encoded))
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown> : null
+  } catch { return null }
+}
+
+// Format recognition must not change when the same packet expires.
+export const isEncodedSidepanelChatWebUiHandoff = (value: string) => parseEncodedHandoff(value) !== null
+
 export const decodeSidepanelChatWebUiHandoff = (
   value: string | null | undefined
 ): SidepanelChatWebUiHandoffPayload | null => {
-  const encoded = normalizeOptionalString(value)
-  if (!encoded) return null
-
   try {
-    const parsed = JSON.parse(decodeBase64Url(encoded)) as Record<string, unknown>
+    const parsed = parseEncodedHandoff(value)
     if (
       !parsed ||
       parsed.source !== SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE ||
@@ -205,7 +215,7 @@ export const decodeSidepanelChatWebUiHandoff = (
       if (nextValue !== undefined) decoded[key] = nextValue
     }
 
-    assignIfPresent("draft", normalizeOptionalString(parsed.draft) ?? undefined)
+    assignIfPresent("draft", typeof parsed.draft === "string" ? parsed.draft : undefined)
     assignIfPresent("historyId", normalizeNullableStringField(parsed, "historyId"))
     assignIfPresent("serverChatId", normalizeNullableStringField(parsed, "serverChatId"))
     assignIfPresent("chatMode", isChatMode(parsed.chatMode) ? parsed.chatMode : undefined)

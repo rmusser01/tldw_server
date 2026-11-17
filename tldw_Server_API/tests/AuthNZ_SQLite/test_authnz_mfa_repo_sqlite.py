@@ -9,11 +9,11 @@ pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 
 @pytest.mark.asyncio
-async def test_authnz_mfa_repo_basic_sqlite(tmp_path, monkeypatch) -> None:
+async def test_authnz_mfa_repo_basic_sqlite(tmp_path, monkeypatch, fresh_services) -> None:
     """AuthnzMfaRepo should update and read MFA fields on a SQLite-backed AuthNZ DB."""
     from pathlib import Path
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mfa_repo import AuthnzMfaRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -24,7 +24,6 @@ async def test_authnz_mfa_repo_basic_sqlite(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     # Ensure core AuthNZ tables (including MFA columns) exist via migrations.

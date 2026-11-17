@@ -1,0 +1,204 @@
+import { afterEach, describe, expect, it, vi } from "vitest"
+import {
+  buildServerChatPath,
+  historyHandoffState,
+  isAddressableServerChatId,
+  isCharacterChatRouteLocation,
+  isCharacterChatRouteSearch,
+  isServerChatNavigationPending,
+  PLANNED_CHAT_NAVIGATION_TIMEOUT_MS,
+  planServerChatNavigation,
+  readServerChatRouteId,
+  reportMountedChatRoute,
+  resetServerChatRouteState,
+  serverChatNavigationWaitMs,
+  settleHistoryHandoff,
+  settleServerChatNavigation,
+  withoutConsumedParams,
+  withServerChatRouteId
+} from "../server-chat-route"
+
+describe("chat page addresses (XP-05)", () => {
+  afterEach(() => resetServerChatRouteState())
+
+  it("names a saved chat by its server id", () => {
+    expect(buildServerChatPath("d64f6a52-aaaa")).toBe("/chat?chat=d64f6a52-aaaa")
+    expect(readServerChatRouteId("?chat=d64f6a52-aaaa")).toBe("d64f6a52-aaaa")
+  })
+
+  it("ignores a missing or malformed chat id", () => {
+    expect(readServerChatRouteId("")).toBeNull()
+    expect(readServerChatRouteId("?chat=")).toBeNull()
+    expect(readServerChatRouteId("?chat=%2Fapi%2Fv1")).toBeNull()
+  })
+
+  it("keeps the rest of the query when the chat changes", () => {
+    expect(withServerChatRouteId("?tab=history&chat=old", "new")).toBe("?tab=history&chat=new")
+    expect(withServerChatRouteId("?tab=history&chat=old", null)).toBe("?tab=history")
+    expect(withServerChatRouteId("?chat=old", null)).toBe("")
+  })
+
+  it("leaves character chat routes to the character intent", () => {
+    expect(isCharacterChatRouteSearch("?mode=character&chatId=abc")).toBe(true)
+    expect(isCharacterChatRouteSearch("?chat=abc")).toBe(false)
+  })
+
+  // The Playground also reads a character intent from a hash route outside a
+  // hash router (/options.html?keep=1#/chat?mode=character&...).
+  it("leaves a character chat route carried in the hash to the character intent", () => {
+    expect(isCharacterChatRouteLocation("?keep=1", "#/chat?mode=character&characterId=5&chatId=robot")).toBe(true)
+    expect(isCharacterChatRouteLocation("?mode=character", "")).toBe(true)
+    expect(isCharacterChatRouteLocation("?chat=abc", "#anchor")).toBe(false)
+  })
+
+  it("adds a history entry when switching from one saved chat to another", () => {
+    reportMountedChatRoute({ namesChat: true })
+    expect(planServerChatNavigation("chat-b")).toEqual({ to: "/chat?chat=chat-b", replace: false })
+  })
+
+  it("replaces the entry of a chat page that named no chat", () => {
+    reportMountedChatRoute({ namesChat: false })
+    expect(planServerChatNavigation("chat-b")).toEqual({ to: "/chat?chat=chat-b", replace: true })
+  })
+
+  it("adds a history entry when opening a chat from another page", () => {
+    reportMountedChatRoute(null)
+    expect(planServerChatNavigation("chat-b").replace).toBe(false)
+  })
+
+  it("plans New chat as a history entry of its own when it leaves a saved chat (#3119)", () => {
+    reportMountedChatRoute({ namesChat: true })
+    expect(planServerChatNavigation(null)).toEqual({ to: "/chat", replace: false })
+    expect(isServerChatNavigationPending(null)).toBe(true)
+    settleServerChatNavigation()
+    expect(isServerChatNavigationPending(null)).toBe(false)
+  })
+
+  it("holds the address sync until the planned navigation lands", () => {
+    planServerChatNavigation("chat-b")
+    expect(isServerChatNavigationPending("chat-b")).toBe(true)
+    expect(isServerChatNavigationPending("chat-a")).toBe(false)
+    settleServerChatNavigation()
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+  })
+})
+
+// #3119: a planned navigation that never lands (cancelled, or the page left
+// before it arrived) must not block the address for that chat for the rest
+// of the session.
+describe("a planned chat navigation that never lands", () => {
+  afterEach(() => {
+    resetServerChatRouteState()
+    vi.useRealTimers()
+  })
+
+  it("is forgotten when the chat page unmounts", () => {
+    reportMountedChatRoute({ namesChat: true })
+    planServerChatNavigation("chat-b")
+    reportMountedChatRoute(null)
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+  })
+
+  it("is forgotten when a location that does not name its chat arrives", () => {
+    planServerChatNavigation("chat-b")
+    settleServerChatNavigation()
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+  })
+
+  it("is replaced when another chat is planned", () => {
+    planServerChatNavigation("chat-b")
+    planServerChatNavigation("chat-c")
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+    expect(isServerChatNavigationPending("chat-c")).toBe(true)
+  })
+
+  it("is given up after a short wait", () => {
+    vi.useFakeTimers()
+    planServerChatNavigation("chat-b")
+    expect(serverChatNavigationWaitMs()).toBe(PLANNED_CHAT_NAVIGATION_TIMEOUT_MS)
+    vi.advanceTimersByTime(PLANNED_CHAT_NAVIGATION_TIMEOUT_MS - 1)
+    expect(isServerChatNavigationPending("chat-b")).toBe(true)
+    vi.advanceTimersByTime(1)
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+    expect(serverChatNavigationWaitMs()).toBe(0)
+  })
+})
+
+// The Playground consumes a /chat?historySelection=... link with
+// history.replaceState, which the router does not see. The chat address must
+// wait until it is consumed and must never write it back afterwards.
+describe("chat address and the history handoff link", () => {
+  const handoff = "?historySelection=%7B%22conversation_id%22%3A%22c1%22%7D"
+
+  it("reports no handoff when the router query has none", () => {
+    expect(historyHandoffState("?chat=c1", "http://app.test/chat?chat=c1")).toBe("none")
+  })
+
+  it("waits while the browser address still carries the handoff", () => {
+    expect(historyHandoffState(handoff, `http://app.test/chat${handoff}`)).toBe("pending")
+    expect(historyHandoffState(handoff, `chrome-extension://x/options.html#/chat${handoff}`)).toBe("pending")
+  })
+
+  it("treats a handoff only the router still sees as consumed", () => {
+    expect(historyHandoffState(handoff, "http://app.test/chat")).toBe("consumed")
+  })
+
+  // #3119: a link the page could not load stays in the address; once the
+  // page has settled it, the address sync stops waiting and drops it.
+  it("stops waiting for a handoff the page has settled, and drops it", () => {
+    const browser = `http://app.test/chat${handoff}`
+    settleHistoryHandoff(browser)
+    expect(historyHandoffState(handoff, browser)).toBe("consumed")
+    expect(withoutConsumedParams(`${handoff}&tab=x`, browser)).toBe("?tab=x")
+    resetServerChatRouteState()
+  })
+
+  it("forgets a settled handoff when the chat page unmounts", () => {
+    const browser = `http://app.test/chat${handoff}`
+    settleHistoryHandoff(browser)
+    reportMountedChatRoute(null)
+    expect(historyHandoffState(handoff, browser)).toBe("pending")
+  })
+
+  it("drops a consumed handoff from the query it writes", () => {
+    expect(
+      withServerChatRouteId(withoutConsumedParams(`${handoff}&tab=x`, "http://app.test/chat?tab=x"), "c1")
+    ).toBe("?tab=x&chat=c1")
+  })
+})
+
+// Returning from Settings or a research run also arrives as one-shot
+// parameters that the Playground removes with history.replaceState.
+describe("chat address and one-shot return parameters", () => {
+  const returned = "?settingsServerChatId=c1&settingsHistoryId=h1&researchReturnRunId=r1&tab=x"
+
+  it("drops return parameters the browser address no longer carries", () => {
+    expect(withoutConsumedParams(returned, "http://app.test/chat?tab=x")).toBe("?tab=x")
+  })
+
+  it("drops them from a hash-routed address too", () => {
+    expect(withoutConsumedParams(returned, "chrome-extension://x/options.html#/chat?tab=x")).toBe("?tab=x")
+  })
+
+  it("keeps return parameters the browser address still carries", () => {
+    expect(withoutConsumedParams(returned, `http://app.test/chat${returned}`)).toBe(returned)
+  })
+
+  it("never drops other parameters, even when only the router knows them", () => {
+    expect(withoutConsumedParams("?tab=x&mode=pro", "http://localhost/")).toBe("?tab=x&mode=pro")
+  })
+})
+
+// The address can name only ids the route pattern reads back; writing any
+// other id would be read as "no chat" and rewritten forever.
+describe("addressable chat ids", () => {
+  it("accepts server chat ids", () => {
+    expect(isAddressableServerChatId("3f2b8c1e-9d4a-4e6b-8f1a-2c3d4e5f6a7b")).toBe(true)
+  })
+
+  it("rejects ids the address cannot carry", () => {
+    expect(isAddressableServerChatId("has spaces")).toBe(false)
+    expect(isAddressableServerChatId("-leading-dash")).toBe(false)
+    expect(isAddressableServerChatId("x".repeat(200))).toBe(false)
+  })
+})

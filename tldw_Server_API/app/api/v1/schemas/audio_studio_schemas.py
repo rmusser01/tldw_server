@@ -322,6 +322,14 @@ class AudioStudioClipResponse(_BaseAudioStudioModel):
     archived_at: str | None = None
 
 
+class AudioStudioProjectDetailResponse(AudioStudioProjectResponse):
+    """One owner's saved project resources; list responses remain summaries."""
+
+    sections: list[AudioStudioSectionResponse] = Field(default_factory=list)
+    tracks: list[AudioStudioTrackResponse] = Field(default_factory=list)
+    clips: list[AudioStudioClipResponse] = Field(default_factory=list)
+
+
 class _AudioStudioJobCreate(_SecretFreePayloadMixin):
     idempotency_key: str = Field(..., min_length=16, max_length=200)
     target_resource_kind: AudioStudioResourceKind
@@ -364,6 +372,29 @@ class AudioStudioGenerationJobResponse(_BaseAudioStudioModel):
     result: dict[str, Any] | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+class AudioStudioJobStateResponse(_BaseAudioStudioModel):
+    """Secret-free owner-visible state from the actual Jobs lifecycle."""
+
+    job_id: str
+    job_type: str
+    status: str
+    project_id: str
+    target_resource_kind: str
+    target_resource_id: str
+    target_revision_id: str
+    retry_count: int = 0
+    max_retries: int = 0
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    created_at: str | None = None
+
+
+class AudioStudioJobListResponse(_BaseAudioStudioModel):
+    jobs: list[AudioStudioJobStateResponse]
+    next_before_id: int | None = None
+    next_created_before: str | None = None
 
 
 class AudioStudioArtifactResponse(_BaseAudioStudioModel):

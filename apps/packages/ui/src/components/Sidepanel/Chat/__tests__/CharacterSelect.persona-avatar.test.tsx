@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => {
@@ -224,6 +224,16 @@ vi.mock("@/utils/characters-route", () => ({
 import CharacterSelect from "../CharacterSelect"
 
 describe("CharacterSelect persona avatar", () => {
+  it.each(["character", "persona"] as const)("shows a catalog failure with retry instead of an empty %s library", async tab => {
+    const retry = vi.fn();
+    mocks.useQuery.mockImplementation(() => ({ data: [], isLoading: false, isError: true, refetch: retry }));
+    render(<CharacterSelect selectedCharacterId={null} setSelectedCharacterId={vi.fn()} openRequest={{ id: 1, tab }} />);
+    const alert = await screen.findByRole("alert");
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/No (characters|personas) available/)).not.toBeInTheDocument();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.setCapabilities({

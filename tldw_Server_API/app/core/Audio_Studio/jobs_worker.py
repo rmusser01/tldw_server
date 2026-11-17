@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDat
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int, jobs_manager_from_env
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, is_retryable_error
 
 
 class AudioStudioJobError(Exception):
@@ -176,12 +177,11 @@ async def _handle_generation_job(
         result = await adapter.generate(request, user_id=int(owner_user_id) if owner_user_id.isdigit() else None)
     except Exception as exc:
         reason = _redact_audio_studio_error(str(exc) or type(exc).__name__)
-        response = {
-            "status": "failed",
-            "reason": reason,
-            "retryable": bool(getattr(exc, "retryable", True)),
-        }
+        retryable = is_retryable_error(exc) if isinstance(exc, TTSError) else bool(getattr(exc, "retryable", True))
+        response = {"status": "failed", "reason": reason, "retryable": retryable}
         _update_generation_job_result(collections_db, project=project, job=job, status="failed", result=response)
+        if isinstance(exc, TTSError):
+            raise AudioStudioJobError(reason, retryable=retryable) from exc
         raise
     artifact_id = f"art_{uuid4().hex[:16]}"
     content_hash = hashlib.sha256(result.content_bytes).hexdigest()
@@ -195,6 +195,9 @@ async def _handle_generation_job(
         content_bytes=result.content_bytes,
     )
     metadata = dict(result.metadata or {})
+    if request.kind == "speech" and request.text is not None:
+        metadata["source_text_hash"] = hashlib.sha256(request.text.encode("utf-8")).hexdigest()
+        metadata["source_provider_hint"] = request.provider_options.get("provider_hint")
     metadata["job_id"] = job_id
     metadata["source"] = "audio_studio_generation"
     artifact = collections_db.create_audio_studio_artifact(

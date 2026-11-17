@@ -19,18 +19,14 @@ def _setup_env(monkeypatch, *, user_db_base: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_incident_patch_resolves_assignee_and_preserves_workflow_fields(monkeypatch, tmp_path):
+async def test_incident_patch_resolves_assignee_and_preserves_workflow_fields(monkeypatch, tmp_path, fresh_services):
     _setup_env(monkeypatch, user_db_base=str(tmp_path / "user_dbs"))
 
     from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services import admin_system_ops_service
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     monkeypatch.setattr(admin_system_ops_service, "_STORE_PATH", tmp_path / "system_ops.json")
 
     async def _resolve_assignee(user_id: int) -> dict[str, object]:
@@ -93,18 +89,14 @@ async def test_incident_patch_resolves_assignee_and_preserves_workflow_fields(mo
 
 
 @pytest.mark.asyncio
-async def test_incident_patch_rejects_non_admin_assignee(monkeypatch, tmp_path):
+async def test_incident_patch_rejects_non_admin_assignee(monkeypatch, tmp_path, fresh_services):
     _setup_env(monkeypatch, user_db_base=str(tmp_path / "user_dbs"))
 
     from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services import admin_system_ops_service
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     monkeypatch.setattr(admin_system_ops_service, "_STORE_PATH", tmp_path / "system_ops.json")
 
     async def _reject_assignee(user_id: int) -> dict[str, object]:
@@ -130,18 +122,14 @@ async def test_incident_patch_rejects_non_admin_assignee(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_incident_patch_clears_assignment_with_null(monkeypatch, tmp_path):
+async def test_incident_patch_clears_assignment_with_null(monkeypatch, tmp_path, fresh_services):
     _setup_env(monkeypatch, user_db_base=str(tmp_path / "user_dbs"))
 
     from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services import admin_system_ops_service
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     monkeypatch.setattr(admin_system_ops_service, "_STORE_PATH", tmp_path / "system_ops.json")
 
     async def _resolve_assignee(user_id: int) -> dict[str, object]:

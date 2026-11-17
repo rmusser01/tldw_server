@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react"
+import React, { useEffect, useState } from "react"
 import {
   Button,
   Descriptions,
@@ -15,7 +15,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useDataTablesStore } from "@/store/data-tables"
 import { exportAndDownload } from "@/utils/data-table-export"
-import { pollDataTableJob } from "@/utils/data-tables-jobs"
+import { useDataTableGeneration } from "@/hooks/useDataTableGeneration"
 import { Alert } from "@/components/ui/primitives"
 import type { DataTable, ExportFormat } from "@/types/data-tables"
 import { EditableDataTable } from "./EditableDataTable"
@@ -53,53 +53,36 @@ export const TableDetailModal: React.FC<TableDetailModalProps> = ({
   // Local state
   const [error, setError] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
-  const [isRegenerating, setIsRegenerating] = useState(false)
+  const generation = useDataTableGeneration(open && Boolean(tableId), tableId)
+  const isRegenerating = generation.isGenerating
   const [editMode, setEditMode] = useState(false)
-  const regenerateAbortRef = useRef<AbortController | null>(null)
 
-  // Fetch table details
-  const fetchTable = async () => {
-    if (!tableId) return
-
-    setCurrentTableLoading(true)
-    setError(null)
-
-    try {
-      const table = await tldwClient.getDataTable(tableId, { rows_limit: 2000 })
-      setCurrentTable(table)
-    } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to load table"
-      setError(errorMessage)
-    } finally {
-      setCurrentTableLoading(false)
-    }
-  }
-
-  // Fetch on open
+  // A closed drawer or a different table must not receive a late detail response.
   useEffect(() => {
+    const controller = new AbortController()
     if (open && tableId) {
-      fetchTable()
-      setEditMode(false) // Reset edit mode when opening
+      setCurrentTableLoading(true)
+      setError(null)
+      setEditMode(false)
+      void tldwClient.getDataTable(tableId, { rows_limit: 2000 }, { signal: controller.signal })
+        .then((table) => {
+          if (!controller.signal.aborted) setCurrentTable(table)
+        })
+        .catch((err) => {
+          if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Failed to load table")
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setCurrentTableLoading(false)
+        })
     }
     return () => {
+      controller.abort()
       setCurrentTable(null)
+      setCurrentTableLoading(false)
       setError(null)
       stopEditing()
     }
-  }, [open, tableId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!open) {
-      regenerateAbortRef.current?.abort()
-    }
-  }, [open])
-
-  useEffect(() => {
-    return () => {
-      regenerateAbortRef.current?.abort()
-    }
-  }, [])
+  }, [open, tableId, setCurrentTable, setCurrentTableLoading, stopEditing])
 
   // Handle close with unsaved changes check
   const handleClose = () => {
@@ -133,59 +116,29 @@ export const TableDetailModal: React.FC<TableDetailModalProps> = ({
     }
   }
 
-  // Handle regenerate
-  const handleRegenerate = async () => {
+  // Replace the visible table only after the captured job has completed.
+  const handleRegenerate = () => {
     if (!tableId) return
+    void generation.run((options) => tldwClient.regenerateDataTable(tableId, {}, options), 2000, {
+      onComplete: (table) => {
+        setCurrentTable(table)
+        updateTableInList(tableId, {
+          row_count: table.row_count,
+          column_count: table.columns.length,
+          updated_at: table.updated_at
+        })
+        void queryClient.invalidateQueries({ queryKey: ["dataTables"] })
+        message.success(t("dataTables:regenerateSuccess", "Table regenerated successfully!"))
+      },
+      onError: (error) => message.error(error instanceof Error ? error.message : "Regeneration failed")
+    })
+  }
 
-    regenerateAbortRef.current?.abort()
-    const abortController = new AbortController()
-    regenerateAbortRef.current = abortController
-    setIsRegenerating(true)
+  const cancelGeneration = async () => {
     try {
-      const response = await tldwClient.regenerateDataTable(tableId)
-      const jobId = response?.job_id
-      const tableUuid = response?.table?.uuid || tableId
-      if (!jobId) {
-        throw new Error("Regeneration job was not created")
-      }
-
-      const jobStatus = await pollDataTableJob({
-        jobId,
-        fetchJob: (id) => tldwClient.getDataTableJob(id),
-        signal: abortController.signal
-      })
-      if (abortController.signal.aborted) return
-
-      const status = String(jobStatus?.status || "").toLowerCase()
-      if (status !== "completed") {
-        throw new Error(jobStatus?.error_message || "Regeneration failed")
-      }
-
-      const table = await tldwClient.getDataTable(jobStatus.table_uuid || tableUuid, {
-        rows_limit: 2000
-      })
-      if (!table) {
-        throw new Error("No table data in response")
-      }
-
-      setCurrentTable(table)
-      updateTableInList(tableId, {
-        row_count: table.row_count || table.rows?.length || 0,
-        column_count: table.columns?.length || 0,
-        updated_at: table.updated_at
-      })
-      await queryClient.invalidateQueries({ queryKey: ["dataTables"] })
-      message.success(t("dataTables:regenerateSuccess", "Table regenerated successfully!"))
-    } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Regeneration failed"
-      if (!abortController.signal.aborted) {
-        message.error(errorMessage)
-      }
-    } finally {
-      if (!abortController.signal.aborted) {
-        setIsRegenerating(false)
-      }
+      await generation.cancel(() => message.info(t("dataTables:generationCancelled", "Generation cancelled. Your saved table is unchanged.")))
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Cancellation failed")
     }
   }
 
@@ -287,6 +240,11 @@ export const TableDetailModal: React.FC<TableDetailModalProps> = ({
                   size="small"
                 />
               </div>
+              {isRegenerating && (
+                <Button onClick={cancelGeneration} loading={generation.isCancelling} size="small">
+                  {t("dataTables:cancelGeneration", "Cancel generation")}
+                </Button>
+              )}
               <Button
                 icon={<RefreshCw className="h-4 w-4" />}
                 onClick={handleRegenerate}

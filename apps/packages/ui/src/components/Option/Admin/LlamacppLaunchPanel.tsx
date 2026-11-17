@@ -11,7 +11,10 @@ import {
   Typography
 } from "antd"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
-import type { LlamacppServerArgsInput } from "@/utils/build-llamacpp-server-args"
+import {
+  DEFAULT_LLAMACPP_SERVER_ARGS_INPUT,
+  type LlamacppServerArgsInput
+} from "@/utils/build-llamacpp-server-args"
 import { CollapsibleSection } from "./CollapsibleSection"
 import { ServerArgsEditor } from "./ServerArgsEditor"
 
@@ -62,9 +65,26 @@ interface ChatActionState {
   onUse: () => void
 }
 
-interface LlamacppLaunchPanelProps {
+/**
+ * Externally applied preset (import). `token` changes on each application so
+ * the panel can adopt the settings exactly once per import.
+ */
+interface AppliedLlamacppPreset {
+  token: number
   settings: LlamacppServerArgsInput
-  onSettingsChange: (settings: LlamacppServerArgsInput) => void
+}
+
+interface LlamacppLaunchPanelProps {
+  /** Seed value used once on mount; the panel owns all subsequent edits. */
+  initialSettings?: LlamacppServerArgsInput
+  /**
+   * Ref the panel keeps in sync with its current settings so the page can
+   * read the final launch args at submit/export time without owning the
+   * form state.
+   */
+  settingsRef?: React.MutableRefObject<LlamacppServerArgsInput>
+  /** Settings imported via preset; applied when `token` changes. */
+  appliedPreset?: AppliedLlamacppPreset | null
   selectedModelId?: string
   selectedModelLabel?: string
   isRunning: boolean
@@ -81,9 +101,10 @@ interface LlamacppLaunchPanelProps {
   chatAction: ChatActionState | null
 }
 
-export const LlamacppLaunchPanel: React.FC<LlamacppLaunchPanelProps> = ({
-  settings,
-  onSettingsChange,
+const LlamacppLaunchPanelImpl: React.FC<LlamacppLaunchPanelProps> = ({
+  initialSettings,
+  settingsRef,
+  appliedPreset,
   selectedModelId,
   selectedModelLabel,
   isRunning,
@@ -99,11 +120,29 @@ export const LlamacppLaunchPanel: React.FC<LlamacppLaunchPanelProps> = ({
   importPresetInput,
   chatAction
 }) => {
+  const [settings, setSettings] = React.useState<LlamacppServerArgsInput>(
+    () => initialSettings ?? DEFAULT_LLAMACPP_SERVER_ARGS_INPUT
+  )
+  const internalSettingsRef = React.useRef<LlamacppServerArgsInput>(settings)
+  const settingsSyncRef = settingsRef ?? internalSettingsRef
+  const lastAppliedPresetTokenRef = React.useRef<number | null>(null)
+
+  React.useEffect(() => {
+    settingsSyncRef.current = settings
+  }, [settings, settingsSyncRef])
+
+  React.useEffect(() => {
+    if (!appliedPreset) return
+    if (lastAppliedPresetTokenRef.current === appliedPreset.token) return
+    lastAppliedPresetTokenRef.current = appliedPreset.token
+    setSettings(appliedPreset.settings)
+  }, [appliedPreset])
+
   function updateSetting<K extends keyof LlamacppServerArgsInput>(
     key: K,
     value: LlamacppServerArgsInput[K]
   ) {
-    onSettingsChange({ ...settings, [key]: value })
+    setSettings((current) => ({ ...current, [key]: value }))
   }
 
   const numaValue: NumaSelectValue =
@@ -711,5 +750,7 @@ export const LlamacppLaunchPanel: React.FC<LlamacppLaunchPanelProps> = ({
     </Card>
   )
 }
+
+export const LlamacppLaunchPanel = React.memo(LlamacppLaunchPanelImpl)
 
 export default LlamacppLaunchPanel

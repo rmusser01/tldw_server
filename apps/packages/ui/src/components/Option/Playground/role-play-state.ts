@@ -72,8 +72,7 @@ const deriveBehavior = (
 ): RolePlayBehaviorState | null => {
   const promptText = normalizePromptText(input.systemPrompt);
   const hasSelectedPrompt =
-    normalizePromptText(input.selectedSystemPrompt).length > 0 ||
-    normalizePromptText(input.selectedQuickPrompt).length > 0;
+    normalizePromptText(input.selectedSystemPrompt).length > 0;
 
   if (!promptText && !hasSelectedPrompt) return null;
 

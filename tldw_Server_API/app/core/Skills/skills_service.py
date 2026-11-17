@@ -555,7 +555,14 @@ class SkillsService:
                 archive_id = candidate.name.removeprefix(".purging-")
                 try:
                     row = self._registry_row_for_archive_id(archive_id)
-                    if row is None or not row.get("deleted"):
+                    if row is None:
+                        logger.warning(
+                            "Preserved Skills purge staging '{}' for user {} without owned registry authority",
+                            archive_id,
+                            self.user_id,
+                        )
+                        continue
+                    if not row.get("deleted"):
                         self._stage_for_cleanup(candidate, f"orphaned-purge-{archive_id}")
                         continue
 

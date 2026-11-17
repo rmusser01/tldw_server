@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib
-import sys
 from collections.abc import Callable
 from types import SimpleNamespace
 
@@ -11,7 +10,6 @@ pytestmark = pytest.mark.unit
 
 
 def _import_shutdown_resource_cleanup():
-    sys.modules.pop("tldw_Server_API.app.services.shutdown_resource_cleanup", None)
     return importlib.import_module("tldw_Server_API.app.services.shutdown_resource_cleanup")
 
 

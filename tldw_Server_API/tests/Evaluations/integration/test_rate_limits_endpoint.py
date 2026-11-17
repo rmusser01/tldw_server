@@ -3,6 +3,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.main import app
 
 pytestmark = [pytest.mark.integration, pytest.mark.evaluations]
@@ -10,15 +11,14 @@ pytestmark = [pytest.mark.integration, pytest.mark.evaluations]
 
 @pytest.fixture(autouse=True)
 def _setup_env(monkeypatch):
-     # Enable test-mode auth bypass
+    # Open the admin gate; requests authenticate with the real single-user key.
     monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "false")
-    monkeypatch.setenv("TESTING", "true")
 
 
 def test_get_rate_limits_shape():
 
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-API-KEY": get_settings().SINGLE_USER_API_KEY})
     r = client.get("/api/v1/evaluations/rate-limits")
     assert r.status_code == 200
     j = r.json()
@@ -33,8 +33,6 @@ def test_get_rate_limits_shape():
         "evaluations_per_minute",
         "evaluations_per_day",
         "tokens_per_day",
-        "cost_per_day",
-        "cost_per_month",
     ]:
         assert k in lim, f"Missing limits key: {k}"
         if k in ("evaluations_per_day", "tokens_per_day"):
@@ -47,8 +45,6 @@ def test_get_rate_limits_shape():
     for k in [
         "evaluations_today",
         "tokens_today",
-        "cost_today",
-        "cost_month",
     ]:
         assert k in usage, f"Missing usage key: {k}"
         assert isinstance(usage[k], int)
@@ -58,14 +54,14 @@ def test_get_rate_limits_shape():
     for k in [
         "daily_evaluations",
         "daily_tokens",
-        "daily_cost",
-        "monthly_cost",
     ]:
         assert k in rem, f"Missing remaining key: {k}"
-        if k in ("daily_evaluations", "daily_tokens"):
-            assert rem[k] is None or isinstance(rem[k], int)  # None is unlimited
-        else:
-            assert isinstance(rem[k], int)
+        assert rem[k] is None or isinstance(rem[k], int)  # None is unlimited
+
+    # Evaluation cost caps were removed (TASK-13436): no cost fields anywhere.
+    assert set(lim) == {"evaluations_per_minute", "evaluations_per_day", "tokens_per_day"}
+    assert set(usage) == {"evaluations_today", "tokens_today"}
+    assert set(rem) == {"daily_evaluations", "daily_tokens"}
 
 
 def test_rate_limits_daily_caps_are_null_when_unlimited(monkeypatch):
@@ -77,7 +73,7 @@ def test_rate_limits_daily_caps_are_null_when_unlimited(monkeypatch):
         return None
 
     monkeypatch.setattr(user_rate_limiter, "user_quota", _no_cap)
-    r = TestClient(app).get("/api/v1/evaluations/rate-limits")
+    r = TestClient(app, headers={"X-API-KEY": get_settings().SINGLE_USER_API_KEY}).get("/api/v1/evaluations/rate-limits")
     assert r.status_code == 200
     j = r.json()
     assert j["limits"]["evaluations_per_day"] is None

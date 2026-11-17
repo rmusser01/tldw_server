@@ -78,7 +78,9 @@ describe("Media search outage handling", () => {
     const pending: Array<{ resolve: (value: unknown) => void; reject: (error: Error) => void }> = []
     vi.mocked(bgRequest).mockImplementation(() => new Promise((resolve, reject) => { pending.push({ resolve, reject }) }))
     const { unmount, feedback, client } = mountSearch()
-    await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(2))
+    // WP-43: mount issues exactly one request (the search; the type-discovery
+    // fan-out is gone), so one pending request proves the search is in flight.
+    await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(1))
     const before = vi.mocked(bgRequest).mock.calls.length
     unmount()
     await act(async () => {
@@ -143,7 +145,7 @@ describe("Media search outage handling", () => {
     const resolvers: Array<(value: unknown) => void> = []
     vi.mocked(bgRequest).mockImplementation(() => new Promise(resolve => { resolvers.push(resolve) }))
     const { result, feedback } = mountSearch()
-    await waitFor(() => expect(resolvers.length).toBeGreaterThanOrEqual(2))
+    await waitFor(() => expect(resolvers.length).toBeGreaterThanOrEqual(1))
     const data = { items: [{ id: 7, title: 'Current source' }], pagination: { total_items: 1 } }
     vi.mocked(bgRequest).mockResolvedValue(data)
     await act(async () => {
@@ -201,4 +203,84 @@ it('does not reload another account media types from legacy shared cache', async
   expect(result.current.availableMediaTypes).not.toContain('private-project-type')
   expect(result.current.availableMediaTypes).toContain('pdf')
   expect(localStorage.getItem(MEDIA_TYPES_CACHE_KEY)).toBe(legacy)
+})
+
+
+describe("Media search filter cache identity", () => {
+  it.each(["", "Cedar Ridge"])(
+    "retains loaded results after clearing already-empty filters for %s",
+    async (query) => {
+      vi.mocked(bgRequest).mockResolvedValue({
+        items: [{ id: 1, title: "Rowan" }],
+        pagination: { total_items: 1 },
+      })
+      const { result } = mountSearch()
+      await waitFor(() =>
+        expect(result.current.results.map((item) => item.id)).toEqual([1]),
+      )
+      if (query) {
+        act(() => result.current.setQuery(query))
+        await waitFor(() => expect(result.current.debouncedQuery).toBe(query))
+        await waitFor(() =>
+          expect(result.current.results.map((item) => item.id)).toEqual([1]),
+        )
+      }
+      await waitFor(() => expect(result.current.isFetching).toBe(false))
+      act(() => result.current.resetAllFilters())
+      await waitFor(() =>
+        expect(result.current.results.map((item) => item.id)).toEqual([1]),
+      )
+      expect(result.current.query).toBe(query)
+      expect(result.current.activeTotalCount).toBe(1)
+    },
+  )
+
+  it("retains loaded results when an empty editor value gains whitespace", async () => {
+    vi.mocked(bgRequest).mockResolvedValue({
+      items: [{ id: 1, title: "Rowan" }],
+      pagination: { total_items: 1 },
+    })
+    const { result } = mountSearch()
+    await waitFor(() =>
+      expect(result.current.results.map((item) => item.id)).toEqual([1]),
+    )
+    await waitFor(() => expect(result.current.isFetching).toBe(false))
+    act(() =>
+      result.current.setMetadataFilters((filters) =>
+        filters.map((filter) => ({ ...filter, value: " " })),
+      ),
+    )
+    await waitFor(() =>
+      expect(result.current.results.map((item) => item.id)).toEqual([1]),
+    )
+  })
+
+  it("reloads results when clearing a meaningful type filter", async () => {
+    vi.mocked(bgRequest).mockImplementation(async (request) => {
+      const filtered =
+        request.body &&
+        typeof request.body === "object" &&
+        "media_types" in request.body &&
+        Array.isArray(request.body.media_types) &&
+        request.body.media_types.length > 0
+      const items = filtered
+        ? [{ id: 1, title: "Rowan", type: "pdf" }]
+        : [
+            { id: 1, title: "Rowan", type: "pdf" },
+            { id: 2, title: "Distractor", type: "document" },
+          ]
+      return { items, pagination: { total_items: items.length } }
+    })
+    const { result } = mountSearch()
+    await waitFor(() => expect(result.current.results).toHaveLength(2))
+    act(() => result.current.setMediaTypes(["pdf"]))
+    await waitFor(() =>
+      expect(result.current.results.map((item) => item.id)).toEqual([1]),
+    )
+    act(() => result.current.resetAllFilters())
+    await waitFor(() => {
+      expect(result.current.results.map((item) => item.id)).toEqual([1, 2])
+      expect(result.current.activeTotalCount).toBe(2)
+    })
+  })
 })

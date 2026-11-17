@@ -109,7 +109,7 @@ describe.each([
 
   it("recovers repaired data on retry and resumes normal persistence", async () => {
     seedFailure()
-    const { useWorkspaceStore: store } = await import("../workspace")
+    const { flushWorkspacePersistence, useWorkspaceStore: store } = await import("../workspace")
     expect(store.getState().storeHydrationError).toEqual(expect.any(String))
     localStorage.setItem(
       WORKSPACE_STORAGE_KEY,
@@ -149,6 +149,7 @@ describe.each([
     expect(store.getState().workspaceCreatedAt).toBeInstanceOf(Date)
     expect(store.persist.hasHydrated()).toBe(true)
     await store.getState().setWorkspaceName("Writable after repair")
+    await flushWorkspacePersistence()
     const persisted = await store.persist
       .getOptions().storage!.getItem(WORKSPACE_STORAGE_KEY)
     expect(persisted?.state.workspaceSnapshots.repaired.workspaceName).toBe(
@@ -205,5 +206,25 @@ describe.each([
     await retry
     expect(store.getState().storeHydrationError).toEqual(expect.any(String))
     expect(captureRawStorage()).toEqual(before)
+  })
+
+  it("does not drain a buffered snapshot from before a storage reload", async () => {
+    const { createWorkspaceStorage, useWorkspaceStore: store } = await import("../workspace")
+    const storage = createWorkspaceStorage()
+    const envelope = (workspaceName: string) => JSON.stringify({
+      state: {
+        workspaceId: "retained",
+        workspaceSnapshots: { retained: { workspaceId: "retained", workspaceName } }
+      },
+      version: 1
+    })
+    const pending = storage.setItem(WORKSPACE_STORAGE_KEY, envelope("Buffered old name"))
+    localStorage.setItem(WORKSPACE_STORAGE_KEY, envelope("New storage name"))
+
+    await store.persist.rehydrate()
+    await pending
+    const stored = JSON.parse((await storage.getItem(WORKSPACE_STORAGE_KEY))!)
+    expect(store.getState().workspaceName).toBe("New storage name")
+    expect(stored.state.workspaceSnapshots.retained.workspaceName).toBe("New storage name")
   })
 })

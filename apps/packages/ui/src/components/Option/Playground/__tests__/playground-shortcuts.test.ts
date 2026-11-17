@@ -16,11 +16,14 @@ describe("playground-shortcuts", () => {
       })
     ).toBe("toggle_artifacts")
     expect(
-      resolvePlaygroundShortcutAction({
-        altKey: true,
-        shiftKey: true,
-        key: "c"
-      })
+      resolvePlaygroundShortcutAction(
+        {
+          altKey: true,
+          shiftKey: true,
+          key: "c"
+        },
+        { compareAvailable: true }
+      )
     ).toBe("toggle_compare")
     expect(
       resolvePlaygroundShortcutAction({
@@ -29,6 +32,16 @@ describe("playground-shortcuts", () => {
         key: "m"
       })
     ).toBe("toggle_modes")
+  })
+
+  // CM-05 (#3101), owner decision D4: compare stays hidden until verified,
+  // so Alt+Shift+C must not be claimed (and swallowed) while it is off.
+  it("leaves Alt+Shift+C alone while compare is unavailable", () => {
+    const event = { altKey: true, shiftKey: true, key: "C" }
+    expect(resolvePlaygroundShortcutAction(event)).toBeNull()
+    expect(
+      resolvePlaygroundShortcutAction(event, { compareAvailable: false })
+    ).toBeNull()
   })
 
   it("ignores shortcuts while typing in editable controls", () => {

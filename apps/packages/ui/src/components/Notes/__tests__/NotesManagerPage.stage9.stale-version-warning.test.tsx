@@ -1,7 +1,7 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
 const {
@@ -163,7 +163,7 @@ const renderPage = () => {
 }
 
 const setupVersionDriftMock = () => {
-  let detailCalls = 0
+  let remoteVersion = 1
   mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
     const path = String(request.path || "")
     const method = String(request.method || "GET").toUpperCase()
@@ -184,8 +184,7 @@ const setupVersionDriftMock = () => {
       }
     }
     if (path === "/api/v1/notes/note-a" && method === "GET") {
-      detailCalls += 1
-      if (detailCalls === 1) {
+      if (remoteVersion === 1) {
         return {
           id: "note-a",
           title: "Drift note",
@@ -216,18 +215,22 @@ const setupVersionDriftMock = () => {
     }
     return {}
   })
+  return () => { remoteVersion = 2 }
 }
 
 describe("NotesManagerPage stage 9 stale-version warning", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
     mockClearSetting.mockResolvedValue(undefined)
   })
 
+  afterEach(() => vi.useRealTimers())
+
   it("turns local edits on a stale version into a conflict instead of saving or prompting", async () => {
-    setupVersionDriftMock()
+    const advanceRemoteVersion = setupVersionDriftMock()
     renderPage()
 
     fireEvent.change(screen.getByPlaceholderText("Title"), {
@@ -239,6 +242,8 @@ describe("NotesManagerPage stage 9 stale-version warning", () => {
     fireEvent.click(screen.getByTestId("notes-save-button"))
 
     await waitFor(() => expect(screen.getByTestId("notes-editor-revision-meta")).toHaveTextContent("Version 1"))
+    advanceRemoteVersion()
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
     const staleNotice = await screen.findByTestId("notes-save-issue")
     expect(staleNotice).toHaveAttribute("data-kind", "remote-newer")
     expect(staleNotice).toHaveTextContent(
@@ -265,7 +270,7 @@ describe("NotesManagerPage stage 9 stale-version warning", () => {
   })
 
   it("can reload latest note from stale-version warning", async () => {
-    setupVersionDriftMock()
+    const advanceRemoteVersion = setupVersionDriftMock()
     renderPage()
 
     fireEvent.change(screen.getByPlaceholderText("Title"), {
@@ -275,6 +280,10 @@ describe("NotesManagerPage stage 9 stale-version warning", () => {
       target: { value: "local content" }
     })
     fireEvent.click(screen.getByTestId("notes-save-button"))
+
+    await waitFor(() => expect(screen.getByTestId("notes-editor-revision-meta")).toHaveTextContent("Version 1"))
+    advanceRemoteVersion()
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
 
     expect(await screen.findByTestId("notes-stale-version-reload")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("notes-stale-version-reload"))

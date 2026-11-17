@@ -74,7 +74,7 @@ describe("AddSourceModal Stage 3 performance", () => {
     })
   })
 
-  it("reuses cached library media on reopen within cache TTL", async () => {
+  it("refreshes authenticated library media when the view reopens", async () => {
     const firstRender = render(<AddSourceModal />)
 
     await waitFor(() => {
@@ -86,7 +86,7 @@ describe("AddSourceModal Stage 3 performance", () => {
     render(<AddSourceModal />)
 
     await waitFor(() => {
-      expect(mockListMedia).toHaveBeenCalledTimes(1)
+      expect(mockListMedia).toHaveBeenCalledTimes(2)
     })
   })
 })

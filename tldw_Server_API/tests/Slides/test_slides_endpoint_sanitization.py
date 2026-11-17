@@ -29,6 +29,13 @@ class _LoggerStub:
         self.warnings.append((message, args, kwargs))
 
 
+def _connected_request():
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return Request({"type": "http"}, receive)
+
+
 def _request() -> SimpleNamespace:
     return SimpleNamespace(
         visual_style_id=None,
@@ -63,13 +70,14 @@ def test_generate_presentation_metric_error_log_is_sanitized(monkeypatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(slides_ep, "logger", logger_stub)
     monkeypatch.setattr(slides_ep, "_resolve_provider", lambda provider: "stub-provider")
-    monkeypatch.setattr(slides_ep, "SlidesGenerator", _RaisingGenerator)
-    monkeypatch.setattr(slides_ep, "get_metrics_registry", lambda: _RaisingMetrics())
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", _RaisingGenerator)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: _RaisingMetrics())
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
             slides_ep._generate_presentation(
                 response=Response(),
+                http_request=_connected_request(),
                 db=SimpleNamespace(client_id="1"),
                 request=_request(),
                 source_text="Source text",
@@ -143,12 +151,13 @@ def test_generate_presentation_latency_metric_log_is_sanitized(monkeypatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(slides_ep, "logger", logger_stub)
     monkeypatch.setattr(slides_ep, "_resolve_provider", lambda provider: "stub-provider")
-    monkeypatch.setattr(slides_ep, "SlidesGenerator", _ReturningGenerator)
-    monkeypatch.setattr(slides_ep, "get_metrics_registry", lambda: _RaisingMetrics())
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", _ReturningGenerator)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: _RaisingMetrics())
 
     response = asyncio.run(
         slides_ep._generate_presentation(
             response=Response(),
+            http_request=_connected_request(),
             db=_PresentationDB(),
             request=_request(),
             source_text="Source text",
@@ -173,7 +182,7 @@ def test_resolve_media_source_text_document_fallback_log_is_sanitized(monkeypatc
     def _raise_document_lookup(**_kwargs):
         raise RuntimeError("document backend exploded at /private/slides-documents.db")
 
-    monkeypatch.setattr(slides_ep, "get_document_version", _raise_document_lookup, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_document_version", _raise_document_lookup, raising=False)
 
     source_text = slides_ep._resolve_media_source_text(
         media_db=object(),

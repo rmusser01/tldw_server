@@ -11,7 +11,7 @@ import {
   readdirSync,
   rmSync,
   writeFileSync,
-} from "node:fs"
+} from 'node:fs';
 import path from "node:path"
 import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
@@ -37,7 +37,7 @@ import {
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 const frontendRootDefault = path.resolve(moduleDir, "../..")
 const repoRootDefault = path.resolve(frontendRootDefault, "../..")
-const validProjects = new Set(["tier-1", "tier-2", "tier-3", "ux-regression"])
+const validProjects = new Set(["tier-1", "tier-2", "tier-3", "ux-regression", "notes-studio"])
 
 function runIdNow() {
   return new Date().toISOString().replace(/[:.]/g, "-")
@@ -79,7 +79,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
   }
 
   if (!options.projects.length || options.projects.some((project) => !validProjects.has(project))) {
-    throw new Error("--projects entries must be tier-1, tier-2, tier-3, or ux-regression")
+    throw new Error("--projects entries must be tier-1, tier-2, tier-3, ux-regression, or notes-studio")
   }
   if (options.runId && !/^[A-Za-z0-9._-]+$/.test(options.runId)) {
     throw new Error("--run-id may contain only letters, numbers, dots, underscores, and hyphens")
@@ -91,7 +91,7 @@ export function formatUsage() {
   return [
     "Usage: bun run uat:live-tiers -- [options]",
     "",
-    "  --projects=tier-1,tier-2,tier-3  Complete projects to list and run (also: ux-regression).",
+    "  --projects=tier-1,tier-2,tier-3  Complete projects to list and run (also: ux-regression, notes-studio).",
     "  --workers=1                       Playwright worker count.",
     "  --list-only                       List and inventory without executing tests.",
     "  --grep=<pattern>                  Non-certifying bounded smoke selection.",
@@ -151,7 +151,8 @@ export function resolveExtensionBuild({
       command: "bun",
       args: ["run", "build:chrome:prod"],
       cwd: extensionRoot,
-      env: safeEnv(baseEnv, baseEnvKeys),
+      // Rollup's production bundle exceeds Node's default heap during rendering.
+      env: { ...safeEnv(baseEnv, baseEnvKeys), NODE_OPTIONS: "--max-old-space-size=6144" },
     },
   }
 }
@@ -206,6 +207,7 @@ export function buildCommands({
   const listJsonPath = path.join(artifactRoot, "playwright-list.json")
   const runArgs = [
     "playwright", "test", ...projectArgs, `--workers=${workers}`, "--retries=0", "--reporter=line,json",
+    `--output=${path.join(artifactRoot, 'playwright-output')}`,
   ]
   const grepArgs = grep ? ["--grep", grep] : []
   runArgs.push(...grepArgs)
@@ -228,15 +230,15 @@ export function buildCommands({
       name: "auth-init",
       command: python,
       args: ["-m", "tldw_Server_API.app.core.AuthNZ.initialize", "--non-interactive"],
-      cwd: repoRoot,
-      env: backendEnv,
+      cwd: profile.runDir,
+      env: withPythonPath(backendEnv, repoRoot),
     },
     backend: {
       name: "backend",
       command: python,
       args: ["-m", "uvicorn", "tldw_Server_API.app.main:app", "--host", "127.0.0.1", "--port", String(ports.backend)],
-      cwd: repoRoot,
-      env: backendEnv,
+      cwd: profile.runDir,
+      env: withPythonPath(backendEnv, repoRoot),
     },
     frontend: {
       name: "frontend",

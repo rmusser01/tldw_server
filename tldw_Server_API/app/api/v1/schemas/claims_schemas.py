@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -16,6 +17,31 @@ from tldw_Server_API.app.core.claims_analytics_export_contract import (
     CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS,
     CLAIMS_ANALYTICS_EXPORT_WORKSPACE_ID_MAX_CHARS,
 )
+
+# Core-owned since TASK-13950.15; re-exported for the API layer.
+from tldw_Server_API.app.core.Claims_Extraction.claims_schemas import (  # noqa: F401 - re-exported (TASK-13950.15)
+    FVAAdjudicationResult,
+    FVAClaimResult,
+    FVAEvidenceItem,
+)
+
+
+class ClaimsClusterRebuildAccepted(BaseModel):
+    """Immutable reference to accepted work; status remains Jobs-owned."""
+
+    job_id: int = Field(gt=0, strict=True)
+    job_uuid: UUID
+    status_url: str
+    reused: bool
+
+
+class ClaimsClusterRebuildConflict(BaseModel):
+    """An authorized identity for the work conflicting with this request."""
+
+    code: Literal["claims_cluster_active_conflict", "claims_cluster_request_conflict"]
+    job_id: int = Field(gt=0, strict=True)
+    job_uuid: UUID
+    status_url: str
 
 
 def _default_offset_pagination_aliases(response):
@@ -797,48 +823,6 @@ class FVAVerifyRequest(BaseModel):
     )
     top_k: int = Field(default=10, ge=1, le=100, description="Number of documents to retrieve.")
     fva_config: FVAConfigRequest | None = Field(default=None, description="FVA pipeline configuration.")
-
-
-class FVAEvidenceItem(BaseModel):
-    """Evidence item for FVA verification results."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    doc_id: str = Field(..., description="Document ID.")
-    snippet: str = Field(..., description="Evidence snippet text.")
-    score: float = Field(..., description="Evidence relevance score.")
-    stance: str | None = Field(default=None, description="Evidence stance: supports, contradicts, neutral.")
-    confidence: float | None = Field(default=None, description="Stance assessment confidence.")
-
-
-class FVAAdjudicationResult(BaseModel):
-    """Adjudication details from FVA pipeline."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    support_score: float = Field(..., description="Aggregate supporting evidence score.")
-    contradict_score: float = Field(..., description="Aggregate contradicting evidence score.")
-    contestation_score: float = Field(..., description="Evidence balance (0=one-sided, 1=balanced).")
-    rationale: str = Field(..., description="Adjudication rationale explaining the verdict.")
-
-
-class FVAClaimResult(BaseModel):
-    """Verification result for a single claim from FVA pipeline."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    claim_text: str = Field(..., description="Original claim text.")
-    claim_type: str | None = Field(default=None, description="Claim type classification.")
-    original_status: str = Field(..., description="Status from initial verification.")
-    final_status: str = Field(..., description="Status after FVA adjudication.")
-    confidence: float = Field(..., description="Final verification confidence.")
-    falsification_triggered: bool = Field(..., description="Whether falsification was triggered.")
-    anti_context_found: int = Field(..., description="Number of anti-context documents found.")
-    supporting_evidence: list[FVAEvidenceItem] = Field(default_factory=list)
-    contradicting_evidence: list[FVAEvidenceItem] = Field(default_factory=list)
-    adjudication: FVAAdjudicationResult | None = Field(default=None)
-    rationale: str | None = Field(default=None, description="Verification rationale.")
-    processing_time_ms: float = Field(..., description="Processing time in milliseconds.")
 
 
 class FVAVerifyResponse(BaseModel):

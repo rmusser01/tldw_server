@@ -1,0 +1,254 @@
+{
+  "source_base": "39b53a876f2cfefcede02c92ae7dacf88f7a98ec",
+  "terminal_exits": {
+    "production_chrome_build": 0,
+    "final_six_case_playwright": 0,
+    "existing_host_components": 0,
+    "new_e2e_eslint": 0,
+    "options_host_eslint": 0,
+    "previous_six_case_fixture_trial": 1,
+    "new_e2e_prettier_check": 0
+  },
+  "playwright_stats": {
+    "startTime": "2026-10-11T22:56:31.706Z",
+    "duration": 67490.84599999999,
+    "expected": 6,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "host_components": {
+    "numPassedTests": 41,
+    "numFailedTests": 0,
+    "numPendingTests": 0
+  },
+  "scope": {
+    "clients": [
+      "real Next WebUI at loopback18180",
+      "production extension loaded by cached Chrome for Testing in disposable persistent profiles"
+    ],
+    "backend": "synthetic loopback HTTP contract fixture; no real backend schema migration",
+    "upgrade": "actual Zustand Buddy-shell version0 to1 rehydration with saved position240,160; synthetic existing server rows",
+    "extension_permission": "copied production manifest pre-grants fixture loopback origin; existing launch helper adds deterministic key",
+    "transport": "native extension background HTTP; no request API shim in Buddy cases",
+    "artwork": "existing deterministic one-pixel PNG visual fixture; no new real Migu artwork/animation acceptance",
+    "provider_audio": "no provider submission, real credential, microphone or human audibility"
+  },
+  "cases": [
+    {
+      "title": "independent Buddy extension fresh profile setup",
+      "status": "passed",
+      "duration_ms": 10419,
+      "files": [
+        "buddy-extension-fresh-profile-setup-artifact-receipt.json",
+        "buddy-extension-fresh-profile-setup-state-and-writes.json",
+        "buddy-extension-fresh-profile-setup-trace-events.json",
+        "buddy-extension-fresh-profile-setup-static-conversation.png",
+        "buddy-extension-fresh-profile-setup-dynamic-workspace-after-reload.png"
+      ]
+    },
+    {
+      "title": "independent Buddy extension upgraded profile setup",
+      "status": "passed",
+      "duration_ms": 8895,
+      "files": [
+        "buddy-extension-upgraded-profile-setup-artifact-receipt.json",
+        "buddy-extension-upgraded-profile-setup-state-and-writes.json",
+        "buddy-extension-upgraded-profile-setup-trace-events.json",
+        "buddy-extension-upgraded-profile-setup-static-conversation.png",
+        "buddy-extension-upgraded-profile-setup-dynamic-workspace-after-reload.png"
+      ]
+    },
+    {
+      "title": "independent Buddy webui fresh profile setup",
+      "status": "passed",
+      "duration_ms": 14961,
+      "files": [
+        "buddy-webui-fresh-profile-setup-state-and-writes.json",
+        "buddy-webui-fresh-profile-setup-trace-events.json",
+        "buddy-webui-fresh-profile-setup-static-conversation.png",
+        "buddy-webui-fresh-profile-setup-dynamic-workspace-after-reload.png"
+      ]
+    },
+    {
+      "title": "independent Buddy webui upgraded profile setup",
+      "status": "passed",
+      "duration_ms": 16885,
+      "files": [
+        "buddy-webui-upgraded-profile-setup-state-and-writes.json",
+        "buddy-webui-upgraded-profile-setup-trace-events.json",
+        "buddy-webui-upgraded-profile-setup-static-conversation.png",
+        "buddy-webui-upgraded-profile-setup-dynamic-workspace-after-reload.png"
+      ]
+    },
+    {
+      "title": "persona assistant setup can resume and finish with dry run",
+      "status": "passed",
+      "duration_ms": 6038,
+      "files": [
+        "persona-resume-and-finish-with-dry-run-trace-events.json"
+      ]
+    },
+    {
+      "title": "persona assistant setup can recover from a starter-command failure",
+      "status": "passed",
+      "duration_ms": 6093,
+      "files": [
+        "persona-recover-from-a-starter-command-failure-trace-events.json"
+      ]
+    }
+  ],
+  "source_sha256": {
+    "apps/packages/ui/src/entries/shared/options-app.tsx": "7933736b64dc4f2f65dc49649420bf004e956d11033d0e4d06e5cad87af84a82",
+    "apps/extension/tests/e2e/persona-assistant-setup.spec.ts": "fe071875c5ae27dd49d09f9109397ac2caa8bf7ffc6d68d8d41a936204190e53",
+    "apps/extension/tests/e2e/buddy-independent-setup.spec.ts": "63a045f79b1b1d8c173468f48dfffbb5ab8820b439de6ea33e50e4ab244def96",
+    "apps/extension/.output/chrome-mv3/manifest.json": "5a28cc368433e285d793a166165297d6dd36c33b14e78a4806c45fc1e337c100"
+  },
+  "artifact_sha256": {
+    "buddy-extension-upgraded-profile-setup-dynamic-workspace-after-reload.png": "f00d551d0dd68766bcdf1fc260e0bf3ee7302c022e304361bfd4ae48eeeca1c8",
+    "persona-recover-from-a-starter-command-failure-trace-events.json": "50ec54aa3c09f15842e0552dc1e18dcfe17e3820f3899ff08db32e9c297ecf6d",
+    "buddy-extension-fresh-profile-setup-state-and-writes.json": "71f5629043cf498b98da61db28a35d4aec3f6693657504a52f53b57ef23c8f6a",
+    "buddy-extension-upgraded-profile-setup-trace-events.json": "64d18293812e508c789f09098d904d705bd5d505b54ee6772da00423e587349c",
+    "options-host-red-test-failed-1.png": "1bf21a40558c8e2a9508265ceed922586c5b13effbdaf0e1a37fbdab52ff0a05",
+    "buddy-extension-upgraded-profile-setup-artifact-receipt.json": "1a180f8fd776af343e0a1f3fbb60455b74b592832a0f390c00dc3e67094ee7df",
+    "buddy-extension-upgraded-profile-setup-static-conversation.png": "212aea756217b7040de03dfb1f2bed4b57852e67cf952765623567f8c4d71b6a",
+    "buddy-extension-fresh-profile-setup-trace-events.json": "4cae70268a721244f4c7a14c5b8b8a7ae4f4defe59db53d59911a668f4ca1baf",
+    "buddy-webui-upgraded-profile-setup-trace-events.json": "1fb1920bc4a42a5d8266a377d804bb7c2076bbb8f11da85927e864fc97d28af9",
+    "buddy-webui-upgraded-profile-setup-static-conversation.png": "5857c210e8e8967bbee30e9adfdc492270b19670ceb0c1f502aadbf62cb30797",
+    "buddy-webui-fresh-profile-setup-static-conversation.png": "fb5cdfa185775d31c49fef09cfc6bb527084f8d82b08740d79a94998172a9b92",
+    "buddy-extension-upgraded-profile-setup-state-and-writes.json": "e674581b754fb6ec9c3772c13cd9595ac31cc7718534bfea96283f6694880333",
+    "buddy-webui-fresh-profile-setup-state-and-writes.json": "71f5629043cf498b98da61db28a35d4aec3f6693657504a52f53b57ef23c8f6a",
+    "options-host-red-trace-events.json": "7513c9e0d53c77028a55702d8aea275d8e54f60807d4de812965163d7f4076a5",
+    "buddy-webui-fresh-profile-setup-trace-events.json": "c49dc966544f5eb58ecc0f9ec678bb7bb68d92a2a5e18da493979b34ca0208c3",
+    "buddy-client-final-source-20261011.json": "e2639bbe1919d3b126ddfb42e670bc12986ad009194b711ecf582becd39242c8",
+    "buddy-extension-fresh-profile-setup-static-conversation.png": "50625e1a1684bf2881e3f0dea1948d2a93ceca5ae320ee128dac0240a32532b2",
+    "buddy-webui-fresh-profile-setup-dynamic-workspace-after-reload.png": "89650839ab915ef901527a7a3b6cacd675947d9fcf07e4a0c95e21131d04b091",
+    "buddy-webui-upgraded-profile-setup-state-and-writes.json": "e674581b754fb6ec9c3772c13cd9595ac31cc7718534bfea96283f6694880333",
+    "buddy-extension-fresh-profile-setup-artifact-receipt.json": "eae787cf0d33ab2bc9371d67c8d01dd204a421766314870325d6eb68774ca4d3",
+    "buddy-webui-upgraded-profile-setup-dynamic-workspace-after-reload.png": "4a10a88d4b01d8af4360a6686dcb926808bef938a25e134f3f014859f335535b",
+    "persona-resume-and-finish-with-dry-run-trace-events.json": "3b1d18e2a362ae9b2cef8d917604d304515358ecf9a3415e6a703a9ecf542469",
+    "buddy-extension-fresh-profile-setup-dynamic-workspace-after-reload.png": "7a3282e685387b320c7229cefe9a399187e4373b0710dcad6326f8384563c643",
+    "buddy-client-host-components-20261011.json.gz": "e81816eae21f9b448ca736c3ff7673d3c784c513068ef799803f9ffea53d9d24",
+    "buddy-client-e2e-prettier-20261011.log.gz": "d64010ae55eaddf0a918163db8e4a6821b3d87a770c6df0154973888c7113c59",
+    "buddy-options-host-eslint-20261011.log.gz": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837",
+    "buddy-extension-host-build-20261011.log.gz": "463aa06f4b2f34ca928f75a56b6304f80a2d482a91534032bd2ad43b48ab9fd7",
+    "buddy-client-e2e-prettier-final-20261011.log.gz": "d64010ae55eaddf0a918163db8e4a6821b3d87a770c6df0154973888c7113c59",
+    "buddy-independent-clients-workspaces-20261011.log.gz": "111aa2bf8e8616ab523765d04d0735484951b08c9a724b15b0600301c989680c",
+    "buddy-independent-e2e-eslint-final-20261011.log.gz": "90bdcbb8c8448e90d22db045101e3b097c48f5e5527672d5d3e981d631e77ff7",
+    "buddy-independent-clients-workspaces-20261011.json.gz": "e3fb2ba2aefa9885b44663f1f22ace1d69095406f351b73862e9e80f89e4c80a",
+    "buddy-client-host-components-20261011.log.gz": "2b74b7d9d2248356255c4da345e17fb0b65aed43f743c343e93d0f065ae8ee40",
+    "buddy-client-e2e-eslint-baseline-20261011.log.gz": "9e96b63a6d2791f33b5121dcffb2c96d6d9152723f496979b0152518456453c8",
+    "buddy-client-final-green-20261011.log.gz": "9af2f69c2bb8beb520864cc99c3ff4d32ef47b471718c84ae2a935fa860687d6",
+    "buddy-client-e2e-eslint-20261011.log.gz": "fb7cdc93c775103f6bc891ae5091092cb2099e0797cb0fd7e8badc120d83de65",
+    "buddy-client-final-green-20261011.json.gz": "6a68cde0be2b0132e1719c22f6226beedea5c2082943baa1c1ab745789784df5"
+  },
+  "cleanup": {
+    "owned_webui_stopped": true,
+    "port18180_listener_after_stop": false,
+    "synthetic_fixture_servers_closed": true,
+    "browser_contexts_closed": true,
+    "user_browser_profile_used": false
+  },
+  "raw_traces": {
+    "retained_privately": [
+      {
+        "trace": "persona-resume-and-finish-with-dry-run-trace.zip",
+        "sha256": "f31535563698278104c9e85e59e86fc8f1384152c10efeaf2994826f2235142e"
+      },
+      {
+        "trace": "buddy-extension-upgraded-profile-setup-trace.zip",
+        "sha256": "def9757dddd969bddecb08bc2cfbb6e103231b0141cd0b11487164c8542279d0"
+      },
+      {
+        "trace": "buddy-extension-fresh-profile-setup-trace.zip",
+        "sha256": "c9bed211be472652baea61bceb98113aae8647e2538d0fe3608809572db22135"
+      },
+      {
+        "trace": "options-host-red-trace.zip",
+        "sha256": "42ba9afc69bb55eb9d61ed8b49aa7719f8383a6536bf373ecbbb00b1f1028452"
+      },
+      {
+        "trace": "persona-recover-from-a-starter-command-failure-trace.zip",
+        "sha256": "1a5a6e2f2077eec193cb142a7ecf239a50d42fe27a3a5819a968753d1efcff0f"
+      },
+      {
+        "trace": "buddy-webui-fresh-profile-setup-trace.zip",
+        "sha256": "f1943cb23bac5354bb92e59977b140e0e388e1a2befaf070deed57a990e5c27f"
+      },
+      {
+        "trace": "buddy-webui-upgraded-profile-setup-trace.zip",
+        "sha256": "3d8da624d632f6e7604a4221845ac048d2d8bc5be9eb6b2a7b5ceed75becb706"
+      }
+    ],
+    "directory": "/private/tmp/buddy-client-final-green-results-20261011",
+    "red_directory": "/private/tmp/buddy-independent-clients-workspaces-results-20261011",
+    "durable_subset": "before/after/call logs/context metadata and API request/response metadata, with source raw-trace hashes"
+  },
+  "captured_text_encoding": {
+    "buddy-client-host-components-20261011.json": {
+      "stored_as": "buddy-client-host-components-20261011.json.gz",
+      "decoded_sha256": "ce64ace639569a8a875527148322d96d36c7f7cf66ae2727d1889406754253e3",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    },
+    "buddy-client-e2e-prettier-20261011.log": {
+      "stored_as": "buddy-client-e2e-prettier-20261011.log.gz",
+      "decoded_sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    },
+    "buddy-options-host-eslint-20261011.log": {
+      "stored_as": "buddy-options-host-eslint-20261011.log.gz",
+      "decoded_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    },
+    "buddy-extension-host-build-20261011.log": {
+      "stored_as": "buddy-extension-host-build-20261011.log.gz",
+      "decoded_sha256": "0e2bffefcc118b04d14ddd4c10b5eb957ee00d4cc83b2a818647424973175a54",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    },
+    "buddy-client-e2e-prettier-final-20261011.log": {
+      "stored_as": "buddy-client-e2e-prettier-final-20261011.log.gz",
+      "decoded_sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    },
+    "buddy-independent-clients-workspaces-20261011.log": {
+      "stored_as": "buddy-independent-clients-workspaces-20261011.log.gz",
+      "decoded_sha256": "1570af20084cfcfbd3b644d9cab14d65f0512072f33ca28be05d4bc732a3177a",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    },
+    "buddy-independent-e2e-eslint-final-20261011.log": {
+      "stored_as": "buddy-independent-e2e-eslint-final-20261011.log.gz",
+      "decoded_sha256": "b587350f36734e7eddd995cee4ac33393f04d780b0e11ccf6b963899da04ba35",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    },
+    "buddy-independent-clients-workspaces-20261011.json": {
+      "stored_as": "buddy-independent-clients-workspaces-20261011.json.gz",
+      "decoded_sha256": "c496c2af3ae545ceb5aca7e8a2cf8d3153fd0a531688eeb253298147c11d5afe",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    },
+    "buddy-client-host-components-20261011.log": {
+      "stored_as": "buddy-client-host-components-20261011.log.gz",
+      "decoded_sha256": "db98e037eaa5488418ea0852bd7f67de4f4ec2da14239f3e38a0f0da2e1134e5",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    },
+    "buddy-client-e2e-eslint-baseline-20261011.log": {
+      "stored_as": "buddy-client-e2e-eslint-baseline-20261011.log.gz",
+      "decoded_sha256": "f05a34e996d3473a62e7ce5002f0958b9a97c243171e66c2a6c81014b2985da5",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    },
+    "buddy-client-final-green-20261011.log": {
+      "stored_as": "buddy-client-final-green-20261011.log.gz",
+      "decoded_sha256": "5fdbee0b536b0d25e0f739ac086c3f3b6009047c272c06c5d11f234ce8e360b5",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    },
+    "buddy-client-e2e-eslint-20261011.log": {
+      "stored_as": "buddy-client-e2e-eslint-20261011.log.gz",
+      "decoded_sha256": "5ba75d1b6622e8137886bfff7bbaebf660d1e7c2731a1eb3819a5a232ee8eff4",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    },
+    "buddy-client-final-green-20261011.json": {
+      "stored_as": "buddy-client-final-green-20261011.json.gz",
+      "decoded_sha256": "89c4f2de79d735b26c5dfccccde39665e3940ee70bbf263aca5e9031e70a2840",
+      "encoding": "gzip, mtime0; exact original bytes preserved"
+    }
+  }
+}

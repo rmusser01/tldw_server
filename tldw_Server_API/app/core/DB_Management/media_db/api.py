@@ -95,7 +95,7 @@ def _supports_keyword_delete_repository(db_instance: Any) -> bool:
     required_attrs = (
         "client_id",
         "transaction",
-        "_fetchone_with_connection",
+        "_fetchall_with_connection",
         "_execute_with_connection",
         "_get_current_utc_timestamp_str",
         "_log_sync_event",

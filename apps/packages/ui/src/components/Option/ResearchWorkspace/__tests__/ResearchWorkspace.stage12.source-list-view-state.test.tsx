@@ -1,10 +1,26 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render as renderUI,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import userEvent from "@testing-library/user-event"
 import React from "react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
-import type { WorkspaceSourceSavedViewResponse } from "@/services/tldw/domains/workspace-api"
+import type { WorkspaceSourceSavedViewResponse, WorkspaceSourceSavedViewValidResponse } from "@/services/tldw/domains/workspace-api"
 import type { WorkspaceSourceSavedViewStateV1 } from "@/types/workspace-source-saved-view"
 import { ResearchWorkspace } from "../index"
+
+
+// Match the router context provided by both deployed shells.
+const render: typeof renderUI = (ui, options) =>
+  renderUI(ui, {
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    ...options
+  })
 import type { SourceListViewState } from "../SourcesPane/source-list-view"
 import type { SourceSavedViewsController } from "../SourcesPane/use-source-saved-views"
 
@@ -80,8 +96,8 @@ const wireState = (
 
 const validView = (
   workspaceId: string,
-  overrides: Partial<WorkspaceSourceSavedViewResponse> = {}
-): WorkspaceSourceSavedViewResponse => ({
+  overrides: Partial<WorkspaceSourceSavedViewValidResponse> = {}
+): WorkspaceSourceSavedViewValidResponse => ({
   id: `${workspaceId}-view-${savedViewHarness.nextId}`,
   workspace_id: workspaceId,
   name: "Current filters",
@@ -510,7 +526,7 @@ describe("ResearchWorkspace source list view state", () => {
         const existing = savedViewHarness.rows.find(
           (view) => view.workspace_id === workspaceId && view.id === viewId
         )
-        if (!existing) throw new Error("Saved view not found")
+        if (!existing || !existing.valid) throw new Error("Valid saved view not found")
         const updated = validView(workspaceId, {
           ...existing,
           name: body.name ?? existing.name,

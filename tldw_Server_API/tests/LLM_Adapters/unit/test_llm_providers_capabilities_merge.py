@@ -1,11 +1,18 @@
 import configparser
+
 import pytest
 
 
 @pytest.fixture(autouse=True)
-def _healthy_provider_override_snapshot():
+def _healthy_provider_override_snapshot(monkeypatch):
     """Keep this lightweight router test independent of app-startup refresh."""
+    from tldw_Server_API.app.api.v1.endpoints import llm_providers
     from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.openai.com/v1")
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("gpt-4o-mini",)))
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
 
     llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
     yield
@@ -37,6 +44,7 @@ def _provider_by_display_name(data: dict, display_name: str) -> dict:
 def llm_client():
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+
     from tldw_Server_API.app.api.v1.endpoints.llm_providers import router as llm_router
 
     app = FastAPI()
@@ -49,11 +57,11 @@ def test_llm_providers_merges_adapter_capabilities_from_envelope(monkeypatch, ll
     # Force adapters available even though this is not strictly required for the endpoint
 
     # Stub configuration loader to return a controlled config
-    import tldw_Server_API.app.core.config as core_config
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
+    import tldw_Server_API.app.core.config as core_config
 
     monkeypatch.setattr(core_config, "load_comprehensive_config", _fake_config)
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config)
 
     # Stub registry capability discovery
     import tldw_Server_API.app.core.LLM_Calls.adapter_registry as reg_mod
@@ -105,7 +113,7 @@ def test_public_llm_providers_never_exposes_private_override_envelope(
 
     original = llm_provider_overrides.get_llm_provider_overrides_snapshot()
     monkeypatch.setattr(core_config, "load_comprehensive_config", _fake_config)
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config)
     monkeypatch.setattr(reg_mod, "get_registry", lambda: _DummyReg())
     llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
         {
@@ -133,7 +141,7 @@ def test_public_llm_providers_never_exposes_private_override_envelope(
         if provider["name"] == "openai"
     )
     assert openai["enabled"] is False
-    assert openai["models"] == ["gpt-4o-mini"]
+    assert openai["models"] == []
     assert "override" not in openai
     for hidden in (
         "public-hidden-config",
@@ -145,11 +153,11 @@ def test_public_llm_providers_never_exposes_private_override_envelope(
 
 
 def test_llm_providers_legacy_capabilities_fallback(monkeypatch, llm_client):
-    import tldw_Server_API.app.core.config as core_config
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
+    import tldw_Server_API.app.core.config as core_config
 
     monkeypatch.setattr(core_config, "load_comprehensive_config", _fake_config)
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config)
 
     import tldw_Server_API.app.core.LLM_Calls.adapter_registry as reg_mod
 
@@ -171,11 +179,11 @@ def test_llm_providers_legacy_capabilities_fallback(monkeypatch, llm_client):
 
 
 def test_llm_providers_includes_model_level_extra_body_compat(monkeypatch, llm_client):
-    import tldw_Server_API.app.core.config as core_config
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
+    import tldw_Server_API.app.core.config as core_config
 
     monkeypatch.setattr(core_config, "load_comprehensive_config", _fake_config)
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config)
 
     import tldw_Server_API.app.core.LLM_Calls.adapter_registry as reg_mod
 
@@ -198,11 +206,11 @@ def test_llm_providers_includes_model_level_extra_body_compat(monkeypatch, llm_c
 
 
 def test_llm_providers_extra_body_compat_reflects_strict_runtime(monkeypatch, llm_client):
-    import tldw_Server_API.app.core.config as core_config
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
+    import tldw_Server_API.app.core.config as core_config
 
     monkeypatch.setattr(core_config, "load_comprehensive_config", _fake_config)
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config)
     monkeypatch.setenv("LOCAL_LLM_STRICT_OPENAI_COMPAT", "true")
 
     import tldw_Server_API.app.core.LLM_Calls.adapter_registry as reg_mod
@@ -225,11 +233,11 @@ def test_llm_providers_extra_body_compat_reflects_strict_runtime(monkeypatch, ll
 
 
 def test_llm_providers_includes_model_level_tokenizer_metadata(monkeypatch, llm_client):
-    import tldw_Server_API.app.core.config as core_config
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
+    import tldw_Server_API.app.core.config as core_config
 
     monkeypatch.setattr(core_config, "load_comprehensive_config", _fake_config)
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config)
 
     import tldw_Server_API.app.core.LLM_Calls.adapter_registry as reg_mod
 
@@ -272,12 +280,12 @@ def test_llm_providers_includes_model_level_tokenizer_metadata(monkeypatch, llm_
 
 
 def test_llm_providers_exposes_llama_cpp_controls_block(monkeypatch, llm_client):
-    import tldw_Server_API.app.core.config as core_config
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
+    import tldw_Server_API.app.core.config as core_config
     import tldw_Server_API.app.core.LLM_Calls.adapter_registry as reg_mod
 
     monkeypatch.setattr(core_config, "load_comprehensive_config", _fake_config_with_llama)
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config_with_llama)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config_with_llama)
 
     class _DummyReg:
         def list_capabilities(self, include_disabled=True):
@@ -295,12 +303,12 @@ def test_llm_providers_exposes_llama_cpp_controls_block(monkeypatch, llm_client)
 
 
 def test_llm_providers_disables_thinking_budget_without_verified_mapping(monkeypatch, llm_client):
-    import tldw_Server_API.app.core.config as core_config
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
+    import tldw_Server_API.app.core.config as core_config
     import tldw_Server_API.app.core.LLM_Calls.adapter_registry as reg_mod
 
     monkeypatch.setattr(core_config, "load_comprehensive_config", _fake_config_with_llama)
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config_with_llama)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config_with_llama)
     monkeypatch.delenv("LLAMA_CPP_THINKING_BUDGET_PARAM", raising=False)
 
     class _DummyReg:
@@ -317,12 +325,12 @@ def test_llm_providers_disables_thinking_budget_without_verified_mapping(monkeyp
 
 
 def test_llm_providers_exposes_reserved_key_when_mapping_configured(monkeypatch, llm_client):
-    import tldw_Server_API.app.core.config as core_config
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
+    import tldw_Server_API.app.core.config as core_config
     import tldw_Server_API.app.core.LLM_Calls.adapter_registry as reg_mod
 
     monkeypatch.setattr(core_config, "load_comprehensive_config", _fake_config_with_llama)
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config_with_llama)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config_with_llama)
     monkeypatch.setenv("LLAMA_CPP_THINKING_BUDGET_PARAM", "reasoning_budget")
 
     class _DummyReg:
@@ -357,8 +365,8 @@ def test_public_llm_providers_applies_override_merge_once(monkeypatch, llm_clien
         return value
 
     monkeypatch.setattr(llm_endpoints, "get_configured_providers_async", configured_providers)
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", configparser.ConfigParser)
-    monkeypatch.setattr(llm_endpoints, "apply_llm_provider_overrides_to_listing", merge_once)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", configparser.ConfigParser)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.apply_llm_provider_overrides_to_listing", merge_once)
 
     response = llm_client.get("/api/v1/llm/providers")
 

@@ -1,7 +1,12 @@
 import { browser } from "./wxt-browser"
 import { clearRuntimeAuth } from "@web/lib/authStorage"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { createSafeStorage } from "@/utils/safe-storage"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import {
+  cancelRuntimeAuthBootstrapRecovery,
+  setRuntimeAuthBootstrapRecovery
+} from "@/services/tldw/runtime-bootstrap-recovery"
 import { FEATURE_FLAGS } from "@/hooks/useFeatureFlags"
 import {
   DEFAULT_HEADER_SHORTCUT_SELECTION,
@@ -16,6 +21,7 @@ import {
 } from "@/services/settings/ui-settings"
 import {
   COOKIE_SESSION_CONFIG_KEY,
+  isExactOriginCookieSessionConfig,
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
@@ -211,6 +217,8 @@ const RUNTIME_REQUEST_TIMEOUT_MS = 8_000
 const RUNTIME_AUTH_METADATA_KEY = "tldwRuntimeAuthMetadata"
 const MANUAL_SESSION_API_KEY = "tldwManualSessionApiKey"
 const MANUAL_SESSION_CREDENTIAL_LOCK = "tldw:manual-session-credential"
+const COOKIE_SESSION_CONFIG_LOCK = "tldw:cookie-session-config"
+type VerifiedCookieSessionConfig = TldwConfig & { verificationRevision?: string }
 const LEGACY_RUNTIME_KEYS = [
   "apiKey",
   "tldwRuntimeSessionSingleUserApiKey",
@@ -286,8 +294,11 @@ const fetchRuntimeConfig = async (): Promise<RuntimeConfigPayload | null> => {
   }
 }
 
-const bootstrapCookieSession = async (): Promise<boolean> => {
+const bootstrapCookieSession = async (
+  isCurrent: () => boolean
+): Promise<boolean> => {
   try {
+    if (!isCurrent()) return false
     const response = await withRuntimeRequestTimeout((signal) =>
       fetch(RUNTIME_SESSION_ENDPOINT, {
         method: "POST",
@@ -296,7 +307,7 @@ const bootstrapCookieSession = async (): Promise<boolean> => {
         signal
       })
     )
-    if (!response.ok) return false
+    if (!response.ok || !isCurrent()) return false
 
     const probe = await withRuntimeRequestTimeout((signal) =>
       fetch(RUNTIME_PROFILE_PROBE_ENDPOINT, {
@@ -306,7 +317,7 @@ const bootstrapCookieSession = async (): Promise<boolean> => {
         signal
       })
     )
-    return probe.ok
+    return probe.ok && isCurrent()
   } catch {
     return false
   }
@@ -343,12 +354,14 @@ const hasCompleteManualDeviceKey = (config: TldwConfig | null): boolean =>
   )
 
 const scrubMismatchedManualSessionKey = async (
-  quickstartServerUrl: string
+  quickstartServerUrl: string,
+  isCurrent: () => boolean
 ): Promise<void> => {
   if (typeof navigator === "undefined" || !navigator.locks?.request) return
 
   try {
     await navigator.locks.request(MANUAL_SESSION_CREDENTIAL_LOCK, async () => {
+      if (!isCurrent()) return
       const rawConfig = window.localStorage.getItem("tldwConfig")
       if (!rawConfig) return
       const parsedConfig: unknown = JSON.parse(rawConfig)
@@ -371,55 +384,99 @@ const scrubMismatchedManualSessionKey = async (
         typeof record.apiKey === "string" &&
         record.apiKey.trim() &&
         record.apiKeyServerOrigin === serverOrigin
-      if (!complete) window.sessionStorage.removeItem(MANUAL_SESSION_API_KEY)
+      if (!complete && isCurrent())
+        window.sessionStorage.removeItem(MANUAL_SESSION_API_KEY)
     })
   } catch {
     // Leave the record unreadable rather than racing a concurrent save.
   }
 }
 
-const seedTldwConfigFromRuntime = async (): Promise<void> => {
-  if (typeof window === "undefined") return
+const seedTldwConfigFromRuntime = async (
+  isCurrent: () => boolean = () => true
+): Promise<"ready" | "retry" | "unavailable"> => {
+  if (typeof window === "undefined" || !isCurrent()) return "unavailable"
 
   const storage = createSafeStorage()
   invalidateCookieSessionConfig()
-  await storage.remove(COOKIE_SESSION_CONFIG_KEY).catch(() => undefined)
-
-  const payload = await fetchRuntimeConfig()
-  if (
-    payload?.runtimeAuth?.available !== true ||
-    payload.runtimeAuth.authMode !== "single-user" ||
-    payload.runtimeAuth.transport !== "cookie-session"
-  ) {
-    return
-  }
-
-  if (!(await bootstrapCookieSession())) return
+  let verified = false
+  let previousCookieConfig: VerifiedCookieSessionConfig | undefined
+  let previousCookieConfigRead = false
 
   try {
+    previousCookieConfig = await storage.get<VerifiedCookieSessionConfig>(
+      COOKIE_SESSION_CONFIG_KEY
+    )
+    previousCookieConfigRead = true
+    const payload = await fetchRuntimeConfig()
+    if (!isCurrent()) return "unavailable"
+    if (!payload) return "retry"
+    if (
+      payload.runtimeAuth?.available !== true ||
+      payload.runtimeAuth.authMode !== "single-user" ||
+      payload.runtimeAuth.transport !== "cookie-session"
+    ) {
+      return "unavailable"
+    }
+
+    if (!(await bootstrapCookieSession(isCurrent))) return isCurrent() ? "retry" : "unavailable"
+
     const existing =
       (await storage.get<TldwConfig>("tldwConfig").catch(() => null)) || null
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
-    if (!quickstartWebUiServerUrl) return
+    if (!quickstartWebUiServerUrl || !isCurrent()) return "unavailable"
 
-    const next: TldwConfig = {
+    const next: VerifiedCookieSessionConfig = {
       authMode: "single-user",
       authSource: "cookie-session",
-      serverUrl: quickstartWebUiServerUrl
+      serverUrl: quickstartWebUiServerUrl,
+      verificationRevision: globalThis.crypto.randomUUID()
     }
 
     if (existing?.apiKey && !hasCompleteManualDeviceKey(existing)) {
       const { apiKey: _ambiguousSecret, ...safeExisting } = existing
       await storage.set("tldwConfig", safeExisting)
     }
-    await storage.set(COOKIE_SESSION_CONFIG_KEY, next)
+    const publish = async () => {
+      if (isCurrent()) await storage.set(COOKIE_SESSION_CONFIG_KEY, next)
+    }
+    if (typeof navigator !== "undefined" && navigator.locks?.request) {
+      await navigator.locks.request(COOKIE_SESSION_CONFIG_LOCK, publish)
+    } else {
+      await publish()
+    }
+    if (!isCurrent()) return "unavailable"
     activateCookieSessionConfig()
+    verified = true
     clearRuntimeAuth()
     clearRuntimeAuthOverride()
     removeLegacyRuntimeSecrets()
-    await scrubMismatchedManualSessionKey(quickstartWebUiServerUrl)
+    await scrubMismatchedManualSessionKey(quickstartWebUiServerUrl, isCurrent)
+    return "ready"
   } catch {
     // Leave existing manual configuration intact if client storage is unavailable.
+    return "retry"
+  } finally {
+    // Only invalidate the verification observed before this document's probe.
+    // Without a shared lock, leave cleanup to authenticated requests/logout;
+    // this document remains locally untrusted rather than racing a peer save.
+    if (
+      !verified &&
+      previousCookieConfigRead &&
+      typeof navigator !== "undefined" &&
+      navigator.locks?.request
+    ) {
+      await navigator.locks.request(COOKIE_SESSION_CONFIG_LOCK, async () => {
+        const current = await storage.get<VerifiedCookieSessionConfig>(
+          COOKIE_SESSION_CONFIG_KEY
+        )
+        if (
+          current?.verificationRevision === previousCookieConfig?.verificationRevision
+        ) {
+          await storage.remove(COOKIE_SESSION_CONFIG_KEY)
+        }
+      }).catch(() => undefined)
+    }
   }
 }
 
@@ -538,6 +595,12 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
       }
     }
 
+    if (!existing && !apiKey && !apiBearer) {
+      // A URL hint helps setup; it does not establish an authentication configuration.
+      if (next.serverUrl && shouldSyncStoredServerUrl) await storage.set("tldwServerUrl", next.serverUrl)
+      return
+    }
+
     if (changed || shouldSyncStoredServerUrl) {
       await storage.set("tldwConfig", next)
       if (next.serverUrl) {
@@ -549,9 +612,69 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
   }
 }
 
-export const runtimeBootstrapReady = (async () => {
-  await seedTldwConfigFromRuntime().catch(() => undefined)
-  await seedTldwConfigFromEnv().catch(() => undefined)
+export const runtimeBootstrapReady: Promise<void> = (async () => {
+  const initialIsCurrent = setRuntimeAuthBootstrapRecovery(async () => {
+    await runtimeBootstrapReady
+  })
+  const stop = watchChatAccountChanges((invalidated) => {
+    if (invalidated) {
+      cancelRuntimeAuthBootstrapRecovery()
+      stop()
+    }
+  })
+  invalidateCookieSessionConfig()
+  const outcome = await seedTldwConfigFromRuntime(initialIsCurrent).catch(
+    () => "retry"
+  )
+  if (initialIsCurrent()) await seedTldwConfigFromEnv().catch(() => undefined)
+  const canRecoverRuntimeAuth = () => {
+    try {
+      const raw = window.localStorage.getItem("tldwConfig")
+      if (raw === null) return true
+      const config: unknown = JSON.parse(raw)
+      return (
+        config === null ||
+        (isRecord(config) &&
+          !Array.isArray(config) &&
+          typeof config.serverUrl === "string" &&
+          Object.keys(config).every((key) =>
+            ["serverUrl", "authMode", "authSource"].includes(key)
+          ) &&
+          isExactOriginCookieSessionConfig(
+            {
+              serverUrl: config.serverUrl,
+              authMode:
+                config.authMode === undefined ? "single-user" : config.authMode,
+              authSource:
+                config.authSource === undefined
+                  ? "cookie-session"
+                  : config.authSource
+            },
+            getQuickstartWebUiServerUrl()
+          ))
+      )
+    } catch {
+      return false
+    }
+  }
+  if (
+    !initialIsCurrent() ||
+    outcome !== "retry" ||
+    !getQuickstartWebUiServerUrl() ||
+    !canRecoverRuntimeAuth()
+  ) {
+    stop()
+    if (initialIsCurrent()) cancelRuntimeAuthBootstrapRecovery()
+    return
+  }
+  setRuntimeAuthBootstrapRecovery(async (isCurrent) => {
+    const current = () => isCurrent() && canRecoverRuntimeAuth()
+    const recovered = await seedTldwConfigFromRuntime(current)
+    if (recovered !== "retry" || !current()) {
+      stop()
+      if (isCurrent()) cancelRuntimeAuthBootstrapRecovery()
+    }
+  })
 })()
 
 const WEB_DEFAULTS_MIRRORED_KEY = "tldw:web-defaults:mirrored"

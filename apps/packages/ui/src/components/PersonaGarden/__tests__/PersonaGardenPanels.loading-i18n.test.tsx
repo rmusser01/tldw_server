@@ -36,7 +36,8 @@ const createDeferred = <T,>() => {
 const apiResponse = (body: unknown) => ({
   ok: true,
   status: 200,
-  json: async () => body
+  json: async () => body,
+  text: async () => JSON.stringify(body)
 })
 
 const renderPanel = async (panel: React.ReactNode) => {

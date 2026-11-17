@@ -11,8 +11,8 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-from tldw_Server_API.app.core.Chat import bounded_daemon, streaming_utils
 from tldw_Server_API.app.core.Chat import request_queue as request_queue_module
+from tldw_Server_API.app.core.Chat import streaming_utils
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     BoundedDaemonPool,
     DaemonCapacityError,
@@ -22,6 +22,8 @@ from tldw_Server_API.app.core.Chat.request_queue import (
     RequestPriority,
     RequestQueue,
 )
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _StreamUsage
 
 
 class _ResistantAsyncIterator:
@@ -507,9 +509,9 @@ async def test_direct_initial_capacity_failure_closes_adapter_and_finalizes(
         assert wire.count("data: [DONE]\n\n") == 1
         assert adapter.started is False
         assert adapter.closed is True
-        assert finalized == [
-            {"success": False, "cancelled": False, "error": True}
-        ]
+        (outcome,) = finalized
+        assert isinstance(outcome.pop("stream_usage"), _StreamUsage)  # what the stream received (TASK-13953)
+        assert outcome == {"success": False, "cancelled": False, "error": True}
     finally:
         await streaming_utils.cancel_stream_tasks_bounded([lease], timeout=0.01)
         release.set()
@@ -567,9 +569,9 @@ async def test_midstream_capacity_failure_finalizes_as_provider_error_once(
         assert '"code": "provider_unavailable"' in wire
         assert "second output" not in wire
         assert wire.count("data: [DONE]\n\n") == 1
-        assert finalized == [
-            {"success": False, "cancelled": False, "error": True}
-        ]
+        (outcome,) = finalized
+        assert isinstance(outcome.pop("stream_usage"), _StreamUsage)  # what the stream received (TASK-13953)
+        assert outcome == {"success": False, "cancelled": False, "error": True}
     finally:
         release.set()
         for lease in leases:
@@ -917,7 +919,8 @@ async def test_daemon_drain_after_timeout_rejects_until_exit_then_raises() -> No
         assert task.done() is False
         assert pool.active_count == 1
 
-        with pytest.raises(DaemonCapacityError):
+        # The rejection names the call, not the pool's streaming default (TASK-13888).
+        with pytest.raises(DaemonCapacityError, match="^capacity-rejected capacity is exhausted$"):
             await bounded_daemon.await_bounded_daemon_with_timeout(
                 blocked_call,
                 pool=pool,
@@ -1039,7 +1042,7 @@ async def test_async_daemon_bridge_consumes_failure_when_cancelled_during_releas
             return super().is_set()
 
     class GatedReleasePool(BoundedDaemonPool):
-        def start(self, target, *, name, released_event=None):
+        def start(self, target, *, name, released_event=None, **kwargs):
             def gated_target() -> None:
                 target()
                 target_finished.set()
@@ -1049,6 +1052,7 @@ async def test_async_daemon_bridge_consumes_failure_when_cancelled_during_releas
                 gated_target,
                 name=name,
                 released_event=released_event,
+                **kwargs,
             )
 
     def fail() -> None:

@@ -5,7 +5,7 @@ status: Done
 references:
 - Docs/superpowers/specs/2026-05-17-workspace-playground-ux-remediation-design.md
 - Docs/superpowers/plans/2026-05-17-workspace-playground-ux-remediation-implementation-plan.md
-- TASK-407
+- TASK-15005
 - apps/packages/ui/src/components/Option/WorkspacePlayground/index.tsx
 - apps/packages/ui/src/components/Option/WorkspacePlayground/SourcesPane/AddSourceModal.tsx
 - apps/packages/ui/src/components/Option/WorkspacePlayground/ChatPane/index.tsx

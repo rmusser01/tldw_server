@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { summarizeQueueHealth } from "../Studio/queue-health-utils"
+import { getQueueSuccessPercent, summarizeQueueHealth } from "../Studio/queue-health-utils"
 
 describe("summarizeQueueHealth", () => {
   it("returns healthy_idle when queue is idle and successful", () => {
@@ -7,7 +7,7 @@ describe("summarizeQueueHealth", () => {
       queue_depth: 0,
       processing: 0,
       leases: {},
-      success_rate: 1
+      success_rate: 100
     })
 
     expect(summary.level).toBe("healthy")
@@ -19,7 +19,7 @@ describe("summarizeQueueHealth", () => {
       queue_depth: 2,
       processing: 3,
       leases: {},
-      success_rate: 0.98
+      success_rate: 98
     })
 
     expect(summary.level).toBe("healthy")
@@ -32,7 +32,7 @@ describe("summarizeQueueHealth", () => {
       queue_depth: 2,
       processing: 1,
       leases: {},
-      success_rate: 0.85,
+      success_rate: 85,
       by_status: { failed: 4 }
     })
 
@@ -46,11 +46,23 @@ describe("summarizeQueueHealth", () => {
       queue_depth: 11,
       processing: 2,
       leases: {},
-      success_rate: 0.99
+      success_rate: 99
     })
 
     expect(summary.level).toBe("degraded")
     expect(summary.code).toBe("degraded_backlog")
     expect(summary.values.queueDepth).toBe(11)
+  })
+
+  it.each([
+    ["100", 100, 100, "healthy_idle"],
+    ["85", 85, 85, "degraded_success_rate"],
+    ["0", 0, 0, "degraded_success_rate"],
+    ["1", 1, 1, "degraded_success_rate"],
+    ["absent", undefined, 0, "degraded_success_rate"]
+  ] as const)("uses canonical rate %s for displayed percent and health", (_label, rate, percent, code) => {
+    const status = { queue_depth: 0, processing: 0, leases: {}, success_rate: rate }
+    expect(getQueueSuccessPercent(status)).toBe(percent)
+    expect(summarizeQueueHealth(status).code).toBe(code)
   })
 })

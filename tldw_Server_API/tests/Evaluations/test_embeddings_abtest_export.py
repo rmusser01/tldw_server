@@ -56,8 +56,8 @@ class _StubPrincipal:
 async def test_abtest_export_json_parses_payload(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified as endpoints
 
-    monkeypatch.setattr(endpoints, "get_unified_evaluation_service_for_user", lambda _uid: _StubService())
-    monkeypatch.setattr(endpoints, "log_evaluation_exported", lambda **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _uid: _StubService())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.audit_adapter.log_evaluation_exported", lambda **_kwargs: None)
     monkeypatch.setattr(endpoints, "enforce_heavy_evaluations_admin", lambda _principal: None)
 
     resp = await endpoints.export_embeddings_abtest(

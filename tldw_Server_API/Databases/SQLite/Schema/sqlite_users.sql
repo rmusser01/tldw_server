@@ -324,3 +324,23 @@ CREATE TRIGGER IF NOT EXISTS update_session_activity
 BEGIN
     UPDATE user_sessions SET last_activity = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
+
+-- Native retained chat accounting; released keys remain terminal.
+CREATE TABLE IF NOT EXISTS native_chat_quota_reservations (
+            user_id INTEGER NOT NULL,
+            user_uuid TEXT NOT NULL,
+            owner_key TEXT NOT NULL,
+            candidate_key TEXT NOT NULL,
+            scope_type TEXT NOT NULL CHECK (scope_type IN ('global', 'workspace')),
+            workspace_id TEXT,
+            org_id INTEGER,
+            team_id INTEGER,
+            size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+            state TEXT NOT NULL CHECK (state IN ('active', 'released')),
+            PRIMARY KEY (user_id, candidate_key),
+            CHECK (team_id IS NULL OR org_id IS NOT NULL),
+            CHECK ((scope_type = 'global' AND workspace_id IS NULL) OR (scope_type = 'workspace' AND workspace_id IS NOT NULL))
+        );
+CREATE INDEX IF NOT EXISTS native_chat_quota_user ON native_chat_quota_reservations(user_id, user_uuid, state);
+CREATE INDEX IF NOT EXISTS native_chat_quota_org ON native_chat_quota_reservations(org_id, state);
+CREATE INDEX IF NOT EXISTS native_chat_quota_team ON native_chat_quota_reservations(team_id, state);

@@ -61,6 +61,21 @@ const source: WorkspaceSource = {
   url: "https://source.test/report",
   addedAt: new Date("2026-09-29T00:00:00Z")
 }
+const pinnedSource: WorkspaceSource = {
+  ...source,
+  id: "web-clipper:clip-7",
+  type: "website",
+  webCapture: {
+    clipId: "clip-7",
+    requestedUrl: "https://source.test/report",
+    capturedAt: "2026-09-29T00:00:00Z",
+    contentSha256: "a".repeat(64),
+    refreshOf: null,
+    mediaId: 1,
+    versionNumber: 7,
+    versionUuid: "60272377-767d-460f-a505-e46c646cf849"
+  }
+}
 const preview = (
   changes: Partial<WorkspaceSourcePreviewResponse> = {}
 ): WorkspaceSourcePreviewResponse => ({
@@ -182,6 +197,97 @@ describe("Chat Workspace canonical Browse preview", () => {
     useWorkspaceStore.setState({ workspaceId: "ws-a", sources: [source] })
     previewRequest.mockReset().mockResolvedValue(preview())
     resolveScope.mockReset().mockResolvedValue(owner)
+  })
+
+  it.each([
+    ["without a pin", undefined],
+    ["with a retained pin", pinnedSource.webCapture]
+  ] as const)("blocks an unavailable capture %s without opening current media", async (_, pin) => {
+    const unavailable: WorkspaceSource = {
+      ...pinnedSource,
+      webCapture: pin,
+      status: "error",
+      statusDetails: { statusReason: "capture_unavailable", retryEligible: false }
+    }
+    useWorkspaceStore.setState({ sources: [unavailable] })
+    previewRequest.mockResolvedValue(preview({
+      source_id: unavailable.id,
+      document_version_number: 7,
+      snippets: [],
+      text_preview: "Unavailable capture must not display"
+    }))
+    render(<StoreHarness />)
+    await act(async () => browse())
+
+    expect(previewRequest).not.toHaveBeenCalled()
+    expect(resolveScope).not.toHaveBeenCalled()
+    expect(await screen.findByText("Exact capture version unavailable")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+
+    await act(async () => {
+      useWorkspaceStore.setState({ sources: [{ ...pinnedSource, webCapture: undefined }] })
+    })
+    expect(previewRequest).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { versionNumber: 0 },
+    { mediaId: 2 }
+  ])("does not dispatch an unusable capture pin %j", async (changes) => {
+    useWorkspaceStore.setState({
+      sources: [{ ...pinnedSource, webCapture: { ...pinnedSource.webCapture!, ...changes } }]
+    })
+    render(<StoreHarness />)
+    await act(async () => browse())
+
+    expect(previewRequest).not.toHaveBeenCalled()
+    expect(await screen.findByText("Exact capture version unavailable")).toBeInTheDocument()
+  })
+
+  it.each([7, undefined, null, 8])("qualifies a pinned Browse response at version %s", async (version) => {
+    useWorkspaceStore.setState({ sources: [pinnedSource] })
+    previewRequest.mockResolvedValue(preview({
+      source_id: pinnedSource.id,
+      source_type: "website",
+      document_version_number: version,
+      snippets: [],
+      text_preview: "Pinned capture text"
+    }))
+    render(<StoreHarness />)
+    await act(async () => browse())
+
+    expect(previewRequest).toHaveBeenCalledExactlyOnceWith(
+      "ws-a",
+      pinnedSource.id,
+      { max_chars: 3000, chunk_limit: 3, version_number: 7 },
+      { requestScope: owner, signal: expect.any(AbortSignal) }
+    )
+    if (version === 7) {
+      expect(await screen.findByText("Pinned capture text")).toBeInTheDocument()
+    } else {
+      expect(await screen.findByText("Exact capture version unavailable")).toBeInTheDocument()
+      expect(screen.queryByText("Pinned capture text")).not.toBeInTheDocument()
+    }
+  })
+
+  it("keeps ordinary note Browse on the unversioned path", async () => {
+    const note = { ...source, type: "text" as const, url: "/notes?source_ref_id=note-1" }
+    useWorkspaceStore.setState({ sources: [note] })
+    previewRequest.mockResolvedValue(preview({
+      source_type: "text",
+      url: note.url,
+      text_preview: "Workspace note text"
+    }))
+    render(<StoreHarness />)
+    browse()
+
+    expect(await screen.findByText("Workspace note text")).toBeInTheDocument()
+    expect(previewRequest).toHaveBeenCalledExactlyOnceWith(
+      "ws-a",
+      note.id,
+      { max_chars: 3000, chunk_limit: 3 },
+      { requestScope: owner, signal: expect.any(AbortSignal) }
+    )
   })
 
   it.each([

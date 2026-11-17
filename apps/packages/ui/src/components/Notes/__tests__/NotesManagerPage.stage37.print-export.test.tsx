@@ -135,6 +135,29 @@ vi.mock("@/components/Notes/NotesEditorHeader", () => ({
   )
 }))
 
+const createPrintWindow = () => {
+  const printWindow = {
+    opener: {} as unknown,
+    document: {
+      open: vi.fn(),
+      write: vi.fn((_html: string) => expect(printWindow.opener).toBeNull()),
+      close: vi.fn()
+    },
+    focus: vi.fn(),
+    print: vi.fn()
+  }
+  return printWindow
+}
+
+const openPrintWindow = (printWindow: ReturnType<typeof createPrintWindow>, features = "") => {
+  const options = new Map(features.split(",").map((feature) => {
+    const [name, value] = feature.trim().toLowerCase().split("=")
+    return [name, value] as const
+  }))
+  if (["noopener", "noreferrer"].some((name) => options.has(name) && !["0", "no", "false"].includes(options.get(name) ?? ""))) return null
+  return printWindow as unknown as Window
+}
+
 const renderPage = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -175,24 +198,16 @@ describe("NotesManagerPage stage 37 print export", () => {
   })
 
   it("opens a print window with print-safe html for single-note export", async () => {
-    const mockPrintWindow = {
-      document: {
-        open: vi.fn(),
-        write: vi.fn(),
-        close: vi.fn()
-      },
-      focus: vi.fn(),
-      print: vi.fn()
-    }
-    const openSpy = vi.spyOn(window, "open").mockReturnValue(mockPrintWindow as any)
+    const mockPrintWindow = createPrintWindow()
+    const openSpy = vi.spyOn(window, "open").mockImplementation((_url, _target, features) => openPrintWindow(mockPrintWindow, features))
 
     renderPage()
 
     fireEvent.change(screen.getByPlaceholderText("Title"), {
-      target: { value: "Printable note title" }
+      target: { value: 'Printable note title <img src=x onerror="alert(1)">' }
     })
     fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {
-      target: { value: "Printable **body** content" }
+      target: { value: "Printable **body** content <script>alert(1)</script>" }
     })
     fireEvent.click(screen.getByTestId("print-note-action"))
 
@@ -201,10 +216,17 @@ describe("NotesManagerPage stage 37 print export", () => {
       expect(mockPrintWindow.document.write).toHaveBeenCalledTimes(1)
     })
 
+    const features = String(openSpy.mock.calls[0]?.[2]).split(",")
+    expect(features).toEqual(expect.arrayContaining(["width=1024", "height=768"]))
+    expect(features.some((feature) => /^(noopener|noreferrer)(=|$)/i.test(feature))).toBe(false)
+
     const html = String(mockPrintWindow.document.write.mock.calls[0]?.[0] || "")
     expect(html).toContain("@media print")
     expect(html).toContain("Printable note title")
     expect(html).toContain("<strong>body</strong>")
+    expect(html).toContain("Printable note title &lt;img")
+    expect(html).not.toContain("<script>")
+    expect(new DOMParser().parseFromString(html, "text/html").querySelector("[onerror]")).toBeNull()
     expect(mockPrintWindow.focus).toHaveBeenCalled()
     expect(mockPrintWindow.print).toHaveBeenCalled()
     expect(mockMessageSuccess).toHaveBeenCalledWith(
@@ -214,6 +236,7 @@ describe("NotesManagerPage stage 37 print export", () => {
 
   it("shows an actionable error when the print pop-up cannot be opened", async () => {
     vi.spyOn(window, "open").mockReturnValue(null)
+    const printSpy = vi.spyOn(window, "print")
 
     renderPage()
     fireEvent.click(screen.getByTestId("print-note-action"))
@@ -223,5 +246,7 @@ describe("NotesManagerPage stage 37 print export", () => {
         "Unable to open print view. Please allow pop-ups and try again."
       )
     })
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+    expect(printSpy).not.toHaveBeenCalled()
   })
 })

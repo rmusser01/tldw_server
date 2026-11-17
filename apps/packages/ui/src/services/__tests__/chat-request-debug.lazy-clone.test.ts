@@ -1,12 +1,17 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   captureChatRequestDebugSnapshot,
   getLastChatCompletionDebugSnapshot,
-  getLastChatRequestDebugSnapshot
+  getLastChatRequestDebugSnapshot,
+  setChatRequestDebugEnabled
 } from "../tldw/chat-request-debug"
 
 describe("chat-request-debug lazy cloning (TASK-13511)", () => {
+  beforeEach(() => {
+    setChatRequestDebugEnabled(true)
+  })
+
   it("does not deep-clone the payload at capture time", () => {
     const stringifySpy = vi.spyOn(JSON, "stringify")
     try {

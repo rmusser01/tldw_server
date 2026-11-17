@@ -29,7 +29,6 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType as UEvent,
 )
-from tldw_Server_API.app.core.testing import is_test_mode
 
 
 def _parse_cache_size(env_key: str, default: int) -> int:
@@ -50,10 +49,6 @@ _SYNC_LOOP_THREAD: threading.Thread | None = None
 _SYNC_LOOP_LOCK = threading.Lock()
 _SYNC_LOOP_READY = threading.Event()
 _MANDATORY_TIMEOUT_S = 5.0
-
-
-def _in_test_mode() -> bool:
-    return bool(os.getenv("PYTEST_CURRENT_TEST")) or is_test_mode()
 
 
 def _ensure_sync_loop() -> asyncio.AbstractEventLoop | None:

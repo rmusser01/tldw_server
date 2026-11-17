@@ -25,6 +25,7 @@ import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import { useIngestWizard } from "./IngestWizardContext"
 import { classifyError, extractionFailureSources } from "./ErrorClassification"
 import type { ErrorCategory } from "./ErrorClassification"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   canOpenMedia,
   canRetryWizardResult,
@@ -223,6 +224,9 @@ const SkippedRow: React.FC<SkippedRowProps> = React.memo(
           <p className="mt-0.5 text-xs text-text-subtle">
             {skippedMessage}
           </p>
+          {item.warning && (
+            <p className="mt-0.5 whitespace-pre-line break-words text-xs text-text-subtle">{item.warning}</p>
+          )}
         </div>
         <div className="flex flex-shrink-0 items-center gap-1">
           {showOpenMedia && (
@@ -291,6 +295,12 @@ const ErrorRow: React.FC<ErrorRowProps> = React.memo(
             <p className="mt-1 text-xs text-text-subtle">
               {category.userMessage} {category.suggestion}
             </p>
+            {item.error && (
+              <details className="mt-1 text-xs text-text-subtle">
+                <summary className="cursor-pointer">{qi("wizard.results.errorDetails", "Error details")}</summary>
+                <p className="mt-1 break-words">{sanitizeServerErrorMessage(item.error, category.userMessage)}</p>
+              </details>
+            )}
             {failedSources.length > 0 && (
               <p className="mt-1 break-all text-xs text-text-subtle">
                 {qi("wizard.results.failedSources", "Failed: {{sources}}", {
@@ -374,7 +384,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const { t } = useTranslation(["option"])
   const { state, reset } = useIngestWizard()
   const { results, processingState } = state
-  const queueItems = state.queueItems ?? []
+  const queueItems = useMemo(() => state.queueItems ?? [], [state.queueItems]);
   const eligibleIds = new Set(getEligibleQueueItems(queueItems).map(item => item.id))
   const savedIds = getSavedMediaIds(results.filter(item => !queueItems.some(source => source.id === item.id) || eligibleIds.has(item.id) || queueItems.some(source => source.id === item.id && source.kind === "file" && !source.file)))
   const excludedItems = queueItems.filter(item => getQueueItemExclusionReason(item, queueItems) && !results.some(result => result.id === item.id))

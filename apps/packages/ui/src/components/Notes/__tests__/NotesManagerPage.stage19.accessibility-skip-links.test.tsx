@@ -184,6 +184,15 @@ describe("NotesManagerPage stage 19 accessibility skip links and labels", () => 
     })
   })
 
+  it.each([
+    { level: 1, name: "Notes" },
+    { level: 2, name: "New note" }
+  ])("exposes an accessible level $level heading for $name", ({ level, name }) => {
+    renderPage()
+
+    expect(screen.getByRole("heading", { level, name })).toBeInTheDocument()
+  })
+
   it("renders skip links and focuses list/editor regions when activated", async () => {
     renderPage()
 

@@ -1,5 +1,3 @@
-import { RouteRedirect } from '@web/components/navigation/RouteRedirect';
+import dynamic from "next/dynamic"
 
-export default function ClaimsReviewRedirectPage() {
-  return <RouteRedirect to="/content-review" />;
-}
+export default dynamic(() => import("@/routes/option-claims-review"), { ssr: false })

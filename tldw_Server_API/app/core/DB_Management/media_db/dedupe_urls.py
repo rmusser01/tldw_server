@@ -36,6 +36,23 @@ _URL_DEDUPE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 )
 
 
+def media_owner_identity(client_id: int | str, owner_user_id: int | str | None = None) -> str:
+    """Resolve the exact owner/client key that a new Media insertion persists."""
+    if isinstance(client_id, bool) or not isinstance(client_id, (int, str)) or not str(client_id).strip():
+        raise InputError("A nonempty Media client identity is required")
+    if owner_user_id is not None:
+        if isinstance(owner_user_id, bool) or not isinstance(owner_user_id, (int, str)):
+            raise InputError("A valid Media owner identity is required")
+        try:
+            return str(int(owner_user_id))
+        except ValueError as error:
+            raise InputError("A valid Media owner identity is required") from error
+    try:
+        return str(int(client_id))
+    except ValueError:
+        return str(client_id)
+
+
 def normalize_media_dedupe_url(url: str | None) -> str | None:
     """Normalize URL-like media identifiers for dedupe comparisons."""
     if url is None:
@@ -75,6 +92,7 @@ def media_dedupe_url_candidates(url: str | None) -> tuple[str, ...]:
 
 
 __all__ = [
+    "media_owner_identity",
     "media_dedupe_url_candidates",
     "normalize_media_dedupe_url",
 ]

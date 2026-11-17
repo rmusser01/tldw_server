@@ -145,6 +145,9 @@ async def test_list_evaluations_honors_non_multiple_offset() -> None:
         def __init__(self) -> None:
             self.calls: list[dict[str, int | None]] = []
 
+        def get_project(self, project_id):
+            return {"id": project_id, "user_id": "pagination-owner"}
+
         def list_evaluations(self, *, project_id, prompt_id=None, status=None, page=1, per_page=20):
             self.calls.append(
                 {
@@ -174,7 +177,7 @@ async def test_list_evaluations_honors_non_multiple_offset() -> None:
         limit=3,
         offset=4,
         db=db,
-        user_context={},
+        user_context={"user_id": "pagination-owner", "is_admin": False},
     )
 
     assert [item.id for item in response["evaluations"]] == [4, 5, 6]
@@ -224,7 +227,7 @@ def test_db():
 def auth_headers():
     """Create authentication headers for testing."""
     return {
-        "Authorization": "Bearer test-token",
+        "X-API-KEY": get_auth_settings().SINGLE_USER_API_KEY,
         "Content-Type": "application/json"
     }
 
@@ -1462,7 +1465,7 @@ class TestEvaluationEndpoints:
             async def close(self):
                 return None
 
-        monkeypatch.setattr(ps_eval, "_is_prompt_studio_test_mode", lambda: False)
+        monkeypatch.setattr(ps_eval, "is_test_context", lambda: False)
         monkeypatch.setattr(ps_eval, "ProviderCredentialRuntime", lambda **_kwargs: _MissingRuntime())
 
         with patch('tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.get_current_active_user', return_value=mock_user):
@@ -1742,9 +1745,11 @@ class TestWebSocketEndpoints:
 class TestErrorHandling:
     """Test API error handling."""
 
-    def test_unauthorized_access(self, client):
+    def test_unauthorized_access(self, client, monkeypatch):
 
         """Test accessing endpoints without authentication."""
+        monkeypatch.setenv("TEST_MODE", "false")
+        monkeypatch.setenv("TLDW_TEST_MODE", "false")
         response = client.get("/api/v1/prompt-studio/projects")
         assert response.status_code == 401
 

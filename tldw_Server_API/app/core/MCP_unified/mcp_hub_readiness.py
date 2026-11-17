@@ -246,17 +246,14 @@ def build_server_readiness_payload(
     last_error_category = row.get("last_error_category")
     last_error_message = None
     refresh_errors = refresh_result.get("errors") if isinstance(refresh_result, dict) else {}
-    if refresh_result is not None:
-        if isinstance(refresh_errors, dict) and server_id in refresh_errors:
-            reasons.append("discovery_failed")
-            last_error_category = "discovery_failed"
-            last_error_message = "Discovery refresh failed."
-        elif last_error_category == "discovery_failed":
-            last_error_category = None
-            last_error_message = None
-    elif last_error_category == "discovery_failed":
+    if last_error_category == "discovery_failed" or (
+        isinstance(refresh_errors, dict) and server_id in refresh_errors
+    ):
         reasons.append("discovery_failed")
+        last_error_category = "discovery_failed"
         last_error_message = "Discovery refresh failed."
+    if last_error_category == "config_changed":
+        reasons.append("config_changed")
 
     if tool_count == 0 and "runtime_unavailable" not in reasons and "discovery_failed" not in reasons:
         if row.get("last_successful_discovery_at"):

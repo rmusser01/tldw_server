@@ -339,7 +339,11 @@ const toBlockerLocation = (href: string): BlockerLocation => {
   return { pathname: url.pathname, search: url.search, hash: url.hash, state: null, key: href }
 }
 
-type PendingNavigation = { href: string; action: "PUSH" | "POP" }
+type NextHistoryState = Record<string, unknown> & {
+  url: string; as: string; options: object; __N: true; key: string
+}
+type SourceHistoryEntry = { href: string; state: NextHistoryState }
+type PendingNavigation = { href: string; action: "PUSH" | "POP"; source?: SourceHistoryEntry | null }
 
 const UNBLOCKED: ShimBlocker = { state: "unblocked", proceed: noop, reset: noop }
 
@@ -358,11 +362,23 @@ const useNextRouterBlocker = (shouldBlock: BlockerHookArg): ShimBlocker => {
   shouldBlockRef.current = shouldBlock
   const pendingRef = React.useRef<PendingNavigation | null>(null)
   const bypassRef = React.useRef<string | null>(null)
+  const popBypassRef = React.useRef<NextHistoryState | null>(null)
+  const sourceRef = React.useRef<SourceHistoryEntry | null>(null)
   const [pending, setPending] = React.useState<PendingNavigation | null>(null)
   const active = shouldBlock !== false
 
   React.useEffect(() => {
     if (!active) return
+    const captureSource = (href = routerRef.current.asPath) => {
+      if (pendingRef.current) return
+      const state = window.history.state
+      const currentHref = window.location.pathname + window.location.search + window.location.hash
+      sourceRef.current = state && state.__N === true && state.as === href && currentHref === href &&
+        typeof state.url === "string" && typeof state.key === "string" &&
+        state.options && typeof state.options === "object"
+        ? { href, state } : null
+    }
+    captureSource()
     const shouldHold = (href: string, action: PendingNavigation["action"]) => {
       // Once one navigation is held, later ones wait behind it.
       if (pendingRef.current) return true
@@ -393,17 +409,26 @@ const useNextRouterBlocker = (shouldBlock: BlockerHookArg): ShimBlocker => {
     }
     const handleBeforePopState = (state: { url: string; as: string }) => {
       const href = state.as || state.url
+      const restoring = popBypassRef.current
+      if (restoring && state.as === restoring.as && "key" in state && state.key === restoring.key) {
+        popBypassRef.current = null
+        return false
+      }
       if (!shouldHold(href, "POP")) return true
-      hold({ href, action: "POP" })
+      hold({ href, action: "POP", source: sourceRef.current })
       return false
     }
 
     router.events.on("routeChangeStart", handleRouteStart)
     router.events.on("hashChangeStart", handleRouteStart)
+    router.events.on("routeChangeComplete", captureSource)
+    router.events.on("hashChangeComplete", captureSource)
     router.beforePopState(handleBeforePopState)
     return () => {
       router.events.off("routeChangeStart", handleRouteStart)
       router.events.off("hashChangeStart", handleRouteStart)
+      router.events.off("routeChangeComplete", captureSource)
+      router.events.off("hashChangeComplete", captureSource)
       router.beforePopState(() => true)
     }
   }, [active, router])
@@ -430,11 +455,25 @@ const useNextRouterBlocker = (shouldBlock: BlockerHookArg): ShimBlocker => {
   const reset = React.useCallback(() => {
     const held = pendingRef.current
     if (!held) return
+    if (held.action === "POP") {
+      const source = held.source
+      if (!source || source.href !== routerRef.current.asPath) return
+      // Next's same-URL push replaces the destination; preserve its entry and the source key.
+      window.history.pushState(source.state, "", source.href)
+      popBypassRef.current = source.state
+      pendingRef.current = null
+      setPending(null)
+      try {
+        // onPopState restores Next's key before this guard; the page itself never changed.
+        window.dispatchEvent(new PopStateEvent("popstate", { state: source.state }))
+      } finally {
+        popBypassRef.current = null
+      }
+      return
+    }
     pendingRef.current = null
     setPending(null)
-    // After a held Back press the address bar already shows the target.
-    if (held.action === "POP") replay(routerRef.current.asPath, "push")
-  }, [replay])
+  }, [])
 
   return React.useMemo(
     () =>

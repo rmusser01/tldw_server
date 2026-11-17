@@ -19,7 +19,7 @@ from tldw_Server_API.app.api.v1.schemas.pagination import (
     OffsetPaginationMeta,
     default_cursor_pagination_aliases,
 )
-from tldw_Server_API.app.core.Evaluations.run_state import normalize_run_status
+from tldw_Server_API.app.core.Evaluations.run_state import RunStatus, normalize_run_status
 
 try:
     import bleach
@@ -119,15 +119,6 @@ class EvaluationType(str, Enum):
     LABEL_CHOICE = "label_choice"  # Multi-class single-label selection
     NLI_FACTCHECK = "nli_factcheck"  # Claim verification via NLI-style labels
     CUSTOM = "custom"
-
-
-class RunStatus(str, Enum):
-    """Run status values"""
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
 
 
 class WebhookEventType(str, Enum):
@@ -326,6 +317,13 @@ class RunProgress(BaseModel):
     percent_complete: float = Field(0.0, ge=0.0, le=100.0)
     current_sample: Optional[int] = None
     estimated_completion: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _derive_missing_percentage(self) -> "RunProgress":
+        """Derive omitted percentages from validated sample counts."""
+        if "percent_complete" not in self.model_fields_set and self.total_samples > 0:
+            self.percent_complete = min(self.completed_samples, self.total_samples) * 100 / self.total_samples
+        return self
 
 
 class RunResponse(BaseModel):

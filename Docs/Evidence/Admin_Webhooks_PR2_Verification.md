@@ -616,7 +616,7 @@ left untouched because it is unrelated to this PR.
 
 ## Records
 
-- Backlog: [`TASK-13111`](../../backlog/tasks/task-13111%20-%20Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md)
+- Backlog: [`TASK-13111`](../../backlog/tasks/task-15132%20-%20Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md)
 - Design: [Canonical admin outgoing webhooks](../Design/2026-07-12-canonical-admin-outgoing-webhooks.md)
 - Implementation plan: [Canonical delivery substrate plan](../superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md)
 - Operations: [Admin Webhooks delivery runbook](../Admin_Webhooks_Delivery_Runbook.md)

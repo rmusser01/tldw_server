@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest"
 import { shouldRestorePersistedPlaygroundSession } from "@/hooks/playground-session-restore"
 
 describe("shouldRestorePersistedPlaygroundSession", () => {
+  it("restores the draft address even when a stale ID-free transcript has the same IDs", () => {
+    expect(shouldRestorePersistedPlaygroundSession({
+      hasPersistedSession: true, hasPersistedDraftHandle: true,
+      persistedHistoryId: null, persistedServerChatId: null,
+      currentHistoryId: null, currentServerChatId: null,
+      currentMessagesLength: 2, currentHistoryLength: 2
+    })).toBe(true)
+  })
   it("returns false when no persisted session is available", () => {
     expect(
       shouldRestorePersistedPlaygroundSession({

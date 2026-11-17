@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
 const mocks = vi.hoisted(() => ({
+  capabilitiesState: { loading: false, capabilities: { hasPersonalization: true, hasCompanion: true } },
   isCompanionConsentRequiredError: vi.fn((error: { status?: number; message?: string }) => {
     return (
       error?.status === 409 &&
@@ -12,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   }),
   recordExplicitCompanionCapture: vi.fn(async (..._args: unknown[]) => null)
 }))
+
+vi.mock("@/hooks/useServerCapabilities", () => ({ useServerCapabilities: () => mocks.capabilitiesState }))
 
 vi.mock("@/components/Common/RouteErrorBoundary", () => ({
   RouteErrorBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</>
@@ -78,8 +81,36 @@ const renderRoute = () =>
   )
 
 describe("SidepanelCompanion", () => {
+  it.each([
+    { loading: true, hasPersonalization: true, hasCompanion: true },
+    { loading: false, hasPersonalization: true, hasCompanion: false },
+    { loading: false, hasPersonalization: false, hasCompanion: true }
+  ])("retains pending capture until Companion router availability resolves (%j)", async (state) => {
+    mocks.capabilitiesState = { loading: state.loading, capabilities: {
+      hasPersonalization: state.hasPersonalization, hasCompanion: state.hasCompanion
+    } }
+    const capture = { id: "capture-1", selectionText: "Remember this paragraph.",
+      pageUrl: "https://example.com/article", pageTitle: "Example article", action: "save_selection" }
+    const pending = JSON.stringify(capture)
+    window.sessionStorage.setItem("tldw:companion:pendingCapture", pending)
+    const view = renderRoute()
+    await screen.findByTestId("companion-home-shell")
+    expect(mocks.recordExplicitCompanionCapture).not.toHaveBeenCalled()
+    window.dispatchEvent(new CustomEvent("tldw:companion-pending-capture", { detail: capture }))
+    expect(mocks.recordExplicitCompanionCapture).not.toHaveBeenCalled()
+    expect(window.sessionStorage.getItem("tldw:companion:pendingCapture")).toBe(pending)
+
+    mocks.capabilitiesState = { loading: false, capabilities: { hasPersonalization: true, hasCompanion: true } }
+    view.rerender(<MemoryRouter><SidepanelCompanion /></MemoryRouter>)
+    await waitFor(() => expect(mocks.recordExplicitCompanionCapture).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(window.sessionStorage.getItem("tldw:companion:pendingCapture")).toBeNull())
+    window.dispatchEvent(new CustomEvent("tldw:companion-pending-capture", { detail: capture }))
+    expect(mocks.recordExplicitCompanionCapture).toHaveBeenCalledTimes(1)
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.capabilitiesState = { loading: false, capabilities: { hasPersonalization: true, hasCompanion: true } }
     window.sessionStorage.clear()
     mocks.recordExplicitCompanionCapture.mockResolvedValue({
       id: "activity-1",
@@ -108,6 +139,17 @@ describe("SidepanelCompanion", () => {
     expect(await screen.findByTestId("companion-home-shell")).toBeInTheDocument()
     expect(screen.getByText("sidepanel")).toBeInTheDocument()
     expect(screen.getByTestId("sidepanel-header")).toHaveTextContent("Companion")
+  })
+
+  it("XS-17: pins a way back to chat above the Companion dashboard", async () => {
+    renderRoute()
+
+    const shell = await screen.findByTestId("companion-home-shell")
+    const chatLink = screen.getByRole("link", { name: "Open chat" })
+    expect(chatLink).toHaveAttribute("href", "/?view=chat")
+    expect(
+      chatLink.compareDocumentPosition(shell) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 
   it("records the pending selection capture when the companion route opens", async () => {

@@ -8,14 +8,14 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
-from cachetools import LRUCache
 
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ExternalConnection, chacha_operation
-from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager, get_chacha_runtime
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.StudyPacks import generation_service
+from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.services import study_pack_jobs_worker as worker
 
 pytestmark = pytest.mark.integration
@@ -37,14 +37,12 @@ def worker_db(request, tmp_path, monkeypatch):
     db.close_connection()
     owner_dir = tmp_path / "owner"
     monkeypatch.setattr(deps.DatabasePaths, "get_user_base_directory", staticmethod(lambda _: owner_dir))
-    cache = LRUCache(maxsize=4)
+    runtime = ChaChaRuntimeManager(max_cached=4)
+    cache = runtime._instances
     cache[str(owner_dir)] = db
-    monkeypatch.setattr(deps, "_chacha_db_instances", cache)
-    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", ChaChaRuntimeManager())
-    monkeypatch.setattr(deps, "_CHACHA_SHUTTING_DOWN", False)
-    monkeypatch.setattr(deps, "_chacha_default_char_tasks", set())
+    monkeypatch.setattr(app_services(), "chacha_runtime", runtime)
     executor = ThreadPoolExecutor(max_workers=1)
-    monkeypatch.setattr(deps, "_get_chacha_executor", lambda: executor)
+    monkeypatch.setattr(runtime, "executor", lambda: executor)
     monkeypatch.setattr(worker, "get_media_db_for_owner", lambda _: SimpleNamespace())
     monkeypatch.setattr(
         generation_service, "_resolve_generation_provider_and_model", lambda *_: ("fixture", "fixture", {})
@@ -118,8 +116,8 @@ def job(f, number=1):
 
 async def drain():
     await asyncio.sleep(0)
-    while deps._chacha_default_char_tasks:
-        await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
+    while get_chacha_runtime()._tasks:
+        await asyncio.gather(*tuple(get_chacha_runtime()._tasks))
         # Awaiting a gather of already-done tasks never yields, so without this
         # their pending discard callbacks never run and the loop spins forever.
         await asyncio.sleep(0)

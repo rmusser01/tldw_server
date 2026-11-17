@@ -3,48 +3,19 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import Field, model_validator
 
-ResourceId = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$"),
-]
-BuddyName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
-
-
-class BuddyModel(BaseModel):
-    """Closed Buddy API contract; unknown fields fail Pydantic validation."""
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class StarterSource(BuddyModel):
-    """Select immutable bundled artwork by a bounded, path-free catalog identifier."""
-
-    kind: Literal["starter"]
-    starter_id: ResourceId
-
-
-class PersonaPackSource(BuddyModel):
-    """Select an owned Persona pack to snapshot; source IDs do not grant access."""
-
-    kind: Literal["persona_pack"]
-    persona_id: ResourceId
-    pack_id: ResourceId
-
-
-class BuddyCreate(BuddyModel):
-    """Create independent artwork with a nonblank name and one discriminated source.
-
-    Resource IDs and name lengths are bounded. Persona behavior is optional;
-    display mode defaults to dynamic. Invalid fields raise Pydantic validation errors."""
-
-    name: BuddyName
-    source: Annotated[StarterSource | PersonaPackSource, Field(discriminator="kind")]
-    optional_persona_id: ResourceId | None = None
-    display_mode: Literal["dynamic", "static"] = "dynamic"
+# Core-owned since TASK-13950.15; re-exported for the API layer.
+from tldw_Server_API.app.core.Buddy.buddy_schemas import (  # noqa: F401 - re-exported (TASK-13950.15)
+    BuddyCreate,
+    BuddyModel,
+    BuddyName,
+    PersonaPackSource,
+    ResourceId,
+    StarterSource,
+)
 
 
 class BuddyUpdate(BuddyModel):

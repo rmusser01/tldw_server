@@ -13,7 +13,10 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
-from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
+from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
+    WORKSPACES_READ_RATE_LIMIT,
+    WORKSPACES_WRITE_RATE_LIMIT,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -167,6 +170,7 @@ def _install_overrides(
     app.dependency_overrides[try_get_media_db_for_user] = _media_db
     app.dependency_overrides[workspaces_endpoint.try_get_workspace_job_manager] = lambda: _JobManagerDouble(jobs)
     app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
 
 
 def _clear_overrides(app: Any) -> None:
@@ -175,6 +179,7 @@ def _clear_overrides(app: Any) -> None:
     app.dependency_overrides.pop(try_get_media_db_for_user, None)
     app.dependency_overrides.pop(workspaces_endpoint.try_get_workspace_job_manager, None)
     app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+    app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
 
 
 def _media_db() -> _MediaPreviewDB:
@@ -280,6 +285,46 @@ def test_workspace_content_reads_accept_current_or_unasserted_user(
                 if expected_user_id is not None else {},
             )
         assert response.status_code == 200, response.text
+    finally:
+        _clear_overrides(workspace_preview_app)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("method", ["POST", "PUT"])
+@pytest.mark.parametrize("expected_user_id", ["2", None, "1"])
+def test_workspace_artifact_writes_validate_expected_user(
+    workspace_preview_app,
+    workspace_preview_db,
+    method: str,
+    expected_user_id: str | None,
+):
+    db = workspace_preview_db
+    workspace_id = "ws-preview"
+    path = f"/api/v1/workspaces/{workspace_id}/artifacts"
+    create = {"id": "draft", "artifact_type": "summary", "title": "Original draft"}
+    if method == "PUT":
+        artifact = db.add_workspace_artifact(workspace_id, create)
+        path += "/draft"
+        body = {"title": "Updated draft", "version": artifact["version"]}
+    else:
+        body = create
+    before = db.list_workspace_artifacts(workspace_id)
+    headers = {"X-TLDW-Expected-User-ID": expected_user_id} if expected_user_id is not None else {}
+    _install_overrides(workspace_preview_app, db, None)
+    try:
+        with patch.object(db, "get_workspace", wraps=db.get_workspace) as workspace_read:
+            with TestClient(workspace_preview_app) as client:
+                response = client.request(method, path, json=body, headers=headers)
+        if expected_user_id == "2":
+            assert response.status_code == 412, response.text
+            assert response.headers["cache-control"] == "no-store"
+            assert response.json()["detail"]["code"] == "request_config_scope_changed"
+            workspace_read.assert_not_called()
+            assert db.list_workspace_artifacts(workspace_id) == before
+        else:
+            assert response.status_code == (201 if method == "POST" else 200), response.text
+            [saved] = db.list_workspace_artifacts(workspace_id)
+            assert saved["title"] == body["title"]
     finally:
         _clear_overrides(workspace_preview_app)
 

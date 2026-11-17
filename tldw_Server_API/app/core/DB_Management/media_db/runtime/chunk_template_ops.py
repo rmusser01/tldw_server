@@ -115,6 +115,8 @@ def get_chunking_template(
     name: str | None = None,
     uuid: str | None = None,
     include_deleted: bool = False,
+    *,
+    owner_user_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Get a chunking template by ID, name, or UUID."""
 
@@ -134,10 +136,18 @@ def get_chunking_template(
         conditions.append("uuid = ?")
         params.append(uuid)
 
+    if owner_user_id is not None:
+        owner_user_id = str(owner_user_id).strip()
+        if not owner_user_id:
+            raise InputError("Template owner must not be empty")
     query = f"SELECT * FROM ChunkingTemplates WHERE ({' OR '.join(conditions)})"  # nosec B608
     if not include_deleted:
         query += " AND deleted = ?"
         params.append(False)
+
+    if owner_user_id is not None:
+        query += " AND (user_id = ? OR is_builtin = ?)"
+        params.extend([owner_user_id, True])
 
     cursor = self.execute_query(query, tuple(params))
     row = cursor.fetchone()
@@ -169,6 +179,8 @@ def update_chunking_template(
     template_json: str | None = None,
     description: str | None = None,
     tags: list[str] | None = None,
+    *,
+    owner_user_id: str | None = None,
 ) -> bool:
     """Update a chunking template."""
 
@@ -177,6 +189,7 @@ def update_chunking_template(
         template_id=template_id,
         name=name,
         uuid=uuid,
+        owner_user_id=owner_user_id,
     )
 
     if not template:
@@ -227,6 +240,10 @@ def update_chunking_template(
         WHERE id = ? AND deleted = ?
     """.format_map(locals())  # nosec B608
 
+    if owner_user_id is not None:
+        update_sql += " AND user_id = ? AND is_builtin = ?"
+        params.extend([str(owner_user_id).strip(), False])
+
     with self.transaction() as conn:
         cursor = self._execute_with_connection(conn, update_sql, tuple(params))
         if cursor.rowcount == 0:
@@ -242,6 +259,8 @@ def delete_chunking_template(
     name: str | None = None,
     uuid: str | None = None,
     hard_delete: bool = False,
+    *,
+    owner_user_id: str | None = None,
 ) -> bool:
     """Delete a chunking template."""
 
@@ -250,6 +269,7 @@ def delete_chunking_template(
         template_id=template_id,
         name=name,
         uuid=uuid,
+        owner_user_id=owner_user_id,
     )
 
     if not template:
@@ -258,34 +278,32 @@ def delete_chunking_template(
     if template["is_builtin"]:
         raise InputError("Cannot delete built-in templates")  # noqa: TRY003
 
-    deleted_rows = 0
+    conditions = "id = ? AND deleted = ? AND is_builtin = ?"
+    identity_params = [template["id"], False, False]
+    if owner_user_id is not None:
+        conditions += " AND user_id = ?"
+        identity_params.append(str(owner_user_id).strip())
 
     with self.transaction() as conn:
         if hard_delete:
-            delete_cursor = self._execute_with_connection(
+            cursor = self._execute_with_connection(
                 conn,
-                "DELETE FROM ChunkingTemplates WHERE id = ?",
-                (template["id"],),
+                "DELETE FROM ChunkingTemplates WHERE " + conditions,  # nosec B608 -- Fixed predicates, bound values.
+                tuple(identity_params),
             )
-            deleted_rows = delete_cursor.rowcount
-            logger.info("Hard deleted chunking template ID {}", template["id"])
         else:
             current_time = self._get_current_utc_timestamp_str()
-            update_cursor = self._execute_with_connection(
+            cursor = self._execute_with_connection(
                 conn,
                 """
                 UPDATE ChunkingTemplates
-                SET deleted = ?,
-                    updated_at = ?,
-                    last_modified = ?,
-                    client_id = ?
-                WHERE id = ?
-                """,
-                (True, current_time, current_time, self.client_id, template["id"]),
+                SET deleted = ?, updated_at = ?, last_modified = ?, client_id = ?
+                WHERE """ + conditions,  # nosec B608 -- Fixed predicates, bound values.
+                (True, current_time, current_time, self.client_id, *identity_params),
             )
-            deleted_rows = update_cursor.rowcount
-            logger.info("Soft deleted chunking template ID {}", template["id"])
+        deleted_rows = cursor.rowcount
 
+    logger.info("{} deleted chunking template ID {}", "Hard" if hard_delete else "Soft", template["id"])
     return deleted_rows > 0
 
 

@@ -8,10 +8,8 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     try:
-        from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-        await reset_db_pool()
         reset_settings()
     except Exception:
         _ = None
@@ -31,7 +29,7 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_e2e_workflows_daily_cap_denies_with_headers(monkeypatch, tmp_path):
+async def test_e2e_workflows_daily_cap_denies_with_headers(monkeypatch, tmp_path, fresh_services):
     """A user-level ``limits.workflows_runs_per_day`` override is enforced by the real endpoint."""
     db_path = tmp_path / "authnz_wf_e2e.db"
     await _init_authnz_sqlite(db_path, monkeypatch)

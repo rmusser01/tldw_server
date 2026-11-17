@@ -25,6 +25,7 @@ vi.mock("@/services/tldw/server-capabilities", async original => ({
 
 import { captureNormalHistoryTurn, normalChatMode } from "../normalChatMode"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { getServerChatSaveStatus, resetServerChatSaveStatus, serverChatSaveStatusStore } from "@/store/server-chat-save-status"
 
@@ -33,9 +34,14 @@ beforeEach(() => {
   resetServerChatSaveStatus()
 })
 
-const captureTurn = async (serverOwned = true) => {
+const admission = { version: 1 as const, owner_key: "owner-1", conversation_id: "chat-1", input_message_id: "input-1", input_message_revision: "1", selection_digest: "selection" }
+
+const captureTurn = async (serverOwned = true, retryRecoveries?: HistoryTurnRecoveryEntry[]) => {
   const owner = { kind: "native", conversation_id: "chat-1", validate_lease: () => true }
-  const view = { owner_key: "owner-1", conversation_id: "chat-1", view_session_id: "view-1", selection_revision: 1 }
+  const view = {
+    owner_key: "owner-1", conversation_id: "chat-1", view_session_id: "view-1", selection_revision: 1,
+    ...(retryRecoveries ? { cursor: { kind: "before_message", message_id: admission.input_message_id } } : {})
+  }
   const controller = {
     getCurrent: () => ({ status: "ready", owner, view, bookmarkScope: { profile_id: "profile-1", client_session_id: "session-1" }, capture: { status: "captured" } }),
     fence: () => () => true,
@@ -46,23 +52,27 @@ const captureTurn = async (serverOwned = true) => {
     scopeInvalidatedSignal: new AbortController().signal
   } as ServicePromptSnapshot
   const turn = await captureNormalHistoryTurn({
-    historySelection: { controller, originIsCurrent: () => true },
+    historySelection: {
+      controller, originIsCurrent: () => true,
+      ...(retryRecoveries ? { retryAdmission: admission, retryRecoveries } : {})
+    },
     historyId: null, serverChatId: "chat-1", setHistoryId: () => {}, selectedModel: "test", toolChoice: "none",
     ...(serverOwned ? { tldwTurn: { user_message_id: "00000000-0000-4000-8000-000000000001" } } : {})
   }, "Question", snapshot, new AbortController().signal)
   Object.assign(turn, {
     input: { id: "input-1", content: "Question", images: [] },
     selection: { selection_digest: "selection", request_context_digest: "request" },
-    admission: { version: 1, owner_key: "owner-1", conversation_id: "chat-1", input_message_id: "input-1", input_message_revision: "1", selection_digest: "selection" },
+    admission,
     createdAt: 1, assistantId: "assistant-1"
   })
   return turn
 }
 
 it.each(["failed", "skipped", "kept"])("only reports a complete ordinary reply submitted when Keep is kept (%s)", async (status) => {
+  const owner = { kind: "native", conversation_id: "chat-1", validate_lease: () => true }
   const view = { owner_key: "owner-1", conversation_id: "chat-1", view_session_id: "view-1", selection_revision: 1 }
   const controller = {
-    getCurrent: () => ({ status: "ready", owner: { kind: "native", conversation_id: "chat-1", validate_lease: () => true }, view, bookmarkScope: {}, capture: { status: "captured" } }),
+    getCurrent: () => ({ status: "ready", owner, view, bookmarkScope: {}, capture: { status: "captured" } }),
     fence: () => () => true, recoveries: [], refreshRecovery: vi.fn()
   } as unknown as HistorySelectionController
   storage.keep.mockResolvedValue(status === "kept" ? { status, retained: false, followed: true, resultId: "reply-1" } : { status, reason: "stale_parent" })
@@ -74,15 +84,49 @@ it.each(["failed", "skipped", "kept"])("only reports a complete ordinary reply s
   })
   const result = await normalChatMode("Question", "", false, [], [], new AbortController().signal, {
     selectedModel: "test", toolChoice: "none", selectedSystemPrompt: "", useOCR: false,
+    currentChatModelSettings: null,
+    setMessages: vi.fn(), setHistory: vi.fn(), setIsProcessing: vi.fn(),
+    setStreaming: vi.fn(), setAbortController: vi.fn(),
+    saveMessageOnSuccess: vi.fn(), saveMessageOnError: vi.fn(),
     historyId: null, serverChatId: "chat-1", setHistoryId: () => {},
     historySelection: { controller, originIsCurrent: () => true },
     servicePromptSnapshot: {
       definitions: {}, requestScope: { config: { serverUrl: "https://example.test", authMode: "single-user" }, userId: 1 },
       scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal
     } as ServicePromptSnapshot
-  } as Parameters<typeof normalChatMode>[6])
+  })
   expect(storage.keep).toHaveBeenCalledOnce()
   expect(result.status).toBe(status === "kept" ? "submitted" : "failed")
+})
+
+it("retires only retained records for the exact admission a retry settled", async () => {
+  const scope = { profile_id: "profile-1", client_session_id: "session-1" }
+  const same: HistoryTurnRecoveryEntry["turn"] = {
+    operation_id: "same",
+    origin_view: {
+      owner_key: admission.owner_key, conversation_id: admission.conversation_id,
+      view_session_id: "view-1", selection_revision: 1,
+      cursor: { kind: "before_message", message_id: admission.input_message_id },
+      interpretation: { kind: "parent_graph_v1" }
+    },
+    owner_key: admission.owner_key,
+    conversation_id: admission.conversation_id,
+    selection_digest: admission.selection_digest,
+    request_context_digest: "request",
+    created_at: 1, input_text: "Question", input_images: [], result_text: "",
+    state: "accepted_unsent", persistence: "server", input_id: admission.input_message_id, admission
+  }
+  const entries = [
+    { scope, turn: same },
+    { scope, turn: { ...same, operation_id: "other", admission: { ...admission, input_message_revision: "2" } } }
+  ]
+  const turn = await captureTurn(false, entries)
+  try {
+    await turn.complete!("Saved reply")
+    expect(storage.dismiss).toHaveBeenCalledExactlyOnceWith(scope, expect.any(Object), "same", "completed")
+  } finally {
+    turn.release!()
+  }
 })
 
 it("balances split admission/result notifications with one server-write handle", async () => {

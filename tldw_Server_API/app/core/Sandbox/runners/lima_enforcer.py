@@ -5,7 +5,7 @@ import platform
 import sys
 from typing import Any
 
-from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.testing import is_test_context, is_truthy
 
 
 def _truthy(v: str | None) -> bool:
@@ -38,11 +38,6 @@ class LimaSecurityEnforcer:
             return False
         return sys.platform.startswith("linux") or sys.platform == "darwin"
 
-    def _test_override_mode(self) -> bool:
-        if os.getenv("PYTEST_CURRENT_TEST"):
-            return True
-        return _truthy(os.getenv("TEST_MODE"))
-
     def preflight_capabilities(self) -> dict[str, bool]:
         host = self.host_facts()
         variant = str(host.get("variant", "")).strip().lower()
@@ -56,7 +51,7 @@ class LimaSecurityEnforcer:
         allowlist_default = False
         deny_default = bool(default_ready)
 
-        if not self._test_override_mode():
+        if not is_test_context():
             return {"deny_all": deny_default, "allowlist": allowlist_default}
 
         deny_all = os.getenv("TLDW_SANDBOX_LIMA_ENFORCER_DENY_ALL_READY")

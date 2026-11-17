@@ -22,6 +22,7 @@ import {
   getLastChatCompletionDebugSnapshot
 } from "@/services/tldw/TldwChat"
 import type { ChatMessage } from "@/services/tldw/TldwApiClient"
+import { setChatRequestDebugEnabled } from "@/services/tldw/chat-request-debug"
 
 const makeDefaultResponse = () =>
   new Response(
@@ -37,6 +38,7 @@ const makeDefaultResponse = () =>
 describe("TldwChatService message sanitization", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setChatRequestDebugEnabled(true)
     vi.useRealTimers()
     mocks.createChatCompletion.mockResolvedValue(makeDefaultResponse())
     mocks.streamChatCompletion.mockImplementation(async function* () {
@@ -717,8 +719,62 @@ it("dispatches the exact finalized stateless wire body without rereading message
     messages: [
       { role: "assistant", content: null },
       { role: "tool", tool_call_id: "c1", content: "result" },
-      { role: "user", content: "next" }
+      { role: "user", content: " next " }
     ]
   })
   expect(actual.conversation_id).toBeUndefined()
 })
+
+
+it.each(["prepare", "send", "stream"])(
+  "%s preserves exact nonblank user text and multipart text",
+  async (transport) => {
+    const service = new TldwChatService()
+    const authored = "  *Mira pauses.*\n\n  Keep this indentation.  \n"
+    const messages: ChatMessage[] = [
+      { role: "user", content: authored },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: authored },
+          {
+            type: "image_url",
+            image_url: { url: " https://example.com/card.png " }
+          }
+        ]
+      }
+    ]
+    const options = { model: "test", apiProvider: "openai" }
+    let request: {
+      messages: ChatMessage[]
+    }
+    if (transport === "prepare")
+      request = prepareChatCompletionRequest(messages, options)
+    else if (transport === "send") {
+      mocks.createChatCompletion.mockResolvedValueOnce(makeDefaultResponse())
+      await service.sendMessage(messages, options)
+      request = mocks.createChatCompletion.mock.calls.at(-1)![0]
+    } else {
+      mocks.streamChatCompletion.mockImplementationOnce(async function* () {
+        yield { choices: [{ delta: { content: "Answer" } }] }
+      })
+      for await (const _token of service.streamMessage(messages, options)) {
+        /* consume */
+      }
+      request = mocks.streamChatCompletion.mock.calls.at(-1)![0]
+    }
+    expect(request.messages).toEqual([
+      messages[0],
+      {
+        role: "user",
+        content: [
+          { type: "text", text: authored },
+          {
+            type: "image_url",
+            image_url: { url: "https://example.com/card.png" }
+          }
+        ]
+      }
+    ])
+  }
+)

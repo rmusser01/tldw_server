@@ -15,6 +15,8 @@ from fastapi import FastAPI, Request
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.services.app_lifecycle import get_or_create_lifecycle_state
 
 _READINESS_GUARD_EXCEPTIONS = (
@@ -138,10 +140,12 @@ async def collect_readiness_snapshot(app: FastAPI) -> ReadinessSnapshot:
             engine_stats = {"queue_depth": None, "active_tenants": None, "active_workflows": None}
 
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsSchemaError
 
         db_pool = await get_db_pool()
         db_health = _public_database_health(await db_pool.health_check())
 
+        workflow_backend_is_pg = False
         try:
             from tldw_Server_API.app.core.DB_Management.DB_Manager import (
                 create_workflows_database,
@@ -150,19 +154,18 @@ async def collect_readiness_snapshot(app: FastAPI) -> ReadinessSnapshot:
             from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 
             backend = get_content_backend_instance()
+            workflow_backend_is_pg = getattr(backend, "backend_type", None) == BackendType.POSTGRESQL
             workflows_db: WorkflowsDatabase = create_workflows_database(backend=backend)
-            if workflows_db._using_backend():
-                with workflows_db.backend.transaction() as connection:  # type: ignore[union-attr]
-                    try:
-                        schema_version = int(workflows_db._get_backend_schema_version(connection))  # type: ignore[attr-defined]
-                        expected_version = int(workflows_db._CURRENT_SCHEMA_VERSION)  # type: ignore[attr-defined]
-                    except _READINESS_GUARD_EXCEPTIONS:
-                        schema_version = None
-                        expected_version = None
-            else:
-                schema_version = None
-                expected_version = None
+            workflow_health = workflows_db.health_probe()
+            schema_version = workflow_health["schema_version"]
+            expected_version = workflow_health["expected_version"]
+            if workflow_backend_is_pg and (type(schema_version) is not int or type(expected_version) is not int):
+                return ReadinessSnapshot(False, "workflows_schema_not_ready", {})
+        except (WorkflowsSchemaError, BackendDatabaseError):
+            return ReadinessSnapshot(False, "workflows_schema_not_ready", {})
         except _READINESS_GUARD_EXCEPTIONS:
+            if workflow_backend_is_pg:
+                return ReadinessSnapshot(False, "workflows_schema_not_ready", {})
             schema_version = None
             expected_version = None
 

@@ -82,6 +82,10 @@ async def test_build_quotas_falls_back_to_user_values_when_live_storage_fails(
         return {}
 
     class _BrokenStorageService:
+        async def native_usage(self, user_id: int) -> dict[str, int]:
+            """A failed filesystem scan still has a known retained-byte ledger."""
+            return {"bytes": 2 * 1048576, "count": 1}
+
         async def calculate_user_storage(
             self,
             user_id: int,
@@ -126,5 +130,5 @@ async def test_build_quotas_falls_back_to_user_values_when_live_storage_fails(
     # Seeded from the resolver (patched above), not the raw user-context column.
     if quotas["storage_quota_mb"] != 777:
         raise AssertionError("Expected storage_quota_mb to fall back to the resolved value")
-    if quotas["storage_used_mb"] != 12.5:
-        raise AssertionError("Expected storage_used_mb to fall back to user-context value")
+    if quotas["storage_used_mb"] != 14.5:
+        raise AssertionError("Expected fallback legacy usage plus fresh retained bytes")

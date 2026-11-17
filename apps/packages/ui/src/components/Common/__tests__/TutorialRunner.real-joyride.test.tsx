@@ -1,0 +1,341 @@
+/**
+ * TutorialRunner against the real react-joyride (NO-N1, NO-02).
+ *
+ * TutorialRunner.retry.test.tsx mocks react-joyride, so it cannot see how the
+ * real library behaves when a step target is missing. These tests drive the
+ * real tour through the DOM.
+ */
+import React from "react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { TutorialRunner } from "../TutorialRunner"
+import { useTutorialStore } from "@/store/tutorials"
+
+const step = (id: string, extra: Record<string, unknown> = {}) => ({
+  target: `[data-testid="${id}"]`,
+  titleKey: `tutorials:test.${id}.title`,
+  titleFallback: `Title ${id}`,
+  contentKey: `tutorials:test.${id}.content`,
+  contentFallback: `Content ${id}`,
+  placement: "bottom" as const,
+  disableBeacon: true,
+  ...extra
+})
+
+const tutorialRegistry: Record<string, { id: string; steps: ReturnType<typeof step>[] } & Record<string, unknown>> = {}
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string) => fallback || _key
+  })
+}))
+
+vi.mock("@/tutorials", () => ({
+  getTutorialById: (tutorialId: string) => tutorialRegistry[tutorialId]
+}))
+
+const defineTutorial = (id: string, steps: ReturnType<typeof step>[]) => {
+  tutorialRegistry[id] = {
+    id,
+    routePattern: "/test",
+    labelKey: "tutorials:test.label",
+    labelFallback: "Test tour",
+    descriptionKey: "tutorials:test.description",
+    descriptionFallback: "Test tour",
+    steps
+  }
+}
+
+const renderTour = (targets: React.ReactNode) =>
+  render(
+    <MemoryRouter>
+      {targets}
+      <TutorialRunner />
+    </MemoryRouter>
+  )
+
+const startTour = (id: string) => {
+  act(() => {
+    useTutorialStore.getState().startTutorial(id)
+  })
+}
+
+const clickPrimary = () => {
+  const tooltip = document.querySelector(".react-joyride__tooltip")
+  const primary = tooltip?.querySelector<HTMLButtonElement>(
+    'button[data-action="primary"]'
+  )
+  if (!primary) throw new Error("No tour tooltip primary button")
+  fireEvent.click(primary)
+}
+
+const pendingTimeouts = new Map<string, { completion: Promise<void>; complete: () => void }>()
+const suiteSetTimeout = globalThis.setTimeout
+const suiteClearTimeout = globalThis.clearTimeout
+
+const ownRealTimeouts = () => {
+  const realSetTimeout = globalThis.setTimeout
+  const realClearTimeout = globalThis.clearTimeout
+  vi.spyOn(globalThis, "setTimeout").mockImplementation((
+    (callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+      if (typeof callback !== "function") return realSetTimeout(callback, delay, ...args)
+      let complete: () => void
+      const completion = new Promise<void>((resolve) => { complete = resolve })
+      const handle = realSetTimeout(function (this: unknown, ...callbackArgs: unknown[]) {
+        try {
+          Reflect.apply(callback, this, callbackArgs)
+        } finally {
+          pendingTimeouts.delete(String(handle))
+          complete()
+        }
+      }, delay, ...args)
+      // Native handles and their public numeric IDs must cancel the same work.
+      pendingTimeouts.set(String(handle), { completion, complete })
+      return handle
+    }
+  ) as typeof setTimeout)
+  vi.spyOn(globalThis, "clearTimeout").mockImplementation((handle) => {
+    realClearTimeout(handle)
+    const owned = pendingTimeouts.get(String(handle))
+    pendingTimeouts.delete(String(handle))
+    owned?.complete()
+  })
+}
+
+const endTourAndDrain = async (cancelFrames: () => void) => {
+  await act(async () => {
+    useTutorialStore.getState().endTutorial()
+  })
+  cleanup()
+  // Cancel deferred Popper animation frames, but drain owned timeout callbacks.
+  cancelFrames()
+  // Keep the environment alive until callback/microtask descendants settle.
+  do {
+    await Promise.all([...pendingTimeouts.values()].map(({ completion }) => completion))
+    await new Promise<void>((resolve) => {
+      const { port1, port2 } = new MessageChannel()
+      port1.onmessage = () => {
+        port1.close()
+        port2.close()
+        resolve()
+      }
+      port2.postMessage(null)
+    })
+    cancelFrames()
+  } while (pendingTimeouts.size > 0)
+}
+
+describe("TutorialRunner with the real react-joyride", { timeout: 30_000 }, () => {
+  let cancelFrames: () => void
+
+  afterAll(() => {
+    expect(globalThis.setTimeout).toBe(suiteSetTimeout)
+    expect(globalThis.clearTimeout).toBe(suiteClearTimeout)
+  })
+
+  beforeEach(() => {
+    expect(pendingTimeouts.size).toBe(0)
+    ownRealTimeouts()
+    localStorage.clear()
+    useTutorialStore.setState({
+      completedTutorials: [],
+      seenPromptPages: [],
+      activeTutorialId: null,
+      activeRun: null,
+      activeStepIndex: 0
+    })
+    // jsdom has no layout; give every element a measurable box.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(10, 10, 120, 40)
+    )
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const frames = vi.spyOn(globalThis, "requestAnimationFrame")
+    cancelFrames = () => {
+      for (const { value } of frames.mock.results) cancelAnimationFrame(value)
+    }
+  })
+
+  afterEach(async () => {
+    try {
+      await endTourAndDrain(cancelFrames)
+      expect(pendingTimeouts.size).toBe(0)
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it("drains teardown work chained through real timers and microtasks", async () => {
+    defineTutorial("owned-teardown", [step("a")])
+    renderTour(<div data-testid="a">A</div>)
+    startTour("owned-teardown")
+    expect(await screen.findByText("Content a")).toBeInTheDocument()
+
+    const completed: string[] = []
+    const token = {}
+    const cancelled = setTimeout(() => completed.push("cancelled"), 0)
+    clearTimeout(Number(cancelled))
+    const cancelFrame = vi.spyOn(globalThis, "cancelAnimationFrame")
+    const frame = requestAnimationFrame(() => undefined)
+    queueMicrotask(() => {
+      const handle = setTimeout(function (this: unknown, value: string, argument: object) {
+        completed.push(this === handle && argument === token ? value : "wrong invocation")
+        Promise.resolve().then(() => Promise.resolve()).then(() => {
+          setTimeout(() => completed.push("nested"), 0)
+        })
+      }, 0, "first", token)
+    })
+
+    await endTourAndDrain(cancelFrames)
+
+    expect(completed).toEqual(["first", "nested"])
+    expect(cancelFrame).toHaveBeenCalledWith(frame)
+    expect(pendingTimeouts.size).toBe(0)
+    expect(screen.queryByText("Content a")).not.toBeInTheDocument()
+    expect(useTutorialStore.getState().activeRun).toBeNull()
+  })
+
+  it("skips a step whose target never mounts and still records completion (NO-N1)", async () => {
+    defineTutorial("missing-middle", [step("a"), step("b"), step("c")])
+    renderTour(
+      <>
+        <div data-testid="a">A</div>
+        <div data-testid="c">C</div>
+      </>
+    )
+    startTour("missing-middle")
+
+    expect(await screen.findByText("Content a")).toBeInTheDocument()
+    clickPrimary()
+
+    // Step b's target is missing: the tour must move on to c rather than
+    // hang with no tooltip.
+    expect(
+      await screen.findByText("Content c", {}, { timeout: 8_000 })
+    ).toBeInTheDocument()
+    clickPrimary()
+
+    await waitFor(() => {
+      expect(useTutorialStore.getState().completedTutorials).toContain(
+        "missing-middle"
+      )
+    })
+    expect(useTutorialStore.getState().activeRun).toBeNull()
+  })
+
+  it("shows a step whose target mounts while the runner is retrying", async () => {
+    // jsdom has no scrollIntoView; the runner scrolls a late target into view.
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      writable: true,
+      value: scrollIntoView
+    })
+    const lateTarget = document.createElement("div")
+    lateTarget.dataset.testid = "late"
+    lateTarget.textContent = "Late"
+    try {
+      defineTutorial("late-target", [step("a"), step("late"), step("c")])
+      renderTour(
+        <>
+          <div data-testid="a">A</div>
+          <div data-testid="c">C</div>
+        </>
+      )
+      startTour("late-target")
+      expect(await screen.findByText("Content a")).toBeInTheDocument()
+      clickPrimary()
+
+      // The target appears shortly after the step was requested, without
+      // re-rendering the runner: only its own retry can pick it up.
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      document.body.appendChild(lateTarget)
+
+      expect(
+        await screen.findByText("Content late", {}, { timeout: 8_000 })
+      ).toBeInTheDocument()
+      expect(scrollIntoView).toHaveBeenCalled()
+      expect(screen.queryByText("Content c")).not.toBeInTheDocument()
+    } finally {
+      lateTarget.remove()
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
+  })
+
+  it("counts only the steps it can show when optional targets are absent (NO-02)", async () => {
+    defineTutorial("optional-step", [
+      step("a"),
+      step("needs-selection", { optional: true }),
+      step("c")
+    ])
+    renderTour(
+      <>
+        <div data-testid="a">A</div>
+        <div data-testid="c">C</div>
+      </>
+    )
+    startTour("optional-step")
+
+    expect(await screen.findByText("Content a")).toBeInTheDocument()
+    const tooltip = document.querySelector(".react-joyride__tooltip")
+    // "Step 1 of 2", not "of 3": the optional step has no target to show.
+    expect(tooltip?.textContent).toMatch(/1\s*of\s*2/)
+  })
+
+  it("puts the window scroll position back when the tour is skipped (NO-02)", async () => {
+    // jsdom does not scroll; model the window scroll position.
+    let pageY = 0
+    vi.spyOn(window, "scrollY", "get").mockImplementation(() => pageY)
+    vi.spyOn(window, "scrollTo").mockImplementation(((
+      xOrOptions?: number | ScrollToOptions,
+      y?: number
+    ) => {
+      pageY =
+        typeof xOrOptions === "object"
+          ? Number(xOrOptions?.top ?? pageY)
+          : Number(y ?? pageY)
+    }) as typeof window.scrollTo)
+
+    defineTutorial("scroll-restore", [step("a"), step("c")])
+    renderTour(
+      <>
+        <div data-testid="a">A</div>
+        <div data-testid="c">C</div>
+      </>
+    )
+    startTour("scroll-restore")
+    expect(await screen.findByText("Content a")).toBeInTheDocument()
+
+    // The tour scrolled the page to reach a target.
+    pageY = 315
+    const skip = document.querySelector<HTMLButtonElement>(
+      '.react-joyride__tooltip button[data-action="skip"]'
+    )
+    if (!skip) throw new Error("No skip button")
+    fireEvent.click(skip)
+
+    await waitFor(() => {
+      expect(useTutorialStore.getState().activeRun).toBeNull()
+    })
+    expect(pageY).toBe(0)
+  })
+
+  it("leaves pane scrolling alone on viewport-framed routes (NO-02)", async () => {
+    defineTutorial("framed-pane", [step("in-pane"), step("c")])
+    render(
+      <MemoryRouter initialEntries={["/notes"]}>
+        <div data-testid="pane" style={{ overflow: "auto" }}>
+          <div data-testid="in-pane">In pane</div>
+        </div>
+        <div data-testid="c">C</div>
+        <TutorialRunner />
+      </MemoryRouter>
+    )
+    startTour("framed-pane")
+    expect(await screen.findByText("Content in-pane")).toBeInTheDocument()
+    // Joyride's scroll-parent fix sets overflow: initial on a pane that is
+    // not scrolling yet, which breaks the pane once its content grows.
+    expect(screen.getByTestId("pane").style.overflow).toBe("auto")
+  })
+})

@@ -158,9 +158,9 @@ class TestChromaDBManagerInit:
         with cdl._TEST_STUB_CLIENTS_LOCK:
             assert expected_key in cdl._TEST_STUB_CLIENTS
 
-    def test_init_reuses_cached_persistent_client_while_managers_overlap(self):
+    def test_init_shares_inert_client_handles_without_retaining_live_sdk(self):
 
-        """Concurrent managers for the same path should share both client and lock."""
+        """Managers share coordination, but no SDK lives beyond its store lock."""
         import tempfile
         from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
 
@@ -194,10 +194,12 @@ class TestChromaDBManagerInit:
                     },
                 },
             )
-            assert manager2.client is persistent_client
+            assert manager2.client is manager1.client
             assert manager1._lock is manager2._lock
+            assert manager1._lock.sdk is None
+            persistent_client.close.assert_called_once()
             manager1.close()
-            persistent_client.close.assert_not_called()
+            persistent_client.close.assert_called_once()
             manager2.close()
 
         assert mock_persistent.call_count == 1

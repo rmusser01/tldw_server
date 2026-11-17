@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError, UserNotFoundError
 from tldw_Server_API.app.core.AuthNZ.mfa_service import get_mfa_service
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
-from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import (
     AuthnzUserProviderSecretsRepo,
 )
 from tldw_Server_API.app.core.UserProfiles.limits_precedence import LIMITS_PREFIX, most_generous_values
@@ -458,8 +458,16 @@ class UserProfileService:
             quotas["storage_quota_mb"] = live_quota
             if live_used is not None:
                 quotas["storage_used_mb"] = float(live_used)
+            quotas['legacy_storage_used_mb'] = storage_info.get('legacy_mb')
+            quotas['native_storage_used_mb'] = storage_info.get('native_mb')
         except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Live storage quotas unavailable for user {}: {}", user_id, exc)
+            # A scan failure may fall back to the stored legacy counter, never to an empty native ledger.
+            storage_service = await get_storage_service()
+            native = await storage_service.native_usage(user_id)
+            quotas['storage_used_mb'] = float(user.get('legacy_storage_used_mb', user.get('storage_used_mb', 0.0)) or 0.0) + native['bytes'] / 1048576
+            quotas['legacy_storage_used_mb'] = float(user.get('legacy_storage_used_mb', user.get('storage_used_mb', 0.0)) or 0.0)
+            quotas['native_storage_used_mb'] = native['bytes'] / 1048576
 
         try:
             from tldw_Server_API.app.core.Usage.audio_quota import (
@@ -537,6 +545,13 @@ class UserProfileService:
             }
         except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Prompt Studio quotas unavailable for user {}: {}", user_id, exc)
+
+        try:
+            from tldw_Server_API.app.core.Usage.quota_checks import llm_quota_summary
+
+            quotas["llm"] = await llm_quota_summary(user_id)
+        except Exception as exc:  # noqa: BLE001 - one unavailable block must not fail the quotas section
+            logger.debug("LLM quotas unavailable for user {}: {}", user_id, exc)
 
         return quotas
 
@@ -769,6 +784,26 @@ class UserProfileService:
                 lock_user=lock_user,
             )
         return await self._profile_version_gateway.read(user_id)
+
+    async def lock_profile_users(
+        self,
+        *,
+        user_ids: tuple[int, ...],
+        db_conn: Any,
+    ) -> dict[int, datetime]:
+        """Lock profile user rows once in caller-supplied canonical order."""
+        if user_ids != tuple(sorted(set(user_ids))) or any(
+            type(user_id) is not int or user_id <= 0 for user_id in user_ids
+        ):
+            raise ValueError("Profile user locks require sorted unique positive IDs")
+        return {
+            user_id: await self._profile_version_gateway.read_in_transaction(
+                db_conn,
+                user_id,
+                lock_user=True,
+            )
+            for user_id in user_ids
+        }
 
     async def _get_byok_repo(self) -> AuthnzUserProviderSecretsRepo:
         repo = AuthnzUserProviderSecretsRepo(self._db_pool)

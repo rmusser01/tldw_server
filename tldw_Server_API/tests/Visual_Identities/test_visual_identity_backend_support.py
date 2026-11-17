@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.api.v1.endpoints import visual_identities as api
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
 
@@ -49,6 +50,7 @@ def route(request, tmp_path: Path) -> Iterator[Route]:
     assert character is not None
     persona = db.create_persona_profile({"name": "Owned persona", "user_id": "2"})
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(api.router, prefix=PREFIX)
     app.dependency_overrides[api.get_request_user] = lambda: User(
         id=2, username="visual-fixture-owner", roles=["user"], permissions=[]

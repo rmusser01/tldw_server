@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -424,3 +425,113 @@ async def test_worker_errors_never_echo_source_url_credentials(
     assert "token=secret" not in message
     assert not final_path.exists()
     assert list(final_path.parent.glob("*.partial")) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_number", [errno.ENOSPC, errno.EDQUOT], ids=["disk-full", "quota-exceeded"])
+@pytest.mark.parametrize("failure_phase", ["prepare", "write", "promote"])
+async def test_worker_model_storage_failure_is_terminal_and_preserves_existing_asset(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    error_number: int,
+    failure_phase: str,
+) -> None:
+    from tldw_Server_API.app.services import llamacpp_acquisition_jobs_worker as worker
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    final_path = models_dir / "model.gguf"
+    final_path.write_bytes(b"retained model")
+    partial = worker.acquisition_service.partial_download_path(final_path, "41")
+    _allow_destination(monkeypatch, worker, models_dir)
+    _allow_example_dot_com_dns(monkeypatch, worker)
+    registered = []
+    monkeypatch.setattr(worker.acquisition_service, "register_completed_download", lambda path: registered.append(path))
+    opened, replaced, mkdir = Path.open, Path.replace, Path.mkdir
+    stream_calls = []
+
+    class FailingWrite:
+        def __init__(self, handle):
+            self.handle = handle
+            self.writes = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def write(self, data):
+            self.writes += 1
+            if self.writes == 2:
+                raise OSError(error_number, "bounded storage failure")
+            return self.handle.write(data)
+
+    def fault_open(path, mode="r", *args, **kwargs):
+        handle = opened(path, mode, *args, **kwargs)
+        return FailingWrite(handle) if path == partial and mode == "wb" else handle
+
+    def fault_replace(path, target):
+        if path == partial:
+            raise OSError(error_number, "bounded storage failure")
+        return replaced(path, target)
+
+    def fault_mkdir(path, *args, **kwargs):
+        if path == models_dir:
+            raise OSError(error_number, "bounded storage failure")
+        return mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        Path,
+        {"prepare": "mkdir", "write": "open", "promote": "replace"}[failure_phase],
+        {"prepare": fault_mkdir, "write": fault_open, "promote": fault_replace}[failure_phase],
+    )
+
+    def stream_factory(_url, *, timeout_seconds):
+        stream_calls.append(timeout_seconds)
+        return _FakeDownloadStream([b"a", b"b"], total_bytes=2)
+
+    with pytest.raises(worker.LlamaCppAcquisitionJobError, match="[Ii]nsufficient.*storage") as caught:
+        await worker.process_llamacpp_acquisition_job(
+            _job_for(final_path, payload_overrides={"overwrite": True}),
+            job_manager=_RecordingJobManager(),
+            stream_factory=stream_factory,
+        )
+    assert (
+        caught.value.retryable,
+        caught.value.failure_code,
+        partial.exists(),
+        final_path.read_bytes(),
+        registered,
+        len(stream_calls),
+    ) == (False, "insufficient_storage", False, b"retained model", [], 0 if failure_phase == "prepare" else 1)  # nosec B101 -- storage failure preserves the old asset and bounds work.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wrapped", [False, True], ids=["raw-os-error", "download-error"])
+async def test_worker_preserves_non_storage_error_retry_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    wrapped: bool,
+) -> None:
+    from tldw_Server_API.app.services import llamacpp_acquisition_jobs_worker as worker
+
+    final_path = tmp_path / "models" / "model.gguf"
+    final_path.parent.mkdir()
+    _allow_destination(monkeypatch, worker, final_path.parent)
+    _allow_example_dot_com_dns(monkeypatch, worker)
+    original = OSError(errno.EIO, "unrelated I/O failure")
+
+    async def fail_download(*args, **kwargs):
+        if wrapped:
+            raise worker.acquisition_service.LlamaCppDownloadError("Download failed.") from original
+        raise original
+
+    monkeypatch.setattr(worker.acquisition_service, "download_to_partial", fail_download)
+    expected = worker.LlamaCppAcquisitionJobError if wrapped else OSError
+    with pytest.raises(expected) as caught:
+        await worker.process_llamacpp_acquisition_job(_job_for(final_path), job_manager=_RecordingJobManager())
+    if wrapped:
+        assert (caught.value.retryable, caught.value.failure_code) == (True, "download_failed")  # nosec B101 -- retain ordinary download retries.
+    else:
+        assert caught.value is original  # nosec B101 -- unrelated raw errors keep their existing SDK behavior.

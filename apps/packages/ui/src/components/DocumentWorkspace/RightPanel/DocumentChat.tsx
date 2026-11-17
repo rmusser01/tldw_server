@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, Suspense, useEffect } from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
 import { Empty, Spin, Switch, Tooltip, Popconfirm } from "antd"
 import {
@@ -96,7 +97,7 @@ export const DocumentChat: React.FC = () => {
   // Scroll to bottom when new messages arrive
   React.useEffect(() => {
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
+      messagesEndRef.current.scrollIntoView({ behavior: smoothScrollBehavior() })
     }
   }, [messages.length])
 
@@ -254,7 +255,7 @@ export const DocumentChat: React.FC = () => {
         </div>
       )}
 
-      {/* Show suggestions button when collapsed */}
+      {/* Chat header with clear button */}
       {hasMessages && suggestionsCollapsed && (
         <div className="flex justify-center border-b border-border py-1">
           <button
@@ -268,7 +269,7 @@ export const DocumentChat: React.FC = () => {
         </div>
       )}
 
-      {/* Messages area */}
+      {/* Chat header with clear button */}
       <div className="flex-1 overflow-y-auto">
         {showSuggestions && (
           <SuggestedQuestions
@@ -301,11 +302,18 @@ export const DocumentChat: React.FC = () => {
                     onRegenerate={regenerateLastMessage}
                     isProcessing={isProcessing}
                     sources={message.sources}
-                    onEditFormSubmit={(value, isSend) => {
-                      editMessage(index, value, !message.isBot, isSend)
+                    onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
+                      return editMessage(
+                        index,
+                        value,
+                        !message.isBot,
+                        isSend,
+                        editIsCurrent,
+                        editOriginIsCurrent
+                      )
                     }}
                     onDeleteMessage={() => {
-                      deleteMessage(index)
+                      return deleteMessage(index)
                     }}
                     isTTSEnabled={ttsEnabled}
                     generationInfo={message?.generationInfo}
@@ -335,15 +343,22 @@ export const DocumentChat: React.FC = () => {
                     toolResults={message?.toolResults}
                   />
                   {message.isBot && message.sources && message.sources.length > 0 && (
-                    <div className="ml-10 mt-1 flex items-center gap-1 text-xs text-text-muted">
-                      <Tooltip title={t("option:documentWorkspace.usesDocumentContext", "Uses document context")}>
-                        <span className="flex items-center gap-1">
-                          <BookOpen className="h-3 w-3" />
-                          <span>{message.sources.length} source{message.sources.length !== 1 ? "s" : ""}</span>
-                        </span>
-                      </Tooltip>
-                    </div>
-                  )}
+                      <div className="ml-10 mt-1 flex items-center gap-1 text-xs text-text-muted">
+                        <Tooltip
+                          title={t(
+                            "option:documentWorkspace.usesDocumentContext",
+                            "Uses document context"
+                          )}>
+                          <span className="flex items-center gap-1">
+                            <BookOpen className="h-3 w-3" />
+                            <span>
+                              {message.sources.length} source
+                              {message.sources.length !== 1 ? "s" : ""}
+                            </span>
+                          </span>
+                        </Tooltip>
+                      </div>
+                    )}
                 </div>
               ))}
             </Suspense>
@@ -364,7 +379,7 @@ export const DocumentChat: React.FC = () => {
         )}
       </div>
 
-      {/* Input area */}
+      {/* Chat header with clear button */}
       <div className="border-t border-border p-3">
         <div className="mb-2 flex items-center justify-between text-xs text-text-muted">
           <div className="flex items-center gap-2">
@@ -444,20 +459,20 @@ export const DocumentChat: React.FC = () => {
         </div>
 
         {/* Document scope indicator */}
-      <div className="mt-2 flex items-center gap-1 text-xs text-text-subtle">
-        <BookOpen className="h-3 w-3" />
-        <span>
-          {ragEnabled
-            ? t(
-                "option:documentWorkspace.scopedToDocument",
-                "Answers scoped to this document"
-              )
-            : t(
-                "option:documentWorkspace.ragDisabled",
-                "Document content is not being used. Enable to get answers based on this document."
-              )}
-        </span>
-      </div>
+        <div className="mt-2 flex items-center gap-1 text-xs text-text-subtle">
+          <BookOpen className="h-3 w-3" />
+          <span>
+            {ragEnabled
+              ? t(
+                  "option:documentWorkspace.scopedToDocument",
+                  "Answers scoped to this document"
+                )
+              : t(
+                  "option:documentWorkspace.ragDisabled",
+                  "Document content is not being used. Enable to get answers based on this document."
+                )}
+          </span>
+        </div>
       </div>
     </div>
   )

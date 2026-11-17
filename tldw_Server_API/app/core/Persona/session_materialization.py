@@ -295,6 +295,30 @@ def get_session_preferences_with_activity_surface(
     return dict(updated_preferences), activity_surface
 
 
+def persona_session_transcript_snapshot(
+    db: CharactersRAGDB,
+    *,
+    session_manager: SessionManager,
+    session_id: str,
+    user_id: str,
+    limit_turns: int | None = None,
+    renew: bool = False,
+) -> dict[str, Any] | None:
+    """Prefer durable authority, including retired headers, over a local snapshot."""
+    local = session_manager.get_session_snapshot(session_id=session_id, user_id=user_id)
+    durable = db.persona_transcript_store.get_persona_transcript(session_id, user_id=user_id, renew=renew)
+    if durable is None:
+        snapshot = local
+    else:
+        session_manager.publish_transcript(user_id=user_id, snapshot=durable, touch=renew and not durable["retired"])
+        snapshot = {**(local or {}), **durable}
+    if snapshot is None:
+        return None
+    if limit_turns is not None and limit_turns > 0:
+        snapshot["turns"] = snapshot["turns"][-limit_turns:]
+    return snapshot
+
+
 def materialize_persona_session(
     db: CharactersRAGDB,
     *,
@@ -307,6 +331,17 @@ def materialize_persona_session(
 ) -> MaterializedPersonaSession:
     requested_persona_id = str(persona_id or "").strip() or DEFAULT_PERSONA_ID
     requested_activity_surface = normalize_persona_activity_surface(surface)
+    local_session = None
+    session_row: dict[str, Any] | None = None
+    if resume_session_id:
+        local_session = session_manager.get(resume_session_id)
+        if local_session is not None and str(local_session.user_id) != user_id:
+            raise PermissionError("session ownership mismatch")
+        session_row = db.get_persona_session(resume_session_id, user_id=user_id, include_deleted=False)
+        # Only an existing owned temporary runtime may acquire its first durable parent.
+        if session_row is None and (local_session is None or local_session.persisted):
+            raise PermissionError("session ownership mismatch")
+
     profile = db.get_persona_profile(requested_persona_id, user_id=user_id, include_deleted=False)
     if profile is None:
         logger.info(
@@ -318,10 +353,7 @@ def materialize_persona_session(
     resolved_persona_id = str(profile.get("id") or DEFAULT_PERSONA_ID)
 
     if resume_session_id:
-        local_session = session_manager.get(resume_session_id)
         if local_session is not None:
-            if str(local_session.user_id) != user_id:
-                raise PermissionError("session ownership mismatch")
             if str(local_session.persona_id) != resolved_persona_id:
                 raise ConflictError(
                     "resume_session_id is bound to a different persona_id.",
@@ -329,9 +361,7 @@ def materialize_persona_session(
                     entity_id=str(resume_session_id),
                 )
 
-    session_row: dict[str, Any] | None = None
     if resume_session_id:
-        session_row = db.get_persona_session(resume_session_id, user_id=user_id, include_deleted=False)
         if session_row is not None:
             bound_persona_id = str(session_row.get("persona_id") or "").strip()
             if bound_persona_id and bound_persona_id != resolved_persona_id:
@@ -394,6 +424,10 @@ def materialize_persona_session(
             user_id=user_id,
             persona_id=resolved_persona_id,
             resume_session_id=session_id,
+            persisted=True,
+        )
+        persona_session_transcript_snapshot(
+            db, session_manager=session_manager, session_id=session_id, user_id=user_id, renew=True,
         )
         if created_new_session or surface is not None:
             session_manager.update_preferences(

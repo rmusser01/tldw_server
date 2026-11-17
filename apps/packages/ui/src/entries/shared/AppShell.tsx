@@ -4,7 +4,6 @@ import { StyleProvider } from "@ant-design/cssinjs"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { useTheme } from "@/hooks/useTheme"
 import { PageAssistProvider } from "@/components/Common/PageAssistProvider"
-import { SplashOverlay } from "@/components/Common/SplashScreen"
 import { useSplashScreen } from "@/hooks/useSplashScreen"
 import { FontSizeProvider } from "@/context/FontSizeProvider"
 import { getQueryClient } from "@/services/query-client"
@@ -22,15 +21,21 @@ type AppShellProps = {
   includeAntdApp?: boolean
 }
 
+const SplashOverlay = React.lazy(() =>
+  import("@/components/Common/SplashScreen/SplashOverlay").catch((error) => {
+    console.warn("Unable to load splash screen", error)
+    return { default: () => null }
+  })
+)
+
 const queryClient = getQueryClient()
-const DevLocaleJsonDiagnostics =
-  import.meta.env.DEV
-    ? React.lazy(() =>
-        import("@/components/Common/LocaleJsonDiagnostics").then((module) => ({
-          default: module.LocaleJsonDiagnostics
-        }))
-      )
-    : null
+const DevLocaleJsonDiagnostics = import.meta.env.DEV
+  ? React.lazy(() =>
+      import("@/components/Common/LocaleJsonDiagnostics").then((module) => ({
+        default: module.LocaleJsonDiagnostics
+      }))
+    )
+  : null
 
 export const AppShell: React.FC<AppShellProps> = ({
   router: Router,
@@ -90,7 +95,8 @@ export const AppShell: React.FC<AppShellProps> = ({
       splash.show({ force: detail?.force === true })
     }
     window.addEventListener(SPLASH_TRIGGER_EVENT, onSplashTrigger)
-    return () => window.removeEventListener(SPLASH_TRIGGER_EVENT, onSplashTrigger)
+    return () =>
+      window.removeEventListener(SPLASH_TRIGGER_EVENT, onSplashTrigger)
   }, [splash.show])
 
   const content = (
@@ -124,15 +130,16 @@ export const AppShell: React.FC<AppShellProps> = ({
             description={emptyDescription}
           />
         )}
-        direction={direction}
-      >
+        direction={direction}>
         {includeAntdApp ? <AntdApp>{content}</AntdApp> : content}
         {splash.visible && splash.card ? (
-          <SplashOverlay
-            card={splash.card}
-            message={splash.message}
-            onDismiss={splash.dismiss}
-          />
+          <React.Suspense fallback={null}>
+            <SplashOverlay
+              card={splash.card}
+              message={splash.message}
+              onDismiss={splash.dismiss}
+            />
+          </React.Suspense>
         ) : null}
         <div id="tldw-portal-root" ref={portalRootRef} />
       </ConfigProvider>

@@ -10,14 +10,39 @@ class KnowledgeFlashcardError(ValueError):
     """The selected public turn cannot supply a complete flashcard."""
 
 
+_REASONING_TAG = re.compile(r"<(/?)(?:think|reason|reasoning|thought)>", re.IGNORECASE)
+
+
+def split_reasoning_text(value: str) -> tuple[str, str]:
+    """Separate answer and thinking text, preserving characters in each channel."""
+    answer: list[str] = []
+    thinking: list[str] = []
+    depth = start = 0
+    for tag in _REASONING_TAG.finditer(value):
+        if depth == 0:
+            answer.append(value[start:tag.start()])
+        if tag[1]:
+            if depth == 1:
+                thinking.append(value[start:tag.start()])
+            depth = max(0, depth - 1)
+            if depth == 0:
+                start = tag.end()
+        else:
+            if depth == 0:
+                start = tag.end()
+            depth += 1
+    (thinking if depth else answer).append(value[start:])
+    return "".join(answer), "".join(thinking)
+
+
+def strip_reasoning_blocks(value: str) -> str:
+    """Remove tagged thinking without changing any visible answer characters."""
+    return split_reasoning_text(value)[0]
+
+
 def visible_knowledge_text(value: str) -> str:
     """Exclude closed and unfinished model reasoning blocks from saved content."""
-    return re.sub(
-        r"<(think|reason|reasoning|thought)>.*?(?:</\1>|$)",
-        "",
-        value,
-        flags=re.IGNORECASE | re.DOTALL,
-    ).strip()
+    return strip_reasoning_blocks(value).strip()
 
 
 def _public_turn_text(value: Any) -> str:

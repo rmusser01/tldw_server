@@ -147,6 +147,17 @@ def test_refresh_output_matches_tracked_published_files(tmp_path: Path) -> None:
     assert set(_tree_manifest(destination)) == _tracked_published_files()
 
 
+def test_refresh_publishes_claims_cluster_runbook_without_other_operations(tmp_path: Path) -> None:
+    destination = tmp_path / "published"
+    relative_path = Path("Operations/Claims_Cluster_Rebuild_Jobs.md")
+
+    result = _refresh(destination=destination)
+
+    assert result.returncode == 0, result.stderr
+    assert (destination / relative_path).read_bytes() == (REPO_ROOT / "Docs" / relative_path).read_bytes()
+    assert set(_tree_manifest(destination / "Operations")) == {relative_path.name}
+
+
 def test_only_reviewed_published_json_files_are_unignored_and_tracked() -> None:
     tracked = {f"Docs/Published/{path}" for path in _tracked_published_files()}
 

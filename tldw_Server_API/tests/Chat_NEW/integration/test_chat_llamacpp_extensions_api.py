@@ -51,7 +51,7 @@ def test_chat_completions_resolves_saved_grammar_into_llamacpp_payload(
         return _fake_chat_response(content="Grammar resolved.")
 
     test_client.app.dependency_overrides[get_chacha_db_for_user] = override_get_db
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_provider_call)
 
     try:
         response = test_client.post(
@@ -125,8 +125,8 @@ def test_chat_completions_refresh_params_reloads_saved_grammar_for_retry(
 
     test_client.app.dependency_overrides[get_chacha_db_for_user] = override_get_db
     monkeypatch.setattr(chacha_db, "get_chat_grammar", counting_get_chat_grammar)
-    monkeypatch.setattr(chat_endpoint_module, "execute_non_stream_call", _fake_execute_non_stream_call)
-    monkeypatch.setattr(chat_endpoint_module, "get_provider_manager", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call", _fake_execute_non_stream_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", lambda: None)
 
     try:
         response = test_client.post(

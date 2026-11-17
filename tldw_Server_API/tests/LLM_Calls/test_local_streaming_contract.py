@@ -1,6 +1,7 @@
 import json
 from typing import Iterable, Union
 
+import httpx
 import pytest
 
 from tldw_Server_API.app.core.LLM_Calls.providers.local_adapters import (
@@ -110,3 +111,51 @@ def test_local_streaming_normalizes_sse_and_closes_client():
     assert chunks[-1] == "data: [DONE]\n\n"
     assert dummy_response.close_calls >= 1
     assert client_closed["called"] is False
+
+
+class _RejectingResponse(DummyResponse):
+    def __init__(self, status_code: int):
+        super().__init__([])
+        request = httpx.Request("POST", "http://fake.local/v1/chat/completions")
+        self._error = httpx.HTTPStatusError(
+            "upstream body must not reach the frame",
+            request=request,
+            response=httpx.Response(status_code, request=request),
+        )
+
+    def raise_for_status(self) -> None:
+        raise self._error
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("status_code", "code"),
+    [
+        (401, "provider_authentication_failed"),
+        (403, "provider_authentication_failed"),
+        (429, "provider_unavailable"),
+        (404, "provider_unavailable"),
+        (500, "provider_unavailable"),
+    ],
+)
+def test_local_stream_error_frame_code_follows_the_upstream_status(status_code, code):
+    def streamer(**_kwargs):
+        return DummyStreamContext(_RejectingResponse(status_code))
+
+    chunks = list(
+        _chat_with_openai_compatible_local_server(
+            api_base_url="http://fake.local",
+            model_name="local-model",
+            input_data=[{"role": "user", "content": "Ping"}],
+            streaming=True,
+            provider_name="TestLocalProvider",
+            http_streamer=streamer,
+            configured_endpoint_scope=ConfiguredEndpointScope.from_url("http://fake.local"),
+        )
+    )
+
+    assert len(chunks) == 2
+    frame = json.loads(chunks[0][len("data: ") : -2])
+    assert frame["error"]["code"] == code
+    assert "upstream body" not in chunks[0]
+    assert chunks[1] == "data: [DONE]\n\n"

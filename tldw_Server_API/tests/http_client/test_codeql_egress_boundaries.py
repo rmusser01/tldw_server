@@ -18,9 +18,6 @@ pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 @pytest.fixture
 def production_egress(monkeypatch):
     """Use the real production policy; replace DNS and transport I/O only."""
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
-    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
-    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     # Let private-address and DNS checks decide, independently of CI host policy.
     monkeypatch.setenv(

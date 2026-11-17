@@ -203,6 +203,21 @@ describe("ChatbooksPlaygroundPage accessibility", () => {
         name: "Conflict resolution",
       }),
     ).toBeInTheDocument();
+    const conflict = within(importPanel).getByRole("combobox", {
+      name: "Conflict resolution",
+    });
+    expect(conflict).toHaveValue("skip");
+    expect(
+      within(conflict).getAllByRole("option").map((option) => ({
+        value: (option as HTMLOptionElement).value,
+        label: option.textContent,
+      })),
+    ).toEqual([
+      { value: "skip", label: "Skip" },
+      { value: "rename", label: "Rename" },
+    ]);
+    fireEvent.change(conflict, { target: { value: "rename" } });
+    expect(conflict).toHaveValue("rename");
     expect(
       within(importPanel).getByRole("switch", { name: "Prefix imported" }),
     ).toBeInTheDocument();

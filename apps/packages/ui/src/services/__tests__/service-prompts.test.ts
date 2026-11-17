@@ -712,6 +712,14 @@ describe("Service Prompt migration and runtime snapshots", () => {
     })
   })
 
+  it("keeps the captured draft account when initial Save makes manual authentication explicit", async () => {
+    const captured = await resolveServicePromptScope()
+    mocks.ensureConfig.mockResolvedValue({ ...config, authSource: "manual" })
+    const snapshot = await loadServicePromptSnapshot([], { requestScope: captured })
+    expect(snapshot.scopeInvalidatedSignal.aborted).toBe(false)
+    snapshot.release()
+  })
+
   it("does not resolve a user for single-user scope", async () => {
     mocks.ensureConfig.mockResolvedValue({
       ...config,

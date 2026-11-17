@@ -17,9 +17,6 @@ from loguru import logger
 from tldw_Server_API.app.core import http_client
 from tldw_Server_API.app.core.exceptions import NetworkError
 from tldw_Server_API.app.core.Security.egress import public_url_policy_active
-from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
-    DEFAULT_MAX_ARTICLE_BYTES as _PUBLIC_CAPTURE_MAX_PROBE_BYTES,
-)
 from tldw_Server_API.app.core.Web_Scraping.preflight.context import (
     PreflightDeadlineExceeded,
     PreflightRuntimeControls,
@@ -472,6 +469,13 @@ def _is_timeout_error(exc: Exception) -> bool:
     return isinstance(code, int) and not isinstance(code, bool) and code == 28
 
 
+def _public_response_limit() -> int:
+    """Use the canonical article ceiling for public preflight response accumulation."""
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import DEFAULT_MAX_ARTICLE_BYTES
+
+    return DEFAULT_MAX_ARTICLE_BYTES
+
+
 class HttpxProbeTransport:
     """Single-attempt transport over the central DNS-pinned async boundary."""
 
@@ -493,7 +497,7 @@ class HttpxProbeTransport:
                 proxies=proxies,
                 retry=http_client.RetryPolicy(attempts=1),
                 sensitive_observability=True,
-                **({"max_response_bytes": _PUBLIC_CAPTURE_MAX_PROBE_BYTES} if public_capture else {}),
+                **({"max_response_bytes": _public_response_limit()} if public_capture else {}),
             )
         except asyncio.CancelledError:
             await _close_resource(client, label="client")
@@ -530,32 +534,10 @@ def _curl_resolve_entries(
     validated = _validated_absolute_url(url)
     if validated is None:
         raise ProbeError("policy_error", "Probe destination was denied.")
-    _, _, host, port = validated
     try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        pass
-    else:
-        return []
-
-    addresses: list[str] = []
-    for raw_ip in resolved_ips:
-        if not isinstance(raw_ip, str) or raw_ip != raw_ip.strip() or "%" in raw_ip:
-            raise ProbeError("policy_error", "Probe destination was denied.")
-        try:
-            approved_ip = ipaddress.ip_address(raw_ip)
-        except ValueError:
-            raise ProbeError(
-                "policy_error",
-                "Probe destination was denied.",
-            ) from None
-        address = approved_ip.compressed
-        if approved_ip.version == 6:
-            address = f"[{address}]"
-        addresses.append(address)
-    if not addresses:
-        raise ProbeError("policy_error", "Probe destination was denied.")
-    return [f"{host}:{port}:{','.join(addresses)}"]
+        return http_client._curl_resolve_entries(url, resolved_ips)
+    except (ValueError, http_client.EgressPolicyError):
+        raise ProbeError("policy_error", "Probe destination was denied.") from None
 
 
 class CurlCffiProbeTransport:
@@ -573,7 +555,8 @@ class CurlCffiProbeTransport:
         self._session_factory = _CurlAsyncSession if session_factory is _DEFAULT_SESSION_FACTORY else session_factory
 
     async def send(self, request: ProbeHttpRequest) -> Any:
-        if public_url_policy_active():
+        public_capture = public_url_policy_active()
+        if public_capture and not all(hasattr(_CurlOpt, name) for name in ("PROXY", "NETRC", "RESOLVE")):
             raise ProbeUnavailable()
         if self._session_factory is None or _CurlOpt is None:
             raise ProbeUnavailable(error_code="missing_dependency")
@@ -594,22 +577,44 @@ class CurlCffiProbeTransport:
             decision.resolved_ips,
         )
         session_kwargs: dict[str, Any] = {"impersonate": request.impersonate}
+        request_options: dict[str, Any] = {}
+        if public_capture:
+            session_kwargs.update(http_client._public_curl_session_options())
+            collector = http_client._BoundedBodyCollector(_public_response_limit())
+            request_options.update(content_callback=collector, accept_encoding=None)
         if resolve_entries:
-            session_kwargs["curl_options"] = {_CurlOpt.RESOLVE: resolve_entries}
+            session_kwargs.setdefault("curl_options", {})[_CurlOpt.RESOLVE] = resolve_entries
         session = self._session_factory(**session_kwargs)
+        response = None
         try:
             response = await session.get(
                 request.url,
-                headers=dict(request.headers),
-                cookies=dict(request.cookies),
+                headers=(
+                    http_client._force_identity_accept_encoding(dict(request.headers))
+                    if public_capture
+                    else dict(request.headers)
+                ),
+                cookies={} if public_capture else dict(request.cookies),
                 timeout=request.timeout_s,
                 allow_redirects=False,
                 proxies=proxies,
+                **request_options,
             )
+            if public_capture:
+                if 200 <= response.status_code < 300:
+                    if http_client._uses_compressed_content_encoding(response.headers):
+                        raise ValueError("Compressed responses are not allowed with max_response_bytes")
+                    if collector.overflow:
+                        raise ValueError("Response exceeds max_response_bytes limit")
+                    response.content = collector.body
+                else:
+                    response.content = b""
         except asyncio.CancelledError:
             await _close_resource(session, label="session")
             raise
         except Exception:
+            if response is not None:
+                await _close_resource(response, label="response")
             await _close_resource(session, label="session")
             raise
         return _OwnedResponse(response, session)

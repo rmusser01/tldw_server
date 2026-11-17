@@ -15,10 +15,8 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     try:
-        from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-        await reset_db_pool()
         reset_settings()
     except Exception:
         _ = None
@@ -46,7 +44,7 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_workflows_runs_daily_cap_denies_when_exceeded(tmp_path, monkeypatch):
+async def test_workflows_runs_daily_cap_denies_when_exceeded(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "authnz_workflows.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
 
@@ -81,7 +79,7 @@ route_map: {}
 
 
 @pytest.mark.asyncio
-async def test_record_workflow_run_is_idempotent(tmp_path, monkeypatch):
+async def test_record_workflow_run_is_idempotent(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "authnz_workflows_idem.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
 

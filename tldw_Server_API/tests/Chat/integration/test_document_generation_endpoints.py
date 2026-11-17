@@ -99,8 +99,7 @@ def _install_direct_document_runtime(monkeypatch, lifecycle):
 
     monkeypatch.setattr(chat_docs, "ProviderCredentialRuntime", RecordingRuntime)
     monkeypatch.setattr(
-        chat_docs,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _principal: (1, [11], [22], True),
     )
 
@@ -212,7 +211,7 @@ async def test_document_factory_starts_without_default_executor_and_drains_cance
             return "generated"
 
     _install_direct_document_runtime(monkeypatch, lifecycle)
-    monkeypatch.setattr(chat_docs, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL", pool, raising=False)
     loop.set_default_executor(saturated_executor)
     default_blocker = loop.run_in_executor(None, block_default_executor)
     try:
@@ -292,7 +291,7 @@ async def test_document_factory_capacity_rejection_is_bounded_and_pre_dispatch(
             return []
 
     _install_direct_document_runtime(monkeypatch, lifecycle)
-    monkeypatch.setattr(chat_docs, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL", pool, raising=False)
     pool.start(occupy_pool, name="occupied-document-worker")
     try:
         await _wait_for_thread_event(occupied)
@@ -358,8 +357,7 @@ async def test_document_stream_missing_credentials_fails_closed_in_test_mode(
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setattr(chat_docs, "ProviderCredentialRuntime", MissingCredentialRuntime)
     monkeypatch.setattr(
-        chat_docs,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _principal: (1, [], [], False),
     )
 
@@ -618,7 +616,7 @@ async def test_document_sync_stream_disconnect_retains_distinct_late_iterator_fo
 
     _install_direct_document_runtime(monkeypatch, lifecycle)
     monkeypatch.delenv("STREAMS_UNIFIED", raising=False)
-    monkeypatch.setattr(chat_docs, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL", pool, raising=False)
     response = await chat_docs.generate_document(
         request=GenerateDocumentRequest(
             **_make_payload(provider="ollama", model="model-a", api_key=None, stream=True)
@@ -659,7 +657,7 @@ async def test_document_sync_stream_uses_bounded_next_and_reserved_close_when_ex
 ):
     """Disconnect drains direct next/close workers without the loop executor."""
     from tldw_Server_API.app.api.v1.endpoints import chat_documents as chat_docs
-    from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 
     lifecycle = []
     default_entered = threading.Event()
@@ -710,7 +708,7 @@ async def test_document_sync_stream_uses_bounded_next_and_reserved_close_when_ex
 
     _install_direct_document_runtime(monkeypatch, lifecycle)
     monkeypatch.delenv("STREAMS_UNIFIED", raising=False)
-    monkeypatch.setattr(chat_docs, "SYNC_ADAPTER_CALL_POOL", sync_pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL", sync_pool, raising=False)
     monkeypatch.setattr(
         bounded_daemon_module,
         "STREAM_CLEANUP_DAEMON_POOL",
@@ -776,6 +774,57 @@ async def test_document_sync_stream_uses_bounded_next_and_reserved_close_when_ex
     assert cleanup_pool.active_count == 0
     assert lifecycle.count("mark_used") == 1
     assert lifecycle.count("close_start") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream_mode", ["classic", "unified"])
+async def test_document_stream_does_not_send_an_unrequested_usage_chunk(monkeypatch, stream_mode):
+    """OpenAI's usage chunk (empty choices) is dropped: this request cannot ask for it (TASK-13951)."""
+    from tldw_Server_API.app.api.v1.endpoints import chat_documents as chat_docs
+
+    lifecycle = []
+    persisted = []
+    content = 'data: {"choices":[{"index":0,"delta":{"content":"Doc"}}],"usage":null}'
+    usage_chunk = 'data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":1,"total_tokens":10}}'
+    # Not OpenAI's usage chunk, so each one passes as before.
+    others = ["data: plain text", 'data: {"choices": [], "usage"', 'data: {"choices":[],"usage":null}']
+
+    class StreamingService:
+        def __init__(self, _db):
+            return None
+
+        def generate_document(self, **_kwargs):
+            return iter([f"{line}\n\n" for line in (content, usage_chunk, *others, "data: [DONE]")])
+
+        def record_streamed_document(self, **kwargs):
+            persisted.append(kwargs["content"])
+
+    _install_direct_document_runtime(monkeypatch, lifecycle)
+    if stream_mode == "unified":
+        monkeypatch.setenv("STREAMS_UNIFIED", "1")
+    else:
+        monkeypatch.delenv("STREAMS_UNIFIED", raising=False)
+
+    response = await chat_docs.generate_document(
+        request=GenerateDocumentRequest(
+            **_make_payload(provider="ollama", model="model-a", api_key=None, stream=True)
+        ),
+        http_request=_direct_request(),
+        db=object(),
+        service_cls=StreamingService,
+        principal=AuthPrincipal(kind="user", user_id=1),
+    )
+    wire = "".join(
+        [
+            chunk.decode() if isinstance(chunk, (bytes, bytearray)) else str(chunk)
+            async for chunk in response.body_iterator
+        ]
+    )
+
+    assert '"prompt_tokens":9' not in wire
+    assert [line for line in (content, *others) if line not in wire] == []
+    (document,) = persisted
+    assert '"prompt_tokens":9' not in document
 
 
 @pytest.mark.asyncio
@@ -994,7 +1043,7 @@ async def test_document_cancelled_next_classifies_late_result_semantically(
     success_state = {"successful": False}
     resource_holder = {}
     pool = BoundedDaemonPool(2)
-    monkeypatch.setattr(chat_docs, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL", pool, raising=False)
 
     def late_value():
         if late_kind == "clean_exhaustion":
@@ -1115,8 +1164,7 @@ async def test_document_bedrock_auth_contract_distinguishes_default_chain_from_a
 
     monkeypatch.setattr(chat_docs, "ProviderCredentialRuntime", BedrockRuntime)
     monkeypatch.setattr(
-        chat_docs,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _principal: (1, [], [], False),
     )
 
@@ -1279,6 +1327,103 @@ def test_document_generate_bubbles_service_error(authenticated_client):
     assert response.json() == {"detail": "No messages found for conversation chat-42"}
     response.close()
     assert FailingStubService.record_calls == 0
+
+
+def test_document_generate_refuses_an_over_quota_user_before_generation(authenticated_client, monkeypatch):
+    """An over-quota user gets the 402 for a sync and an async request, and the service never generates."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    class RecordingStubService:
+        generate_calls = 0
+
+        def __init__(self, db):
+            self._db = db
+
+        def generate_document(self, *args, **kwargs):
+            RecordingStubService.generate_calls += 1
+            return {"success": True, "content": "unused", "metadata": {}}
+
+        def get_generated_documents(self, *args, **kwargs):
+            return []
+
+        def record_streamed_document(self, *args, **kwargs):
+            return None
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: RecordingStubService
+    RecordingStubService.generate_calls = 0
+    refuse_llm_work(monkeypatch)
+
+    for payload in (_make_payload(), {**_make_payload(), "async_generation": True}):
+        response = authenticated_client.post("/api/v1/chat/documents/generate", json=payload)
+        assert_llm_quota_402(response)
+        response.close()
+    assert RecordingStubService.generate_calls == 0
+
+
+def test_document_generate_admits_an_over_limit_user_whose_provider_runs_on_their_own_key(
+    authenticated_client, monkeypatch
+):
+    """Past a limit, a document whose provider runs on the user's own key is generated, unmarked (TASK-13956)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    asked: list[str] = []
+    marked: list[bool] = []
+
+    async def own_key(_uid, provider):
+        """Stands in for the lookup answering True for the request's provider (the boundary is under test)."""
+        asked.append(provider)
+        return provider == "openai"
+
+    class OwnKeyRuntime:
+        def __init__(self, **_kwargs):
+            return None
+
+        async def resolve(self, provider, *, model=None):
+            return SimpleNamespace(provider=provider, api_key="sk-own", app_config={}, credentials_resolved=True)
+
+        async def mark_used(self, _handle):
+            return None
+
+        async def close(self):
+            return None
+
+    class OwnKeyStubService:
+        def __init__(self, db):
+            self._db = db
+
+        def generate_document(self, *args, **kwargs):
+            marked.append(current_llm_call_context().prechecked)
+            return "Generated on your own key."
+
+        def get_generated_documents(self, conversation_id=None, document_type=None, **_kwargs):
+            return [
+                {
+                    "id": 1,
+                    "conversation_id": conversation_id,
+                    "title": "Doc",
+                    "content": "Generated on your own key.",
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "generation_time_ms": 1,
+                    "created_at": datetime.datetime.now(datetime.timezone.utc),
+                }
+            ]
+
+    from tldw_Server_API.app.api.v1.endpoints import chat_documents as chat_docs
+
+    monkeypatch.setattr(chat_docs, "ProviderCredentialRuntime", OwnKeyRuntime)
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: OwnKeyStubService
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", own_key)
+    refuse_llm_work(monkeypatch)
+
+    response = authenticated_client.post("/api/v1/chat/documents/generate", json=_make_payload())
+
+    assert response.status_code == 200, response.text
+    assert asked == ["openai"]
+    assert marked == [False]
+    response.close()
 
 
 def test_document_generate_maps_input_error_from_service(authenticated_client):
@@ -1785,8 +1930,7 @@ def test_document_generate_keeps_static_snapshot_at_service_boundary(
     authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: SnapshotService
     monkeypatch.setattr(chat_docs, "ProviderCredentialRuntime", FakeRuntime)
     monkeypatch.setattr(
-        chat_docs,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _principal: (1, [2], [3], True),
     )
     monkeypatch.setattr(

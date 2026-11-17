@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.endpoints import characters_endpoint as characters
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.integration
@@ -33,6 +34,7 @@ def character_db(request, tmp_path):
 def character_client(character_db):
     """Exercise production routing/serialization with only the owned DB injected."""
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(characters.router, prefix="/characters")
     app.dependency_overrides[characters.get_chacha_db_for_user] = lambda: character_db
     with TestClient(app) as client:
@@ -98,6 +100,7 @@ def test_sqlite_legacy_and_offset_dates_are_explicit_without_storage_changes(tmp
             )
         before = db.get_character_card_by_id(1)
         app = FastAPI()
+        app.add_middleware(ChaChaOperationMiddleware)
         app.include_router(characters.router, prefix="/characters")
         app.dependency_overrides[characters.get_chacha_db_for_user] = lambda: db
         with TestClient(app) as client:

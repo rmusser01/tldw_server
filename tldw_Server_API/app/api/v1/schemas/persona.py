@@ -9,6 +9,10 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, StrictInt, ValidationInfo, field_validator, model_validator
 
+# Core-owned since TASK-13950.15; re-exported for the API layer.
+from tldw_Server_API.app.core.Persona.archetype_schemas import (  # noqa: F401 - re-exported (TASK-13950.15)
+    PersonaConfirmationMode,
+)
 from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
     PersonaVisualRendererSetupStatus,
 )
@@ -16,7 +20,6 @@ from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
     BUDDY_VISUAL_ANIMATION_OUTPUT_IDS,
     BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS,
 )
-
 
 PersonaMode = Literal["session_scoped", "persistent_scoped"]
 PersonaScopeRuleType = Literal["conversation_id", "character_id", "media_id", "media_tag", "note_id"]
@@ -27,7 +30,6 @@ PersonaLiveReusePolicy = Literal["resume_compatible", "create_new"]
 PersonaExemplarKind = Literal["style", "catchphrase", "boundary", "scenario_demo", "tool_behavior"]
 PersonaExemplarSourceType = Literal["manual", "transcript_import", "character_seed", "generated_candidate"]
 PersonaExemplarReviewAction = Literal["approve", "reject"]
-PersonaConfirmationMode = Literal["always", "destructive_only", "never"]
 PersonaWakeBehavior = Literal["one_shot", "continuous", "push_to_talk_after_wake"]
 PersonaSetupStatus = Literal["not_started", "in_progress", "completed"]
 PersonaSetupStep = Literal["archetype", "persona", "voice", "commands", "safety", "test"]

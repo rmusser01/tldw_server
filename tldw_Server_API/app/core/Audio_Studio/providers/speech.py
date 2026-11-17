@@ -5,8 +5,8 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable
 
-from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.Audio_Studio.models import AudioGenerationRequest, AudioGenerationResult
+from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 
 _MIME_BY_FORMAT = {

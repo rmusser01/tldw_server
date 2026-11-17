@@ -1,3 +1,4 @@
+import { readSavedRoleplayPresentation } from "@/services/tldw/roleplay-resume"
 import React from "react"
 import { useStoreMessageOption } from "@/store/option"
 import { useSidepanelChatTabsStore } from "@/store/sidepanel-chat-tabs"
@@ -14,6 +15,7 @@ const METADATA_FAILURE = "Conversation details could not be loaded. Retry before
 const METADATA_WAITING = "Waiting for conversation details before sending queued requests."
 
 export type QueuedDispatchGuard = (() => void) & {
+  isSourceCurrent?: () => boolean
   publishServerChatId: (id: string | null, publish: (id: string | null) => void) => void
   publishHistoryId: (id: string | null, publish: (id: string | null) => void) => void
 }
@@ -81,6 +83,7 @@ export const useSidepanelChatMetadata = (
         const options = { signal: snapshot.scopeSignal, requestScope: snapshot.requestScope }
         const chat = await tldwClient.getChat(serverChatId, options)
         if (!current()) return
+        const savedRoleplay = readSavedRoleplayPresentation(chat)
         const identity = resolveServerChatAssistantIdentity(chat as unknown as Record<string, unknown>)
         const { assistantKind, assistantId, characterId, personaMemoryMode } = identity
         const selectionRevision = getSelectedAssistantOperationRevision()
@@ -89,7 +92,9 @@ export const useSidepanelChatMetadata = (
           const profile = await tldwClient.getPersonaProfile(assistantId, options).catch(() => null)
           selection = personaToAssistantSelection(profile ?? { id: assistantId, name: chat.assistant_name ?? chat.title ?? "Persona" })
         } else if (assistantKind === "character" && assistantId) {
-          const character = await tldwClient.getCharacter(assistantId, options).catch(() => null)
+          const character =
+            savedRoleplay ??
+            (await tldwClient.getCharacter(assistantId, options).catch(() => null))
           selection = characterToAssistantSelection(character ?? { id: assistantId, name: chat.assistant_name ?? chat.title ?? "Assistant" })
         }
         if (!current()) return
@@ -97,6 +102,7 @@ export const useSidepanelChatMetadata = (
           await selectionSetter.current(selection, { isCurrent: current })
           if (!current()) return
         }
+        state.setServerChatRoleplaySetup(savedRoleplay)
         state.setServerChatTitle(String(chat.title || ""))
         state.setServerChatCharacterId(characterId)
         state.setServerChatAssistantKind(assistantKind)
@@ -181,6 +187,7 @@ export const useSidepanelChatMetadata = (
       revision = lifetime.current.revision
     }
     return Object.assign(assertCurrent, {
+      isSourceCurrent: () => { try { assertOwner(); return true } catch { return false } },
       publishServerChatId: (id: string | null, publish: (id: string | null) => void) => {
         publishIdentity("serverChatId", id, publish)
       },

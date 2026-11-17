@@ -131,7 +131,9 @@ describe("actual Flashcards generation private handoff", () => {
       fireEvent.click(screen.getByRole("button", { name: "Study this source" }))
     })
     expect(await screen.findByDisplayValue(studyIntent.title)).toBeVisible()
-    expect(screen.getByText("note · alice-note")).toBeVisible()
+    // NE-08: the drawer names a source by its title.
+    expect(screen.getByTestId("study-pack-source-0")).toHaveTextContent(studyIntent.sourceItems[0].sourceTitle)
+    expect(screen.getByTestId("study-pack-source-0")).toBeVisible()
     expect(screen.queryByRole("button", { name: "Study this source" })).not.toBeInTheDocument()
     expect(screen.getByTestId("location")).not.toHaveTextContent(/Alice|alice-note|study_pack_handoff/)
     expect(failures).not.toHaveBeenCalled()
@@ -169,7 +171,7 @@ describe("actual Flashcards generation private handoff", () => {
       }
     })
     await waitFor(() => expect(screen.queryByDisplayValue(studyIntent.title)).not.toBeInTheDocument())
-    expect(screen.queryByText("note · alice-note")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("study-pack-source-0")).not.toBeInTheDocument()
     expect(screen.getByTestId("location")).not.toHaveTextContent(/Alice|alice-note/)
   })
 
@@ -179,7 +181,7 @@ describe("actual Flashcards generation private handoff", () => {
     mount(route)
     expect(await screen.findByText(/belongs to another account/)).toBeVisible()
     expect(screen.queryByDisplayValue(studyIntent.title)).not.toBeInTheDocument()
-    expect(screen.queryByText("note · alice-note")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("study-pack-source-0")).not.toBeInTheDocument()
   })
 
   it("scrubs an old Study Pack history entry when Bob goes Back and keeps reload empty", async () => {
@@ -195,7 +197,7 @@ describe("actual Flashcards generation private handoff", () => {
     view.unmount()
     mount(cleanRoute)
     await act(async () => {})
-    expect(screen.queryByText("note · alice-note")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("study-pack-source-0")).not.toBeInTheDocument()
   })
 
   it("scrubs both legacy transfer types even when account verification fails", async () => {

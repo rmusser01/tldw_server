@@ -717,14 +717,10 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
           : t("sidepanel:clipper.saveFailed", "The clip could not be saved.")
       )
     } finally {
-      if (
-        !isMountedRef.current ||
-        activeClipIdRef.current !== submittedClipId
-      ) {
-        return
+      if (isMountedRef.current && activeClipIdRef.current === submittedClipId) {
+        setActiveAction(null);
+        setIsSaving(false);
       }
-      setActiveAction(null)
-      setIsSaving(false)
     }
   }
 

@@ -28,6 +28,8 @@ GATES = {
     "coverage-required.yml": "coverage-required",
     "e2e-required.yml": "e2e-required",
     "container-build-check.yml": "container-build-check",
+    # Path-scoped by its `if:` rather than by no-op steps: see test_e2e_critical_skips_only_an_irrelevant_change.
+    "frontend-e2e-tiers.yml": "critical",
 }
 # The gates with a `changes` job. container-build-check builds every image on every run.
 CHANGE_GATED = tuple(name for name in GATES if name != "container-build-check.yml")
@@ -128,7 +130,11 @@ def _evaluate(expression: str, values: dict[str, str], cancelled: bool = False) 
 def test_gate_declares_an_optional_base_sha_dispatch_input(name):
     """Without the input a dispatch compares against HEAD^ and can no-op with nothing tested."""
     inputs = _triggers(name)["workflow_dispatch"]["inputs"]
-    assert set(inputs) == {"base_sha"}
+    if name == "frontend-e2e-tiers.yml":
+        # A dispatch runs its chosen tier whatever changed, so there is no base to compare against.
+        assert set(inputs) == {"tier"}
+        return
+    assert set(inputs) == ({"base_sha", "queue_kick", "wait_run"} if name == "security-required.yml" else {"base_sha"})
     assert inputs["base_sha"]["type"] == "string"
     assert inputs["base_sha"]["required"] is False
 
@@ -150,7 +156,7 @@ def test_no_dispatch_input_is_interpolated_into_a_shell_script(name):
     ("dispatch_base", "event_base", "expected"),
     [
         ("a" * 40, "", "a" * 40),  # queue dispatch: dev's tip
-        ("", "b" * 40, "b" * 40),  # pull_request and workflow_run resolve what they always did
+        ("", "b" * 40, "b" * 40),  # pull_request supplies the base
         ("", "", ""),  # hand dispatch without a base: falls through to the HEAD^ fallback
     ],
 )
@@ -172,8 +178,7 @@ def test_backend_type_check_prefers_the_dispatch_base(dispatch_base, event_base,
 def test_backlog_ratchet_base_prefers_the_dispatch_base():
     step = _step(_gate("backend-required.yml"), "Enforce CI contracts and code ratchets")
     assert step["env"]["BACKLOG_TASK_FORMAT_BASE"] == (
-        "${{ inputs.base_sha || needs.admission.outputs.base_sha || "
-        "github.event.pull_request.base.sha || github.event.before }}"
+        "${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}"
     )
 
 
@@ -225,6 +230,7 @@ class Row(NamedTuple):
     license_passed: str
     changes: str
     cancelled: bool
+    relevant: bool = True  # what `changes` found, read only by E2E Critical's path scope
 
     @property
     def admitted(self) -> bool:
@@ -246,7 +252,20 @@ class Row(NamedTuple):
             "needs.await_license.result": self.awaited,
             "needs.await_license.outputs.license_passed": self.license_passed,
             "needs.changes.result": self.changes,
+            "github.event.inputs.queue_kick": "",
+            "github.ref": "refs/pull/1/merge",
+            **_e2e_scope(self.relevant),
         }
+
+
+def _e2e_scope(relevant: bool) -> dict[str, str]:
+    """The extra names E2E Critical's `if:` reads: the dispatched tier and the two path flags."""
+    flag = "true" if relevant else "false"
+    return {
+        "github.event.inputs.tier": "critical",
+        "needs.changes.outputs.backend_changed": flag,
+        "needs.changes.outputs.e2e_changed": flag,
+    }
 
 
 def _rows(reachable_only: bool = True) -> list[Row]:
@@ -283,6 +302,13 @@ def _outcome(job: dict, row: Row) -> str:
     return "proceeds"
 
 
+def _gate_rows(name: str, *, reachable_only: bool = True) -> list[Row]:
+    rows = _rows(reachable_only=reachable_only)
+    if name == "backend-required.yml":
+        return [row for row in rows if row.event in _triggers(name)]
+    return rows
+
+
 def _expected_outcome(name: str, row: Row) -> str:
     if row.cancelled:
         return "skipped"  # a cancelled run stays cancelled
@@ -302,10 +328,27 @@ def test_gate_is_red_when_change_detection_did_not_succeed(name):
     """
     gate = _gate(name)
     newly_red = 0
-    for row in _rows():
+    for row in _gate_rows(name):
         assert _outcome(gate, row) == _expected_outcome(name, row), row
         newly_red += _outcome(gate, row) == "changes"
     assert newly_red, "no row exercised a failed change detection"
+
+
+def test_e2e_critical_skips_only_an_irrelevant_change():
+    """E2E Critical has no `paths:` filter, so it always reports; a PR that changes nothing
+    E2E-relevant skips it, which GitHub counts as passing. Every other row keeps the shared gate
+    outcome: a license wait that did not pass, or change detection that did not succeed, is red
+    whatever the PR changed, and a dispatch runs its tier."""
+    gate = _gate("frontend-e2e-tiers.yml")
+    skipped = 0
+    for row in _rows():
+        row = row._replace(relevant=False)
+        expected = _expected_outcome("frontend-e2e-tiers.yml", row)
+        if expected == "proceeds" and row.event != "workflow_dispatch":
+            expected = "skipped"
+            skipped += 1
+        assert _outcome(gate, row) == expected, row
+    assert skipped, "no row exercised an irrelevant change"
 
 
 @pytest.mark.parametrize("name", CHANGE_GATED)
@@ -313,8 +356,9 @@ def test_gate_that_sees_admission_is_red_if_changes_was_skipped_when_it_should_h
     """Every gate needs admission and await_license itself, so it can tell "skipped by design" from
     "skipped although admitted" (which the `changes` condition should make impossible)."""
     gate = _gate(name)
-    assert {"changes", "admission", "await_license"} <= set(gate["needs"])
-    rows = [r for r in _rows(reachable_only=False) if r.admitted and r.changes == "skipped" and not r.cancelled]
+    assert {"changes", "await_license"} <= set(gate["needs"])
+    assert ("admission" in gate["needs"]) == (name != "backend-required.yml")
+    rows = [r for r in _gate_rows(name, reachable_only=False) if r.admitted and r.changes == "skipped" and not r.cancelled]
     assert rows
     for row in rows:
         assert _outcome(gate, row) == "changes", row
@@ -340,10 +384,13 @@ def test_change_detection_guard_fails_before_any_other_work(name):
     assert result.returncode == 1
     assert result.stdout.startswith("::error::") and "'failure'" in result.stdout
 
-    # Nothing can turn that failure back into a pass, and nothing after it runs.
+    # Nothing can turn that failure back into a pass, and nothing after it runs. An evidence upload
+    # may use always() only together with a successful `changes`, so it cannot run after the guard.
     assert "continue-on-error" not in guard and "continue-on-error" not in gate
     for step in steps[index + 1:]:
         condition = str(step.get("if", ""))
+        if " ".join(condition.split()) == "always() && needs.changes.result == 'success'":
+            continue
         assert not re.search(r"\b(always|failure|cancelled)\(\)", condition), step.get("name")
 
 
@@ -353,18 +400,27 @@ def test_every_gate_turns_a_license_wait_that_did_not_pass_red(name):
     up), fails, or reports a negative verdict, the gate used to be skipped in every workflow but
     backend-required, and GitHub counts a skipped required job as satisfied (TASK-13502)."""
     gate = _gate(name)
-    assert {"admission", "await_license"} <= set(gate["needs"])
+    assert "await_license" in gate["needs"]
+    assert ("admission" in gate["needs"]) == (name != "backend-required.yml")
     refusal = gate["steps"][0]
     assert refusal["name"] == LICENSE_STEP
-    assert refusal["if"] == (
-        "github.event_name != 'workflow_run' && needs.await_license.result != 'skipped' && "
-        "needs.await_license.outputs.license_passed != 'true'"
-    )
+    if name == "backend-required.yml":
+        assert refusal["if"] == (
+            "github.event_name == 'pull_request' && needs.await_license.outputs.license_passed != 'true'"
+        )
+    else:
+        assert refusal["if"] == (
+            "github.event_name != 'workflow_run' && needs.await_license.result != 'skipped' && "
+            "needs.await_license.outputs.license_passed != 'true'"
+        )
     assert refusal["run"] == (
         'echo "::error::License audit did not pass for this PR head, so the gates were not run. '
         'Fix the licence policy failure and re-run."\nexit 1\n'
     )
-    for awaited, passed in (("cancelled", ""), ("failure", ""), ("success", "false"), ("success", "")):
+    outcomes = [("cancelled", ""), ("failure", ""), ("success", "false"), ("success", "")]
+    if name == "backend-required.yml":
+        outcomes.append(("skipped", ""))
+    for awaited, passed in outcomes:
         values = {
             "github.event_name": "pull_request",
             "needs.admission.result": "skipped",
@@ -372,6 +428,9 @@ def test_every_gate_turns_a_license_wait_that_did_not_pass_red(name):
             "needs.await_license.result": awaited,
             "needs.await_license.outputs.license_passed": passed,
             "needs.changes.result": "skipped",
+            "github.event.inputs.queue_kick": "",
+            "github.ref": "refs/pull/1/merge",
+            **_e2e_scope(False),
         }
         assert _evaluate(gate["if"], values), (awaited, passed)
         assert _evaluate(refusal["if"], values), (awaited, passed)
@@ -382,6 +441,9 @@ def test_every_gate_turns_a_license_wait_that_did_not_pass_red(name):
         "needs.await_license.result": "success",
         "needs.await_license.outputs.license_passed": "true",
         "needs.changes.result": "success",
+        "github.event.inputs.queue_kick": "",
+        "github.ref": "refs/pull/1/merge",
+        **_e2e_scope(True),
     }
     assert not _evaluate(refusal["if"], passing)
 
@@ -389,57 +451,108 @@ def test_every_gate_turns_a_license_wait_that_did_not_pass_red(name):
 # --- 4.6: waking the queue after a red gate ---------------------------------------------------
 
 
-@pytest.mark.parametrize("name", GATES)
-def test_queue_tick_runs_the_queue_from_dev_with_the_queue_permissions(name):
+KICK_RUN = (
+    'gh api -X POST "repos/${REPOSITORY}/actions/workflows/security-required.yml/dispatches" '
+    '-f ref=dev -f "inputs[queue_kick]=true" -f "inputs[wait_run]=${RUN_ID}"'
+)
+
+
+# All seven gate workflows. GATES above leaves out frontend-required.yml, which its own test file covers.
+TICK_GATES = {**GATES, "frontend-required.yml": "frontend-required"}
+
+
+@pytest.mark.parametrize("name", TICK_GATES)
+def test_queue_tick_only_sends_a_kick(name):
+    """Spec 4.6: the tick cannot re-run its own still-running run, so it asks a kick on dev to wait
+    for it and run the queue. It needs nothing but `actions: write` and no checkout."""
     jobs = _wf(name)["jobs"]
-    gate = GATES[name]
-    assert jobs[gate]["name"] == gate, "the gate job's name is the required context"
+    gate = TICK_GATES[name]
     tick = dict(jobs["queue-tick"])
-    tick.pop("if")  # covered by test_queue_tick_runs_only_after_a_failed_gate_while_the_queue_is_enabled
-    queue = _wf("merge-queue.yml")["jobs"]["queue"]  # pinned by test_merge_queue_workflow.py
+    tick.pop("if")
     assert tick == {
         "name": "Merge queue tick",
         "needs": [gate],
         "runs-on": "ubuntu-latest",
-        "timeout-minutes": 10,
-        "permissions": queue["permissions"],
-        "steps": queue["steps"],
+        "timeout-minutes": 5,
+        "permissions": {"actions": "write"},
+        "steps": [{
+            "name": "Wake the merge queue",
+            "env": {"GH_TOKEN": "${{ github.token }}", "REPOSITORY": "${{ github.repository }}",
+                    "RUN_ID": "${{ github.run_id }}"},
+            "run": KICK_RUN,
+        }],
     }
-    assert queue["steps"][0]["with"] == {"ref": "dev", "persist-credentials": False}
-    checkouts = set(re.findall(r"actions/checkout@\S+", _text(name)))
-    assert checkouts == {queue["steps"][0]["uses"]}, "one pinned checkout action per workflow"
 
 
-@pytest.mark.parametrize("name", GATES)
-def test_queue_tick_runs_only_after_a_failed_gate_while_the_queue_is_enabled(name):
+@pytest.mark.parametrize("name", TICK_GATES)
+def test_queue_tick_runs_only_after_a_failed_gate_on_a_same_repo_pull_request(name):
     condition = _wf(name)["jobs"]["queue-tick"]["if"]
-    events = [  # (event, PR head repository)
-        ("workflow_dispatch", ""),
-        ("pull_request", "owner/repo"),
-        ("pull_request", "fork/repo"),
-        ("workflow_run", ""),
-        ("push", ""),
-    ]
+    events = [("workflow_dispatch", ""), ("pull_request", "owner/repo"), ("pull_request", "fork/repo"),
+              ("workflow_run", ""), ("push", "")]
     ran = 0
     for (event, head_repo), result, mode, cancelled in product(
         events, ("failure", "success", "skipped", "cancelled"), ("", "off", "dry", "on"), (False, True)
     ):
         values = {
-            f"needs.{GATES[name]}.result": result,
+            f"needs.{TICK_GATES[name]}.result": result,
             "vars.MERGE_QUEUE": mode,
             "github.event_name": event,
             "github.event.pull_request.head.repo.full_name": head_repo,
             "github.repository": "owner/repo",
         }
-        expected = (
-            not cancelled
-            and result == "failure"
-            and mode in ("dry", "on")
-            and (event, head_repo) in (("workflow_dispatch", ""), ("pull_request", "owner/repo"))
-        )
+        expected = (not cancelled and result == "failure" and mode in ("dry", "on")
+                    and (event, head_repo) == ("pull_request", "owner/repo"))
         assert _evaluate(condition, values, cancelled) is expected, (event, head_repo, result, mode, cancelled)
         ran += expected
-    assert ran == 4  # two events x two modes: with MERGE_QUEUE unset it never runs
+    assert ran == 2  # one event x two modes: never on a dispatch, never with MERGE_QUEUE unset
+
+
+def _kick_values(event, flag, ref, mode="on"):
+    return {"github.event_name": event, "github.event.inputs.queue_kick": flag, "github.ref": ref,
+            "vars.MERGE_QUEUE": mode}
+
+
+def test_the_kick_job_runs_only_for_a_flagged_dispatch_on_dev_with_the_queue_enabled():
+    job = _wf("security-required.yml")["jobs"]["queue-kick"]
+    for event, flag, ref, mode in product(("workflow_dispatch", "pull_request"), ("true", "false", ""),
+                                          ("refs/heads/dev", "refs/heads/feat/x"), ("", "off", "dry", "on")):
+        expected = event == "workflow_dispatch" and flag == "true" and ref == "refs/heads/dev" and mode in ("dry", "on")
+        assert _evaluate(job["if"], _kick_values(event, flag, ref, mode)) is expected, (event, flag, ref, mode)
+
+
+def test_the_kick_job_is_the_queue_job_reading_wait_run():
+    job = dict(_wf("security-required.yml")["jobs"]["queue-kick"])
+    job.pop("if")
+    queue = _wf("merge-queue.yml")["jobs"]["queue"]
+    steps = [dict(step) for step in queue["steps"]]
+    steps[1] = dict(steps[1], env={**steps[1]["env"], "WAIT_RUN": "${{ github.event.inputs.wait_run }}"})
+    assert job == {"name": "Merge queue kick", "runs-on": "ubuntu-latest", "timeout-minutes": queue["timeout-minutes"],
+                   "permissions": queue["permissions"], "steps": steps}
+    assert queue["timeout-minutes"] == 15, "a kick may wait 3 minutes and then re-run up to seven gates"
+
+
+def test_security_required_kick_skips_every_gate_job_only_on_dev():
+    """Spec 4.6: a flagged dispatch on dev runs only the kick; on any other ref, or without the flag,
+    the gate jobs run as today."""
+    jobs = _wf("security-required.yml")["jobs"]
+    for job_id in ("changes", "security-required"):
+        condition = jobs[job_id]["if"]
+        assert ("always() && !cancelled() && (github.event.inputs.queue_kick != 'true' || "
+                "github.ref != 'refs/heads/dev') &&") in " ".join(condition.split())
+    kick = {"github.event.inputs.queue_kick": "true", "github.ref": "refs/heads/dev"}
+    other_ref = {"github.event.inputs.queue_kick": "true", "github.ref": "refs/heads/feat/x"}
+    unflagged = {"github.event.inputs.queue_kick": "", "github.ref": "refs/heads/dev"}
+    base = {"github.event_name": "workflow_dispatch", "needs.await_license.result": "skipped",
+            "needs.await_license.outputs.license_passed": "", "needs.admission.result": "skipped",
+            "needs.admission.outputs.should_run": ""}
+    assert not _evaluate(jobs["changes"]["if"], {**base, **kick})
+    assert _evaluate(jobs["changes"]["if"], {**base, **other_ref})
+    assert _evaluate(jobs["changes"]["if"], {**base, **unflagged})
+
+
+def test_a_kick_never_cancels_a_running_kick():
+    concurrency = _wf("security-required.yml")["concurrency"]
+    assert concurrency["cancel-in-progress"] == "${{ github.event.inputs.queue_kick != 'true' }}"
 
 
 @pytest.mark.parametrize("name", GATES)
@@ -459,3 +572,147 @@ def test_conditions_read_only_the_jobs_they_need(name):
         conditions = [job["if"], *(str(step.get("if", "")) for step in job["steps"])]
         read = {match for condition in conditions for match in re.findall(r"needs\.([\w-]+)\.", condition)}
         assert read <= set(job["needs"]), (job_id, read)
+
+
+def test_non_utc_workload_has_its_own_required_job_budget():
+    """The 14-minute timezone axis must not starve the backend's later gates."""
+    jobs = _wf("backend-required.yml")["jobs"]
+    assert "non-utc-tests" in jobs, "timezone work still shares the backend job budget"  # nosec B101
+    timezone = jobs["non-utc-tests"]
+    backend = jobs["backend-required"]
+    assert "non-utc-tests" in backend["needs"]  # nosec B101
+    assert timezone["timeout-minutes"] == 30  # nosec B101 - The isolated timezone budget stays bounded.
+    assert backend["timeout-minutes"] == 45  # nosec B101 - Preserve the upstream backend gate budget.
+    offset = _step(timezone, "Confirm the runner is not on UTC")
+    suite = _step(timezone, "Timestamp-sensitive tests under a non-UTC timezone")
+    assert offset["env"]["TZ"] == suite["env"]["TZ"] == "America/Los_Angeles"  # nosec B101
+    assert timezone["steps"].index(offset) < timezone["steps"].index(suite)  # nosec B101
+    assert "--timeout=300" in suite["run"] and "-p pytest_timeout" in suite["run"]  # nosec B101
+    expected_paths = {
+        "AuthNZ_SQLite/test_admin_endpoints_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_api_keys_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_llm_provider_overrides_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_mfa_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_monitoring_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_org_provider_secrets_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_rate_limits_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_sessions_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_token_blacklist_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_usage_repo_rollups_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_usage_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_user_provider_secrets_repo_sqlite.py",
+        "AuthNZ_SQLite/test_byok_endpoints_sqlite.py",
+        "AuthNZ_SQLite/test_byok_oauth_state_repo_sqlite.py",
+        "AuthNZ_SQLite/test_byok_rotation_sqlite.py",
+        "AuthNZ_SQLite/test_byok_runtime_sqlite.py",
+        "AuthNZ_SQLite/test_llm_budget_402_sqlite.py",
+        "AuthNZ_SQLite/test_scheduler_auth_failure_monitor_sqlite.py",
+        "Discord/test_discord_oauth_lifecycle.py",
+        "Embeddings/test_request_signing_nonce_cleanup.py",
+        "Flashcards/test_flashcards_endpoint_integration.py",
+        "Flashcards/test_flashcards_timestamp_contract.py",
+        "Flashcards/test_review_response_timestamp_contract.py",
+        "Flashcards/test_source_review_plans_api.py",
+        "Flashcards/test_study_response_timestamp_contract.py",
+        "Media_DB/test_media_clone_snapshot_repository.py",
+        "Personalization/test_companion_derivations.py",
+        "Personalization/test_companion_proactive_policy.py",
+        "Personalization/test_companion_reflection_jobs.py",
+        "Personalization/test_personalization_endpoints.py",
+        "Research/test_research_broker.py",
+        "Research/test_research_discovery_legacy_execution_contract.py",
+        "Sharing/test_shared_workspace_chat_endpoint.py",
+        "Sharing/test_shared_workspace_clone_operations.py",
+        "Sharing/test_shared_workspace_recipient_security_matrix.py",
+    }
+    paths = re.findall(r"tldw_Server_API/tests/([\w/]+\.py)", suite["run"])
+    assert set(paths) == expected_paths and len(paths) == len(expected_paths)  # nosec B101
+    assert suite not in backend["steps"] and offset not in backend["steps"]  # nosec B101
+    assert not timezone.get("continue-on-error") and not suite.get("continue-on-error")  # nosec B101
+
+
+@pytest.mark.parametrize("changed", ["true", "false", "", "unknown"])
+@pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
+def test_timezone_prerequisite_cannot_silently_satisfy_the_required_gate(changed, result):
+    """Execute the real gate refusal, including missing and cancelled child results."""
+    gate = _gate("backend-required.yml")
+    guard = _step(gate, "Require non-UTC timestamp tests to have passed")
+    row = Row("pull_request", "skipped", "", "success", "true", "success", False)
+    values = {**row.values, "needs.non-utc-tests.result": result}
+    assert _evaluate(gate["if"], values), "a negative child result skipped the protected gate"  # nosec B101
+    assert "if" not in guard, "the prerequisite result must always be checked after admission"  # nosec B101
+    assert guard["env"] == {  # nosec B101
+        "BACKEND_CHANGED": "${{ needs.changes.outputs.backend_changed }}",
+        "TIMEZONE_RESULT": "${{ needs.non-utc-tests.result }}",
+    }
+    run = subprocess.run(  # nosec B603, B607 - execute the reviewed workflow guard with bounded literal cases
+        ["bash", "-e", "-c", guard["run"]],
+        env={**os.environ, "BACKEND_CHANGED": changed, "TIMEZONE_RESULT": result},
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    allowed = (changed, result) in {("true", "success"), ("false", "skipped")}
+    assert run.returncode == (0 if allowed else 1)  # nosec B101
+    assert [s.get("name") for s in gate["steps"][:3]] == [  # nosec B101
+        LICENSE_STEP, CHANGES_STEP, guard["name"],
+    ]
+    assert not guard.get("continue-on-error") and not gate.get("continue-on-error")  # nosec B101
+
+
+def test_timezone_prerequisite_only_runs_after_admitted_backend_change():
+    """No timezone checkout or test may outrun licensing or failed change detection."""
+    jobs = _wf("backend-required.yml")["jobs"]
+    assert "non-utc-tests" in jobs, "timezone prerequisite is missing"  # nosec B101
+    child = jobs["non-utc-tests"]
+    assert set(child["needs"]) == {"changes", "await_license"}  # nosec B101
+    for row, relevant in product(_gate_rows("backend-required.yml", reachable_only=False), (False, True)):
+        row = row._replace(relevant=relevant)
+        expected = row.admitted and row.changes == "success" and relevant and not row.cancelled
+        assert _evaluate(child["if"], row.values, row.cancelled) is expected, row  # nosec B101
+
+
+
+@pytest.mark.parametrize(
+    ("report", "pytest_exit", "expected"),
+    [
+        ("<testcase/>", "0", 0),
+        ("<testcase><skipped/></testcase>", "0", 1),
+        ("", "0", 1),
+        ("<testcase/>", "1", 1),
+    ],
+    ids=["executed", "skipped", "unexecuted", "pytest-failed"],
+)
+def test_required_auth_teardown_rejects_missing_execution(tmp_path, report, pytest_exit, expected):
+    gate = _gate("backend-required.yml")
+    step = _step(gate, "Test Auth PostgreSQL fixture teardown")
+    assert not gate.get("continue-on-error") and not step.get("continue-on-error")  # nosec B101
+    assert step["env"]["TLDW_TEST_POSTGRES_REQUIRED"] == "1"  # nosec B101
+    assert step["env"]["TLDW_TEST_NO_DOCKER"] == "1"  # nosec B101
+    assert step["if"] == "needs.changes.outputs.backend_changed == 'true'"  # nosec B101
+    assert gate["services"]["postgres"]["image"] == (  # nosec B101
+        "${{ needs.changes.result == 'success' && needs.changes.outputs.backend_changed == 'true' "
+        "&& 'mirror.gcr.io/library/postgres:18-bookworm' || '' }}"
+    )
+
+    # Execute the workflow shell with controlled pytest outcomes.
+    fake_pytest = """
+    pytest() {
+        for arg in "$@"; do
+            case "$arg" in
+                --junitxml=*) printf '<testsuites><testsuite>%s</testsuite></testsuites>' \\
+                    "$CASE_REPORT" > "${arg#--junitxml=}" ;;
+            esac
+        done
+        return "$PYTEST_EXIT"
+    }
+    """
+    run = subprocess.run(  # nosec B603, B607 - local workflow command with controlled test outcomes
+        ["bash", "-c", fake_pytest + step["run"]],
+        env={
+            **os.environ,
+            "RUNNER_TEMP": str(tmp_path),
+            "CASE_REPORT": report,
+            "PYTEST_EXIT": pytest_exit,
+        },
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert run.returncode == expected, run.stderr  # nosec B101

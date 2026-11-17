@@ -7,7 +7,8 @@ import type { ComparisonResult } from "@/hooks/useComparisonTranscribe"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import type { SttModelOption } from "@/components/Option/Audio/audio-readiness"
 import {
-  buildSttProvenanceTags
+  buildSttProvenanceTags,
+  type SttComparisonMetadata
 } from "@/components/Option/Audio/comparison-provenance"
 
 const { Text } = Typography
@@ -17,13 +18,14 @@ const { Text } = Typography
 // ---------------------------------------------------------------------------
 
 export interface ComparisonPanelProps {
+  isCurrentOwner: () => boolean
   blob: Blob | null
   availableModels: string[]
   availableModelOptions?: SttModelOption[]
   selectedModels?: string[]
   onSelectedModelsChange?: (models: string[]) => void
   sttOptions: Record<string, any>
-  onSaveToNotes: (text: string, model: string) => void
+  onSaveToNotes: (text: string, model: string, metadata?: SttComparisonMetadata) => void
   onComparisonComplete?: (results: ComparisonResult[]) => void
 }
 
@@ -35,7 +37,7 @@ interface ResultCardProps {
   result: ComparisonResult
   onCopy: (text: string) => void
   onRetry: (target: string) => void
-  onSave: (text: string, model: string) => void
+  onSave: (text: string, model: string, metadata?: SttComparisonMetadata) => void
   onDuplicate: (target: string) => void
   onToggleDisabled: (target: string, disabled: boolean) => void
 }
@@ -112,6 +114,11 @@ const ResultCard: React.FC<ResultCardProps> = ({
 
       {result.status === "done" && (
         <div className="space-y-2">
+          {!result.text.trim() && (
+            <Text role="status" type="secondary">
+              {t("stt.comparison.noSpeech", "No speech detected. Try a recording with clear speech.")}
+            </Text>
+          )}
           <Input.TextArea
             value={editedText}
             onChange={(e) => setEditedText(e.target.value)}
@@ -131,6 +138,7 @@ const ResultCard: React.FC<ResultCardProps> = ({
               <Button
                 size="small"
                 icon={<Copy className="h-3.5 w-3.5" />}
+                disabled={!editedText.trim()}
                 onClick={() => onCopy(editedText)}
               >
                 {t("stt.comparison.copy", "Copy")}
@@ -140,7 +148,8 @@ const ResultCard: React.FC<ResultCardProps> = ({
               <Button
                 size="small"
                 icon={<Save className="h-3.5 w-3.5" />}
-                onClick={() => onSave(editedText, result.model)}
+                disabled={!editedText.trim()}
+                onClick={() => onSave(editedText, result.model, result.metadata)}
               >
                 {t("stt.comparison.saveToNotes", "Save to Notes")}
               </Button>
@@ -188,6 +197,7 @@ const ResultCard: React.FC<ResultCardProps> = ({
 // ---------------------------------------------------------------------------
 
 export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
+  isCurrentOwner,
   blob,
   availableModels,
   availableModelOptions,
@@ -207,8 +217,11 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
     transcribeAll,
     retryModel,
     duplicateResult,
-    setResultDisabled
-  } = useComparisonTranscribe()
+    setResultDisabled,
+    clearResults
+  } = useComparisonTranscribe(isCurrentOwner)
+
+  useEffect(() => { clearResults() }, [blob, clearResults])
 
   // Sync from prop when provided
   useEffect(() => {

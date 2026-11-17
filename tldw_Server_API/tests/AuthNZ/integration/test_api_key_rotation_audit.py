@@ -9,7 +9,8 @@ from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import shutdown_all_audit
 import tldw_Server_API.app.core.AuthNZ.api_key_manager as api_key_manager_module
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, APIKeyStatus
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
@@ -33,7 +34,7 @@ def _install_failing_mandatory_audit(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest_asyncio.fixture
-async def sqlite_authnz_pool(tmp_path, monkeypatch):
+async def sqlite_authnz_pool(tmp_path, monkeypatch, fresh_services):
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import reset_api_key_manager
 
     db_path = tmp_path / f"api_key_rotation_{uuid.uuid4().hex}.sqlite"
@@ -43,7 +44,7 @@ async def sqlite_authnz_pool(tmp_path, monkeypatch):
     monkeypatch.setenv("USER_DB_BASE_DIR", str(user_db_base))
 
     await reset_api_key_manager()
-    await reset_db_pool()
+    reset_settings()
     await shutdown_all_audit_services()
     pool = await get_db_pool()
     try:
@@ -51,7 +52,6 @@ async def sqlite_authnz_pool(tmp_path, monkeypatch):
     finally:
         await shutdown_all_audit_services()
         await reset_api_key_manager()
-        await reset_db_pool()
 
 
 @pytest.mark.asyncio

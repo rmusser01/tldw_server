@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 import tempfile
+from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -17,8 +18,172 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     get_limits_for_user,
     increment_jobs_started,
 )
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 
 DOMAIN = "audio"
+# Analysis failures a retry can fix. The other SummaryProviderError codes (missing model or
+# credentials, bad configuration or authentication, an unknown provider, a request the provider
+# rejected, a spent provider quota) fail the same way every time, so the transcript is stored at
+# once with the failure in analysis_error.
+_RETRYABLE_ANALYSIS_CODES = frozenset({"rate_limit", "provider_failure"})
+
+
+class _StageFailure(RuntimeError):
+    """A stage failure carrying its job error code, whether a retry can fix it, its retry
+    backoff (doubled by fail_job on each retry) and whether repeats may quarantine the job."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str,
+        retryable: bool,
+        backoff_seconds: int = 1,
+        quarantine: bool = True,
+    ) -> None:
+        super().__init__(message)
+        self.failure_code = failure_code
+        self.retryable = retryable
+        self.backoff_seconds = backoff_seconds
+        self.quarantine = quarantine
+
+
+def start_lease_renewal(jm: JobManager, job: dict[str, Any], *, worker_id: str, lease_seconds: int) -> asyncio.Task:
+    """Renew the job's lease every half lease while its stage runs, so no other worker runs the stage again.
+
+    The caller stops it with ``stop_lease_renewal`` when the stage ends. It stops by itself once a renewal is
+    refused: the lease was lost, or the job was cancelled. A backend error (a locked database, a dropped
+    connection) is logged and the next renewal is tried, so one error does not let a long stage's lease expire.
+
+    It renews the lease acquisition granted: ``lease_seconds`` capped at JOBS_LEASE_MAX_SECONDS, as
+    ``acquire_next_job`` caps it, or, for 0 (an adaptive lease, whose length acquisition chose), the time left
+    on the job's ``leased_until``.
+    """
+    job_id = int(job["id"])
+    lease_id = str(job.get("lease_id"))
+    if lease_seconds > 0:
+        lease = max(1, min(lease_seconds, int(os.getenv("JOBS_LEASE_MAX_SECONDS", "3600") or "3600")))
+    else:
+        leased_until = datetime.fromisoformat(str(job["leased_until"]))
+        if leased_until.tzinfo is None:  # SQLite stores UTC without an offset
+            leased_until = leased_until.replace(tzinfo=timezone.utc)
+        # ponytail: Postgres sets leased_until by its own clock; a skew near half the lease would need the
+        # granted length returned by acquire_next_job instead.
+        lease = max(1, int((leased_until - datetime.now(timezone.utc)).total_seconds()))
+
+    async def _renew() -> None:
+        while True:
+            await asyncio.sleep(max(1, lease // 2))
+            try:
+                if not jm.renew_job_lease(job_id, seconds=lease, worker_id=worker_id, lease_id=lease_id):
+                    return
+            except Exception as e:  # noqa: BLE001 - a backend error must not end renewal; the next one may pass
+                logger.warning("Audio job {}: lease renewal failed ({}); trying again", job_id, type(e).__name__)
+
+    return asyncio.create_task(_renew())
+
+
+async def stop_lease_renewal(task: asyncio.Task | None) -> None:
+    """Stop a renewal started by ``start_lease_renewal``; a no-op for None.
+
+    ``asyncio.wait`` does not raise the renewal's own cancellation, so a cancellation of the caller that
+    arrives while it waits still propagates.
+    """
+    if task is None:
+        return
+    task.cancel()
+    await asyncio.wait({task})
+
+
+def _next_stage_queue(next_type: str) -> str:
+    """The queue for the next stage: this worker's own ``default``, except that ``audio_transcribe``
+    goes to the GPU transcription worker's ``transcribe`` queue when AUDIO_JOBS_GPU_TRANSCRIBE is set."""
+    gpu = os.getenv("AUDIO_JOBS_GPU_TRANSCRIBE", "false").lower() in {"true", "1", "yes", "y", "on"}
+    return "transcribe" if next_type == "audio_transcribe" and gpu else "default"
+
+
+# Waits between attempts to queue the next stage. An error other than a refusal is retried this way, without
+# running the stage again; after the last attempt the stage fails and is retried as a whole.
+_ENQUEUE_RETRY_DELAYS: tuple[float, ...] = (1.0, 2.0)
+
+
+async def hand_off(
+    jm: JobManager,
+    job: dict[str, Any],
+    next_type: str,
+    payload: dict[str, Any],
+    *,
+    worker_id: str,
+    result: dict[str, Any] | None = None,
+) -> _StageFailure | None:
+    """Queue the next stage, then complete this one with ``result``. Return the failure to record, or None.
+
+    The next stage is queued first, so a failed hand-off fails this stage instead of completing it with nothing
+    after it. The key makes a re-run stage reuse the next stage it already queued, which also makes a repeated
+    enqueue safe. The next stage continues this job, so it is exempt from the per-user fair-share limit and the
+    submit quotas, and it keeps the pipeline's batch_group. If this stage was cancelled while it ran, the stage
+    just queued is cancelled too, so the pipeline stops here.
+
+    Once the next stage is queued, a transient error completing this one is retried in place, and an error
+    checking for a cancel is logged, so neither runs this stage again.
+    """
+    next_queue = _next_stage_queue(next_type)
+    for delay in (*_ENQUEUE_RETRY_DELAYS, None):
+        try:
+            next_job = jm.create_job(
+                domain=DOMAIN,
+                queue=next_queue,
+                job_type=next_type,
+                payload=payload,
+                owner_user_id=str(job.get("owner_user_id")),
+                batch_group=job.get("batch_group"),
+                priority=5,
+                idempotency_key=f"audio-stage:{job['id']}:{next_type}",
+                fair_share_exempt=True,
+                quota_exempt=True,
+            )
+            break
+        except (TypeError, ValueError) as e:
+            # A refusal (a payload over JOBS_MAX_JSON_BYTES or not JSON, a queue or job type that is not allowed,
+            # a JOBS_SECRET_REJECT match) repeats every time: fail now instead of running the stage again.
+            # The log names only the error type; the job row's error keeps the detail.
+            logger.warning("Audio job {}: could not queue {} ({})", job["id"], next_type, type(e).__name__)
+            return _StageFailure(
+                f"could not queue {next_type}: {e}", failure_code="next_stage_enqueue_failed", retryable=False
+            )
+        except Exception as e:  # noqa: BLE001 - any other error may pass when the enqueue alone is retried
+            logger.warning("Audio job {}: could not queue {} ({})", job["id"], next_type, type(e).__name__)
+            if delay is None:
+                return _StageFailure(
+                    f"could not queue {next_type}: {e}", failure_code="next_stage_enqueue_failed", retryable=True
+                )
+            await asyncio.sleep(delay)
+    lease_id = str(job.get("lease_id"))
+    for delay in (*_ENQUEUE_RETRY_DELAYS, None):
+        try:
+            completed = jm.complete_job(
+                int(job["id"]), result=result, worker_id=worker_id, lease_id=lease_id, completion_token=lease_id
+            )
+            break
+        except Exception as e:  # noqa: BLE001 - the completion token makes a repeated complete safe
+            logger.warning("Audio job {}: could not complete it ({})", job["id"], type(e).__name__)
+            if delay is None:
+                raise
+            await asyncio.sleep(delay)
+    if not completed:
+        try:
+            if (jm.get_job(int(job["id"])) or {}).get("status") == "cancelled":
+                jm.cancel_job(int(next_job["id"]), reason="pipeline_cancelled")
+        except Exception as e:  # noqa: BLE001 - this stage is over; raising would only run it again
+            logger.warning("Audio job {}: could not check for a cancel ({})", job["id"], type(e).__name__)
+    return None
+
+
+def stage_after_transcription(payload: dict[str, Any]) -> str:
+    """The stage after audio_transcribe: chunking first if asked, then analysis if asked, then store."""
+    if payload.get("perform_chunking"):
+        return "audio_chunk"
+    return "audio_analyze" if payload.get("perform_analysis") else "audio_store"
 
 
 async def _handle_audio_transcribe_stage(payload: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
@@ -30,7 +195,7 @@ async def _handle_audio_transcribe_stage(payload: dict[str, Any]) -> tuple[dict[
     expected shape for downstream stages:
       - `segments`: list of segment dicts
       - `text`: merged transcript string
-      - `normalized_stt`: full normalized STT artifact
+      - `normalized_stt`: the rest of the STT artifact (language, diarization, usage, metadata)
     """
     wav_path = payload.get("wav_path")
     if not wav_path:
@@ -71,12 +236,11 @@ async def _handle_audio_transcribe_stage(payload: dict[str, Any]) -> tuple[dict[
     updated_payload = dict(payload)
     updated_payload["segments"] = segments_list
     updated_payload["text"] = text_merged
-    # Attach full normalized artifact for future stages without breaking
-    # existing consumers that rely only on 'text' and 'segments'.
-    updated_payload["normalized_stt"] = artifact
+    # The artifact's metadata (language, usage, provider); its text and segments are already above, and
+    # carrying them twice would put a long recording's payload over JOBS_MAX_JSON_BYTES.
+    updated_payload["normalized_stt"] = {k: v for k, v in artifact.items() if k not in ("text", "segments")}
 
-    next_type: str | None = "audio_chunk" if payload.get("perform_chunking") else "audio_store"
-    return updated_payload, next_type
+    return updated_payload, stage_after_transcription(payload)
 
 
 async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
@@ -103,6 +267,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
         # initialized before any `continue` to avoid leaking previous values.
         owner: str | None = None
         acquired_slot = False
+        renewal: asyncio.Task | None = None
         try:
             lease_seconds = int(os.getenv("JOBS_LEASE_SECONDS", "120") or "120")
             # Optional strict owner-aware acquisition: try to pick an owner under cap
@@ -296,12 +461,14 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
             else:
                 acquired_slot = True
 
+            renewal = start_lease_renewal(jm, job, worker_id=worker_id, lease_seconds=lease_seconds)
             payload: dict[str, Any] = job.get("payload") or {}
             jtype = str(job.get("job_type") or "").lower()
             next_type: str | None = None
             updated_payload = dict(payload)
             ok = True
             msg_err = ""
+            failure: Exception | None = None
             try:
                 if jtype == "audio_download":
                     # Download to temp path
@@ -343,14 +510,63 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                     updated_payload["chunks"] = chunks
                     next_type = payload.get("perform_analysis") and "audio_analyze" or "audio_store"
                 elif jtype == "audio_analyze":
-                    from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
+                    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+                    from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+                        SummaryProviderError,
+                        analyze,
+                    )
                     text = updated_payload.get("text")
                     if not text:
                         # Fallback to segments
                         segs = updated_payload.get("segments") or []
                         text = " ".join((s.get("Text", "").strip() if isinstance(s, dict) else "") for s in segs).strip()
-                    analysis = await asyncio.to_thread(analyze, text, payload.get("api_name") or "openai")
-                    updated_payload["analysis"] = analysis
+                    api_name = str(payload.get("api_name") or "").strip()
+                    code: str | None = None
+                    message = ""
+                    if not api_name or api_name.lower() == "none":
+                        # No provider named: skip analysis, as /media/process-audios does.
+                        updated_payload["analysis_skipped"] = "no api_name"
+                        logger.info("Audio job {}: analysis skipped, no api_name", job["id"])
+                    elif not text.strip():
+                        code, message = "empty_transcript", "empty transcript: nothing to analyze"
+                    else:
+                        try:
+                            with llm_call_root(owner):
+                                analysis = await asyncio.to_thread(
+                                    analyze,
+                                    api_name,
+                                    text,
+                                    None,  # jobs carry no prompt: analyze's default system prompt (bulleted notes)
+                                    input_is_literal_text=True,
+                                    raise_on_error=True,
+                                )
+                        except SummaryProviderError as exc:
+                            code, message = exc.code, str(exc)
+                        except LLMQuotaExceededError as exc:
+                            # A quota window does not reset in seconds: no retry, and no LLM call was made.
+                            code, message = exc.failure_code, f"LLM quota exceeded ({exc.category})"
+                        else:
+                            if isinstance(analysis, str) and analysis.startswith("Error:"):
+                                code, message = "provider_failure", analysis
+                            else:
+                                updated_payload["analysis"] = analysis
+                    if code is not None:
+                        # Jobs requeues while retry_count < max_retries, checked before the increment.
+                        attempts_left = int(job.get("retry_count") or 0) < int(job.get("max_retries") or 0)
+                        if code in _RETRYABLE_ANALYSIS_CODES and attempts_left:
+                            # Wait long enough for a rate limit to lift; a retry, not a poison message.
+                            raise _StageFailure(
+                                message,
+                                failure_code=code,
+                                retryable=True,
+                                backoff_seconds=30 if code == "rate_limit" else 5,
+                                quarantine=False,
+                            )
+                        # For good: keep the transcript and record why there is no analysis.
+                        updated_payload["analysis_error"] = {"code": code, "message": message}
+                        logger.warning(
+                            "Audio job {}: analysis failed ({}); storing the transcript without it", job["id"], code
+                        )
                     next_type = "audio_store"
                 elif jtype == "audio_store":
                     # Placeholder: integration to store into DB or export artifacts
@@ -363,29 +579,47 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
             except Exception as e:
                 ok = False
                 msg_err = str(e)
+                failure = e
 
-            if ok:
-                if next_type:
-                    # Create next stage
-                    jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
-                    jm.create_job(
-                        domain=DOMAIN,
-                        queue=("transcribe" if next_type == "audio_transcribe" else "default"),
-                        job_type=next_type,
-                        payload=updated_payload,
-                        owner_user_id=str(owner),
-                        priority=5,
-                    )
-                else:
+            if ok and next_type:
+                # A failed analysis completes its stage; the result keeps the reason visible on this job.
+                analysis_error = updated_payload.get("analysis_error")
+                failure = await hand_off(
+                    jm, job, next_type, updated_payload, worker_id=worker_id,
+                    result={"analysis_error": analysis_error} if analysis_error else None,
+                )
+                if failure is not None:
+                    ok = False
+                    msg_err = str(failure)
+            elif ok:
+                try:
                     jm.complete_job(int(job["id"]), result={"payload": updated_payload}, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
-            else:
-                jm.fail_job(int(job["id"]), error=msg_err, retryable=True, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
+                except ValueError as e:
+                    # A result over JOBS_MAX_JSON_BYTES is refused the same way every time: fail the job
+                    # instead of leaving it processing until its lease expires.
+                    ok = False
+                    msg_err = str(e)
+                    failure = _StageFailure(msg_err, failure_code="result_too_large", retryable=False)
+            if not ok:
+                # An error that says it is not retryable (a _StageFailure, for one) fails the job now.
+                jm.fail_job(
+                    int(job["id"]),
+                    error=msg_err,
+                    retryable=bool(getattr(failure, "retryable", True)),
+                    backoff_seconds=getattr(failure, "backoff_seconds", 1),
+                    quarantine=getattr(failure, "quarantine", True),
+                    error_code=getattr(failure, "failure_code", None),
+                    worker_id=worker_id,
+                    lease_id=str(job.get("lease_id")),
+                    completion_token=str(job.get("lease_id")),
+                )
 
         except asyncio.CancelledError:
             raise
         except Exception as e:
             logger.error(f"Audio worker loop error: {e}")
         finally:
+            await stop_lease_renewal(renewal)
             try:
                 if acquired_slot and owner is not None:
                     await finish_job(int(owner))  # type: ignore[arg-type]

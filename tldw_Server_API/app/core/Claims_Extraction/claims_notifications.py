@@ -172,8 +172,8 @@ def record_watchlist_cluster_notifications(
                 payload_json=json.dumps(payload),
             )
             inserted += 1
-        except _CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to insert watchlist cluster notification: {exc}")
+        except _CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to insert watchlist cluster notification")
     return inserted
 
 

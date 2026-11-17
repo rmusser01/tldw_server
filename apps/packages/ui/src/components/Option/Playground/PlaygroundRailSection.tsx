@@ -9,7 +9,6 @@ export type PlaygroundRailSectionProps = {
   children: React.ReactNode;
   defaultOpen?: boolean;
 };
-
 export const PlaygroundRailSection = ({
   label,
   title,
@@ -18,36 +17,35 @@ export const PlaygroundRailSection = ({
 }: PlaygroundRailSectionProps) => {
   const { t } = useTranslation("playground");
   const [open, setOpen] = React.useState(defaultOpen);
-  const headingId = React.useId();
   const panelId = React.useId();
   const toggleLabel = open
     ? t("cockpit.collapseRailSection", `Collapse ${title}`, { title })
     : t("cockpit.expandRailSection", `Expand ${title}`, { title });
-
   return (
-    <section
-      className={cockpitRailStyles.section}
-      aria-label={label}
-    >
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <h2 id={headingId} className={cockpitRailStyles.heading}>
-          {title}
-        </h2>
+    <section className={cockpitRailStyles.section} aria-label={label}>
+      <h2 className={cockpitRailStyles.heading} aria-label={title}>
         <button
           type="button"
-          className={cockpitRailStyles.collapseAction}
+          className="flex min-h-11 w-full items-center justify-between gap-2 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           aria-label={toggleLabel}
           aria-expanded={open}
           aria-controls={panelId}
           onClick={() => setOpen((value) => !value)}
         >
+          <span>{title}</span>
           {open ? (
-            <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+            <ChevronDown
+              className="h-3.5 w-3.5 text-text-muted"
+              aria-hidden="true"
+            />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+            <ChevronRight
+              className="h-3.5 w-3.5 text-text-muted"
+              aria-hidden="true"
+            />
           )}
         </button>
-      </div>
+      </h2>
       <div
         id={panelId}
         aria-hidden={!open}

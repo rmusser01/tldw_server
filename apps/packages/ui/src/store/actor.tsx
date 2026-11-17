@@ -1,10 +1,32 @@
 import { createWithEqualityFn } from "zustand/traditional"
 import { createJSONStorage, persist } from "zustand/middleware"
 
+import type { ActorSettingsTarget } from "@/utils/actor-settings-target"
 import type { ActorEditorMode, ActorSettings } from "@/types/actor"
 import { createDefaultActorSettings } from "@/types/actor"
 
+export type ActorAppliedScene = {
+  target: ActorSettingsTarget
+  settings: ActorSettings
+  preview: string
+  tokenCount: number
+}
+
+export const actorSceneForTarget = (
+  applied: ActorAppliedScene | null,
+  target: ActorSettingsTarget | null
+): ActorAppliedScene | null =>
+  applied &&
+  target &&
+  applied.target.key === target.key &&
+  applied.target.isCurrent() &&
+  target.isCurrent()
+    ? applied
+    : null
+
 type ActorUiStoreState = {
+  applied: ActorAppliedScene | null
+  applyScene: (scene: ActorAppliedScene) => boolean
   /**
    * Current chat's Actor settings in memory.
    * Persisted per-chat via services/actor-settings.
@@ -32,26 +54,47 @@ type ActorUiStoreState = {
   reset: () => void
 }
 
-export const useActorStore = createWithEqualityFn<ActorUiStoreState>((set) => ({
-  settings: null,
-  preview: "",
-  tokenCount: 0,
-  setSettings: (next: ActorSettings | null) => {
-    set((state) => (state.settings === next ? state : { settings: next }))
-  },
-  setPreviewAndTokens: (preview: string, tokenCount: number) =>
-    set((state) =>
-      state.preview === preview && state.tokenCount === tokenCount
-        ? state
-        : { preview, tokenCount }
-    ),
-  reset: () =>
-    set({
-      settings: createDefaultActorSettings(),
-      preview: "",
-      tokenCount: 0
-    })
-}))
+export const useActorStore = createWithEqualityFn<ActorUiStoreState>(
+  (set, get) => ({
+    applied: null,
+    applyScene: (scene) => {
+      if (!scene.target.isCurrent()) return false
+      const applied = { ...scene, settings: structuredClone(scene.settings) }
+      set({
+        applied,
+        settings: applied.settings,
+        preview: applied.preview,
+        tokenCount: applied.tokenCount
+      })
+      return scene.target.isCurrent() && get().applied === applied
+    },
+    settings: null,
+    preview: "",
+    tokenCount: 0,
+    setSettings: (next: ActorSettings | null) => {
+      set((state) =>
+        state.settings === next && !state.applied
+          ? state
+          : { settings: next, applied: null }
+      )
+    },
+    setPreviewAndTokens: (preview: string, tokenCount: number) =>
+      set((state) =>
+        state.preview === preview &&
+        state.tokenCount === tokenCount &&
+        !state.applied
+          ? state
+          : { preview, tokenCount, applied: null }
+      ),
+    reset: () =>
+      set({
+        applied: null,
+        settings: createDefaultActorSettings(),
+        preview: "",
+        tokenCount: 0
+      })
+  })
+)
 
 /**
  * Persisted editor preferences for the Actor drawer.

@@ -1,15 +1,32 @@
+import { canonicalHistoryJson } from "@/db/dexie/history-selection"
+import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
+import type { ActorSceneSend } from "@/hooks/chat/actor-scene-source"
 import type {
   HistoryLoadReceipt,
   HistorySelectionController
 } from "@/hooks/chat/useHistorySelection"
-import type { HistorySendTurn } from "@/types/chat-modes"
+import { captureChatDraftLoad, captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryEditRefusal } from "@/hooks/chat/native-character-preflight"
+import type {
+  HistorySendTurn,
+  HistoryEditAndSendBoundary,
+  HistoryRegenerateBoundary,
+  NativeHistoryEditResend
+} from "@/types/chat-modes"
 import type { HistoryAdmissionReferenceV1 } from "@/types/history-selection"
 import {
+  assertHistoryConversationTarget,
   captureHistorySnapshot,
-  historyAdmissionReference
+  nativeHistoryNeedsBranchChoice,
+  requireNativeHistoryEditAdmission,
+  historyAdmissionReference,
+  isDefinitiveNativeBranchRejection,
+  isDefinitiveNativeEditRejection,
+  nativeEditResendView
 } from "@/services/chat-history-selection"
 import {
   saveHistoryTurnRecovery,
+  retainHistoryTurnRecoveryInMemory,
   dismissHistoryTurnRecovery
 } from "@/db/dexie/history-selection"
 import type { HistoryTurnRecovery } from "@/db/dexie/types"
@@ -18,10 +35,14 @@ import {
   markHistoryTurnLive,
   releaseHistoryTurn
 } from "@/services/history-turn-keep"
+import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 import { beginServerChatWrite } from "@/store/server-chat-save-status"
-import { wasChatTurnStoppedByUser } from "@/hooks/chat/abort-turn-cleanup"
-import { useStoreChatModelSettings } from "@/store/model"
+import {
+  beginChatTurnSettlement,
+  wasChatTurnStoppedByUser
+} from "@/hooks/chat/abort-turn-cleanup"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { buildFriendlyErrorMessage, decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
 import { systemPromptForNonRagOption } from "~/services/tldw-server"
@@ -38,12 +59,17 @@ import {
   formatSelectedHistory
 } from "@/db/dexie/helpers"
 import { generateHistory } from "@/utils/generate-history"
+import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import { createImageDataUrl } from "@/utils/image-utils"
 import { humanMessageFormatter } from "@/utils/human-message"
 import { systemPromptFormatter } from "@/utils/system-message"
 import type { ActorSettings } from "@/types/actor"
-import { maybeInjectActorMessage } from "@/utils/actor"
+import type { ActorSceneRead } from "@/services/actor-settings"
+import { bindActorSceneAfterLoad } from "@/hooks/chat/actor-scene-source"
+import { buildActorPrompt, maybeInjectActorMessage, shouldInjectActorForTemplates } from "@/utils/actor"
+import { removeReasoning } from "@/libs/reasoning"
 import { tldwClient, type ChatTurnIdentity } from "@/services/tldw/TldwApiClient"
+import { linkServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { getSearchSettings } from "@/services/search"
 import { resolveImageBackendCandidates } from "@/utils/image-backends"
 import {
@@ -62,10 +88,14 @@ import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
   getRequiredServicePrompt,
   runChatPipeline,
-  type ChatModeDefinition
+  type ChatModeDefinition,
+  type ChatModeParamsBase
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
-import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { chatSubmitFailed, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { createChatWithRecovery, markChatCreationBound, markChatCreationSettled } from "@/services/pending-chat-promotion"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
+import type { ChatDraftAddress, ChatDraftHandle } from "@/utils/chat-draft-address"
 import {
   loadServicePromptSnapshot,
   renderServicePromptPart,
@@ -165,10 +195,19 @@ const buildWebSearchSources = (results: any[]) => {
 }
 
 type NormalChatModeParams = {
-  scope?: ChatScope
+  surface?: 'playground' | 'sidepanel';
+  onServerChatMutated?: (isCurrent: () => boolean) => void | Promise<void>;
+  historyPreparation?: {
+    dispatchIsCurrent: () => boolean
+    draftIsCurrent: () => boolean
+    acceptDraftBind: ReturnType<typeof captureChatDraftLoad> | null
+    sourceDraft: ChatDraftAddress | null
+  }
   historySelection?: {
     controller: HistorySelectionController
     originIsCurrent: () => boolean
+    sourceIsCurrent?: () => boolean
+    onResultFollow?: () => void
     temporary?: boolean
     createServerChat?: boolean
     /**
@@ -176,6 +215,12 @@ type NormalChatModeParams = {
      * already has. The view must stand just before that question.
      */
     retryAdmission?: HistoryAdmissionReferenceV1
+    editResend?: NativeHistoryEditResend
+    editAndSend?: HistoryEditAndSendBoundary
+    regenerate?: HistoryRegenerateBoundary
+    retryRecoveries?: HistoryTurnRecoveryEntry[]
+    /** The source instruction block explicitly reviewed for this recovery retry. */
+    reviewedSystemPrompts?: string[]
   }
   historyTurn?: HistorySendTurn
 
@@ -216,9 +261,12 @@ type NormalChatModeParams = {
   conversationId?: string
   tldwTurn?: ChatTurnIdentity
   setServerChatId?: (id: string) => void
-  setHistoryId: (id: string) => void
+  scope?: ChatScope
+  setHistoryId: (id: string, options?: { preserveServerChatId?: boolean }) => void
   uploadedFiles?: any[]
+  actorSceneSend?: ActorSceneSend
   actorSettings?: ActorSettings
+  actorScene?: ActorSceneRead
   systemPromptAppendix?: string
   overlaySystemPrompt?: string
   webSearch?: boolean
@@ -236,7 +284,26 @@ type NormalChatModeParams = {
   regenerateFromMessage?: Message
   servicePromptSnapshot?: ServicePromptSnapshot
   requestScope?: ServicePromptRequestScope
+  onResponseDispatch?: () => void
 }
+
+/** Existing H1 ownership and preparation shared by the local context modes. */
+export type HistoryChatModeParams = Pick<
+  NormalChatModeParams,
+  | 'surface'
+  | 'historyPreparation'
+  | 'historySelection'
+  | 'historyTurn'
+  | 'selectionSource'
+  | 'serverChatId'
+  | 'setServerChatId'
+  | 'scope'
+  | 'actorScene'
+  | 'webSearch'
+  | 'uploadedFiles'
+  | 'onResponseDispatch'
+  | 'onServerChatMutated'
+>;
 
 const isBackendUnavailableError = (error: unknown): boolean => {
   if (!error) return false
@@ -314,6 +381,13 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
             ctx.selectedModel
           )
     if (imageBackendCandidates.length > 0) {
+      const assertImagePreparationCurrent = () => {
+        ctx.assertPreparationCurrent?.()
+        if (ctx.actorSceneSend?.isCurrent() === false)
+          throw new Error("actor_settings_scope_changed")
+        ctx.signal?.throwIfAborted()
+      }
+      assertImagePreparationCurrent()
       const promptSource =
         typeof requestOverride.prompt === "string"
           ? requestOverride.prompt
@@ -323,10 +397,12 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       let lastError: unknown = null
 
       const backendConfigs = await getImageBackendConfigs().catch(() => ({}))
+      assertImagePreparationCurrent()
 
       await tldwClient.initialize()
+      assertImagePreparationCurrent()
       for (const backend of imageBackendCandidates) {
-        if (ctx.signal?.aborted) break
+        assertImagePreparationCurrent()
         try {
           if (!prompt) {
             throw new Error("Image prompt is required.")
@@ -382,6 +458,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
             model,
             extraParams
           }
+          assertImagePreparationCurrent()
           const response = await tldwClient.createImageArtifact({
             backend,
             prompt,
@@ -396,6 +473,10 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
             sampler,
             model,
             extraParams
+          }, {
+            requestScope: ctx.servicePromptSnapshot?.requestScope ?? ctx.actorSceneSend?.requestScope,
+            signal: ctx.signal,
+            onDispatch: ctx.onResponseDispatch
           })
           const exportInfo = response?.artifact?.export
           const contentB64 = exportInfo?.content_b64
@@ -447,6 +528,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
     return null
   },
   preparePrompt: async (ctx) => {
+    ctx.assertPreparationCurrent?.()
     const webSearchPrompt = ctx.webSearch
       ? getRequiredServicePrompt(
           ctx.servicePromptSnapshot,
@@ -454,7 +536,9 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         )
       : null
     const prompt = await systemPromptForNonRagOption()
+    ctx.assertPreparationCurrent?.()
     const selectedPrompt = await getPromptById(ctx.selectedSystemPrompt)
+    ctx.assertPreparationCurrent?.()
     const promptId = ctx.selectedSystemPrompt
     let promptContent: string | undefined = undefined
     let webSearchSources: any[] = []
@@ -472,6 +556,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       model: ctx.selectedModel,
       useOCR: ctx.useOCR
     })
+    ctx.assertPreparationCurrent?.()
     if (ctx.image.length > 0) {
       humanMessage = await humanMessageFormatter({
         content: [
@@ -487,6 +572,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         model: ctx.selectedModel,
         useOCR: ctx.useOCR
       })
+      ctx.assertPreparationCurrent?.()
     }
 
     if (ctx.webSearch) {
@@ -495,7 +581,9 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         ctx.setIsSearchingInternet(true)
       }
       try {
+        ctx.assertPreparationCurrent?.()
         await tldwClient.initialize()
+        ctx.assertPreparationCurrent?.()
         const {
           searchProvider,
           totalSearchResults,
@@ -503,6 +591,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
           searxngJSONMode,
           googleDomain
         } = await getSearchSettings()
+        ctx.assertPreparationCurrent?.()
 
         const engineMap: Record<string, string> = {
           google: "google",
@@ -542,11 +631,13 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
           payload.google_domain = googleDomain
         }
 
+        ctx.assertPreparationCurrent?.()
         const res = await tldwClient.webSearch({
           ...payload,
           signal: ctx.signal,
           requestScope: ctx.servicePromptSnapshot?.requestScope
         })
+        ctx.assertPreparationCurrent?.()
 
         if (res?.error) {
           throw new Error(
@@ -559,6 +650,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         webSearchResults = res?.web_search_results_dict?.results || []
         webSearchSources = buildWebSearchSources(webSearchResults)
       } catch (error) {
+        ctx.assertPreparationCurrent?.()
         if (ctx.signal.aborted || isRequestConfigScopeChangedError(error)) {
           throw error
         }
@@ -579,6 +671,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         webSearchSystemMessage = await systemPromptFormatter({
           content: renderedWebSearchPrompt
         })
+        ctx.assertPreparationCurrent?.()
       }
     }
 
@@ -629,6 +722,17 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       baseSystemPrompts.push(overlayPrompt)
     }
 
+    let currentSystemMessages: typeof applicationChatHistory = []
+    const reviewedSystemPrompts = ctx.historySelection?.reviewedSystemPrompts
+    if (reviewedSystemPrompts) {
+      if (ctx.selectedSystemPrompt && !selectedPrompt)
+        throw new Error("retry_prompt_unavailable")
+      // Bind the review to the strings this preparation actually uses. Later
+      // awaits format this captured block; they never reread Prompt/default sources.
+      if (canonicalHistoryJson(baseSystemPrompts) !== canonicalHistoryJson(reviewedSystemPrompts))
+        throw new Error("retry_context_changed")
+    }
+
     if (baseSystemPrompts.length > 0) {
       const promptMessages = await Promise.all(
         baseSystemPrompts.map((content) =>
@@ -637,22 +741,42 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
           })
         )
       )
-      applicationChatHistory = [...promptMessages, ...applicationChatHistory]
+      ctx.assertPreparationCurrent?.()
+      currentSystemMessages = promptMessages
     }
 
     const templatesActive = !!ctx.selectedSystemPrompt
-    applicationChatHistory = await maybeInjectActorMessage(
-      applicationChatHistory,
-      ctx.actorSettings || null,
-      templatesActive
-    )
+    const actor = ctx.actorSettings
+    const actorRewritesHistory = Boolean(actor &&
+      shouldInjectActorForTemplates({ settings: actor, templatesActive }) && buildActorPrompt(actor) &&
+      ((actor.chatRole && actor.chatRole !== "system") ||
+        (actor.chatPosition === "depth" && actor.chatDepth > 0)))
+    if (actorRewritesHistory) {
+      applicationChatHistory = await maybeInjectActorMessage(
+        [...currentSystemMessages, ...applicationChatHistory], actor, templatesActive)
+    } else {
+      currentSystemMessages = await maybeInjectActorMessage(currentSystemMessages, actor || null, templatesActive)
+      applicationChatHistory = [...currentSystemMessages, ...applicationChatHistory]
+    }
+    ctx.assertPreparationCurrent?.()
 
     if (webSearchSystemMessage) {
       applicationChatHistory.push(webSearchSystemMessage)
     }
 
+    const capture = ctx.historyTurn?.capture
+    const supportsReasoningHistory =
+      capture?.status === "captured" &&
+      capture.native_completion_v1?.reasoning_history_supported === true
+
     return {
       chatHistory: applicationChatHistory,
+      ...(!actorRewritesHistory && !(ctx.useOCR && ctx.image) && ctx.messageForModel === undefined &&
+        !ctx.historyTurn?.clientManagedContext &&
+        !(ctx.historyForModel ?? ctx.history).some(row => row.role === "system" || (row.role === "assistant" &&
+          (decodeChatErrorPayload(row.content) ||
+            (!supportsReasoningHistory && removeReasoning(row.content) !== row.content))))
+        ? { nativeCurrentInput: [...currentSystemMessages, ...(webSearchSystemMessage ? [webSearchSystemMessage] : [])] } : {}),
       humanMessage,
       sources: webSearchSources,
       promptId,
@@ -664,26 +788,126 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
 /** How often a streaming reply is checkpointed so a reload can keep it (CS-04). */
 const HISTORY_TURN_CHECKPOINT_INTERVAL_MS = 1_000
 
+/** Capture once before caller setup waits; explicit overrides retain their own values. */
+export const captureNormalChatPreparation = (
+  params: Pick<
+    NormalChatModeParams,
+    | "selectedModel"
+    | "selectionSource"
+    | "toolChoice"
+    | "historyId"
+    | "serverChatId"
+  >,
+  nativeSourceIsCurrent?: () => boolean
+) => {
+  const dispatchIsCurrent = captureChatDispatchSource(params)
+  const sourceAddress = useStoreMessageOption.getState().chatDraftAddress
+  const sourceDraft = sourceAddress ? structuredClone(sourceAddress) : null
+  const acceptDraftBind =
+    !params.historyId && !params.serverChatId && sourceAddress?.kind === "fresh"
+      ? captureChatDraftLoad("bind")
+      : null
+  const draftIsCurrent =
+    acceptDraftBind?.isCurrent ?? (sourceAddress?.kind === "native" && nativeSourceIsCurrent ? nativeSourceIsCurrent : captureChatDraftSource().isCurrent)
+  return { dispatchIsCurrent, draftIsCurrent, acceptDraftBind, sourceDraft }
+}
+
+type CaptureHistoryParams = Pick<ChatModeParamsBase,
+  "historyId" | "setHistoryId" | "tldwTurn" | "toolChoice" | "selectedModel"
+> & HistoryChatModeParams
+
 /** Establish one operation-lived adapter; display leases never authorize its later writes. */
 export const captureNormalHistoryTurn = async (
-  params: Pick<NormalChatModeParams,
-    "historySelection" | "historyId" | "serverChatId" | "setHistoryId" | "setServerChatId" |
-    "tldwTurn" | "scope" | "selectionSource" | "toolChoice" | "selectedModel">,
+  params: CaptureHistoryParams,
   message: string,
   snapshot: ServicePromptSnapshot,
-  signal: AbortSignal
+  signal: AbortSignal,
+  image = "",
+  stopSignal = signal
+): Promise<HistorySendTurn> => {
+  const preparation = params.historyPreparation ?? captureNormalChatPreparation(params)
+  let stopWatchingPreparationIds: (() => void) | undefined
+  try {
+    const turn = await captureHistoryTurn(
+      { ...params, historyPreparation: preparation },
+      message,
+      image,
+      snapshot,
+      signal,
+      preparation.dispatchIsCurrent,
+      () => params.historySelection?.sourceIsCurrent?.() !== false && preparation.draftIsCurrent(),
+      preparation.acceptDraftBind,
+      preparation.sourceDraft,
+      stopSignal,
+      stop => { stopWatchingPreparationIds = stop }
+    )
+    const release = turn.release
+    turn.release = () => {
+      stopWatchingPreparationIds?.()
+      release?.()
+    }
+    return turn
+  } catch (error) {
+    stopWatchingPreparationIds?.()
+    throw error
+  }
+}
+
+const captureHistoryTurn = async (
+  params: CaptureHistoryParams,
+  message: string,
+  image: string,
+  snapshot: ServicePromptSnapshot,
+  signal: AbortSignal,
+  dispatchIsCurrent: () => boolean,
+  draftIsCurrent: () => boolean,
+  acceptDraftBind: ReturnType<typeof captureChatDraftLoad> | null,
+  sourceDraft: ChatDraftAddress | null,
+  stopSignal: AbortSignal,
+  retainIdWatcher: (stop: () => void) => void
 ): Promise<HistorySendTurn> => {
   const { controller, originIsCurrent, temporary } = params.historySelection!
   const serverOwned = Boolean(params.tldwTurn)
-  if (temporary || params.historyId === "temp")
-    throw new Error("temporary_history_unavailable")
-  if (!originIsCurrent()) throw new Error("stale_selection")
-  let current = controller.getCurrent()
+  if (serverOwned && !params.serverChatId)
+    throw new Error("unsupported_history_durable_turn")
+  const notifyServerMutation = () => {
+    if (snapshot.scopeInvalidatedSignal.aborted) return;
+    try {
+      void Promise.resolve(
+        params.onServerChatMutated?.(() => !snapshot.scopeInvalidatedSignal.aborted)
+      ).catch(() => console.warn('Could not refresh the server conversation list.'));
+    } catch {
+      console.warn('Could not refresh the server conversation list.');
+    }
+  };
+  let creationHandle: ChatDraftHandle | undefined;
+  if (temporary || params.historyId === 'temp') throw new Error('temporary_history_unavailable');
+  if (!originIsCurrent()) throw new Error('stale_selection');
+  let current = controller.getCurrent();
+  let selectionCurrent = originIsCurrent;
+  let targetHistoryId = params.historyId;
+  let targetServerChatId = params.serverChatId;
+  const preparationIsCurrent = () =>
+    draftIsCurrent() &&
+    acceptDraftBind?.isCurrent() !== false &&
+    !signal.aborted &&
+    !snapshot.scopeInvalidatedSignal.aborted &&
+    dispatchIsCurrent();
+  if (!preparationIsCurrent()) throw new Error('stale_selection');
+  if (
+    params.actorScene &&
+    (!params.actorScene.target.isCurrent() ||
+      (params.actorScene.target.localProfileId === undefined &&
+        (!params.actorScene.target.account?.isCurrent() ||
+          params.actorScene.target.accountKey !==
+            chatDraftOwnerKey(snapshot.requestScope))))
+  )
+    throw new Error("actor_settings_scope_changed")
   if (!current.owner && current.status === "idle") {
-    const scope = params.scope ? { ...params.scope } : undefined
+    const scope = params.scope ? structuredClone(params.scope) : undefined
     let localId = params.historyId
     let serverId = params.serverChatId
-    let createdServerChat = false
+    let createdNativeChat: Awaited<ReturnType<typeof tldwClient.createChat>> | undefined
     const toolsState = useMcpToolsStore.getState()
     const toolRequest = resolveChatToolRequest({
       tools: toolsState.chatTools ?? toolsState.tools,
@@ -693,20 +917,35 @@ export const captureNormalHistoryTurn = async (
     })
     if (!localId && !serverId && !current.view &&
       params.historySelection!.createServerChat && !toolRequest.tools?.length) {
-      const requireCurrentCreation = () => {
-        if (!originIsCurrent() || signal.aborted || snapshot.scopeInvalidatedSignal.aborted)
-          throw new Error("stale_selection")
-      }
-      requireCurrentCreation()
-      const created = await tldwClient.createChat(
-        { title: message.trim().slice(0, 80) || "Untitled Chat", source: scope?.type === "workspace" ? undefined : WEBUI_CHAT_SOURCE },
-        { scope, signal, requestScope: snapshot.requestScope }
-      )
-      requireCurrentCreation()
-      if (typeof created?.id !== "string" || !created.id.trim())
-        throw new Error("native_history_creation_unacknowledged")
+      if (!sourceDraft || sourceDraft.kind !== "fresh" || !params.surface)
+        throw new Error("chat_creation_source_invalid")
+      creationHandle = { address: sourceDraft, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
+      const created = await createChatWithRecovery({
+        snapshot,
+        handle: creationHandle,
+        scope,
+        surface: params.surface,
+        inputText: message,
+        setup: {},
+        isCurrent: () => originIsCurrent() && preparationIsCurrent(),
+        create: async (id) => {
+          const created = await tldwClient.createChat(
+            {
+              id,
+              title: message.trim().slice(0, 80) || "Untitled Chat",
+              source:
+                scope?.type === "workspace" ? undefined : WEBUI_CHAT_SOURCE
+            },
+            { scope, signal, requestScope: snapshot.requestScope }
+          );
+          if (created.id === id) notifyServerMutation();
+          return created;
+        },
+      });
+      // The recovery record keeps a late ACK even when this view can no longer bind.
+      if (!originIsCurrent() || !preparationIsCurrent()) throw new Error("stale_selection")
       serverId = created.id
-      createdServerChat = true
+      createdNativeChat = created
     }
     if (!localId && !serverId) {
       const created = await saveHistory(
@@ -718,55 +957,215 @@ export const captureNormalHistoryTurn = async (
         snapshot.requestScope
       )
       // Creation may have succeeded after navigation. It remains its own local history.
-      if (!originIsCurrent()) throw new Error("stale_selection")
+      if (!originIsCurrent() || acceptDraftBind?.isCurrent() === false) throw new Error("stale_selection")
       localId = created.id
       params.setHistoryId(localId)
     }
     if (!originIsCurrent()) throw new Error("stale_selection")
-    let loadAdopted = false
-    let loadRejected = false
+    targetHistoryId = localId
+    targetServerChatId = serverId
+    const ownsNativeMirror = Boolean(creationHandle && serverId && acceptDraftBind)
+    let loadPhase: "preparing" | "accepted" | "rejected" = "preparing"
     const target = {
       historyId: localId, serverChatId: serverId, scope,
-      resetOnCancel: createdServerChat,
-      // Once adopted, the owner's lifetime is independent of this turn's Stop control.
-      ...(serverId ? { isCurrent: () => loadAdopted ||
-        (!loadRejected && !signal.aborted && !snapshot.scopeInvalidatedSignal.aborted) } : {})
+      // Accepted saved ownership is independent of the originating turn's Stop.
+      isCurrent: () => acceptDraftBind?.isCurrent() !== false &&
+        (loadPhase === "accepted" || (loadPhase === "preparing" && preparationIsCurrent()))
     }
     let receipt: HistoryLoadReceipt | undefined
     let adoptionIsCurrent: (() => boolean) | undefined
     try {
-      const loaded = await controller.loadConversation(target, null, (value) => {
+      const loaded = await controller.loadConversation(target, null, value => {
+        loadPhase = "rejected"
+        const now = controller.getCurrent()
+        if (!preparationIsCurrent() || now.owner !== value.owner || now.view !== value.view) return
+        const expectedId = target.serverChatId || (!params.historyId ? localId : null)
+        const expectedKind = target.serverChatId ? "native" : "local"
+        if (expectedId && (value.owner.kind !== expectedKind || value.owner.conversation_id !== expectedId)) return
+        // Draft binding validates this owner's lease through the same guard.
+        loadPhase = "preparing"
+        if (!ownsNativeMirror && acceptDraftBind && !acceptDraftBind(value)) {
+          loadPhase = "rejected"
+          return
+        }
         receipt = value
+        loadPhase = "accepted"
         adoptionIsCurrent = controller.fence()
+        if (!ownsNativeMirror && serverId) params.setServerChatId?.(serverId)
+        if (!ownsNativeMirror && acceptDraftBind) {
+          const bindingIsCurrent = params.historyPreparation!.draftIsCurrent
+          let metadataRetired = false
+          // Raw display IDs guard this command, independently of the accepted H1 load.
+          params.historyPreparation!.draftIsCurrent = () => {
+            const state = useStoreMessageOption.getState()
+            const valid = !metadataRetired && bindingIsCurrent() &&
+              state.historyId === (localId ?? null) && state.serverChatId === (serverId ?? null)
+            if (!valid) metadataRetired = true
+            return valid
+          }
+        }
       })
       current = controller.getCurrent()
-      if (
-        !loaded ||
-        !receipt ||
-        current.owner !== receipt.owner ||
-        current.view !== receipt.view ||
-        !adoptionIsCurrent?.() ||
-        (receipt.owner.kind === "native" &&
-          (signal.aborted || snapshot.scopeInvalidatedSignal.aborted || !receipt.owner.validate_lease()))
-      ) {
+      if (!loaded || !receipt || current.owner !== receipt.owner || current.view !== receipt.view ||
+        !adoptionIsCurrent?.() || !preparationIsCurrent() || receipt.owner.kind === "unavailable" || receipt.owner.validate_lease?.() === false)
         throw new Error("stale_selection")
+      selectionCurrent = adoptionIsCurrent
+      if (ownsNativeMirror) {
+        const accepted = receipt
+        const acceptedOwner = accepted.owner
+        if (acceptedOwner.kind !== "native" || !serverId || !acceptDraftBind)
+          throw new Error("stale_selection")
+        const expectedIds = {
+          historyId: params.historyId ?? null,
+          serverChatId: params.serverChatId ?? null
+        }
+        let publication:
+          | {
+              field: keyof typeof expectedIds
+              id: string
+              observed: boolean
+              original: ReturnType<typeof useStoreMessageOption.getState>
+            }
+          | undefined
+        let metadataRetired = false
+        const metadataIsCurrent = () => {
+          const state = useStoreMessageOption.getState()
+          const matches = (field: keyof typeof expectedIds) => {
+            if (publication?.field !== field)
+              return state[field] === expectedIds[field]
+            if (state[field] === publication.id) {
+              publication.observed = true
+              return true
+            }
+            return !publication.observed && state[field] === expectedIds[field]
+          }
+          const valid =
+            !metadataRetired && matches("historyId") && matches("serverChatId")
+          if (!valid) metadataRetired = true
+          return valid
+        }
+        const mirrorIsCurrent = () =>
+          preparationIsCurrent() &&
+          metadataIsCurrent() &&
+          selectionCurrent() &&
+          controller.getCurrent().owner === accepted.owner &&
+          controller.getCurrent().view === accepted.view &&
+          acceptedOwner.validate_lease() !== false
+        // The creating command owns this alias before the background mirror effect sees its CID.
+        retainIdWatcher(
+          useStoreMessageOption.subscribe((_next, previous) => {
+            // A previous frame exposes replacements hidden by an earlier synchronous subscriber.
+            const previousMatches = (field: keyof typeof expectedIds) =>
+              publication?.field === field
+                ? previous === publication.original ||
+                  previous[field] === publication.id
+                : previous[field] === expectedIds[field]
+            if (!previousMatches("historyId") || !previousMatches("serverChatId"))
+              metadataRetired = true
+            if (publication && previous[publication.field] === publication.id)
+              publication.observed = true
+            metadataIsCurrent()
+          })
+        )
+        const mirrorId = await linkServerChatMirror({
+          chatId: serverId,
+          title: message.trim().slice(0, 80) || "Untitled Chat",
+          ownerKey: serverChatMirrorOwnerKey(snapshot),
+          scope: acceptedOwner.scope,
+          currentHistoryId: null,
+          signal,
+          validate_lease: mirrorIsCurrent
+        })
+        if (!mirrorIsCurrent() || !acceptDraftBind(accepted) || !mirrorIsCurrent())
+          throw new Error("stale_selection")
+        const bindingIsCurrent = params.historyPreparation!.draftIsCurrent
+        params.historyPreparation!.draftIsCurrent = () => {
+          const valid = !metadataRetired && bindingIsCurrent() && metadataIsCurrent()
+          if (!valid) metadataRetired = true
+          return valid
+        }
+        const publish = (
+          field: keyof typeof expectedIds,
+          id: string,
+          setter: () => void
+        ) => {
+          if (!mirrorIsCurrent()) throw new Error("stale_selection")
+          publication = {
+            field,
+            id,
+            observed: false,
+            original: useStoreMessageOption.getState()
+          }
+          try {
+            setter()
+            if (!mirrorIsCurrent() || useStoreMessageOption.getState()[field] !== id)
+              throw new Error("stale_selection")
+            expectedIds[field] = id
+          } catch (error) {
+            metadataRetired = true
+            throw error
+          } finally {
+            publication = undefined
+          }
+        }
+        publish("historyId", mirrorId, () =>
+          params.setHistoryId(mirrorId, { preserveServerChatId: true })
+        )
+        publish("serverChatId", serverId, () => params.setServerChatId?.(serverId!))
+        if (createdNativeChat?.id === serverId) {
+          const createdChat = { ...createdNativeChat }
+          const { resolveServerChatAssistantIdentity } = await import("@/hooks/chat/useServerChatLoader")
+          const { readSavedRoleplayPresentation } = await import("@/services/tldw/roleplay-resume")
+          const identity = resolveServerChatAssistantIdentity(createdChat)
+          const store = useStoreMessageOption.getState()
+          // H1 already owns this new chat, so its background loader will not adopt it again.
+          for (const publishMetadata of [
+            () => store.setServerChatCharacterId(identity.characterId),
+            () => store.setServerChatAssistantKind(identity.assistantKind),
+            () => store.setServerChatAssistantId(identity.assistantId),
+            () => store.setServerChatPersonaMemoryMode(identity.personaMemoryMode),
+            () => store.setServerChatRoleplaySetup(readSavedRoleplayPresentation(createdChat)),
+            () => store.setServerChatMetaLoaded(true)
+          ]) {
+            if (!mirrorIsCurrent()) throw new Error("stale_selection")
+            publishMetadata()
+          }
+          if (!mirrorIsCurrent()) throw new Error("stale_selection")
+        }
+        localId = mirrorId
+        targetHistoryId = mirrorId
       }
-      // A historyId-only bound mirror is resolved by the loader; no metadata reread.
-      // Explicit native targets and newly created local targets must still match.
-      const expectedId =
-        target.serverChatId || (!params.historyId ? localId : null)
-      const expectedKind = target.serverChatId ? "native" : "local"
-      if (
-        expectedId &&
-        (receipt.owner.kind !== expectedKind ||
-          receipt.owner.conversation_id !== expectedId)
-      ) {
-        throw new Error("owner_conversation_mismatch")
+
+      if (creationHandle && serverId) await markChatCreationBound(creationHandle, serverId)
+      if (!selectionCurrent() || !preparationIsCurrent()) throw new Error("stale_selection")
+      if (acceptDraftBind && params.actorScene) {
+        const acceptedReceipt = receipt
+        const boundIsCurrent = () =>
+          acceptDraftBind.isCurrent() &&
+          controller.getCurrent().owner === acceptedReceipt.owner &&
+          controller.getCurrent().view?.owner_key ===
+            acceptedReceipt.view.owner_key &&
+          controller.getCurrent().view?.conversation_id ===
+            acceptedReceipt.view.conversation_id
+        const scenePreparationIsCurrent = () =>
+          preparationIsCurrent() &&
+          adoptionIsCurrent?.() === true &&
+          controller.getCurrent().owner === acceptedReceipt.owner &&
+          controller.getCurrent().view === acceptedReceipt.view
+        if (
+          !(await bindActorSceneAfterLoad(
+            params.actorScene,
+            acceptedReceipt,
+            boundIsCurrent,
+            scenePreparationIsCurrent
+          ))
+        )
+          throw new Error("actor_settings_bind_not_committed")
       }
-      loadAdopted = true
-      if (serverId) params.setServerChatId?.(serverId)
+      if (!selectionCurrent() || !preparationIsCurrent() || controller.getCurrent().owner !== receipt.owner || controller.getCurrent().view !== receipt.view)
+        throw new Error("stale_selection")
     } finally {
-      loadRejected = !loadAdopted
+      if (!receipt || !adoptionIsCurrent?.()) loadPhase = "rejected"
     }
   }
   if (
@@ -780,19 +1179,69 @@ export const captureNormalHistoryTurn = async (
     throw new Error(current.error || "history_selection_not_ready")
   }
   if (current.owner.validate_lease?.() === false) throw new Error("stale_selection")
-  const view = structuredClone(current.view)
+  const viewIsCurrent = controller.fence()
+  const selectionIntent = usePlaygroundSessionStore.getState()
+  const navigationIsCurrent = () =>
+    usePlaygroundSessionStore.getState().restoreRevision === selectionIntent.restoreRevision &&
+    usePlaygroundSessionStore.getState().serverChatSelectionIntent === selectionIntent.serverChatSelectionIntent
+  await assertHistoryConversationTarget(current.owner, { historyId: targetHistoryId, serverChatId: targetServerChatId })
+  if (!viewIsCurrent() || !navigationIsCurrent() || !selectionCurrent() ||
+      controller.getCurrent().owner !== current.owner || controller.getCurrent().view !== current.view ||
+      current.owner.validate_lease?.() === false)
+    throw new Error("stale_selection")
+  const originalOwner = current.owner
+  const originalCapture = current.capture
+  const originView = structuredClone(current.view)
+  const editResend = params.historySelection!.editResend
+  const editAndSend = params.historySelection!.editAndSend
+  const regenerate = params.historySelection!.regenerate
+  if ((editAndSend || regenerate) && (current.owner.kind !== "local" || editResend))
+    throw new Error("unsupported_history_action")
+  if (editAndSend && (
+    current.owner !== editAndSend.owner ||
+    !editAndSend.originIsCurrent() ||
+    canonicalHistoryJson(originView) !== canonicalHistoryJson(editAndSend.originView) ||
+    !current.capture.rows.some((row) =>
+      row.id === editAndSend.targetId && row.role === "user"
+    )
+  )) throw new Error("stale_selection")
+  if (regenerate && (
+    current.owner !== regenerate.owner || !regenerate.originIsCurrent() ||
+    canonicalHistoryJson(originView) !== canonicalHistoryJson(regenerate.originView) ||
+    current.capture.rows.at(-1)?.id !== regenerate.answerId ||
+    current.capture.rows.at(-2)?.id !== regenerate.questionId ||
+    current.capture.rows.at(-2)?.role !== "user" ||
+    current.capture.rows.at(-2)?.revision !== regenerate.questionRevision ||
+    (originView.interpretation.kind === "parent_graph_v1" &&
+      current.capture.rows.at(-1)?.parent_id !== regenerate.questionId)
+  )) throw new Error("stale_selection")
+  const branchIntent = current.owner.kind === "native" && !editResend &&
+    controller.takeBranchIntent?.(current.view) === true
+  const view = editResend
+    ? nativeEditResendView(
+        current.owner,
+        originView,
+        current.capture,
+        editResend
+      )
+    : regenerate
+      ? { ...originView, cursor: { kind: "after_message" as const, message_id: regenerate.questionId } }
+      : editAndSend
+        ? { ...originView, cursor: { kind: "before_message" as const, message_id: editAndSend.targetId } }
+        : structuredClone(originView)
   const retryAdmission = params.historySelection!.retryAdmission
-  // A retry reasks the question from the point just before it, in the chat
-  // that admitted it.
-  if (
-    retryAdmission &&
-    (retryAdmission.owner_key !== view.owner_key ||
-      retryAdmission.conversation_id !== view.conversation_id ||
-      view.cursor.kind !== "before_message" ||
-      view.cursor.message_id !== retryAdmission.input_message_id)
-  )
+  if (retryAdmission &&
+    (retryAdmission.owner_key !== view.owner_key || retryAdmission.conversation_id !== view.conversation_id ||
+      view.cursor.kind !== "before_message" || view.cursor.message_id !== retryAdmission.input_message_id))
     throw new Error("invalid_history_retry")
   const bookmarkScope = { ...current.bookmarkScope }
+  const retryRecoveries = params.historySelection!.retryRecoveries ?? []
+  if (retryRecoveries.some(entry =>
+    entry.scope.profile_id !== bookmarkScope.profile_id ||
+    entry.turn.owner_key !== view.owner_key ||
+    entry.turn.conversation_id !== view.conversation_id ||
+    !entry.turn.operation_id
+  )) throw new Error("invalid_history_retry")
   const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
   const owner =
     current.owner.kind === "native"
@@ -802,56 +1251,48 @@ export const captureNormalHistoryTurn = async (
           request_scope: snapshot.requestScope,
           validate_lease: authValid
         }
-      : current.owner
-  // A Zustand publication replaces the store object even for loading flags or
-  // settings for another model. Bind the lease to dispatch inputs instead.
-  const dispatchSettings = () => {
-    const settings = useStoreChatModelSettings.getState()
-    const selection = useStoreMessageOption.getState()
-    const tools = useMcpToolsStore.getState()
-    const effectiveToolChoice = params.selectionSource?.toolChoice === "global"
-      ? selection.toolChoice
-      : params.toolChoice ?? selection.toolChoice
-    const toolRequest = resolveChatToolRequest({
-      tools: tools.chatTools ?? tools.tools,
-      toolChoice: effectiveToolChoice,
-      mcpHealthState: tools.healthState,
-      hasMcp: tools.healthState !== "unavailable"
-    })
-    return JSON.stringify({
-      settings: settings.getEffectiveSettings(),
-      settingsScope: settings.activeSettingsScope,
-      model: params.selectionSource?.model === "global"
-        ? selection.selectedModel
-        : params.selectedModel,
-      toolChoice: effectiveToolChoice,
-      tools: toolRequest.tools,
-      requestToolChoice: toolRequest.toolChoice
-    })
-  }
-  const capturedDispatchSettings = dispatchSettings()
-  const viewIsCurrent = controller.fence()
-  const selectionIntent = usePlaygroundSessionStore.getState()
+      : {
+          ...current.owner,
+          // The accepted local question settles under its original account,
+          // independently of the controller's retired display/load lease.
+          validate_lease: authValid
+        }
   const validateLease = () =>
-    authValid() &&
-    dispatchSettings() === capturedDispatchSettings
-  const navigationIsCurrent = () =>
-    usePlaygroundSessionStore.getState().restoreRevision === selectionIntent.restoreRevision &&
-    usePlaygroundSessionStore.getState().serverChatSelectionIntent === selectionIntent.serverChatSelectionIntent
+    authValid() && dispatchIsCurrent() &&
+    (serverOwned || owner.kind !== "native" || !!turn.admission || editPreparationIsCurrent())
   const canUpdateView = () => {
     const now = controller.getCurrent().view
     return (
-      viewIsCurrent() &&
-      navigationIsCurrent() &&
+      viewIsCurrent() && navigationIsCurrent() &&
+      (!editAndSend || editAndSend.originIsCurrent()) &&
+      (!regenerate || regenerate.originIsCurrent()) &&
+      draftIsCurrent() && acceptDraftBind?.isCurrent() !== false && selectionCurrent() && controller.getCurrent().owner === originalOwner &&
       !!now &&
-      now.owner_key === view.owner_key &&
-      now.conversation_id === view.conversation_id &&
-      now.view_session_id === view.view_session_id &&
-      now.selection_revision === view.selection_revision
+      now.owner_key === originView.owner_key &&
+      now.conversation_id === originView.conversation_id &&
+      now.view_session_id === originView.view_session_id &&
+      now.selection_revision === originView.selection_revision
     )
   }
+  const editOriginIsCurrent = () =>
+    selectionCurrent() &&
+    preparationIsCurrent() &&
+    controller.getCurrent().owner === current.owner &&
+    controller.getCurrent().view === current.view &&
+    originalOwner.validate_lease?.() !== false &&
+    canUpdateView() &&
+    editResend?.isOriginCurrent() !== false
+  const editPreparationIsCurrent = () =>
+    editOriginIsCurrent() && editResend?.isCurrent() !== false
   const capture = await captureHistorySnapshot(owner, view, "send", signal)
   if (capture.status !== "captured") throw new Error(capture.code)
+  if (regenerate && (capture.rows.at(-1)?.id !== regenerate.questionId ||
+      capture.rows.at(-1)?.role !== "user" ||
+      capture.rows.at(-1)?.revision !== regenerate.questionRevision ||
+      capture.selected_content.at(-1)?.message !== message ||
+      canonicalHistoryJson(capture.selected_content.at(-1)?.images ?? []) !==
+        canonicalHistoryJson(image ? [image] : [])))
+    throw new Error("stale_selection")
   if (!canUpdateView()) throw new Error("stale_selection")
   if (serverOwned) {
     if (owner.kind !== "native" || owner.conversation_id !== params.serverChatId ||
@@ -861,26 +1302,60 @@ export const captureNormalHistoryTurn = async (
       throw new Error("unsupported_history_durable_capability")
     if (!validateLease() || !canUpdateView()) throw new Error("stale_selection")
   }
-  const previousAttempts = serverOwned ? controller.recoveries.flatMap(({ turn }) =>
-    turn.persistence === "server" && turn.logical_user_message_id === params.tldwTurn!.user_message_id ? [turn] : []
+  const previousAttempts = serverOwned ? controller.recoveries.flatMap(({ scope, turn }) =>
+    scope.profile_id === bookmarkScope.profile_id && turn.owner_key === view.owner_key &&
+    turn.conversation_id === view.conversation_id && turn.persistence === "server" &&
+    turn.logical_user_message_id === params.tldwTurn!.user_message_id ? [turn] : []
   ) : []
   const prior = previousAttempts[0]
   if (prior && (prior.input_text !== message || !prior.admission || !prior.finalized_selection))
     throw new Error("history_recovery_inspection_required")
-  if (previousAttempts.some(turn => turn.admission?.selection_digest !== prior?.admission?.selection_digest))
+  if (prior?.admission && previousAttempts.some(turn =>
+    !turn.admission || canonicalHistoryJson(turn.admission) !== canonicalHistoryJson(prior.admission)
+  ))
     throw new Error("history_operation_conflict")
+  if (serverOwned && retryAdmission &&
+      (!prior?.admission || canonicalHistoryJson(retryAdmission) !== canonicalHistoryJson(prior.admission)))
+    throw new Error("invalid_history_retry")
+  if (editResend) {
+    if (!editPreparationIsCurrent()) throw new Error("stale_selection")
+    nativeEditResendView(owner, originView, capture, editResend, originalCapture)
+  }
   const operationId = crypto.randomUUID()
   // Until this turn ends, no view may keep its record: the reply is still
   // being written (CS-04). Released by normalChatMode when the turn ends.
-  markHistoryTurnLive(operationId)
+  markHistoryTurnLive(operationId);
+  let admissionNotified = false;
+  let settlementNotified = false;
+  const notifyServerSettlement = () => {
+    if (settlementNotified || owner.kind !== 'native' || !turn.resultId) return;
+    settlementNotified = true;
+    notifyServerMutation();
+  };
   // Record writes run in order, so a late checkpoint never replaces the final
   // record of the turn.
   let recoveryWrites: Promise<void> = Promise.resolve()
   let lastRecord: HistoryTurnRecovery | null = null
+  let settlementPayload: import("@/db/dexie/types").Message | undefined
+  let durableCompleted = false
+  const dismissRetriedRecords = async () => {
+    if (!turn.retryAdmission || !turn.admission) return
+    const admission = canonicalHistoryJson(historyAdmissionReference(turn.admission))
+    if (admission !== canonicalHistoryJson(turn.retryAdmission)) return
+    for (const entry of retryRecoveries) {
+      if (entry.turn.admission && canonicalHistoryJson(entry.turn.admission) === admission)
+        await dismissHistoryTurnRecovery(entry.scope, view, entry.turn.operation_id, "completed")
+    }
+  }
   const saveRecord = (next: HistoryTurnRecovery) => {
     const write = recoveryWrites.then(async () => {
       lastRecord = next
-      await saveHistoryTurnRecovery(bookmarkScope, view, next)
+      try { await saveHistoryTurnRecovery(bookmarkScope, view, next) }
+      catch (error) {
+        if (next.persistence !== "server" || !next.result_text) throw error
+        await retainHistoryTurnRecoveryInMemory(bookmarkScope, view, next)
+        console.warn("Recovered server reply text is retained in this window only.")
+      }
     })
     recoveryWrites = write.catch(() => undefined)
     return write
@@ -891,10 +1366,12 @@ export const captureNormalHistoryTurn = async (
     state: HistoryTurnRecovery["state"],
     extra: Pick<
       Partial<HistoryTurnRecovery>,
-      "outcome" | "interruption_reason" | "settled_message_id"
+      | "outcome" | "interruption_reason" | "failure_reason" | "failure_action"
+      | "stopped_before_reply" | "settled_message_id"
     > = {}
   ): HistoryTurnRecovery => ({
     operation_id: operationId,
+    ...(editResend ? { action: "edit_resend" as const } : {}),
     origin_view: view,
     selection_digest: turn.retryAdmission?.selection_digest ?? turn.selection!.selection_digest,
     request_context_digest: turn.requestContextDigest ?? turn.selection!.request_context_digest,
@@ -906,6 +1383,10 @@ export const captureNormalHistoryTurn = async (
       finalized_selection: turn.selection!,
       ...(turn.admission ? { input_id: turn.admission.input_message_id } : {}),
       ...(turn.observedResult ? { assistant_id: turn.observedResult.result_message_id, observed_result: turn.observedResult } : {})
+    } : turn.persistence === "server" ? {
+      persistence: "server" as const,
+      ...(turn.admission ? { input_id: turn.admission.input_message_id } : {}),
+      ...(turn.resultId ? { assistant_id: turn.resultId } : {})
     } : { input_id: turn.input!.id, assistant_id: turn.assistantId! }),
     created_at: turn.createdAt!,
     input_text: turn.input!.content,
@@ -917,14 +1398,16 @@ export const captureNormalHistoryTurn = async (
     ...(turn.admission
       ? { admission: historyAdmissionReference(turn.admission) }
       : {}),
+    ...(turn.existingSelection && turn.selection
+      ? { existing_selection: structuredClone(turn.selection) }
+      : {}),
+    ...(settlementPayload ? { settlement_payload: structuredClone(settlementPayload), outcome: "complete" as const } : {}),
     ...extra
   })
   // A server chat holds the question once it is admitted; until the reply is
   // settled there too, its latest write is still in flight (CS-04).
   let endReplyWrite: ((outcome: "saved" | "failed" | "unknown") => void) | null =
     null
-  // The reply was written to the owner (`complete`).
-  let settled = false
   // Throttled checkpoints of the reply so far: a reload keeps what arrived.
   let checkpointsStopped = false
   let checkpointTimer: ReturnType<typeof setTimeout> | null = null
@@ -940,7 +1423,7 @@ export const captureNormalHistoryTurn = async (
     checkpointTimer = null
     const content = pendingCheckpoint
     pendingCheckpoint = null
-    if (checkpointsStopped || content == null || !turn.admission) return
+    if (checkpointsStopped || content == null || (!turn.admission && !turn.existingSelection)) return
     lastCheckpointAt = Date.now()
     // If the page goes away now, this partial reply was interrupted.
     void saveRecord(
@@ -953,19 +1436,68 @@ export const captureNormalHistoryTurn = async (
     owner,
     capture,
     ...(!serverOwned && retryAdmission ? { retryAdmission } : {}),
-    currentView: () => controller.getCurrent().view,
+    ...(regenerate ? { existingSelection: true } : {}),
+    ...(owner.kind === "native" ? { historyBranch: Boolean(editResend || branchIntent) } : {}),
+    ...(editResend ? { historyEdit: Object.freeze({ version: 1 as const, message_id: editResend.message_id, message_revision: editResend.message_revision }) } : {}),
+    currentView: () =>
+      (editResend || editAndSend || regenerate)
+        ? canUpdateView()
+          ? view
+          : null
+        : controller.getCurrent().view,
     validateLease,
     canUpdateView,
+    preparationIsCurrent: editPreparationIsCurrent,
     beforeDispatch: async () => {
+      if ((editResend || branchIntent) && !editPreparationIsCurrent())
+        throw new Error("stale_selection")
+      if (owner.kind === "native" && turn.historyEdit)
+        await requireNativeHistoryEditAdmission(owner, capture, turn.persistence === "server" ? "completion" : "messages", {
+          signal, validate_lease: editPreparationIsCurrent
+        })
+      if (
+        owner.kind === "native" &&
+        turn.historyBranch === false &&
+        !turn.retryAdmission &&
+        (await nativeHistoryNeedsBranchChoice(owner, capture, turn.persistence === "server" ? "completion" : "messages", {
+          signal,
+          validate_lease: editPreparationIsCurrent
+        }))
+      )
+        throw new NativeHistoryBranchChoice(
+          () => canUpdateView() && originalOwner.validate_lease?.() !== false
+        )
+
       await saveRecord(record(turn, "", "dispatching"))
+      if (turn.persistence === "server" && owner.kind === "native")
+        endReplyWrite = beginServerChatWrite(owner.conversation_id)
+      if ((editResend || branchIntent) && !editPreparationIsCurrent())
+        throw new Error("stale_selection")
     },
     afterAdmission: async () => {
+      if (
+        turn.owner.kind === 'native' &&
+        !turn.retryAdmission &&
+        turn.admission &&
+        !admissionNotified
+      ) {
+        admissionNotified = true;
+        notifyServerMutation();
+      }
       if (turn.owner.kind === "native" && !endReplyWrite)
         endReplyWrite = beginServerChatWrite(turn.owner.conversation_id)
       await saveRecord(record(turn, "", "accepted_unsent"))
     },
+    stageSettlementPayload: async (message) => {
+      if (!turn.existingSelection || message.id !== turn.assistantId ||
+          message.parent_message_id !== turn.input?.id)
+        throw new Error("history_operation_conflict")
+      stopCheckpoints()
+      settlementPayload = structuredClone(message)
+      await saveRecord(record(turn, message.content, "generated_unsaved", { outcome: "complete" }))
+    },
     checkpoint: (content) => {
-      if (checkpointsStopped || !turn.admission || !content.trim()) return
+      if (checkpointsStopped || (!turn.admission && !turn.existingSelection) || !content.trim()) return
       pendingCheckpoint = content
       if (checkpointTimer) return
       const wait = Math.max(
@@ -974,91 +1506,188 @@ export const captureNormalHistoryTurn = async (
       )
       checkpointTimer = setTimeout(flushCheckpoint, wait)
     },
-    recover: async (data) => {
+    recover: async (data, error) => {
       stopCheckpoints()
-      if (settled) {
-        // The reply is already saved with its owner (only a later step, such
-        // as an account change, failed): there is nothing to review or keep.
+      if (durableCompleted) return
+      if (
+        owner.kind === "native" &&
+        !turn.retryAdmission &&
+        !turn.admission &&
+        !turn.resultId &&
+        data.content === "" &&
+        turn.selection &&
+        ((turn.historyBranch === false && (error instanceof NativeHistoryBranchChoice ||
+          isDefinitiveNativeBranchRejection(error, turn.selection))) ||
+          (turn.dispatched && turn.historyEdit && isDefinitiveNativeEditRejection(error, turn.selection, turn.historyEdit)))
+      ) {
+        const refusal =
+          error instanceof NativeHistoryBranchChoice
+            ? error
+            : new (turn.historyEdit ? NativeHistoryEditRefusal : NativeHistoryBranchRefusal)(
+                error,
+                () => canUpdateView() && originalOwner.validate_lease?.() !== false
+              )
+        try {
+          await saveRecord(record(turn, "", "refused"))
+        } catch {
+          console.warn("Could not retain a native input that was not admitted.")
+        }
+        if (refusal.isCurrent()) {
+          if (!turn.historyEdit) controller.holdStaleSend?.(current.view!, draftIsCurrent)
+          try {
+            await controller.refreshRecovery?.()
+          } catch {
+            console.warn("Could not display retained native input.")
+          }
+        }
+        throw refusal
+      }
+
+      if (turn.resultId) {
+        endReplyWrite?.('saved');
+        notifyServerSettlement();
+        // Keep the acknowledged receipt until this view or a reopened view follows it.
         await recoveryWrites
-        await dismissHistoryTurnRecovery(
-          bookmarkScope,
-          view,
-          operationId,
-          "completed"
-        )
+        await saveRecord(record(turn, data.content, "generated_unsaved", {
+          outcome: turn.outcome ?? "complete",
+          settled_message_id: turn.resultId
+        }))
         return
       }
       // A reply the server never received leaves the server copy incomplete.
-      endReplyWrite?.(data.content.trim() ? "failed" : "unknown")
+      endReplyWrite?.(turn.persistence === "server" ? "unknown" : data.content.trim() ? "failed" : "unknown")
+      const failure = !data.outcome && !data.stoppedBeforeReply && error != null
+        ? decodeChatErrorPayload(
+            buildFriendlyErrorMessage(error, { modelLabel: turn.replyModel?.label })
+          )
+        : null
       await saveRecord(
         record(
           turn,
           data.content,
           data.content
             ? "generated_unsaved"
-            : turn.admission
+            : turn.admission || turn.existingSelection
               ? "accepted_unsent"
               : "unknown",
-          data.outcome
-            ? {
-                outcome: data.outcome,
-                ...(data.interruptionReason
-                  ? { interruption_reason: data.interruptionReason }
-                  : {})
-              }
-            : {}
+          {
+            ...(data.outcome ? {
+              outcome: data.outcome,
+              ...(data.interruptionReason
+                ? { interruption_reason: data.interruptionReason }
+                : {})
+            } : {}),
+            ...(failure ? { failure_reason: `${failure.summary} ${failure.hint}` } : {}),
+            ...(failure?.recoveryAction === "open-model-selector"
+              ? { failure_action: failure.recoveryAction }
+              : {}),
+            ...(data.stoppedBeforeReply ? { stopped_before_reply: true as const } : {})
+          }
         )
       )
+      // Keep the admitted question selected so a deliberate no-output retry can reuse it.
+      if (turn.admission && !data.content && !data.outcome && !turn.existingSelection && canUpdateView()) {
+        const commandIsCurrent = captureChatDraftSource(authValid).isCurrent
+        const following = controller.followResult(originView, turn.admission.input_message_id,
+          () => commandIsCurrent() && navigationIsCurrent())
+        // A Stop ends at once; following the question may wait on a slow read (CM-02).
+        if (data.stoppedBeforeReply)
+          void Promise.resolve(following).catch(() =>
+            console.warn("Could not follow a question stopped before its reply.")
+          )
+        else await following
+      }
       await controller.refreshRecovery?.()
     },
     cancelPreparation: async () => {
       stopCheckpoints()
       await recoveryWrites
-      await dismissHistoryTurnRecovery(bookmarkScope, view, operationId)
+      if (lastRecord) {
+        try { await saveRecord({ ...lastRecord, state: "refused" }) }
+        catch { console.warn("Could not record retained input from cancelled preparation.") }
+        if (canUpdateView()) await controller.refreshRecovery?.()
+      } else await dismissHistoryTurnRecovery(bookmarkScope, view, operationId)
     },
-    complete: async () => {
-      // Only locally settled replies need a record until the view follows.
-      settled = true
-      stopCheckpoints()
-      endReplyWrite?.("saved")
-      await recoveryWrites
+    complete: async (content) => {
+      stopCheckpoints();
+      endReplyWrite?.('saved');
+      notifyServerSettlement();
+      await recoveryWrites;
       if (serverOwned) {
         await dismissHistoryTurnRecovery(bookmarkScope, view, operationId, "completed")
+        durableCompleted = true
+        await dismissRetriedRecords()
+        return
       }
+      // This lane keeps the receipt until the view follows it.
+      await saveRecord(
+        record(
+          turn,
+          content ?? lastRecord?.result_text ?? "",
+          "generated_unsaved",
+          {
+            outcome: turn.outcome ?? "complete",
+            settled_message_id: turn.resultId
+          }
+        )
+      )
+      if (creationHandle && owner.kind === "native")
+        await markChatCreationSettled(creationHandle, owner.conversation_id)
+      await dismissRetriedRecords()
     },
     followResult: async (id) => {
-      if (!canUpdateView()) return false
-      return controller.followResult(view, id, navigationIsCurrent)
+      if (!canUpdateView() || (editResend && !editOriginIsCurrent())) return false
+      // Following owns its H1 advancement, while draft publication stays fenced.
+      const commandIsCurrent = captureChatDraftSource(authValid).isCurrent
+      const followed = await controller.followResult(
+        originView,
+        id,
+        () => commandIsCurrent() && navigationIsCurrent() && editResend?.isCurrent() !== false
+      )
+      if (
+        followed &&
+        commandIsCurrent() &&
+        navigationIsCurrent() &&
+        params.historySelection?.sourceIsCurrent?.() !== false
+      )
+        params.historySelection?.onResultFollow?.()
+      return followed
     },
     finish: async (followed) => {
       await recoveryWrites
-      if (serverOwned && settled) return
+      if (durableCompleted) return
       if (followed || !turn.resultId) {
-        await dismissHistoryTurnRecovery(
-          bookmarkScope,
-          view,
-          operationId,
-          "completed"
-        )
+        try {
+          await dismissHistoryTurnRecovery(bookmarkScope, view, operationId, "completed")
+        } catch (error) {
+          if (turn.persistence !== "server" || !turn.admission || !turn.resultId) throw error
+          console.warn("The server saved the reply; its recovery record could not be cleared.")
+        }
         return
       }
       // The view went away before it could follow the settled reply (the
       // user left /chat): the next view of this chat follows it instead.
       await saveRecord(
         record(turn, lastRecord?.result_text ?? "", "generated_unsaved", {
-          outcome: "complete",
+          outcome: turn.outcome ?? "complete",
           settled_message_id: turn.resultId
         })
       )
+      if (editResend && editOriginIsCurrent())
+        await controller.refreshRecovery?.()
     },
     keep: async () => {
       await recoveryWrites
       if (!lastRecord?.outcome) return
       releaseHistoryTurn(operationId)
-      return keepHistoryTurnRecovery(controller, {
-        scope: bookmarkScope,
-        turn: lastRecord
-      })
+      const kept = await keepHistoryTurnRecovery(
+        controller,
+        { scope: bookmarkScope, turn: lastRecord },
+        stopSignal
+      )
+      if (kept.status === "kept" && kept.settledByKeep)
+        await dismissRetriedRecords()
+      return kept
     },
     release: () => {
       stopCheckpoints()
@@ -1069,65 +1698,65 @@ export const captureNormalHistoryTurn = async (
   return turn
 }
 
-export const normalChatMode = async (
-  message: string,
-  image: string,
-  isRegenerate: boolean,
-  messages: Message[],
-  history: ChatHistory,
-  signal: AbortSignal,
-  params: NormalChatModeParams
+/** Reuse the accepted H1 bind and operation-lived settlement for each real mode. */
+export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase & HistoryChatModeParams>(
+  mode: ChatModeDefinition<TParams>,
+  message: string, image: string, isRegenerate: boolean,
+  messages: Message[], history: ChatHistory, signal: AbortSignal, params: TParams
 ): Promise<ChatSubmitResult> => {
-  console.log("Using normalChatMode")
   if (params.historySelection && params.tldwTurn && !params.serverChatId)
     throw new Error("unsupported_history_durable_turn")
-  const historyOwner = params.historySelection?.controller.getCurrent().owner
-  const needsRequestScope = Boolean(
-    params.webSearch || params.historySelection || params.tldwTurn || params.requestScope
-  )
-  const ownsServicePromptSnapshot =
-    !params.servicePromptSnapshot && needsRequestScope
-  const servicePromptSnapshot =
-    params.servicePromptSnapshot ??
-    (needsRequestScope
-      ? await loadServicePromptSnapshot(
-          params.webSearch ? ["chat.web_search.answer"] : [],
-          {
-            signal,
-            requestScope: historyOwner?.kind === "native"
-              ? historyOwner.request_scope
-              : params.requestScope
-          }
-        )
-      : undefined)
+  const preparation = params.historySelection
+    ? params.historyPreparation ?? captureNormalChatPreparation(params)
+    : undefined
+  const servicePromptSnapshot = params.servicePromptSnapshot
   const executionSignal = servicePromptSnapshot
     ? servicePromptSnapshot.scopeSignal
     : signal
   let createdTurn: HistorySendTurn | undefined
+  const settlement = params.historySelection
+    ? beginChatTurnSettlement(signal)
+    : undefined
   try {
-    if (params.webSearch) {
-      getRequiredServicePrompt(servicePromptSnapshot, "chat.web_search.answer")
-    }
+    if (servicePromptSnapshot?.scopeInvalidatedSignal.aborted || executionSignal.aborted)
+      return chatSubmitFailed("Request cancelled")
     if (params.historySelection) {
-      if (isRegenerate) throw new Error("unsupported_history_action")
-      if (params.uploadedFiles?.length)
-        throw new Error("unsupported_history_message_assets")
-      if (params.tldwTurn && (image || params.webSearch || params.dynamicUIRequest || params.overlaySystemPrompt || params.actorSettings?.isEnabled))
+      if (isRegenerate && (params.tldwTurn || !params.historySelection.regenerate))
+        throw new Error("unsupported_history_action")
+      const originalOwner = params.historySelection.controller.getCurrent().owner
+      const durableRag = mode.id === "rag" && Boolean(params.tldwTurn)
+      if (originalOwner?.kind === "native" && mode.id !== "normal" && !durableRag)
         throw new Error("unsupported_history_action_context")
+      if (params.uploadedFiles?.length && mode.id === "normal")
+        throw new Error("unsupported_history_message_assets")
+      if (params.tldwTurn && (image || params.webSearch || params.dynamicUIRequest ||
+          params.actorSettings?.isEnabled || params.historySelection.editResend ||
+          params.historySelection.editAndSend || params.historySelection.regenerate))
+        throw new Error("unsupported_history_action_context")
+      if (!servicePromptSnapshot) throw new Error("history_scope_unavailable")
       const historyTurn = await captureNormalHistoryTurn(
-        params,
+        { ...params, historyPreparation: preparation },
         message,
-        servicePromptSnapshot!,
-        executionSignal
+        servicePromptSnapshot,
+        executionSignal,
+        image,
+        signal
       )
       createdTurn = historyTurn
       // Canonical roles/content come from the captured owner, not display normalization.
+      const displayMessages = formatSelectedHistory(historyTurn.capture).messages
+      const inferenceIds = historyTurn.owner.kind === "local"
+        ? new Set(excludeLocalRagDiagnostics(displayMessages).map(row => row.id))
+        : undefined
       const selected = historyTurn.capture.rows.map((node, index) => {
         const content = historyTurn.capture.selected_content[index]
         const metadata = content.extra_metadata ?? {}
-        const local = metadata.local_history as
-          | Record<string, unknown>
-          | undefined
+        const local = (
+          historyTurn.owner.kind === "local"
+            ? metadata.local_history
+            : undefined
+        ) as Record<string, unknown> | undefined
+
         return {
           id: node.id,
           role: node.role,
@@ -1140,35 +1769,43 @@ export const normalChatMode = async (
             | undefined,
           messageType: local?.messageType as string | undefined
         }
-      })
-      generateHistory(selected, params.selectedModel, { versioned: true })
+      }).filter(row => !inferenceIds || inferenceIds.has(row.id))
+      if (!durableRag) generateHistory(selected, params.selectedModel, { versioned: true })
       if (
         historyTurn.owner.kind === "native" &&
         (params.webSearch || params.dynamicUIRequest)
       )
         throw new Error("unsupported_history_native_result_metadata")
-      const selectedParent = historyTurn.capture.rows.at(-1)?.id ?? null
+      const selectedParent = (durableRag ? historyTurn.retryAdmission?.input_message_id : undefined) ??
+        historyTurn.capture.rows.at(-1)?.id ?? null
+      const regenerate = params.historySelection.regenerate
       if (
         params.userParentMessageId &&
         params.userParentMessageId !== selectedParent
       )
         throw new Error("unsupported_history_reply_target")
-      messages = formatSelectedHistory(historyTurn.capture).messages
+      historyTurn.clientManagedContext = params.historyForModel !== undefined
+      if (!regenerate) messages = displayMessages
       params = {
         ...params,
         historyTurn,
+        ...((params.historySelection?.editResend || params.historySelection?.editAndSend)
+          ? { setMessages: () => {}, setHistory: () => {} }
+          : {}),
         // A retry shows and settles under the question it reasks.
         ...(historyTurn.retryAdmission
           ? { userMessageId: historyTurn.retryAdmission.input_message_id }
           : {}),
-        userParentMessageId: selectedParent,
-        historyForModel: selected as ChatHistory,
+        ...(regenerate ? { userMessageId: regenerate.questionId } : {}),
+        userParentMessageId: regenerate ? (historyTurn.capture.rows.at(-1)?.parent_id ?? null) : selectedParent,
+        assistantParentMessageId: regenerate?.questionId,
+        historyForModel: (durableRag ? [] : regenerate ? selected.slice(0, -1) : selected) as ChatHistory,
         historyId:
           historyTurn.owner.kind === "local"
             ? historyTurn.owner.conversation_id
             : params.historyId
       }
-      history = selected as ChatHistory
+      history = (regenerate ? selected.slice(0, -1) : selected) as ChatHistory
     }
     const resolvedImage =
       image.length > 0
@@ -1177,7 +1814,7 @@ export const normalChatMode = async (
         : ""
 
     const result = await runChatPipeline(
-      normalChatModeDefinition,
+      mode,
       message,
       resolvedImage,
       isRegenerate,
@@ -1200,26 +1837,67 @@ export const normalChatMode = async (
       }
     )
     const historyTurn = params.historyTurn
-    if (historyTurn?.outcome) {
-      // The reply ended early or lost its view: keep it in the transcript
-      // instead of parking it for review (CS-04, #3104).
+    if (result.status === "submitted" && historyTurn?.resultId) {
+      const followed = await historyTurn.followResult(historyTurn.resultId)
+      await historyTurn.finish?.(followed !== false)
+    } else if (historyTurn?.outcome && !historyTurn.serverOwned && !params.historySelection?.editResend) {
+      // Partial replies stay in the transcript; unknown save receipts stay in review.
       const kept = await historyTurn.keep?.()
-      if (kept && kept.status === "failed")
-        return { status: "failed", errorMessage: kept.reason }
+      if (kept && kept.status === "failed") return chatSubmitFailed(kept.reason)
       if (historyTurn.outcome === "complete") {
         return kept && kept.status === "kept" && !kept.retained
           ? { status: "submitted" }
-          : { status: "failed", errorMessage: kept && kept.status === "skipped" ? kept.reason : "unverified_history_result" }
+          : chatSubmitFailed(kept && kept.status === "skipped" ? kept.reason : "unverified_history_result")
       }
-    } else if (result.status === "submitted" && historyTurn?.resultId) {
-      const followed = await historyTurn.followResult(historyTurn.resultId)
-      await historyTurn.finish?.(followed !== false)
     }
     return result
   } finally {
     createdTurn?.release?.()
-    if (ownsServicePromptSnapshot && servicePromptSnapshot) {
-      servicePromptSnapshot.release()
-    }
+    settlement?.finish()
+  }
+}
+
+export const normalChatMode = async (
+  message: string,
+  image: string,
+  isRegenerate: boolean,
+  messages: Message[],
+  history: ChatHistory,
+  signal: AbortSignal,
+  params: NormalChatModeParams
+): Promise<ChatSubmitResult> => {
+  console.log("Using normalChatMode")
+  if (params.historySelection && params.tldwTurn && !params.serverChatId)
+    throw new Error("unsupported_history_durable_turn")
+  if (params.historySelection && params.tldwTurn && params.overlaySystemPrompt)
+    throw new Error("unsupported_history_action_context")
+  const preparation = params.historySelection
+    ? params.historyPreparation ?? captureNormalChatPreparation(params)
+    : undefined
+  const historyOwner = params.historySelection?.controller.getCurrent().owner
+  const needsRequestScope = Boolean(
+    params.webSearch || params.historySelection || params.actorSceneSend || params.tldwTurn || params.requestScope
+  )
+  const ownsServicePromptSnapshot = !params.servicePromptSnapshot && needsRequestScope
+  const servicePromptSnapshot =
+    params.servicePromptSnapshot ??
+    (needsRequestScope
+      ? await loadServicePromptSnapshot(
+          params.webSearch ? ["chat.web_search.answer"] : [],
+          {
+            signal,
+            requestScope:
+              params.actorSceneSend?.requestScope ?? params.actorScene?.target.account?.requestScope ??
+              (historyOwner?.kind === "native" ? historyOwner.request_scope : params.requestScope)
+          }
+        )
+      : undefined)
+  try {
+    if (params.webSearch) getRequiredServicePrompt(servicePromptSnapshot, "chat.web_search.answer")
+    return await runChatModeWithHistory(normalChatModeDefinition, message, image,
+      isRegenerate, messages, history, signal,
+      { ...params, historyPreparation: preparation, servicePromptSnapshot })
+  } finally {
+    if (ownsServicePromptSnapshot && servicePromptSnapshot) servicePromptSnapshot.release()
   }
 }

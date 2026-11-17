@@ -9,6 +9,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
+    media_owner_identity,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
@@ -33,18 +34,25 @@ def check_media_exists(
     if media_id is not None:
         query_parts.append("id = ?")
         params.append(media_id)
+    source_parts: list[str] = []
     if url:
         url_candidates = media_dedupe_url_candidates(url)
         if len(url_candidates) == 1:
-            query_parts.append("url = ?")
+            source_parts.append("url = ?")
             params.append(url_candidates[0])
         elif url_candidates:
             placeholders = ", ".join(["?"] * len(url_candidates))
-            query_parts.append(f"url IN ({placeholders})")
+            source_parts.append(f"url IN ({placeholders})")
             params.extend(url_candidates)
     if content_hash:
-        query_parts.append("content_hash = ?")
+        source_parts.append("content_hash = ?")
         params.append(content_hash)
+    if source_parts:
+        source_predicate = "(" + " OR ".join(source_parts) + ")"
+        if getattr(getattr(db_instance, "backend_type", None), "name", None) == "POSTGRESQL":
+            source_predicate += " AND COALESCE(CAST(owner_user_id AS TEXT),client_id) = ?"
+            params.append(media_owner_identity(db_instance.client_id))
+        query_parts.append("(" + source_predicate + ")")
     if not query_parts:
         raise ValueError("Must provide id, url, or content_hash to check.")  # noqa: TRY003
 

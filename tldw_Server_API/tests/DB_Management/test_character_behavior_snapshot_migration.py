@@ -1357,6 +1357,12 @@ class _PostgresStoreBackend:
                 [{"conversation_id": message["conversation_id"]}] if message else [],
                 rowcount=1 if message else 0,
             )
+        if normalized == "update messages set version = version + 1 where id = %s":
+            message = self.messages.get(str(values[0]))
+            if message is None:
+                return self._result()
+            message["version"] += 1
+            return self._result(rowcount=1)
         if normalized.startswith("update messages set"):
             message_id = str(values[-2])
             message = self.messages[message_id]
@@ -1384,6 +1390,7 @@ def _postgres_store_db(
     db._backend_refresh_suspended = False
     db._local = SimpleNamespace()
     db.client_id = "postgres-store-owner"
+    db._owner_user_id = "postgres-store-owner"
     db.db_path_str = "postgresql://recording"
     db.message_store = MessageStore(db)
     db.conversation_resume_store = ConversationResumeStore(db)
@@ -1413,6 +1420,7 @@ def test_postgres_backend_wrapper_roundtrips_resume_store_contract() -> None:
     assert state["behavior_snapshot"]["status"] == "valid"
     assert state["behavior_snapshot"]["canonical_json"] == snapshot.canonical_bytes.decode()
     assert state["behavior_snapshot"]["payload"] == snapshot.payload
+    assert state["dictionary_catalog_owner"] == "postgres-store-owner"
     assert not any(
         statement.startswith("select id, version from messages")
         for statement, _params in backend.executed
@@ -1664,8 +1672,10 @@ def test_resume_state_rejects_wrong_owner_and_deleted_conversation(
 def test_postgres_resume_state_owner_filter_is_applied_to_lock_and_read() -> None:
     backend = _PostgresStoreBackend()
     db, wrapper = _postgres_store_db(backend)
+    assert db.owner_user_id == db.client_id == "postgres-store-owner"
+    db.client_id = "later-writer"
 
-    db.conversation_resume_store.get_roleplay_resume_state(
+    state = db.conversation_resume_store.get_roleplay_resume_state(
         backend.conversation_id,
         conn=wrapper,
         lock_for_update=True,
@@ -1676,6 +1686,13 @@ def test_postgres_resume_state_owner_filter_is_applied_to_lock_and_read() -> Non
     assert "client_id = %s" in statements[0]
     assert statements[0].endswith("for update")
     assert "c.client_id = %s" in statements[1]
+    assert backend.executed[0][1] == (
+        backend.conversation_id, "postgres-store-owner", "postgres-store-owner"
+    )
+    assert backend.executed[1][1] == (
+        backend.conversation_id, "postgres-store-owner", "postgres-store-owner"
+    )
+    assert state["dictionary_catalog_owner"] == db.owner_user_id == "postgres-store-owner"
 
 
 def test_postgres_backend_wrapper_caller_owned_message_mutations_advance_once() -> None:
@@ -1755,6 +1772,8 @@ def test_postgres_rag_merge_locks_before_read_and_preserves_interleaved_pin() ->
         )
 
     backend.metadata_lock_interleave = _commit_concurrent_pin
+    before_message_version = backend.messages[message_id]["version"]
+    before_history_version = backend.history_version
     start_index = len(backend.executed)
 
     assert store.set_message_rag_context(
@@ -1781,7 +1800,8 @@ def test_postgres_rag_merge_locks_before_read_and_preserves_interleaved_pin() ->
         if statement.startswith("insert into message_metadata") and index > lock_index
     )
     assert lock_index < write_index
-
+    assert backend.messages[message_id]["version"] == before_message_version + 1
+    assert backend.history_version == before_history_version + 1
 
 @pytest.mark.parametrize("caller_owned", [False, True])
 @pytest.mark.parametrize(
@@ -1854,7 +1874,8 @@ def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_
     monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: None)
+    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: True)
+    monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
     monkeypatch.setattr(db, "_ensure_postgres_fts", lambda conn: None)
     monkeypatch.setattr(db, "_ensure_study_pack_schema_postgres", lambda conn: None)
     applied: list[str] = []
@@ -1964,7 +1985,8 @@ def test_postgres_v65_checkpoint_failure_uses_outer_transaction_rollback(
     monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: None)
+    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: True)
+    monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
 
     def _fail_checkpoint(_self: CharactersRAGDB, stage: str) -> None:
         assert stage == "schema-created"

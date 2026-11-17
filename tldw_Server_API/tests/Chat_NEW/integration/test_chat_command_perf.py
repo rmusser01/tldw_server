@@ -57,7 +57,7 @@ async def test_chat_command_p50_latency(async_client, auth_headers, monkeypatch)
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
 
     payload = {
         "model": "openai/gpt-4o-mini",

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.flashcards import FlashcardGenerateRequest
+from tldw_Server_API.app.core.Flashcards.flashcard_schemas import FlashcardGenerateRequest
 
 
 class FlashcardGenerationPlanError(ValueError):

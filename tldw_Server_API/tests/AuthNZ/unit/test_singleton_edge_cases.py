@@ -51,12 +51,12 @@ class TestConcurrentSingletonInitialization:
         """Verify concurrent calls to get_session_manager() return the same instance."""
         from tldw_Server_API.app.core.AuthNZ.session_manager import (
             get_session_manager,
-            reset_session_manager,
         )
+        from tldw_Server_API.tests._plugins.app_services_fixtures import discard_app_services
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
         # Reset to ensure clean state
-        await reset_session_manager()
+        await discard_app_services()
         reset_settings()
 
         # Set up test environment
@@ -73,7 +73,7 @@ class TestConcurrentSingletonInitialization:
             assert manager is first_manager, f"Session manager {i} is not the same instance"
 
         # Cleanup
-        await reset_session_manager()
+        await discard_app_services()
         reset_settings()
 
 

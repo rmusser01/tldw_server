@@ -3,6 +3,7 @@ import { flushSync } from "react-dom"
 import { useNavigate } from "react-router-dom"
 
 import { ProjectWorkspace } from "./ProjectWorkspace"
+import { PresentationExportMenu } from "./PresentationExportMenu"
 import { PresentationStudioIndex } from "./PresentationStudioIndex"
 import { StandaloneHtmlWorkspace } from "./StandaloneHtmlWorkspace"
 import { VisualStylePicker } from "./VisualStylePicker"
@@ -269,7 +270,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     window.addEventListener("tldw:slides-scope-mismatch", handleAuthorityBoundary)
     window.addEventListener("pagehide", handlePagehideBoundary, true)
     window.addEventListener("pageshow", handleRestorationBoundary, true)
-    window.addEventListener("focus", handleRestorationBoundary, true)
+    window.addEventListener("focus", handleRestorationBoundary)
     document.addEventListener("visibilitychange", handleVisibilityBoundary, true)
     return () => {
       window.removeEventListener("tldw:config-updated", handleAuthorityBoundary)
@@ -277,7 +278,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
       window.removeEventListener("tldw:slides-scope-mismatch", handleAuthorityBoundary)
       window.removeEventListener("pagehide", handlePagehideBoundary, true)
       window.removeEventListener("pageshow", handleRestorationBoundary, true)
-      window.removeEventListener("focus", handleRestorationBoundary, true)
+      window.removeEventListener("focus", handleRestorationBoundary)
       document.removeEventListener("visibilitychange", handleVisibilityBoundary, true)
     }
   }, [invalidateDetailRequest, mode])
@@ -872,7 +873,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   return (
     <section className="space-y-4">
       <header className="rounded-xl border border-slate-200 bg-white p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">Presentation Studio</h1>
             <p className="mt-1 text-sm text-slate-600">
@@ -881,24 +882,39 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
             </p>
           </div>
           <div className="min-w-[240px] flex-1 sm:max-w-sm">
-            <VisualStylePicker
-              label="Choose visual style"
-              value={encodeVisualStyleValue(visualStyleId, visualStyleScope)}
-              styles={styleOptions}
-              onChange={handleDetailStyleChange}
-              disabled={stylesLoading}
-              loading={stylesLoading}
-              description="Updates deck appearance defaults and future generated slides. Existing slide content stays unchanged."
-            />
+            <p className="mb-2 text-sm text-slate-600">
+              Visual style: {visualStyleName || "Default"}
+            </p>
+            <details className="rounded-lg border border-slate-200 p-3">
+              <summary className="cursor-pointer text-sm font-medium text-slate-900">
+                Visual style settings
+              </summary>
+              <div className="mt-4 space-y-4">
+                <VisualStylePicker
+                  label="Choose visual style"
+                  value={encodeVisualStyleValue(visualStyleId, visualStyleScope)}
+                  styles={styleOptions}
+                  onChange={handleDetailStyleChange}
+                  disabled={stylesLoading}
+                  loading={stylesLoading}
+                  description="Updates deck appearance defaults and future generated slides. Existing slide content stays unchanged."
+                />
+                <VisualStyleManager
+                  selectedCustomStyle={selectedCustomStyle}
+                  refreshVisualStyles={refreshVisualStyles}
+                  onStyleSelected={applySelectedStyle}
+                />
+              </div>
+            </details>
           </div>
+          <PresentationExportMenu
+            key={detailContextKey}
+            presentationId={currentDetailState.projectId}
+            title={title}
+            isAuthorityCurrent={() => isStandaloneKindAuthorityCurrent(authorityEpoch, currentDetailState.projectId)}
+          />
         </div>
       </header>
-
-      <VisualStyleManager
-        selectedCustomStyle={selectedCustomStyle}
-        refreshVisualStyles={refreshVisualStyles}
-        onStyleSelected={applySelectedStyle}
-      />
 
       <ProjectWorkspace canRender={Boolean(capabilities?.hasPresentationRender)} />
     </section>

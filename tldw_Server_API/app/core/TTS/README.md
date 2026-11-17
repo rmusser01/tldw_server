@@ -16,7 +16,7 @@
   - `tldw_Server_API/app/api/v1/endpoints/audio/audio_tts.py` - POST `/api/v1/audio/speech`, GET `/api/v1/audio/voices/catalog`
   - `tldw_Server_API/app/api/v1/endpoints/audio/audio_voices.py` - POST `/api/v1/audio/voices/upload`, GET/DELETE `/api/v1/audio/voices/{voice_id}`, and POST `/api/v1/audio/voices/{voice_id}/preview`
 - Related Schemas:
-  - tldw_Server_API/app/api/v1/schemas/audio_schemas.py:44 — OpenAISpeechRequest
+  - tldw_Server_API/app/core/TTS/speech_schemas.py:36 — OpenAISpeechRequest (re-exported by api/v1/schemas/audio_schemas.py)
   - tldw_Server_API/app/core/TTS/voice_manager.py:74 — VoiceUploadRequest
   - tldw_Server_API/app/core/TTS/voice_manager.py:89 — VoiceInfo
   - tldw_Server_API/app/core/TTS/voice_manager.py:104 — VoiceUploadResponse
@@ -155,7 +155,7 @@ Example: programmatic usage
 
 ```python
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
-from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
+from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
 
 async def synthesize():
     service = await get_tts_service_v2()

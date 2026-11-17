@@ -11,7 +11,6 @@ from typing import Any
 from loguru import logger
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 from tldw_Server_API.app.api.v1.schemas.osce import (
     OsceCitation,
     OsceCitationSourceType,
@@ -24,6 +23,7 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
     ArtifactVerificationUnit,
     verify_generated_artifact_against_sources,
 )
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.exceptions import (
     OsceCitationError,
     OsceGenerationError,
@@ -696,7 +696,11 @@ async def generate_osce_stations_from_sources(
 
     from tldw_Server_API.app.services import quiz_generator
 
-    if quiz_generator._should_use_deterministic_test_mode():
+    # Same rule as quiz_generator (its owner): a patched LLM call opts out of the deterministic path.
+    if (
+        is_test_mode()
+        and quiz_generator._call_quiz_generation_llm is quiz_generator._ORIGINAL_CALL_QUIZ_GENERATION_LLM
+    ):
         raw_stations = [
             _build_test_mode_station(evidence=canonical_evidence, station_index=index)
             for index in range(1, num_stations + 1)
@@ -740,7 +744,7 @@ async def generate_osce_stations_from_sources(
     if len(stations) != num_stations:
         raise OsceMalformedOutputError()
 
-    generation_provider = api_provider or DEFAULT_LLM_PROVIDER
+    generation_provider = api_provider or get_default_provider()
     try:
         verification_result = await _verify_stations(
             stations=stations,

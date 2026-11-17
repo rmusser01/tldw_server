@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { getCanonicalModelKey } from "@/hooks/playground/modelSelectorUtils"
 import {
   buildCompareModelMetaById,
   compareModelsSupportCapability,
@@ -42,6 +43,15 @@ describe("compare-preflight", () => {
 
     expect(compareModelsSupportCapability(["a", "b"], "vision", meta)).toBe(true)
     expect(compareModelsSupportCapability(["a", "b"], "tools", meta)).toBe(false)
+  })
+
+  it("uses the actual provider-qualified selector key without borrowing another provider's vision", () => {
+    const vision = { model: "tldw:shared-model", id: "shared-model", provider: "llama", capabilities: ["vision"] }
+    const text = { model: "tldw:shared-model", id: "shared-model", provider: "ollama", capabilities: [] }
+    const meta = buildCompareModelMetaById([vision, text])
+    expect(compareModelsSupportCapability([getCanonicalModelKey(vision)], "vision", meta)).toBe(true)
+    expect(compareModelsSupportCapability([getCanonicalModelKey(text)], "vision", meta)).toBe(false)
+    expect(compareModelsSupportCapability([getCanonicalModelKey(vision), getCanonicalModelKey(text)], "vision", meta)).toBe(false)
   })
 
   it("flags mixed capability and large context mismatches", () => {

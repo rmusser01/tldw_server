@@ -1,5 +1,6 @@
 import React from "react"
 import { useStorage } from "@plasmohq/storage/hook"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 
 export interface TabInfo {
   id: number
@@ -19,7 +20,11 @@ export const useTabMentions = (
   options?: { includeActive?: boolean }
 ) => {
   const includeActive = options?.includeActive ?? false
-  const [tabMentionsEnabled] = useStorage("tabMentionsEnabled", false)
+  const [storedTabMentionsEnabled] = useStorage("tabMentionsEnabled", false)
+  // '@' lists browser tabs, which only the extension can read; the web app
+  // ignores a setting turned on before it was hidden there (CC-11).
+  const tabMentionsEnabled =
+    storedTabMentionsEnabled === true && isExtensionRuntime()
   const [showMentions, setShowMentions] = React.useState(false)
   const [mentionPosition, setMentionPosition] = React.useState<MentionPosition | null>(null)
   const [availableTabs, setAvailableTabs] = React.useState<TabInfo[]>([])
@@ -32,7 +37,7 @@ export const useTabMentions = (
       const tabInfos: TabInfo[] = tabs
         .filter(tab => tab.id && tab.title && tab.url)
         .filter(tab => includeActive || !tab.active)
-        .filter(tab => tab?.status === 'complete') 
+        .filter(tab => tab?.status === 'complete')
         .filter(tab => {
           const url = tab.url!.toLowerCase()
           return !url.startsWith('chrome://') &&
@@ -161,6 +166,10 @@ export const useTabMentions = (
     setSelectedDocuments(prev => prev.filter(doc => doc.id !== id))
   }, [])
 
+  const clearSubmittedDocuments = React.useCallback((expected: TabInfo[]) => {
+    setSelectedDocuments(current => current === expected ? [] : current)
+  }, [])
+
   const clearSelectedDocuments = React.useCallback(() => {
     setSelectedDocuments([])
   }, [])
@@ -178,7 +187,8 @@ export const useTabMentions = (
     addDocument,
     removeDocument,
     clearSelectedDocuments,
+    clearSubmittedDocuments,
     reloadTabs: fetchTabs,
-    handleMentionsOpen  
+    handleMentionsOpen
   }
 }

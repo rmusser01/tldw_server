@@ -6,12 +6,14 @@ Legacy thread-local and explicitly borrowed connections are never adopted.
 """
 
 import asyncio
-from collections.abc import Iterator
+import functools
+import inspect
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import RLock, get_ident
-from typing import Any
+from typing import Any, TypeVar
 
 from loguru import logger
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -19,6 +21,10 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 class ClosedChaChaOperationError(RuntimeError):
     """An inherited operation no longer admits new commands."""
+
+
+class ConcurrentChaChaTransactionError(RuntimeError):
+    """Another thread or task already holds this operation's managed transaction (ADR-080)."""
 
 
 @dataclass
@@ -32,6 +38,7 @@ class ConnectionState:
     lock: Any = field(default_factory=RLock)
     allocation_lock: Any = field(default_factory=RLock)
     retiring: bool = False
+    tx_owner: tuple[int, Any] | None = None
     _uses: dict[tuple[int, Any], int] = field(default_factory=dict)
 
     @staticmethod
@@ -41,6 +48,35 @@ class ConnectionState:
         except RuntimeError:
             task = None
         return get_ident(), task
+
+    def enter_transaction(self) -> bool:
+        """Claim the managed transaction for this thread and task; True if this call claimed it.
+
+        Every thread and task of an operation shares this one connection and one
+        ``tx_depth``. A transaction entered while another thread's or task's is open
+        would join it, and the depth each writes back on exit would leave every later
+        transaction in the operation uncommitted. So that raises instead (ADR-080).
+        Nesting on the owning thread and task joins as before.
+        """
+        key = self._execution_key()
+        with self.lock:
+            if self.tx_owner is None:
+                self.tx_owner = key
+                return True
+            if self.tx_owner == key:
+                return False
+        # depth=2 reports the caller's `with db.transaction()` line, past BackendManagedTransaction.__enter__,
+        # so a refusal a caller swallows as RuntimeError can still be traced to the overlapping code.
+        logger.opt(depth=2).error("A ChaCha transaction overlapped another thread's or task's in one operation")
+        raise ConcurrentChaChaTransactionError(
+            "Another thread or task holds this ChaCha operation's transaction; "
+            "give concurrent work its own chacha_operation(independent=True)"
+        )
+
+    def leave_transaction(self) -> None:
+        """Release the claim taken by the outermost ``enter_transaction()``."""
+        with self.lock:
+            self.tx_owner = None
 
     def permits_current_use(self) -> bool:
         """Only already-entered work in this task/thread may finish after close."""
@@ -211,6 +247,55 @@ def chacha_operation(
                 raise
         finally:
             _current_operation.reset(token)
+
+
+@contextmanager
+def outside_chacha_operation() -> Iterator[None]:
+    """Run without the caller's operation, for work that may outlive it, such as a detached task.
+
+    ChaCha calls inside take the thread-local fallback or open their own operations. Never
+    wrap such work in one operation of its own instead: concurrent branches would share
+    one connection and lose writes (ADR-080).
+    """
+    token = _current_operation.set(None)
+    try:
+        yield
+    finally:
+        _current_operation.reset(token)
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def current_operation_is_open() -> bool:
+    """Whether an open ChaCha operation owns this context's PostgreSQL checkouts."""
+    owner = _current_operation.get()
+    return owner is not None and not owner._closed
+
+
+def owns_chacha_checkouts(func: _F | None = None, *, independent: bool = False) -> Any:
+    """Run ``func`` inside a ChaCha operation: the caller's, or its own outside one.
+
+    For a unit of work outside HTTP (a job handler, a cancel check, a call that opens
+    a handle of its own), so its PostgreSQL checkouts go back to the pool when it
+    returns, on whichever thread they were taken. Decorate the ``async def`` itself:
+    a lambda that returns a coroutine would leave the operation before the coroutine
+    runs, and so would ``@chacha_operation()`` on an ``async def``.
+
+    ``independent=True`` always opens a new operation. Use it for work that a detached
+    task can reach after the request that started it has closed its operation.
+    """
+    if func is None:
+        return functools.partial(owns_chacha_checkouts, independent=independent)
+    if inspect.iscoroutinefunction(func):
+
+        @functools.wraps(func)
+        async def owned(*args: Any, **kwargs: Any) -> Any:
+            with chacha_operation(independent=independent):
+                return await func(*args, **kwargs)
+
+        return owned
+    return chacha_operation(independent=independent)(func)
 
 
 class ChaChaOperationMiddleware:

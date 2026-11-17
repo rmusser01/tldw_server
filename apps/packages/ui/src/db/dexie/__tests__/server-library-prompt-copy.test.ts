@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { upsertServerLibraryPromptCopy } from "../helpers"
+import { getPromptById, upsertServerLibraryPromptCopy } from "../helpers"
 
 const mocks = vi.hoisted(() => ({
   prompts: [] as Array<Record<string, unknown>>,
   addPrompt: vi.fn(),
   updatePrompt: vi.fn(),
   savePromptFB: vi.fn(),
-  updatePromptFB: vi.fn()
+  updatePromptFB: vi.fn(),
+  getPromptByIdFB: vi.fn(),
+  closed: false
+}))
+
+vi.mock("@/services/recipe-persistence-uncertainty", () => ({
+  resolveRecipePersistenceOwnerView: async () => ({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), authorizationRevision: "test-owner" })
 }))
 
 vi.mock("../chat", () => ({
@@ -16,6 +22,7 @@ vi.mock("../chat", () => ({
       return mocks.prompts.filter((prompt) => !prompt.deletedAt)
     }
     async getPromptById(id: string) {
+      if (mocks.closed) throw Object.assign(new Error("closed"), { name: "DatabaseClosedError" })
       return mocks.prompts.find((prompt) => prompt.id === id)
     }
     async addPrompt(prompt: Record<string, unknown>) {
@@ -37,7 +44,7 @@ vi.mock("../chat", () => ({
 vi.mock("../..", () => ({
   deletePromptByIdFB: vi.fn(),
   getAllPromptsFB: vi.fn(async () => []),
-  getPromptByIdFB: vi.fn(),
+  getPromptByIdFB: mocks.getPromptByIdFB,
   restorePromptSnapshotFB: vi.fn(),
   savePromptFB: mocks.savePromptFB,
   updatePromptFB: mocks.updatePromptFB
@@ -58,6 +65,7 @@ describe("upsertServerLibraryPromptCopy", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.prompts = []
+    mocks.closed = false
   })
 
   it("saves a system prompt copy linked to the server library prompt", async () => {
@@ -97,6 +105,7 @@ describe("upsertServerLibraryPromptCopy", () => {
     mocks.prompts = [
       {
         id: "copy-6",
+        ownerId: "recipe-owner:sha256:" + "a".repeat(64),
         title: "Old name",
         name: "Old name",
         content: "Old text",
@@ -125,5 +134,23 @@ describe("upsertServerLibraryPromptCopy", () => {
       favorite: true,
       serverLibraryUuid: serverPrompt.uuid
     })
+  })
+
+  it("returns a Firefox fallback row for the captured current owner", async () => {
+    mocks.closed = true
+    const row = { id: "owned", title: "Private", ownerId: "recipe-owner:sha256:" + "a".repeat(64) }
+    mocks.getPromptByIdFB.mockResolvedValue(row)
+    await expect(getPromptById("owned")).resolves.toEqual(row)
+  })
+
+  it("hides a foreign Firefox fallback row", async () => {
+    mocks.closed = true
+    mocks.getPromptByIdFB.mockResolvedValue({ id: "foreign", ownerId: "recipe-owner:sha256:" + "b".repeat(64) })
+    await expect(getPromptById("foreign")).resolves.toBeUndefined()
+  })
+
+  it("rejects an empty id without reading the Firefox fallback", async () => {
+    await expect(getPromptById(" ")).resolves.toBeNull()
+    expect(mocks.getPromptByIdFB).not.toHaveBeenCalled()
   })
 })

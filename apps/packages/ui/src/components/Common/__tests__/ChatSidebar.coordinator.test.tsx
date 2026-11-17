@@ -16,7 +16,14 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/hooks/useSetting", () => ({
-  useSetting: (...args: unknown[]) => useSettingMock(...args)
+  useSetting: (...args: unknown[]) => {
+    const result = useSettingMock(...args)
+    const [value, setValue] = React.useState(result[0])
+    const setting = args[0] as { key?: string }
+    return setting?.key === "tldw:sidebar:recentCollapsed"
+      ? [value, setValue]
+      : result
+  }
 }))
 
 vi.mock("@/hooks/useDebounce", () => ({
@@ -81,6 +88,7 @@ describe("ChatSidebar coordinator integration", () => {
     const setShortcutSelection = vi.fn()
     useSettingMock.mockImplementation((setting: { key?: string } | string) => {
       const key = typeof setting === "string" ? setting : setting?.key
+      if (key === "tldw:sidebar:recentCollapsed") return [true, vi.fn()]
       if (key === "tldw:sidebar:activeTab") {
         return ["server", setCurrentTab]
       }
@@ -128,4 +136,18 @@ describe("ChatSidebar coordinator integration", () => {
       useChatSurfaceCoordinatorStore.getState().visiblePanels["server-history"]
     ).toBe(true)
   })
+
+  // AX-14: screen-reader users find chat history by landmark.
+  it.each([true, false])("is a Chat history navigation landmark when collapsed=%s", (collapsed) => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <ChatSidebar collapsed={collapsed} />
+      </MemoryRouter>
+    )
+
+    const landmark = screen.getByRole("navigation", { name: "Chat history" })
+    expect(landmark).toBe(screen.getByTestId("chat-sidebar"))
+  })
 })
+
+vi.mock("../ChatSidebar/LocalChatList", () => ({ LocalChatList: () => <div data-testid="local-chat-list" /> }))

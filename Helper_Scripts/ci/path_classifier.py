@@ -4,8 +4,11 @@ from collections.abc import Iterable
 from fnmatch import fnmatch
 
 BACKEND_GLOBS = [
+    "apps/packages/api-types/**",
+    "Helper_Scripts/export_openapi_schema.py",
     "tldw_Server_API/**",
     "Helper_Scripts/ci/emit_ci_gate_flags.py",
+    "Helper_Scripts/ci/merge_queue.py",
     "Helper_Scripts/ci/path_classifier.py",
     "Helper_Scripts/ci/vitest_base_ratchet.py",
     "tools/backlog-py/**",
@@ -22,6 +25,7 @@ COVERAGE_GLOBS = [
 ]
 
 TLDW_FRONTEND_GLOBS = [
+    "apps/packages/api-types/**",
     "apps/tldw-frontend/**",
     "apps/packages/ui/**",
     "apps/extension/**",
@@ -53,7 +57,12 @@ FRONTEND_GLOBS = [
 E2E_BACKEND_GLOBS = [
     "tldw_Server_API/app/api/v1/endpoints/**",
     "tldw_Server_API/app/api/v1/schemas/**",
+    "tldw_Server_API/app/api/v1/utils/**",
+    "tldw_Server_API/app/core/Sandbox/default_service.py",
     "tldw_Server_API/app/core/AuthNZ/**",
+    "tldw_Server_API/app/core/Provider_Credentials/**",
+    "tldw_Server_API/app/core/Usage/llm_budget_*.py",
+    "tldw_Server_API/app/services/authnz_scheduler.py",
 ]
 
 

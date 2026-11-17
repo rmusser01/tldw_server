@@ -185,6 +185,18 @@ describe("sidepanel chat handoff storage service", () => {
     await expect(readSidepanelChatHandoff(pkg.id)).resolves.toEqual(pkg)
   })
 
+  it("preserves producer-reported partial references through storage read-back", async () => {
+    const pkg = await createSidepanelChatHandoff({
+      draftText: "Source draft",
+      pageContext: {
+        snippets: [{ kind: "visible-context", text: "Title: Research note" }],
+        truncated: true
+      }
+    })
+    expect(pkg.pageContext?.truncated).toBe(true)
+    await expect(readSidepanelChatHandoff(pkg.id)).resolves.toEqual(pkg)
+  })
+
   it("throws and does not return a handoff id when storage set fails", async () => {
     storageState.set.mockRejectedValueOnce(new Error("storage quota exceeded"))
 
@@ -205,6 +217,41 @@ describe("sidepanel chat handoff storage service", () => {
 
     expect(storageState.store.size).toBe(0)
     expect(storageState.remove).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["cleanup", "write", "read-back"])("does not publish a copied package after its source retires during %s", async boundary => {
+    let finish!: () => void
+    let entered!: () => void
+    const reached = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { finish = resolve })
+    if (boundary === "cleanup") storageState.getAll.mockImplementationOnce(async () => { entered(); await held; return {} })
+    if (boundary === "write") storageState.set.mockImplementationOnce(async (key, value) => { entered(); await held; storageState.store.set(key, value) })
+    if (boundary === "read-back") storageState.get.mockImplementationOnce(async key => { entered(); await held; return storageState.store.get(key) })
+    let current = true
+    const creation = createSidepanelChatHandoff({ draftText: "PRIVATE SOURCE TEXT" }, () => current)
+    const outcome = expect(creation).rejects.toThrow("source changed")
+    await reached
+    current = false
+    finish()
+    await outcome
+    expect(storageState.store.size).toBe(0)
+    if (boundary === "cleanup") expect(storageState.set).not.toHaveBeenCalled()
+  })
+
+  it("propagates storage read errors only for callers requesting a retryable read", async () => {
+    storageState.get.mockRejectedValueOnce(new Error("read failed"))
+    await expect(readSidepanelChatHandoff("handoff-existing")).resolves.toBeNull()
+    storageState.get.mockRejectedValueOnce(new Error("read failed"))
+    await expect(readSidepanelChatHandoff("handoff-existing", { throwOnReadError: true })).rejects.toThrow("read failed")
+    expect(storageState.remove).not.toHaveBeenCalled()
+  })
+
+  it("returns null for missing, expired or consumed copies even when read errors are propagated", async () => {
+    storageState.store.set(storageKey("expired"), buildStoredPackage({ id: "expired", expiresAt: new Date(NOW.getTime() - 1).toISOString() }))
+    storageState.store.set(storageKey("consumed"), buildStoredPackage({ id: "consumed", consumedAt: NOW.toISOString() }))
+    for (const id of ["missing", "expired", "consumed"]) {
+      await expect(readSidepanelChatHandoff(id, { throwOnReadError: true })).resolves.toBeNull()
+    }
   })
 
   it("returns null and removes expired or malformed packages", async () => {
@@ -280,6 +327,25 @@ describe("sidepanel chat handoff storage service", () => {
     await expect(readSidepanelChatHandoff("serialized-valid")).resolves.toEqual(
       validSerialized
     )
+  })
+
+  it("does not consume a copy when its destination retires during the storage read", async () => {
+    const pkg = buildStoredPackage()
+    storageState.store.set(storageKey(pkg.id), pkg)
+    let finish!: (value: SidepanelChatHandoffPackage) => void
+    storageState.get.mockImplementationOnce(() => new Promise<SidepanelChatHandoffPackage>(resolve => { finish = resolve }))
+    let current = true
+    const consumption = consumeSidepanelChatHandoff(pkg.id, () => current)
+    current = false
+    finish(pkg)
+    await expect(consumption).resolves.toBeNull()
+    expect(storageState.store.get(storageKey(pkg.id))).toEqual(pkg)
+    expect(storageState.remove).not.toHaveBeenCalled()
+  })
+
+  it("does not start a consume read for an already retired destination", async () => {
+    await expect(consumeSidepanelChatHandoff("retired", () => false)).resolves.toBeNull()
+    expect(storageState.get).not.toHaveBeenCalled()
   })
 
   it("consumes a package exactly once", async () => {

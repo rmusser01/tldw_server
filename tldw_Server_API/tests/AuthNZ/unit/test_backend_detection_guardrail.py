@@ -9,8 +9,8 @@ misclassify shim/wrapper connections. Backend selection should use
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 import pytest
 
@@ -18,8 +18,15 @@ import pytest
 @pytest.mark.unit
 def test_authnz_core_avoids_connection_capability_backend_probing():
     project_root = Path(__file__).resolve().parents[3]
-    authnz_core = project_root / "app" / "core" / "AuthNZ"
-    assert authnz_core.exists(), f"Expected AuthNZ core path not found: {authnz_core}"
+    roots = [project_root / "app" / "core" / name for name in ("AuthNZ", "Provider_Credentials")]
+    for root in roots:
+        assert root.exists(), f"Expected core path not found: {root}"
+    files = [path for root in roots for path in root.rglob("*.py")]
+    files += [project_root / "app" / "core" / "Usage" / f"llm_budget_{name}.py" for name in ("guard", "middleware")]
+    files.append(project_root / "app" / "services" / "authnz_scheduler.py")
+    assert project_root / "app" / "core" / "Provider_Credentials" / "byok_runtime.py" in files
+    assert project_root / "app" / "core" / "Usage" / "llm_budget_guard.py" in files
+    assert project_root / "app" / "services" / "authnz_scheduler.py" in files
 
     forbidden_patterns = (
         re.compile(r"hasattr\(\s*conn\s*,\s*['\"]fetch['\"]\s*\)"),
@@ -30,7 +37,7 @@ def test_authnz_core_avoids_connection_capability_backend_probing():
 
     offending: list[str] = []
 
-    for path in authnz_core.rglob("*.py"):
+    for path in files:
         rel = path.relative_to(project_root).as_posix()
         lines = path.read_text(encoding="utf-8").splitlines()
         for lineno, line in enumerate(lines, start=1):

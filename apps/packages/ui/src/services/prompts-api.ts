@@ -264,14 +264,17 @@ export const buildPromptExportQuery = (format: PromptExportFormat): string => {
 }
 
 export async function exportPromptsServer(
-  format: PromptExportFormat
+  format: PromptExportFormat,
+  expectedOwnerId?: string | null
 ): Promise<PromptExportResponse> {
+  if (expectedOwnerId === null) throw new Error("Prompt owner is unavailable")
   const response = await apiSend<PromptExportResponse>({
     path: appendPathQuery(
       toAllowedPath("/api/v1/prompts/export"),
       buildPromptExportQuery(format)
     ),
-    method: "GET"
+    method: "GET",
+    ...(expectedOwnerId ? { recipePersistence: { mode: "owner" as const, expectedOwnerId } } : {})
   })
 
   if (!response.ok) {

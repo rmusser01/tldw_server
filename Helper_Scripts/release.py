@@ -821,10 +821,13 @@ class ShellReleaseRunner:
         }
 
         missing = [name for name in required_checks if name not in status_by_name]
+        # GitHub counts a skipped required check as passing, and `E2E Critical (Tier 1 +
+        # Journeys)` is skipped by design when a change touches nothing E2E-relevant.
+        passing = {("completed", "success"), ("completed", "skipped")}
         failing = [
             name
             for name in required_checks
-            if name in status_by_name and status_by_name[name] != ("completed", "success")
+            if name in status_by_name and status_by_name[name] not in passing
         ]
         if missing or failing:
             details = []

@@ -20,6 +20,13 @@ import {
   deriveEffectiveSelectedSourceIds
 } from '@/store/workspace-organization'
 
+/**
+ * WP-45: cap for the in-memory source-text cache (never persisted).
+ * Single source of truth — the ResearchWorkspace source-content resolver
+ * and its tests import this constant instead of mirroring the value.
+ */
+export const SOURCE_CONTENT_CACHE_MAX_ENTRIES = 32
+
 // Extract SourcesActions from workspace.ts (action interface only)
 type SourcesActions = Pick<
   WorkspaceState,
@@ -54,6 +61,8 @@ type SourcesActions = Pick<
   | 'getSelectedMediaIds'
   | 'getEffectiveSelectedSources'
   | 'getEffectiveSelectedMediaIds'
+  | 'getSourceContentText'
+  | 'setSourceContentText'
 >
 
 export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => ({
@@ -434,9 +443,10 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
         source.mediaId === mediaId &&
         // Media readiness cannot validate an immutable captured pin.
         !(
-          source.webCapture &&
           source.status === "error" &&
-          source.statusDetails?.statusReason === "capture_head_changed"
+          (source.statusDetails?.statusReason === "capture_unavailable" ||
+            (source.webCapture &&
+              source.statusDetails?.statusReason === "capture_head_changed"))
         )
           ? {
               ...source,
@@ -445,10 +455,10 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
               statusDetails:
                 statusDetails ??
                 (source.status === status ? source.statusDetails : undefined),
-              readiness: readiness ?? source.readiness
+              readiness: readiness ?? source.readiness,
             }
-          : source
-      )
+          : source,
+      );
       return {
         sources: nextSources,
         selectedSourceIds:
@@ -561,5 +571,40 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
   getEffectiveSelectedMediaIds: () =>
     get()
       .getEffectiveSelectedSources()
-      .map((source) => source.mediaId)
+      .map((source) => source.mediaId),
+
+  getSourceContentText: (mediaId, version = null) => {
+    const entry = get().sourceContentCache.get(mediaId)
+    if (
+      !entry ||
+      entry.version !== version ||
+      typeof entry.text !== "string" ||
+      entry.text.length === 0
+    ) {
+      return null
+    }
+    return entry.text
+  },
+
+  setSourceContentText: (mediaId, version, text, title = null) => {
+    const normalizedText = text.trim()
+    if (!Number.isFinite(mediaId) || normalizedText.length === 0) return
+    set((state) => {
+      // The cache is a Map so integer mediaId keys keep insertion order
+      // (a plain object iterates integer-like keys numerically, which made
+      // eviction drop the smallest id instead of the least-recently-used
+      // one). Delete + re-insert refreshes recency for this mediaId, and
+      // the first key is the least-recently-used entry to evict.
+      const nextCache = new Map(state.sourceContentCache)
+      nextCache.delete(mediaId)
+      nextCache.set(mediaId, { version, text: normalizedText, title })
+      if (nextCache.size > SOURCE_CONTENT_CACHE_MAX_ENTRIES) {
+        const oldestKey = nextCache.keys().next().value
+        if (oldestKey !== undefined) {
+          nextCache.delete(oldestKey)
+        }
+      }
+      return { sourceContentCache: nextCache }
+    })
+  }
 })

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { TtsPlaygroundSegment } from "@/hooks/useTtsPlayground"
 import React from "react"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -50,6 +51,8 @@ const {
   getElevenLabsModelsMock,
   addRenderMock,
   generateSegmentsMock,
+  clearSegmentsMock,
+  ttsGeneratingRef,
   streamStartMock,
   streamAppendMock,
   streamFinishMock,
@@ -73,7 +76,9 @@ const {
     getElevenLabsVoicesMock: vi.fn(),
     getElevenLabsModelsMock: vi.fn(),
     addRenderMock: vi.fn(),
-    generateSegmentsMock: vi.fn(async () => []),
+    generateSegmentsMock: vi.fn(async (): Promise<TtsPlaygroundSegment[]> => []),
+    clearSegmentsMock: vi.fn(),
+    ttsGeneratingRef: { current: false },
     streamStartMock: vi.fn(),
     streamAppendMock: vi.fn(),
     streamFinishMock: vi.fn(),
@@ -238,6 +243,8 @@ vi.mock("@/components/Option/Speech/TtsStickyActionBar", () => ({
   TtsStickyActionBar: ({
     onAddRender,
     onPlay,
+    onStop,
+    isStopDisabled,
     isPlayDisabled,
     playDisabledReason,
     provider,
@@ -246,6 +253,8 @@ vi.mock("@/components/Option/Speech/TtsStickyActionBar", () => ({
   }: {
     onAddRender?: () => void
     onPlay?: () => void
+    onStop?: () => void
+    isStopDisabled?: boolean
     isPlayDisabled?: boolean
     playDisabledReason?: string | null
     provider?: string
@@ -268,6 +277,9 @@ vi.mock("@/components/Option/Speech/TtsStickyActionBar", () => ({
         onClick={onPlay}
       >
         Play
+      </button>
+      <button type="button" disabled={Boolean(isStopDisabled)} onClick={onStop}>
+        Stop
       </button>
       {playDisabledReason && (
         <p data-testid="tts-play-disabled-reason">{playDisabledReason}</p>
@@ -383,9 +395,9 @@ vi.mock("@/hooks/useTtsPlayground", () => ({
   },
   useTtsPlayground: () => ({
     segments: ttsSegmentsRef.current,
-    isGenerating: false,
+    isGenerating: ttsGeneratingRef.current,
     generateSegments: generateSegmentsMock,
-    clearSegments: vi.fn(),
+    clearSegments: clearSegmentsMock,
     setSegments: vi.fn(),
   }),
 }))
@@ -567,6 +579,8 @@ describe("SpeechPlaygroundPage", () => {
     getElevenLabsVoicesMock.mockReset()
     getElevenLabsModelsMock.mockReset()
     addRenderMock.mockReset()
+    ttsGeneratingRef.current = false
+    clearSegmentsMock.mockReset()
     generateSegmentsMock.mockReset()
     generateSegmentsMock.mockResolvedValue([])
     setTTSSettingsMock.mockClear()
@@ -598,6 +612,59 @@ describe("SpeechPlaygroundPage", () => {
     setSpeechModeMock.mockReset()
     setSpeechHistoryMock.mockReset()
     tMock.mockClear()
+  })
+
+  it.each([false, true])("B04 Stop cancels pending synthesis with prior audio %s", (hasPriorAudio): void => {
+    ttsGeneratingRef.current = true
+    ttsSegmentsRef.current = hasPriorAudio
+      ? [{ id: "prior", index: 0, text: "Prior", source: "generated" }]
+      : []
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    const stop = screen.getByRole("button", { name: "Stop", exact: true })
+    expect(stop).toBeEnabled()
+    fireEvent.click(stop)
+    expect(clearSegmentsMock).toHaveBeenCalledOnce()
+  })
+
+  it("B04 cancelled caller cannot overwrite settings saved by a later retry", async (): Promise<void> => {
+    const cancelled = createDeferred<TtsPlaygroundSegment[]>()
+    const retried = createDeferred<TtsPlaygroundSegment[]>()
+    generateSegmentsMock.mockImplementationOnce(() => cancelled.promise)
+    generateSegmentsMock.mockImplementationOnce(() => retried.promise)
+    ttsSettingsRef.current = { ...ttsSettingsRef.current, ttsProvider: "browser", voice: "old" }
+    const view = render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+    fireEvent.change(screen.getByLabelText("Enter some text to hear it spoken."), { target: { value: "Cancelled speech" } })
+    fireEvent.click(screen.getByTestId("tts-play-button"))
+    await waitFor(() => expect(generateSegmentsMock).toHaveBeenCalledTimes(1))
+    ttsGeneratingRef.current = true
+    clearSegmentsMock.mockClear()
+    view.rerender(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+    const stop = screen.getByRole("button", { name: "Stop", exact: true })
+    expect(stop).toBeEnabled()
+    fireEvent.click(stop)
+    expect(clearSegmentsMock).toHaveBeenCalledOnce()
+
+    ttsGeneratingRef.current = false
+    ttsSettingsRef.current = { ...ttsSettingsRef.current, voice: "new" }
+    view.rerender(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+    fireEvent.click(screen.getByTestId("tts-play-button"))
+    await waitFor(() => expect(generateSegmentsMock).toHaveBeenCalledTimes(2))
+    await act(async () => { retried.resolve([{ id: "retry", index: 0, text: "Retry", source: "browser" }]) })
+    expect(setTTSSettingsMock).toHaveBeenLastCalledWith(expect.objectContaining({ voice: "new" }))
+    setTTSSettingsMock.mockClear()
+    setSpeechHistoryMock.mockClear()
+    await act(async () => { cancelled.resolve([]) })
+    expect(setTTSSettingsMock).not.toHaveBeenCalled()
+    expect(setSpeechHistoryMock).not.toHaveBeenCalled()
+  })
+
+  it("B04 Stop preserves completed audio when generation is idle", (): void => {
+    ttsSegmentsRef.current = [{ id: "completed", index: 0, text: "Completed", source: "generated" }]
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop", exact: true }))
+    expect(clearSegmentsMock).not.toHaveBeenCalled()
   })
 
   it("persists only voice preference fields when a selection includes credentials", (): void => {
@@ -1378,3 +1445,14 @@ describe("SpeechPlaygroundPage", () => {
     expect(screen.queryByText(/Request failed/)).not.toBeInTheDocument()
   })
 })
+
+vi.mock("@/hooks/useSpeechHistory", () => ({
+  useSpeechHistory: () => {
+    const key = "speechPlaygroundHistory"
+    return [storageValues.get(key) || [], (next: unknown) => {
+      setSpeechHistoryMock(next)
+      const old = storageValues.get(key) || []
+      storageValues.set(key, typeof next === "function" ? next(old) : next)
+    }] as const
+  }
+}))

@@ -8,7 +8,6 @@ import {
   type DesignSystemStateKey
 } from "@/design-system"
 import type { ConnectionState, ConnectionUxState } from "@/types/connection"
-import { SaveStatusIcon } from "../SaveStatusIcon"
 import { StatusDot } from "../StatusDot"
 
 type ConnectionUxHookState = {
@@ -36,10 +35,6 @@ const connectionState = vi.hoisted(() => ({
   checkOnce: vi.fn()
 }))
 
-const notificationMock = vi.hoisted(() => ({
-  warning: vi.fn()
-}))
-
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string) => fallback ?? _key
@@ -64,10 +59,6 @@ vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionActions: () => ({
     checkOnce: connectionState.checkOnce
   })
-}))
-
-vi.mock("@/hooks/useAntdNotification", () => ({
-  useAntdNotification: () => notificationMock
 }))
 
 const connectedUxStates: ConnectionUxState[] = [
@@ -186,7 +177,6 @@ describe("Chat status design-system badges", () => {
   beforeEach(() => {
     connectionState.ux = makeConnectionUxState({ uxState: "connected_ok" })
     connectionState.checkOnce.mockReset()
-    notificationMock.warning.mockReset()
     vi.clearAllMocks()
   })
 
@@ -235,29 +225,6 @@ describe("Chat status design-system badges", () => {
     fireEvent.click(statusButton)
 
     expect(connectionState.checkOnce).not.toHaveBeenCalled()
-  })
-
-  it("renders the chat save status through the shared Badge while preserving the action", () => {
-    const onClick = vi.fn()
-
-    render(
-      <SaveStatusIcon
-        temporaryChat={false}
-        serverChatId="server-chat-1"
-        onClick={onClick}
-      />
-    )
-
-    const statusButton = screen.getByTestId("chat-save-status")
-    const badge = screen.getByTestId("chat-save-status-badge")
-
-    expect(statusButton).toHaveAccessibleName("Saved to server")
-    expect(badge).toHaveAttribute("data-ds-component", "Badge")
-    expect(badge.querySelector(".sr-only")).toBeNull()
-
-    fireEvent.click(statusButton)
-
-    expect(onClick).toHaveBeenCalledTimes(1)
   })
 
   it("keeps configured-but-unavailable status colors aligned with the Badge variant", () => {

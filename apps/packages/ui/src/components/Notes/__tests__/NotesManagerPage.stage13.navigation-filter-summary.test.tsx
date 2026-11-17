@@ -1,4 +1,5 @@
 import React from "react"
+import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -150,9 +151,20 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    getConfig: vi.fn(async () => ({
+      serverUrl: "https://notes.example.test",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })),
     getChat: vi.fn(async () => null),
     listChatMessages: vi.fn(async () => []),
     getCharacter: vi.fn(async () => null)
+  }
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
   }
 }))
 
@@ -304,13 +316,25 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
   })
 
   it("renders keyword-only summary after applying keyword picker selection", async () => {
+    const user = userEvent.setup()
     renderPage()
     fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     await screen.findByText("Apply filters")
-    fireEvent.click(screen.getByText(/^research\b/i))
+    await user.click(await screen.findByRole("checkbox", { name: /^research\b/i }))
+    expect(screen.getByRole("checkbox", { name: /^research\b/i })).toBeChecked()
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }))
 
     await waitFor(() => {
+      expect(mockBgRequest.mock.calls.some(([request]) => {
+        const path = String((request as { path?: string }).path || "")
+        if (!path.startsWith("/api/v1/notes/search/?")) return false
+        const url = new URL(`http://localhost${path}`)
+        return (
+          (url.searchParams.get("query") || "") === "" &&
+          url.searchParams.getAll("tokens").length === 1 &&
+          url.searchParams.get("tokens") === "research"
+        )
+      })).toBe(true)
       expect(screen.getByTestId("notes-active-filter-summary")).toHaveTextContent(
         "Showing 1 of 4 notes"
       )
@@ -321,6 +345,7 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
   })
 
   it("renders combined query + keyword summary and preserves clear action labeling", async () => {
+    const user = userEvent.setup()
     renderPage()
     fireEvent.change(screen.getByPlaceholderText("Search notes... (use quotes for exact match)"), {
       target: { value: "ML" }
@@ -333,7 +358,7 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     await screen.findByText("Apply filters")
-    fireEvent.click(screen.getByText(/^research\b/i))
+    await user.click(await screen.findByRole("checkbox", { name: /^research\b/i }))
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }))
 
     await waitFor(() => {

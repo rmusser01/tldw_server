@@ -1,10 +1,10 @@
 ---
 id: TASK-13211
 title: Investigate repeated Buddy visual pack loads during live UAT
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-09-06 16:57
-updated_date: 2026-09-10 16:24
+updated_date: 2026-10-11 23:05
 labels: []
 dependencies: []
 references:
@@ -19,7 +19,7 @@ During physical Migu voice UAT, the floating Buddy lost its image after repeated
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The initiating trigger is identified with reproducible evidence.
+- [x] #1 The retained incident evidence and a reproducible loader trigger are investigated; the demonstrated trigger is repaired, and unresolved historical attribution is explicitly documented.
 - [x] #2 A regression check verifies bounded visual-pack loading through live state updates.
 - [x] #3 Real browser validation confirms the Buddy image remains available without repeated pack-load failures.
 <!-- AC:END -->
@@ -31,6 +31,8 @@ During physical Migu voice UAT, the floating Buddy lost its image after repeated
 2. Reproduce the trigger with a focused regression test before a minimal repair.
 3. Verify focused frontend checks and real browser visuals; record limitations.
 ADR required: no. Reason: investigation and routine lifecycle repair within existing Buddy rendering contracts.
+
+2026-10-11 requester-approved closeout: reconcile the original historical trigger criterion with the independently reproduced and merged effect-replay repair. The requester approved closing against verified repairs and accepted UAT with historical coverage limits explicit. Preserve the original incident receipt and its Not established cause, record missing initiator/effect metadata, supersede the older remount-only inference, and verify the current focused loader contracts. The former AC1 is retained in the closeout report; it is not claimed satisfied as written. ADR required: no. ADR path: backlog/decisions/005-independent-buddy-bindings-and-work-ownership.md and Docs/ADR/046-persona-live-conversation-and-voice-runtime.md. Reason: evidence reconciliation under existing request and ownership guards; no new product contract.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -50,18 +52,20 @@ September 30 UAT on reviewed server source eaebb194b717d3adc335dbca8961bc9ef5884
 Authorized repair plan: IMPLEMENTATION_PLAN_buddy_effect_replay_13211.md. Add failing effect replay regressions, retain per-instance automatic loader requests, preserve explicit refresh and stale ownership, then repeat actual Fast Refresh UAT. ADR required: no; existing ADR005/046 govern unchanged ownership. No new storage or global cache.
 Implemented the reproducible effect replay repair under the requester instruction to fix remaining issues. Pack loading retains one promise per normalized Persona/activation nonce in a mounted lifetime. Session autoload retains its scope request; pending explicit reloads also reattach after replay, with unchanged generation/request fences. Identity changes, activation, explicit reload, disable/re-enable and true remount still fetch fresh data. No storage or global cache. Four new replay regressions failed on old source; review found an explicit reload hang, reproduced with two failing resolve/reject tests and repaired before publication. Final focused scope: 124 frontend tests passed. Scoped ESLint: zero errors/new findings (one unchanged host dependency warning); TypeScript: zero owned diagnostics, four identical existing dependency declaration errors at base and head. Independent review found no remaining actionable defects after five ownership checks. Bandit is inapplicable to TypeScript-only source/tests.
 Actual browser UAT on source hashes in /private/tmp/buddy-replay-fix-uat-20261003/setup.json: three Fast Refresh cycles retained the same host and hook refs, Persona research_assistant and nonce0; each added zero pack-list and session-list dispatches. Loaded image stayed128x128, and the exact unsent draft survived closed controls, refresh and Escape/reopen. Original source yielded one pair per refresh. Browser/source-bound receipts and executable assertions are browser-result.json, persona-request-metadata.json, repaired-controls.png and verify-result.py in that private directory. The original September6 250ms trigger remains historically unproven; this repair closes the independently reproduced effect replay mechanism. AC1 stays open for that historical attribution, and no human speech or audibility is claimed by this experiment. Existing ADR005/046 govern unchanged ownership; no new ADR required. Plan: IMPLEMENTATION_PLAN_buddy_effect_replay_13211.md.
+2026-10-11 requester-approved criterion revision: close against the evidence-bounded historical investigation and independently reproduced, repaired effect-replay mechanism. The September 6 initiating trigger remains unproven; original incident bytes preserved. Current focused loader, host and route checks passed with zero failures/pending. Original browser/human acceptance retains its source attribution. The missing private receipt directories are explicitly recorded and are not claimed freshly inspected. Docs/Reviews/2026-10-11-buddy-loader-closeout.md explains the former criterion and the approved revised scope. Older remount-only inference is superseded. Markdown-only closeout: Bandit not applicable; no new ADR, runtime change or provider/audio call.
+Evidence pointer added after independent closeout review: Docs/Reviews/assets/buddy-closeout-2026-10-11/loader-verification.json retains the exact command, three selected file paths, source/result/log hashes and 103 passed cases with zero failures or pending. No runtime change or additional test run.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Requester-approved revised criterion satisfied by retained incident investigation, merged effect-replay repair and current passing focused loader contracts. September 6 initiating trigger remains historically unproven; accepted UAT preserved.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

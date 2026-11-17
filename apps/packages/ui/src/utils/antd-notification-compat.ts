@@ -10,19 +10,14 @@ export const normalizeNotificationConfig = (config: unknown) => {
   }
 
   const typed = config as Record<string, unknown>
-  if (!Object.prototype.hasOwnProperty.call(typed, "message")) {
-    return config
-  }
-
+  const hasTitle = Object.prototype.hasOwnProperty.call(typed, "title")
+  if (!hasTitle && !Object.prototype.hasOwnProperty.call(typed, "message")) return config
   const { message, ...rest } = typed
-  if (Object.prototype.hasOwnProperty.call(rest, "title")) {
-    return rest
-  }
-
-  return {
-    ...rest,
-    title: message
-  }
+  const title = hasTitle ? rest.title : message
+  // Nested locale resources use label; passing the resource object crashes React.
+  const label = title && typeof title === "object" && !Array.isArray(title)
+    ? (title as { label?: unknown }).label : undefined
+  return { ...rest, title: typeof label === "string" ? label : title }
 }
 
 const patchNotificationMethod = (api: any, method: NotificationMethod) => {

@@ -385,6 +385,22 @@ store for CLI reporting, export, and cleanup commands.
 See [USER_GUIDE.md](USER_GUIDE.md) for report, export, cleanup, privacy, and
 future evaluation workflow details.
 
+## Internal Model Completion
+
+`MCPRuntimeDependencies.model_completion_port_factory` is optional and defaults
+to `None`. The `tldw-server` dependency builder supplies a lazy callable for the
+host's `build_tldw_model_completion_port`. Building the dependency bundle does
+not load completion configuration, create a completion port, governor, or
+database, or start model or network work.
+
+The callable accepts `ModelCompletionPortSettings` with four operator settings:
+`provider`, `model`, `run_timeout_seconds` (1-120), and
+`cancellation_cleanup_seconds` (1-15). Explicit host-only accounting, cost,
+transport, and fail-closed governor policies are required; the standalone
+package defines only the contracts, not the host configuration schema. This
+internal composition exposes no tool and enables no execution, including
+`skills.run`.
+
 ## Tool-Call Hooks
 
 The package includes a host-neutral `ConfiguredToolCallHookManager` for

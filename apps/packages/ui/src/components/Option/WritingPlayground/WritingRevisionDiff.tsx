@@ -53,24 +53,24 @@ export function WritingRevisionDiff({
 
   return (
     <div className="grid gap-2 md:grid-cols-2" data-testid="writing-revision-diff">
-      <div className="min-h-20 rounded border border-red-100 bg-red-50 p-2">
+      <div className="min-h-20 rounded border border-danger/40 bg-surface p-2 text-text">
         <Text strong className="block text-xs">
           Before
         </Text>
         <pre className="m-0 whitespace-pre-wrap text-xs">{beforeText}</pre>
         {beforeChanged.length > 0 ? (
-          <Text type="danger" className="text-xs">
+          <Text className="text-xs">
             Changed: {beforeChanged.join("")}
           </Text>
         ) : null}
       </div>
-      <div className="min-h-20 rounded border border-green-100 bg-green-50 p-2">
+      <div className="min-h-20 rounded border border-success/40 bg-surface p-2 text-text">
         <Text strong className="block text-xs">
           After
         </Text>
         <pre className="m-0 whitespace-pre-wrap text-xs">{afterText}</pre>
         {afterChanged.length > 0 ? (
-          <Text type="success" className="text-xs">
+          <Text className="text-xs">
             Changed: {afterChanged.join("")}
           </Text>
         ) : null}

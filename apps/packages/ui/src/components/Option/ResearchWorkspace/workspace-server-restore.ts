@@ -7,6 +7,7 @@ import { normalizeNoteKeyword } from "@/services/note-keywords";
 import { resolveKnowledgeNoteProvenance, knowledgeNoteHead, retainKnowledgeNoteProvenance, type KnowledgeNoteHead } from "@/utils/knowledge-note-provenance";
 import { bgRequest } from "@/services/background-proxy";
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts";
+import { rememberCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts";
 import type {
   WorkspaceArtifactApiResponse,
@@ -16,6 +17,7 @@ import type {
 } from "@/services/tldw/domains/workspace-api";
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error";
 import { hydrateWorkspaceFromServer, type LocalWorkspaceState } from "@/store/workspace-api";
+import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import {
   createSlug,
   useWorkspaceStore,
@@ -297,8 +299,10 @@ export const restoreMigratedResearchWorkspace = async (options: {
     await hydrateCanonicalWorkspaceCapturePins(local, scope, assertCurrent);
     await hydrateCanonicalWorkspaceNote(local, scope, scope.scopeSignal);
     assertCurrent();
+    local.artifacts.forEach(artifact => bindWorkspaceArtifactOrigin(artifact, scope.scopeKey, workspaceId));
     if (!options.apply(local, scope.scopeKey))
       throw new Error("Workspace restoration could not be installed without replacing retained content");
+    rememberCanonicalArtifactWorkspace(workspaceId, scope.scopeKey);
     storage.setItem(
       receipt.key,
       JSON.stringify({ ...receipt.value, serverScopeKey: scope.scopeKey }),

@@ -4,7 +4,6 @@ import {
   Steps,
   Form,
   Input,
-  Select,
   InputNumber,
   Table,
   notification,
@@ -23,6 +22,7 @@ import {
   type EvaluationCreatePayload,
   type EvaluationConfig
 } from "@/services/prompt-studio"
+import { StudioModelTargetFields, useStudioModelTarget } from "../StudioModelTargetFields"
 import { Button } from "@/components/Common/Button"
 import { Alert as DsAlert } from "@/components/ui/primitives"
 
@@ -37,6 +37,7 @@ type FormValues = {
   description?: string
   prompt_id: number
   test_case_ids: number[]
+  provider?: string
   model_name?: string
   temperature?: number
   max_tokens?: number
@@ -58,6 +59,7 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
   const { t } = useTranslation(["settings", "common"])
   const [form] = Form.useForm<FormValues>()
   const queryClient = useQueryClient()
+  const modelTarget = useStudioModelTarget(open, form)
 
   const wizardStep = usePromptStudioStore((s) => s.wizardStep)
   const setWizardStep = usePromptStudioStore((s) => s.setWizardStep)
@@ -85,7 +87,11 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
 
   // Create mutation
   const createMutation = useMutation({
-    mutationFn: (payload: EvaluationCreatePayload) => createEvaluation(payload),
+    mutationFn: async (payload: EvaluationCreatePayload) => {
+      const response = await createEvaluation(payload)
+      if (response.ok === false) throw new Error(response.error || "Request failed")
+      return response
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["prompt-studio", "evaluations", projectId]
@@ -102,7 +108,7 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -134,10 +140,18 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
   }
 
   const handleSubmit = () => {
-    const values = form.getFieldsValue()
+    const values = form.getFieldsValue(true)
+    let target: ReturnType<typeof modelTarget.resolveTarget>
+    try {
+      target = modelTarget.resolveTarget()
+    } catch (error) {
+      notification.error({ message: t("common:error.label", { defaultValue: "Error" }), description: (error as Error).message })
+      return
+    }
 
     const config: EvaluationConfig = {}
-    if (values.model_name) config.model_name = values.model_name
+    if (target.provider) config.provider = target.provider
+    if (target.model) config.model_name = target.model
     if (values.temperature !== undefined) config.temperature = values.temperature
     if (values.max_tokens !== undefined) config.max_tokens = values.max_tokens
 
@@ -318,32 +332,7 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
                 />
               </Form.Item>
 
-              <Form.Item
-                name="model_name"
-                label={t("managePrompts.studio.evaluations.wizard.model", {
-                  defaultValue: "Model"
-                })}
-              >
-                <Select
-                  placeholder={t(
-                    "managePrompts.studio.evaluations.wizard.modelPlaceholder",
-                    {
-                      defaultValue: "Use default"
-                    }
-                  )}
-                  allowClear
-                  options={[
-                    { label: "GPT-4o", value: "gpt-4o" },
-                    { label: "GPT-4o mini", value: "gpt-4o-mini" },
-                    { label: "GPT-3.5 Turbo", value: "gpt-3.5-turbo" },
-                    {
-                      label: "Claude 3.5 Sonnet",
-                      value: "claude-3-5-sonnet-latest"
-                    },
-                    { label: "Claude 3 Haiku", value: "claude-3-haiku-20240307" }
-                  ]}
-                />
-              </Form.Item>
+              <StudioModelTargetFields target={modelTarget} />
 
               <div className="grid grid-cols-2 gap-4">
                 <Form.Item
@@ -427,7 +416,7 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
                   })}
                 </span>
                 <p className="font-medium">
-                  {form.getFieldValue("model_name") || "Default"}
+                  {modelTarget.provider || "Default"} / {modelTarget.model || "Default"}
                 </p>
               </div>
             </div>

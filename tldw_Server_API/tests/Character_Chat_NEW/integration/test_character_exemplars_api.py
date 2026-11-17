@@ -291,8 +291,7 @@ class TestCharacterExemplarEndpoints:
             }
 
         monkeypatch.setattr(
-            characters_endpoint_module,
-            "score_exemplars_with_embeddings",
+            "tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings.score_exemplars_with_embeddings",
             _fake_embedding_scores,
         )
 
@@ -345,8 +344,7 @@ class TestCharacterExemplarEndpoints:
             raise RuntimeError("embedding backend unavailable")
 
         monkeypatch.setattr(
-            characters_endpoint_module,
-            "score_exemplars_with_embeddings",
+            "tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings.score_exemplars_with_embeddings",
             _raise_embedding_error,
         )
 
@@ -422,8 +420,7 @@ class TestCharacterExemplarEndpoints:
             }
 
         monkeypatch.setattr(
-            characters_endpoint_module,
-            "score_exemplars_with_embeddings",
+            "tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings.score_exemplars_with_embeddings",
             _fake_embedding_scores,
         )
 
@@ -466,13 +463,11 @@ class TestCharacterExemplarEndpoints:
             return len(kwargs.get("exemplar_ids") or [])
 
         monkeypatch.setattr(
-            characters_endpoint_module,
-            "upsert_character_exemplar_embeddings",
+            "tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings.upsert_character_exemplar_embeddings",
             _fake_upsert,
         )
         monkeypatch.setattr(
-            characters_endpoint_module,
-            "delete_character_exemplar_embeddings",
+            "tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings.delete_character_exemplar_embeddings",
             _fake_delete,
         )
 

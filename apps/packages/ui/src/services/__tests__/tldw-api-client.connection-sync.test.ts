@@ -672,7 +672,7 @@ describe("TldwApiClient connection storage sync", () => {
     })
   })
 
-  it("skips same-origin quickstart OpenAPI discovery", async () => {
+  it("reads the deployed same-origin quickstart OpenAPI contract", async () => {
     const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     try {
@@ -683,10 +683,11 @@ describe("TldwApiClient connection storage sync", () => {
         apiKey: "test-api-key"
       })
 
-      await expect(client.getOpenAPISpec()).resolves.toBeNull()
+      mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { openapi: "3.1.0", paths: {} } })
+      await expect(client.getOpenAPISpec()).resolves.toMatchObject({ openapi: "3.1.0" })
 
       expect(mocks.bgRequest).not.toHaveBeenCalled()
-      expect(mocks.tldwRequest).not.toHaveBeenCalled()
+      expect(mocks.tldwRequest).toHaveBeenCalledWith(expect.objectContaining({ path: `${window.location.origin}/openapi.json`, method: "GET" }), expect.anything())
     } finally {
       if (previousMode === undefined) {
         delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE

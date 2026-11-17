@@ -10,13 +10,13 @@ import { createStore } from "zustand/vanilla"
  * - "saved": the most recent settled write was acknowledged by the server;
  * - "failed": the most recent settled write was not acknowledged;
  * - "unknown": no write was recorded in this session. A chat id is only ever
- *   issued by the server, so an unknown chat is one the server already holds.
+ *   issued by the server, but does not acknowledge the latest retained turn.
  *
  * Recording an outcome never changes how or whether a chat is saved. The store
  * is framework-free so the API client can record writes; React components read
  * it through `useServerChatSaveStatus` (hooks/chat/useServerChatSaveStatus).
  */
-export type ServerChatSaveStatus = "unknown" | "saving" | "saved" | "failed"
+export type ServerChatSaveStatus = "unknown" | "unconfirmed" | "saving" | "saved" | "failed"
 
 /** "unknown" ends a write without changing the last acknowledged outcome. */
 export type ServerChatWriteOutcome = "saved" | "failed" | "unknown"
@@ -24,6 +24,8 @@ export type ServerChatWriteOutcome = "saved" | "failed" | "unknown"
 export type ServerChatSaveEntry = {
   inFlight: number
   lastOutcome: "saved" | "failed" | null
+  historyEvidence?: "confirmed" | "unconfirmed"
+  historyEvidenceCurrent?: () => boolean
 }
 
 type ServerChatSaveStatusState = {
@@ -58,7 +60,16 @@ export const toServerChatSaveStatus = (
 ): ServerChatSaveStatus => {
   if (!entry) return "unknown"
   if (entry.inFlight > 0) return "saving"
-  return entry.lastOutcome ?? "unknown"
+  if (entry.historyEvidence && (entry.historyEvidence === "unconfirmed" || entry.historyEvidenceCurrent?.() === false)) return "unconfirmed"
+  return entry.lastOutcome ?? (entry.historyEvidence === "confirmed" ? "saved" : "unknown")
+}
+
+/** Current owner-verified history and journal evidence cannot replace an active write. */
+export const recordServerChatHistoryEvidence = (
+  chatId: unknown, evidence: "confirmed" | "unconfirmed", isCurrent: () => boolean
+) => {
+  const id = normalizeServerChatId(chatId)
+  if (id && isCurrent()) updateEntry(id, entry => ({ ...entry, historyEvidence: evidence, historyEvidenceCurrent: isCurrent }))
 }
 
 /**
@@ -76,6 +87,7 @@ export const beginServerChatWrite = (
     if (ended) return
     ended = true
     updateEntry(id, (entry) => ({
+      ...entry,
       inFlight: Math.max(0, entry.inFlight - 1),
       lastOutcome: outcome === "unknown" ? entry.lastOutcome : outcome
     }))
@@ -86,18 +98,33 @@ export const beginServerChatWrite = (
  * Runs a server write for `chatId` and records whether the server acknowledged
  * it. The write's result or error is passed through unchanged.
  */
-export const trackServerChatWrite = async <T>(
+export const trackServerChatWrite = async <T,>(
   chatId: unknown,
   write: () => Promise<T>,
-  options?: { isAcknowledgedError?: (error: unknown) => boolean }
+  options?: {
+    isAcknowledgedResult?: (result: T) => boolean
+    isAcknowledgedError?: (error: unknown) => boolean
+    isUnchangedError?: (error: unknown) => boolean
+  }
 ): Promise<T> => {
   const endWrite = beginServerChatWrite(chatId)
   try {
     const result = await write()
-    endWrite("saved")
+    endWrite(
+      options?.isAcknowledgedResult && !options.isAcknowledgedResult(result)
+        ? "failed"
+        : "saved"
+    )
     return result
   } catch (error) {
-    endWrite(options?.isAcknowledgedError?.(error) ? "saved" : "failed")
+    let outcome: ServerChatWriteOutcome = "failed"
+    try {
+      if (options?.isAcknowledgedError?.(error)) outcome = "saved"
+      else if (options?.isUnchangedError?.(error)) outcome = "unknown"
+    } catch {
+      // A failed classifier cannot supply acknowledgement or replace the write error.
+    }
+    endWrite(outcome)
     throw error
   }
 }

@@ -6,15 +6,15 @@ import asyncio
 from collections.abc import Awaitable
 from typing import Any, TypeVar
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-    is_runtime_issued_provider_call_credentials,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     invoke_stream_close_bounded,
     normalize_provider_stream_error,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    is_runtime_issued_provider_call_credentials,
 )
 
 _T = TypeVar("_T")

@@ -26,7 +26,12 @@ export const FirstRunGate: React.FC<FirstRunGateProps> = ({
   bypass = false,
   allowCompletedSetup = false
 }) => {
-  const { shouldShowSetup, loading } = useFirstRunCheck({ allowCompletedSetup, enabled: !bypass })
+  // Destinations that allow completed setup never show this gate, so they
+  // skip the persona profile read entirely (XP-16).
+  const { shouldShowSetup, loading } = useFirstRunCheck({
+    allowCompletedSetup,
+    enabled: !bypass && !allowCompletedSetup
+  })
   const [dismissed, setDismissed] = React.useState(false)
 
   // While loading or if the user dismissed the overlay, render children

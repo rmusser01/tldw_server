@@ -277,7 +277,7 @@ class TestDatabaseCRUDAndSync:
         db_instance.add_keyword("beta")
         assert db_instance.soft_delete_keyword("beta") is True
 
-        assert db_instance.fetch_all_keywords() == ["alpha", "zulu"]
+        assert db_instance.fetch_all_keywords() == ["alpha", "Zulu"]
 
     def test_undelete_keyword(self, db_instance):
 

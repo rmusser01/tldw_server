@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
@@ -16,6 +17,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing import (
 )
 from tldw_Server_API.app.core import Storage
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
+from tldw_Server_API.app.core.Ingestion_Media_Processing.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.Storage.filesystem_storage import FileSystemStorage
 from tldw_Server_API.app.services import storage_quota_service
 
@@ -617,6 +619,52 @@ async def test_original_storage_replaces_binary_and_preserves_plaintext_history(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize("include_new", [False, True])
+async def test_add_media_analysis_admission_follows_existing_source_check(monkeypatch, tmp_path, include_new):
+    existing_url = "https://example.com/report.pdf"
+    new_url = "https://example.com/new-report.pdf"
+    db = create_media_database(client_id="2", db_path=str(tmp_path / "media.db"))
+    try:
+        media_id, _, _ = db.add_media_with_keywords(
+            url=existing_url, title="Report", media_type="pdf", content="Saved report.", keywords=[],
+        )
+        admit = AsyncMock()
+        process_document = AsyncMock(return_value={"status": "Success", "db_id": None})
+        monkeypatch.setattr(ingestion_persistence, "process_document_like_item", process_document)
+        response = await ingestion_persistence.add_media_orchestrate(
+            background_tasks=BackgroundTasks(),
+            form_data=AddMediaForm(
+                media_type="pdf",
+                urls=[existing_url, new_url] if include_new else [existing_url],
+                perform_analysis=True,
+                api_name="deepseek",
+            ),
+            files=None,
+            db=db,
+            current_user=SimpleNamespace(id=2),
+            usage_log=None,
+            admit_after_duplicate_check=admit,
+        )
+    finally:
+        db.close_connection()
+
+    skipped, *remaining = json.loads(response.body)["results"]
+    assert skipped["status"] == "Skipped"
+    assert skipped["db_id"] == media_id
+    assert skipped["warnings"] == ["Analysis skipped because this item is already in your library."]
+    if include_new:
+        assert remaining[0]["status"] == "Success"
+        admit.assert_awaited_once()
+        process_document.assert_awaited_once()
+        assert process_document.await_args.kwargs["processing_source"] == new_url
+    else:
+        assert not remaining
+        admit.assert_not_awaited()
+        process_document.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_add_media_orchestrate_handles_document_exceptions(monkeypatch, tmp_path, fake_db, fake_storage):
     db = fake_db
 
@@ -1120,3 +1168,17 @@ async def test_process_batch_media_test_mode_accepts_single_letter_y(
     assert captured.get("block_private_override") is False
     assert len(results) == 1
     assert "URL blocked by security policy" in str(results[0].get("error"))
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("saved_files", "expected"),
+    [(None, None), ([], None), ([{}], None), ([{"original_filename": "first.txt"}, {"original_filename": "later.txt"}], "first.txt")],
+)
+def test_first_saved_filename_preserves_upload_selection(saved_files, expected):
+    assert input_sourcing.first_saved_filename(saved_files) == expected  # nosec B101 -- Preserve first-upload selection and absence.
+
+
+@pytest.mark.unit
+def test_first_saved_filename_leaves_malformed_input_to_the_callers_error_policy():
+    with pytest.raises(AttributeError):
+        input_sourcing.first_saved_filename([None])

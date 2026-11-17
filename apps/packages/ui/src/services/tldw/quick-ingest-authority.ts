@@ -10,14 +10,13 @@ import { tldwClient, type TldwConfig } from "./TldwApiClient"
 import { REFRESH_ROTATION_KEY, REFRESH_SESSION_INVALIDATION_PREFIX } from "./single-user-credential"
 import { createServicePromptScopeChangedError, servicePromptTargetsMatch, servicePromptPrincipalMatches, servicePromptSingleUserApiKeyScopeMatches } from "./service-prompt-scope-error"
 import { isHostedTldwDeployment } from "./deployment-mode"
-import type { ServicePromptRequestScope } from "./domains/service-prompts"
+import {
+  servicePromptAuthorityKey,
+  type ServicePromptRequestScope,
+} from "./domains/service-prompts";
 
-/** Metadata only: never persist the access token or API key with ingest results. */
-export const quickIngestAuthorityKey = ({ config, userId }: ServicePromptRequestScope): string => JSON.stringify([
-  config.serverUrl.trim().replace(/\/+$/, ""), config.authMode,
-  config.authSource || "manual", config.orgId ?? null, userId,
-  config.expectedSingleUserApiKeyScope ?? null
-])
+/** Existing ingest alias preserves the shared captured-scope contract. */
+export const quickIngestAuthorityKey = servicePromptAuthorityKey
 
 export type QuickIngestOperation = {
   authorityKey: string

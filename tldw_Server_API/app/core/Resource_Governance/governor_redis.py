@@ -21,8 +21,26 @@ from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from .daily_caps import check_daily_cap, consume_daily_cap
 from .governor import _EVICT_BATCH, _EVICT_INTERVAL_SEC, MemoryResourceGovernor, ResourceGovernor, RGDecision, RGRequest
 from .metrics_rg import _labels, ensure_rg_metrics_registered, rg_metrics_entity_label_enabled
-from .policy_eval import clamp_token_units, effective_policy, log_lookup_failure, requests_window, scope_pairs
+from .policy_eval import (
+    clamp_token_units,
+    effective_policy,
+    lease_limits,
+    log_lookup_failure,
+    log_redis_failure,
+    requests_window,
+    scope_pairs,
+)
 from .tenant import hash_entity
+
+try:
+    from redis.exceptions import BusyLoadingError, RedisError
+    from redis.exceptions import ConnectionError as RedisConnectionError
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+except ImportError:  # pragma: no cover - redis is an optional deployment dependency
+    _REDIS_ERRORS: tuple[type[Exception], ...] = ()
+else:
+    # redis-py's ConnectionError and TimeoutError are not the builtins: they derive from RedisError.
+    _REDIS_ERRORS = (RedisError,)
 
 TimeSource = Callable[[], float]
 
@@ -37,6 +55,7 @@ _RG_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     UnicodeDecodeError,
     ValueError,
     json.JSONDecodeError,
+    *_REDIS_ERRORS,
 )
 
 try:
@@ -48,6 +67,85 @@ except _RG_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - metrics optional
 
 class _FallbackToMemory(Exception):
     """Signal that Redis operations failed and fallback_memory should be used."""
+
+
+# RG's Redis client waits at most this long to connect, and for each reply (TASK-13882). It is
+# redis-py 8's default, set here so older releases the redis>=4.5.0 pin allows wait no longer.
+# socket_timeout and socket_connect_timeout options in REDIS_URL override it.
+_REDIS_SOCKET_TIMEOUT_S = 5.0
+# How long RG stops sending commands to a Redis it could not reach (TASK-13882), unless
+# RG_REDIS_UNREACHABLE_COOLDOWN_SEC says otherwise (0 turns the cooldown off). At least twice the
+# socket timeout, so a probe and its confirming PING finish before the next probe starts.
+# ponytail: one cooldown per governor's client; share one per Redis URL if each governor's first wait matters.
+_REDIS_UNREACHABLE_COOLDOWN_S = 10.0
+
+
+def _redis_unreachable_cooldown_s() -> float:
+    """``RG_REDIS_UNREACHABLE_COOLDOWN_SEC``, or the default when it is unset or not a number of seconds >= 0."""
+    raw = (os.getenv("RG_REDIS_UNREACHABLE_COOLDOWN_SEC") or "").strip()
+    if not raw:
+        return _REDIS_UNREACHABLE_COOLDOWN_S
+    try:
+        seconds = float(raw)
+    except ValueError:
+        seconds = -1.0
+    if not math.isfinite(seconds) or seconds < 0:
+        logger.warning("RG_REDIS_UNREACHABLE_COOLDOWN_SEC={!r} is not a number of seconds >= 0; using {}", raw, _REDIS_UNREACHABLE_COOLDOWN_S)
+        return _REDIS_UNREACHABLE_COOLDOWN_S
+    return seconds
+
+
+def _stop_calling_redis_while_unreachable(client: Any, cooldown_s: float) -> Any:
+    """Make ``client`` fail fast for ``cooldown_s`` once Redis cannot be reached (TASK-13882).
+
+    A black-holed Redis makes each command wait the socket timeout, and a governed request sends
+    several commands while Redis is down. A command that fails to reach Redis (refused, reset or
+    timed out) starts the cooldown only if a PING right after it fails too. redis-py drops the
+    failed connection and its pool hands the most recently released one out first, so the PING
+    normally takes that connection and reconnects; a connection Redis closed while idle, or one
+    stall, does not stop RG. Within the cooldown a command raises redis ConnectionError at once,
+    which RG answers by its fail mode as it does a refused connection. After it, one command goes
+    to Redis while the rest keep failing fast; any answer from Redis, an error reply included,
+    ends the cooldown. That includes LOADING from a restarting Redis, which redis-py raises as
+    BusyLoadingError, a ConnectionError: it never starts the cooldown.
+    """
+    run = client.execute_command
+    blocked_until = 0.0
+
+    async def _unreachable() -> bool:
+        try:
+            await run("PING")
+        except BusyLoadingError:
+            return False  # LOADING: Redis answered
+        except (RedisConnectionError, RedisTimeoutError):
+            return True
+        except RedisError:
+            return False  # an error reply: Redis answered
+        return False
+
+    async def execute_command(*args: Any, **options: Any) -> Any:
+        nonlocal blocked_until
+        now = time.monotonic()
+        if now < blocked_until:
+            raise RedisConnectionError("Redis was unreachable; the Resource Governor retries it after a cooldown")
+        if blocked_until:
+            blocked_until = now + cooldown_s  # this command probes; the rest fail fast meanwhile
+        try:
+            result = await run(*args, **options)
+        except BusyLoadingError:
+            blocked_until = 0.0  # LOADING: Redis answered while it loads its data
+            raise
+        except (RedisConnectionError, RedisTimeoutError):
+            blocked_until = time.monotonic() + cooldown_s if await _unreachable() else 0.0
+            raise
+        except RedisError:
+            blocked_until = 0.0  # Redis answered (NOSCRIPT, READONLY, OOM): it is reachable
+            raise
+        blocked_until = 0.0
+        return result
+
+    client.execute_command = execute_command
+    return client
 
 
 def _rate_window(policy: dict[str, Any], category: str) -> tuple[int, int]:
@@ -138,6 +236,7 @@ class RedisResourceGovernor(ResourceGovernor):
         self._client_lock = asyncio.Lock()
         self._concurrency_lock = asyncio.Lock()
         self._fail_mode = rg_redis_fail_mode()
+        self._unreachable_cooldown_s = _redis_unreachable_cooldown_s()
         self._local_handles: dict[str, dict[str, Any]] = {}
         self._tokens_lua_sha: str | None = None
         self._multi_lua_sha: str | None = None
@@ -415,7 +514,14 @@ class RedisResourceGovernor(ResourceGovernor):
             return self._client
         async with self._client_lock:
             if self._client is None:
-                self._client = await create_async_redis_client(context="resource_governor", fallback_to_fake=True)
+                client = await create_async_redis_client(
+                    context="resource_governor",
+                    fallback_to_fake=True,
+                    redis_kwargs={"socket_connect_timeout": _REDIS_SOCKET_TIMEOUT_S, "socket_timeout": _REDIS_SOCKET_TIMEOUT_S},
+                )
+                if self._unreachable_cooldown_s > 0 and not getattr(client, "_tldw_is_stub", False):
+                    _stop_calling_redis_while_unreachable(client, self._unreachable_cooldown_s)
+                self._client = client
         return self._client
 
     async def _scan_keys(self, pattern: str, *, count: int = 1000) -> list[Any]:
@@ -557,12 +663,15 @@ class RedisResourceGovernor(ResourceGovernor):
         return cnt
 
     async def _add_members(self, *, key: str, members: list[str], now: float, window: int) -> None:
+        """Add window members; a failed write (OOM, READONLY) is logged and raised, so the caller applies the fail mode."""
         client = await self._client_get()
         try:
             await client.zadd(key, dict.fromkeys(members, now))
             await client.expire(key, _window_ttl(window))
-        except _RG_NONCRITICAL_EXCEPTIONS:
+        except _RG_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("RG window add/expire failed for key={}", key, exc_info=True)
+            log_redis_failure(self._keys.ns, exc)
+            raise
 
     async def _zrem_members(self, *, key: str, members: list[str]) -> None:
         client = await self._client_get()
@@ -621,10 +730,12 @@ class RedisResourceGovernor(ResourceGovernor):
                     except _RG_NONCRITICAL_EXCEPTIONS:
                         ra = window
             except _RG_NONCRITICAL_EXCEPTIONS:
-                # Fallback to conservative window
+                # Fallback to conservative window; a lost script (NOSCRIPT after a restart) loads again next time
                 ra = window
+                self._tokens_lua_sha = None
             return False, int(ra), count
-        except _RG_NONCRITICAL_EXCEPTIONS:
+        except _RG_NONCRITICAL_EXCEPTIONS as exc:
+            log_redis_failure(self._keys.ns, exc)
             if fail_mode == "fallback_memory":
                 raise _FallbackToMemory from None
             if fail_mode == "fail_open":
@@ -1090,8 +1201,7 @@ class RedisResourceGovernor(ResourceGovernor):
                         **(daily_details or {}),
                     }
                 elif category in ("streams", "jobs"):
-                    limit = int((pol.get(category) or {}).get("max_concurrent") or 0)
-                    ttl_sec = int((pol.get(category) or {}).get("ttl_sec") or 60)
+                    limit, ttl_sec, scope_keys = lease_limits(pol, category, cfg, entity_scope, entity_value)
                     cat_fail = self._effective_fail_mode(pol, category)
                     if limit <= 0:
                         # Missing max_concurrent is unbounded; mirror memory's semantics (spec §4).
@@ -1104,8 +1214,6 @@ class RedisResourceGovernor(ResourceGovernor):
                             "unbounded": True,
                         }
                     else:
-                        scope_keys = self._scope_pairs(pol, entity_scope, entity_value)
-
                         remainings: list[int] = []
                         retry_after_candidates: list[int] = []
                         for sc, ev in scope_keys:
@@ -1119,6 +1227,7 @@ class RedisResourceGovernor(ResourceGovernor):
                                 await client.zremrangebyscore(key, float("-inf"), now)
                                 active_real = int(await client.zcard(key))
                             except _RG_NONCRITICAL_EXCEPTIONS as exc:
+                                log_redis_failure(self._keys.ns, exc)
                                 if cat_fail == "fallback_memory":
                                     raise _FallbackToMemory from exc
                                 active_real = 0
@@ -1595,8 +1704,11 @@ class RedisResourceGovernor(ResourceGovernor):
         # First, try to atomically add request/token units across scopes; track members for rollback/refund
         added_members: dict[str, dict[tuple[str, str], list[str]]] = {}
         add_failed = False
+        fallback_to_memory = False
         denial_retry_after = 0
         used_lua = False
+        # The script's members, kept to populate added_members on success and to remove on failure
+        tmp_members: list[tuple[str, str, str, str, list[str]]] = []  # (category, sc, ev, key, members)
 
         # Attempt real-Redis multi-key Lua script when available (disabled when forcing stub rate)
         try:
@@ -1606,8 +1718,6 @@ class RedisResourceGovernor(ResourceGovernor):
                 argv: list[Any] = []
                 # ARGV[1]=now, ARGV[2]=kcount; rest per-key quads
                 now_f = float(now)
-                # We'll build a temporary structure to also populate added_members on success
-                tmp_members: list[tuple[str, str, str, str, list[str]]] = []  # (category, sc, ev, key, members)
                 for category, cfg in req.categories.items():
                     units = int(cfg.get("units") or 0)
                     if units <= 0:
@@ -1645,9 +1755,15 @@ class RedisResourceGovernor(ResourceGovernor):
                                 pass
                             add_failed = True
         except _RG_NONCRITICAL_EXCEPTIONS:
-            # fall through to Python fallback
+            # fall through to Python fallback; a lost script (NOSCRIPT after a restart) loads again next time
             used_lua = False
             self._last_used_multi_lua = False
+            self._multi_lua_sha = None
+            # A script that ran but lost its reply charged these members: take them out, or the
+            # Python path below counts them and charges the request again (TASK-13892).
+            for _category, _sc, _ev, win_key, members in tmp_members:
+                with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):
+                    await client.zrem(win_key, *members)
         if not used_lua:
             if await self._is_stub_client():
                 # Pre-check across all scopes/categories
@@ -1665,9 +1781,20 @@ class RedisResourceGovernor(ResourceGovernor):
                         ok_all = True
                         for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
-                            ok, ra, cnt = await self._allow_requests_sliding_check_only(
-                                key=key, limit=limit_m, window=window, units=units_m, now=now, fail_mode=self._effective_fail_mode(pol, category)
-                            )
+                            try:
+                                ok, ra, cnt = await self._allow_requests_sliding_check_only(
+                                    key=key, limit=limit_m, window=window, units=units_m, now=now, fail_mode=self._effective_fail_mode(pol, category)
+                                )
+                            except _FallbackToMemory:
+                                if self._stub_delegate is None:  # no memory governor to count it: deny for the window
+                                    ok, ra, cnt = False, window, 0
+                                else:
+                                    # Redis dropped after check() passed: the worker's memory governor counts the
+                                    # request, as at check(). Nothing has been added to Redis yet.
+                                    dec_f, handle_f = await self._stub_delegate.reserve(daily_req, op_id=op_id)
+                                    if handle_f:
+                                        self._fallback_handles.add(handle_f)
+                                    return dec_f, handle_f
                             counts.append(int(cnt))
                             if not ok:
                                 ok_all = False
@@ -1707,7 +1834,8 @@ class RedisResourceGovernor(ResourceGovernor):
                         for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             members = [f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}" for i in range(units_m)]
-                            await self._add_members(key=key, members=members, now=now, window=window)
+                            with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):  # the check above applied the fail mode
+                                await self._add_members(key=key, members=members, now=now, window=window)
                             with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):
                                 logger.debug(
                                     "RG stub add: policy_id={pid} cat={cat} scope={sc} entity={ev} units={units}",
@@ -1732,7 +1860,6 @@ class RedisResourceGovernor(ResourceGovernor):
                         added_members.setdefault(category, {})
                         for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
-                            _ = await self._purge_and_count(key=key, now=now, window=window)
                             added_for_scope: list[str] = []
                             for i in range(units_m):
                                 try:
@@ -1744,9 +1871,12 @@ class RedisResourceGovernor(ResourceGovernor):
                                     await self._add_members(key=key, members=[member], now=now, window=window)
                                     added_for_scope.append(member)
                                 except _RG_NONCRITICAL_EXCEPTIONS:
+                                    # Redis cannot count or take the write (OOM, READONLY): the fail mode, as in check().
                                     if cat_fail == "fail_open":
-                                        continue
+                                        break  # admitted uncounted; retrying each remaining unit only repeats the failure
                                     add_failed = True
+                                    fallback_to_memory = cat_fail == "fallback_memory"
+                                    denial_retry_after = max(denial_retry_after, int(window))
                                     break
                             added_members[category][(sc, ev)] = added_for_scope
                             if add_failed:
@@ -1756,6 +1886,16 @@ class RedisResourceGovernor(ResourceGovernor):
 
         if add_failed:
             # Rollback any added members
+            for category, scopes in added_members.items():
+                for (sc, ev), mems in scopes.items():
+                    key = self._keys.win(policy_id, category, sc, ev)
+                    await self._zrem_members(key=key, members=mems)
+            if fallback_to_memory and self._stub_delegate is not None:
+                # Redis rejected the window write: this worker's memory governor counts the request.
+                dec_f, handle_f = await self._stub_delegate.reserve(daily_req, op_id=op_id)
+                if handle_f:
+                    self._fallback_handles.add(handle_f)
+                return dec_f, handle_f
             try:
                 # Establish deny-until/backoff using the computed retry_after for stability
                 now_df = self._time()
@@ -1775,10 +1915,6 @@ class RedisResourceGovernor(ResourceGovernor):
                     self._stub_backoff_until[(self._keys.ns, policy_id_df, req.entity, "requests", rpm_df, win_df)] = now_df + float(ra_df)
             except _RG_NONCRITICAL_EXCEPTIONS:
                 pass
-            for category, scopes in added_members.items():
-                for (sc, ev), mems in scopes.items():
-                    key = self._keys.win(policy_id, category, sc, ev)
-                    await self._zrem_members(key=key, members=mems)
             # Build a denial decision reflecting max retry_after across attempted keys
             try:
                 base_cats = dict((dec.details or {}).get("categories") or {})
@@ -1843,14 +1979,12 @@ class RedisResourceGovernor(ResourceGovernor):
                 units = int((cfg or {}).get("units") or 0)
                 if units <= 0:
                     continue
-                limit = int((pol.get(category) or {}).get("max_concurrent") or 0)
-                ttl_sec = int((pol.get(category) or {}).get("ttl_sec") or 60)
+                # Named "pairs", not "scope_pairs": that name would shadow the
+                # policy_eval.scope_pairs import for the rest of this function.
+                limit, ttl_sec, pairs = lease_limits(pol, category, cfg or {}, entity_scope, entity_value)
                 if limit <= 0:
                     # Missing max_concurrent is unbounded; mirror memory's semantics (spec §4).
                     continue
-                # Named "pairs", not "scope_pairs": that name would shadow the
-                # policy_eval.scope_pairs import for the rest of this function.
-                pairs = self._scope_pairs(pol, entity_scope, entity_value)
 
                 planned: dict[tuple[str, str], list[str]] = {}
                 for sc, ev in pairs:
@@ -1880,12 +2014,14 @@ class RedisResourceGovernor(ResourceGovernor):
                                     denial_retry_after = max(denial_retry_after, int(ttl_sec or 1))
                                 break
                     except _RG_NONCRITICAL_EXCEPTIONS:
-                        if self._effective_fail_mode(pol, category) == "fail_open":
-                            continue
-                        concurrency_failed = True
-                        concurrency_failed_category = category
-                        denial_retry_after = max(denial_retry_after, int(ttl_sec or 1))
-                        break
+                        # Redis answered the probe but not the script (NOSCRIPT after a restart, OOM,
+                        # READONLY): load it again next time, and count leases in the Python path below.
+                        self._concurrency_lua_sha = None
+                        # A script that ran but lost its reply left this reserve's leases in Redis:
+                        # take them out, or the count below includes them (TASK-13892).
+                        for (sc, ev), members in planned.items():
+                            with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):
+                                await client.zrem(self._keys.lease(policy_id, category, sc, ev), *members)
 
                 if not used_concurrency_lua:
                     active_by_scope: dict[tuple[str, str], int] = {}
@@ -1928,8 +2064,9 @@ class RedisResourceGovernor(ResourceGovernor):
                             bucket[mem] = float(expires_at)
                         try:
                             await client.zadd(key, {mem: float(expires_at) for mem in members})
-                        except _RG_NONCRITICAL_EXCEPTIONS:
-                            pass
+                        except _RG_NONCRITICAL_EXCEPTIONS as exc:
+                            # Redis rejects the write (OOM, READONLY): only this worker counts the lease.
+                            log_redis_failure(self._keys.ns, exc)
 
                 expires_at = now + max(1, int(ttl_sec))
                 for (sc, ev), members in planned.items():
@@ -1957,12 +2094,13 @@ class RedisResourceGovernor(ResourceGovernor):
                     await self._zrem_members(key=key, members=mems)
             per_category = dict((dec.details or {}).get("categories") or {})
             failed = concurrency_failed_category or "streams"
+            failed_limit, failed_ttl, _pairs = lease_limits(pol, failed, req.categories.get(failed) or {}, entity_scope, entity_value)
             failed_info = dict(per_category.get(failed) or {})
             failed_info.update({
                 "allowed": False,
-                "limit": int((pol.get(failed) or {}).get("max_concurrent") or 0),
-                "retry_after": int(denial_retry_after or (pol.get(failed) or {}).get("ttl_sec") or 1),
-                "ttl_sec": int((pol.get(failed) or {}).get("ttl_sec") or 60),
+                "limit": failed_limit,
+                "retry_after": int(denial_retry_after or failed_ttl or 1),
+                "ttl_sec": failed_ttl,
             })
             per_category[failed] = failed_info
             denial_decision = RGDecision(
@@ -2122,7 +2260,11 @@ class RedisResourceGovernor(ResourceGovernor):
                         return
         try:
             hkey = self._keys.handle(handle_id)
-            data = await client.hgetall(hkey)
+            try:
+                data = await client.hgetall(hkey)
+            except _RG_NONCRITICAL_EXCEPTIONS:
+                # Redis is down: release from this process's copy, or the lease blocks its slot until TTL.
+                data = None
             if not data:
                 data = self._local_handles.get(handle_id) or {}
                 if not data:
@@ -2146,7 +2288,8 @@ class RedisResourceGovernor(ResourceGovernor):
             # regardless of what was persisted in the handle's categories map.
             for category in ("streams", "jobs"):
                 try:
-                    if not (pol.get(category) or {}):
+                    # A request-limited lease (TASK-13435) has no policy block; its members say it exists.
+                    if not (pol.get(category) or members.get(category)):
                         continue
                 except _RG_NONCRITICAL_EXCEPTIONS:
                     continue
@@ -2386,14 +2529,22 @@ class RedisResourceGovernor(ResourceGovernor):
         client = await self._client_get()
         try:
             hkey = self._keys.handle(handle_id)
-            data = await client.hgetall(hkey)
+            try:
+                data = await client.hgetall(hkey)
+            except _RG_NONCRITICAL_EXCEPTIONS:
+                data = None
+            if not data:
+                # Redis is down, or never saw a lease taken during an outage: renew this process's copy,
+                # or the lease lapses after its TTL while still held.
+                data = self._local_handles.get(handle_id)
             if not data:
                 return
             policy_id = data.get("policy_id") or "default"
             entity = data.get("entity") or ""
             entity_scope, entity_value = self._parse_entity(entity)
             pol = self._get_policy(policy_id)
-            cats = json.loads(data.get("categories") or "{}")
+            cats_raw = data.get("categories")
+            cats = json.loads(cats_raw or "{}") if isinstance(cats_raw, str) else dict(cats_raw or {})
             members_raw = data.get("members")
             try:
                 members = json.loads(members_raw or "{}") if isinstance(members_raw, str) else (members_raw or {})
@@ -2402,7 +2553,10 @@ class RedisResourceGovernor(ResourceGovernor):
             now = self._time()
             for category in cats:
                 if category in ("streams", "jobs"):
-                    for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
+                    # Refresh only the buckets the reservation charged: a request-limited
+                    # lease (TASK-13435) charged the caller's bucket, never `global`.
+                    charged = [tuple(scope_key.split(":", 1)) for scope_key in (members.get(category) or {})]
+                    for sc, ev in charged or self._scope_pairs(pol, entity_scope, entity_value):
                         key = self._keys.lease(policy_id, category, sc, ev)
                         scope_key = f"{sc}:{ev}"
                         members_list: list[str] = []
@@ -2470,7 +2624,12 @@ class RedisResourceGovernor(ResourceGovernor):
             for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                 current_cnt = 0
                 key = self._keys.win(policy_id, category, sc, ev)
-                current_cnt = await self._purge_and_count(key=key, now=now, window=window)
+                try:
+                    current_cnt = await self._purge_and_count(key=key, now=now, window=window)
+                except _RG_NONCRITICAL_EXCEPTIONS:
+                    # Redis cannot be read: this category's headroom is unknown.
+                    remainings, resets = [], []
+                    break
                 if current_cnt >= limit_m:
                     try:
                         res = await self._ensure_tokens_lua()
@@ -2484,6 +2643,7 @@ class RedisResourceGovernor(ResourceGovernor):
                             resets.append(window)
                     except _RG_NONCRITICAL_EXCEPTIONS:
                         resets.append(window)
+                        self._tokens_lua_sha = None  # a lost script (NOSCRIPT after a restart) loads again next time
                 else:
                     resets.append(0)
                 remainings.append(min(limit, max(0, limit_m - current_cnt) * quantum))

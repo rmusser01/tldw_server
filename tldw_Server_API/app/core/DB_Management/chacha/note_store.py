@@ -26,8 +26,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     logger,
 )
 from tldw_Server_API.app.core.Notes.wikilinks import parse_wikilinks
-from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+from tldw_Server_API.app.core.Notes_Graph.semantic_content import semantic_content_fingerprint
+from tldw_Server_API.app.core.Sync_Contracts.models import validate_notes_note_upsert_payload
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract import (
     SYNC_ENVELOPE_MAX_BYTES,
     NotesMoodboardStudioContractError,
     StudioDiagramManifestV1,
@@ -39,6 +40,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     parse_notes_studio_document_v1,
     studio_result_hash,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -78,6 +80,58 @@ class NoteStore:
             expected_time = expected_time.replace(tzinfo=timezone.utc)
         return actual_time.astimezone(timezone.utc) == expected_time.astimezone(timezone.utc)
 
+    @staticmethod
+    def _semantic_now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    def _mark_note_semantic_dirty(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        dataset_id: str | None,
+        note_id: str,
+        title: str,
+        content: str,
+        content_version: int,
+    ) -> None:
+        if dataset_id is None:
+            dataset_id = self._db.note_semantic_store.resolve_enabled_dataset_for_local_mutation(
+                tx=conn
+            )
+        self._db.note_semantic_store.mark_note_dirty(
+            tx=conn,
+            dataset_id=dataset_id,
+            note_id=note_id,
+            content_version=content_version,
+            content_fingerprint=semantic_content_fingerprint(title, content, content_version),
+            now=self._semantic_now(),
+        )
+
+    def _mark_note_semantic_tombstone(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        dataset_id: str | None,
+        note_id: str,
+        title: str,
+        content: str,
+        content_version: int,
+        hard_delete: bool = False,
+    ) -> None:
+        if dataset_id is None:
+            dataset_id = self._db.note_semantic_store.resolve_enabled_dataset_for_local_mutation(
+                tx=conn
+            )
+        self._db.note_semantic_store.mark_note_tombstoned(
+            tx=conn,
+            dataset_id=dataset_id,
+            note_id=note_id,
+            content_version=content_version,
+            content_fingerprint=semantic_content_fingerprint(title, content, content_version),
+            hard_delete=hard_delete,
+            now=self._semantic_now(),
+        )
+
     # ------------------------------------------------------------------
     # Note creation
     # ------------------------------------------------------------------
@@ -90,6 +144,7 @@ class NoteStore:
         conversation_id: str | None = None,
         message_id: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        semantic_dataset_id: str | None = None,
     ) -> str | None:
         if not title or not title.strip():
             raise InputError("Note title cannot be empty.")  # noqa: TRY003
@@ -163,6 +218,14 @@ class NoteStore:
                     (title.strip(),),
                     conn=transaction_conn,
                 )
+                self._mark_note_semantic_dirty(
+                    transaction_conn,
+                    dataset_id=semantic_dataset_id,
+                    note_id=final_note_id,
+                    title=title.strip(),
+                    content=content,
+                    content_version=1,
+                )
                 logger.info(f"Added note '{title.strip()}' with ID: {final_note_id}.")
                 return final_note_id
 
@@ -192,6 +255,7 @@ class NoteStore:
         expected_product_version: int | None = None,
         projection_timestamp: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        semantic_dataset_id: str | None = None,
     ) -> bool:
         """Create or update a note projection from an accepted Sync v2 envelope."""
 
@@ -258,7 +322,7 @@ class NoteStore:
                 self._db._require_selected_owner_row(transaction_conn, "messages", normalized_message_id, self._db.client_id)
                 self._db._require_selected_owner_row(transaction_conn, "conversations", normalized_conversation_id, self._db.client_id)
                 previous = transaction_conn.execute(
-                    f"SELECT title, content FROM notes WHERE id = ?{owner_clause}",  # nosec B608
+                    f"SELECT title, content, deleted FROM notes WHERE id = ?{owner_clause}",  # nosec B608
                     (normalized_note_id,) + owner_params,
                 ).fetchone()
                 if expected_product_version is None:
@@ -362,6 +426,17 @@ class NoteStore:
                     note_id=normalized_note_id,
                     deleted=False,
                 )
+                if previous is None or bool(previous["deleted"]) or (
+                    previous["title"] != exact_title or previous["content"] != content
+                ):
+                    self._mark_note_semantic_dirty(
+                        transaction_conn,
+                        dataset_id=semantic_dataset_id,
+                        note_id=normalized_note_id,
+                        title=exact_title,
+                        content=content,
+                        content_version=object_revision,
+                    )
                 if previous is not None and (
                     previous["title"] != exact_title or previous["content"] != content
                 ):
@@ -437,6 +512,7 @@ class NoteStore:
         object_revision: int,
         object_hash: str,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        semantic_dataset_id: str | None = None,
     ) -> bool:
         """Soft-delete a note projection from an accepted Sync v2 tombstone."""
 
@@ -470,6 +546,10 @@ class NoteStore:
 
         try:
             def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> bool:
+                note = transaction_conn.execute(
+                    "SELECT title, content FROM notes WHERE id = ?",
+                    (normalized_note_id,),
+                ).fetchone()
                 cursor = transaction_conn.execute(query, params)
                 if cursor.rowcount == 0:
                     raise ConflictError(  # noqa: TRY003
@@ -489,6 +569,14 @@ class NoteStore:
                     note_id=normalized_note_id,
                     deleted=True,
                 )
+                self._mark_note_semantic_tombstone(
+                    transaction_conn,
+                    dataset_id=semantic_dataset_id,
+                    note_id=normalized_note_id,
+                    title=str(note["title"]),
+                    content=str(note["content"]),
+                    content_version=object_revision,
+                )
                 logger.info("Soft-deleted note projection from Sync v2 for ID: {}.", normalized_note_id)
                 return True
 
@@ -501,6 +589,74 @@ class NoteStore:
         except CharactersRAGDBError:
             logger.error("Database error tombstoning synced note ID {}.", normalized_note_id, exc_info=True)
             raise
+
+    def tombstone_unsynced_note_from_sync(
+        self,
+        *,
+        note_id: str,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> str:
+        """Make a note the Sync dataset holds no state for absent, and report what that took.
+
+        A device can tombstone a note this server never received through Sync.
+        The end state it asks for is "gone", so there is nothing to conflict
+        with: either no row carries the id, or the row is a copy kept outside
+        Sync, which the delete now reaches too, with everything an ordinary Sync
+        delete does to it (provenance, clipper sidecars, graph and Studio state).
+
+        Only a note owned by ``sync_client_id`` is looked at. The lookup is by
+        id, and on PostgreSQL one database holds every owner's notes; with no
+        Sync state to tie the id to this owner, the note's owner is the only
+        thing that does.
+
+        Args:
+            note_id: The note id the tombstone names.
+            sync_client_id: The projection's client id: the owner whose notes are
+                searched, and the id stamped on a deleted row.
+            object_revision: The tombstone's revision, stored as the row version.
+            object_hash: The tombstone's payload hash.
+            conn: The caller's transaction, if any.
+
+        Returns:
+            ``"absent"`` when this owner has no note with the id and nothing
+            changed, or ``"deleted"`` when the note is now (or already was)
+            soft-deleted.
+        """
+
+        normalized_note_id = str(note_id).strip()
+        if not normalized_note_id:
+            raise InputError("note_id cannot be empty.")  # noqa: TRY003
+        if object_revision < 1:
+            raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
+
+        owner = str(sync_client_id)
+        lock_suffix = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+
+        def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> str:
+            row = transaction_conn.execute(
+                "SELECT deleted FROM notes WHERE id = ? AND client_id = ?" + lock_suffix,  # nosec B608
+                (normalized_note_id, owner),
+            ).fetchone()
+            if row is None:
+                return "absent"
+            if bool(row["deleted"]):
+                return "deleted"
+            self.tombstone_note_from_sync(
+                note_id=normalized_note_id,
+                sync_client_id=owner,
+                object_revision=object_revision,
+                object_hash=object_hash,
+                conn=transaction_conn,
+            )
+            return "deleted"
+
+        if conn is None:
+            with self._db.transaction() as transaction_conn:
+                return _execute(transaction_conn)
+        return _execute(conn)
 
     # ------------------------------------------------------------------
     # Note retrieval
@@ -1830,6 +1986,34 @@ class NoteStore:
         cursor = self._db.execute_query(query, tuple(params), read_only=True)
         return [dict(row) for row in cursor.fetchall()]
 
+    def list_semantic_note_versions(self, *, limit: int) -> tuple[tuple[str, int], ...]:
+        """List active Note identities for a bounded semantic snapshot."""
+
+        if type(limit) is not int or not 1 <= limit <= 100_001:
+            raise ValueError("notes_semantic_note_limit_invalid")
+        deleted = False if self._db.backend_type == BackendType.POSTGRESQL else 0
+        rows = self._db.execute_query(
+            "SELECT id,version FROM notes WHERE deleted=? ORDER BY id LIMIT ?",
+            (deleted, limit),
+        ).fetchall()
+        return tuple((str(row["id"]), int(row["version"])) for row in rows)
+
+    def get_semantic_note_version(
+        self,
+        *,
+        note_id: str,
+        content_version: int,
+    ) -> dict[str, Any] | None:
+        """Read one exact active Note version for fenced semantic processing."""
+
+        deleted = False if self._db.backend_type == BackendType.POSTGRESQL else 0
+        row = self._db.execute_query(
+            "SELECT id,title,content,version FROM notes "
+            "WHERE id=? AND version=? AND deleted=?",
+            (note_id, content_version, deleted),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
     def list_note_ids_page(
         self,
         *,
@@ -1947,6 +2131,14 @@ class NoteStore:
             return []
 
         keyword_table = self._db._map_table_for_backend("keywords")
+        # Match by keyword identity, as the notes tag filter does: LOWER() misses
+        # non-ASCII case on SQLite and ß/SS on Postgres.
+        keyword_ids = self._active_keyword_ids_by_identity([normalized_tag], keyword_table).get(
+            normalize_keyword_identity(normalized_tag), []
+        )
+        if not keyword_ids:
+            return []
+        id_placeholders = ", ".join(["?"] * len(keyword_ids))
         owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
         related_clause, related_params = self._db._selected_owner_filter(self._db.client_id, "k")
         if include_deleted:
@@ -1955,21 +2147,21 @@ class NoteStore:
                 "FROM notes n "
                 "JOIN note_keywords nk ON nk.note_id = n.id "
                 f"JOIN {keyword_table} k ON k.id = nk.keyword_id "  # nosec B608
-                "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? "
+                f"WHERE nk.keyword_id IN ({id_placeholders}) AND k.deleted = ? "
                 f"{owner_clause}{related_clause} ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
             )
-            params: list[Any] = [normalized_tag, self._deleted_value(False), limit]
+            params: list[Any] = [*keyword_ids, self._deleted_value(False), limit]
         else:
             query = (
                 "SELECT DISTINCT n.id, n.last_modified "
                 "FROM notes n "
                 "JOIN note_keywords nk ON nk.note_id = n.id "
                 f"JOIN {keyword_table} k ON k.id = nk.keyword_id "  # nosec B608
-                "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? AND n.deleted = ? "
+                f"WHERE nk.keyword_id IN ({id_placeholders}) AND k.deleted = ? AND n.deleted = ? "
                 f"{owner_clause}{related_clause} ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
             )
             params = [
-                normalized_tag,
+                *keyword_ids,
                 self._deleted_value(False),
                 self._deleted_value(False),
                 limit,
@@ -2154,6 +2346,7 @@ class NoteStore:
         update_data: dict[str, Any],
         expected_version: int,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        semantic_dataset_id: str | None = None,
     ) -> bool | None:
         if not update_data:
             raise InputError("No data provided for note update.")  # noqa: TRY003
@@ -2256,6 +2449,18 @@ class NoteStore:
                         note_id=note_id,
                         conn=transaction_conn,
                     )
+                    persisted = transaction_conn.execute(
+                        "SELECT title, content FROM notes WHERE id = ?",
+                        (note_id,),
+                    ).fetchone()
+                    self._mark_note_semantic_dirty(
+                        transaction_conn,
+                        dataset_id=semantic_dataset_id,
+                        note_id=note_id,
+                        title=str(persisted["title"]),
+                        content=str(persisted["content"]),
+                        content_version=next_version_val,
+                    )
                 logger.info(f"Updated note ID {note_id} from version {expected_version} to version {next_version_val}.")
                 return True
 
@@ -2281,6 +2486,65 @@ class NoteStore:
                          exc_info=True)
             raise
 
+    def bump_note_version(
+        self,
+        note_id: str,
+        expected_version: int,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        semantic_dataset_id: str | None = None,
+    ) -> int:
+        """Advance a note's version for a change kept outside the note row, such as its tags or folders.
+
+        Optimistic locking compares this version, so a relink that left it alone let two
+        clients at the same version both succeed (#3157). Returns the new version and raises
+        ``ConflictError`` when the note is no longer at ``expected_version``.
+        """
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        next_version = expected_version + 1
+        query = (
+            "UPDATE notes SET last_modified = ?, version = ?, client_id = ? "
+            f"WHERE id = ? AND version = ? AND deleted = 0{owner_clause}"  # nosec B608 - fixed owner SQL fragment; values stay bound.
+        )
+        params = (
+            self._db._get_current_utc_timestamp_iso(),
+            next_version,
+            self._db.client_id,
+            note_id,
+            expected_version,
+        ) + owner_params
+
+        def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> int:
+            if transaction_conn.execute(query, params).rowcount == 0:
+                current = self.get_note_by_id(note_id, include_deleted=True)
+                current_version = current.get("version") if current else None
+                raise ConflictError(  # noqa: TRY003
+                    f"Note ID {note_id} update failed: version mismatch (db has {current_version}, client expected {expected_version}).",
+                    entity="notes",
+                    entity_id=note_id,
+                )
+            note = transaction_conn.execute("SELECT title, content FROM notes WHERE id = ?", (note_id,)).fetchone()
+            # Graph and semantic state are only current while they match the note's version.
+            self._db.note_graph_projection_store.replace_projection(
+                note_id=note_id,
+                source_version=next_version,
+                projection=parse_wikilinks(str(note["content"] or ""), source_note_id=note_id),
+                conn=transaction_conn,
+            )
+            self._mark_note_semantic_dirty(
+                transaction_conn,
+                dataset_id=semantic_dataset_id,
+                note_id=note_id,
+                title=str(note["title"]),
+                content=str(note["content"]),
+                content_version=next_version,
+            )
+            return next_version
+
+        if conn is not None:
+            return _execute(conn)
+        with self._db.transaction() as transaction_conn:
+            return _execute(transaction_conn)
+
     # ------------------------------------------------------------------
     # Note deletion and restoration
     # ------------------------------------------------------------------
@@ -2297,7 +2561,12 @@ class NoteStore:
         if record is not None and not record["deleted"]:
             store.tombstone(note_id, expected_version=record["version"], conn=conn)
 
-    def soft_delete_note(self, note_id: str, expected_version: int) -> bool | None:
+    def soft_delete_note(
+        self,
+        note_id: str,
+        expected_version: int,
+        semantic_dataset_id: str | None = None,
+    ) -> bool | None:
         owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
@@ -2323,6 +2592,11 @@ class NoteStore:
                         entity="notes", entity_id=note_id
                     )
 
+                note = conn.execute(
+                    "SELECT title, content FROM notes WHERE id = ?",
+                    (note_id,),
+                ).fetchone()
+
                 cursor = conn.execute(query, params)
 
                 if cursor.rowcount == 0:
@@ -2347,6 +2621,14 @@ class NoteStore:
                     conn=conn,
                 )
                 self._advance_studio_lifecycle(conn, note_id=note_id, deleted=True)
+                self._mark_note_semantic_tombstone(
+                    conn,
+                    dataset_id=semantic_dataset_id,
+                    note_id=note_id,
+                    title=str(note["title"]),
+                    content=str(note["content"]),
+                    content_version=next_version_val,
+                )
                 self._db.note_graph_suggestion_store.invalidate_for_note_change(
                     note_id=note_id,
                     conn=conn,
@@ -2361,14 +2643,20 @@ class NoteStore:
                          exc_info=True)
             raise
 
-    def delete_note(self, note_id: str, expected_version: int | None = None, hard_delete: bool = False) -> bool:
+    def delete_note(
+        self,
+        note_id: str,
+        expected_version: int | None = None,
+        hard_delete: bool = False,
+        semantic_dataset_id: str | None = None,
+    ) -> bool:
         """Soft or hard delete a note."""
         owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
         now = self._db._get_current_utc_timestamp_iso()
         try:
             with self._db.transaction() as conn:
                 lock_clause = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
-                row = conn.execute(f"SELECT id, version, deleted FROM notes WHERE id = ?{owner_clause}{lock_clause}", (note_id,) + owner_params).fetchone()  # nosec B608 - fixed owner/lock SQL fragments; values stay bound.
+                row = conn.execute(f"SELECT id, version, deleted, title, content FROM notes WHERE id = ?{owner_clause}{lock_clause}", (note_id,) + owner_params).fetchone()  # nosec B608 - fixed owner/lock SQL fragments; values stay bound.
                 if not row:
                     return False
                 self._db._require_selected_owner_row(conn, "notes", note_id, self._db.client_id, include_deleted=True)
@@ -2377,6 +2665,15 @@ class NoteStore:
                 if hard_delete:
                     projection_store = self._db.note_graph_projection_store
                     deleted_title = projection_store.get_note_title(note_id, conn=conn)
+                    self._mark_note_semantic_tombstone(
+                        conn,
+                        dataset_id=semantic_dataset_id,
+                        note_id=note_id,
+                        title=str(row["title"]),
+                        content=str(row["content"]),
+                        content_version=cur_ver + 1,
+                        hard_delete=True,
+                    )
                     self._db._delete_note_clipper_sidecars(note_id, conn=conn)
                     conn.execute("DELETE FROM note_studio_documents WHERE note_id = ?", (note_id,))
                     conn.execute(f"DELETE FROM notes WHERE id = ?{owner_clause}", (note_id,) + owner_params)  # nosec B608 - fixed owner SQL fragments; values stay bound.
@@ -2402,6 +2699,14 @@ class NoteStore:
                         conn=conn,
                     )
                     self._advance_studio_lifecycle(conn, note_id=note_id, deleted=True)
+                    self._mark_note_semantic_tombstone(
+                        conn,
+                        dataset_id=semantic_dataset_id,
+                        note_id=note_id,
+                        title=str(row["title"]),
+                        content=str(row["content"]),
+                        content_version=cur_ver + 1,
+                    )
                     self._db.note_graph_suggestion_store.invalidate_for_note_change(
                         note_id=note_id,
                         conn=conn,
@@ -2412,7 +2717,12 @@ class NoteStore:
         except sqlite3.Error as e:
             raise CharactersRAGDBError(f"Failed to delete note: {e}") from e  # noqa: TRY003
 
-    def restore_note(self, note_id: str, expected_version: int) -> bool | None:
+    def restore_note(
+        self,
+        note_id: str,
+        expected_version: int,
+        semantic_dataset_id: str | None = None,
+    ) -> bool | None:
         """
         Restores a soft-deleted note using optimistic locking.
 
@@ -2445,7 +2755,7 @@ class NoteStore:
         try:
             with self._db.transaction() as conn:
                 # First check if record exists at all
-                check_cursor = conn.execute(f"SELECT deleted, version FROM notes WHERE id = ?{owner_clause}", (note_id,) + owner_params)  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                check_cursor = conn.execute(f"SELECT deleted, version, title, content FROM notes WHERE id = ?{owner_clause}", (note_id,) + owner_params)  # nosec B608 - fixed owner SQL fragments; values stay bound.
                 record_status = check_cursor.fetchone()
 
                 if not record_status:
@@ -2494,6 +2804,14 @@ class NoteStore:
                     conn=conn,
                 )
                 self._advance_studio_lifecycle(conn, note_id=note_id, deleted=False)
+                self._mark_note_semantic_dirty(
+                    conn,
+                    dataset_id=semantic_dataset_id,
+                    note_id=note_id,
+                    title=str(record_status["title"]),
+                    content=str(record_status["content"]),
+                    content_version=next_version_val,
+                )
                 logger.info(
                     f"Restored note ID {note_id} (was version {expected_version}), new version {next_version_val}.")
                 return True
@@ -2667,23 +2985,93 @@ class NoteStore:
         ).fetchone()
         return int(row["cnt"]) if row else 0
 
+    def _active_keyword_ids_by_identity(self, tokens: list[str], keyword_table: str) -> dict[str, list[int]]:
+        """Map each token's ``normalize_keyword_identity`` to every active keyword id with it.
+
+        SQL cannot compare the identity (NFC plus casefold): SQLite's LOWER() and NOCASE
+        fold ASCII only, so a stored "Éclair" never matched "éclair", and Postgres LOWER()
+        misses ß/SS. As Media does (TASK-13950.5), one lookup reads the case-insensitive
+        SQL matches, which hold every ASCII row (an ASCII row's casefold is its
+        lowercase), plus every row with a non-ASCII character, and Python compares the
+        identities. Legacy rows that share an identity all count.
+        """
+        wanted = {normalize_keyword_identity(token) for token in tokens}
+        postgres = self._db.backend_type == BackendType.POSTGRESQL
+        values = [*tokens, *(wanted - set(tokens))]
+        placeholders = ", ".join(["LOWER(?)" if postgres else "?"] * len(values))
+        # SQLite's keyword column is NOCASE, so its IN folds ASCII case too.
+        match = f"{'LOWER(keyword)' if postgres else 'keyword'} IN ({placeholders})"
+        # ponytail: reads every non-ASCII keyword row; add a stored identity column if
+        # non-ASCII vocabularies get large.
+        non_ascii = "keyword ~ '[^[:ascii:]]'" if postgres else "keyword GLOB '*[^ -~]*'"
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        query = (
+            f"SELECT id, keyword FROM {keyword_table} "  # nosec B608 - fixed SQL fragments; values stay bound.
+            f"WHERE deleted = {'FALSE' if postgres else '0'} AND ({match} OR {non_ascii}){owner_clause}"
+        )
+        ids: dict[str, list[int]] = {}
+        for row in self._db.execute_query(query, (*values, *owner_params)).fetchall():
+            identity = normalize_keyword_identity(str(row["keyword"]))
+            if identity in wanted:
+                ids.setdefault(identity, []).append(int(row["id"]))
+        return ids
+
+    def _keyword_token_filter(
+        self,
+        tokens: list[str],
+        match: str,
+        keyword_table: str,
+    ) -> tuple[str, list[Any]]:
+        """Build the keyword-token predicate for a notes search (NL-N1).
+
+        Tokens match keywords by ``normalize_keyword_identity``: exactly, ignoring
+        case on every backend. ``match="any"`` keeps a note that has at least one
+        of the tokens; ``match="all"`` keeps only a note that has every token. The
+        caller joins ``nk`` (note_keywords) and ``n`` (notes). The keyword ids come
+        from the owner's active keywords, so they carry the owner and deleted filters.
+        """
+        if match not in ("all", "any"):
+            raise ValueError(f"Unsupported keyword match mode: {match!r}")
+        found = self._active_keyword_ids_by_identity(tokens, keyword_table)
+        groups = [found.get(normalize_keyword_identity(token), []) for token in tokens]
+        if match == "all" and not all(groups):
+            return "1 = 0", []
+        groups = [ids for ids in groups if ids]
+        if not groups:
+            return "1 = 0", []
+        all_ids = [keyword_id for ids in groups for keyword_id in ids]
+        clause = f"nk.keyword_id IN ({', '.join(['?'] * len(all_ids))})"
+        params: list[Any] = list(all_ids)
+        if match == "all" and len(groups) > 1:
+            for ids in groups:
+                clause += (
+                    " AND EXISTS (SELECT 1 FROM note_keywords nk2 WHERE nk2.note_id = n.id "
+                    f"AND nk2.keyword_id IN ({', '.join(['?'] * len(ids))}))"
+                )
+                params.extend(ids)
+        return clause, params
+
     def search_notes_with_keywords(
         self,
         search_term: str | None,
         keyword_tokens: list[str],
         limit: int = 10,
-        offset: int = 0
+        offset: int = 0,
+        match: str = "all",
     ) -> list[dict[str, Any]]:
-        """Search notes with an optional FTS query and keyword-token filter."""
-        tokens = [t.strip().lower() for t in keyword_tokens if isinstance(t, str) and t.strip()]
+        """Search notes with an optional FTS query and keyword-token filter.
+
+        Tokens match keywords exactly (case-insensitive); ``match`` is "all"
+        (every token, the default) or "any" (at least one).
+        """
+        tokens = dedupe_keywords(t for t in keyword_tokens if isinstance(t, str))
         if not tokens:
             if not search_term or not str(search_term).strip():
                 return []
             return self.search_notes(search_term=str(search_term), limit=limit, offset=offset)
 
         keyword_table = self._db._map_table_for_backend("keywords")
-        like_clause = " OR ".join(["LOWER(k.keyword) LIKE ?"] * len(tokens))
-        like_params = [f"%{t}%" for t in tokens]
+        like_clause, like_params = self._keyword_token_filter(tokens, match, keyword_table)
 
         if self._db.backend_type == BackendType.POSTGRESQL:
             note_scope, note_owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
@@ -2764,17 +3152,20 @@ class NoteStore:
         self,
         search_term: str | None,
         keyword_tokens: list[str],
+        match: str = "all",
     ) -> int:
-        """Return the total active notes matching an optional FTS query and keyword-token filter."""
-        tokens = [t.strip().lower() for t in keyword_tokens if isinstance(t, str) and t.strip()]
+        """Return the total active notes matching an optional FTS query and keyword-token filter.
+
+        Uses the same exact, ``match``-mode token rules as ``search_notes_with_keywords``.
+        """
+        tokens = dedupe_keywords(t for t in keyword_tokens if isinstance(t, str))
         if not tokens:
             if not search_term or not str(search_term).strip():
                 return 0
             return self._db.count_notes_matching(str(search_term))
 
         keyword_table = self._db._map_table_for_backend("keywords")
-        like_clause = " OR ".join(["LOWER(k.keyword) LIKE ?"] * len(tokens))
-        like_params = [f"%{t}%" for t in tokens]
+        like_clause, like_params = self._keyword_token_filter(tokens, match, keyword_table)
 
         if self._db.backend_type == BackendType.POSTGRESQL:
             note_scope, note_owner_params = self._db._selected_owner_filter(self._db.client_id, "n")

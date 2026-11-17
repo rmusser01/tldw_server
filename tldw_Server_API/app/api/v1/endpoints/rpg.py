@@ -38,8 +38,8 @@ from tldw_Server_API.app.api.v1.schemas.rpg_schemas import (
     RPGSessionCreateRequest,
     RPGSessionResponse,
 )
+from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
@@ -51,6 +51,7 @@ from tldw_Server_API.app.core.RPG.rules.lookup import RulesLookupService
 from tldw_Server_API.app.core.RPG.rules.retrieval import RulesRetrievalAdapter
 from tldw_Server_API.app.core.RPG.rules.source_validation import RPGRulesSourceValidator
 from tldw_Server_API.app.core.RPG.service import RPGService
+from tldw_Server_API.app.core.Usage.llm_budget_guard import enforce_llm_budget
 
 router = APIRouter(prefix="/rpg", tags=["rpg"])
 
@@ -105,13 +106,8 @@ async def _enforce_answer_mode_generation_controls(
 def _bearer_credentials_from_request(request: Request) -> HTTPAuthorizationCredentials | None:
     """Extract bearer credentials from a FastAPI request if present."""
 
-    authorization = request.headers.get("Authorization")
-    if not authorization:
-        return None
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
-        return None
-    return HTTPAuthorizationCredentials(scheme=scheme, credentials=token.strip())
+    token = bearer_credential(request.headers.get("Authorization"))
+    return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token) if token else None
 
 
 def _owner_user_id(current_user: User) -> int:

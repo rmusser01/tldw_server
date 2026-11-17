@@ -8,6 +8,8 @@ into the project Chat*Error exceptions. Complements endpoint SSE error tests.
 from typing import Any, Dict, Type
 import pytest
 
+pytestmark = pytest.mark.usefixtures("no_live_network", "loopback_custom_openai_endpoints")
+
 
 def _httpx_status_error(status_code: int):
     import httpx

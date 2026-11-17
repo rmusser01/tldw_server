@@ -5,6 +5,7 @@ import { useWritingRevisions } from "../hooks/useWritingRevisions"
 import type { WritingSessionPayload } from "../hooks/utils"
 import { mergeRevisionsIntoPayload } from "../hooks/utils"
 import type { WritingRevisionProposal } from "../writing-revision-types"
+import { parseRevisionModelResponse } from "../writing-revision-prompt-utils"
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>")
 
@@ -239,7 +240,7 @@ describe("useWritingRevisions", () => {
       instruction: "Different instruction",
       presetId: "make_concise",
       presetInstruction: "Different preset.",
-      status: "applied"
+      status: "pending"
     })
     const createReplacement = vi.fn(async () => replacement)
     const { result, applySessionPayloadPatch } = setup()
@@ -415,3 +416,157 @@ describe("useWritingRevisions", () => {
     })
   })
 })
+
+describe("parser-authoritative regeneration", () => {
+  const parsedReplacement = (responseText: string) =>
+    parseRevisionModelResponse({
+      responseText,
+      sessionId: "session-1",
+      action: "rewrite",
+      operation: "replace",
+      instruction: "Make this clearer.",
+      target,
+      id: "replacement"
+    })
+
+  it.each([
+    "Unstructured model advice.",
+    '{"rawText":"Advice without replacement."}',
+    '{"replacement":42}'
+  ])(
+    "keeps the usable original and parser-classified raw result for %s",
+    async (responseText) => {
+      const source = buildRevision({ id: "source" })
+      const { result, applyEditorText, applySessionPayloadPatch } = setup()
+      act(() => result.current.addRevision(source))
+      await act(async () => {
+        await result.current.regenerateRevision(source.id, async () =>
+          parsedReplacement(responseText)
+        )
+      })
+
+      expect(result.current.revisions[0]).toMatchObject({
+        id: "source",
+        status: "pending",
+        replacementText: "Omega"
+      })
+      expect(result.current.revisions[1]).toMatchObject({
+        id: "replacement",
+        status: "raw_suggestion",
+        regeneratedFromId: "source"
+      })
+      expect(result.current.revisions[1]).not.toHaveProperty("replacementText")
+      expect(
+        latestPersistedRevisions(applySessionPayloadPatch).map(
+          ({ status }) => status
+        )
+      ).toEqual(["pending", "raw_suggestion"])
+      expect(applyEditorText).not.toHaveBeenCalled()
+      act(() => result.current.applyRevision(source.id))
+      expect(applyEditorText).toHaveBeenCalledWith("Omega beta")
+    }
+  )
+
+  it.each([
+    ['{"replacement":"New Alpha"}', "New Alpha beta"],
+    ['{"replacement":""}', " beta"]
+  ])(
+    "supersedes the original only for usable parsed replacement %s",
+    async (responseText, expectedText) => {
+      const source = buildRevision({ id: "source" })
+      const { result, applyEditorText } = setup()
+      act(() => result.current.addRevision(source))
+      await act(async () => {
+        await result.current.regenerateRevision(source.id, async () =>
+          parsedReplacement(responseText)
+        )
+      })
+      expect(result.current.revisions.map(({ status }) => status)).toEqual([
+        "rejected",
+        "pending"
+      ])
+      act(() => result.current.applyRevision("replacement"))
+      expect(applyEditorText).toHaveBeenCalledWith(expectedText)
+    }
+  )
+
+  it.each(["session", "list epoch", "source rejection"])(
+    "does not append a held raw response after %s changes",
+    async (change) => {
+      const source = buildRevision({ id: "source" })
+      const response = createDeferred<WritingRevisionProposal>()
+      const { result, rerender, applyEditorText, applySessionPayloadPatch } = setup()
+      act(() => result.current.addRevision(source))
+      let regeneration: Promise<void> | undefined
+      act(() => {
+        regeneration = result.current.regenerateRevision(
+          source.id,
+          () => response.promise
+        )
+      })
+      if (change === "session") {
+        rerender({
+          activeSessionId: "session-2",
+          activeSessionPayload: mergeRevisionsIntoPayload({}, [
+            buildRevision({ id: "other", sessionId: "session-2" })
+          ]),
+          editorText: "Other session",
+          applyEditorText,
+          applySessionPayloadPatch
+        })
+      } else if (change === "list epoch") {
+        act(() => result.current.addRevision(buildRevision({ id: "other" })))
+      } else {
+        act(() => result.current.rejectRevision(source.id))
+      }
+      const before = result.current.revisions
+      const persistedBefore = applySessionPayloadPatch.mock.calls.length
+      await act(async () => {
+        response.resolve(parsedReplacement("Unstructured late advice."))
+        await regeneration
+      })
+      expect(result.current.revisions).toEqual(before)
+      expect(result.current.revisions.some(({ id }) => id === "replacement")).toBe(
+        false
+      )
+      expect(applySessionPayloadPatch).toHaveBeenCalledTimes(persistedBefore)
+      expect(applyEditorText).not.toHaveBeenCalled()
+    }
+  )
+})
+
+
+describe("initial regeneration eligibility", () => {
+  it.each([
+    "rejected",
+    "applied",
+    "conflict",
+    "advisory",
+    "raw_suggestion",
+  ] as const)(
+    "does not request regeneration for an already %s proposal",
+    async (status) => {
+      const source = buildRevision({ status });
+      const payload = mergeRevisionsIntoPayload({ prompt: "Alpha beta" }, [
+        source,
+      ]);
+      const view = setup({ activeSessionPayload: payload });
+      const createReplacement = vi.fn(async () =>
+        buildRevision({ id: "replacement" }),
+      );
+      try {
+        await act(async () => {
+          await view.result.current.regenerateRevision(
+            source.id,
+            createReplacement,
+          );
+        });
+        expect(createReplacement).not.toHaveBeenCalled();
+        expect(view.result.current.revisions).toEqual([source]);
+        expect(view.applySessionPayloadPatch).not.toHaveBeenCalled();
+      } finally {
+        view.unmount();
+      }
+    },
+  );
+});

@@ -134,6 +134,7 @@ export METRICS_SAMPLE_RATE=1.0
 - `llm_tokens_used_total` - Tokens consumed (counter)
 - `llm_request_duration_seconds` - LLM request duration (histogram)
 - `llm_cost_dollars` - Cumulative API costs (counter)
+- `llm_quota_refusals_total` - LLM work refused because a user was over an LLM quota (counter, label `category`)
 
 ### RAG Metrics
 - `rag_queries_total` - RAG queries (counter)

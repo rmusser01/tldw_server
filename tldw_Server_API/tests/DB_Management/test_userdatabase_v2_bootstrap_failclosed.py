@@ -104,6 +104,7 @@ def test_postgres_initialize_runs_profile_readiness_before_core_normalization(
     backend = SimpleNamespace(
         backend_type=BackendType.POSTGRESQL,
         transaction=lambda: _Transaction(),
+        execute=lambda query, **kwargs: SimpleNamespace(first={"can_migrate": True}),
     )
     db = UserDatabase.__new__(UserDatabase)
     db.backend = backend
@@ -126,7 +127,9 @@ def test_postgres_initialize_runs_profile_readiness_before_core_normalization(
 
     db._initialize_schema()
 
-    assert events == [
+    assert events == [  # nosec B101 -- pytest checks schema-owner preflight and readiness ordering.
+        "transaction.enter",
+        "transaction.exit",
         ("schema", ["CREATE TABLE"]),
         "transaction.enter",
         ("readiness", backend, connection),

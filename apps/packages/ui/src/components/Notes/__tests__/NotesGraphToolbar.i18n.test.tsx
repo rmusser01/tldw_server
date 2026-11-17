@@ -35,6 +35,11 @@ const translations: Record<string, string> = {
   "option:notesSearch.graphEdgeType.backlink": "BACKLINK_X",
   "option:notesSearch.graphEdgeType.tag_membership": "TAG_MEMBERSHIP_X",
   "option:notesSearch.graphEdgeType.source_membership": "SOURCE_MEMBERSHIP_X",
+  "option:notesSearch.graphSimilarContent": "SIMILAR_CONTENT_X",
+  "option:notesSearch.graphSemanticNeighbors": "NEIGHBORS_X",
+  "option:notesSearch.graphSemanticThreshold": "THRESHOLD_X",
+  "option:notesSearch.graphSemanticReset": "RESET_X",
+  "option:notesSearch.graphSemanticFocusRequired": "FOCUS_NOTE_X",
   "option:notesSearch.graphSuggestions": "SUGGESTIONS_X"
 }
 
@@ -72,6 +77,12 @@ describe("NotesGraphToolbar localization", () => {
           ])
         }
         showProvisional
+        semanticAvailable
+        semanticEnabled={false}
+        semanticFocusRequired={false}
+        semanticTopK={10}
+        semanticMaxTopK={20}
+        semanticThreshold={0.75}
         canExpand
         isRefreshing={false}
         onSearchChange={vi.fn()}
@@ -84,6 +95,10 @@ describe("NotesGraphToolbar localization", () => {
         onShowAllNotes={vi.fn()}
         onToggleEdgeType={vi.fn()}
         onToggleProvisional={vi.fn()}
+        onSemanticEnabledChange={vi.fn()}
+        onSemanticTopKChange={vi.fn()}
+        onSemanticThresholdChange={vi.fn()}
+        onSemanticReset={vi.fn()}
         onFocusCurrent={vi.fn()}
         onExpand={vi.fn()}
         onRefresh={vi.fn()}
@@ -131,5 +146,79 @@ describe("NotesGraphToolbar localization", () => {
     ]) {
       expect(screen.getByRole("checkbox", { name })).toBeVisible()
     }
+    expect(
+      screen.getByRole("checkbox", { name: "SIMILAR_CONTENT_X" })
+    ).not.toBeChecked()
+  })
+
+  it("localizes and bounds the opt-in semantic controls", () => {
+    const onSemanticEnabledChange = vi.fn()
+    const onSemanticTopKChange = vi.fn()
+    const onSemanticThresholdChange = vi.fn()
+    const onSemanticReset = vi.fn()
+    render(
+      <NotesGraphToolbar
+        viewMode="canvas"
+        suggestionsAuthorized={false}
+        search=""
+        searchResults={[]}
+        radius={1}
+        maxNodes={100}
+        maxNodeCap={300}
+        layout="dagre"
+        scope="focused"
+        allNotes={{ activeNoteCount: 3, effectiveNoteCap: 300, eligible: true }}
+        visibleEdgeTypes={new Set()}
+        showProvisional={false}
+        semanticAvailable
+        semanticEnabled
+        semanticFocusRequired
+        semanticTopK={10}
+        semanticMaxTopK={20}
+        semanticThreshold={0.75}
+        canExpand={false}
+        isRefreshing={false}
+        onSearchChange={vi.fn()}
+        onViewModeChange={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onRadiusChange={vi.fn()}
+        onMaxNodesChange={vi.fn()}
+        onLayoutChange={vi.fn()}
+        onShowFocused={vi.fn()}
+        onShowAllNotes={vi.fn()}
+        onToggleEdgeType={vi.fn()}
+        onToggleProvisional={vi.fn()}
+        onSemanticEnabledChange={onSemanticEnabledChange}
+        onSemanticTopKChange={onSemanticTopKChange}
+        onSemanticThresholdChange={onSemanticThresholdChange}
+        onSemanticReset={onSemanticReset}
+        onFocusCurrent={vi.fn()}
+        onExpand={vi.fn()}
+        onRefresh={vi.fn()}
+        onZoomIn={vi.fn()}
+        onZoomOut={vi.fn()}
+        onFit={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("FOCUS_NOTE_X")).toHaveAttribute("role", "status")
+    expect(
+      screen.getByRole("spinbutton", { name: "NEIGHBORS_X" })
+    ).toHaveAttribute("max", "20")
+    expect(screen.getByRole("slider", { name: "THRESHOLD_X" })).toHaveValue(
+      "0.75"
+    )
+    fireEvent.click(screen.getByRole("checkbox", { name: "SIMILAR_CONTENT_X" }))
+    fireEvent.change(screen.getByRole("spinbutton", { name: "NEIGHBORS_X" }), {
+      target: { value: "14" }
+    })
+    fireEvent.change(screen.getByRole("slider", { name: "THRESHOLD_X" }), {
+      target: { value: "0.82" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "RESET_X" }))
+    expect(onSemanticEnabledChange).toHaveBeenCalledWith(false)
+    expect(onSemanticTopKChange).toHaveBeenCalledWith(14)
+    expect(onSemanticThresholdChange).toHaveBeenCalledWith(0.82)
+    expect(onSemanticReset).toHaveBeenCalled()
   })
 })

@@ -8,6 +8,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
     PersonaExemplarPromptAssembly,
     assemble_persona_exemplar_prompt,
@@ -111,7 +112,8 @@ async def resolve_persona_exemplar_runtime_context(
     if persona_scope_db is not None:
         try:
             persona_exemplars = await asyncio.to_thread(
-                persona_scope_db.list_persona_exemplars,
+                # Join the caller's ChaCha operation, or own this read outside one (a WebSocket turn).
+                chacha_operation()(persona_scope_db.list_persona_exemplars),
                 user_id=user_id,
                 persona_id=persona_id,
                 include_disabled=False,

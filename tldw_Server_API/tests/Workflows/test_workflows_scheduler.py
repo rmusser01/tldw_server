@@ -55,6 +55,10 @@ class _CoreSchedulerStub:
         self.task_id = task_id
         self.submissions: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         self.stop_calls = 0
+        self.worker_pool = self
+
+    def get_status(self) -> dict[str, Any]:
+        return {"workers_by_queue": {"workflows": 1, "watchlists": 1}}
 
     async def submit(self, *args: Any, **kwargs: Any) -> str:
         self.submissions.append((args, kwargs))
@@ -165,6 +169,51 @@ def test_update_invalid_cron_returns_422(client_admin):
     # Attempt to update with invalid cron
     r = client.patch(f"/api/v1/scheduler/workflows/{sid}", json={"cron": "not a cron"})
     assert r.status_code == 422
+
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"timezone": "C12/Not_A_Zone"},
+        {"timezone": "C12/Not_A_Zone", "name": "must-not-persist"},
+        {"timezone": "C12/Not_A_Zone", "cron": "*/20 * * * *"},
+    ],
+)
+def test_update_invalid_timezone_preserves_saved_schedule(client_admin, update):
+    client, svc = client_admin
+    created = client.post(
+        "/api/v1/scheduler/workflows",
+        json={
+            "name": "timezone-update",
+            "cron": "*/10 * * * *",
+            "timezone": "UTC",
+            "enabled": False,
+        },
+    )
+    sid = created.json()["id"]
+    before = svc.get(sid)
+    response = client.patch(f"/api/v1/scheduler/workflows/{sid}", json=update)
+    assert response.status_code == 422  # nosec B101 -- pytest request-validation oracle.
+    assert svc.get(sid) == before  # nosec B101 -- rejected patches must preserve every saved field.
+
+
+def test_update_valid_timezone_alone_preserves_cron(client_admin):
+    client, svc = client_admin
+    created = client.post(
+        "/api/v1/scheduler/workflows",
+        json={
+            "name": "valid-timezone-update",
+            "cron": "*/10 * * * *",
+            "timezone": "UTC",
+            "enabled": False,
+        },
+    )
+    sid = created.json()["id"]
+    response = client.patch(f"/api/v1/scheduler/workflows/{sid}", json={"timezone": "Europe/London"})
+    saved = svc.get(sid)
+    assert response.status_code == 200  # nosec B101 -- valid timezone-only edits remain supported.
+    assert saved.timezone == "Europe/London" and saved.cron == "*/10 * * * *"  # nosec B101 -- unchanged authored cron retained.
 
 
 def test_next_run_persisted_after_create(client_admin):
@@ -460,6 +509,12 @@ async def test_run_schedule_submits_with_resolved_owner_user_id(monkeypatch):
             return None
 
     class _StubScheduler:
+        def __init__(self) -> None:
+            self.worker_pool = self
+
+        def get_status(self) -> dict[str, Any]:
+            return {"workers_by_queue": {"workflows": 1}}
+
         async def submit(self, *args: Any, **kwargs: Any) -> str:
             captured["payload"] = kwargs.get("payload")
             captured["metadata"] = kwargs.get("metadata")
@@ -495,6 +550,12 @@ def test_run_now_routes_watchlist_backed_schedules_to_watchlists_queue(client_ad
     captured: dict[str, Any] = {}
 
     class _StubScheduler:
+        def __init__(self) -> None:
+            self.worker_pool = self
+
+        def get_status(self) -> dict[str, Any]:
+            return {"workers_by_queue": {"watchlists": 1}}
+
         async def submit(self, handler: str, *args: Any, **kwargs: Any) -> str:
             captured["handler"] = handler
             captured["payload"] = kwargs.get("payload")

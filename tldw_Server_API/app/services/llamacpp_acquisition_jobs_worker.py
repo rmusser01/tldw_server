@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import os
 import re
 import time
@@ -376,9 +377,19 @@ async def process_llamacpp_acquisition_job(
             reason="cancel requested during download",
         )
         return {}
-    except acquisition_service.LlamaCppDownloadError as exc:
+    except (acquisition_service.LlamaCppDownloadError, OSError) as exc:
+        cause = exc.__cause__ if isinstance(exc, acquisition_service.LlamaCppDownloadError) else exc
+        storage_full = isinstance(cause, OSError) and cause.errno in {errno.ENOSPC, errno.EDQUOT}
+        if isinstance(exc, OSError) and not storage_full:
+            raise
         if partial_path is not None:
             acquisition_service.cleanup_partial_if_needed(partial_path)
+        if storage_full:
+            raise LlamaCppAcquisitionJobError(
+                "Insufficient model storage; free disk space or quota before retrying.",
+                retryable=False,
+                failure_code="insufficient_storage",
+            ) from exc
         raise LlamaCppAcquisitionJobError(
             _safe_error_message(exc),
             retryable=True,

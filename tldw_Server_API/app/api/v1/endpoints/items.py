@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
 
 router = APIRouter(prefix="/items", tags=["items"])
 
@@ -383,15 +384,14 @@ async def bulk_update_items(
                 collections_db.update_content_item(item_id, favorite=payload.favorite)
             elif action in {"add_tags", "remove_tags", "replace_tags"}:
                 current = collections_db.get_content_item(item_id)
-                incoming = payload.tags or []
-                incoming_norm = [str(tag).strip().lower() for tag in incoming if str(tag).strip()]
+                incoming = dedupe_keywords(payload.tags or [])
                 if action == "replace_tags":
-                    next_tags = incoming_norm
+                    next_tags = incoming
                 elif action == "add_tags":
-                    next_tags = sorted(set((current.tags or []) + incoming_norm))
+                    next_tags = dedupe_keywords([*(current.tags or []), *incoming])
                 else:
-                    remove_set = set(incoming_norm)
-                    next_tags = [tag for tag in (current.tags or []) if tag not in remove_set]
+                    remove_set = {normalize_keyword_identity(tag) for tag in incoming}
+                    next_tags = [tag for tag in (current.tags or []) if normalize_keyword_identity(tag) not in remove_set]
                 collections_db.update_content_item(item_id, tags=next_tags)
             elif action == "delete":
                 if payload.hard:

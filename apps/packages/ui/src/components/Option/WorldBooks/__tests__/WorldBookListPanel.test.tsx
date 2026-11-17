@@ -62,6 +62,14 @@ const defaultProps = {
 }
 
 describe("WorldBookListPanel", () => {
+  it("keeps a visible library target when the compact table is collapsed", async () => {
+    render(<WorldBookListPanel {...defaultProps} selectedWorldBookId={1} collapsible />)
+    expect(screen.getByTestId("world-books-library")).toBeVisible()
+    expect(screen.getByTestId("world-books-table")).not.toBeVisible()
+    await userEvent.setup().click(screen.getByText("World Books — Fantasy Lore"))
+    expect(screen.getByTestId("world-books-table")).toBeVisible()
+  })
+
   it("renders Name+Description merged column (both visible)", () => {
     render(<WorldBookListPanel {...defaultProps} />)
 

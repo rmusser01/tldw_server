@@ -110,7 +110,7 @@ def test_sync_media_add_results_to_collections_writes_expected_payload(monkeypat
     assert payload["canonical_url"] == "media://123"
     assert payload["url"] == "https://Example.COM/path/to/item"
     assert payload["domain"] == "example.com"
-    assert payload["tags"] == ["topic", "fromform", "alpha"]
+    assert payload["tags"] == ["topic", "FromForm", "Alpha"]
     assert payload["status"] == "saved"
     assert payload["favorite"] is False
 
@@ -124,7 +124,8 @@ def test_sync_media_add_results_to_collections_writes_expected_payload(monkeypat
     assert results[0]["collections_origin"] == "media_add"
 
 
-def test_sync_media_add_results_resolves_planned_collection_item(monkeypatch):
+@pytest.mark.parametrize(("status", "resolved_status"), [("Success", "completed"), ("Skipped", "skipped_existing")])
+def test_sync_media_add_results_resolves_planned_collection_item(monkeypatch, status, resolved_status):
     _FakeCollectionsDatabase.reset()
     monkeypatch.setattr(
         collections_db_module,
@@ -134,7 +135,7 @@ def test_sync_media_add_results_resolves_planned_collection_item(monkeypatch):
 
     results = [
         {
-            "status": "Success",
+            "status": status,
             "db_id": "456",
             "input_ref": "https://example.com/conf-talk",
             "processing_source": "https://example.com/conf-talk",
@@ -156,11 +157,13 @@ def test_sync_media_add_results_resolves_planned_collection_item(monkeypatch):
 
     instance = _FakeCollectionsDatabase.last_instance
     assert instance is not None
+    assert len(instance.upsert_calls) == (1 if status == "Success" else 0)
+    assert results[0]["media_collection_item_id"] == 88
     assert instance.resolve_calls == [
         {
             "item_id": 88,
             "media_id": 456,
-            "status": "completed",
+            "status": resolved_status,
             "latest_job_id": "1234",
         }
     ]

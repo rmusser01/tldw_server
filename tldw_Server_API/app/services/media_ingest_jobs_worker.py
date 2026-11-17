@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import json
@@ -8,10 +9,18 @@ import re
 import shutil
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
+from fastapi import HTTPException
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
+    media_analysis_credentials,
+    media_analysis_provider,
+    media_analysis_requested,
+)
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.Chunking.templates import TemplateClassifier
 from tldw_Server_API.app.core.config import settings
@@ -21,17 +30,30 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database, get_media_by_id
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     apply_chunking_template_if_any,
     prepare_chunking_options_dict,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
+    PreparedMediaBatch,
+    _enforce_and_record_media_bytes,
+    find_duplicate_document_before_analysis,
     process_batch_media,
     process_document_like_item,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
+from tldw_Server_API.app.core.Usage.llm_call_context import (
+    FRESH_ROOT,
+    bind_provider_credentials,
+    current_llm_user_id,
+    llm_call_context,
+    mark_llm_quota_prechecked,
+)
+from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_async, user_to_check
+from tldw_Server_API.app.core.Usage.llm_roots import ensure_llm_state_executor
 from tldw_Server_API.app.core.Workspaces.status_projection import derive_workspace_source_media_status
 
 _MEDIA_DOMAIN = "media_ingest"
@@ -353,6 +375,41 @@ def _build_form_data(payload: dict[str, Any]) -> AddMediaForm:
     return AddMediaForm(**options)
 
 
+async def _admit_or_refuse_analysis(form_data: AddMediaForm) -> LLMQuotaExceededError | None:
+    """Check the owner's LLM quota once, before any work, when the job asks for analysis (TASK-13864).
+
+    Admitted, the rest of the job runs as an admitted request does (LLM usage accounting
+    spec §4a), so no refusal lands part-way through an item. Refused, the refusal is
+    returned and the job runs without analysis. The analysis runs on the owner's own key
+    when they stored one (TASK-15426); an over-limit owner whose analysis runs on it, and
+    who turned on no other LLM stage, is admitted without the mark, so each call is
+    checked where its key is known.
+    """
+    if not media_analysis_requested(form_data):
+        return None
+    handle = await media_analysis_credentials(current_llm_user_id(), form_data)
+    user_id = user_to_check()
+    if user_id is not None:
+        try:
+            await check_user_async(user_id)
+        except LLMQuotaExceededError as refusal:
+            if handle is None or media_analysis_provider(form_data) is None:
+                return refusal  # the server's key, or another LLM stage: refused as before, no key bound
+        else:
+            mark_llm_quota_prechecked()
+    bind_provider_credentials(handle)
+    return None
+
+
+def _record_analysis_refusal(job_result: dict[str, Any], refusal: LLMQuotaExceededError) -> None:
+    """Say in the job's result why the stored item has no analysis (TASK-13638 Decision 3)."""
+    message = f"Analysis skipped: LLM quota exceeded ({refusal.category})."
+    job_result["warnings"] = [*(job_result.get("warnings") or []), message]
+    job_result["analysis_error"] = {"code": refusal.failure_code, "message": message}
+    if job_result.get("status") == "Success":
+        job_result["status"] = "Warning"
+
+
 def _create_db(user_id: str):
     db_path = DatabasePaths.get_media_db_path(user_id)
     # Media writes derive ownership from the same user identity as API writes.
@@ -367,7 +424,7 @@ async def _schedule_embeddings(
     form_data: AddMediaForm,
 ) -> None:
     try:
-        from tldw_Server_API.app.api.v1.endpoints.media_embeddings import (
+        from tldw_Server_API.app.core.Embeddings.media_embeddings import (
             generate_embeddings_for_media,
             get_media_content,
         )
@@ -479,7 +536,10 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
     if str(job.get("job_type") or "").lower() not in {_MEDIA_JOB_TYPE, _WORKSPACE_SOURCE_JOB_TYPE}:
         return await _handle_job_in_scope(job, jm, progress)
     user_id = _resolve_user_id(job)
-    with scoped_context(user_id=int(user_id), is_admin=False):
+    # The job's executor hops carry its call state (owner, admission, own-key handle) whoever calls the handler.
+    ensure_llm_state_executor()
+    # llm_call_context(): an admission the job marks (TASK-13864) ends with the job, whoever calls the handler.
+    with scoped_context(user_id=int(user_id), is_admin=False), llm_call_context():
         return await _handle_job_in_scope(job, jm, progress)
 
 
@@ -538,6 +598,22 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
             latest_job_id=latest_job_id,
         )
 
+        if source_kind == "file":
+            job_uuid = str(job.get("uuid") or "").strip()
+            if not job_uuid:
+                raise MediaIngestJobError("Missing upload job identity", failure_code="media_ingest_missing_identity")
+            try:
+                await _enforce_and_record_media_bytes(
+                    user_id, Path(str(source)).stat().st_size,
+                    op_id=f"media-ingestion-job:{user_id}:{job_uuid}",
+                )
+            except HTTPException as exc:
+                if exc.status_code == 429:
+                    raise MediaIngestJobError(
+                        str(exc.detail), failure_code="media_ingest_daily_quota_exceeded",
+                    ) from exc
+                raise
+
         progress.percent = 5.0
         progress.message = "prepare"
         jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
@@ -550,69 +626,90 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
         def cancel_check():
             return _should_cancel(jm, job_id)
 
-        chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
-            form_data,
-            media_type=str(form_data.media_type) if form_data.media_type else None,
-            source_name=str(input_ref or source),
+        result_item = await find_duplicate_document_before_analysis(
+            input_ref=str(input_ref),
+            processing_source=str(source),
+            is_url=(source_kind == "url"),
+            form_data=form_data,
+            temp_dir=Path(temp_dir),
+            db=db,
         )
-        if chunk_options is not None and chunking_plan is None:
-            try:
-                first_url = source if source_kind == "url" else None
-                first_filename = payload.get("original_filename")
-                chunk_options = apply_chunking_template_if_any(
+        analysis_refusal = None
+        chunking_plan = None
+
+        async def prepare_new_item() -> PreparedMediaBatch:
+            nonlocal form_data, analysis_refusal, chunking_plan
+            analysis_refusal = await _admit_or_refuse_analysis(form_data)
+            if analysis_refusal is not None:
+                form_data = form_data.model_copy(update={"perform_analysis": False})
+
+            chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
+                form_data,
+                media_type=str(form_data.media_type) if form_data.media_type else None,
+                source_name=str(input_ref or source),
+            )
+            if chunk_options is not None and chunking_plan is None:
+                try:
+                    first_url = source if source_kind == "url" else None
+                    first_filename = payload.get("original_filename")
+                    chunk_options = apply_chunking_template_if_any(
+                        form_data=form_data,
+                        db=db,
+                        chunking_options_dict=chunk_options,
+                        owner_user_id=str(user_id),
+                        TemplateClassifier=TemplateClassifier,
+                        first_url=first_url,
+                        first_filename=first_filename,
+                    )
+                except Exception as exc:
+                    logger.debug("Chunking template auto-apply failed: {}", exc)
+
+            return form_data, chunk_options, analysis_refusal
+
+        if result_item is None:
+            progress.percent = 20.0
+            progress.message = "process"
+            jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
+            if str(form_data.media_type) in {"video", "audio"}:
+                urls = [source] if source_kind == "url" else []
+                uploaded_paths = [source] if source_kind == "file" else []
+                source_to_ref_map = {str(source): input_ref}
+
+                results = await process_batch_media(
+                    media_type=str(form_data.media_type),
+                    urls=urls,
+                    uploaded_file_paths=uploaded_paths,
+                    source_to_ref_map=source_to_ref_map,
                     form_data=form_data,
-                    db=db,
-                    chunking_options_dict=chunk_options,
-                    TemplateClassifier=TemplateClassifier,
-                    first_url=first_url,
-                    first_filename=first_filename,
+                    chunk_options=None,
+                    loop=loop,
+                    db_path=str(db_path),
+                    client_id=str(client_id),
+                    temp_dir=Path(temp_dir),
+                    user_id=int(user_id) if user_id.isdigit() else None,
+                    cancel_check=cancel_check,
+                    prepare_new_items=prepare_new_item,
                 )
-            except Exception as exc:
-                logger.debug("Chunking template auto-apply failed: {}", exc)
+            else:
+                form_data, chunk_options, _ = await prepare_new_item()
+                result = await process_document_like_item(
+                    item_input_ref=str(input_ref),
+                    processing_source=str(source),
+                    media_type=form_data.media_type,
+                    is_url=(source_kind == "url"),
+                    form_data=form_data,
+                    chunk_options=chunk_options,
+                    temp_dir=temp_dir,
+                    loop=loop,
+                    db_path=str(db_path),
+                    client_id=str(client_id),
+                    user_id=int(user_id) if user_id.isdigit() else None,
+                    cancel_check=cancel_check,
+                )
+                results = [result]
 
-        if str(form_data.media_type) in {"video", "audio"}:
-            urls = [source] if source_kind == "url" else []
-            uploaded_paths = [source] if source_kind == "file" else []
-            source_to_ref_map = {str(source): input_ref}
-
-            progress.percent = 20.0
-            progress.message = "process"
-            jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
-
-            results = await process_batch_media(
-                media_type=str(form_data.media_type),
-                urls=urls,
-                uploaded_file_paths=uploaded_paths,
-                source_to_ref_map=source_to_ref_map,
-                form_data=form_data,
-                chunk_options=chunk_options,
-                loop=loop,
-                db_path=str(db_path),
-                client_id=str(client_id),
-                temp_dir=temp_dir,
-                user_id=int(user_id) if user_id.isdigit() else None,
-                cancel_check=cancel_check,
-            )
-        else:
-            progress.percent = 20.0
-            progress.message = "process"
-            jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
-
-            result = await process_document_like_item(
-                item_input_ref=str(input_ref),
-                processing_source=str(source),
-                media_type=form_data.media_type,
-                is_url=(source_kind == "url"),
-                form_data=form_data,
-                chunk_options=chunk_options,
-                temp_dir=temp_dir,
-                loop=loop,
-                db_path=str(db_path),
-                client_id=str(client_id),
-                user_id=int(user_id) if user_id.isdigit() else None,
-                cancel_check=cancel_check,
-            )
-            results = [result]
+            result_item = results[0] if results else {}
 
         if _should_cancel(jm, job_id):
             _mark_collection_item_status(
@@ -629,18 +726,19 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
         progress.message = "finalize"
         jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
-        result_item = results[0] if results else {}
         media_id = result_item.get("db_id") if isinstance(result_item, dict) else None
 
-        if media_id and getattr(form_data, "generate_embeddings", False):
-            asyncio.create_task(
-                _schedule_embeddings(
-                    media_id=int(media_id),
-                    user_id=user_id,
-                    db=db,
-                    form_data=form_data,
+        if media_id and result_item.get("status") != "Skipped" and form_data.generate_embeddings:
+            # The task outlives the job: it keeps the owner, not the job's admission or key.
+            with llm_call_context(**FRESH_ROOT):
+                asyncio.create_task(
+                    _schedule_embeddings(
+                        media_id=int(media_id),
+                        user_id=user_id,
+                        db=db,
+                        form_data=form_data,
+                    )
                 )
-            )
 
         progress.percent = 100.0
         progress.message = "completed"
@@ -664,6 +762,8 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
             }
             if final_chunking_plan is not None:
                 job_result["chunking_plan"] = final_chunking_plan
+            if analysis_refusal is not None and result_item.get("status") != "Skipped":
+                _record_analysis_refusal(job_result, analysis_refusal)
             _sync_collection_item_terminal_result(
                 user_id=user_id,
                 item_id=planned_item_id,
@@ -703,6 +803,8 @@ async def run_media_ingest_jobs_worker(
     queue: str | None = None,
     worker_id: str | None = None,
 ) -> None:
+    if stop_event is not None and stop_event.is_set():
+        return
     if JobManager._ACQUIRE_GATE_ENABLED:
         logger.warning("Media Ingest Jobs worker starting with acquire gate enabled; clearing stale gate state")
     JobManager.set_acquire_gate(False)
@@ -740,24 +842,39 @@ async def run_media_ingest_jobs_worker(
         except Exception:
             sdk.stop()
 
-    logger.info("Starting Media Ingest Jobs worker (queue={})", queue_name)
+    logger.info("Starting Media Ingest Jobs worker (queue={}, worker={})", queue_name, resolved_worker_id)
     watcher = asyncio.create_task(_watch_stop())
     try:
-        await sdk.run(handler=_handler, cancel_check=_cancel_check, progress_cb=_progress_cb)
+        # The trusted dispatcher crosses Job owners; content work still uses each persisted owner.
+        with JobManager.scoped_rls_context(is_admin=True, domain_allowlist=_MEDIA_DOMAIN, owner_user_id=None):
+            await sdk.run(handler=_handler, cancel_check=_cancel_check, progress_cb=_progress_cb)
     finally:
-        with contextlib.suppress(Exception):
-            watcher.cancel()
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher
 
 
 async def run_media_ingest_heavy_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
     heavy_queue = (os.getenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE") or "").strip() or "low"
-    await run_media_ingest_jobs_worker(
-        stop_event,
-        queue=heavy_queue,
-        worker_id=f"media-ingest-worker-{heavy_queue}",
-    )
+    concurrency = max(1, min(4, _coerce_int(os.getenv("MEDIA_INGEST_HEAVY_JOBS_CONCURRENCY"), 2)))
+    worker_prefix = f"media-ingest-worker-{heavy_queue}"
+    if concurrency == 1:
+        await run_media_ingest_jobs_worker(stop_event, queue=heavy_queue, worker_id=worker_prefix)
+        return
+
+    pool_id = uuid4().hex
+    async with asyncio.TaskGroup() as pool:
+        for slot in range(1, concurrency + 1):
+            worker_id = f"{worker_prefix}-{pool_id}-{slot}"
+            pool.create_task(
+                run_media_ingest_jobs_worker(stop_event, queue=heavy_queue, worker_id=worker_id),
+                name=worker_id,
+            )
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run a media ingest Jobs worker")
+    parser.add_argument("--heavy", action="store_true", help="Run the heavy ingest worker pool")
+    run_worker = run_media_ingest_heavy_jobs_worker if parser.parse_args().heavy else run_media_ingest_jobs_worker
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run_media_ingest_jobs_worker())
+        asyncio.run(run_worker())

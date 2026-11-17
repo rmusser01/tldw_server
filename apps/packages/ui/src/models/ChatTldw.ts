@@ -13,17 +13,18 @@ import {
   type ChatResearchContext
 } from "@/services/tldw"
 import type { ToolCall } from "@/types/tool-calls"
+import type { ChatScope } from "@/types/chat-scope"
 import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
-import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
+import { extractStreamTransportInterruption, extractTokenFromChunk } from "@/utils/extract-token-from-chunk"
 import { extractStreamingChunkError } from "@/utils/streaming-chunks"
+import { readChunkFinishReason } from "@/utils/output-limit-reply"
 import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { ImageSupportUnconfirmedError } from "@/utils/chat-error-message"
 import type { ChatTurnIdentity } from "@/services/tldw/TldwApiClient"
-import type { ChatScope } from "@/types/chat-scope"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import type { HistoryDurableResultReceiptV1, HistoryDurableSourceV1, HistoryDurableResultV1 } from "@/types/history-durable-turn"
 import { canonicalHistoryJson } from "@/db/dexie/history-selection"
@@ -34,6 +35,7 @@ import {
   beginServerChatWrite,
   type ServerChatWriteOutcome
 } from "@/store/server-chat-save-status"
+import { CHAT_REQUEST_SAMPLING_FALLBACKS } from "./chat-sampling-defaults"
 
 export interface ChatTldwOptions {
   model: string
@@ -54,6 +56,9 @@ export interface ChatTldwOptions {
   topP?: number
   frequencyPenalty?: number
   presencePenalty?: number
+  /** Top-K and Min-P, set only when the model's provider accepts them (#3283). */
+  topK?: number
+  minP?: number
   systemPrompt?: string
   streaming?: boolean
   reasoningEffort?: "low" | "medium" | "high"
@@ -88,6 +93,8 @@ export class ChatTldw {
   topP?: number
   frequencyPenalty?: number
   presencePenalty?: number
+  topK?: number
+  minP?: number
   systemPrompt?: string
   streaming: boolean
   reasoningEffort?: "low" | "medium" | "high"
@@ -104,6 +111,8 @@ export class ChatTldw {
   userServerMessageId?: string
   tldwTurn?: ChatTurnIdentity
   originalUserMessage?: string
+  /** The last stream's `finish_reason` ("length" when the output limit cut it off, CM-03). */
+  finishReason?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
   slashCommandInjectionMode?: string
@@ -125,11 +134,17 @@ export class ChatTldw {
     // Normalize model id: drop internal prefix like "tldw:" so server receives provider/model
     this.model = String(options.model || "").replace(/^tldw:/, "")
     this.routing = options.routing
-    this.temperature = options.temperature ?? 0.7
+    this.temperature =
+      options.temperature ?? CHAT_REQUEST_SAMPLING_FALLBACKS.temperature
     this.maxTokens = options.maxTokens
-    this.topP = options.topP ?? 1
-    this.frequencyPenalty = options.frequencyPenalty ?? 0
-    this.presencePenalty = options.presencePenalty ?? 0
+    this.topP = options.topP ?? CHAT_REQUEST_SAMPLING_FALLBACKS.topP
+    this.frequencyPenalty =
+      options.frequencyPenalty ??
+      CHAT_REQUEST_SAMPLING_FALLBACKS.frequencyPenalty
+    this.presencePenalty =
+      options.presencePenalty ?? CHAT_REQUEST_SAMPLING_FALLBACKS.presencePenalty
+    this.topK = options.topK
+    this.minP = options.minP
     this.systemPrompt = options.systemPrompt
     this.streaming = options.streaming ?? false
     this.reasoningEffort = options.reasoningEffort
@@ -166,7 +181,7 @@ export class ChatTldw {
    * Streaming API used by existing chat modes.
    *
    * This intentionally mirrors the previous `ollama.stream(...)` contract:
-   * - yields plain string tokens
+   * - yields text tokens and optional reasoning frames
    * - optionally calls `callbacks[i].handleLLMEnd(result)` once at the end
    */
   async stream(
@@ -174,6 +189,8 @@ export class ChatTldw {
     options?: {
       signal?: AbortSignal
       preparedRequest?: ChatCompletionRequest
+      onDispatch?: () => void
+      onChunk?: (chunk: unknown) => Promise<void>
       // Matches the shape used in normalChatMode/search/rag, where
       // callbacks: [{ handleLLMEnd(output) { ... } }]
       callbacks?: Array<{ handleLLMEnd?: (output: any) => any }>
@@ -182,6 +199,7 @@ export class ChatTldw {
     const { signal, callbacks } = options || {}
     this.serverMessageId = undefined
     this.userServerMessageId = undefined
+    this.finishReason = undefined
     this.serverMessagesAlreadyPersisted = false
     this.serverUserMessageId = undefined
     this.historyAdmission = undefined
@@ -245,7 +263,7 @@ export class ChatTldw {
       })
     }
 
-    const handleChunk = (chunk: any) => {
+    const consumeChunk = (chunk: any) => {
       if (signal?.aborted) return
       if (selectedRequest && selected) {
         const inputId = selectedRequest.tldw_turn!.user_message_id
@@ -281,49 +299,38 @@ export class ChatTldw {
             ...(result ? { tldw_history_result_v1: result } : {})
           }
         }
-      } else {
-      const streamedConversationId =
-        typeof chunk?.tldw_conversation_id === "string" &&
-        chunk.tldw_conversation_id.trim().length > 0
-          ? chunk.tldw_conversation_id.trim()
-          : typeof chunk?.conversation_id === "string" &&
-              chunk.conversation_id.trim().length > 0
-            ? chunk.conversation_id.trim()
-            : null
-      const acceptsReceipt = !this.tldwTurn || (
-        streamedConversationId === requestedConversationId &&
-        chunk?.tldw_user_message_id === this.tldwTurn.user_message_id
-      )
-      // Nonpersisted completions also carry a request-scoped conversation UUID.
-      // It must not turn local history into a link to a nonexistent server chat.
-      if (acceptsReceipt && streamedConversationId && this.saveToDb !== false) {
-        if (
+      } else if (!options?.onChunk && this.saveToDb !== false) {
+        const streamedConversationId =
+          typeof chunk?.tldw_conversation_id === "string" &&
+          chunk.tldw_conversation_id.trim().length > 0
+            ? chunk.tldw_conversation_id.trim()
+            : typeof chunk?.conversation_id === "string" &&
+                chunk.conversation_id.trim().length > 0
+              ? chunk.conversation_id.trim()
+              : null
+        const acceptsReceipt = !this.tldwTurn || (
           streamedConversationId === requestedConversationId &&
-          this.tldwTurn &&
           chunk?.tldw_user_message_id === this.tldwTurn.user_message_id
-        ) {
-          this.serverUserMessageId = chunk.tldw_user_message_id
+        )
+        if (acceptsReceipt) {
+          if (streamedConversationId) {
+            this.conversationId = streamedConversationId
+            this.saveToDb = true
+            if (this.tldwTurn && streamedConversationId === requestedConversationId) {
+              this.serverUserMessageId = chunk.tldw_user_message_id
+            }
+          }
+          const assistantId = typeof chunk?.tldw_message_id === "string" ? chunk.tldw_message_id.trim() : ""
+          if (assistantId) {
+            this.serverMessageId = assistantId
+            if (streamedConversationId) {
+              this.serverMessagesAlreadyPersisted = true
+              if (streamedConversationId === requestedConversationId) serverWriteAcknowledged = true
+            }
+          }
+          const userId = typeof chunk?.tldw_user_message_id === "string" ? chunk.tldw_user_message_id.trim() : ""
+          if (userId) this.userServerMessageId = userId
         }
-        this.conversationId = streamedConversationId
-        this.saveToDb = true
-        // The server attaches the assistant message ID only after its save.
-        if (
-          typeof chunk?.tldw_message_id === "string" &&
-          chunk.tldw_message_id.trim().length > 0
-        ) {
-          this.serverMessagesAlreadyPersisted = true
-          if (streamedConversationId === requestedConversationId) serverWriteAcknowledged = true
-        }
-      }
-      if (acceptsReceipt && this.saveToDb !== false && typeof chunk?.tldw_message_id === "string") {
-        const savedMessageId = chunk.tldw_message_id.trim()
-        if (savedMessageId) this.serverMessageId = savedMessageId
-      }
-
-      if (acceptsReceipt && this.saveToDb !== false && typeof chunk?.tldw_user_message_id === "string") {
-        const savedUserMessageId = chunk.tldw_user_message_id.trim()
-        if (savedUserMessageId) this.userServerMessageId = savedUserMessageId
-      }
       }
 
       const loopEvent = extractChatLoopEvent(chunk)
@@ -335,6 +342,9 @@ export class ChatTldw {
         interruptionChunk = chunk as Record<string, unknown>
       }
 
+      const finishReason = readChunkFinishReason(chunk)
+      if (finishReason) this.finishReason = finishReason
+
       const deltas =
         chunk?.choices?.[0]?.delta?.tool_calls ??
         chunk?.choices?.[0]?.tool_calls ??
@@ -344,6 +354,9 @@ export class ChatTldw {
       }
     }
 
+    const handleChunk = (chunk: unknown) => options?.onChunk
+      ? options.onChunk(chunk).then(() => consumeChunk(chunk)) : consumeChunk(chunk)
+
     const stream = tldwChat.streamMessage(
       tldwMessages,
       {
@@ -351,12 +364,15 @@ export class ChatTldw {
         // all modes (not just polling `signal.aborted` at the loop top).
         signal,
         preparedRequest: options?.preparedRequest,
+        onDispatch: options?.onDispatch,
         model: this.model,
         temperature: this.temperature,
         maxTokens: this.maxTokens,
         topP: this.topP,
         frequencyPenalty: this.frequencyPenalty,
         presencePenalty: this.presencePenalty,
+        topK: this.topK,
+        minP: this.minP,
         systemPrompt: this.systemPrompt,
         stream: true,
         reasoningEffort: this.reasoningEffort,
@@ -380,7 +396,8 @@ export class ChatTldw {
         requestScope: this.requestScope,
         scope: this.scope
       },
-      handleChunk
+      handleChunk,
+      true
     )
 
     const getUserMessageId = () => this.serverUserMessageId
@@ -388,7 +405,7 @@ export class ChatTldw {
     // server write. Record its outcome so chat persistence labels only claim
     // the server once it has acknowledged the turn (CS-03 / XS-05, #3104).
     const serverWriteChatId =
-      this.saveToDb === true && !this.clientManagedHistory
+      this.saveToDb === true && !this.clientManagedHistory && !options?.onChunk
         ? this.conversationId
         : undefined
 
@@ -400,6 +417,7 @@ export class ChatTldw {
       let serverWriteOutcome: ServerChatWriteOutcome = "unknown"
       let fullText = ""
       try {
+        signal?.throwIfAborted()
         for await (const token of stream) {
           if (signal?.aborted) {
             break
@@ -413,11 +431,7 @@ export class ChatTldw {
             yield token
             return
           }
-          if (typeof token !== "string") continue
-          fullText += token
-          // Downstream chat-modes treat chunks as strings or objects with
-          // `content` / `choices[0].delta.content`. Yielding the plain
-          // string keeps the simple path working (`typeof chunk === 'string'`).
+          fullText += extractTokenFromChunk(token)
           yield token
         }
         if (observationChunk && !signal?.aborted) {
@@ -494,6 +508,16 @@ export class ChatTldw {
   prepareClientManagedRequest(messages: BaseMessage[]): ChatCompletionRequest {
     if (!this.clientManagedHistory)
       throw new Error("client_managed_history_required")
+    return this.prepareHistoryRequest(messages)
+  }
+
+  prepareNativeHistoryRequest(messages: BaseMessage[]): ChatCompletionRequest {
+    if (this.clientManagedHistory || this.saveToDb !== true || !this.conversationId)
+      throw new Error("native_history_persistence_required")
+    return this.prepareHistoryRequest(messages)
+  }
+
+  private prepareHistoryRequest(messages: BaseMessage[]): ChatCompletionRequest {
     // Custom provider objects can contain credentials. No implicit redaction/projection.
     if (this.extraBody && Object.keys(this.extraBody).length) {
       throw new Error("unsupported_history_custom_provider_body")
@@ -524,13 +548,16 @@ export class ChatTldw {
       topP: this.topP,
       frequencyPenalty: this.frequencyPenalty,
       presencePenalty: this.presencePenalty,
+      topK: this.topK,
+      minP: this.minP,
       systemPrompt: this.systemPrompt,
       reasoningEffort: this.reasoningEffort,
       toolChoice: this.toolChoice,
       tools: this.tools,
       apiProvider: this.apiProvider,
       extraHeaders: this.extraHeaders,
-      saveToDb: false,
+      saveToDb: this.clientManagedHistory ? false : this.saveToDb,
+      ...(!this.clientManagedHistory ? { conversationId: this.conversationId } : {}),
       researchContext: this.researchContext,
       slashCommandInjectionMode: this.slashCommandInjectionMode
     })
@@ -551,6 +578,8 @@ export class ChatTldw {
       topP: this.topP,
       frequencyPenalty: this.frequencyPenalty,
       presencePenalty: this.presencePenalty,
+      topK: this.topK,
+      minP: this.minP,
       systemPrompt: this.systemPrompt,
       stream: false,
       reasoningEffort: this.reasoningEffort,

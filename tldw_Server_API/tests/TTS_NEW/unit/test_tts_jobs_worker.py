@@ -254,6 +254,49 @@ async def test_tts_jobs_worker_output_failure_after_synthesis_is_terminal(
 
 
 @pytest.mark.unit
+async def test_tts_worker_takes_only_tts_jobs_from_its_queue(monkeypatch, tmp_path):
+    """On a queue that also holds an audio pipeline job, the TTS worker takes only the TTS job (TASK-13641)."""
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_AUDIO", "tts-shared")
+    monkeypatch.setenv("TTS_JOBS_QUEUE", "tts-shared")
+    jm = JobManager(tmp_path / "tts-shared-queue.db")
+    monkeypatch.setattr(tts_jobs_worker, "_jobs_manager", lambda: jm)
+    audio_row = jm.create_job(
+        domain="audio",
+        queue="tts-shared",
+        job_type="audio_convert",
+        payload={"local_path": "/tmp/audio.wav"},
+        owner_user_id="1",
+    )
+    # Positive control: proves the worker polled this queue (it fails: no speech_request).
+    tts_row = jm.create_job(
+        domain="audio", queue="tts-shared", job_type="tts_longform", payload={}, owner_user_id="1"
+    )
+
+    stop = asyncio.Event()
+    task = asyncio.create_task(tts_jobs_worker.run_tts_jobs_worker(stop))
+    await asyncio.sleep(0.5)
+    stop.set()
+    await asyncio.wait_for(task, timeout=5.0)
+
+    audio_job = jm.get_job(int(audio_row["id"])) or {}
+    assert audio_job.get("status") == "queued"
+    assert int(audio_job.get("retry_count") or 0) == 0
+    assert (jm.get_job(int(tts_row["id"])) or {}).get("status") != "queued"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("queue", ["default", "transcribe"])
+def test_tts_jobs_queue_refuses_the_audio_pipeline_queues(monkeypatch, queue):
+    from tldw_Server_API.app.core.TTS import utils as tts_utils
+
+    monkeypatch.setenv("TTS_JOBS_QUEUE", queue)
+    with pytest.raises(ValueError, match="TTS_JOBS_QUEUE"):
+        tts_utils.tts_jobs_queue()
+
+
+@pytest.mark.unit
 async def test_standalone_worker_waits_for_override_bootstrap(monkeypatch):
     """Standalone dispatch cannot start before the first policy load succeeds."""
     refresh_started = asyncio.Event()

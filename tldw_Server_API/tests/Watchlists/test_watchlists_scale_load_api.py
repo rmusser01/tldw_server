@@ -53,6 +53,8 @@ def client_admin(monkeypatch):
     app = FastAPI()
     app.include_router(watchlists_router, prefix=f"{API_V1_PREFIX}")
     app.dependency_overrides[get_request_user] = override_user
+    # Match mandatory production OpenAPI startup before timing admitted requests.
+    app.openapi()
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()

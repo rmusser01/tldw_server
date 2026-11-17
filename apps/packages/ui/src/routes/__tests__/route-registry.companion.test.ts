@@ -30,6 +30,16 @@ const optionRouteRegistrySource = readFileSync(optionRouteRegistryPath, "utf8")
 const sidepanelRouteRegistrySource = readFileSync(sidepanelRouteRegistryPath, "utf8")
 
 describe("sidepanel route registry companion parity", () => {
+  it("exposes the Companion conversation in WebUI and options with manual smoke coverage", () => {
+    const metadata = getRouteMetadata("/companion/conversation")
+    expect(metadata?.availability).toEqual(
+      expect.arrayContaining(["web", "extension_options", "extension_sidepanel"])
+    )
+    expect(metadata?.surface).toBe("default_self_hosted")
+    expect(metadata?.requiresBackend).toBe(true)
+    expect(metadata?.smoke).toBe("manual")
+  })
+
   it("registers a dedicated companion sidepanel route", () => {
     expect(sidepanelRouteRegistrySource).toMatch(/path:\s*"\/companion"/)
     expect(getRouteMetadata("/companion")?.availability).toContain(

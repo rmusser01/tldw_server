@@ -7,7 +7,7 @@ from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_tes
 
 
 @pytest.mark.asyncio
-async def test_create_virtual_key_and_budget_checks(tmp_path):
+async def test_create_virtual_key_and_budget_checks(tmp_path, fresh_services):
     # Configure SQLite for AuthNZ
     os.environ['AUTH_MODE'] = 'single_user'
     db_path = tmp_path / 'users.db'
@@ -15,10 +15,9 @@ async def test_create_virtual_key_and_budget_checks(tmp_path):
 
     # Reset singletons
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))

@@ -13,6 +13,15 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
+
 
 def _b64_key(byte_char: bytes) -> str:
     return base64.b64encode(byte_char * 32).decode("ascii")
@@ -58,6 +67,7 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
     monkeypatch.setenv("BYOK_ENABLED", "1")
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
     monkeypatch.setenv("BYOK_ALLOWED_BASE_URL_PROVIDERS", "openai")
+    monkeypatch.setenv("OPENAI_OAUTH_REFRESH_LOCK_DIR", str(tmp_path / "oauth-locks"))
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-jwt-key-please-change-1234567890")
     monkeypatch.setenv("DEFAULT_MODEL_OPENAI", "gpt-4o-mini")
     monkeypatch.setenv("DEFAULT_MODEL_ANTHROPIC", "claude-3-haiku")
@@ -86,7 +96,6 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
         monkeypatch.setitem(sys.modules, "pyotp", pyotp_stub)
 
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
         add_org_member,
@@ -97,9 +106,10 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB, reset_users_db
+    from tldw_Server_API.app.core.Utils.app_services import app_services
 
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
     await reset_db_pool()
     await reset_users_db()
 
@@ -135,11 +145,11 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
     await users_repo.assign_role_if_missing(user_id=int(admin["id"]), role_name="admin")
     await users_repo.assign_role_if_missing(user_id=int(user["id"]), role_name="user")
 
-    org = await create_organization(name="BYOK Org", owner_user_id=int(admin["id"]))
+    org = await create_organization(name="BYOK Org", owner_user_id=None)
     team = await create_team(org_id=int(org["id"]), name="BYOK Team")
 
-    await add_org_member(org_id=int(org["id"]), user_id=int(user["id"]), role="lead")
-    await add_team_member(team_id=int(team["id"]), user_id=int(user["id"]), role="lead")
+    await add_org_member(org_id=int(org["id"]), user_id=int(user["id"]), role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_team_member(team_id=int(team["id"]), user_id=int(user["id"]), role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     return {
         "pool": pool,
@@ -576,8 +586,8 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
         decrypt_byok_payload,
         loads_envelope,
     )
-    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.main import app
 
     specs = {
@@ -2058,8 +2068,8 @@ async def test_shared_keys_scoped_requires_manager_sqlite(tmp_path, monkeypatch)
     )
     member_id = int(member["id"])
     await AuthnzUsersRepo(db_pool=pool).assign_role_if_missing(user_id=member_id, role_name="user")
-    await add_org_member(org_id=org_id, user_id=member_id, role="member")
-    await add_team_member(team_id=team_id, user_id=member_id, role="member")
+    await add_org_member(org_id=org_id, user_id=member_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_team_member(team_id=team_id, user_id=member_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     from tldw_Server_API.app.main import app
 

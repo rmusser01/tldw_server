@@ -107,3 +107,48 @@ def test_ccv3_parser_preserves_image_fields(image_key):
     imported = import_character_card_from_json_string(json.dumps(card))
     assert imported is not None
     assert imported.get("image_base64") == sample_b64
+
+
+OPTIONAL_V3_TEXT_FIELDS = (
+    "personality", "scenario", "mes_example", "creator_notes", "system_prompt",
+    "post_history_instructions", "creator", "character_version",
+)
+
+
+@pytest.mark.parametrize("field", OPTIONAL_V3_TEXT_FIELDS)
+def test_ccv3_legacy_null_optional_text_uses_omitted_field_default(field):
+    """Already-exported nullable DB text remains importable without mutating input."""
+    card = {
+        "spec": "chara_card_v3", "spec_version": "3.0",
+        "data": {"name": "Legacy export", "description": "Saved", "first_mes": "Hi", field: None},
+    }
+    missing = {**card, "data": {key: value for key, value in card["data"].items() if key != field}}
+
+    imported = import_character_card_from_json_string(json.dumps(card))
+
+    assert imported == parse_v3_card(missing)  # nosec B101
+    assert card["data"][field] is None  # nosec B101
+
+
+@pytest.mark.parametrize("field", ("name", "description", "first_mes"))
+def test_ccv3_null_required_text_remains_invalid(field):
+    card = {"data": {"name": "Invalid", "description": "Saved", "first_mes": "Hi", field: None}}
+
+    assert validate_v3_card(card)[0] is False  # nosec B101
+    assert parse_v3_card(card) is None  # nosec B101
+
+
+@pytest.mark.parametrize("field", OPTIONAL_V3_TEXT_FIELDS + ("alternate_greetings", "tags", "extensions"))
+def test_ccv3_wrong_optional_type_remains_invalid(field):
+    card = {"data": {"name": "Invalid", "description": "Saved", "first_mes": "Hi", field: 17}}
+
+    assert validate_v3_card(card)[0] is False  # nosec B101
+    assert parse_v3_card(card) is None  # nosec B101
+
+
+@pytest.mark.parametrize("field", ("alternate_greetings", "tags", "extensions"))
+def test_ccv3_null_collections_remain_invalid(field):
+    card = {"data": {"name": "Invalid", "description": "Saved", "first_mes": "Hi", field: None}}
+
+    assert validate_v3_card(card)[0] is False  # nosec B101
+    assert parse_v3_card(card) is None  # nosec B101

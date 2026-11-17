@@ -1,10 +1,19 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from datetime import datetime
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta, OffsetPaginationMeta
+
+
+def _workflow_timestamp(value: Any) -> Any:
+    """Keep native PostgreSQL timestamps compatible with the public string contract."""
+    return value.isoformat() if isinstance(value, datetime) else value
+
+
+WorkflowTimestamp = Annotated[str, BeforeValidator(_workflow_timestamp)]
 
 
 class WorkflowInputSchema(BaseModel):
@@ -185,7 +194,7 @@ class EventResponse(BaseModel):
     event_seq: int
     event_type: str
     payload: dict[str, Any] = Field(default_factory=dict)
-    created_at: str
+    created_at: WorkflowTimestamp
 
 
 # Listing schemas (lighter than full run response)
@@ -196,9 +205,9 @@ class WorkflowRunListItem(BaseModel):
     status: str
     status_reason: str | None = None
     definition_version: int | None = None
-    created_at: str | None = None
-    started_at: str | None = None
-    ended_at: str | None = None
+    created_at: WorkflowTimestamp | None = None
+    started_at: WorkflowTimestamp | None = None
+    ended_at: WorkflowTimestamp | None = None
 
 
 class WorkflowRunListResponse(BaseModel):
@@ -244,8 +253,8 @@ class WorkflowStepAttemptResponse(BaseModel):
     step_id: str
     attempt_number: int
     status: str
-    started_at: str
-    ended_at: str | None = None
+    started_at: WorkflowTimestamp
+    ended_at: WorkflowTimestamp | None = None
     duration_ms: int | None = None
     reason_code_core: str | None = None
     reason_code_detail: str | None = None
@@ -261,8 +270,8 @@ class WorkflowRunStepResponse(BaseModel):
     type: str | None = None
     status: str
     attempt_count: int = 0
-    started_at: str | None = None
-    ended_at: str | None = None
+    started_at: WorkflowTimestamp | None = None
+    ended_at: WorkflowTimestamp | None = None
     error: str | None = None
     latest_failure: WorkflowFailureSummary | None = None
 

@@ -28,9 +28,7 @@ from tldw_Server_API.app.core.Research.streaming import (
 from tldw_Server_API.app.core.Research.service import ResearchService
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.testing import is_test_mode
-from tldw_Server_API.app.core.Workflows.research_wait_bridge import (
-    resume_workflows_waiting_on_research_checkpoint,
-)
+import tldw_Server_API.app.core.Workflows.research_wait_bridge as _research_wait_bridge
 
 router = APIRouter(prefix="/research", tags=["research-runs"])
 _RESEARCH_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
@@ -223,8 +221,21 @@ async def stream_research_run_events(
             session_id=session_id,
             after_id=cursor,
         )
+        try:
+            # Read after the event rows so a new checkpoint includes its committed proposal.
+            replay_state = load_research_stream_state(
+                service=service,
+                owner_user_id=str(current_user.id),
+                session_id=session_id,
+                job_manager=job_manager,
+            )
+        except (KeyError, ValueError) as exc:
+            await stream.error("research_stream_error", str(exc), close=True)
+            return
         for event_row in replay_rows:
-            stream_event = persisted_event_to_stream_event(event_row, replayed=True)
+            stream_event = persisted_event_to_stream_event(
+                event_row, replayed=True, checkpoint=replay_state.snapshot.checkpoint
+            )
             await stream.send_event(
                 stream_event.event,
                 stream_event.data,
@@ -252,6 +263,11 @@ async def stream_research_run_events(
         while True:
             await asyncio.sleep(poll_interval)
             try:
+                live_rows = list_run_events_after(
+                    owner_user_id=str(current_user.id),
+                    session_id=session_id,
+                    after_id=cursor,
+                )
                 current = load_research_stream_state(
                     service=service,
                     owner_user_id=str(current_user.id),
@@ -266,13 +282,10 @@ async def stream_research_run_events(
                 )
                 return
 
-            live_rows = list_run_events_after(
-                owner_user_id=str(current_user.id),
-                session_id=session_id,
-                after_id=cursor,
-            )
             for event_row in live_rows:
-                stream_event = persisted_event_to_stream_event(event_row, replayed=False)
+                stream_event = persisted_event_to_stream_event(
+                    event_row, replayed=False, checkpoint=current.snapshot.checkpoint
+                )
                 await stream.send_event(
                     stream_event.event,
                     stream_event.data,
@@ -315,7 +328,7 @@ async def stream_research_run_events(
     return StreamingResponse(
         _gen(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
     )
 
 
@@ -427,7 +440,7 @@ async def patch_and_approve_research_checkpoint(
         _raise_research_http_error(exc)
     with contextlib.suppress(Exception):
         asyncio.create_task(
-            resume_workflows_waiting_on_research_checkpoint(
+            _research_wait_bridge.resume_workflows_waiting_on_research_checkpoint(
                 research_run_id=session_id,
                 checkpoint_id=checkpoint_id,
             )

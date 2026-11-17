@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import HealthStatus from "../health-status"
 
 const apiSendMock = vi.hoisted(() => vi.fn())
+const notificationSuccessMock = vi.hoisted(() => vi.fn())
+const notificationWarningMock = vi.hoisted(() => vi.fn())
 const clientMock = vi.hoisted(() => ({
   getConfig: vi.fn(),
   initialize: vi.fn(),
@@ -68,8 +70,8 @@ vi.mock("@/services/api-send", () => ({
 
 vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => ({
-    success: vi.fn(),
-    warning: vi.fn(),
+    success: notificationSuccessMock,
+    warning: notificationWarningMock,
     error: vi.fn()
   })
 }))
@@ -220,6 +222,91 @@ describe("HealthStatus design-system states", () => {
       screen.getByRole("group", { name: `RAG: ${designSystemLabels.degraded}` })
     ).toBeInTheDocument()
     expect(screen.getByText(/RAG offline/)).toBeInTheDocument()
+  })
+
+  it.each([
+    ["audio", "Audio", "unhealthy"],
+    ["rag", "RAG", "degraded"],
+    ["metrics", "Metrics Health", "unhealthy"],
+    ["embeddings", "Embeddings", "degraded"],
+    ["mcp", "MCP", "unknown"],
+    ["core", "Core API", undefined],
+    ["core", "Core API", null]
+  ])("does not pass %s (%s) with HTTP 200 and payload status %s", async (key, label, status) => {
+    const failingPath = key === "core" ? "/api/v1/health" : `/api/v1/${key}/health`
+    apiSendMock.mockImplementation(({ path }: { path: string }) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        data: { status: path === failingPath ? status : "healthy" }
+      })
+    )
+
+    await renderHealth()
+
+    expect(await screen.findByRole("group", {
+      name: `${label}: ${designSystemLabels.degraded}`
+    })).toBeInTheDocument()
+    expect(screen.getByText("{{healthy}} of {{total}} checks passing")).toBeInTheDocument()
+    expect(screen.queryByText("All {{count}} checks passing")).not.toBeInTheDocument()
+  })
+
+  it("keeps successful status-less Chat Metrics passing", async () => {
+    apiSendMock.mockImplementation(({ path }: { path: string }) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        data: path === "/api/v1/metrics/chat"
+          ? { active_operations: {}, metrics: {}, token_costs: {} }
+          : { status: "healthy" }
+      })
+    )
+
+    await renderHealth()
+
+    expect(await screen.findByRole("group", {
+      name: `Chat Metrics: ${designSystemLabels.ready}`
+    })).toBeInTheDocument()
+    expect(screen.getByText("All {{count}} checks passing")).toBeInTheDocument()
+  })
+
+  it("does not pass a transport failure with a healthy payload", async () => {
+    apiSendMock.mockResolvedValue({ ok: false, status: 503, data: { status: "healthy" } })
+
+    await renderHealth()
+
+    expect(await screen.findByRole("group", {
+      name: `Audio: ${designSystemLabels.degraded}`
+    })).toBeInTheDocument()
+  })
+
+  it("reports an unhealthy payload on recheck and recovers after the payload becomes healthy", async () => {
+    let audioStatus = "unhealthy"
+    apiSendMock.mockImplementation(({ path }: { path: string }) =>
+      Promise.resolve({ ok: true, status: 200, data: {
+        status: path === "/api/v1/audio/health" ? audioStatus : "healthy"
+      } })
+    )
+    await renderHealth()
+
+    const audio = await screen.findByRole("group", {
+      name: `Audio: ${designSystemLabels.degraded}`
+    })
+    fireEvent.click(within(audio).getByText("Recheck", { exact: true }))
+    await waitFor(() => expect(notificationWarningMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Check failed - see details below" })
+    ))
+    expect(notificationSuccessMock).not.toHaveBeenCalled()
+
+    audioStatus = "healthy"
+    fireEvent.click(within(audio).getByText("Recheck", { exact: true }))
+    expect(await screen.findByRole("group", {
+      name: `Audio: ${designSystemLabels.ready}`
+    })).toBeInTheDocument()
+    expect(screen.getByText("All {{count}} checks passing")).toBeInTheDocument()
+    expect(notificationSuccessMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Check passed" })
+    )
   })
 
   it("renders Loading through the design-system state registry while checks are pending", async () => {

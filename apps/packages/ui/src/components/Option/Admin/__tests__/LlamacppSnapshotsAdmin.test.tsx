@@ -7,6 +7,10 @@ import ICU from "@/i18n/icu-format"
 import { LlamacppSnapshotsAdmin } from "../LlamacppAdminPage"
 
 void i18next.use(ICU).use(initReactI18next).init({ lng: "en", resources: {} })
+const connection = vi.hoisted(() => ({
+  config: { serverUrl: "http://server-a.test", authMode: "single-user", apiKey: "test-owner-a" }, authorityLoading: false
+}))
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({ useCanonicalConnectionConfig: () => connection }))
 const api = vi.hoisted(() => ({
   getLlamacppSnapshotSlots: vi.fn(),
   listLlamacppSnapshots: vi.fn(),
@@ -64,6 +68,8 @@ beforeEach(() => {
   api.getLlamacppSnapshotOperation.mockResolvedValue(receipt)
   api.saveLlamacppSnapshot.mockResolvedValue(receipt)
 })
+
+const requestOptions = () => expect.objectContaining({ configSnapshot: connection.config, abortSignal: expect.any(AbortSignal) })
 
 describe("snapshot Admin coordination", () => {
   it.each([
@@ -147,10 +153,7 @@ describe("snapshot Admin coordination", () => {
       <LlamacppSnapshotsAdmin profile={profile} onProfileChanged={vi.fn()} />
     )
     expect(await screen.findByText(/Latest operation: Complete/)).toBeVisible()
-    expect(api.getLlamacppSnapshotOperation).toHaveBeenCalledWith(
-      "test-profile",
-      "operation-one",
-      expect.any(AbortSignal)
+    expect(api.getLlamacppSnapshotOperation).toHaveBeenCalledWith("test-profile", "operation-one", expect.any(AbortSignal), requestOptions()
     )
     expect(api.saveLlamacppSnapshot).not.toHaveBeenCalled()
     expect(api.restoreLlamacppSnapshot).not.toHaveBeenCalled()
@@ -174,7 +177,7 @@ describe("snapshot Admin coordination", () => {
           slot_id: 0,
           expected_launch_generation: "generation-one",
           request_id: "fresh-token"
-        }
+        }, requestOptions()
       )
     )
   })
@@ -275,7 +278,7 @@ describe("snapshot Admin coordination", () => {
       )
       await waitFor(() =>
         expect(api.stopLlamacppProfile).toHaveBeenCalledExactlyOnceWith(
-          "test-profile"
+          "test-profile", requestOptions()
         )
       )
     }
@@ -359,7 +362,7 @@ describe("snapshot Admin coordination", () => {
     await waitFor(() =>
       expect(api.updateLlamacppProfile).toHaveBeenCalledExactlyOnceWith(
         "test-profile",
-        { snapshots_enabled: false }
+        { snapshots_enabled: false }, requestOptions()
       )
     )
     expect(api.stopLlamacppProfile).not.toHaveBeenCalled()

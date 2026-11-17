@@ -563,3 +563,87 @@ def test_prose_units_use_claims_engine_extraction_and_keep_unit_prefix(
         assert result.unit_results[0].claim_ids == ["audio_script:paragraph:4:c1"]
 
     asyncio.run(_run())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "generation_provider",
+        "generation_model",
+        "verification_provider",
+        "verification_model",
+        "expected_provider",
+        "expected_model",
+    ),
+    [
+        ("llamacpp", None, None, None, "llamacpp", None),
+        ("llamacpp", "local-generation", "ollama", None, "ollama", None),
+        ("llamacpp", None, "ollama", "local-judge", "ollama", "local-judge"),
+        ("llamacpp", "local-generation", "llama.cpp", None, "llama.cpp", "local-generation"),
+        pytest.param(
+            "local-llm", "local-generation", "local", None, "local", "local-generation", id="legacy-local-alias"
+        ),
+    ],
+)
+async def test_x04_bound_model_defaults_do_not_reuse_another_providers_model(
+    monkeypatch,
+    generation_provider,
+    generation_model,
+    verification_provider,
+    verification_model,
+    expected_provider,
+    expected_model,
+):
+    """An omitted artifact model must not send the engine's global GPT model to a local server."""
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+    from tldw_Server_API.app.core.Claims_Extraction import artifact_verification
+    from tldw_Server_API.app.core.config import settings
+
+    for key, value in {
+        "CLAIMS_ENABLE_LOCAL_NLI": False,
+        "CLAIMS_LLM_PROVIDER": "openai",
+        "CLAIMS_LLM_MODEL": "unrelated-global-claims-model",
+        "CLAIMS_VERIFICATION_PROVIDER": None,
+        "CLAIMS_VERIFICATION_MODEL": None,
+    }.items():
+        monkeypatch.setitem(settings, key, value)
+    dispatches = []
+
+    def provider_io(**kwargs):
+        pair = (kwargs["api_endpoint"], kwargs["model"])
+        dispatches.append(pair)
+        if pair != (expected_provider, expected_model):
+            raise ChatBadRequestError(provider=kwargs["api_endpoint"], message="The fixture server rejects that model")
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"label":"supported","confidence":0.99,"rationale":"The source names Selene."}'
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider_io)
+    result = await artifact_verification.verify_generated_artifact_against_sources(
+        artifact_type="flashcards",
+        units=[
+            artifact_verification.ArtifactVerificationUnit(
+                unit_id="rowan:back",
+                text="Rowan's telescope is named Selene.",
+                claims=["Rowan's telescope is named Selene."],
+                metadata={"requires_semantic_verification": True},
+            )
+        ],
+        source_documents=[
+            Document(id="rowan", content="The observatory's main telescope is named Selene.", metadata={})
+        ],
+        generation_provider=generation_provider,
+        generation_model=generation_model,
+        verification_provider=verification_provider,
+        verification_model=verification_model,
+    )
+    assert result.verdict == "grounded"  # nosec B101 # Pytest behavioral oracle; not a runtime guard.
+    assert dispatches == [(expected_provider, expected_model)]  # nosec B101 # Pytest behavioral oracle; not a runtime guard.
+    assert result.metadata["verification_provider"] == expected_provider  # nosec B101 # Pytest behavioral oracle; not a runtime guard.
+    assert result.metadata["verification_model"] == expected_model  # nosec B101 # Pytest behavioral oracle; not a runtime guard.

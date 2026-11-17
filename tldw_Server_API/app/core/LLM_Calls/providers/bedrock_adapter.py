@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlparse
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
 )

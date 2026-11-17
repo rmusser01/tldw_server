@@ -136,31 +136,29 @@ async def run_jobs_webhooks_worker(stop_event: asyncio.Event | None = None) -> N
             after_id = persisted_after
         logger.info("Starting Jobs webhooks worker")
         # Enforce egress policy per URL
-        _is_test = is_test_mode()
-        if not _is_test:
-            try:
-                from tldw_Server_API.app.core.Security.egress import evaluate_url_policy as _eval_policy
-                pol = _eval_policy(url)
-                if not getattr(pol, "allowed", False):
-                    logger.warning(f"Jobs webhooks disabled: URL not allowed by egress policy ({getattr(pol, 'reason', 'denied')})")
-                    try:
-                        get_metrics_registry().increment(
-                            "app_warning_events_total",
-                            labels={"component": "jobs_webhooks", "event": "egress_policy_denied"},
-                        )
-                    except _JOBS_WEBHOOKS_NONCRITICAL_EXCEPTIONS:
-                        logger.debug("metrics increment failed for egress_policy_denied")
-                    return
-            except _JOBS_WEBHOOKS_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(f"Jobs webhooks: egress policy check failed; refusing to start for safety: {e}")
+        try:
+            from tldw_Server_API.app.core.Security.egress import evaluate_url_policy as _eval_policy
+            pol = _eval_policy(url)
+            if not getattr(pol, "allowed", False):
+                logger.warning(f"Jobs webhooks disabled: URL not allowed by egress policy ({getattr(pol, 'reason', 'denied')})")
                 try:
                     get_metrics_registry().increment(
-                        "app_exception_events_total",
-                        labels={"component": "jobs_webhooks", "event": "egress_policy_check_failed"},
+                        "app_warning_events_total",
+                        labels={"component": "jobs_webhooks", "event": "egress_policy_denied"},
                     )
                 except _JOBS_WEBHOOKS_NONCRITICAL_EXCEPTIONS:
-                    logger.debug("metrics increment failed for egress_policy_check_failed")
+                    logger.debug("metrics increment failed for egress_policy_denied")
                 return
+        except _JOBS_WEBHOOKS_NONCRITICAL_EXCEPTIONS as e:
+            logger.warning(f"Jobs webhooks: egress policy check failed; refusing to start for safety: {e}")
+            try:
+                get_metrics_registry().increment(
+                    "app_exception_events_total",
+                    labels={"component": "jobs_webhooks", "event": "egress_policy_check_failed"},
+                )
+            except _JOBS_WEBHOOKS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("metrics increment failed for egress_policy_check_failed")
+            return
 
         while True:
             if stop_event and stop_event.is_set():

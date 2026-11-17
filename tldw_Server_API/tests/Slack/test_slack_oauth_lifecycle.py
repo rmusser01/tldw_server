@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import slack as slack_endpoint
-from tldw_Server_API.app.api.v1.endpoints import slack_support
+from tldw_Server_API.app.api.v1.utils.chatops import slack_support
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.tests._chatops_helpers.fake_oauth_repos import (
     FakeOAuthStateRepo as _FakeOAuthStateRepo,

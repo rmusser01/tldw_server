@@ -328,7 +328,7 @@ def test_postgres_workspace_clone_graph_is_tenant_isolated(
 
 @pytest.mark.parametrize(
     "failure_mode",
-    ["scope_apply", "scope_verification", "transaction_mode"],
+    ["scope_apply", "scope_verification", "transaction_mode", "scope_missing", "scope_noncallable"],
 )
 def test_postgres_workspace_snapshot_setup_failure_stops_before_table_queries(
     postgres_db: CharactersRAGDB,
@@ -414,11 +414,22 @@ def test_postgres_workspace_snapshot_setup_failure_stops_before_table_queries(
         )
         scope_kwargs["session_role"] = "task3_missing_snapshot_role"
 
+    if failure_mode == "scope_missing":
+        monkeypatch.delattr(type(backend), "apply_and_verify_scope")
+    elif failure_mode == "scope_noncallable":
+        monkeypatch.setattr(backend, "apply_and_verify_scope", None)
+
     with scoped_context(**scope_kwargs):
-        with pytest.raises(CloneSnapshotUnavailable):
+        with pytest.raises(CloneSnapshotUnavailable) as exc_info:
             postgres_db.read_workspace_clone_snapshot("workspace-source")
+    assert str(exc_info.value) == "source_snapshot_unavailable"
 
     assert table_queries == []
+    if failure_mode == "scope_apply":
+        # The pool discards a checkout it cannot scope (TASK-13950.3), so
+        # nothing is handed out or returned for reuse.
+        assert (acquired_connections, returned_connections) == ([], [])
+        return
     assert len(acquired_connections) == 1
     snapshot_connection = acquired_connections[0]
     assert snapshot_connection is not caller_connection

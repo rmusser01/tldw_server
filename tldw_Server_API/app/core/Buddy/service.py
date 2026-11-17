@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.buddies import BuddyCreate
+from tldw_Server_API.app.core.Buddy.buddy_schemas import BuddyCreate
 from tldw_Server_API.app.core.DB_Management.Buddy_DB import BuddyRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, NotFoundError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths

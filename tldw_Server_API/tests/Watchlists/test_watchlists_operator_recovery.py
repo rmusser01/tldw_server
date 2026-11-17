@@ -786,7 +786,7 @@ async def test_run_stats_record_safe_source_error_when_active_source_fetch_fails
 
     assert result["items_ingested"] == 0
     run = db.get_run(result["run_id"])
-    assert run.status in {"completed", "succeeded", "partial", "warning"}
+    assert result["status"] == run.status == "failed"
     stats = json.loads(run.stats_json or "{}")
     assert stats["source_errors"] >= 1
     assert stats["source_statuses"][0]["source_id"] == source.id

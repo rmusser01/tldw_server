@@ -20,6 +20,8 @@ from loguru import logger
 from tldw_Server_API.app.core.Claims_Extraction.analyze_types import (
     AdjudicatorAnalyzeCallable,
 )
+from tldw_Server_API.app.core.Claims_Extraction.claims_engine import _run_bounded_claims_analyze
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.RAG.rag_service.types import (
     Document,
     VerificationStatus,
@@ -228,6 +230,8 @@ class ClaimAdjudicator:
                         confidence=confidence,
                     )
                 )
+            except LLMQuotaExceededError:
+                raise  # the user's limit: not a document that could not be assessed
             except Exception as e:
                 logger.warning(f"Failed to assess document {doc.id}: {e}")
                 continue
@@ -299,7 +303,9 @@ class ClaimAdjudicator:
         extended_error: Exception | None = None
 
         try:
-            response = fn(
+            # Off the loop: a sync LLM call on the loop's thread blocks it and cannot be quota-checked.
+            response = await _run_bounded_claims_analyze(
+                fn,
                 provider,
                 prompt,
                 prompt,
@@ -324,7 +330,7 @@ class ClaimAdjudicator:
             extended_error = exc
 
         try:
-            fallback = fn(prompt)
+            fallback = await _run_bounded_claims_analyze(fn, prompt)
             if inspect.isawaitable(fallback):
                 fallback = await fallback
             return coerce_llm_response_text(fallback)
@@ -385,6 +391,8 @@ Respond with a JSON object:
                 "NEUTRAL": EvidenceStance.NEUTRAL,
             }
             return stance_map.get(stance_str, EvidenceStance.NEUTRAL), confidence
+        except LLMQuotaExceededError:
+            raise  # the user's limit: not a neutral stance
         except Exception as e:
             logger.warning(f"LLM assessment failed: {e}")
             return EvidenceStance.NEUTRAL, 0.5

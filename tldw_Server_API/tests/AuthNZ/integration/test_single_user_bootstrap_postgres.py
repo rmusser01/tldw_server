@@ -1,4 +1,4 @@
-import os
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +11,7 @@ pytestmark = pytest.mark.integration
 @pytest.mark.asyncio
 async def test_single_user_bootstrap_creates_admin_user_and_primary_key_postgres(
     isolated_test_environment,
-    monkeypatch,
+    monkeypatch, fresh_services
 ):
     # Use the isolated Postgres-backed AuthNZ environment
     client, _db_name = isolated_test_environment
@@ -21,15 +21,12 @@ async def test_single_user_bootstrap_creates_admin_user_and_primary_key_postgres
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "test_single_user_primary_key_pg_123")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings, get_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 
     # Ensure AuthNZ settings and pool pick up the single-user profile
     reset_settings()
-    await reset_db_pool()
-
-    pool = await get_db_pool()
 
     # Run the single-user bootstrap helper twice to assert idempotency
     ok_first = await bootstrap_single_user_profile()
@@ -37,6 +34,8 @@ async def test_single_user_bootstrap_creates_admin_user_and_primary_key_postgres
     assert ok_first is True
     assert ok_second is True
 
+    # Bootstrap can replace the process pool; read through its current owner.
+    pool = await get_db_pool()
     settings = get_settings()
     single_user_id = settings.SINGLE_USER_FIXED_ID
 
@@ -58,7 +57,7 @@ async def test_single_user_bootstrap_creates_admin_user_and_primary_key_postgres
 
     manager = APIKeyManager()
     await manager.initialize()
-    key_hash = manager.hash_api_key(settings.SINGLE_USER_API_KEY)
+    key_hash = manager.hash_api_key(cast(str, settings.SINGLE_USER_API_KEY))
 
     rows = await pool.fetch(
         "SELECT user_id, key_hash, scope, status, is_virtual FROM api_keys WHERE key_hash = ?",
@@ -77,7 +76,7 @@ async def test_single_user_bootstrap_creates_admin_user_and_primary_key_postgres
 @pytest.mark.asyncio
 async def test_single_user_bootstrap_reuses_preseeded_primary_key_postgres(
     isolated_test_environment,
-    monkeypatch,
+    monkeypatch, fresh_services
 ):
     # Use the isolated Postgres-backed AuthNZ environment
     client, _db_name = isolated_test_environment
@@ -87,12 +86,11 @@ async def test_single_user_bootstrap_reuses_preseeded_primary_key_postgres(
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "test_single_user_preseeded_key_pg_123")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings, get_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     settings = get_settings()
@@ -103,7 +101,7 @@ async def test_single_user_bootstrap_reuses_preseeded_primary_key_postgres(
 
     manager = APIKeyManager()
     await manager.initialize()
-    key_value = settings.SINGLE_USER_API_KEY
+    key_value = cast(str, settings.SINGLE_USER_API_KEY)
     key_hash = manager.hash_api_key(key_value)
     key_prefix = (key_value[:10] + "...") if len(key_value) > 10 else key_value
 
@@ -149,6 +147,7 @@ async def test_single_user_bootstrap_reuses_preseeded_primary_key_postgres(
     ok = await bootstrap_single_user_profile()
     assert ok is True
 
+    pool = await get_db_pool()
     after_rows = await pool.fetch(
         "SELECT id, user_id, key_hash, scope, status, is_virtual FROM api_keys WHERE key_hash = ?",
         key_hash,
@@ -166,7 +165,7 @@ async def test_single_user_bootstrap_reuses_preseeded_primary_key_postgres(
 @pytest.mark.asyncio
 async def test_single_user_bootstrap_fails_with_extra_active_user_postgres(
     isolated_test_environment,
-    monkeypatch,
+    monkeypatch, fresh_services
 ):
     client, _db_name = isolated_test_environment
     assert isinstance(client, TestClient)
@@ -174,12 +173,11 @@ async def test_single_user_bootstrap_fails_with_extra_active_user_postgres(
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "test_single_user_conflict_key_pg_123")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
 
@@ -200,7 +198,7 @@ async def test_single_user_bootstrap_fails_with_extra_active_user_postgres(
 @pytest.mark.asyncio
 async def test_single_user_bootstrap_fails_with_multiple_primary_keys_postgres(
     isolated_test_environment,
-    monkeypatch,
+    monkeypatch, fresh_services
 ):
     client, _db_name = isolated_test_environment
     assert isinstance(client, TestClient)
@@ -208,13 +206,12 @@ async def test_single_user_bootstrap_fails_with_multiple_primary_keys_postgres(
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "test_single_user_multi_key_pg_123")
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings, get_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     settings = get_settings()
@@ -234,7 +231,7 @@ async def test_single_user_bootstrap_fails_with_multiple_primary_keys_postgres(
     manager = APIKeyManager()
     await manager.initialize()
 
-    primary_value = settings.SINGLE_USER_API_KEY
+    primary_value = cast(str, settings.SINGLE_USER_API_KEY)
     primary_hash = manager.hash_api_key(primary_value)
     primary_prefix = (primary_value[:10] + "...") if len(primary_value) > 10 else primary_value
 

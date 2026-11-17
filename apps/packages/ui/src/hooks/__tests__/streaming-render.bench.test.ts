@@ -25,12 +25,21 @@
 // batch W1 re-runs this bench after fixing the per-token work and records the
 // before/after delta there.
 //
+// 2026-10-16: harness setup adapted to dev's scene-ownership gate introduced
+// in 7b5da56346 (PR #3229, TASK-13549 lineage): every send must now carry an
+// ActorSceneSend captured before dispatch, so the harness stubs
+// captureActorSceneSend with an inert default scene (mirroring dev's own
+// scene tests) whose requestScope matches the service-prompts mock.
+// Measurement unchanged: spies, counters and window boundaries are exactly as
+// they were.
+//
 // Run: cd apps/packages/ui && bun run vitest run src/hooks/__tests__/streaming-render.bench.test.ts
 import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useMessage } from "../useMessage"
 import { useStoreMessageOption, type Message } from "~/store/option"
+import { normalizeChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
 const { SEED_MESSAGES, CHUNKS, bench, benchCharacter } = vi.hoisted(() => ({
   // Plan constants (Stage 1): N=200 seeded messages, 500 streamed token chunks.
@@ -174,6 +183,47 @@ vi.mock("@/hooks/chat/useHistorySelection", async (original) => ({
   useHistorySelectionContext: () => null
 }))
 
+// This bench isolates the legacy character stream; an H1 controller selects a different sender.
+vi.mock("@/hooks/chat/actor-scene-source", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/actor-scene-source")>()
+  const { createDefaultActorSettings } = await import("@/types/actor")
+  const { chatDraftOwnerKey } = await import("@/utils/chat-draft-owner")
+  const requestScope = {
+    config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" as const },
+    userId: null
+  }
+  const account = { requestScope, isCurrent: () => true }
+  return {
+    ...actual,
+    captureActorSceneSend: () => ({
+      isCurrent: account.isCurrent,
+      read: async () => ({
+        requestScope,
+        isCurrent: account.isCurrent,
+        scene: {
+          target: {
+            key: "bench-character-scene",
+            accountKey: chatDraftOwnerKey(requestScope),
+            account,
+            address: {
+              kind: "native",
+              id: "bench-chat",
+              ownerKey: "bench-chat-owner",
+              scope: { type: "global" }
+            },
+            isCurrent: account.isCurrent,
+            profileIsCurrent: account.isCurrent
+          },
+          originalRecord: null,
+          settings: createDefaultActorSettings(),
+          origin: "default",
+          profileUnavailable: false
+        }
+      })
+    })
+  }
+})
+
 vi.mock("@/services/service-prompts", () => ({
   loadServicePromptSnapshot: async () => ({
     scopeKey: "scope:bench",
@@ -292,7 +342,8 @@ describe("streaming render bench (sidepanel path)", () => {
     const { result, unmount } = renderHook(() => useMessage())
     try {
       await act(async () => {
-        await result.current.onSubmit({ message: "bench question", image: "" })
+        const submission = await result.current.onSubmit({ message: "bench question", image: "" })
+        expect(normalizeChatSubmitResult(submission)).toEqual({ status: "submitted" })
       })
 
       const streamPhaseMs = bench.streamEndedAt - bench.streamStartedAt

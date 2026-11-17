@@ -75,8 +75,6 @@ class TestDbPathValidation:
         base_dir = tmp_path / "isolated_user_dbs"
         monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
         db_path = DatabasePaths.get_kanban_db_path("1")
-        db = KanbanDB(db_path=str(db_path), user_id="1")
-
         captured: dict[str, Any] = {}
         stale_base_dir = tmp_path / "stale_user_dbs"
         original_settings_get = kanban_db_module.settings.get
@@ -92,7 +90,7 @@ class TestDbPathValidation:
             return None
 
         monkeypatch.setattr(kanban_db_module.settings, "get", _fake_settings_get)
-        monkeypatch.setattr(kanban_db_module, "create_kanban_vector_search", _fake_create_vector_search)
+        db = KanbanDB(db_path=str(db_path), user_id="1", vector_search_factory=_fake_create_vector_search)
         try:
             db.get_vector_search()
         finally:

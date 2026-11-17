@@ -100,7 +100,7 @@ async def test_knowledge_search_defaults_to_all_advertised_sources():
         km = KnowledgeModule(ModuleConfig(name="knowledge"))
         await km.on_initialize()
         metadata = _trusted_compat_claims_metadata(
-            auth_via="single_user_test_api_key",
+            auth_via="single_user_api_key",
             compat_claims_source="mounted_http",
         )
         metadata["roles"] = ["admin"]

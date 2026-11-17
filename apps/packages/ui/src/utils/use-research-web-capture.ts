@@ -272,8 +272,9 @@ export function useResearchWebCapture(workspaceId: string | null) {
         status: "ready",
         ...mapServerSourceReviewFields(confirmed.source),
         webCapture: confirmed.pin,
-        knowledgeQaEvidence: session.source.knowledgeQaEvidence
-      }
+        captureOwnerScope: session.owner,
+        knowledgeQaEvidence: session.source.knowledgeQaEvidence,
+      };
       const select =
         !session.manualSelection &&
         selectionKey() === session.selection &&

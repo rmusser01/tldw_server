@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
-    MEDIA_NONCRITICAL_EXCEPTIONS,
-)
-
-_MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
 
 def _get_txn_conn(self: Any):
@@ -30,13 +24,13 @@ def _set_tx_depth(self: Any, depth: int) -> None:
 
 
 def _inc_tx_depth(self: Any) -> int:
-    depth = self._get_tx_depth() + 1
+    depth: int = self._get_tx_depth() + 1
     self._set_tx_depth(depth)
     return depth
 
 
 def _dec_tx_depth(self: Any) -> int:
-    depth = self._get_tx_depth() - 1
+    depth: int = self._get_tx_depth() - 1
     if depth < 0:
         depth = 0
     self._set_tx_depth(depth)
@@ -79,8 +73,12 @@ def get_connection(self: Any):
     if conn is None:
         conn = self.backend.get_pool().get_connection()
         self._set_persistent_conn(conn)
-    with suppress(_MEDIA_NONCRITICAL_EXCEPTIONS):
+    try:
         self.backend.apply_scope(conn)
+    except BaseException:
+        # apply_scope discarded the connection; it may carry another tenant's GUCs.
+        self._set_persistent_conn(None)
+        raise
     return conn
 
 

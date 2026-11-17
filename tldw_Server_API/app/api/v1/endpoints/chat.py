@@ -56,23 +56,23 @@ from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     LegacyHistoryProjectionV1,
     LegacyProjectionConfirmEnvelopeV1,
 )
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     capture_provider_override_call_snapshot,
     get_llm_provider_override,
     get_llm_provider_overrides_snapshot,
-    get_override_default_model,
     get_override_model_priority,
     validate_provider_override,
 )
-from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
 from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
-    validate_image_url,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 # Import new modules for integration
+
 
 def is_authentication_required() -> bool:
     """Legacy shim used by tests to toggle auth enforcement.
@@ -81,16 +81,17 @@ def is_authentication_required() -> bool:
     function on the chat module to simulate authentication-disabled scenarios.
     """
     return True
+
+
 from loguru import logger
 from starlette.responses import JSONResponse, StreamingResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
-    get_chacha_db_for_user_id,
 )
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
-from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import (
+from tldw_Server_API.app.api.v1.utils.notes_sync_errors import (
     NOTES_SYNC_EXCEPTIONS,
     notes_sync_http_error,
 )
@@ -113,15 +114,11 @@ from tldw_Server_API.app.api.v1.schemas.chat_knowledge_schemas import (
     KnowledgeSaveResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    API_KEYS as SCHEMAS_API_KEYS,
-)
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    DEFAULT_LLM_PROVIDER,
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
     RagContext,
-    get_api_keys,  # noqa: F401 - legacy tests patch this endpoint symbol
 )
 from tldw_Server_API.app.api.v1.schemas.chat_validators import (
     validate_character_id,
@@ -138,20 +135,13 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 )
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
     ChatSettingsSizeError,
-    validate_chat_settings_storage,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     map_sender_to_role,
 )
-from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings import (
-    score_exemplars_with_embeddings,
-)
 from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector import (
     PersonaExemplarSelectorConfig,
     select_character_exemplars,
-)
-from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry import (
-    compute_persona_exemplar_telemetry,
 )
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
@@ -175,18 +165,11 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
 )
 from tldw_Server_API.app.core.Chat.chat_metrics import get_chat_metrics
 from tldw_Server_API.app.core.Chat.chat_service import (
-    _nonstream_provider_result_is_usable,
-    apply_prompt_templating,
     build_call_params_from_request,
-    build_context_and_messages,
     estimate_tokens_from_json,
-    execute_non_stream_call,
     execute_streaming_call,
     inject_research_context_into_prompt,
-    is_model_known_for_provider,
-    moderate_input_messages,
     perform_chat_api_call,
-    perform_chat_api_call_async,
     queue_is_active,
     resolve_input_moderation_chat_type,
     resolve_moderation_chat_type,
@@ -206,6 +189,7 @@ from tldw_Server_API.app.core.Chat.knowledge_save import (
 )
 from tldw_Server_API.app.core.Chat.persistence_service import (
     assistant_generation_extra,
+    native_stream_persistence,
     save_workspace_chat_model_selection,
 )
 
@@ -214,9 +198,7 @@ from tldw_Server_API.app.core.Chat.prompt_template_manager import (  # noqa: F40
     apply_template_to_string,
     load_template,
 )
-from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
-from tldw_Server_API.app.core.Chat.rate_limiter import get_rate_limiter
-from tldw_Server_API.app.core.Chat.request_queue import RequestPriority, get_request_queue
+from tldw_Server_API.app.core.Chat.request_queue import RequestPriority
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     PROVIDER_STREAM_ERROR_MESSAGES,
     StreamTaskCapacityError,
@@ -229,6 +211,9 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
 )
+from tldw_Server_API.app.core.config_llm_providers import (
+    get_api_keys,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -239,19 +224,21 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.transaction_utils import (
     db_transaction,
 )
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import (
+    ChatModelNotAvailableError,
+    LLMPolicyRefusal,
+    LLMQuotaExceededError,
+    raise_detached_error,
+)
 from tldw_Server_API.app.core.LLM_Calls.routing import (
     InMemoryRoutingDecisionStore,
     RouterRequest,
     RoutingUsageContext,
-    build_provider_order_for_routing,
     extract_router_choice,  # noqa: F401 - legacy tests patch/use this endpoint symbol
     extract_router_usage,
     flatten_provider_listing_for_routing,
-    log_model_router_usage,
     resolve_routing_policy,
     route_model,
-    select_llm_router_choice,
 )
 from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
     build_candidate_pool,
@@ -261,9 +248,6 @@ from tldw_Server_API.app.core.Moderation.review_service import (
     capture_moderation_review_item,
     is_moderation_review_capture_enabled,
 )
-from tldw_Server_API.app.core.Moderation.supervised_policy import (
-    bootstrap_guardian_moderation_runtime,
-)
 from tldw_Server_API.app.core.Notes.organization_capture import (
     active_coordinator,
     capture_note_upsert,
@@ -271,11 +255,6 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
     stable_note_id,
 )
 from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
-from tldw_Server_API.app.core.Skills.context_integration import (
-    add_skill_tool_to_tools_list_async,
-    build_system_message_with_skills_async,
-)
-from tldw_Server_API.app.core.Utils.chunked_image_processor import get_image_processor
 from tldw_Server_API.app.core.Workspaces.assistant_defaults import (
     project_assistant_startup,
     require_workspace_for_chat_creation,
@@ -297,6 +276,10 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import (
+    enforce_llm_quota,
+    enforce_llm_quota_if_the_router_was_refused,
+)
 from tldw_Server_API.app.api.v1.schemas.chat_commands_schemas import ChatCommandInfo, ChatCommandsListResponse
 from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ValidateDictionaryRequest,
@@ -304,25 +287,9 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ValidationIssue,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    derive_trusted_credential_scope,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
-from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
-from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
+from tldw_Server_API.app.core.Usage.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-    ProviderCredentialRuntime,
-    configured_provider_model_from_snapshot,
-    mark_provider_credential_used,
-)
-from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission
-from tldw_Server_API.app.core.Billing.enforcement import LimitCategory, enforcement_enabled, get_billing_enforcer
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory, get_billing_enforcer
 from tldw_Server_API.app.core.Chat import command_router
 from tldw_Server_API.app.core.Chat.command_authorization import (
     authorize_command,
@@ -336,9 +303,6 @@ from tldw_Server_API.app.core.Chat_Macros.parser import enforce_background_execu
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.Chat_Macros.service import ChatMacroCatalogItem, ChatMacrosService
 from tldw_Server_API.app.core.Chat_Macros.storage import ChatMacroStorage
-from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
-from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
     assemble_persona_exemplar_prompt,
@@ -347,6 +311,20 @@ from tldw_Server_API.app.core.Persona.exemplar_runtime import (
     append_persona_exemplar_sections,
 )
 from tldw_Server_API.app.core.Persona.memory_integration import persist_persona_turn
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    derive_trusted_credential_scope,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
+    configured_provider_model_from_snapshot,
+    mark_provider_credential_used,
+)
 from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
 from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
@@ -354,17 +332,9 @@ from tldw_Server_API.app.core.testing import (
     env_flag_enabled as _shared_env_flag_enabled,
 )
 from tldw_Server_API.app.core.testing import (
-    is_test_mode as _shared_is_test_mode,
-)
-from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
-from tldw_Server_API.app.core.Usage.quota_checks import (
-    as_quota_user_id,
-    check_usage,
-    llm_tokens_this_month,
-    seconds_until_utc_month_start,
-)
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context, with_llm_call_context
 from tldw_Server_API.app.core.Usage.usage_tracker import backfill_legacy_tokens_to_ledger
 
 from . import chat_dictionaries, chat_documents, chat_grammars
@@ -408,6 +378,55 @@ def _derive_endpoint_provenance(
     return credentials.endpoint_provenance
 
 
+async def _own_key_before_the_hosted_plan(current_user: Any, provider: str, billing_org_id: Any) -> bool | None:
+    """Whether the user's own key serves ``provider``; None when the hosted plan does not check this request.
+
+    Asked once per request: ``enforce_llm_quota`` reuses the answer (ADR-083).
+    """
+    if not _enforcement.enforcement_enabled() or billing_org_id is None:
+        return None
+    return await _usage_quota_deps.users_own_key_serves(getattr(current_user, "id", None), provider)
+
+
+async def _enter_the_hosted_plans_enforcer(billing_org_id: Any, estimated_tokens: int) -> LimitEnforcer | None:
+    """Enter the hosted plan's LLM-token enforcer for this request; None when its lookup fails (fail-open).
+
+    Raises the plan's 402 or 429 when the org is over its plan.
+    """
+    try:
+        enforcer = _billing_deps.LimitEnforcer(
+            billing_org_id, LimitCategory.LLM_TOKENS_MONTH, estimated_units=max(1, estimated_tokens),
+        )
+        await enforcer.__aenter__()
+        return enforcer
+    except HTTPException:
+        raise
+    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as billing_err:
+        logger.debug(f"Billing token pre-check failed (fail-open): {billing_err}")
+        return None
+
+
+async def _the_hosted_plan_refuses(billing_org_id: Any, estimated_tokens: int) -> bool:
+    """Whether the hosted plan would refuse a server-key call of this size for the org now (TASK-15481).
+
+    The pre-check's own answer, so an own-key request learns it without being checked or counted: the
+    enforcer entered here records nothing and is dropped. A billing data-source failure follows
+    ``BILLING_ENFORCEMENT_FAILURE_MODE`` inside the enforcer, as for the server-key pre-check (open: the plan
+    admits; closed: it refuses). Any other error from the check answers True: the request still runs on the
+    user's key, only its failover is withheld.
+    """
+    try:
+        await _billing_deps.LimitEnforcer(
+            billing_org_id, LimitCategory.LLM_TOKENS_MONTH, estimated_units=max(1, estimated_tokens),
+        ).__aenter__()
+    except HTTPException:
+        return True
+    except Exception as billing_err:  # noqa: BLE001 - asking about a failover must never fail an own-key request
+        logger.warning(f"Hosted plan check for a failover failed; failover withheld: {type(billing_err).__name__}")
+        return True
+    return False
+
+
 def _request_has_endpoint_override(request_data: Any) -> bool:
     """Return whether parsed request data contains an explicit endpoint override."""
     return any(
@@ -416,16 +435,12 @@ def _request_has_endpoint_override(request_data: Any) -> bool:
         for field in ("base_url", "api_base_url")
     )
 
+
 #######################################################################################################################
 #
 # ---------------------------------------------------------------------------
 # Constants & helpers
 # ---------------------------------------------------------------------------
-# Backward-compatibility for tests that patch API_KEYS directly (in schemas module).
-# This map is for test overrides/transitional compatibility; prefer get_api_keys()
-# / resolve_provider_api_key for new code paths.
-API_KEYS = SCHEMAS_API_KEYS
-
 router = APIRouter()
 conversations_alias_router = APIRouter()
 
@@ -462,6 +477,7 @@ get_chat_grammar = chat_grammars.get_chat_grammar
 update_chat_grammar = chat_grammars.update_chat_grammar
 delete_chat_grammar = chat_grammars.delete_chat_grammar
 
+
 def _chat_connectors_enabled() -> bool:
     """Feature flag for chat connectors v2 (email/issue/wiki exports)."""
     return _shared_env_flag_enabled("CHAT_CONNECTORS_V2_ENABLED")
@@ -474,10 +490,37 @@ def _mandatory_audit_unavailable_detail() -> dict[str, str]:
         "message": "Mandatory audit persistence is currently unavailable",
     }
 
+
 # Load configuration values from config
 import contextlib
 
-from tldw_Server_API.app.core.config import load_and_log_configs, load_comprehensive_config
+from tldw_Server_API.app.core.config import load_comprehensive_config
+import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
+import tldw_Server_API.app.api.v1.API_Deps.billing_deps as _billing_deps
+import tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps as _usage_quota_deps
+import tldw_Server_API.app.core.AuthNZ.crypto_utils as _crypto_utils
+import tldw_Server_API.app.core.AuthNZ.rbac as _rbac
+import tldw_Server_API.app.core.Billing.enforcement as _enforcement
+import tldw_Server_API.app.core.Character_Chat.chat_settings_validation as _chat_settings_validation
+import tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings as _persona_exemplar_embeddings
+import tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry as _persona_exemplar_telemetry
+import tldw_Server_API.app.core.Chat.chat_metrics as _chat_metrics
+import tldw_Server_API.app.core.Chat.chat_service as _chat_service
+import tldw_Server_API.app.core.Chat.provider_manager as _provider_manager
+import tldw_Server_API.app.core.Chat.rate_limiter as _rate_limiter
+import tldw_Server_API.app.core.Chat.request_queue as _request_queue
+import tldw_Server_API.app.core.LLM_Calls.routing as _routing
+import tldw_Server_API.app.core.Metrics.metrics_logger as _metrics_logger
+import tldw_Server_API.app.core.Metrics.metrics_manager as _metrics_manager
+import tldw_Server_API.app.core.Moderation.moderation_service as _moderation_service
+import tldw_Server_API.app.core.Moderation.supervised_policy as _supervised_policy
+import tldw_Server_API.app.core.Persona.conversation_admission as _conversation_admission
+import tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides as _llm_provider_overrides
+import tldw_Server_API.app.core.Skills.context_integration as _context_integration
+import tldw_Server_API.app.core.Utils.chunked_image_processor as _chunked_image_processor
+import tldw_Server_API.app.core.Utils.image_validation as _image_validation
+import tldw_Server_API.app.core.config as __config
+import tldw_Server_API.app.core.testing as _testing
 
 _config = load_comprehensive_config()
 # ConfigParser uses sections, check if Chat-Module section exists
@@ -499,6 +542,8 @@ MAX_IMAGES_PER_REQUEST: int = int(_chat_config.get('max_images_per_request', 10)
 MAX_BASE64_BYTES: int = get_max_base64_bytes()
 # Provider fallback setting - disabled by default for production stability
 ENABLE_PROVIDER_FALLBACK: bool = _chat_config.get('enable_provider_fallback', 'False').lower() == 'true'
+
+
 def _cfg_float(key: str, fallback: float) -> float:
     try:
         raw = _chat_config.get(key)
@@ -590,6 +635,7 @@ ANALYTICS_MAX_RANGE_DAYS: int = int(_chat_config.get("analytics_max_range_days",
 TREE_MESSAGE_CAP_DEFAULT: int = int(_chat_config.get("tree_message_cap_default", 200))
 TREE_MESSAGE_CAP_MAX: int = int(_chat_config.get("tree_message_cap_max", 500))
 
+
 # Chat-Commands feature toggles (env overrides take priority)
 def _cfg_bool_cmds(env_name: str, cfg_key: str, fallback: bool) -> bool:
     v = os.getenv(env_name)
@@ -601,6 +647,7 @@ def _cfg_bool_cmds(env_name: str, cfg_key: str, fallback: bool) -> bool:
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         return fallback
 
+
 # Feature flag: queued execution of chat calls via workers (default disabled)
 _env_queued = os.getenv("CHAT_QUEUED_EXECUTION")
 try:
@@ -610,6 +657,7 @@ try:
     )
 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
     QUEUED_EXECUTION = False
+
 
 def _to_bool(val: str) -> bool:
     return _shared_is_truthy(val)
@@ -625,6 +673,7 @@ def _resolve_base64_image_limit_enforcement() -> bool:
         # Default to enforcing base64 image limits unless explicitly disabled.
         return True
     return _to_bool(cfg_val)
+
 
 # Optional flag: allow auto-switch from 'local-llm' to 'openai' when an
 # OpenAI key is present. Intended primarily for tests; disabled by default.
@@ -940,17 +989,17 @@ async def _build_context_and_messages_compat(
         "save_message_fn": save_message_fn,
     }
     try:
-        signature = inspect.signature(build_context_and_messages)
+        signature = inspect.signature(_chat_service.build_context_and_messages)
     except (TypeError, ValueError):
         signature = None
 
     if signature is None or "runtime_state" in signature.parameters:
-        return await build_context_and_messages(
+        return await _chat_service.build_context_and_messages(
             **call_kwargs,
             runtime_state=runtime_state,
         )
 
-    return await build_context_and_messages(**call_kwargs)
+    return await _chat_service.build_context_and_messages(**call_kwargs)
 
 
 def _request_uses_vision_input(messages: list[Any]) -> bool:
@@ -999,7 +1048,8 @@ def _provider_credential_error_code(exc: BaseException) -> str | None:
     if isinstance(exc, ChatAuthenticationError):
         return "provider_authentication_failed"
     if isinstance(exc, ChatConfigurationError):
-        return "provider_configuration_invalid"
+        code = getattr(exc, "error_code", None)
+        return code if code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
     if isinstance(exc, ByokResolutionError):
         code = getattr(exc, "policy_code", exc.code)
         return code if code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
@@ -1017,16 +1067,94 @@ def _provider_credential_error_code(exc: BaseException) -> str | None:
     return None
 
 
+async def _existing_input_validation_request(
+    request_data: ChatCompletionRequest, request: Request, current_user: User,
+    db: CharactersRAGDB, scope_type: str | None, workspace_id: str | None,
+) -> ChatCompletionRequest:
+    """Apply normal size, policy and accounting checks to the canonical saved text."""
+    from tldw_Server_API.app.core.Chat.history_context import selected_unanswered_text_question
+    from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
+
+    selection = request_data.tldw_history_server_existing_input_v1.model_dump(mode="json")
+    owner = native_history_owner_key(request, current_user.id)
+    if selection["owner_key"] != owner:
+        raise HTTPException(409, detail={"code": "owner_conversation_mismatch"})
+    supplied_scope = _resolve_conversation_scope(scope_type, workspace_id) if scope_type is not None or workspace_id is not None else None
+
+    def read_question() -> str:
+        _verify_conversation_ownership(db, request_data.conversation_id, current_user, supplied_scope,
+            use_stored_scope=supplied_scope is None, conceal_foreign=True)
+        with db.transaction() as conn:
+            snapshot, content = db.validate_history_selection(request_data.conversation_id, selection,
+                owner_client_id=str(current_user.id), owner_key=owner, conn=conn)
+            return selected_unanswered_text_question(snapshot, content, selection)["message"]
+
+    try:
+        text = await asyncio.to_thread(read_question)
+    except HistorySelectionError as exc:
+        raise HTTPException(409, detail={"code": exc.code}) from exc
+    try:
+        message = ChatCompletionUserMessageParam(role="user", content=text)
+    except ValidationError as exc:
+        raise HTTPException(413, detail="Saved question exceeds the supported message size.") from exc
+    return request_data.model_copy(deep=True, update={"messages": [message]})
+
+
+def _inference_request_json(payload: dict[str, Any]) -> str:
+    """Exclude persistence proofs without changing estimates for ordinary requests."""
+    history_fields = {
+        "tldw_turn",
+        "tldw_history_selection_v1",
+        "tldw_history_server_existing_input_v1",
+        "tldw_history_branch",
+        "tldw_history_edit_v1",
+    }
+    return json.dumps({key: value for key, value in payload.items() if value is None or key not in history_fields})
+
+
+def _admitted_native_provider_error_response(
+    admission: dict[str, Any], error_code: str, message: str | None = None,
+) -> StreamingResponse:
+    """Keep an accepted input identifiable when provider preparation fails.
+
+    ``message`` replaces the allow-listed copy only for ``model_not_available``, whose text is built from the
+    request's own provider and model.
+    """
+    code = error_code if error_code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
+    public_message = message if code == "model_not_available" and message else _PROVIDER_CREDENTIAL_MESSAGES[code]
+    # Freeze only server-owned metadata and allow-listed public error copy.
+    frames = (
+        {"tldw_history_admission_v1": admission},
+        {"error": {"code": code, "message": public_message}},
+    )
+    encoded = tuple("data: " + json.dumps(frame) + "\n\n" for frame in frames)
+
+    async def failed_stream():
+        for frame in encoded:
+            yield frame
+        yield sse_done()
+
+    return StreamingResponse(failed_stream(), media_type="text/event-stream")
+
+
 def _provider_credential_http_exception(exc: BaseException) -> HTTPException:
     """Map internal credential failures to bounded downstream-provider errors."""
     code = _provider_credential_error_code(exc) or "provider_configuration_invalid"
     return _provider_credential_http_exception_for_code(code)
 
 
-def _provider_credential_http_exception_for_code(code: str) -> HTTPException:
-    """Build a bounded downstream-provider response for an allow-listed code."""
+def _provider_credential_http_exception_for_code(code: str, message: str | None = None) -> HTTPException:
+    """Build a bounded downstream-provider response for an allow-listed code.
+
+    ``message`` is used only for ``model_not_available``, whose text names the request's own model and provider.
+    """
     if code not in _PROVIDER_CREDENTIAL_MESSAGES:
         code = "provider_configuration_invalid"
+    if code == "model_not_available":
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error_code": code, "message": message or _PROVIDER_CREDENTIAL_MESSAGES[code]},
+        )
     if code in {"provider_disabled", "model_not_allowed"}:
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1208,6 +1336,8 @@ def _record_provider_stream_error(
         and error.output_emitted is False
         and getattr(error, "credential_refresh_retry_safe", None) is True
     )
+    if error.code == "model_not_available":
+        error_state["model_not_available_message"] = error.message
 
 
 def _sanitize_provider_stream_call(
@@ -1222,6 +1352,8 @@ def _sanitize_provider_stream_call(
         error_state["prime_raw_counting"] = True
         try:
             stream = call_func()
+        except LLMPolicyRefusal:
+            raise
         except Exception as exc:
             sanitized_error = sanitized_provider_stream_exception(exc)
             _record_provider_stream_error(sanitized_error, error_state)
@@ -1573,7 +1705,7 @@ async def _select_auto_chat_llm_router_choice(
         # Router output is a constrained JSON control response, so retain its
         # legacy textual error-prefix rejection while normal Chat preserves
         # assistant-authored strings verbatim.
-        return _nonstream_provider_result_is_usable(response) and not (
+        return _chat_service._nonstream_provider_result_is_usable(response) and not (
             provider_result_contains_error(response, legacy_error_prefix=True)
         )
 
@@ -1604,8 +1736,8 @@ async def _select_auto_chat_llm_router_choice(
             terminal_credential_error = exc
             raise
 
-        metrics = get_chat_metrics()
-        provider_manager = get_provider_manager()
+        metrics = _chat_metrics.get_chat_metrics()
+        provider_manager = _provider_manager.get_provider_manager()
         router_started_at = time.time()
 
         async def _mark_late_router_choice(response: Any) -> None:
@@ -1613,25 +1745,26 @@ async def _select_auto_chat_llm_router_choice(
                 await _record_router_use_once(handle)
 
         try:
-            response = await await_owned_worker(
-                perform_chat_api_call_async(
-                    api_endpoint=router_model.provider,
-                    messages_payload=router_messages,
-                    api_key=handle.api_key,
-                    model=router_model.model,
-                    max_tokens=64,
-                    streaming=False,
-                    user_identifier=str(getattr(current_user, "id", "auto-router")),
-                    app_config=handle.app_config,
-                    credentials_resolved=handle.credentials_resolved,
-                    _endpoint_provenance=_derive_endpoint_provenance(
-                        handle,
-                        request_override=False,
+            with llm_call_context(records_itself=True):
+                response = await await_owned_worker(
+                    _chat_service.perform_chat_api_call_async(
+                        api_endpoint=router_model.provider,
+                        messages_payload=router_messages,
+                        api_key=handle.api_key,
+                        model=router_model.model,
+                        max_tokens=64,
+                        streaming=False,
+                        user_identifier=str(getattr(current_user, "id", "auto-router")),
+                        app_config=handle.app_config,
+                        credentials_resolved=handle.credentials_resolved,
+                        _endpoint_provenance=_derive_endpoint_provenance(
+                            handle,
+                            request_override=False,
+                        ),
+                        **{PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: handle},
                     ),
-                    **{PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: handle},
-                ),
-                on_cancel_result=_mark_late_router_choice,
-            )
+                    on_cancel_result=_mark_late_router_choice,
+                )
             if not _router_result_is_usable(response):
                 raise_detached_error(
                     sanitized_provider_stream_exception("provider_unavailable")
@@ -1640,6 +1773,10 @@ async def _select_auto_chat_llm_router_choice(
             terminal_credential_error = exc
             raise
         except asyncio.CancelledError:
+            raise
+        except LLMQuotaExceededError:
+            # The user's limit, not the router provider's health: no failure recorded. The routing
+            # runtime falls back to rules routing, and the boundary check below returns the 402.
             raise
         except Exception as router_error:  # noqa: BLE001 - provider trust boundary
             latency = time.time() - router_started_at
@@ -1689,7 +1826,7 @@ async def _select_auto_chat_llm_router_choice(
     async def _log_router_usage(router_model, usage, latency_ms):
         try:
             await await_owned_worker(
-                log_model_router_usage(
+                _routing.log_model_router_usage(
                     context=RoutingUsageContext(
                         surface="chat",
                         endpoint="POST:/api/v1/chat/completions",
@@ -1705,6 +1842,7 @@ async def _select_auto_chat_llm_router_choice(
                     total_tokens=usage["total_tokens"],
                     latency_ms=latency_ms,
                     estimated=usage["total_tokens"] == 0,
+                    credential_source=getattr(router_credential_handle, "credential_source", None),
                 )
             )
         except asyncio.CancelledError:
@@ -1716,7 +1854,7 @@ async def _select_auto_chat_llm_router_choice(
             )
 
     try:
-        result = await select_llm_router_choice(
+        result = await _routing.select_llm_router_choice(
             router_request=router_request,
             policy=policy,
             candidates=candidates,
@@ -1764,7 +1902,7 @@ async def _resolve_auto_chat_routing_decision(
     """Resolve `model='auto'` into a canonical provider/model pair."""
     provider_overrides = get_llm_provider_overrides_snapshot()
     provider_listing = apply_llm_provider_overrides_to_listing(
-        get_configured_providers(),
+        await asyncio.to_thread(get_configured_providers),
         overrides=provider_overrides,
     )
     default_provider = str(
@@ -1811,7 +1949,7 @@ async def _resolve_auto_chat_routing_decision(
         candidates=candidates,
         sticky_store=sticky_store,
         llm_router_choice=llm_router_choice,
-        provider_order=build_provider_order_for_routing(
+        provider_order=_routing.build_provider_order_for_routing(
             provider_listing,
             objective=policy.objective,
             priority_resolver=partial(
@@ -2203,7 +2341,7 @@ def _chat_macro_completion_response(
     return StreamingResponse(
         iter(frames),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
     )
 
 
@@ -2413,20 +2551,20 @@ def _record_persona_telemetry_hooks(
     except (TypeError, ValueError):
         lcs = 0.0
 
-    log_histogram("chat_persona_ioo_ratio", max(0.0, min(1.0, ioo)), labels=labels)
-    log_histogram("chat_persona_ior_ratio", max(0.0, min(1.0, ior)), labels=labels)
-    log_histogram("chat_persona_lcs_ratio", max(0.0, min(1.0, lcs)), labels=labels)
+    _metrics_logger.log_histogram("chat_persona_ioo_ratio", max(0.0, min(1.0, ioo)), labels=labels)
+    _metrics_logger.log_histogram("chat_persona_ior_ratio", max(0.0, min(1.0, ior)), labels=labels)
+    _metrics_logger.log_histogram("chat_persona_lcs_ratio", max(0.0, min(1.0, lcs)), labels=labels)
 
     safety_flags = telemetry.get("safety_flags")
     if isinstance(safety_flags, list):
         for flag in safety_flags:
-            log_counter(
+            _metrics_logger.log_counter(
                 "chat_persona_safety_flag_total",
                 labels={**labels, "flag": str(flag)},
             )
 
     if ioo >= _PERSONA_IOO_ALERT_THRESHOLD:
-        log_counter("chat_persona_ioo_threshold_exceeded_total", labels=labels)
+        _metrics_logger.log_counter("chat_persona_ioo_threshold_exceeded_total", labels=labels)
         if normalized_assistant_kind == "persona":
             logger.warning(
                 "Persona telemetry IOO threshold exceeded debug_id={} ioo={} user_id={} character_id={} assistant_kind={} assistant_id={}",
@@ -2447,9 +2585,9 @@ def _record_persona_telemetry_hooks(
             )
 
     if ior < _PERSONA_IOR_LOW_ALERT_THRESHOLD:
-        log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "low"})
+        _metrics_logger.log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "low"})
     elif ior > _PERSONA_IOR_HIGH_ALERT_THRESHOLD:
-        log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "high"})
+        _metrics_logger.log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "high"})
 
     window_key = _persona_ioo_window_key(
         user_id=user_id,
@@ -2464,7 +2602,7 @@ def _record_persona_telemetry_hooks(
             len(window) == window.maxlen
             and sum(window) >= _PERSONA_IOO_SUSTAIN_MIN_HITS
         ):
-            log_counter("chat_persona_ioo_sustained_alert_total", labels=labels)
+            _metrics_logger.log_counter("chat_persona_ioo_sustained_alert_total", labels=labels)
 
 
 async def _increment_active_request(user_id: str) -> int:
@@ -2617,9 +2755,11 @@ async def _maybe_rg_shadow_chat_decision(
             # Metrics must never affect control flow
             logger.debug("RG shadow: mismatch metric recording failed: {}", exc)
 
+
 # ------------------------------------------------------------------------------------
 # New Endpoints: Chat Commands discovery and Dictionary Validation
 # ------------------------------------------------------------------------------------
+
 
 @router.get(
     "/commands",
@@ -2695,7 +2835,7 @@ async def list_chat_commands(
             decision = authorize_command(
                 spec=spec,
                 context=auth_context,
-                permission_checker=user_has_permission,
+                permission_checker=_rbac.user_has_permission,
             )
             if decision.allowed:
                 items.append(_as_chat_command_from_spec(name, spec))
@@ -2740,12 +2880,14 @@ async def validate_chat_dictionary(
         partial_reason=result.partial_reason,
     )
 
+
 # --- Helper Functions ---
+
 
 @lru_cache(maxsize=1)
 def _config_default_llm_provider() -> str | None:
     """Compatibility wrapper for tests patching the endpoint config loader."""
-    return config_default_llm_provider(load_and_log_configs())
+    return config_default_llm_provider(__config.load_and_log_configs())
 
 
 def _any_cloud_provider_has_key() -> bool:
@@ -2778,8 +2920,7 @@ def _get_default_provider() -> str:
     """Compatibility wrapper for tests patching ordinary chat defaults."""
     return get_default_provider(
         config_resolver=_config_default_llm_provider,
-        test_mode_resolver=_shared_is_test_mode,
-        fallback_provider=DEFAULT_LLM_PROVIDER,
+        test_mode_resolver=_testing.is_test_mode,
     )
 
 
@@ -2787,7 +2928,7 @@ def _get_default_model_for_provider_name(target_provider: str) -> str | None:
     """Compatibility wrapper for ordinary chat's patchable override helpers."""
     return get_default_model_for_provider(
         target_provider,
-        override_default_resolver=get_override_default_model,
+        override_default_resolver=_llm_provider_overrides.get_override_default_model,
         override_resolver=get_llm_provider_override,
         config_loader=lambda: _config,
     )
@@ -2798,29 +2939,48 @@ def _should_enforce_strict_model_selection() -> bool:
     raw = os.getenv("CHAT_ENFORCE_STRICT_MODEL_SELECTION")
     if raw is not None:
         return _shared_is_truthy(raw)
-    return not _shared_is_test_mode()
+    return not _testing.is_test_mode()
 
 
-def _validate_explicit_model_availability(provider: str, model: str) -> dict[str, Any] | None:
+def _validate_explicit_model_availability(
+    provider: str, model: str, *, api_key: str | None = None,
+    app_config: dict[str, Any] | None = None, credentials_resolved: bool = False,
+    endpoint_provenance: str | None = None,
+) -> dict[str, Any] | None:
     """Validate explicit model selection against known provider inventory when available."""
     provider_name = (provider or "").strip()
     model_name = (model or "").strip()
     if not provider_name or not model_name:
         return None
 
-    availability = is_model_known_for_provider(provider_name, model_name)
+    try:
+        if credentials_resolved:
+            availability = _chat_service.is_model_known_for_provider(
+                provider_name, model_name, api_key=api_key,
+                app_config=app_config, credentials_resolved=True,
+                endpoint_provenance=endpoint_provenance,
+            )
+        else:
+            availability = _chat_service.is_model_known_for_provider(provider_name, model_name)
+    except (ChatAuthenticationError, ChatConfigurationError):
+        # The model list could not be read. Dispatch repeats the authoritative check inside the credential
+        # refresh-and-retry path, so a rejected OAuth token still refreshes (review I3).
+        return None
     if availability is None or availability:
         return None
 
+    return _model_not_available_detail(provider_name, model_name)
+
+
+def _model_not_available_detail(provider: str, model: str) -> dict[str, Any]:
+    """The 400 body for a model the provider does not list, strict pre-check or dispatch alike."""
     return {
-        "error_code": "model_not_available",
-        "message": (
-            f"Model '{model_name}' is not available for provider '{provider_name}'. "
-            "Select one of the server-advertised models for this provider."
-        ),
-        "provider": provider_name,
-        "model": model_name,
+        "error_code": ChatModelNotAvailableError.error_code,
+        "message": ChatModelNotAvailableError.message_for(provider, model),
+        "provider": provider,
+        "model": model,
     }
+
 
 async def _process_content_for_db_sync(
     content_iterable: Any, # Can be list of dicts or string
@@ -2913,7 +3073,7 @@ async def _process_content_for_db_sync(
 
             if url_str.startswith("data:"):
                 # Use chunked image processor for large images
-                image_processor = get_image_processor()
+                image_processor = _chunked_image_processor.get_image_processor()
                 if image_processor and len(url_str) > 100000:  # Large image, use chunked processing
                     is_valid, decoded_bytes, mime_type, error_msg = await image_processor.process_image_url(
                         url_str, get_max_base64_bytes()
@@ -2931,7 +3091,7 @@ async def _process_content_for_db_sync(
                         text_parts_sync.append(f"<Image failed: {error_msg}>")
                 else:
                     # Small image or processor not available - use standard validation
-                    is_valid, mime_type, decoded_bytes = validate_image_url(url_str)
+                    is_valid, mime_type, decoded_bytes = _image_validation.validate_image_url(url_str)
                     if is_valid and decoded_bytes:
                         images_sync.append((decoded_bytes, mime_type))
                         if image_details is not None:
@@ -2952,6 +3112,7 @@ async def _process_content_for_db_sync(
                 text_parts_sync.append(f"<Image URL (not processed): {url_str[:200]}>")
     return text_parts_sync, images_sync
 
+
 def _jsonify_metadata_payload(value: Any) -> Any:
     """Best-effort conversion of metadata objects to JSON-safe structures."""
     if value is None:
@@ -2971,6 +3132,7 @@ def _jsonify_metadata_payload(value: Any) -> Any:
         if isinstance(encoded, (dict, list, str, int, float, bool)) or encoded is None:
             return encoded
         return str(encoded)
+
 
 def _summarize_tool_calls(tool_calls: Any) -> str:
     """Produce a concise placeholder string describing tool call names."""
@@ -2994,6 +3156,7 @@ def _summarize_tool_calls(tool_calls: Any) -> str:
         return "[tool_call: {}{}]".format(", ".join(names[:5]), suffix)
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         return "[tool_call]"
+
 
 def _normalize_message_timestamp(value: Any) -> str | None:
     if value is None:
@@ -3030,6 +3193,7 @@ def _normalize_message_timestamp(value: Any) -> str | None:
         .replace("+00:00", "Z")
     )
 
+
 def _persist_message_sync(
     db: CharactersRAGDB,
     payload: dict[str, Any],
@@ -3046,11 +3210,12 @@ def _persist_message_sync(
             )
     return message_id
 
+
 async def _save_message_turn_to_db(
     db: CharactersRAGDB,
     conversation_id: str,
     message_obj: dict[str, Any],
-    use_transaction: bool = False
+    use_transaction: bool = False,
 ) -> str | None:
     """
     Persist a single user/assistant message.
@@ -3065,7 +3230,7 @@ async def _save_message_turn_to_db(
 
     # Capture before run_in_executor: executor threads do not inherit ContextVars.
     publication = current_buddy_publication.get()
-    metrics = get_chat_metrics()
+    metrics = _chat_metrics.get_chat_metrics()
     current_loop = asyncio.get_running_loop()
     role = message_obj.get("role")
     if role not in ("user", "assistant", "tool", "system"):
@@ -3131,11 +3296,14 @@ async def _save_message_turn_to_db(
         sender_meta["sender_name"] = _jsonify_metadata_payload(sender_name_raw)
     placeholder_reason: str | None = None
 
-    if not text_parts and not images:
+    if not "\n".join(text_parts) and not images:
         if serialized_tool_calls is not None:
             text_parts = [_summarize_tool_calls(serialized_tool_calls)]
             placeholder_reason = "tool_calls"
-        elif serialized_extra is not None:
+        elif role == "tool" and content == "" and tool_call_id_raw is not None:
+            text_parts = ["[empty tool result]"]
+            placeholder_reason = "empty_tool_result"
+        elif function_call_raw is not None:
             placeholder_reason = "function_call"
             function_name = None
             try:
@@ -3150,6 +3318,7 @@ async def _save_message_turn_to_db(
                 conversation_id,
             )
             text_parts = ["<Message processing failed - no valid content>"]
+            placeholder_reason = "invalid_content"
 
     if placeholder_reason:
         if serialized_extra is None:
@@ -3532,7 +3701,7 @@ async def create_chat_completion(
     # Database is provided via dependency; async wrapper not needed here
 
     # Initialize metrics collector
-    metrics = get_chat_metrics()
+    metrics = _chat_metrics.get_chat_metrics()
 
     # Budget enforcement is handled by the dependency and/or middleware.
     # Avoid duplicating authorization logic in the handler to prevent drift.
@@ -3567,11 +3736,19 @@ async def create_chat_completion(
         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
             user_base_dir = None
 
+    native_history_selection = request_data.tldw_history_selection_v1 or request_data.tldw_history_server_existing_input_v1
+    uses_versioned_history = native_history_selection is not None or selected_durable
+    validation_request_data = request_data
+    if request_data.tldw_history_server_existing_input_v1 is not None:
+        validation_request_data = await _existing_input_validation_request(
+            request_data, request, current_user, chat_db, scope_type, workspace_id,
+        )
+
     # Validate request payload using helper function before routing so auto model
     # selection sees the finalized request shape, including validated/injected tools.
     validation_start = time.time()
     is_valid, error_message = await validate_request_payload(
-        request_data,
+        validation_request_data,
         max_messages=MAX_MESSAGES_PER_REQUEST,
         max_images=MAX_IMAGES_PER_REQUEST,
         max_text_length=MAX_TEXT_LENGTH,
@@ -3608,7 +3785,7 @@ async def create_chat_completion(
                 if str(workspace.get("client_id") or "") != user_id:
                     raise HTTPException(status_code=404, detail="Workspace not found")
             await asyncio.to_thread(
-                require_current_persona, chat_db, owner_id=user_id, conversation=conversation,
+                _conversation_admission.require_current_persona, chat_db, owner_id=user_id, conversation=conversation,
             )
         if request_data.character_id:
             request_data.character_id = validate_character_id(request_data.character_id)
@@ -3620,13 +3797,12 @@ async def create_chat_completion(
             provider_hint = request_data.api_provider or _get_default_provider()
             request_data.tools = validate_tool_definitions(tools_as_dicts, provider=provider_hint)
         if (
-            request_data.tldw_history_selection_v1 is None
-            and not selected_durable
+            not uses_versioned_history
             and user_base_dir is not None
             and current_user
             and getattr(current_user, "id", None) is not None
         ):
-            request_data.tools = await add_skill_tool_to_tools_list_async(
+            request_data.tools = await _context_integration.add_skill_tool_to_tools_list_async(
                 request_data.tools,
                 user_id=current_user.id,
                 base_path=user_base_dir,
@@ -3676,6 +3852,7 @@ async def create_chat_completion(
             if routing_decision is None:
                 candidate_count = int((routing_debug or {}).get("candidate_count") or 0)
                 if candidate_count > 0:
+                    await enforce_llm_quota_if_the_router_was_refused(getattr(current_user, "id", None), routing_debug)
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                         detail={
@@ -3706,9 +3883,9 @@ async def create_chat_completion(
             selected_provider,
             selected_model,
             provider_debug,
-        ) = resolve_provider_and_model(
+        ) = _chat_service.resolve_provider_and_model(
             request_data=request_data,
-            metrics_default_provider=DEFAULT_LLM_PROVIDER,
+            metrics_default_provider=get_default_provider(),
             normalize_default_provider=_get_default_provider(),
             routing_decision=routing_decision,
         )
@@ -3764,9 +3941,10 @@ async def create_chat_completion(
         rg_finalized = False
 
         # Billing: initialized after request_json is available (see below)
-        _billing_enforcer: LimitEnforcer | None = None
+        _billing_enforcer: _billing_deps.LimitEnforcer | None = None
         _billing_enforcer_entered = False
         chat_macro_intent: dict[str, Any] | None = None
+        native_stream_failure: HTTPException | None = None
 
         _track_request_cm = metrics.track_request(
             provider=provider, model=model, streaming=request_data.stream, client_id=client_id
@@ -3859,7 +4037,7 @@ async def create_chat_completion(
                                 'redacted': False,
                             }
                             try:
-                                moderation = get_moderation_service()
+                                moderation = _moderation_service.get_moderation_service()
                                 # Determine effective policy for this user/client
                                 req_user_id = None
                                 try:
@@ -4040,7 +4218,7 @@ async def create_chat_completion(
             # Recompute request payload after slash command injection and revalidate/rate-limit
             validation_start = time.time()
             is_valid, error_message = await validate_request_payload(
-                request_data,
+                validation_request_data,
                 max_messages=MAX_MESSAGES_PER_REQUEST,
                 max_images=MAX_IMAGES_PER_REQUEST,
                 max_text_length=MAX_TEXT_LENGTH,
@@ -4056,7 +4234,8 @@ async def create_chat_completion(
                     raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=error_message)
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_message)
 
-            request_json = json.dumps(request_data.model_dump())
+            request_payload = validation_request_data.model_dump()
+            request_json = json.dumps(request_payload)
             request_json_bytes = request_json.encode()
             metrics.metrics.request_size_bytes.record(len(request_json_bytes))
 
@@ -4074,11 +4253,7 @@ async def create_chat_completion(
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request.") from None
 
             # Validate the full envelope above, but charge only provider-bound inference.
-            inference_request_json = json.dumps(
-                request_data.model_dump(
-                    exclude={"tldw_turn", "tldw_history_selection_v1", "tldw_history_admission_v1"}
-                )
-            )
+            inference_request_json = _inference_request_json(request_payload)
 
             # Apply rate limiting after slash command mutation so estimates are accurate.
             #
@@ -4091,7 +4266,7 @@ async def create_chat_completion(
             # limits to validate 429 behavior. So we only bypass the limiter for mocks
             # when not running in TEST_MODE.
             try:
-                _is_test_mode = _shared_is_test_mode()
+                _is_test_mode = _testing.is_test_mode()
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                 _is_test_mode = False
 
@@ -4128,10 +4303,10 @@ async def create_chat_completion(
 
             rate_limiter = None
             if not rg_active:
-                rate_limiter = get_rate_limiter()
+                rate_limiter = _rate_limiter.get_rate_limiter()
                 if (
                     not _is_test_mode
-                    and (isinstance(chat_db, Mock) or isinstance(perform_chat_api_call, Mock))
+                    and (isinstance(chat_db, Mock) or isinstance(_chat_service.perform_chat_api_call, Mock))
                 ):
                     rate_limiter = None
                 # Ensure a limiter exists in TEST_MODE even if startup didn't init it
@@ -4145,7 +4320,7 @@ async def create_chat_completion(
 
             if rg_ready:
                 # Estimate tokens for rate limiting (heuristic).
-                estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(inference_request_json))
+                estimated_tokens = estimate_tokens_from_json(inference_request_json)
                 try:
                     # Derive policy_id from middleware route_map when present.
                     policy_id = str(
@@ -4260,7 +4435,7 @@ async def create_chat_completion(
                 active_count = await _increment_active_request(user_id)
                 try:
                     # Estimate tokens for rate limiting (heuristic).
-                    estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(inference_request_json))
+                    estimated_tokens = estimate_tokens_from_json(inference_request_json)
 
                     # In TEST_MODE, avoid cross-test flakiness by scoping limiter to this request
                     # when no explicit conversation_id is provided. This prevents cumulative
@@ -4370,48 +4545,27 @@ async def create_chat_completion(
             # Durable persistence envelopes never reach the provider and must
             # not count citation excerpts a second time against inference quotas.
             try:
-                _estimated_request_tokens = estimate_tokens_from_json(
-                    _sanitize_json_for_rate_limit(inference_request_json)
-                )
+                _estimated_request_tokens = estimate_tokens_from_json(inference_request_json)
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                 _estimated_request_tokens = 1000
 
-            # Billing: LLM token enforcement via context manager (tracks actual usage)
-            if enforcement_enabled() and billing_org_id is not None and not _billing_enforcer_entered:
-                try:
-                    _billing_enforcer = LimitEnforcer(
-                        billing_org_id,
-                        LimitCategory.LLM_TOKENS_MONTH,
-                        estimated_units=max(1, _estimated_request_tokens),
-                    )
-                    await _billing_enforcer.__aenter__()
-                    _billing_enforcer_entered = True
-                except HTTPException:
-                    raise
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
-                    logger.debug(f"Billing token pre-check failed (fail-open): {_billing_err}")
-                    _billing_enforcer = None
-
-            # Usage quotas (spec 2 §4): the user's monthly LLM token allowance.
-            _quota_uid = as_quota_user_id(getattr(current_user, "id", None))
-            _llm_decision = await check_usage(
-                _quota_uid,
-                "limits.llm_tokens_per_month",
-                max(1, _estimated_request_tokens),
-                lambda: llm_tokens_this_month(_quota_uid),
-            )
-            if not _llm_decision.allowed:
-                raise HTTPException(
-                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                    detail={
-                        "error": "limit_exceeded",
-                        "category": "llm_tokens_month",
-                        "current": int(_llm_decision.used),
-                        "limit": _llm_decision.limit,
-                        "message": "Monthly LLM token limit reached",
-                    },
-                    headers={"Retry-After": str(seconds_until_utc_month_start())},
+            # Billing: LLM token enforcement via context manager (tracks actual usage). A request whose
+            # provider runs on the user's own key is neither checked nor counted as plan usage (ADR-083),
+            # and fails over to another key only while its org is within the plan (TASK-15481).
+            own_key = await _own_key_before_the_hosted_plan(current_user, selected_provider, billing_org_id)
+            if own_key is False and not _billing_enforcer_entered:
+                _billing_enforcer = await _enter_the_hosted_plans_enforcer(billing_org_id, _estimated_request_tokens)
+                _billing_enforcer_entered = _billing_enforcer is not None
+            elif own_key and allow_provider_fallback_for_request:
+                allow_provider_fallback_for_request = not await _the_hosted_plan_refuses(
+                    billing_org_id, _estimated_request_tokens
                 )
+
+            # Usage quotas (LLM usage accounting spec §4a): monthly LLM tokens, and daily and monthly LLM spend.
+            await enforce_llm_quota(
+                getattr(current_user, "id", None), max(1, _estimated_request_tokens), provider=selected_provider,
+                own_key=own_key,
+            )
 
             # Resolve one effective model before either durable macro creation or direct dispatch.
             provider = selected_provider
@@ -4423,7 +4577,7 @@ async def create_chat_completion(
                     if default_model_for_provider:
                         model = default_model_for_provider
                         request_data.model = default_model_for_provider
-                override_error = validate_provider_override(provider, model)
+                override_error = _llm_provider_overrides.validate_provider_override(provider, model)
             except ByokResolutionError as credential_error:
                 raise_detached_error(
                     _provider_credential_http_exception(credential_error)
@@ -4521,7 +4675,7 @@ async def create_chat_completion(
                     and getattr(current_user, "id", None) is not None
                     and (guardian_enabled or self_monitoring_enabled)
                 ):
-                    _guardian_runtime = bootstrap_guardian_moderation_runtime(
+                    _guardian_runtime = _supervised_policy.bootstrap_guardian_moderation_runtime(
                         user_id=current_user.id,
                         dependent_user_id=str(current_user.id),
                         chat_type=input_moderation_chat_type,
@@ -4541,13 +4695,15 @@ async def create_chat_completion(
 
             # Moderation: apply global/per-user policy to input messages (redact or block)
             try:
-                moderation = get_moderation_service()
+                moderation = _moderation_service.get_moderation_service()
                 try:
                     mon = get_topic_monitoring_service()
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                     mon = None
-                await moderate_input_messages(
-                    request_data=request_data,
+                original_saved_content = (validation_request_data.messages[0].content
+                    if request_data.tldw_history_server_existing_input_v1 is not None else None)
+                await _chat_service.moderate_input_messages(
+                    request_data=validation_request_data,
                     request=request,
                     moderation_service=moderation,
                     topic_monitoring_service=mon,
@@ -4561,6 +4717,12 @@ async def create_chat_completion(
                     dependent_user_id=_dep_user_id,
                     chat_type=input_moderation_chat_type,
                 )
+                if request_data.tldw_history_server_existing_input_v1 is not None and (
+                    len(validation_request_data.messages) != 1
+                    or validation_request_data.messages[0].role != "user"
+                    or validation_request_data.messages[0].content != original_saved_content
+                ):
+                    raise HTTPException(403, detail="The saved question cannot be replayed under the current input policy.")
             except MandatoryAuditWriteError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -4587,13 +4749,14 @@ async def create_chat_completion(
             persona_budget_tokens_used = int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET)
             persona_budget_auto_adjusted = False
             persona_budget_adjustment_reason: str | None = None
+            history_admission: dict[str, Any] | None = None
 
             try:
                 # In TEST_MODE or when explicitly enabled via config/env, allow
                 # auto-switching from 'local-llm' to 'openai' if an OpenAI key
                 # is present. This is primarily to satisfy integration tests that
                 # expect config-driven defaults.
-                _test_mode_flag = _shared_is_test_mode()
+                _test_mode_flag = _testing.is_test_mode()
                 _autoswitch_enabled = ALLOW_AUTOSWITCH_TO_OPENAI or _test_mode_flag
                 if (
                     _autoswitch_enabled
@@ -4698,7 +4861,14 @@ async def create_chat_completion(
                         },
                     )
                 if strict_model_selection and explicit_model_requested:
-                    availability_error = _validate_explicit_model_availability(target_api_provider, model)
+                    availability_error = await asyncio.to_thread(
+                        _validate_explicit_model_availability, target_api_provider, model,
+                        api_key=provider_api_key, app_config=app_config_override,
+                        credentials_resolved=True,
+                        endpoint_provenance=_derive_endpoint_provenance(
+                            credential_handle, request_override=_request_has_endpoint_override(request_data),
+                        ),
+                    )
                     if availability_error:
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
@@ -4710,7 +4880,7 @@ async def create_chat_completion(
                     if any(str(provider_api_key).lower().startswith(p) for p in invalid_patterns):
                         raise _provider_credential_http_exception_for_code("provider_authentication_failed")
 
-                if request_data.tldw_history_selection_v1 is None and request_data.tldw_turn is None:
+                if native_history_selection is None and request_data.tldw_turn is None:
                     await asyncio.to_thread(
                         save_workspace_chat_model_selection,
                         chat_db=chat_db,
@@ -4725,7 +4895,7 @@ async def create_chat_completion(
 
                 # --- Character/Conversation Context, History, and Current Turn ---
                 continuation_runtime: dict[str, Any] = {}
-                if request_data.tldw_history_selection_v1 is not None or selected_durable:
+                if uses_versioned_history:
                     from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
                     from tldw_Server_API.app.core.Chat.persistence_service import (
                         native_history_owner_key,
@@ -4740,9 +4910,12 @@ async def create_chat_completion(
                     if _active_message_sync_service(current_user, history_scope) is not None:
                         raise HTTPException(409, detail={"code": "sync_owner_unsupported", "status": "unsupported_history_capability"})
                     history_owner = native_history_owner_key(request, current_user.id)
-                    durable_history = request_data.tldw_turn.history_v1 if selected_durable else None
-                    history_binding = ((durable_history.selection if durable_history.kind == "selection" else durable_history.admission)
-                        if selected_durable else request_data.tldw_history_selection_v1)
+                    history_binding = native_history_selection
+                    if selected_durable:
+                        durable_history = request_data.tldw_turn.history_v1
+                        history_binding = (
+                            durable_history.selection if durable_history.kind == "selection" else durable_history.admission
+                        )
                     if history_binding.owner_key != history_owner:
                         raise HTTPException(409, detail={"code": "owner_conversation_mismatch"})
                     from tldw_Server_API.app.core.Chat.history_context import require_history_skill_absence
@@ -4793,10 +4966,15 @@ async def create_chat_completion(
                     )
                 completion_save_message = _save_message_turn_to_db
                 history_admission = continuation_runtime.get("tldw_history_admission_v1")
-                if history_admission is not None:
+                existing_input_selection = continuation_runtime.get("tldw_history_server_existing_input_v1")
+                if request_data.tldw_history_server_existing_input_v1 is not None and existing_input_selection is None:
+                    raise HTTPException(409, detail={"code": "unsupported_history_existing_input"})
+                if history_admission is not None or existing_input_selection is not None:
                     from tldw_Server_API.app.core.Chat.persistence_service import prepare_native_history_message
-                    reference = {key: history_admission[key] for key in ("version", "owner_key", "conversation_id",
+                    reference = ({key: history_admission[key] for key in ("version", "owner_key", "conversation_id",
                         "input_message_id", "input_message_revision", "selection_digest")}
+                        if history_admission is not None else None)
+                    continue_prefix = continuation_runtime.get("history_continue_prefix")
                     async def completion_save_message(db, cid, payload, use_transaction=False):
                         if payload.get("role") == "system":
                             return None
@@ -4819,16 +4997,24 @@ async def create_chat_completion(
                                 # Mandatory failure must survive the generic SSE callback's catcher.
                                 continuation_runtime["selected_durable_result_error"] = True
                                 raise
-                        prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync)
+                        if continue_prefix is not None and payload.get("role") == "assistant":
+                            # Continue saves the original reply plus its continuation as one sibling reply.
+                            from tldw_Server_API.app.core.Chat.history_continuation import merge_continued_reply
+                            payload = merge_continued_reply(payload, continue_prefix)
+                        prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync, max_assistant_text_length=MAX_TEXT_LENGTH)
                         prepared["extra_metadata"].update(assistant_generation_extra(payload))
                         prepared["id"] = str(uuid.uuid4())
-                        prepared["parent_message_id"] = reference["input_message_id"]
+                        prepared["parent_message_id"] = (reference["input_message_id"] if reference is not None
+                            else existing_input_selection["messages"][-1]["id"])
+                        settle = db.settle_history_admission if reference is not None else db.settle_selected_existing_input
+                        proof = reference if reference is not None else existing_input_selection
                         try:
-                            return await asyncio.to_thread(db.settle_history_admission, cid, reference, prepared,
-                                owner_client_id=str(current_user.id), owner_key=history_owner)
+                            options = {"require_unanswered": True} if reference is None else {}
+                            return await asyncio.to_thread(settle, cid, proof, prepared,
+                                owner_client_id=str(current_user.id), owner_key=history_owner, **options)
                         except HistorySelectionError as exc:
                             raise HTTPException(409, detail={"code": exc.code}) from exc
-                    if not selected_durable:
+                    if history_admission is not None and not selected_durable:
                         await asyncio.to_thread(save_workspace_chat_model_selection, chat_db=chat_db,
                             conversation_id=final_conversation_id, owner_client_id=user_id, provider=target_api_provider,
                             model=model, save_to_db=request_data.save_to_db, explicit_provider_requested=explicit_provider_requested,
@@ -4858,7 +5044,7 @@ async def create_chat_completion(
                     output_moderation_chat_type = None
 
                 # --- Prompt Templating (system + content transforms) ---
-                final_system_message, templated_llm_payload = apply_prompt_templating(
+                final_system_message, templated_llm_payload = _chat_service.apply_prompt_templating(
                     request_data=request_data,
                     character_card=character_card_for_context or {},
                     llm_payload_messages=llm_payload_messages,
@@ -4978,7 +5164,7 @@ async def create_chat_completion(
                             }
                             for item in runtime_guidance["rejected_exemplars"]
                         ]
-                elif persona_strategy != "off" and character_db_id_for_context is not None and history_admission is None:
+                elif persona_strategy != "off" and character_db_id_for_context is not None and not uses_versioned_history:
                     user_turn_text = _extract_latest_user_turn_text(getattr(request_data, "messages", []))
                     if user_turn_text:
                         budget_override = getattr(request_data, "persona_exemplar_budget_tokens", None)
@@ -5008,7 +5194,7 @@ async def create_chat_completion(
                         if persona_strategy in {"hybrid", "embeddings"}:
 
                             def _embedding_callback(turn_text: str, candidates: list[dict[str, Any]]) -> dict[str, float]:
-                                return score_exemplars_with_embeddings(
+                                return _persona_exemplar_embeddings.score_exemplars_with_embeddings(
                                     turn_text,
                                     candidates,
                                     user_id=user_id,
@@ -5061,8 +5247,8 @@ async def create_chat_completion(
                     if persona_budget_adjustment_reason:
                         persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
 
-                if history_admission is None and user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
-                    final_system_message = await build_system_message_with_skills_async(
+                if not uses_versioned_history and user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
+                    final_system_message = await _context_integration.build_system_message_with_skills_async(
                         final_system_message,
                         current_user.id,
                         user_base_dir,
@@ -5106,7 +5292,7 @@ async def create_chat_completion(
                 )
 
                 # --- LLM Call ---
-                cleaned_args = build_call_params_from_request(
+                cleaned_args = _chat_service.build_call_params_from_request(
                     request_data=request_data,
                     target_api_provider=target_api_provider,
                     provider_api_key=provider_api_key,
@@ -5187,7 +5373,7 @@ async def create_chat_completion(
                             },
                         )
 
-                    refreshed_args = build_call_params_from_request(
+                    refreshed_args = _chat_service.build_call_params_from_request(
                         request_data=request_data,
                         target_api_provider=target_provider,
                         provider_api_key=provider_api_key_new,
@@ -5213,7 +5399,7 @@ async def create_chat_completion(
                     return refreshed_args, refreshed_model
 
                 # Use provider manager for health checks and failover
-                provider_manager = get_provider_manager()
+                provider_manager = _provider_manager.get_provider_manager()
                 selected_provider = provider
 
                 if provider_manager:
@@ -5257,7 +5443,7 @@ async def create_chat_completion(
                 if selected_provider != provider:
                     try:
                         refreshed_args, refreshed_model = await rebuild_call_params_for_provider(selected_provider)
-                        override_error = validate_provider_override(selected_provider, refreshed_model or model)
+                        override_error = _llm_provider_overrides.validate_provider_override(selected_provider, refreshed_model or model)
                         if override_error:
                             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=override_error)
                         cleaned_args = refreshed_args
@@ -5285,9 +5471,9 @@ async def create_chat_completion(
 
                 # Request Queue Integration (Admission control / backpressure)
                 # ------------------------------------------------------------------------
-                is_test_mode_flag = _shared_is_test_mode()
+                is_test_mode_flag = _testing.is_test_mode()
                 try:
-                    queue_candidate = get_request_queue()
+                    queue_candidate = _request_queue.get_request_queue()
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                     queue_candidate = None
 
@@ -5322,7 +5508,7 @@ async def create_chat_completion(
                 if admission_queue is not None:
                     try:
                         # Estimate tokens for queue gating (sanitize base64 payloads)
-                        est_tokens_for_queue = _estimate_tokens_for_queue(inference_request_json)
+                        est_tokens_for_queue = estimate_tokens_from_json(inference_request_json)
                         # Use user_id for per-client fairness; HIGH priority for streaming
                         priority = RequestPriority.HIGH if bool(request_data.stream) else RequestPriority.NORMAL
                         # Use request_id generated for this call
@@ -5398,7 +5584,7 @@ async def create_chat_completion(
                             or (target_api_provider in {"openai", "groq", "mistral"})
                         )
                     )
-                    and perform_chat_api_call is _ORIGINAL_PERFORM_CHAT_API_CALL
+                    and _chat_service.perform_chat_api_call is _ORIGINAL_PERFORM_CHAT_API_CALL
                 )
 
                 def _mock_chat_call(**kwargs):
@@ -5457,7 +5643,7 @@ async def create_chat_completion(
                 if use_mock_provider and provider in {"openai", "groq", "mistral"}:
                     llm_call_func = partial(_mock_chat_call, **cleaned_args)
                 else:
-                    llm_call_func = partial(perform_chat_api_call, **cleaned_args)
+                    llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args)
 
                 def _active_provider_uses_openai_oauth() -> bool:
                     active_handle = active_credential.get("handle")
@@ -5481,7 +5667,7 @@ async def create_chat_completion(
 
                 def _record_openai_oauth_retry(outcome: str) -> None:
                     try:
-                        log_counter(
+                        _metrics_logger.log_counter(
                             "byok_oauth_401_retry_total",
                             labels={
                                 "provider": "openai",
@@ -5541,7 +5727,9 @@ async def create_chat_completion(
                                 )
 
                             try:
-                                refreshed_response = perform_chat_api_call(**refreshed_args)
+                                # Checked at the call on its own handle. The usage row keeps the first handle's
+                                # source, which differs only if the user's OAuth key was deleted mid-request (TASK-13955).
+                                refreshed_response = _chat_service.perform_chat_api_call(**refreshed_args)
                                 _record_openai_oauth_retry("success")
                                 return refreshed_response
                             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as retry_exc:
@@ -5561,7 +5749,7 @@ async def create_chat_completion(
 
                 # Build moderation getter that overlays guardian policies on output
                 def _get_moderation_with_guardian():
-                    base = get_moderation_service()
+                    base = _moderation_service.get_moderation_service()
                     if not _supervised_engine or not _dep_user_id:
                         return base
                     try:
@@ -5579,7 +5767,7 @@ async def create_chat_completion(
                 async def _on_stream_full_reply_for_persona_telemetry(full_reply: str) -> None:
                     assistant_text = str(full_reply or "")
                     if should_record_persona_telemetry:
-                        persona_telemetry = compute_persona_exemplar_telemetry(
+                        persona_telemetry = _persona_exemplar_telemetry.compute_persona_exemplar_telemetry(
                             output_text=assistant_text,
                             selected_exemplars=persona_selected_exemplars,
                         )
@@ -5620,7 +5808,7 @@ async def create_chat_completion(
                         error_state: dict[str, Any],
                         stream_attempt_index: int,
                     ):
-                        return await execute_streaming_call(
+                        return await with_llm_call_context(execute_streaming_call(
                             current_loop=current_loop,
                             cleaned_args=cleaned_args,
                             selected_provider=selected_provider,
@@ -5636,8 +5824,11 @@ async def create_chat_completion(
                             character_card_for_context=character_card_for_context,
                             chat_db=chat_db,
                             save_message_fn=completion_save_message,
-                            history_persistence_ack=history_admission is not None,
                             selected_durable_text_only=selected_durable,
+                            native_persistence=native_stream_persistence(
+                                request_data,
+                                not selected_durable and (history_admission is not None or existing_input_selection is not None),
+                            ),
                             system_message_id=system_message_id,
                             user_message_id=continuation_runtime.get("user_message_id"),
                             audit_service=audit_service,
@@ -5680,7 +5871,8 @@ async def create_chat_completion(
                                 0.0,
                                 _provider_stream_prime_remaining(error_state),
                             ),
-                        )
+                            forward_usage_chunk=_client_asked_for_stream_usage(request_data),
+                        ), records_itself=True)
 
                     attempted_providers: list[str] = []
                     stream_attempt_index = 0
@@ -5842,7 +6034,7 @@ async def create_chat_completion(
                                 raise _provider_credential_http_exception_for_code("missing_provider_credentials")
                             cleaned_args = refreshed_args
                             model = refreshed_model or model
-                            llm_call_func = partial(perform_chat_api_call, **cleaned_args)
+                            llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args)
                             continue
 
                         if replay_certified and stream_error_code == "provider_unavailable":
@@ -5881,12 +6073,14 @@ async def create_chat_completion(
                                 cleaned_args = refreshed_args
                                 model = refreshed_model or model
                                 selected_provider = fallback_provider
-                                llm_call_func = partial(perform_chat_api_call, **cleaned_args)
+                                llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args)
                                 continue
 
                         if oauth_retry_state["attempted"]:
                             _record_openai_oauth_retry("retry_auth_failed")
-                        raise _provider_credential_http_exception_for_code(stream_error_code)
+                        raise _provider_credential_http_exception_for_code(
+                            stream_error_code, stream_error_state.get("model_not_available_message"),
+                        )
 
                     if persona_debug_requested and persona_debug_meta and persona_debug_meta.get("debug_id"):
                         try:
@@ -5979,7 +6173,7 @@ async def create_chat_completion(
                 else:  # Non-streaming
 
                     async def _execute_non_stream_response():
-                        return await execute_non_stream_call(
+                        return await with_llm_call_context(_chat_service.execute_non_stream_call(
                             current_loop=current_loop,
                             cleaned_args=cleaned_args,
                             selected_provider=selected_provider,
@@ -6010,7 +6204,7 @@ async def create_chat_completion(
                             assistant_parent_message_id=assistant_parent_message_id,
                             continuation_metadata=continuation_meta,
                             selected_durable_text_only=selected_durable,
-                        )
+                        ), records_itself=True)
 
                     while True:
                         try:
@@ -6047,7 +6241,7 @@ async def create_chat_completion(
                                 )
                             cleaned_args = refreshed_args
                             model = refreshed_model or model
-                            llm_call_func = partial(perform_chat_api_call, **cleaned_args)
+                            llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args)
                     persona_telemetry: dict[str, Any] | None = None
                     assistant_reply_text = (
                         _extract_assistant_text_from_completion_payload(encoded_payload)
@@ -6055,7 +6249,7 @@ async def create_chat_completion(
                         else ""
                     )
                     if isinstance(encoded_payload, dict) and should_record_persona_telemetry:
-                        persona_telemetry = compute_persona_exemplar_telemetry(
+                        persona_telemetry = _persona_exemplar_telemetry.compute_persona_exemplar_telemetry(
                             output_text=assistant_reply_text,
                             selected_exemplars=persona_selected_exemplars,
                         )
@@ -6091,7 +6285,7 @@ async def create_chat_completion(
                         and isinstance(encoded_payload, dict)
                     ):
                         if persona_telemetry is None:
-                            persona_telemetry = compute_persona_exemplar_telemetry(
+                            persona_telemetry = _persona_exemplar_telemetry.compute_persona_exemplar_telemetry(
                                 output_text="",
                                 selected_exemplars=persona_selected_exemplars,
                             )
@@ -6158,14 +6352,46 @@ async def create_chat_completion(
             # Important: preserve HTTPException status codes raised from deeper layers
             # before a broad Exception handler can catch and normalize them.
             except ProviderCredentialTerminalError as credential_error:
+                if request_data.stream and history_admission is not None:
+                    native_stream_failure = _provider_credential_http_exception_for_code(_provider_credential_error_code(credential_error) or "provider_configuration_invalid")
+                    return _admitted_native_provider_error_response(
+                        history_admission, _provider_credential_error_code(credential_error) or "provider_configuration_invalid",
+                    )
                 raise_detached_error(
                     _provider_credential_http_exception_for_code(credential_error.code)
                 )
 
             except ByokResolutionError as credential_error:
+                if request_data.stream and history_admission is not None:
+                    native_stream_failure = _provider_credential_http_exception_for_code(_provider_credential_error_code(credential_error) or "provider_configuration_invalid")
+                    return _admitted_native_provider_error_response(
+                        history_admission, _provider_credential_error_code(credential_error) or "provider_configuration_invalid",
+                    )
                 raise_detached_error(_provider_credential_http_exception(credential_error))
 
+            except ChatModelNotAvailableError as unavailable:
+                if request_data.stream and history_admission is not None:
+                    native_stream_failure = _provider_credential_http_exception_for_code(
+                        "model_not_available", str(unavailable),
+                    )
+                    return _admitted_native_provider_error_response(
+                        history_admission, "model_not_available", str(unavailable),
+                    )
+                raise_detached_error(
+                    HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=_model_not_available_detail(
+                            str(unavailable.provider or provider), str(unavailable.model),
+                        ),
+                    )
+                )
+
             except (ChatAuthenticationError, ChatConfigurationError) as provider_error:
+                if request_data.stream and history_admission is not None:
+                    native_stream_failure = _provider_credential_http_exception_for_code(_provider_credential_error_code(provider_error) or "provider_configuration_invalid")
+                    return _admitted_native_provider_error_response(
+                        history_admission, _provider_credential_error_code(provider_error) or "provider_configuration_invalid",
+                    )
                 raise_detached_error(_provider_credential_http_exception(provider_error))
 
             except HTTPException as e_http:
@@ -6184,6 +6410,10 @@ async def create_chat_completion(
                         type(e_http).__name__,
                         extra={"request_id": request_id, "status_code": e_http.status_code}
                     )
+                provider_failure_code = _provider_credential_error_code(e_http)
+                if request_data.stream and history_admission is not None and provider_failure_code is not None:
+                    native_stream_failure = _provider_credential_http_exception_for_code(provider_failure_code)
+                    return _admitted_native_provider_error_response(history_admission, provider_failure_code)
                 # Allow-list expected HTTP errors raised intentionally by the endpoint
                 allowed_statuses = {
                     status.HTTP_400_BAD_REQUEST,
@@ -6191,6 +6421,7 @@ async def create_chat_completion(
                     status.HTTP_403_FORBIDDEN,
                     status.HTTP_404_NOT_FOUND,
                     status.HTTP_409_CONFLICT,
+                    status.HTTP_402_PAYMENT_REQUIRED,
                     status.HTTP_413_CONTENT_TOO_LARGE,
                     status.HTTP_429_TOO_MANY_REQUESTS,
                     status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -6421,6 +6652,9 @@ async def create_chat_completion(
                         client_detail = "An unexpected internal server error occurred."
                     else:
                         client_detail = "An internal server error occurred."
+                if request_data.stream and history_admission is not None and error_code in _PROVIDER_CREDENTIAL_MESSAGES:
+                    native_stream_failure = _provider_credential_http_exception_for_code(error_code)
+                    return _admitted_native_provider_error_response(history_admission, error_code)
                 raise_detached_error(
                     HTTPException(status_code=err_status, detail=client_detail)
                 )
@@ -6428,6 +6662,9 @@ async def create_chat_completion(
         finally:
             try:
                 exc_type, exc_value, exc_tb = sys.exc_info()
+                if exc_type is None and native_stream_failure is not None:
+                    # Returning a receipt-bearing error stream still exits as a failed request.
+                    exc_type, exc_value, exc_tb = HTTPException, native_stream_failure, None
                 if exc_type is not None and _rg_handle_id and not rg_finalized:
                     try:
                         gov = getattr(request.app.state, "rg_governor", None) if request is not None else None
@@ -6468,7 +6705,7 @@ async def create_chat_completion(
 async def get_chat_queue_status():
     """Expose raw chat request queue metrics for diagnostics."""
     try:
-        queue = get_request_queue()
+        queue = _request_queue.get_request_queue()
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         queue = None
     if queue is None:
@@ -6501,7 +6738,7 @@ async def get_chat_queue_activity(
     if limit < 1 or limit > 1000:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="limit must be between 1 and 1000")
     try:
-        queue = get_request_queue()
+        queue = _request_queue.get_request_queue()
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         queue = None
     if queue is None:
@@ -6513,17 +6750,20 @@ async def get_chat_queue_activity(
         logger.exception("Chat queue activity inspection failed")
         return {"enabled": True, "error": "Queue activity unavailable"}
 
-def _sanitize_json_for_rate_limit(request_json: str) -> str:
-    """Redact base64 image payloads to avoid inflating token estimates.
 
-    Replaces data:image...;base64,<payload> with a small placeholder so that
-    token estimation reflects text size, not binary data.
+def _client_asked_for_stream_usage(request_data: Any) -> bool:
+    """Whether the client asked for a stream's usage chunk (OpenAI's ``stream_options.include_usage``).
+
+    The OpenAI SDKs send ``stream_options`` at the top level of the body; other clients may put it in ``extra_body``.
     """
-    try:
-        pattern = re.compile(r"(\"url\"\s*:\s*\"data:image[^,]*,)[^\"\s]+")
-        return pattern.sub(r"\1<omitted>", request_json)
-    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-        return request_json
+    extra_body = getattr(request_data, "extra_body", None)
+    for options in (
+        (getattr(request_data, "model_extra", None) or {}).get("stream_options"),
+        extra_body.get("stream_options") if isinstance(extra_body, dict) else None,
+    ):
+        if isinstance(options, dict) and options.get("include_usage") is True:
+            return True
+    return False
 
 
 def _build_streaming_commit_cb(
@@ -6535,7 +6775,8 @@ def _build_streaming_commit_cb(
     """Build the rg_commit_cb for streaming chat that handles both RG and billing.
 
     The callback is invoked by chat_service when the stream finishes with the
-    total estimated token count.  It must:
+    recorded token count: the provider's usage chunk when it sent one, else the
+    estimate.  It must:
       - Record billing usage via apply_usage_delta (hot cache) AND schedule a
         durable cost-units ledger write so usage survives cache expiry/restart.
       - Return an awaitable that the caller awaits, combining the durable
@@ -6601,15 +6842,6 @@ def _build_streaming_commit_cb(
         return _durable_and_rg()
 
     return _commit
-
-
-def _estimate_tokens_for_queue(request_json: str) -> int:
-    """Estimate tokens for queue admission, ignoring base64 payload bulk."""
-    try:
-        sanitized = _sanitize_json_for_rate_limit(request_json)
-        return max(1, len(sanitized) // 4)
-    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-        return 1
 
 
 def _coerce_datetime(value: Any) -> datetime | None:
@@ -6834,9 +7066,11 @@ def _replace_conversation_keywords(
         )
         return
     existing = db.get_keywords_for_conversation(conversation_id)
-    existing_map = {str(k.get("keyword") or "").strip().lower(): int(k.get("id")) for k in existing if k.get("id")}
-    target = {str(k).strip() for k in keywords if k is not None and str(k).strip()}
-    target_map = {t.lower(): t for t in target}
+    existing_map = {normalize_keyword_identity(str(k.get("keyword") or "")): int(k["id"]) for k in existing if k.get("id")}
+    target_map: dict[str, str] = {}
+    for keyword in keywords:
+        if keyword is not None and str(keyword).strip():
+            target_map.setdefault(normalize_keyword_identity(str(keyword)), str(keyword).strip())
 
     for key, kw_id in existing_map.items():
         if key not in target_map:
@@ -6876,7 +7110,7 @@ def _get_knowledge_qa_share_signing_key() -> bytes:
     if explicit:
         return explicit.encode("utf-8")
     try:
-        return derive_hmac_key()
+        return _crypto_utils.derive_hmac_key()
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         # Fall back only to a real deployment secret. This previously ended with
         # `or "knowledge_qa_share_link_default"` -- a constant published in this
@@ -7019,7 +7253,7 @@ def _persist_knowledge_qa_share_links(
             snapshot_valid = (
                 isinstance(snapshot, dict) and snapshot.get("status") == "valid"
             )
-            final_settings = validate_chat_settings_storage(
+            final_settings = _chat_settings_validation.validate_chat_settings_storage(
                 final_settings,
                 reject_credentials=snapshot_valid,
                 allow_internal=True,
@@ -7353,7 +7587,7 @@ async def list_chat_conversations(
             search_in=search_in,
         )
         duration_seconds = max(time.perf_counter() - started_at, 0.0)
-        registry = get_metrics_registry()
+        registry = _metrics_manager.get_metrics_registry()
         registry.increment("chat_conversation_search_requests_total", labels=labels)
         registry.observe("chat_conversation_search_duration_seconds", duration_seconds, labels=labels)
         return labels
@@ -8159,7 +8393,7 @@ async def resolve_conversation_share_token(
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid share link owner") from exc
 
-    db = await get_chacha_db_for_user_id(owner_user_id, str(owner_user_id))
+    db = await _ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id(owner_user_id, str(owner_user_id))
     conversation = db.get_conversation_by_id(conversation_id)
     if not conversation or conversation.get("deleted"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
@@ -8529,28 +8763,36 @@ async def get_conversation_citations(
         ) from exc
 
 
-@router.post("/conversations/{conversation_id}/history/selection", response_model=HistoryCaptureResultV1, dependencies=[Depends(require_expected_user)])
+@router.post("/conversations/{conversation_id}/history/selection", response_model=HistoryCaptureResultV1,
+             dependencies=[Depends(require_expected_user)])
 async def capture_conversation_history(
     request: Request,
     body: HistoryCaptureRequestV1,
     conversation_id: str,
     scope_type: Literal["global", "workspace"] | None = None,
     workspace_id: str | None = None,
+    include_native_completion: bool = Query(False, description=(
+        "Opt in to selected_history_v1 persistence ownership eligibility on a captured send. "
+        "Omitted or false preserves the legacy response; completion admission rechecks ownership."
+    )),
+    include_reasoning_history_support: bool = Query(False),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
 ):
-    """Capture a complete owner-bound history manifest and selected content."""
+    """Capture owner-bound history after one-time valid legacy dictionary binding."""
     from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection, snapshot_to_wire
     from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
 
     scope = _resolve_conversation_scope(scope_type, workspace_id)
     conversation = _verify_conversation_ownership(db, conversation_id, current_user, scope)
-    # A capture is a read and the capability handshake for versioned writes. A Sync v2
+    # Capture normally reads; valid legacy dictionary IDs may first acquire frozen
+    # settings authority under owner lock/CAS. It never appends a message. A Sync v2
     # owner passes it for client-managed turns, whose admission and settlement publish
     # their envelopes (character_messages.send_message). A chat bound to a character
     # takes server-settled turns (the server owns its input and result writes), which
     # that owner cannot use yet, so the handshake still refuses it, before any dispatch.
-    if conversation.get("assistant_kind") == "character" or conversation.get("character_id") is not None:
+    if (body.required_capability == "tldw_history_server_existing_input_v1"
+            or conversation.get("assistant_kind") == "character" or conversation.get("character_id") is not None):
         from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
 
         if _active_message_sync_service(current_user, scope) is not None:
@@ -8560,22 +8802,49 @@ async def capture_conversation_history(
     if view["conversation_id"] != conversation_id or view["owner_key"] not in {None, owner}:
         raise HTTPException(409, detail={"status": "invalid_history", "code": "owner_conversation_mismatch"})
     view["owner_key"] = owner
+    capability = ({"acknowledged_capability": body.required_capability}
+                  if body.required_capability else {})
     try:
         with db.transaction() as conn:
+            if body.purpose == "send" and (conversation.get("assistant_kind") == "character" or conversation.get("character_id") is not None):
+                from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+                    bind_legacy_assigned_dictionaries,
+                )
+
+                bind_legacy_assigned_dictionaries(db, conn, conversation_id=conversation_id, owner_user_id=str(current_user.id),
+                    owner_key=owner, view=view, scope_type=scope.scope_type, workspace_id=scope.workspace_id)
             snap = db.get_conversation_history_snapshot(conversation_id, owner_client_id=str(current_user.id),
                 owner_key=owner, projection_id=view["interpretation"].get("projection_id"), conn=conn)
             wire = snapshot_to_wire(snap)
             result = resolve_history_selection(wire, view, body.purpose, "")
             if result["status"] != "ready":
-                return {**result, "snapshot": wire, "view": view}
+                return {**result, "snapshot": wire, "view": view, **capability}
             content = db.get_conversation_history_selected_content(conversation_id,
                 [row["id"] for row in result["rows"]], snapshot=snap, owner_client_id=str(current_user.id),
                 owner_key=owner, conn=conn)
+            if include_native_completion and body.purpose == "send":
+                from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
+
+                capability.update({"native_completion_v1": {
+                    "policy": "selected_history_v1",
+                    "supported": _active_message_sync_service(current_user, scope) is None,
+                    "storage_context_digest": snap.storage_context_digest,
+                    **({"reasoning_history_supported": True} if include_reasoning_history_support else {}),
+                }})
+            proof = {}
+            if body.accepted_input_admission is not None:
+                proof["validated_admission"] = db.validate_history_admission(
+                    conversation_id, body.accepted_input_admission.model_dump(mode="json"), snapshot=snap,
+                    owner_client_id=str(current_user.id), owner_key=owner, conn=conn,
+                )
             return {"status": "captured", "snapshot": wire, "view": view, "purpose": body.purpose,
                     "rows": result["rows"], "selected_content": content,
-                    "storage_context_digest": snap.storage_context_digest}
+                    "storage_context_digest": snap.storage_context_digest, **capability, **proof}
     except HistorySelectionError as exc:
-        raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code}) from exc
+        failure = "unsupported_history_capability" if exc.code.startswith("unsupported_history_context") else "stale_selection"
+        raise HTTPException(409, detail={"status": failure, "code": exc.code}) from exc
+    except ConflictError as exc:
+        raise HTTPException(409, detail={"status": "stale_selection", "code": "stale_settings"}) from exc
 
 
 @router.post("/conversations/{conversation_id}/history/legacy-projection", dependencies=[Depends(require_expected_user)])

@@ -17,10 +17,8 @@ vi.mock("antd", () => ({
   }
 }))
 
-const t = (((_key: string, fallback?: string) => fallback || _key) as unknown) as TFunction<
-  "translation",
-  undefined
->
+const t = ((_key: string, fallback?: string) =>
+  fallback || _key) as unknown as TFunction<"translation", undefined>
 
 describe("runBulkDelete", () => {
   beforeEach(() => {
@@ -113,4 +111,28 @@ describe("runBulkDelete", () => {
     )
     expect(mocks.messageSuccess).not.toHaveBeenCalled()
   })
+})
+
+it("does not publish obsolete bulk feedback after its account or view is retired", async () => {
+  mocks.messageError.mockClear()
+  mocks.messageSuccess.mockClear()
+  let current = true
+  let acknowledge!: () => void
+  const deleteConversation = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        acknowledge = resolve
+      })
+  )
+  const pending = runBulkDelete({
+    selectedConversationIds: ["A"],
+    deleteConversation,
+    t,
+    isCurrent: () => current
+  })
+  current = false
+  acknowledge()
+  expect(await pending).toBeNull()
+  expect(mocks.messageSuccess).not.toHaveBeenCalled()
+  expect(mocks.messageError).not.toHaveBeenCalled()
 })

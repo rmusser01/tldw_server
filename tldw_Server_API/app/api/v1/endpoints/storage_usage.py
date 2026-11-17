@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_api_key_scope
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
     CategoryUsage,
     FolderInfo,
@@ -23,7 +23,11 @@ async def _get_storage_service() -> StorageQuotaService:
     return await storage_endpoint._get_service()
 
 
-@router.get("/usage", response_model=StorageUsageResponse)
+@router.get(
+    "/usage",
+    response_model=StorageUsageResponse,
+    dependencies=[Depends(require_api_key_scope("read"))],
+)
 async def get_storage_usage(
     user: User = Depends(get_request_user),
     service: StorageQuotaService = Depends(_get_storage_service),
@@ -81,6 +85,9 @@ async def get_storage_usage(
         usage=usage,
         quota_mb=quota_mb,
         quota_used_mb=quota_used_mb,
+        legacy_quota_used_mb=usage_data.get('legacy_quota_used_mb', quota_used_mb),
+        native_bytes=usage_data.get('native_bytes', 0),
+        native_mb=usage_data.get('native_mb', 0.0),
         available_mb=available_mb,
         usage_percentage=usage_pct,
         at_soft_limit=at_soft_limit,
@@ -89,7 +96,11 @@ async def get_storage_usage(
     )
 
 
-@router.get("/usage/breakdown", response_model=UsageBreakdownResponse)
+@router.get(
+    "/usage/breakdown",
+    response_model=UsageBreakdownResponse,
+    dependencies=[Depends(require_api_key_scope("read"))],
+)
 async def get_usage_breakdown(
     user: User = Depends(get_request_user),
     service: StorageQuotaService = Depends(_get_storage_service),
@@ -120,6 +131,10 @@ async def get_usage_breakdown(
 
     return UsageBreakdownResponse(
         user_id=user.id,
+        quota_used_mb=quota_used_mb,
+        legacy_quota_used_mb=usage_data.get('legacy_quota_used_mb', quota_used_mb),
+        native_bytes=usage_data.get('native_bytes', 0),
+        native_mb=usage_data.get('native_mb', 0.0),
         by_category=by_category,
         by_folder=[
             FolderInfo(

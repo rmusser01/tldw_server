@@ -5,8 +5,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AnnotationColor(str, Enum):
@@ -95,6 +96,22 @@ class AnnotationSyncRequest(BaseModel):
         None,
         description="Optional client-generated IDs to match with server IDs in response",
     )
+
+
+    @model_validator(mode="after")
+    def validate_client_identities(self) -> Self:
+        """A supplied creation identity must cover exactly one annotation."""
+        if self.client_ids is not None:
+            if len(self.client_ids) != len(self.annotations) or len(set(self.client_ids)) != len(self.client_ids):
+                raise ValueError("client_ids must be unique and match the annotation count")
+            if any(not value.strip() or len(value) > 128 for value in self.client_ids):
+                raise ValueError("client_ids must be nonblank and at most 128 characters")
+            try:
+                for value in self.client_ids:
+                    value.encode("utf-8")
+            except UnicodeEncodeError as exc:
+                raise ValueError("client_ids must contain valid Unicode") from exc
+        return self
 
 
 class AnnotationSyncResponse(BaseModel):

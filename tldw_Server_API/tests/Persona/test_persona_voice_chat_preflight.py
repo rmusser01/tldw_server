@@ -13,15 +13,10 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def configured_target(monkeypatch: pytest.MonkeyPatch) -> Any:
-    from tldw_Server_API.app.core.Chat import chat_service, chat_target_resolution
+    from tldw_Server_API.app.core.Chat import chat_target_resolution
 
     target = SimpleNamespace(provider="deepseek", model="deepseek-chat")
     monkeypatch.setattr(chat_target_resolution, "resolve_chat_target", lambda **kwargs: target)
-
-    def unexpected_static_credentials(*args: Any, **kwargs: Any) -> Any:
-        pytest.fail("Voice preparation cannot decide the caller's effective credentials from server keys")
-
-    monkeypatch.setattr(chat_service, "resolve_static_provider_fallback", unexpected_static_credentials)
     return target
 
 

@@ -92,6 +92,14 @@ def test_drain_gate_503_preserves_cors_headers_for_browser_clients(draining_clie
     required = {item.lower() for item in CORS_EXPOSE_HEADERS}
     if exposed != required:
         raise AssertionError(f"unexpected drain exposed-header policy: {sorted(exposed)!r}")
+    if "x-generated-file-id" not in exposed:
+        raise AssertionError("Browser clients cannot read the saved speech file acknowledgement")
+    healthy = draining_client.get("/health", headers={"Origin": "http://localhost:3000"})
+    healthy_exposed = {
+        item.strip().lower() for item in healthy.headers.get("Access-Control-Expose-Headers", "").split(",")
+    }
+    if healthy.status_code != 200 or "x-generated-file-id" not in healthy_exposed:
+        raise AssertionError("Ordinary CORS responses must expose the saved speech file acknowledgement")
     if "origin" not in blocked.headers.get("Vary", "").lower():
         raise AssertionError("drain CORS response should vary by Origin")
     cors_config = draining_client.app.state._tldw_drain_gate_cors_config

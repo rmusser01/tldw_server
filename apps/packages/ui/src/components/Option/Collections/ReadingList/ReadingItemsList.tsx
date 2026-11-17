@@ -19,6 +19,7 @@ import { useUndoNotification } from "@/hooks/useUndoNotification"
 import { useCollectionsStore } from "@/store/collections"
 import type { ReadingSavedSearch, ReadingStatus } from "@/types/collections"
 import { formatDateInputValue, parseDateInputValue } from "@/utils/date-input"
+import { dedupeTags } from "@/utils/tag-identity"
 import { normalizeBulkTags, getBulkFailureLines } from "./bulkActions"
 import { ReadingItemCard } from "./ReadingItemCard"
 import { ReadingItemDetail } from "./ReadingItemDetail"
@@ -354,10 +355,7 @@ export const ReadingItemsList: React.FC = () => {
 
   const handleTagFilterChange = useCallback(
     (tags: string[]) => {
-      const normalized = tags
-        .map((tag) => tag.trim().toLowerCase())
-        .filter(Boolean)
-      setFilterTags(Array.from(new Set(normalized)))
+      setFilterTags(dedupeTags(tags))
     },
     [setFilterTags]
   )

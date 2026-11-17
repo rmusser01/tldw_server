@@ -128,7 +128,7 @@ describe("useConversationContextComposition", () => {
 
   it.each(["explicit", "inherited"])("retains %s unmatched optional context as an explicit override", async origin => {
     const primitives = buildPrimitives()
-    primitives.processWorldBookContext = vi.fn(async () => ({ injected_content: "", entries_matched: 0, tokens_used: 0, books_used: 0, entry_ids: [] }))
+    primitives.processWorldBookContext = vi.fn(async () => ({ injected_content: "", entries_matched: 0, tokens_used: 0, books_used: 0, entry_ids: [], diagnostics: [] }))
     const { result } = renderHook(() => useConversationContextComposition({
       draftMessage: "Hello", selection: { characterId: 7, worldBookIds: origin === "explicit" ? [3] : [], dictionaryIds: [] }, inheritedWorldBookIds: origin === "inherited" ? [3] : [], primitives
     }))

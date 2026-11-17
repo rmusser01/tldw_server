@@ -39,6 +39,14 @@ def validate_base_url(base_url: str | None, *, allow_remote_base_url: bool = Fal
             provider=PROVIDER_KEY,
             error_code="invalid_base_url",
         )
+    try:
+        parsed.port  # noqa: B018 - raises ValueError for a non-numeric or out-of-range port
+    except ValueError as exc:
+        raise TTSValidationError(
+            "audio.cpp base_url has an invalid port",
+            provider=PROVIDER_KEY,
+            error_code="invalid_base_url",
+        ) from exc
     if not allow_remote_base_url and not _is_loopback_host(parsed.hostname):
         raise TTSValidationError(
             "audio.cpp base_url must be loopback unless allow_remote_base_url is enabled",
@@ -104,6 +112,7 @@ class AudioCppConfig:
     timeout: int
     managed: bool
     allow_remote_base_url: bool
+    allow_private_network: bool
     external_voice_reference_mode: str
     retain_request_artifacts: bool
     request_option_allowlist: tuple[str, ...]
@@ -137,6 +146,9 @@ class AudioCppConfig:
             timeout=int(config.get("timeout") or 300),
             managed=parse_bool(extra_params.get("managed"), default=False, key="audio_cpp.managed"),
             allow_remote_base_url=allow_remote,
+            allow_private_network=parse_bool(
+                extra_params.get("allow_private_network"), default=False, key="audio_cpp.allow_private_network"
+            ),
             external_voice_reference_mode=mode,
             retain_request_artifacts=parse_bool(extra_params.get("retain_request_artifacts"), default=False, key="audio_cpp.retain_request_artifacts"),
             request_option_allowlist=tuple(str(item) for item in allowlist),

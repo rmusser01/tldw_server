@@ -7,12 +7,13 @@ the /api/v1/chat/completions endpoint so the endpoint can orchestrate at a
 higher level. The goal is to reduce duplication and cognitive load while
 keeping the wire behavior identical.
 """
+
 from __future__ import annotations
 
 import asyncio
 import base64
 import contextlib
-import copy
+import html
 import inspect
 import json as _json
 import os
@@ -22,8 +23,7 @@ import time
 import uuid as _uuid
 from collections.abc import AsyncIterator, Awaitable, Iterator, Mapping
 from dataclasses import dataclass
-from functools import lru_cache, partial
-from pathlib import Path
+from functools import partial
 from typing import Any, Callable
 
 from fastapi import HTTPException, status
@@ -34,14 +34,6 @@ from starlette.responses import StreamingResponse
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    ServerFallbackCredentials,
-    resolve_static_server_fallback,
-)
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import replace_placeholders
 from tldw_Server_API.app.core.Character_Chat.constants import DEFAULT_CHARACTER_NAME
@@ -70,6 +62,7 @@ from tldw_Server_API.app.core.Chat.chat_exceptions import get_request_id
 
 # Reuse existing helpers from chat_helpers and prompt templating
 from tldw_Server_API.app.core.Chat.chat_helpers import (
+    first_user_message_text,
     get_or_create_character_context,
     get_or_create_conversation,
 )
@@ -85,17 +78,29 @@ from tldw_Server_API.app.core.Chat.generation_metadata import (
     GENERATION_STATUS_LENGTH,
     build_generation_metadata,
 )
+from tldw_Server_API.app.core.Chat.history_selection import (
+    REPLY_ACTION_REFUSED_QUESTION,
+    REPLY_ACTION_REFUSED_REQUEST,
+    HistorySelectionError,
+    HistorySelectionSnapshotV1,
+    reply_action_refusal,
+)
+from tldw_Server_API.app.core.Chat.knowledge_save import split_reasoning_text, strip_reasoning_blocks
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.Chat.moderation_pipeline import (
     OutputModerationRuntime,
     apply_output_safety_to_choices,
 )
 from tldw_Server_API.app.core.Chat.persistence_service import (
+    NativeStreamPersistence,
     build_assistant_message_payload,
     save_assistant_message,
     save_tool_messages,
 )
-from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import (
+    build_prompt_cost_envelope,
+    estimate_segment_tokens,
+)
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
     PromptCostGuardrailDecision,
     evaluate_prompt_cost_guardrails,
@@ -131,6 +136,8 @@ from tldw_Server_API.app.core.Chat.streaming_pipeline import (
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     CHAT_STREAM_INCLUDE_METADATA,
+    HEARTBEAT_INTERVAL as CHAT_HEARTBEAT_INTERVAL,
+    STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
     await_stream_operation_bounded,
     cancel_stream_tasks_bounded,
     create_streaming_response_with_timeout,
@@ -143,12 +150,6 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
     trusted_local_stream_error_frame,
-)
-from tldw_Server_API.app.core.Chat.streaming_utils import (
-    HEARTBEAT_INTERVAL as CHAT_HEARTBEAT_INTERVAL,
-)
-from tldw_Server_API.app.core.Chat.streaming_utils import (
-    STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
 )
 from tldw_Server_API.app.core.Chat.tool_auto_exec import execute_assistant_tool_calls
 from tldw_Server_API.app.core.Chat.tool_execution_service import (
@@ -165,30 +166,44 @@ from tldw_Server_API.app.core.config import (
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_config_option_names,
     custom_openai_provider_name,
-    custom_openai_provider_number,
     iter_custom_openai_provider_numbers,
 )
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
-from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
-from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
-from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-    privacy_safe_chat_error,
-    provider_error_privacy_scope,
+from tldw_Server_API.app.core.exceptions import (
+    ChatModelNotAvailableError,
+    LLMPolicyRefusal,
+    LLMQuotaExceededError,
+    raise_detached_error,
+)
+from tldw_Server_API.app.core.LLM_Calls.gateway import (  # noqa: F401 - re-exported; callers move to the gateway (TASK-13950.27)
+    infer_provider_from_model_catalog,
+    invalidate_model_alias_caches,
+    normalize_request_provider_and_model,
+    perform_chat_api_call,
+    perform_chat_api_call_async,
+    resolve_provider_and_model,
+    resolve_provider_api_key,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+
+# isort: split
+from tldw_Server_API.app.core.LLM_Calls.gateway import (  # used by build_call_params_from_request and the known-models helpers
+    CHAT_COMPLETIONS_SURFACE,
+    _provider_inventory_endpoint,
+    _raise_inventory_failure,
 )
 from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_request_extensions,
     resolve_llamacpp_runtime_caps,
 )
-from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
-    clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
-)
-from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
-    discover_openrouter_models as _discover_openrouter_models_shared,
-)
 from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import resolve_provider_model_value
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
+    CLOUD_MODEL_PROVIDERS,
+    discover_provider_models,
+    has_model_listing,
+    resolve_provider_model_selection,
+)
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
-from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line, sse_data, sse_done
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
@@ -200,6 +215,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     negotiate_structured_response_mode,
     parse_and_validate_structured_output,
 )
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _approx_tokens, _StreamUsage, _usage_tokens
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Moderation.review_service import (
     capture_moderation_review_item,
@@ -208,14 +224,12 @@ from tldw_Server_API.app.core.Moderation.review_service import (
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
 from tldw_Server_API.app.core.testing import (
-    is_test_mode as _shared_is_test_mode,
-)
-from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
-from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
+from tldw_Server_API.app.core.Usage.llm_accounting import submit_accounting
+from tldw_Server_API.app.core.Usage.llm_call_context import call_credential_source
+from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage, usage_with_service_tier
 from tldw_Server_API.app.core.Usage.pricing_catalog import (
-    get_pricing_catalog,
     list_provider_models,
 )
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
@@ -647,13 +661,6 @@ _PROVIDER_MODEL_CONFIG_FIELDS.update(
     }
 )
 
-_INLINE_MODEL_PROVIDER_NAMES = frozenset(
-    normalize_catalog_provider_for_chat(provider_name)
-    for provider_name in _adapter_registry.ChatProviderRegistry.DEFAULT_ADAPTERS
-)
-_NAMESPACED_MODEL_PROVIDERS = {"openrouter", "huggingface", "novita", "poe", "together"}
-
-_OPENROUTER_MODEL_DISCOVERY_TIMEOUT_SECONDS = 5.0
 _DEFAULT_ASSISTANT_SYSTEM_PROMPT = "You are a helpful AI assistant."
 
 
@@ -697,38 +704,6 @@ def _split_model_list(raw_value: str | None) -> list[str]:
     if not raw:
         return []
     return [item.strip() for item in raw.split(",") if item and item.strip()]
-
-
-def _resolve_openrouter_api_key_for_discovery() -> str:
-    env_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
-    if env_key:
-        return env_key
-
-    try:
-        if _config and _config.has_section("API"):
-            cfg_key = (_config.get("API", "openrouter_api_key", fallback="") or "").strip()
-            if cfg_key and not (cfg_key.startswith("<") and cfg_key.endswith(">")):
-                return cfg_key
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return ""
-    return ""
-
-
-def _discover_openrouter_models_for_chat(*, force_refresh: bool = False) -> tuple[str, ...]:
-    if os.getenv("PYTEST_CURRENT_TEST") and not _shared_is_truthy(
-        os.getenv("CHAT_ALLOW_OPENROUTER_DISCOVERY_IN_TESTS", "0")
-    ):
-        return ()
-
-    return tuple(
-        _discover_openrouter_models_shared(
-            _resolve_openrouter_api_key_for_discovery(),
-            force_refresh=force_refresh,
-            include_extended_aliases=True,
-            timeout_seconds=_OPENROUTER_MODEL_DISCOVERY_TIMEOUT_SECONDS,
-            log_prefix="[OpenRouter model discovery/chat]",
-        )
-    )
 
 
 def _normalize_conversation_assistant_context(
@@ -844,7 +819,8 @@ async def resolve_input_moderation_chat_type(
 ) -> str:
     """Resolve chat_type for input moderation from request fields and saved conversation state."""
     if (getattr(request_data, "tldw_history_selection_v1", None) is not None
-            or getattr(getattr(request_data, "tldw_turn", None), "history_v1", None) is not None):
+            or getattr(getattr(request_data, "tldw_turn", None), "history_v1", None) is not None
+            or getattr(request_data, "tldw_history_server_existing_input_v1", None) is not None):
         conversation = await loop.run_in_executor(None, chat_db.get_conversation_by_id, request_data.conversation_id)
         return "character" if conversation and (conversation.get("character_id") or conversation.get("assistant_kind")) else "regular"
     default_character_id = await _resolve_default_character_id(chat_db, loop)
@@ -970,11 +946,34 @@ def _configured_models_for_provider(provider: str) -> tuple[str, ...]:
     return tuple(_split_model_list(raw_value))
 
 
-def known_models_for_provider_cached(provider: str) -> tuple[str, ...]:
-    """Combine cached sources without retaining inventory across config refreshes."""
-    provider_key = (provider or "").strip().lower()
+def known_models_for_provider_cached(
+    provider: str,
+    *,
+    api_key: str | None = None,
+    app_config: dict[str, Any] | None = None,
+    credentials_resolved: bool = False,
+) -> tuple[str, ...]:
+    """Read scoped commercial inventory; retain configured catalogs only locally."""
+    provider_key = canonical_provider_name(normalize_catalog_provider_for_chat(provider))
     if not provider_key:
         return ()
+    if has_model_listing(provider_key):
+        # A context-free prevalidator cannot select the requesting tenant's key.
+        if not api_key:
+            return ()
+        request = {
+            "api_key": api_key,
+            "app_config": (
+                app_config if app_config is not None
+                else ({} if credentials_resolved else None)
+            ),
+            "credentials_resolved": credentials_resolved,
+        }
+        base_url, discovery_options = _provider_inventory_endpoint(provider_key, request)
+        result = discover_provider_models(provider_key, api_key, base_url=base_url, **discovery_options)
+        if result.status != "ready":
+            _raise_inventory_failure(provider_key, result.status)
+        return tuple(result.models)
 
     known: set[str] = set()
     try:
@@ -993,63 +992,44 @@ def known_models_for_provider_cached(provider: str) -> tuple[str, ...]:
     return tuple(sorted(known))
 
 
-def is_model_known_for_provider(provider: str, model: str) -> bool | None:
-    """Return whether model is known for provider; None means no inventory is available."""
-    provider_key = (provider or "").strip().lower()
-    model_key = (model or "").strip().lower()
+def is_model_known_for_provider(
+    provider: str,
+    model: str,
+    *,
+    api_key: str | None = None,
+    app_config: dict[str, Any] | None = None,
+    credentials_resolved: bool = False,
+    endpoint_provenance: str | None = None,
+) -> bool | None:
+    """Check authoritative commercial request IDs with credential context, else defer."""
+    provider_key = canonical_provider_name(normalize_catalog_provider_for_chat(provider))
+    model_key = (model or "").strip()
     if not provider_key or not model_key:
         return None
-
+    if provider_key in CLOUD_MODEL_PROVIDERS and not has_model_listing(provider_key):
+        return None  # no listing: the provider itself rejects a bad model
+    if provider_key in CLOUD_MODEL_PROVIDERS:
+        if api_key is None and not credentials_resolved:
+            return None
+        if not api_key:
+            return False
+        request = {
+            "app_config": app_config if app_config is not None else ({} if credentials_resolved else None),
+            "credentials_resolved": credentials_resolved,
+            "_endpoint_provenance": endpoint_provenance,
+        }
+        base_url, discovery_options = _provider_inventory_endpoint(provider_key, request)
+        inventory = discover_provider_models(provider_key, api_key, base_url=base_url, **discovery_options)
+        selection = resolve_provider_model_selection(
+            provider_key, api_key, model_key, base_url=base_url, inventory=inventory, **discovery_options,
+        )
+        if selection.status not in {"ready", "not_found"}:
+            _raise_inventory_failure(provider_key, selection.status)
+        return selection.status == "ready"
     known_models = known_models_for_provider_cached(provider_key)
-    if provider_key == "openrouter":
-        discovered_models = _discover_openrouter_models_for_chat(force_refresh=False)
-        if discovered_models:
-            known_models = tuple(sorted(set(known_models) | set(discovered_models)))
     if not known_models:
         return None
-
-    # Most providers use flat model IDs; keep strict exact matching there.
-    # Some providers commonly use namespaced IDs (vendor/model),
-    # so treat namespaced and non-namespaced forms as equivalent.
-    if provider_key not in {"openrouter", "huggingface", "novita", "poe", "together"}:
-        known_lower = {str(item).strip().lower() for item in known_models}
-        return model_key in known_lower
-
-    def _aliases(raw_model: str) -> set[str]:
-        normalized = (raw_model or "").strip().lower()
-        if not normalized:
-            return set()
-        candidates = {normalized}
-        namespace = ""
-        model_part = normalized
-        if "/" in normalized:
-            namespace, model_part = normalized.split("/", 1)
-            if model_part:
-                candidates.add(model_part)
-        base_model = re.sub(r"-(?:\d{4}-\d{2}-\d{2}|\d{4,8})$", "", model_part)
-        if base_model and base_model != model_part:
-            candidates.add(base_model)
-            if namespace:
-                candidates.add(f"{namespace}/{base_model}")
-        return candidates
-
-    known_aliases: set[str] = set()
-    for known in known_models:
-        known_aliases.update(_aliases(str(known)))
-
-    if _aliases(model_key) & known_aliases:
-        return True
-
-    # If there is a near real-time provider inventory, force one refresh on miss.
-    # This avoids stale-cache false negatives for newly published OpenRouter ids.
-    refreshed_models = _discover_openrouter_models_for_chat(force_refresh=True)
-    if not refreshed_models:
-        return False
-
-    refreshed_aliases: set[str] = set()
-    for known in refreshed_models:
-        refreshed_aliases.update(_aliases(str(known)))
-    return bool(_aliases(model_key) & refreshed_aliases)
+    return model_key.lower() in {str(item).strip().lower() for item in known_models}
 
 
 _MAX_HISTORY_MESSAGES = max(1, _coerce_int(_chat_config.get("max_history_messages"), 200))
@@ -1332,6 +1312,8 @@ def _resolve_run_first_completion_outcome(exc: Exception) -> str:
         ):
             return "blocked"
     return "error"
+
+
 def _tool_names_from_tool_calls(tool_calls: Any) -> list[str]:
     """Extract normalized tool names from OpenAI-style tool call payloads."""
     if not isinstance(tool_calls, list):
@@ -1376,6 +1358,7 @@ def _emit_chat_run_first_rollout_metrics(
     except _CHAT_RUN_FIRST_METRIC_EXCEPTIONS as exc:
         logger.warning("Chat run-first rollout metric emission failed: {}", exc)
     return context
+
 
 def _emit_chat_run_first_tool_path_metrics(
     metrics: Any,
@@ -1433,267 +1416,6 @@ def _emit_chat_run_first_completion_metric(
         metrics.track_run_first_completion_proxy(**metric_context, outcome=outcome)
     except _CHAT_RUN_FIRST_METRIC_EXCEPTIONS as exc:
         logger.warning("Chat run-first completion metric emission failed: {}", exc)
-
-
-# --- Cached helpers (module scope) -------------------------------------------
-@lru_cache(maxsize=16)
-def _load_models_with_case_cached(provider: str) -> list[str]:
-    """Load provider models preserving original key casing when possible.
-
-    Attempts to read the raw model_pricing.json to preserve the original
-    casing of model identifiers. Falls back to the normalized catalog
-    via list_provider_models (lowercase keys) if needed.
-    """
-    try:
-        cfg_path = Path(__file__).resolve().parents[3] / "Config_Files" / "model_pricing.json"
-        if cfg_path.exists():
-            data = _json.loads(cfg_path.read_text())
-            prov_block = data.get(provider) or data.get(provider.capitalize()) or data.get(provider.upper())
-            if isinstance(prov_block, dict):
-                return list(prov_block.keys())
-    except (OSError, ValueError, KeyError, AttributeError) as _e:
-        # Expected file/format issues: fall back to normalized catalog
-        logger.debug(
-            "Model catalog raw load fallback for provider '{}': {}",
-            provider,
-            exception_summary(_e),
-        )
-    except _CHAT_NONCRITICAL_EXCEPTIONS as _ue:
-        # Unexpected exceptions should be visible in production logs
-        pass
-        logger.warning(
-            "Unexpected error loading model catalog for provider '{}': {}",
-            provider,
-            exception_summary(_ue),
-        )
-
-    # Fallback: use the normalized list (lowercase keys)
-    return list_provider_models(provider) or []
-
-
-@lru_cache(maxsize=1)
-def _load_alias_overrides_cached() -> dict[str, dict[str, str]]:
-    """Load model alias overrides from env and pricing catalog.
-
-    Resolution order:
-    1) ENV var CHAT_MODEL_ALIAS_OVERRIDES (JSON)
-    2) Keys in Config_Files/model_pricing.json: model_aliases/aliases/alias_map
-    3) Test-friendly defaults when PYTEST_CURRENT_TEST is set
-    """
-    # 1) ENV
-    try:
-        raw = os.getenv("CHAT_MODEL_ALIAS_OVERRIDES")
-        if raw:
-            data = _json.loads(raw)
-            if isinstance(data, dict):
-                return {
-                    str(k).lower(): {str(ak).lower(): str(av) for ak, av in (v or {}).items()}
-                    for k, v in data.items()
-                    if isinstance(v, dict)
-                }
-    except (ValueError, TypeError) as _e:
-        logger.debug("CHAT_MODEL_ALIAS_OVERRIDES parse failed: {}", exception_summary(_e))
-    except _CHAT_NONCRITICAL_EXCEPTIONS as _ue:
-        # Unexpected exceptions should be visible in production logs
-        pass
-        logger.warning("Unexpected error parsing CHAT_MODEL_ALIAS_OVERRIDES: {}", exception_summary(_ue))
-
-    # 2) File keys in pricing catalog
-    try:
-        cfg_path = Path(__file__).resolve().parents[3] / "Config_Files" / "model_pricing.json"
-        if cfg_path.exists():
-            data = _json.loads(cfg_path.read_text())
-            for key in ("model_aliases", "aliases", "alias_map"):
-                block = data.get(key)
-                if isinstance(block, dict):
-                    return {
-                        str(k).lower(): {str(ak).lower(): str(av) for ak, av in (v or {}).items()}
-                        for k, v in block.items()
-                        if isinstance(v, dict)
-                    }
-    except (OSError, ValueError, KeyError, AttributeError) as _e:
-        logger.debug("Alias overrides load fallback: {}", exception_summary(_e))
-    except _CHAT_NONCRITICAL_EXCEPTIONS as _ue:
-        # Unexpected exceptions should be visible in production logs
-        pass
-        logger.warning("Unexpected error loading alias overrides: {}", exception_summary(_ue))
-
-    # 3) Test-friendly defaults (preserve legacy behavior under pytest only)
-    if os.getenv("PYTEST_CURRENT_TEST"):
-        return {
-            "anthropic": {"claude-sonnet": "claude-sonnet-4-5"},
-            # Use a small, fast model via OpenRouter in tests
-            "openrouter": {"dummy": "z-ai/glm-4.6"},
-            "mistral": {"dummy": "mistral-small-latest"},
-        }
-    return {}
-
-
-@lru_cache(maxsize=2048)
-def _provider_has_model_cached(provider: str, model: str) -> bool:
-    """Return True when provider catalog contains the given model (exact, case-insensitive)."""
-    provider_key = (provider or "").strip().lower()
-    model_key = (model or "").strip().lower()
-    if not provider_key or not model_key:
-        return False
-    try:
-        for candidate in _load_models_with_case_cached(provider_key):
-            if str(candidate).strip().lower() == model_key:
-                return True
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return False
-    return False
-
-
-@lru_cache(maxsize=4096)
-def _find_catalog_providers_for_model_cached(model: str) -> tuple[str, ...]:
-    """Return providers whose pricing catalog contains the model (exact, case-insensitive)."""
-    model_key = (model or "").strip().lower()
-    if not model_key:
-        return ()
-
-    matches: set[str] = set()
-    try:
-        catalog = getattr(get_pricing_catalog(), "_catalog", {})
-        if isinstance(catalog, dict):
-            for provider_name, provider_models in catalog.items():
-                if not isinstance(provider_models, dict):
-                    continue
-                for model_name, model_meta in provider_models.items():
-                    if str(model_name).strip().lower() != model_key:
-                        continue
-                    if isinstance(model_meta, dict) and model_meta.get("placeholder"):
-                        continue
-                    provider_key = str(provider_name).strip().lower()
-                    if provider_key:
-                        matches.add(provider_key)
-                    break
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return ()
-
-    return tuple(sorted(matches))
-
-
-def infer_provider_from_model_catalog(
-    *,
-    provider: str,
-    model: str | None,
-    provider_explicit: bool,
-) -> tuple[str, dict[str, Any]]:
-    """Infer provider from model catalog when the current provider likely mismatches.
-
-    Safety rules:
-    - Never override an explicit provider.
-    - Only switch when the model has a unique provider match in catalog.
-    - Keep current provider on ambiguous matches.
-    """
-    current_provider = (provider or "").strip().lower()
-    model_value = (model or "").strip()
-    debug: dict[str, Any] = {
-        "attempted": False,
-        "provider_explicit": provider_explicit,
-        "current_provider": current_provider,
-        "model": model_value,
-        "current_provider_has_model": None,
-        "candidates": [],
-        "selected_provider": current_provider,
-        "reason": "skipped",
-    }
-
-    if provider_explicit:
-        debug["reason"] = "explicit_provider"
-        return current_provider, debug
-    if not current_provider or not model_value:
-        debug["reason"] = "missing_provider_or_model"
-        return current_provider, debug
-    if "/" in model_value:
-        debug["reason"] = "inline_model_namespace"
-        return current_provider, debug
-
-    debug["attempted"] = True
-    has_current_match = _provider_has_model_cached(current_provider, model_value)
-    debug["current_provider_has_model"] = has_current_match
-    if has_current_match:
-        debug["reason"] = "current_provider_match"
-        return current_provider, debug
-
-    candidates = list(_find_catalog_providers_for_model_cached(model_value))
-    debug["candidates"] = candidates
-    if not candidates:
-        debug["reason"] = "no_catalog_match"
-        return current_provider, debug
-
-    if len(candidates) == 1:
-        selected = candidates[0]
-        debug["selected_provider"] = selected
-        debug["reason"] = "unique_catalog_match"
-        return selected, debug
-
-    if current_provider in candidates:
-        debug["reason"] = "ambiguous_kept_current"
-        return current_provider, debug
-
-    debug["reason"] = "ambiguous_no_change"
-    return current_provider, debug
-
-
-def _split_inline_provider_model(
-    model_str: str, api_provider: str | None = None
-) -> tuple[str | None, str | None, str | None]:
-    """Split recognized provider prefixes without changing opaque model IDs."""
-    model_value = (model_str or "").strip()
-    if not model_value:
-        return None, None, None
-    explicit_provider = (
-        canonical_provider_name(normalize_catalog_provider_for_chat(api_provider))
-        if api_provider else None
-    )
-    preserve_local_namespace = (
-        explicit_provider in _adapter_registry.ChatProviderRegistry.DEFAULT_LOCAL_PROVIDERS
-    )
-
-    if "/" in model_value:
-        model_provider, model_name = model_value.split("/", 1)
-        normalized_provider = canonical_provider_name(
-            normalize_catalog_provider_for_chat(model_provider)
-        )
-        if normalized_provider in _INLINE_MODEL_PROVIDER_NAMES and (
-            not preserve_local_namespace or normalized_provider == explicit_provider
-        ):
-            return model_provider.strip(), model_name.strip(), "/"
-        # Model identifiers can be paths or repository names. Only registered
-        # provider prefixes qualify for stripping; a colon prefix may precede
-        # a path (for example, "llamacpp:../../models/model.gguf").
-
-    if ":" not in model_value:
-        return None, None, None
-
-    model_provider, model_name = model_value.split(":", 1)
-    normalized_provider = canonical_provider_name(normalize_catalog_provider_for_chat(model_provider))
-    if normalized_provider not in _INLINE_MODEL_PROVIDER_NAMES or (
-        preserve_local_namespace and normalized_provider != explicit_provider
-    ):
-        return None, None, None
-    return model_provider.strip(), model_name.strip(), ":"
-
-
-def invalidate_model_alias_caches() -> None:
-    """Invalidate cached model list and alias overrides for hot-reload.
-
-    Clears lru_cache for both `_load_models_with_case_cached` and
-    `_load_alias_overrides_cached`. Safe to call at runtime (no side effects
-    beyond cache flush). Subsequent requests will repopulate from sources.
-    """
-    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-        _load_models_with_case_cached.cache_clear()
-    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-        _load_alias_overrides_cached.cache_clear()
-    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-        _provider_has_model_cached.cache_clear()
-    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-        _find_catalog_providers_for_model_cached.cache_clear()
-    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-        _clear_openrouter_model_cache_shared()
 
 
 def queue_is_active(queue: Any) -> bool:
@@ -1786,286 +1508,6 @@ def _schedule_background_task(
     return task
 
 
-def parse_provider_model_for_metrics(
-    request_data: Any,
-    default_provider: str,
-) -> tuple[str, str]:
-    """Parse provider and model for metrics logging without mutating request_data.
-
-    Accepts model strings like "anthropic/claude-opus-4.1" and an optional
-    api_provider on the request, falling back to the server default.
-
-    Returns (provider, model_for_metrics).
-    """
-    raw_model = getattr(request_data, "model", None)
-    model_str = (
-        raw_model.strip()
-        if isinstance(raw_model, str) and raw_model.strip()
-        else "unknown"
-    )
-    api_provider = getattr(request_data, "api_provider", None)
-    model_provider, model_name, _ = _split_inline_provider_model(model_str, api_provider)
-    if model_provider is not None and model_name is not None:
-        raw_provider = api_provider or model_provider
-        provider = normalize_catalog_provider_for_chat((raw_provider or "").strip().lower())
-        model = model_name
-    else:
-        raw_provider = api_provider or default_provider
-        provider = normalize_catalog_provider_for_chat((raw_provider or "").strip().lower())
-        model = model_str
-    return provider, model
-
-
-def normalize_request_provider_and_model(
-    request_data: Any,
-    default_provider: str,
-) -> str:
-    """Normalize provider and model on the request.
-
-    If the request's model contains a provider prefix (e.g., "groq/llama-3"),
-    update request_data.model in-place to only the model component and return
-    the selected provider name. This mirrors the behavior already present in
-    the endpoint and avoids duplication.
-    """
-    model_str = getattr(request_data, "model", None) or ""
-    api_provider = getattr(request_data, "api_provider", None)
-
-    # --- Alias resolution via configurable catalog (model_pricing.json) ---
-    # Prefer provider-agnostic model keys and avoid hardcoded, versioned IDs.
-    # Alias resolution is strict: only explicit overrides or exact model matches
-    # are applied. This avoids silently picking a default model.
-    try:
-        # Determine provider context for alias resolution.
-        # If model includes an inline provider (e.g., "anthropic/claude-sonnet"),
-        # prefer that; else honor api_provider, then default_provider.
-        inline_provider: str | None = None
-        inline_model_part: str | None = None
-        inline_separator: str | None = None
-        inline_provider, inline_model_part, inline_separator = _split_inline_provider_model(model_str, api_provider)
-        provider_for_mapping = normalize_catalog_provider_for_chat(
-            ((inline_provider or api_provider or default_provider) or "").strip().lower()
-        )
-
-
-        def _resolve_alias(provider: str, raw_model: str) -> str | None:
-            m = (raw_model or "").strip()
-            if not m:
-                return None
-            models = _load_models_with_case_cached(provider)
-            if not models:
-                return None
-            m_lower = m.lower()
-            # Strict resolution: only exact (case-insensitive) matches.
-            for cand in models:
-                if cand.lower() == m_lower:
-                    return cand
-            return None
-
-        # Optional alias overrides allow cross-provider or provider-agnostic mappings
-        # without changing code. Sources (first match wins):
-        #  - ENV JSON CHAT_MODEL_ALIAS_OVERRIDES = { provider: { alias: concrete_model } }
-        #  - Config_Files/model_pricing.json key "model_aliases" or "aliases"
-        #  - Test-safe built-ins when PYTEST_CURRENT_TEST is set (keeps historical behavior)
-        alias_overrides = _load_alias_overrides_cached()
-
-        # First apply alias override (supports cross-provider targets)
-        ov_map = alias_overrides.get(provider_for_mapping, {})
-        target_model_part = inline_model_part if inline_model_part is not None else model_str
-        override_target = ov_map.get((target_model_part or "").strip().lower())
-        if override_target:
-            resolved = override_target
-        else:
-            # Resolve against known models when no explicit override present
-            resolved = _resolve_alias(provider_for_mapping, target_model_part)
-        if resolved and resolved != model_str:
-            allow_cross = _shared_is_truthy(os.getenv("CHAT_ALLOW_CROSS_PROVIDER_ALIASING", "0"))
-            if inline_provider:
-                # Preserve inline provider prefix until final normalization below
-                combined = f"{inline_provider}{inline_separator or '/'}{resolved}"
-                request_data.model = combined
-                model_str = combined
-            else:
-                # Prevent accidental provider flips unless explicitly allowed.
-                # Special-case OpenRouter: it expects namespaced model ids like
-                # "z-ai/glm-4.6" to be preserved when api_provider is openrouter.
-                if provider_for_mapping == "openrouter":
-                    request_data.model = resolved
-                    model_str = request_data.model
-                elif "/" in resolved and not allow_cross:
-                    resolved = None
-                else:
-                    request_data.model = resolved
-                    model_str = request_data.model
-                if not resolved:
-                    resolved = None  # leave model_str untouched, no override applied
-    except (AttributeError, KeyError, ValueError):
-        # Expected lookup/attr issues: do not block request
-        pass
-    except _CHAT_NONCRITICAL_EXCEPTIONS as _unexpected:
-        # Unexpected exceptions should be visible in production logs
-        logger.warning(
-            "Unexpected error during model alias resolution: {}",
-            exception_summary(_unexpected),
-        )
-    provider = normalize_catalog_provider_for_chat(
-        ((api_provider or default_provider) or "").strip().lower()
-    )
-    model_provider, actual_model, inline_separator = _split_inline_provider_model(model_str, api_provider)
-    if model_provider is not None and actual_model is not None:
-        inline_provider_lower = normalize_catalog_provider_for_chat(
-            model_provider.strip().lower()
-        )
-        # If the api_provider was not explicitly set, allow inline provider to select it
-        if not api_provider:
-            provider = inline_provider_lower
-            # In this case, strip the inline provider prefix from the model
-            request_data.model = actual_model
-        else:
-            # api_provider is explicitly set on the request. For some providers,
-            # many valid model IDs include a namespace
-            # (e.g., "openai/gpt-4o-mini", "z-ai/glm-4.6"). Preserve slash
-            # namespaces unless the inline namespace is the provider itself.
-            if provider in _NAMESPACED_MODEL_PROVIDERS and inline_separator == "/":
-                if provider == "openrouter" and inline_provider_lower == "openrouter":
-                    request_data.model = actual_model
-                else:
-                    request_data.model = model_str
-            else:
-                # Non-namespaced providers do not use provider-qualified model ids; strip prefix
-                request_data.model = actual_model
-    return provider
-
-
-def resolve_provider_and_model(
-    request_data: Any,
-    metrics_default_provider: str,
-    normalize_default_provider: str,
-    routing_decision: RoutingDecision | None = None,
-) -> tuple[str, str, str, str | None, dict[str, Any]]:
-    """Resolve provider/model for metrics and execution and record the decision path.
-
-    Returns a 5-tuple:
-        (metrics_provider, metrics_model, selected_provider, selected_model, debug_info)
-
-    - metrics_provider/metrics_model mirror the legacy behavior of
-      `parse_provider_model_for_metrics` (used for request-level metrics and audit).
-    - selected_provider/selected_model reflect the normalized provider/model that
-      downstream logic should use (after alias resolution and inline prefixes).
-    - debug_info is a JSON-serializable dict describing the decision path.
-
-    The function may update `request_data.model` in-place via
-    `normalize_request_provider_and_model`, matching existing behavior.
-    """
-    raw_model = getattr(request_data, "model", None)
-    raw_api_provider = getattr(request_data, "api_provider", None)
-    provider_explicit = bool(str(raw_api_provider or "").strip())
-
-    if routing_decision is not None and routing_decision.canonical:
-        request_data.api_provider = routing_decision.provider
-        request_data.model = routing_decision.model
-
-        debug_info: dict[str, Any] = {
-            "raw": {
-                "api_provider": raw_api_provider,
-                "model": raw_model,
-                "provider_explicit": provider_explicit,
-            },
-            "routing": {
-                "canonical": True,
-                "decision_source": routing_decision.decision_source,
-                "provider": routing_decision.provider,
-                "model": routing_decision.model,
-            },
-            "metrics": {
-                "default_provider": metrics_default_provider,
-                "provider": routing_decision.provider,
-                "model": routing_decision.model,
-            },
-            "selected": {
-                "provider": routing_decision.provider,
-                "model": routing_decision.model,
-            },
-        }
-        return (
-            routing_decision.provider,
-            routing_decision.model,
-            routing_decision.provider,
-            routing_decision.model,
-            debug_info,
-        )
-
-    # Step 1: derive metrics-facing provider/model without mutating the request
-    metrics_provider, metrics_model = parse_provider_model_for_metrics(
-        request_data, metrics_default_provider
-    )
-
-    selected_provider = metrics_provider
-    selected_model = (
-        raw_model.strip()
-        if isinstance(raw_model, str) and raw_model.strip()
-        else None
-    )
-
-    # Step 2: normalize provider/model for execution (may mutate request_data.model)
-    try:
-        normalized_provider = normalize_request_provider_and_model(
-            request_data, normalize_default_provider
-        )
-        selected_provider = normalized_provider
-        new_model = getattr(request_data, "model", None)
-        selected_model = (
-            new_model.strip()
-            if isinstance(new_model, str) and new_model.strip()
-            else None
-        )
-    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
-        # Keep the pre-normalization execution values if optional normalization fails.
-        pass
-        logger.debug(
-            "resolve_provider_and_model: normalization failed, "
-            "keeping pre-normalization execution values. Error={}",
-            exc,
-        )
-
-    catalog_inference_debug: dict[str, Any] | None = None
-    try:
-        selected_provider, catalog_inference_debug = infer_provider_from_model_catalog(
-            provider=selected_provider,
-            model=selected_model,
-            provider_explicit=provider_explicit,
-        )
-    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(
-            "resolve_provider_and_model: catalog inference failed; keeping selected provider. Error={}",
-            exc,
-        )
-
-    debug_info: dict[str, Any] = {
-        "raw": {
-            "api_provider": raw_api_provider,
-            "model": raw_model,
-            "provider_explicit": provider_explicit,
-        },
-        "metrics": {
-            "default_provider": metrics_default_provider,
-            "provider": metrics_provider,
-            "model": metrics_model,
-        },
-        "normalized": {
-            "default_provider": normalize_default_provider,
-            "provider": selected_provider,
-            "model": selected_model,
-        },
-        "changed": {
-            "provider_changed": metrics_provider != selected_provider,
-            "model_changed": metrics_model != selected_model,
-        },
-        "catalog_inference": catalog_inference_debug,
-    }
-
-    return metrics_provider, metrics_model, selected_provider, selected_model, debug_info
-
-
 def resolve_model_context_window(provider: str, model: str) -> Any:
     """Return server-owned context metadata without probing provider tokenizers."""
 
@@ -2074,7 +1516,7 @@ def resolve_model_context_window(provider: str, model: str) -> Any:
     if not normalized_provider or not normalized_model:
         return None
     try:
-        from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
             get_llm_provider_override,
         )
 
@@ -2089,7 +1531,7 @@ def resolve_model_context_window(provider: str, model: str) -> Any:
     except Exception:  # noqa: BLE001 - metadata failure falls back conservatively.
         logger.debug("Chat context-window override metadata unavailable")
     try:
-        from tldw_Server_API.app.api.v1.endpoints.llm_providers import (
+        from tldw_Server_API.app.core.LLM_Calls.model_metadata import (
             get_model_metadata,
         )
 
@@ -2097,423 +1539,6 @@ def resolve_model_context_window(provider: str, model: str) -> Any:
         return metadata.get("context_window") if isinstance(metadata, dict) else None
     except Exception:  # noqa: BLE001 - metadata failure falls back conservatively.
         return None
-
-
-def resolve_provider_api_key(
-    provider: str,
-    *,
-    prefer_module_keys_in_tests: bool = True,
-    include_override: bool = True,
-) -> tuple[str | None, dict[str, Any]]:
-    """
-    Resolve the API key for a provider using env/config first, with optional test overrides.
-
-    Resolution order:
-    1) In test contexts (PYTEST_CURRENT_TEST or TEST_MODE) and when prefer_module_keys_in_tests=True,
-       use module-level API_KEYS (schemas first, then endpoint) if present for the provider.
-    2) Otherwise, return the dynamic key from get_api_keys() (env/config/dotenv).
-    Returns (normalized_key, debug_info).
-    """
-    provider_key = (provider or "").strip().lower()
-    debug_info: dict[str, Any] = {
-        "provider": provider_key or provider,
-        "selected_source": "missing",
-        "module_sources": [],
-        "test_flags": {},
-        "raw_value_provided": False,
-        "raw_value_was_empty": False,
-        "dynamic_value_present": False,
-        "override_value_present": False,
-    }
-
-    try:
-        is_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        is_pytest = False
-    test_mode_enabled = _shared_is_test_mode()
-    use_module_overrides = prefer_module_keys_in_tests and (is_pytest or test_mode_enabled)
-    debug_info["test_flags"] = {"pytest": is_pytest, "test_mode": test_mode_enabled}
-
-    try:
-        from tldw_Server_API.app.api.v1.schemas import chat_request_schemas as _schemas_mod  # type: ignore
-
-        dynamic_keys = _schemas_mod.get_api_keys() or {}
-    except _CHAT_NONCRITICAL_EXCEPTIONS as _err:
-        # API key loading errors should be visible in production
-        pass
-        logger.warning("resolve_provider_api_key failed to load dynamic keys: {}", exception_summary(_err))
-        dynamic_keys = {}
-
-    module_keys: dict[str, str | None] = {}
-    if use_module_overrides:
-        try:
-            schema_keys = getattr(_schemas_mod, "API_KEYS", None)
-            if isinstance(schema_keys, dict) and schema_keys:
-                module_keys.update(schema_keys)
-                debug_info["module_sources"].append("chat_request_schemas")
-        except _CHAT_NONCRITICAL_EXCEPTIONS as _schema_err:
-            logger.warning(
-                "resolve_provider_api_key skipped schema module keys: {}",
-                exception_summary(_schema_err),
-            )
-        try:
-            from tldw_Server_API.app.api.v1.endpoints import chat as _chat_mod  # type: ignore
-
-            endpoint_keys = getattr(_chat_mod, "API_KEYS", None)
-            if isinstance(endpoint_keys, dict) and endpoint_keys:
-                # Endpoint-level patches override schema-level for tests.
-                module_keys.update(endpoint_keys)
-                debug_info["module_sources"].append("chat_endpoint")
-        except _CHAT_NONCRITICAL_EXCEPTIONS as _chat_err:
-            logger.warning(
-                "resolve_provider_api_key skipped endpoint module keys: {}",
-                exception_summary(_chat_err),
-            )
-
-    module_override_present = use_module_overrides and provider_key in module_keys
-    override_value = None
-    if include_override and not module_override_present:
-        try:
-            from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import get_llm_provider_override
-
-            override = get_llm_provider_override(provider_key)
-            override_value = override.api_key if override else None
-        except _CHAT_NONCRITICAL_EXCEPTIONS:
-            override_value = None
-
-    debug_info["override_value_present"] = override_value is not None
-
-    dynamic_value = dynamic_keys.get(provider_key)
-    debug_info["dynamic_value_present"] = dynamic_value is not None
-
-    def _normalize(value: str | None) -> str | None:
-        if value is None:
-            return None
-        if isinstance(value, str) and value.strip() == "":
-            return None
-        return value
-
-    raw_value = dynamic_value
-    selected_override = False
-    if override_value is not None:
-        raw_value = override_value
-        selected_override = True
-        debug_info["selected_source"] = "override"
-    if module_override_present:
-        raw_value = module_keys.get(provider_key)
-        debug_info["selected_source"] = "module_override"
-    elif raw_value is not None and not selected_override:
-        env_var = (
-            f"{provider_key.upper().replace('.', '_').replace('-', '_')}_API_KEY"
-            if provider_key
-            else None
-        )
-        debug_info["selected_source"] = "env" if env_var and os.getenv(env_var) is not None else "config"
-    elif raw_value is None:
-        debug_info["selected_source"] = "missing"
-
-    debug_info["raw_value_provided"] = raw_value is not None
-    debug_info["raw_value_was_empty"] = isinstance(raw_value, str) and raw_value.strip() == ""
-    normalized_value = _normalize(raw_value)
-    return normalized_value, debug_info
-
-
-def _resolve_test_module_provider_api_key(provider: str) -> tuple[bool, str | None]:
-    """Return an explicit legacy test-module key without reading server config."""
-    provider_key = (provider or "").strip().lower()
-    try:
-        is_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        is_pytest = False
-    if not (is_pytest or _shared_is_test_mode()):
-        return False, None
-
-    module_keys: dict[str, Any] = {}
-    try:
-        from tldw_Server_API.app.api.v1.schemas import chat_request_schemas as _schemas_mod  # type: ignore
-
-        schema_keys = getattr(_schemas_mod, "API_KEYS", None)
-        if isinstance(schema_keys, dict):
-            module_keys.update(schema_keys)
-    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Static fallback skipped schema module keys: {}", exc)
-    try:
-        from tldw_Server_API.app.api.v1.endpoints import chat as _chat_mod  # type: ignore
-
-        endpoint_keys = getattr(_chat_mod, "API_KEYS", None)
-        if isinstance(endpoint_keys, dict):
-            module_keys.update(endpoint_keys)
-    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Static fallback skipped endpoint module keys: {}", exc)
-
-    if provider_key not in module_keys:
-        return False, None
-    value = module_keys[provider_key]
-    normalized = value.strip() if isinstance(value, str) and value.strip() else None
-    return True, normalized
-
-
-def resolve_static_provider_fallback(provider: str) -> ServerFallbackCredentials:
-    """Capture one authoritative server fallback, honoring explicit test patches."""
-    module_override_present, module_key = _resolve_test_module_provider_api_key(provider)
-    if module_override_present:
-        return ServerFallbackCredentials(
-            api_key=module_key,
-            credential_fields={},
-            auth_source=None,
-            app_config={},
-        )
-    return resolve_static_server_fallback(provider)
-
-
-def _resolve_base_url_override(provider: str, chat_args: dict[str, Any]) -> str | None:
-    base_url = chat_args.get("base_url")
-    if base_url is None:
-        base_url = chat_args.get("api_base_url")
-    if base_url is None:
-        return None
-    provider_key = (provider or "").strip().lower()
-    from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-        is_trusted_base_url_request,
-        resolve_byok_base_url_allowlist,
-        validate_base_url_override,
-    )
-
-    allowlist = _resolve_chat_provider_allowlist(resolve_byok_base_url_allowlist())
-    if provider_key not in allowlist:
-        raise ChatBadRequestError(
-            provider=provider_key or None,
-            message=f"base_url override is not enabled for provider '{provider_key}'",
-        )
-    trusted_override = bool(chat_args.get("trusted_base_url_override"))
-    if not trusted_override:
-        request_obj = chat_args.get("request") or chat_args.get("caller_request")
-        principal = chat_args.get("principal")
-        user = chat_args.get("auth_user")
-        trusted_override = is_trusted_base_url_request(request_obj, principal=principal, user=user)
-    if not trusted_override:
-        raise ChatBadRequestError(
-            provider=provider_key or None,
-            message="base_url override requires a trusted caller",
-        )
-    try:
-        return validate_base_url_override(base_url)
-    except ValueError as exc:
-        raise ChatBadRequestError(provider=provider_key or None, message=str(exc)) from exc
-
-
-def _resolve_chat_provider_name(provider: str | None) -> str:
-    """Return the canonical chat provider key used for adapter dispatch."""
-    provider_key = (provider or "").strip().lower()
-    if provider_key == "local":
-        return "local-llm"
-
-    from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
-
-    return get_registry().resolve_provider_name(provider_key)
-
-
-def _resolve_chat_provider_allowlist(providers: set[str]) -> set[str]:
-    """Canonicalize provider names and aliases used in BYOK allowlists."""
-    return {
-        resolved
-        for provider in providers
-        if (resolved := _resolve_chat_provider_name(provider))
-    }
-
-
-def _is_local_chat_provider(provider: str | None) -> bool:
-    """Return whether a chat provider name or alias resolves to a local adapter."""
-    from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
-
-    return get_registry().is_local_provider_name(provider)
-
-
-def _find_local_request_url_override_keys(chat_args: dict[str, Any]) -> list[str]:
-    """Return non-null request keys that would override a local endpoint URL."""
-    return sorted(
-        key
-        for key, value in chat_args.items()
-        if value is not None
-        and (
-            key in {"api_url", "base_url", "api_base_url"}
-            or key.endswith("_api_url")
-        )
-    )
-
-
-def _reject_local_request_url_overrides(provider: str, chat_args: dict[str, Any]) -> None:
-    """Reject request-level endpoint URL overrides for local chat providers."""
-    provider_key = (provider or "").strip().lower()
-    if not _is_local_chat_provider(provider_key):
-        return
-
-    override_keys = _find_local_request_url_override_keys(chat_args)
-    if not override_keys:
-        return
-
-    raise ChatBadRequestError(
-        provider=provider_key,
-        message=(
-            "Local provider endpoint URLs are config-only; request-level "
-            f"override keys are not allowed: {', '.join(override_keys)}"
-        ),
-    )
-
-
-def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[str, dict[str, Any], dict[str, Any]]:
-    """Translate chat_api_call-style args into an adapter request payload."""
-    from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
-        bind_provider_call_credentials,
-        ensure_app_config,
-        normalize_provider,
-        provider_auth_is_resolved,
-        resolve_provider_api_key_from_config,
-        resolve_provider_model,
-        resolve_provider_section,
-    )
-    from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
-
-    provider = normalize_provider(
-        chat_args.get("api_endpoint") or chat_args.get("api_provider") or chat_args.get("provider")
-    )
-    provider = _resolve_chat_provider_name(provider)
-    if not provider:
-        raise ChatConfigurationError(provider=str(chat_args.get("api_endpoint")), message="LLM provider is required.")
-
-    chat_args, provider_credentials = bind_provider_call_credentials(
-        provider,
-        chat_args,
-        consume=False,
-    )
-
-    _reject_local_request_url_overrides(provider, chat_args)
-    is_local_provider = _is_local_chat_provider(provider)
-
-    credentials_resolved = provider_credentials is not None
-    explicit_app_config = (
-        provider_credentials.app_config
-        if provider_credentials is not None
-        else chat_args.get("app_config")
-    )
-    if credentials_resolved:
-        app_config = copy.deepcopy(explicit_app_config or {})
-        provider_section = resolve_provider_section(provider)
-        if provider_section:
-            app_config.setdefault(provider_section, {})
-    else:
-        app_config = (
-            explicit_app_config
-            if explicit_app_config is not None
-            else (None if is_local_provider else ensure_app_config(None))
-        )
-    model = chat_args.get("model")
-    if model is None and app_config is not None:
-        if credentials_resolved:
-            provider_config = app_config.get(resolve_provider_section(provider)) or {}
-            model = provider_config.get("model") or provider_config.get("model_id")
-            if provider == "mlx":
-                model = model or provider_config.get("model_path") or provider_config.get("mlx_model_path")
-        else:
-            model = resolve_provider_model(provider, app_config)
-    if not model and not is_local_provider:
-        raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
-
-    if credentials_resolved:
-        api_key = (
-            provider_credentials.api_key
-            if provider_credentials is not None
-            else chat_args.get("api_key")
-        )
-        if provider_requires_api_key(provider) and not provider_auth_is_resolved(
-            provider,
-            api_key=api_key,
-            app_config=app_config,
-            credentials_resolved=True,
-        ):
-            raise ChatConfigurationError(
-                provider=provider,
-                message="API key is required for provider.",
-            )
-    else:
-        api_key = chat_args.get("api_key") or resolve_provider_api_key_from_config(provider, app_config)
-    messages_payload = chat_args.get("messages_payload") or chat_args.get("messages") or []
-
-    request: dict[str, Any] = {
-        "messages": messages_payload,
-        "system_message": chat_args.get("system_message"),
-        "model": model,
-        "api_key": api_key,
-        "app_config": app_config,
-    }
-    if credentials_resolved:
-        request["credentials_resolved"] = True
-    if provider_credentials is not None:
-        request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
-    base_url_override = _resolve_base_url_override(provider, chat_args)
-    if base_url_override:
-        request["base_url"] = base_url_override
-
-    stream_value = chat_args.get("stream")
-    if stream_value is None:
-        stream_value = chat_args.get("streaming")
-    if stream_value is not None:
-        request["stream"] = bool(stream_value)
-
-    skip_keys = {
-        "api_endpoint",
-        "api_provider",
-        "provider",
-        "messages_payload",
-        "messages",
-        "system_message",
-        "model",
-        "api_key",
-        "app_config",
-        "credentials_resolved",
-        "base_url",
-        "api_base_url",
-        "request",
-        "caller_request",
-        "principal",
-        "auth_user",
-        "trusted_base_url_override",
-        "configured_endpoint_base_url",
-        "configured_endpoint_scope",
-        "endpoint_provenance",
-        "http_client_factory",
-        "http_fetcher",
-        "http_streamer",
-        "timeout",
-        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-        "_structured_requested_response_format",
-        "stream",
-        "streaming",
-        "history_message_limit",
-        "history_message_order",
-        "slash_command_injection_mode",
-    }
-    for key, value in chat_args.items():
-        if key in skip_keys or key.startswith("_chat_") or key == "_endpoint_provenance" or value is None:
-            continue
-        if key not in request:
-            request[key] = value
-
-    provenance = chat_args.get("_endpoint_provenance")
-    if (
-        custom_openai_provider_number(provider) is not None
-        and provenance in {"server_config", "byok", "request_override"}
-    ):
-        request["_endpoint_provenance"] = provenance
-
-    timeout = chat_args.get("timeout")
-    internal = {"timeout": timeout} if timeout is not None else {}
-    return provider, request, internal
-
-
-def _attach_internal_http_hooks(adapter: Any, request: dict[str, Any], internal: dict[str, Any]) -> None:
-    """Compatibility no-op: transport hooks are adapter-owned, never request-owned."""
-    return None
 
 
 def _is_client_like_error(exc: Exception) -> bool:
@@ -2527,192 +1552,6 @@ def _is_client_like_error(exc: Exception) -> bool:
         "authentication", "ratelimit", "rate_limit",
         "badrequest", "bad_request", "configuration",
     ))
-
-
-def _get_llm_registry():
-    """Resolve the adapter registry at call time to honor test monkeypatching."""
-    return _adapter_registry.get_registry()
-
-
-def _map_provider_egress_error(
-    provider: str,
-    exc: EgressPolicyError,
-) -> ChatAPIError:
-    """Map typed policy failures without exposing target or resolver details."""
-    if exc.reason_code == "dns_unresolved":
-        return ChatProviderError(
-            provider=provider,
-            message="Provider endpoint is unreachable.",
-            status_code=503,
-        )
-    return ChatConfigurationError(
-        provider=provider,
-        message="Provider endpoint is blocked by the outbound security policy.",
-    )
-
-
-def _map_sync_stream_egress_errors(provider: str, stream: Any) -> Iterator[Any]:
-    """Map policy failures raised lazily while consuming a sync stream."""
-    try:
-        yield from stream
-    except EgressPolicyError as exc:
-        raise _map_provider_egress_error(provider, exc) from exc
-
-
-async def _map_async_stream_egress_errors(
-    provider: str,
-    stream: AsyncIterator[Any],
-) -> AsyncIterator[Any]:
-    """Map policy failures raised lazily while consuming an async stream."""
-    try:
-        async for item in stream:
-            yield item
-    except EgressPolicyError as exc:
-        raise _map_provider_egress_error(provider, exc) from exc
-
-
-def _privacy_safe_provider_errors_enabled(request: dict[str, Any]) -> bool:
-    """Return whether this opt-in call requires metadata-only provider errors."""
-
-    call_policy = request.get("call_policy")
-    return bool(
-        isinstance(call_policy, ProviderCallPolicy)
-        and call_policy.privacy_safe_errors
-    )
-
-
-def _validate_audited_call_policy_transport(
-    registry: Any,
-    provider: str,
-    request: dict[str, Any],
-) -> ProviderCallPolicy | None:
-    """Fail closed when an opt-in strict policy lacks adapter guarantees."""
-    policy = request.get("call_policy")
-    if not isinstance(policy, ProviderCallPolicy) or (
-        policy.maximum_timeout_seconds is None
-        and policy.required_endpoint_scope is None
-    ):
-        return None
-    transport = registry.get_audited_call_policy_transport(provider)
-    if (
-        policy.maximum_timeout_seconds is None
-        or policy.required_endpoint_scope is None
-        or transport is None
-        or policy.max_transport_attempts is None
-        or policy.max_transport_attempts > transport.maximum_transport_attempts
-        or not transport.enforces_configured_endpoint_scope
-        or not transport.enforces_maximum_timeout
-    ):
-        raise ChatConfigurationError(
-            provider=provider,
-            message="LLM adapter does not support the required call policy.",
-        )
-    return policy
-
-
-async def _await_with_call_policy_deadline(
-    awaitable: Awaitable[Any],
-    policy: ProviderCallPolicy | None,
-) -> Any:
-    if policy is None:
-        return await awaitable
-    return await asyncio.wait_for(
-        awaitable,
-        timeout=policy.maximum_timeout_seconds,
-    )
-
-
-def perform_chat_api_call(**kwargs: Any) -> Any:
-    """Adapter-backed replacement for chat_orchestrator.chat_api_call."""
-    provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
-    registry = _get_llm_registry()
-    adapter = registry.get_adapter(provider)
-    if adapter is None:
-        raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
-    _attach_internal_http_hooks(adapter, request, internal)
-    timeout = internal.get("timeout")
-    timeout_kwargs = {"timeout": timeout} if timeout is not None else {}
-    privacy_safe_errors = _privacy_safe_provider_errors_enabled(request)
-    try:
-        with provider_error_privacy_scope(privacy_safe_errors):
-            _validate_audited_call_policy_transport(registry, provider, request)
-            if request.get("stream"):
-                return _map_sync_stream_egress_errors(
-                    provider,
-                    adapter.stream(request, **timeout_kwargs),
-                )
-            return adapter.chat(request, **timeout_kwargs)
-    except EgressPolicyError as exc:
-        raise _map_provider_egress_error(provider, exc) from exc
-    except Exception as exc:
-        if privacy_safe_errors:
-            raise privacy_safe_chat_error(provider, exc) from None
-        raise
-
-
-async def perform_chat_api_call_async(**kwargs: Any) -> Any:
-    """Async adapter-backed replacement for chat_orchestrator.chat_api_call_async."""
-    provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
-    registry = _get_llm_registry()
-    adapter = registry.get_adapter(provider)
-    if adapter is None:
-        raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
-    _attach_internal_http_hooks(adapter, request, internal)
-    timeout = internal.get("timeout")
-    timeout_kwargs = {"timeout": timeout} if timeout is not None else {}
-    privacy_safe_errors = _privacy_safe_provider_errors_enabled(request)
-
-    try:
-        with provider_error_privacy_scope(privacy_safe_errors):
-            strict_policy = _validate_audited_call_policy_transport(
-                registry, provider, request
-            )
-            if request.get("stream"):
-                try:
-                    stream_iter = adapter.astream(request, **timeout_kwargs)
-                    if inspect.isawaitable(stream_iter):
-                        stream_iter = await stream_iter
-                    return _map_async_stream_egress_errors(provider, stream_iter)
-                except NotImplementedError:
-                    stream_iter = adapter.stream(request, **timeout_kwargs)
-                    return _map_async_stream_egress_errors(
-                        provider,
-                        wrap_sync_stream(stream_iter),
-                    )
-
-            if getattr(adapter, "async_chat_is_native", None) is True:
-                try:
-                    return await _await_with_call_policy_deadline(
-                        adapter.achat(request, **timeout_kwargs),
-                        strict_policy,
-                    )
-                except NotImplementedError:
-                    pass
-            return await _await_with_call_policy_deadline(
-                await_bounded_sync_call(
-                    partial(adapter.chat, request, **timeout_kwargs),
-                    pool=SYNC_ADAPTER_CALL_POOL,
-                    exhaustion_message="Provider adapter capacity is exhausted",
-                ),
-                strict_policy,
-            )
-    except EgressPolicyError as exc:
-        raise _map_provider_egress_error(provider, exc) from exc
-    except DaemonCapacityError:
-        raise_detached_error(
-            sanitized_provider_stream_exception("provider_unavailable")
-        )
-    except asyncio.CancelledError as provider_cancel:
-        current_task = asyncio.current_task()
-        if current_task is not None and current_task.cancelling():
-            raise
-        raise_detached_error(
-            sanitized_provider_stream_exception(provider_cancel)
-        )
-    except Exception as exc:
-        if privacy_safe_errors:
-            raise privacy_safe_chat_error(provider, exc) from None
-        raise
 
 
 def merge_api_keys_for_provider(
@@ -2776,7 +1615,9 @@ def build_call_params_from_request(
             "stream",
             "save_to_db",
             "tldw_history_selection_v1",
+            "tldw_history_server_existing_input_v1",
             "tldw_history_branch",
+            "tldw_history_edit_v1",
             "tldw_history_admission_v1",
             "tldw_turn",
             "history_message_limit",
@@ -2793,7 +1634,7 @@ def build_call_params_from_request(
             "grammar_override",
         },
     )
-    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
+    from tldw_Server_API.app.core.Chat.chat_request_schemas import (
         _is_server_managed_chat_request_field,
     )
 
@@ -2889,8 +1730,18 @@ def build_call_params_from_request(
     )["extra_body"]
     for extension in ("extra_body", "extra_headers"):
         if isinstance(call_params.get(extension), dict):
-            call_params[extension] = {key: value for key, value in call_params[extension].items()
-                if key.lower().replace("-", "_") not in {"tldw_history_selection_v1", "tldw_history_admission_v1"}}
+            call_params[extension] = {
+                key: value
+                for key, value in call_params[extension].items()
+                if key.lower().replace("-", "_")
+                not in {
+                    "tldw_history_selection_v1",
+                    "tldw_history_branch",
+                    "tldw_history_edit_v1",
+                    "tldw_history_admission_v1",
+                    "tldw_history_server_existing_input_v1",
+                }
+            }
     billing_prompt_cache_intent = getattr(request_data, "billing_prompt_cache_intent", None)
     if billing_prompt_cache_intent is not None:
         call_params["billing_prompt_cache_intent"] = billing_prompt_cache_intent
@@ -2902,6 +1753,7 @@ def build_call_params_from_request(
             "messages_payload": templated_llm_payload,
             "system_message": final_system_message,
             "streaming": getattr(request_data, "stream", False),
+            "llm_surface": CHAT_COMPLETIONS_SURFACE,
         }
     )
     if app_config is not None:
@@ -3006,64 +1858,21 @@ def inject_research_context_into_prompt(
 
 
 def estimate_tokens_from_json(request_json: str) -> int:
-    """Rough estimate: assume ~4 chars per token for rate limiting.
+    """Heuristic prompt size for rate limits, quotas, billing and queue admission.
 
-    This matches the existing heuristic in the endpoint.
+    The chat path's one estimate (``estimate_segment_tokens``: data:image payloads
+    redacted, four characters per token rounded up), never below 1.
     """
     try:
-        sanitized = _sanitize_data_uris(request_json)
-        return max(1, len(sanitized) // 4)
+        return max(1, estimate_segment_tokens(request_json))
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         return 1
 
 
-_DATA_URI_RE = re.compile(r'(data:image[^,]*,)[^"\s]+', re.IGNORECASE)
-
-
-def _sanitize_data_uris(text: str) -> str:
-    """Redact data URI payloads to avoid inflating token estimates."""
-    try:
-        return _DATA_URI_RE.sub(r"\1<omitted>", text)
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return text
-
-
-def _sanitize_messages_for_token_estimate(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return a copy of messages with base64 image payloads replaced."""
-    sanitized: list[dict[str, Any]] = []
-    for msg in messages or []:
-        if not isinstance(msg, dict):
-            continue
-        msg_copy = msg.copy()
-        content = msg_copy.get("content")
-        if isinstance(content, list):
-            new_parts: list[Any] = []
-            for part in content:
-                if not isinstance(part, dict):
-                    new_parts.append(part)
-                    continue
-                if part.get("type") == "image_url":
-                    image_url = part.get("image_url") or {}
-                    if isinstance(image_url, dict):
-                        url_val = image_url.get("url")
-                        if isinstance(url_val, str) and url_val.startswith("data:image"):
-                            new_image_url = dict(image_url)
-                            new_image_url["url"] = "data:image/omitted"
-                            new_parts.append({**part, "image_url": new_image_url})
-                            continue
-                new_parts.append(part)
-            msg_copy["content"] = new_parts
-        elif isinstance(content, str):
-            msg_copy["content"] = _sanitize_data_uris(content)
-        sanitized.append(msg_copy)
-    return sanitized
-
-
 def _estimate_tokens_from_messages(messages: list[dict[str, Any]]) -> int:
-    """Estimate tokens from message payloads with base64 redaction."""
+    """The same estimate for a message list, taken over its JSON."""
     try:
-        sanitized = _sanitize_messages_for_token_estimate(messages)
-        return max(1, len(_json.dumps(sanitized, default=str)) // 4)
+        return estimate_tokens_from_json(_json.dumps(messages, default=str))
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         return 1
 
@@ -3569,9 +2378,14 @@ def build_structured_http_exception(exc: StructuredGenerationError) -> HTTPExcep
 
 
 def _is_trusted_local_chat_http_exception(exc: BaseException) -> bool:
-    """Return whether an HTTP error was created and bounded by this service."""
+    """Return whether an HTTP error was created and bounded by this service.
 
-    return isinstance(exc, UnsupportedMultiChoiceToolAutoexecError) or (
+    An LLM quota refusal is trusted: it is the user's limit, not a provider failure,
+    and reaches the caller as its own 402 (LLM usage accounting spec §4b).
+    A policy refusal is trusted too: the hook's decision, not a provider failure (TASK-13950.13).
+    """
+
+    return isinstance(exc, (UnsupportedMultiChoiceToolAutoexecError, LLMQuotaExceededError, LLMPolicyRefusal)) or (
         isinstance(exc, HTTPException)
         and trusted_local_chat_signal_kind(exc) is not None
     )
@@ -3599,14 +2413,20 @@ def _bound_provider_invocation_exception(exc: BaseException) -> BaseException:
     if _is_trusted_local_chat_http_exception(exc):
         return exc
     if isinstance(exc, ChatAuthenticationError):
-        return ChatAuthenticationError(
+        bounded = ChatAuthenticationError(
             message="The selected provider credentials could not be authenticated.",
             status_code=403 if getattr(exc, "status_code", None) == 403 else 401,
         )
+        if getattr(exc, "credential_refresh_retry_safe", None) is True:
+            bounded.credential_refresh_retry_safe = True
+        return bounded
     if isinstance(exc, ChatConfigurationError):
         return ChatConfigurationError(
             message="The selected provider configuration is invalid.",
+            error_code=getattr(exc, "error_code", "provider_configuration_invalid"),
         )
+    if isinstance(exc, ChatModelNotAvailableError):
+        return exc  # its message is built from the request's provider and model, never upstream text
     if isinstance(exc, ChatBadRequestError):
         return ChatBadRequestError(
             provider=getattr(exc, "provider", None),
@@ -4230,6 +3050,107 @@ async def _resolve_saved_regeneration(
     return user, legacy_reply
 
 
+def _history_for_request(
+    snapshot: Any,
+    content: Any,
+    character_card: dict[str, Any],
+    continue_prefix: str | None,
+) -> list[dict[str, Any]]:
+    """Format the selected rows for this request.
+
+    On Continue the reply being continued is the final context message, and some
+    providers (for example Anthropic) refuse a final message that ends in whitespace,
+    so it goes out without its trailing whitespace.
+    """
+    formatted = _format_selected_history_messages(snapshot, content, character_card)
+    if continue_prefix is not None:
+        formatted[-1]["content"] = formatted[-1]["content"].rstrip()
+    return formatted
+
+
+def _format_selected_history_messages(
+    snapshot: Any,
+    content: Any,
+    character_card: dict[str, Any],
+    *,
+    user_name: str = "User",
+    replace_user_placeholders: bool = True,
+    literal_text: bool = False,
+) -> list[dict[str, Any]]:
+    """Format detached owner-selected rows, leaving placeholders literal when requested."""
+    output: list[dict[str, Any]] = []
+    source_nodes = {row["id"]: row for row in snapshot.nodes}
+    for item in content:
+        extra = item.get("extra_metadata") or {}
+        source_role = map_sender_to_role(source_nodes[item["id"]]["role"], character_card.get("name"))
+        role = extra.get("sender_role") or source_role
+        text = _saved_image_text(
+            {
+                "content": item["message"],
+                "images": item["images"],
+                "sender": source_nodes[item["id"]]["role"],
+                "version": item["_message_version"],
+            },
+            extra,
+        )
+        if role == "assistant":
+            answer = strip_reasoning_blocks(text)
+            if not answer.strip() and answer != text and not item["images"]:
+                if not (item.get("tool_calls") or extra.get("function_call")):
+                    continue
+                text = None
+            else:
+                text = answer
+        image_details = _saved_image_details(extra, len(item["images"]))
+        if text and not literal_text and role != "tool" and (role != "user" or replace_user_placeholders):
+            text = replace_placeholders(text, character_card.get("name", "Char"), user_name)
+        placeholder = extra.get("content_placeholder_reason")
+        if placeholder == "invalid_content" or (
+            placeholder in {"tool_calls", "function_call"}
+            and (
+                role != "assistant"
+                or not (item.get("tool_calls") if placeholder == "tool_calls" else extra.get("function_call"))
+            )
+        ):
+            raise HistorySelectionError("unsupported_history_context_content_placeholder")
+        if placeholder == "empty_tool_result":
+            if role != "tool" or item["images"]:
+                raise HistorySelectionError("unsupported_history_context_content_placeholder")
+            if item["_message_version"] == 1 and text == "[empty tool result]":
+                text = ""
+        entry = {"role": role, "content": text}
+        if item["images"]:
+            entry["content"] = ([{"type": "text", "text": text}] if text else []) + [
+                {"type": "image_url", "image_url": {"url": image, "detail": detail}}
+                for image, detail in zip(item["images"], image_details)
+            ]
+        if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
+            entry["content"] = None
+        if item.get("tool_calls") is not None:
+            entry["tool_calls"] = item["tool_calls"]
+        for key in ("function_call", "tool_call_id"):
+            if extra.get(key) is not None:
+                entry[key] = extra[key]
+        if extra.get("sender_name") or extra.get("tool_name"):
+            entry["name"] = extra.get("sender_name") or extra.get("tool_name")
+        output.append(entry)
+    return output
+
+
+def _normalize_history_overlap_content(value: Any, *, assistant: bool) -> Any:
+    """Normalize text parts for comparing the saved and submitted history."""
+    if isinstance(value, str):
+        value = [{"type": "text", "text": value}]
+    if assistant and isinstance(value, list):
+        return [
+            {**part, "text": strip_reasoning_blocks(part["text"])}
+            if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str)
+            else part
+            for part in value
+        ]
+    return value
+
+
 async def build_context_and_messages(
     chat_db: Any,
     request_data: Any,
@@ -4272,17 +3193,36 @@ async def build_context_and_messages(
     regenerate_reply_id = request_metadata.get("tldw_regenerate_from_message_id") if isinstance(request_metadata, dict) else None
     if regenerate_reply_id is not None:
         if not isinstance(regenerate_reply_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", regenerate_reply_id):
-            raise HTTPException(status_code=422, detail="A valid saved reply ID is required for regeneration.")
+            # 400: the chat endpoint turns statuses outside its allow-list (422) into 500.
+            raise HTTPException(status_code=400, detail="A valid saved reply ID is required for regeneration.")
         if (not final_conversation_id or explicit_failed_retry
                 or getattr(request_data, "tldw_continuation", None) is not None):
             raise HTTPException(status_code=409, detail="Regeneration requires an existing saved answered turn.")
+    from tldw_Server_API.app.core.Chat.history_continuation import (
+        continued_reply_prefix,
+        parse_continue_reply_id,
+    )
+
+    continue_reply_id = parse_continue_reply_id(
+        request_data,
+        conversation_id=final_conversation_id,
+        regenerate_reply_id=regenerate_reply_id,
+        explicit_failed_retry=explicit_failed_retry,
+    )
+    continue_prefix: str | None = None
     reuse_saved_turn = explicit_failed_retry or regenerate_reply_id is not None
 
     durable_history = getattr(turn_spec, "history_v1", None)
     selected_durable = durable_history is not None
-    history_selection = (durable_history.selection if selected_durable and durable_history.kind == "selection"
-        else getattr(request_data, "tldw_history_selection_v1", None))
-    if history_selection is not None and reuse_saved_turn:
+    server_existing_input = getattr(request_data, "tldw_history_server_existing_input_v1", None)
+    history_selection = getattr(request_data, "tldw_history_selection_v1", None) or server_existing_input
+    if (
+        selected_durable and (reuse_saved_turn or continue_reply_id is not None)
+        or history_selection is not None and (
+            explicit_failed_retry
+            or server_existing_input is not None and (regenerate_reply_id is not None or continue_reply_id is not None)
+        )
+    ):
         raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_legacy_retry"})
     versioned = history_selection is not None or selected_durable
     history_runtime = runtime_state or {}
@@ -4292,76 +3232,199 @@ async def build_context_and_messages(
     history_snapshot = None
     admission = None
     if versioned:
-        from tldw_Server_API.app.core.Chat.history_context import project_history_context
-        from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError, HistorySelectionSnapshotV1
+        from tldw_Server_API.app.core.Chat.history_context import (
+            project_history_context,
+            selected_unanswered_text_question,
+        )
+
         if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
             raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_context_prompt_template"})
-        selection = history_selection.model_dump(mode="json") if history_selection is not None else None
+        selection_model = history_selection
+        if selected_durable:
+            selection_model = durable_history.selection if durable_history.kind == "selection" else None
+        selection = selection_model.model_dump(mode="json") if selection_model is not None else None
+        edit_target = getattr(request_data, "tldw_history_edit_v1", None)
+        edit_target = edit_target.model_dump(mode="json") if edit_target is not None else None
         owner = history_runtime["history_owner_key"]
+        continuation_holder: dict[str, str] = {}
+
         def accept_history() -> tuple[
             HistorySelectionSnapshotV1,
             tuple[dict[str, Any], ...],
-            dict[str, Any],
+            dict[str, Any] | None,
             dict[str, Any],
             tuple[dict[str, Any] | None, int | None, dict[str, Any]],
         ]:
             with chat_db.transaction() as conn:
-                state = chat_db.get_roleplay_resume_state(final_conversation_id, conn=conn, lock_for_update=True,
-                    owner_client_id=history_runtime["history_owner_client_id"])
-                if selected_durable and {key: state["conversation"].get(key) for key in ("scope_type", "workspace_id")} != history_runtime["history_scope"]:
-                    raise HistorySelectionError("owner_conversation_mismatch")
-                if (selected_durable and state["conversation"].get("scope_type") == "workspace"
-                        and not any(state["conversation"].get(key) for key in ("character_id", "assistant_kind", "assistant_id"))):
-                    workspace = chat_db.get_workspace(state["conversation"]["workspace_id"], conn=conn, for_update=True)
-                    if workspace and (workspace.get("assistant_defaults_json") is not None or workspace.get("_assistant_defaults_invalid")):
-                        raise HistorySelectionError("unsupported_history_context_inherited_assistant")
-                if not selected_durable:
-                    snap, content = chat_db.validate_history_selection(final_conversation_id, selection,
-                        owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
-                context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
+                owner_client_id = history_runtime["history_owner_client_id"]
+                state = chat_db.get_roleplay_resume_state(
+                    final_conversation_id, conn=conn, lock_for_update=True, owner_client_id=owner_client_id,
+                )
                 if selected_durable:
+                    conversation = state["conversation"]
+                    scope = {key: conversation.get(key) for key in ("scope_type", "workspace_id")}
+                    if scope != history_runtime["history_scope"]:
+                        raise HistorySelectionError("owner_conversation_mismatch")
+                    if conversation.get("scope_type") == "workspace" and not any(
+                        conversation.get(key) for key in ("character_id", "assistant_kind", "assistant_id")
+                    ):
+                        workspace = chat_db.get_workspace(conversation["workspace_id"], conn=conn, for_update=True)
+                        if workspace and (workspace.get("assistant_defaults_json") is not None or workspace.get("_assistant_defaults_invalid")):
+                            raise HistorySelectionError("unsupported_history_context_inherited_assistant")
+                    context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
+                    # Native prompt effects must not silently disappear from the finalized durable request.
+                    if context[2].get("history_dictionary_plan") is not None:
+                        raise HistorySelectionError("unsupported_history_context_dictionaries")
+                    if context[2].get("history_world_book_plan") is not None:
+                        raise HistorySelectionError("unsupported_history_context_world_books")
                     for field, value in context[2].get("history_sampling", {}).items():
                         if field not in request_data.model_fields_set or getattr(request_data, field, None) != value:
                             raise HistorySelectionError("unsupported_history_context_sampling_mismatch")
-                if selected_durable and durable_history.kind == "admission":
                     current_user = next(message for message in request_data.messages if message.role == "user")
-                    reference = durable_history.admission.model_dump(mode="json")
-                    store = chat_db.message_store
-                    accepted = store._verified_history_input(final_conversation_id, str(turn_spec.user_message_id),
-                        owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
-                    authority = store._validate_history_parent(final_conversation_id, reference,
-                        owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
                     intent = {"id": str(turn_spec.user_message_id), "sender": "user", "content": current_user.content}
-                    if (authority["scope"] != history_runtime["history_scope"]
-                            or store._history_intent_digest(intent) != authority["intent_digest"]):
-                        raise HistorySelectionError("message_id_conflict")
-                    snap, content = chat_db.validate_history_selection(final_conversation_id, authority["selection"],
-                        owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
-                elif selected_durable:
-                    snap, content = chat_db.validate_history_selection(final_conversation_id, selection,
-                        owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
-                for item in content:
-                    _saved_image_details(item.get("extra_metadata"), len(item["images"]))
-                    if selected_durable and (item["images"] or item.get("tool_calls") is not None
-                            or (item.get("extra_metadata") or {}).get("sender_role") in {"tool", "function"}
-                            or any((item.get("extra_metadata") or {}).get(key) is not None
-                                for key in ("function_call", "tool_call_id", "content_placeholder_reason"))):
-                        raise HistorySelectionError("unsupported_history_context_selected_assets_or_tools")
-                if selected_durable and durable_history.kind == "selection":
-                    current_user = next(message for message in request_data.messages if message.role == "user")
-                    accepted = chat_db.append_selected_history_input(final_conversation_id, selection,
-                        {"id": str(turn_spec.user_message_id), "sender": "user", "content": current_user.content},
-                        owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
-                elif not selected_durable:
-                    accepted = chat_db.append_selected_history_inputs(final_conversation_id, selection, history_runtime["history_inputs"],
-                        owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn,
-                        history_branch=getattr(request_data, "tldw_history_branch", None))
+                    retained_selection = selection
+                    if durable_history.kind == "admission":
+                        reference = durable_history.admission.model_dump(mode="json")
+                        store = chat_db.message_store
+                        accepted = store._verified_history_input(final_conversation_id, intent["id"],
+                            owner_client_id=owner_client_id, owner_key=owner, conn=conn)
+                        authority = store._validate_history_parent(final_conversation_id, reference,
+                            owner_client_id=owner_client_id, owner_key=owner, conn=conn)
+                        if authority["scope"] != scope or store._history_intent_digest(intent) != authority["intent_digest"]:
+                            raise HistorySelectionError("message_id_conflict")
+                        retained_selection = authority["selection"]
+                    snap, content = chat_db.validate_history_selection(final_conversation_id, retained_selection,
+                        owner_client_id=owner_client_id, owner_key=owner, conn=conn)
+                    for item in content:
+                        extra = item.get("extra_metadata") or {}
+                        _saved_image_details(extra, len(item["images"]))
+                        if (item["images"] or item.get("tool_calls") is not None
+                                or extra.get("sender_role") in {"tool", "function"}
+                                or any(extra.get(key) is not None
+                                    for key in ("function_call", "tool_call_id", "content_placeholder_reason"))):
+                            raise HistorySelectionError("unsupported_history_context_selected_assets_or_tools")
+                    if durable_history.kind == "selection":
+                        accepted = chat_db.append_selected_history_input(final_conversation_id, selection, intent,
+                            owner_client_id=owner_client_id, owner_key=owner, conn=conn)
+                    return snap, content, accepted, conversation, context
+
+                snap, content = chat_db.validate_history_selection(
+                    final_conversation_id,
+                    selection,
+                    owner_client_id=history_runtime["history_owner_client_id"],
+                    owner_key=owner,
+                    conn=conn,
+                    history_edit=edit_target,
+                )
+                question = (selected_unanswered_text_question(snap, content, selection)
+                    if server_existing_input is not None else None)
+                context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
+                dictionary_plan = context[2].pop("history_dictionary_plan", None)
+                if dictionary_plan is not None:
+                    from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import (
+                        transform_frozen_user_content,
+                    )
+                    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+
+                    try:
+                        context[2]["history_dictionary_user_content"] = transform_frozen_user_content(
+                            ([{"role": "user", "content": question["message"]}] if question is not None
+                                else [message.model_dump(exclude_none=True) for message in request_data.messages]), dictionary_plan,
+                        )
+                    except InputError as exc:
+                        raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
+                _format_selected_history_messages(snap, content, context[0] or {})
+                reused_reply_id = regenerate_reply_id if regenerate_reply_id is not None else continue_reply_id
+                unsupported_code = (
+                    "unsupported_history_continuation" if continue_reply_id is not None
+                    else "unsupported_history_regeneration"
+                )
+                if server_existing_input is not None:
+                    accepted = None
+                elif reused_reply_id is not None:
+                    if getattr(request_data, "tldw_history_branch", None) is not True:
+                        raise reply_action_refusal(unsupported_code, REPLY_ACTION_REFUSED_REQUEST)
+                    inputs = [
+                        message.model_dump(exclude_none=True)
+                        for message in request_data.messages
+                        if message.role != "system"
+                    ]
+                    if len(inputs) != 1 or inputs[0].get("role") != "user":
+                        raise HistorySelectionError("invalid_regeneration_input")
+                    try:
+                        accepted = chat_db.reuse_selected_history_admission(
+                            final_conversation_id,
+                            selection,
+                            reused_reply_id,
+                            owner_client_id=history_runtime["history_owner_client_id"],
+                            owner_key=owner,
+                            conn=conn,
+                        )
+                    except HistorySelectionError as exc:
+                        if exc.code == "unsupported_history_regeneration":
+                            raise HistorySelectionError(unsupported_code, details=exc.details) from exc
+                        raise
+                    original = next(item for item in content if item["id"] == accepted["input_message_id"])
+                    extra = original.get("extra_metadata") or {}
+                    if (
+                        original.get("tool_calls") is not None
+                        or extra.get("function_call") is not None
+                        or extra.get("tool_call_id") is not None
+                    ):
+                        raise reply_action_refusal(unsupported_code, REPLY_ACTION_REFUSED_QUESTION)
+                    text = _saved_image_text(
+                        {
+                            "sender": "user",
+                            "version": original["_message_version"],
+                            "content": original["message"],
+                            "images": original["images"],
+                        },
+                        extra,
+                    )
+                    details = _saved_image_details(extra, len(original["images"]))
+                    parts = ([{"type": "text", "text": text}] if text else []) + [
+                        {"type": "image_url", "image_url": {"url": image, "detail": detail}}
+                        for image, detail in zip(original["images"], details)
+                    ]
+                    if (
+                        _retry_content_components(inputs[0].get("content")) != _retry_content_components(parts)
+                        or any(
+                            inputs[0].get(key) is not None for key in ("tool_calls", "function_call", "tool_call_id")
+                        )
+                        or inputs[0].get("name") not in (None, extra.get("sender_name"))
+                    ):
+                        raise HistorySelectionError("regeneration_input_changed")
+                    if continue_reply_id is not None:
+                        # Continue keeps the saved reply as the final context message.
+                        continuation_holder["prefix"] = continued_reply_prefix(
+                            next(item for item in content if item["id"] == continue_reply_id)
+                        )
+                    else:
+                        content = tuple(item for item in content if item["id"] != regenerate_reply_id)
+                else:
+                    accepted = chat_db.append_selected_history_inputs(
+                        final_conversation_id,
+                        selection,
+                        history_runtime["history_inputs"],
+                        owner_client_id=history_runtime["history_owner_client_id"],
+                        owner_key=owner,
+                        conn=conn,
+                        history_branch=getattr(request_data, "tldw_history_branch", None),
+                        history_edit=edit_target,
+                    )
                 return snap, content, accepted, state["conversation"], context
+
         try:
             history_snapshot, selected_content, admission, existing_conversation, context = await asyncio.to_thread(accept_history)
         except HistorySelectionError as exc:
-            failure = "unsupported_history_capability" if exc.code.startswith("unsupported_history_context") else "stale_selection"
+            failure = (
+                "unsupported_history_capability"
+                if (exc.code.startswith("unsupported_history_context")
+                    or exc.code in {"unsupported_history_regeneration", "unsupported_history_continuation"})
+                else "stale_selection"
+            )
             raise HTTPException(409, detail={"status": failure, "code": exc.code, **exc.details}) from exc
+        continue_prefix = continuation_holder.get("prefix")
         character_card, character_db_id, assistant_context = context
         for field, value in assistant_context.pop("history_sampling", {}).items():
             if not selected_durable and field not in request_data.model_fields_set:
@@ -4457,7 +3520,7 @@ async def build_context_and_messages(
         )
         should_persist = False
 
-    if regenerate_reply_id:
+    if regenerate_reply_id or continue_reply_id:
         if (not should_persist or not existing_conversation
                 or existing_conversation.get("client_id") != client_id_from_db
                 or not (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned
@@ -4475,6 +3538,7 @@ async def build_context_and_messages(
                 character_card.get("name", "Chat"),
                 client_id_from_db,
                 loop,
+                first_user_message=first_user_message_text(request_data.messages),
             )
     else:
         if not conv_id:
@@ -4590,6 +3654,8 @@ async def build_context_and_messages(
                 continue
             char_name_hist = character_card.get("name", "Char") if character_card else "Char"
             text_content = _saved_image_text(db_msg, metadata.get("extra") if isinstance(metadata, dict) else None)
+            if role == "assistant":
+                text_content = strip_reasoning_blocks(text_content)
             raw_user_text = text_content
             # Normal/persona Retry compares and sends the literal saved user input.
             preserve_literal_retry = reuse_saved_turn and role == "user" and (is_owned_neutral_conversation or is_existing_persona_conversation)
@@ -4634,12 +3700,12 @@ async def build_context_and_messages(
                         db_msg.get("id"),
                         exception_summary(e),
                     )
-            if msg_parts:
+            if msg_parts or (role == "assistant" and (tool_calls_meta or function_call_meta)):
                 hist_entry = {"role": role}
                 if role == "tool" and len(msg_parts) == 1 and msg_parts[0].get("type") == "text":
                     hist_entry["content"] = msg_parts[0].get("text", "")
                 else:
-                    hist_entry["content"] = msg_parts
+                    hist_entry["content"] = msg_parts or None
                 if role == "assistant":
                     name_source = stored_name or (character_card.get("name") if character_card else None)
                     if name_source:
@@ -4651,7 +3717,12 @@ async def build_context_and_messages(
                     hist_entry["tool_calls"] = tool_calls_meta
                 if function_call_meta and not hist_entry.get("tool_calls"):
                     hist_entry["function_call"] = function_call_meta
-                if content_placeholder_reason in {"tool_calls", "function_call"}:
+                if content_placeholder_reason in {"tool_calls", "function_call"} or (
+                    content_placeholder_reason == "empty_tool_result"
+                    and role == "tool"
+                    and db_msg.get("version") == 1
+                    and db_msg.get("content") == "[empty tool result]"
+                ):
                     hist_entry["content"] = ""
                 if role == "tool" and tool_call_id_meta:
                     hist_entry["tool_call_id"] = tool_call_id_meta
@@ -4704,7 +3775,7 @@ async def build_context_and_messages(
     retry_user_message_id: str | None = None
     saved_retry_system_messages: list[dict[str, Any]] = []
     legacy_regenerated_reply: dict[str, Any] | None = None
-    if regenerate_reply_id:
+    if regenerate_reply_id and not versioned:
         if not request_messages:
             raise HTTPException(status_code=409, detail="Regeneration requires the saved user turn.")
         if any(message.get("role") != "system" for message in request_messages[:-1]):
@@ -4782,17 +3853,10 @@ async def build_context_and_messages(
             msg.get("role") in {"assistant", "tool"} for msg in request_messages
         )
         all_user_roles = all(msg.get("role") == "user" for msg in request_messages)
-        def _normalize_content(value: Any) -> Any:
-            if isinstance(value, str):
-                return [{"type": "text", "text": value}]
-            if isinstance(value, list):
-                return value
-            return value
-
         def _msg_sig(msg: dict[str, Any]) -> str:
             payload = {
                 "role": msg.get("role"),
-                "content": (_retry_content_components(retry_history_content.get(id(msg), msg.get("content"))) if reuse_saved_turn and msg.get("role") == "user" else _normalize_content(msg.get("content"))),
+                "content": (_retry_content_components(retry_history_content.get(id(msg), msg.get("content"))) if reuse_saved_turn and msg.get("role") == "user" else _normalize_history_overlap_content(msg.get("content"), assistant=msg.get("role") == "assistant")),
                 "tool_calls": msg.get("tool_calls"),
                 "function_call": msg.get("function_call"),
                 "tool_call_id": msg.get("tool_call_id"),
@@ -4874,36 +3938,27 @@ async def build_context_and_messages(
                         )
 
     if versioned:
-        source_nodes = {row["id"]: row for row in history_snapshot.nodes}
-        for item in selected_content:
-            extra = item.get("extra_metadata") or {}
-            source_role = map_sender_to_role(source_nodes[item["id"]]["role"], character_card.get("name"))
-            role = extra.get("sender_role") or source_role
-            text = _saved_image_text({
-                "content": item["message"], "images": item["images"],
-                "sender": source_nodes[item["id"]]["role"], "version": item["_message_version"],
-            }, extra)
-            image_details = _saved_image_details(extra, len(item["images"]))
-            if text and role != "tool" and not selected_durable:
-                text = replace_placeholders(text, character_card.get("name", "Char"), "User")
-            entry = {"role": role, "content": text}
-            if item["images"]:
-                entry["content"] = ([{"type": "text", "text": text}] if text else []) + [
-                    {"type": "image_url", "image_url": {"url": image, "detail": detail}}
-                    for image, detail in zip(item["images"], image_details)]
-            if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
-                entry["content"] = None
-            if item.get("tool_calls") is not None:
-                entry["tool_calls"] = item["tool_calls"]
-            for key in ("function_call", "tool_call_id"):
-                if extra.get(key) is not None:
-                    entry[key] = extra[key]
-            if extra.get("sender_name") or extra.get("tool_name"):
-                entry["name"] = extra.get("sender_name") or extra.get("tool_name")
-            historical_msgs.append(entry)
-        assistant_parent_message_id = admission["input_message_id"]
+        if regenerate_reply_id is not None or continue_reply_id is not None:
+            overlap_cut = len(request_messages)
+        formatted_history = (
+            _format_selected_history_messages(history_snapshot, selected_content, character_card, literal_text=True)
+            if selected_durable
+            else _history_for_request(history_snapshot, selected_content, character_card, continue_prefix)
+        )
+        if server_existing_input is not None:
+            existing_dictionary_content = assistant_context.pop("history_dictionary_user_content", [])
+            if existing_dictionary_content:
+                formatted_history[-1]["content"] = existing_dictionary_content[0]
+        historical_msgs.extend(formatted_history)
+        assistant_parent_message_id = (selected_content[-1]["id"] if server_existing_input is not None
+            else admission["input_message_id"])
         runtime_state["assistant_parent_message_id"] = assistant_parent_message_id
-        runtime_state["tldw_history_admission_v1"] = admission
+        if server_existing_input is not None:
+            runtime_state["tldw_history_server_existing_input_v1"] = history_selection.model_dump(mode="json")
+        else:
+            runtime_state["tldw_history_admission_v1"] = admission
+        if continue_prefix is not None:
+            runtime_state["history_continue_prefix"] = continue_prefix
 
     if retry_user_message_id and any(message.get("role") == "user" for message in request_messages[overlap_cut:-1]):
         raise HTTPException(status_code=409, detail="This retry contains extra unsaved user messages. Resolve the local conversation before retrying.")
@@ -4926,9 +3981,7 @@ async def build_context_and_messages(
             raise HTTPException(status_code=409, detail="The saved reply changed. Reload before regenerating.") from exc
 
     persisted_user_message_id: str | None = (
-        admission["input_message_id"] if versioned
-        else assistant_parent_message_id if turn_spec is not None
-        else retry_user_message_id
+        assistant_parent_message_id if versioned or turn_spec is not None else retry_user_message_id
     )
     system_block_id = str(_uuid.uuid4())
     if (should_persist and retry_system_messages
@@ -4961,6 +4014,7 @@ async def build_context_and_messages(
                 detail="Unable to save updated retry instructions. Try again.",
             ) from exc
     current_turn: list[dict[str, Any]] = list(retry_system_messages)
+    dictionary_user_content = iter(assistant_context.pop("history_dictionary_user_content", []))
     for index, msg_dict in enumerate(request_messages[overlap_cut:], start=overlap_cut):
         role = msg_dict.get("role")
         msg_for_db = msg_dict.copy()
@@ -4977,6 +4031,8 @@ async def build_context_and_messages(
             if role == "user":
                 persisted_user_message_id = str(saved_message_id) if saved_message_id else None
         msg_for_llm = msg_dict.copy()
+        if versioned and role == "user":
+            msg_for_llm["content"] = next(dictionary_user_content, msg_for_llm.get("content"))
         if role == "assistant" and character_card and character_card.get("name"):
             name = sanitize_sender_name(character_card.get("name"))
             if name:
@@ -5017,14 +4073,22 @@ async def build_context_and_messages(
     # Preserve requested history ordering (DB fetch already honors ASC/DESC).
     historical_msgs_for_payload = historical_msgs
 
-    llm_payload_messages = (
-        current_turn + historical_msgs_for_payload
-        if turn_spec is not None and not selected_durable
-        else historical_msgs_for_payload + current_turn
-    )
     if selected_durable:
         llm_payload_messages = ([message for message in current_turn if message["role"] == "system"]
             + historical_msgs_for_payload + [message for message in current_turn if message["role"] != "system"])
+    elif turn_spec is not None:
+        llm_payload_messages = current_turn + historical_msgs_for_payload
+    else:
+        llm_payload_messages = historical_msgs_for_payload + current_turn
+
+    if versioned and assistant_context.get("history_world_book_plan") is not None:
+        from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
+            build_frozen_world_book_prompt_context,
+        )
+
+        character_card["_history_world_book_context"] = build_frozen_world_book_prompt_context(
+            llm_payload_messages, assistant_context["history_world_book_plan"],
+        )
 
     return character_card, character_db_id, conv_id, conversation_created, llm_payload_messages, should_persist
 
@@ -5103,7 +4167,8 @@ def apply_prompt_templating(
         saved_system = character_card.get("system_prompt") if character_card else None
         return ("\n\n".join(([saved_system] if saved_system else []) + systems) or None,
             [message.copy() for message in llm_payload_messages if message["role"] != "system"])
-    active_template = (DEFAULT_RAW_PASSTHROUGH_TEMPLATE if getattr(request_data, "tldw_history_selection_v1", None) is not None
+    active_template = (DEFAULT_RAW_PASSTHROUGH_TEMPLATE if (getattr(request_data, "tldw_history_selection_v1", None) is not None
+            or getattr(request_data, "tldw_history_server_existing_input_v1", None) is not None)
         else load_template(getattr(request_data, "prompt_template_name", None) or DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name))
     template_data: dict[str, Any] = {}
     if character_card:
@@ -5149,6 +4214,12 @@ def apply_prompt_templating(
     elif character_card and character_card.get("system_prompt"):
         final_system_message = character_card.get("system_prompt")
         logger.debug("Using character system prompt summary {}", text_summary(final_system_message))
+
+    if (getattr(request_data, "tldw_history_selection_v1", None) is not None
+            or getattr(request_data, "tldw_history_server_existing_input_v1", None) is not None):
+        lore = character_card.get("_history_world_book_context")
+        if lore is not None and lore.text:
+            final_system_message = "\n\n".join(part for part in (final_system_message, lore.text) if part)
 
     logger.debug("Final system message summary {}", text_summary(final_system_message))
 
@@ -5204,6 +4275,82 @@ async def _maybe_refund_streaming_rg(
             await res  # type: ignore[misc]
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         pass
+
+
+async def _record_stream_usage(
+    *,
+    request: Any,
+    provider: str,
+    model: str,
+    templated_llm_payload: list[dict[str, Any]],
+    conversation_id: str | None,
+    llm_start_time: float,
+    credential_source: str | None,
+    stream_usage: _StreamUsage | None,
+    full_reply: str = "",
+    rg_commit_cb: Callable[[int], Any] | None,
+) -> None:
+    """Write the one usage row of a /chat/completions stream and commit its tokens; never raises.
+
+    The row comes from the provider's usage chunk when one arrived, else from the prompt estimate and what
+    the stream received: content, reasoning and tool-call arguments, as the provider-level recorder counts
+    them. A side the chunk does not count comes from the estimate. The same tokens go to the Resource
+    Governor and billing through ``rg_commit_cb``, however the stream ended (TASK-13953).
+    """
+    total_tokens = 0
+    try:
+        provider_usage = stream_usage.usage if stream_usage is not None else None
+        reported_prompt, reported_completion = _usage_tokens(provider_usage) if provider_usage else (0, 0)
+        reported = (reported_prompt, reported_completion) != (0, 0)
+        prompt_tokens = reported_prompt
+        if not prompt_tokens:
+            try:
+                prompt_tokens = _estimate_tokens_from_messages(templated_llm_payload)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                prompt_tokens = 0
+        received_chars = stream_usage.chars if stream_usage is not None else len(full_reply or "")
+        completion_tokens = reported_completion or _approx_tokens(received_chars)
+        user_id = None
+        api_key_id = None
+        try:
+            if request is not None and hasattr(request, "state"):
+                user_id = getattr(request.state, "user_id", None)
+                api_key_id = getattr(request.state, "api_key_id", None)
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            pass
+        total_tokens = int(prompt_tokens + completion_tokens)
+        await log_llm_usage(
+            user_id=user_id,
+            key_id=api_key_id,
+            request=request,
+            endpoint=(f"{request.method}:{request.url.path}" if request else "POST:/api/v1/chat/completions"),
+            operation="chat",
+            provider=provider,
+            model=model,
+            status=200,
+            latency_ms=int((time.time() - llm_start_time) * 1000),
+            prompt_tokens=int(prompt_tokens),
+            completion_tokens=int(completion_tokens),
+            total_tokens=total_tokens,
+            request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
+            conversation_id=(str(conversation_id) if conversation_id is not None else None),
+            usage_metadata=provider_usage if reported else None,
+            estimated=None if reported and (prompt_tokens, completion_tokens) == (reported_prompt, reported_completion) else True,
+            estimate_source=None if reported else "stream_estimate",
+            credential_source=credential_source,
+        )
+    except _CHAT_NONCRITICAL_EXCEPTIONS:
+        pass
+    finally:
+        # Commit the recorded tokens to the Resource Governor and billing whatever the write did: a commit skipped
+        # on a failed write would be a quota bypass
+        try:
+            if callable(rg_commit_cb):
+                res = rg_commit_cb(total_tokens)  # may be async or sync
+                if hasattr(res, "__await__"):
+                    await res  # type: ignore[misc]
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            pass
 
 
 def _evaluate_chat_prompt_cost_guardrails(
@@ -5342,7 +4489,8 @@ async def execute_streaming_call(
     continuation_metadata: dict[str, Any] | None = None,
     queue_request_id: str | None = None,
     provider_factory_timeout: float | None = None,
-    history_persistence_ack: bool = False,
+    native_persistence: NativeStreamPersistence | None = None,
+    forward_usage_chunk: bool = False,
     selected_durable_text_only: bool = False,
 ) -> StreamingResponse:
     """Execute a streaming LLM call with queue, failover, moderation, and persistence.
@@ -5352,8 +4500,12 @@ async def execute_streaming_call(
     - output moderation (chunk-wise)
     - saving final assistant message to DB
     - usage logging and audit success
+
+    Selected durable callers supply a protected settlement callback as
+    save_message_fn. Only return an ID from it after verifying the receipt.
     """
     llm_start_time = time.time()
+    usage_credential_source = call_credential_source(cleaned_args)  # whose key the reply ran on, for the usage row
     factory_budget_seconds = (
         PROVIDER_STREAM_FACTORY_TIMEOUT_SECONDS
         if provider_factory_timeout is None
@@ -5382,6 +4534,7 @@ async def execute_streaming_call(
     )
     stream_metrics_recorded = False
     stream_failure_recorded = False
+    stream_usage_recorded = False  # one usage row per stream, however it ends (TASK-13953)
     raw_stream_iter: AsyncIterator[str] | Iterator[str] | None = None
     queue_for_exec = None
     queue_future: asyncio.Future[Any] | None = None
@@ -5403,8 +4556,6 @@ async def execute_streaming_call(
         if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
             payload["conversation_id"] = final_conversation_id
             payload["tldw_conversation_id"] = final_conversation_id
-            if user_message_id:
-                payload["tldw_user_message_id"] = user_message_id
             if system_message_id:
                 payload["tldw_system_message_id"] = system_message_id
             if normalized_continuation_metadata:
@@ -5483,6 +4634,7 @@ async def execute_streaming_call(
 
             def _queued_processor():
                 nonlocal selected_provider, model, llm_call_func, stream_failure_recorded, structured_request_context
+                nonlocal usage_credential_source
                 local_start = time.time()
                 try:
                     result = _call_stream_factory_from_isolated_worker(
@@ -5500,6 +4652,8 @@ async def execute_streaming_call(
                                 queued=True,
                             )
                     return result
+                except (LLMQuotaExceededError, LLMPolicyRefusal):
+                    raise  # the user's limit or a policy refusal, not the provider's health: no failure, no fallback
                 except Exception as proc_error:  # noqa: BLE001 - adapter trust boundary
                     latency = time.time() - local_start
                     metrics.track_llm_call(
@@ -5589,6 +4743,7 @@ async def execute_streaming_call(
                                     if not hasattr(result, "__aiter__") and hasattr(result, "__iter__"):
                                         result = wrap_sync_stream(result)
                                     selected_provider = fallback_provider
+                                    usage_credential_source = call_credential_source(refreshed_args)
                                     # Update run-first metric context to reflect fallback provider/model
                                     if run_first_metric_context is not None:
                                         run_first_metric_context["provider"] = str(fallback_provider or "").strip() or "unknown"
@@ -5602,6 +4757,8 @@ async def execute_streaming_call(
                                             queued=True,
                                         )
                                     return result
+                                except (LLMQuotaExceededError, LLMPolicyRefusal):
+                                    raise  # the user's refusal, not the fallback provider's health (TASK-13955)
                                 except _CHAT_NONCRITICAL_EXCEPTIONS as fallback_error:
                                     provider_manager.record_failure(
                                         fallback_provider,
@@ -5750,6 +4907,8 @@ async def execute_streaming_call(
                 "message": "Prompt cost guardrail blocked request before provider dispatch.",
             }
         await _maybe_refund_streaming_rg(rg_refund_cb, cancelled=False, error=True)
+        if isinstance(he, (LLMQuotaExceededError, LLMPolicyRefusal)):
+            raise  # quota (§4b) or policy refusal: the caller gets its 402/400, not a provider-style error frame
         response = StreamingResponse(
             _terminal_stream_error(error_payload),
             media_type="text/event-stream",
@@ -5848,6 +5007,7 @@ async def execute_streaming_call(
                             },
                         )
                     cleaned_args = refreshed_args
+                    usage_credential_source = call_credential_source(cleaned_args)
                     model = refreshed_model or model
                     fallback_start_time = time.time()
                     def llm_call_func_fb():
@@ -5878,6 +5038,8 @@ async def execute_streaming_call(
                                 streaming=True,
                                 queued=False,
                             )
+                    except (LLMQuotaExceededError, LLMPolicyRefusal):
+                        raise  # the user's refusal, not the fallback provider's health (TASK-13955)
                     except _CHAT_NONCRITICAL_EXCEPTIONS as fallback_error:
                         provider_manager.record_failure(
                             fallback_provider,
@@ -5961,7 +5123,9 @@ async def execute_streaming_call(
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         loop_compat_enabled = False
 
-    async def _apply_stream_output_policies(full_reply: str) -> tuple[str | None, bool]:
+    async def _apply_stream_output_policies(
+        full_reply: str, *, enforce_resolved_action: bool = False
+    ) -> tuple[str | None, bool]:
         """Run self-monitoring and output moderation on a reply before it is saved.
 
         Shared by complete and partial settlement so both store the same text.
@@ -6045,12 +5209,11 @@ async def execute_streaming_call(
                         _, sample = moderation.check_text(full_reply, eff_policy, "output")
                     except _CHAT_NONCRITICAL_EXCEPTIONS:
                         sample = None
-                if action is None:
-                    flagged, sample = moderation.check_text(full_reply, eff_policy, "output")
-                    if flagged:
-                        action = eff_policy.output_action
-                        if action == "redact":
-                            moderation.redact_text(full_reply, eff_policy)
+                if action is None or enforce_resolved_action:
+                    if action is None:
+                        flagged, sample = moderation.check_text(full_reply, eff_policy, "output")
+                        if flagged:
+                            action = eff_policy.output_action
 
                     if action == "block":
                         if not stream_mod_state["block_logged"]:
@@ -6164,11 +5327,26 @@ async def execute_streaming_call(
             usage=observed.get("usage"),
         )
 
-    # Partial replies are kept only for turns admitted through native history
-    # selection, where the server owns settlement. Other save_to_db clients
-    # retry an unanswered turn with tldw_retry_failed_turn, and that contract
-    # needs the failed turn to have no saved reply.
-    keep_partial_replies = bool(should_persist and history_persistence_ack)
+    # Selected durable only settles a completed receipt. Legacy clients need
+    # unanswered turns to stay unanswered for tldw_retry_failed_turn.
+    keep_partial_replies = bool(should_persist and native_persistence and not selected_durable_text_only)
+
+    async def _prepare_saved_stream_reply(full_reply: str) -> tuple[str | None, bool]:
+        """Apply save policies to answer and thinking without checking synthetic tags."""
+        if native_persistence != "retain_reasoning" or not keep_partial_replies or structured_request_context is not None:
+            return await _apply_stream_output_policies(full_reply)
+        answer, thinking = split_reasoning_text(full_reply)
+        approved_answer, blocked = await _apply_stream_output_policies(answer)
+        if blocked or approved_answer != answer:
+            return approved_answer, blocked
+        if thinking:
+            thinking = html.unescape(thinking)
+            approved_thinking, thinking_blocked = await _apply_stream_output_policies(
+                thinking, enforce_resolved_action=True
+            )
+            if thinking_blocked or approved_thinking != thinking:
+                return answer, False
+        return full_reply, False
 
     async def partial_save_callback(full_reply: str, *, generation: dict[str, Any]) -> str | None:
         """Keep an unfinished reply after a disconnect, stop or provider failure (D7 S3-1).
@@ -6179,11 +5357,9 @@ async def execute_streaming_call(
         """
         if not keep_partial_replies or not final_conversation_id:
             return None
-        if stream_mod_state.get("selected_durable_projection_rejected"):
-            return None
         if stream_mod_state.get("pending_stop_error") is not None:
             return None
-        full_reply_to_save, post_stream_blocked = await _apply_stream_output_policies(full_reply)
+        full_reply_to_save, post_stream_blocked = await _prepare_saved_stream_reply(full_reply)
         if post_stream_blocked or not isinstance(full_reply_to_save, str) or not full_reply_to_save.strip():
             return None
         message_payload = build_assistant_message_payload(
@@ -6201,18 +5377,58 @@ async def execute_streaming_call(
             payload=message_payload,
         )
 
+    def _stream_usage_recorder(
+        stream_usage: _StreamUsage | None, full_reply: str = ""
+    ) -> Callable[[], Awaitable[None]] | None:
+        """The write of this stream's one usage row and token commit, or None once it is claimed (TASK-13953)."""
+        nonlocal stream_usage_recorded
+        if stream_usage_recorded:
+            return None
+        stream_usage_recorded = True
+        return partial(
+            _record_stream_usage,
+            request=request,
+            provider=selected_provider,
+            model=model,
+            templated_llm_payload=templated_llm_payload,
+            conversation_id=final_conversation_id,
+            llm_start_time=llm_start_time,
+            credential_source=usage_credential_source,
+            stream_usage=stream_usage,
+            full_reply=full_reply,
+            rg_commit_cb=rg_commit_cb,
+        )
+
     async def save_callback(
         full_reply: str,
         tool_calls: list[dict[str, Any]] | None,
         function_call: dict[str, Any] | None,
         *,
         generation: dict[str, Any] | None = None,
+        stream_usage: _StreamUsage | None = None,
     ):
         nonlocal stream_metrics_recorded
+        # Charge once per stream, even if the client disconnects or settlement fails.
+        # Early ends account in _finalize_stream.
+        record = _stream_usage_recorder(stream_usage, full_reply)
+        if record is not None:
+            if selected_durable_text_only:
+                # Charge completed consumption before emitting a durable receipt or settlement error.
+                await asyncio.shield(record())
+            else:
+                submit_accounting(record)
+        if selected_durable_text_only and (
+            stream_mod_state.get("selected_durable_projection_rejected")
+            or tool_calls is not None
+            or function_call is not None
+            or (generation or {}).get("generation_status", GENERATION_STATUS_COMPLETE)
+                not in (GENERATION_STATUS_COMPLETE, GENERATION_STATUS_LENGTH)
+        ):
+            return None
         saved_message_id: str | None = None
         tool_execution_payload: list[dict[str, Any]] | None = None
         structured_events: list[dict[str, Any]] = []
-        full_reply_to_save, post_stream_blocked = await _apply_stream_output_policies(full_reply)
+        full_reply_to_save, post_stream_blocked = await _prepare_saved_stream_reply(full_reply)
 
         if structured_request_context is not None:
             try:
@@ -6238,9 +5454,9 @@ async def execute_streaming_call(
                     }
                 )
 
-        if callable(on_stream_full_reply):
+        if not selected_durable_text_only and callable(on_stream_full_reply):
             try:
-                maybe_result = on_stream_full_reply(str(full_reply or ""))
+                maybe_result = on_stream_full_reply(strip_reasoning_blocks(full_reply))
                 if hasattr(maybe_result, "__await__"):
                     await maybe_result  # type: ignore[misc]
             except _CHAT_NONCRITICAL_EXCEPTIONS as stream_callback_err:
@@ -6271,55 +5487,6 @@ async def execute_streaming_call(
             outcome="blocked" if post_stream_blocked else "success",
         )
 
-        # Account for completed provider consumption even if history settlement fails.
-        total_est = 0
-        try:
-            pt_est = 0
-            try:
-                pt_est = _estimate_tokens_from_messages(templated_llm_payload)
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                pt_est = 0
-            ct_est = max(0, len(full_reply or "") // 4)
-            user_id = None
-            api_key_id = None
-            try:
-                if request is not None and hasattr(request, "state"):
-                    user_id = getattr(request.state, "user_id", None)
-                    api_key_id = getattr(request.state, "api_key_id", None)
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                pass
-            latency_ms = int((time.time() - llm_start_time) * 1000)
-            total_est = int(pt_est + ct_est)
-            await log_llm_usage(
-                user_id=user_id,
-                key_id=api_key_id,
-                request=request,
-                endpoint=(f"{request.method}:{request.url.path}" if request else "POST:/api/v1/chat/completions"),
-                operation="chat",
-                provider=selected_provider,
-                model=model,
-                status=200,
-                latency_ms=latency_ms,
-                prompt_tokens=int(pt_est),
-                completion_tokens=int(ct_est),
-                total_tokens=total_est,
-                request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
-                conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
-                estimated=True,
-                estimate_source="stream_estimate",
-            )
-        except _CHAT_NONCRITICAL_EXCEPTIONS:
-            pass
-        # Commit reserved tokens to Resource Governor, if provided
-        try:
-            if callable(rg_commit_cb):
-                # rg_commit_cb may be async or sync; call accordingly
-                res = rg_commit_cb(total_est)
-                if hasattr(res, "__await__"):
-                    await res  # type: ignore[misc]
-        except _CHAT_NONCRITICAL_EXCEPTIONS:
-            pass
-
         if should_persist and final_conversation_id and not post_stream_blocked and (
             full_reply_to_save or tool_calls or function_call
         ):
@@ -6339,7 +5506,8 @@ async def execute_streaming_call(
             )
 
         if (
-            not post_stream_blocked
+            not selected_durable_text_only
+            and not post_stream_blocked
             and should_run_legacy_tool_autoexec(cleaned_args)
             and isinstance(tool_calls, list)
             and tool_calls
@@ -6695,17 +5863,14 @@ async def execute_streaming_call(
             with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
                 _out_transform.flush = _flush_holdback
 
-            async def _finalize_stream(*, success: bool, cancelled: bool, error: bool) -> None:
+            async def _finalize_stream(
+                *, success: bool, cancelled: bool, error: bool, stream_usage: _StreamUsage | None = None
+            ) -> None:
                 nonlocal stream_failure_recorded, stream_metrics_recorded
                 if not success and not stream_failure_recorded and not stream_metrics_recorded:
                     try:
                         latency = time.time() - llm_start_time
-                        if cancelled:
-                            error_type = "stream_cancelled"
-                        elif error:
-                            error_type = "stream_error"
-                        else:
-                            error_type = "stream_incomplete"
+                        error_type = "stream_cancelled" if cancelled else "stream_error" if error else "stream_incomplete"
                         metrics.track_llm_call(
                             selected_provider,
                             model,
@@ -6720,10 +5885,15 @@ async def execute_streaming_call(
                         pass
                 if success:
                     return
-                if callable(rg_refund_cb):
-                    res = rg_refund_cb(cancelled=cancelled, error=error)
-                    if hasattr(res, "__await__"):
-                        await res  # type: ignore[misc]
+                if not (stream_usage and (stream_usage.usage is not None or stream_usage.chars)):
+                    # Nothing came back (the endpoint may be retrying this attempt): refund, as before (TASK-13953)
+                    await _maybe_refund_streaming_rg(rg_refund_cb, cancelled=cancelled, error=error)
+                    return
+                # Recorded and committed, never refunded: the stream was read (TASK-13953). Detached, because a
+                # cancelled stream's teardown may cut any await here.
+                record = _stream_usage_recorder(stream_usage)
+                if record is not None:
+                    submit_accounting(record)
 
             qualified_stream = (
                 _validated_selected_durable_stream(raw_stream_iter, stream_state=stream_mod_state)
@@ -6745,7 +5915,11 @@ async def execute_streaming_call(
                     system_message_id=system_message_id,
                     user_message_id=user_message_id,
                     continuation_metadata=normalized_continuation_metadata,
-                    history_persistence_ack=history_persistence_ack or None,
+                    history_persistence_ack=bool(native_persistence or selected_durable_text_only) or None,
+                    forward_usage_chunk=forward_usage_chunk,
+                    retain_reasoning=(
+                        native_persistence == "retain_reasoning" and keep_partial_replies and structured_request_context is None
+                    ) or None,
                 ),
                 stream_factory=create_streaming_response_with_timeout,
             )
@@ -6933,7 +6107,7 @@ async def _execute_non_stream_call_impl(
         """Record consumed provider usage independently of result persistence."""
 
         choices = response.get("choices")
-        usage = response.get("usage")
+        usage = usage_with_service_tier(response)  # OpenAI reports service_tier beside usage
         if usage:
             try:
                 normalized_usage = normalize_llm_usage(
@@ -6986,6 +6160,7 @@ async def _execute_non_stream_call_impl(
                     usage_metadata=usage if isinstance(usage, dict) else None,
                     choice_count=normalized_usage.choice_count,
                     estimate_source=normalized_usage.estimate_source,
+                    credential_source=call_credential_source(cleaned_args),
                 )
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 pass
@@ -7042,6 +6217,7 @@ async def _execute_non_stream_call_impl(
                 ),
                 estimated=True,
                 estimate_source="missing_usage",
+                credential_source=call_credential_source(cleaned_args),
             )
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
@@ -7114,6 +6290,8 @@ async def _execute_non_stream_call_impl(
                                 queued=True,
                             )
                     return result
+                except (LLMQuotaExceededError, LLMPolicyRefusal):
+                    raise  # the user's limit or a policy refusal, not the provider's health: no failure, no fallback
                 except _CHAT_NONCRITICAL_EXCEPTIONS as proc_error:
                     latency = time.time() - local_start
                     metrics.track_llm_call(
@@ -7342,6 +6520,13 @@ async def _execute_non_stream_call_impl(
                                 streaming=False,
                                 queued=False,
                             )
+                    except (LLMQuotaExceededError, LLMPolicyRefusal):
+                        _emit_chat_run_first_completion_metric(
+                            metrics,
+                            context=run_first_metric_context,
+                            outcome="error",
+                        )
+                        raise  # the user's refusal, not the fallback provider's health (TASK-13955)
                     except Exception as fallback_error:  # noqa: BLE001 - adapter trust boundary
                         fallback_latency = time.time() - fallback_start_time
                         bounded_error = _bound_provider_invocation_exception(
@@ -7630,7 +6815,7 @@ async def _execute_non_stream_call_impl(
                             success=False,
                             error_type=type(bounded_error).__name__,
                         )
-                        if provider_manager:
+                        if provider_manager and not isinstance(continuation_error, LLMPolicyRefusal):
                             provider_manager.record_failure(
                                 selected_provider,
                                 sanitized_provider_stream_exception(bounded_error),

@@ -166,14 +166,12 @@ async def test_tokens_per_min_zero_is_unbounded_in_reserve():
 
 
 @pytest.mark.asyncio
-async def test_tokens_daily_cap_denial_short_circuits_reserve(monkeypatch, tmp_path):
+async def test_tokens_daily_cap_denial_short_circuits_reserve(monkeypatch, tmp_path, fresh_services):
     db_path = tmp_path / "authnz_tokens_daily.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     try:
-        from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-        await reset_db_pool()
         reset_settings()
     except Exception:
         _ = None

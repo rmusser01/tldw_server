@@ -1,7 +1,10 @@
 import { restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
-import { useCallback, useEffect, useRef, useState } from "react"
-import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { chatDraftOwnerKey, useChatDraftOwner } from "@/hooks/useChatDraftOwner"
+import { captureChatDraftLoad, chatDraftAddressForReceipt } from "@/hooks/chat/chat-draft-transition"
+import { chatDraftAddressKey, isChatDraftHandle } from "@/utils/chat-draft-address"
+import { hasCurrentServerChatSelection, usePlaygroundSessionStore } from "@/store/playground-session"
 import { useStoreMessageOption } from "@/store/option"
 import { shallow } from "zustand/shallow"
 import { restoreQueuedRequests } from "@/utils/chat-request-queue"
@@ -30,6 +33,53 @@ import {
 
 const DEBOUNCE_MS = 1000
 
+const selectSessionOptions = (state: ReturnType<typeof useStoreMessageOption.getState>) => ({
+  chatDraftAddress: state.chatDraftAddress,
+  chatDraftRevision: state.chatDraftRevision,
+  historyId: state.historyId,
+  serverChatId: state.serverChatId,
+  serverChatAssistantKind: state.serverChatAssistantKind,
+  serverChatAssistantId: state.serverChatAssistantId,
+  serverChatCharacterId: state.serverChatCharacterId,
+  serverChatPersonaMemoryMode: state.serverChatPersonaMemoryMode,
+  chatMode: state.chatMode,
+  webSearch: state.webSearch,
+  compareMode: state.compareMode,
+  compareSelectedModels: state.compareSelectedModels,
+  fileRetrievalEnabled: state.fileRetrievalEnabled,
+  ragMediaIds: state.ragMediaIds,
+  ragSearchMode: state.ragSearchMode,
+  ragTopK: state.ragTopK,
+  ragEnableGeneration: state.ragEnableGeneration,
+  ragEnableCitations: state.ragEnableCitations,
+  queuedMessages: state.queuedMessages,
+  temporaryChat: state.temporaryChat,
+  temporaryHistory: state.temporaryChat ? state.history : undefined,
+  temporaryMessages: state.temporaryChat ? state.messages : undefined,
+  setHistoryId: state.setHistoryId,
+  setServerChatId: state.setServerChatId,
+  setServerChatTitle: state.setServerChatTitle,
+  setServerChatCharacterId: state.setServerChatCharacterId,
+  setServerChatAssistantKind: state.setServerChatAssistantKind,
+  setServerChatAssistantId: state.setServerChatAssistantId,
+  setServerChatPersonaMemoryMode: state.setServerChatPersonaMemoryMode,
+  setServerChatMetaLoaded: state.setServerChatMetaLoaded,
+  setChatMode: state.setChatMode,
+  setWebSearch: state.setWebSearch,
+  setCompareMode: state.setCompareMode,
+  setCompareSelectedModels: state.setCompareSelectedModels,
+  setFileRetrievalEnabled: state.setFileRetrievalEnabled,
+  setRagMediaIds: state.setRagMediaIds,
+  setRagSearchMode: state.setRagSearchMode,
+  setRagTopK: state.setRagTopK,
+  setRagEnableGeneration: state.setRagEnableGeneration,
+  setRagEnableCitations: state.setRagEnableCitations,
+  setQueuedMessages: state.setQueuedMessages,
+  setHistory: state.setHistory,
+  setMessages: state.setMessages,
+  setSelectedSystemPrompt: state.setSelectedSystemPrompt
+})
+
 export type PlaygroundSessionRestoreOutcome =
   | "restored"
   | "not-restored"
@@ -47,12 +97,13 @@ export function usePlaygroundSessionPersistence() {
   const selectionRef = useRef(historySelection)
   selectionRef.current = historySelection
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const isRestoringRef = useRef(false)
+  const isRestoringRef = useRef<{ isCurrent: () => boolean } | null>(null)
   const initialRestoreSettledRef = useRef(false)
   const { serverUrl, lastConfigUpdatedAt } = useConnectionState()
 
   // Session store
   const sessionStore = usePlaygroundSessionStore()
+  const { ownerKey: draftOwnerKey, isCurrent: isCurrentDraftOwner } = useChatDraftOwner(() => {})
   const saveSession = usePlaygroundSessionStore((s) => s.saveSession)
   const clearSession = usePlaygroundSessionStore((s) => s.clearSession)
   const isSessionValid = usePlaygroundSessionStore((s) => s.isSessionValid)
@@ -66,6 +117,8 @@ export function usePlaygroundSessionPersistence() {
 
   // Main message option store
   const {
+    chatDraftAddress,
+    chatDraftRevision,
     historyId,
     serverChatId,
     serverChatAssistantKind,
@@ -84,6 +137,8 @@ export function usePlaygroundSessionPersistence() {
     ragEnableCitations,
     queuedMessages,
     temporaryChat,
+    temporaryHistory,
+    temporaryMessages,
     setHistoryId,
     setServerChatId,
     setServerChatTitle,
@@ -107,59 +162,21 @@ export function usePlaygroundSessionPersistence() {
     setMessages,
     setSelectedSystemPrompt
   } = useStoreMessageOption(
-    (state) => ({
-      historyId: state.historyId,
-      serverChatId: state.serverChatId,
-      serverChatAssistantKind: state.serverChatAssistantKind,
-      serverChatAssistantId: state.serverChatAssistantId,
-      serverChatCharacterId: state.serverChatCharacterId,
-      serverChatPersonaMemoryMode: state.serverChatPersonaMemoryMode,
-      chatMode: state.chatMode,
-      webSearch: state.webSearch,
-      compareMode: state.compareMode,
-      compareSelectedModels: state.compareSelectedModels,
-      fileRetrievalEnabled: state.fileRetrievalEnabled,
-      ragMediaIds: state.ragMediaIds,
-      ragSearchMode: state.ragSearchMode,
-      ragTopK: state.ragTopK,
-      ragEnableGeneration: state.ragEnableGeneration,
-      ragEnableCitations: state.ragEnableCitations,
-      queuedMessages: state.queuedMessages,
-      temporaryChat: state.temporaryChat,
-      setHistoryId: state.setHistoryId,
-      setServerChatId: state.setServerChatId,
-      setServerChatTitle: state.setServerChatTitle,
-      setServerChatCharacterId: state.setServerChatCharacterId,
-      setServerChatAssistantKind: state.setServerChatAssistantKind,
-      setServerChatAssistantId: state.setServerChatAssistantId,
-      setServerChatPersonaMemoryMode: state.setServerChatPersonaMemoryMode,
-      setServerChatMetaLoaded: state.setServerChatMetaLoaded,
-      setChatMode: state.setChatMode,
-      setWebSearch: state.setWebSearch,
-      setCompareMode: state.setCompareMode,
-      setCompareSelectedModels: state.setCompareSelectedModels,
-      setFileRetrievalEnabled: state.setFileRetrievalEnabled,
-      setRagMediaIds: state.setRagMediaIds,
-      setRagSearchMode: state.setRagSearchMode,
-      setRagTopK: state.setRagTopK,
-      setRagEnableGeneration: state.setRagEnableGeneration,
-      setRagEnableCitations: state.setRagEnableCitations,
-      setQueuedMessages: state.setQueuedMessages,
-      setHistory: state.setHistory,
-      setMessages: state.setMessages,
-      setSelectedSystemPrompt: state.setSelectedSystemPrompt
-    }),
+    selectSessionOptions,
     shallow
   )
 
   const { setSystemPrompt } = useStoreChatModelSettings()
   const [selectedAssistant, setSelectedAssistant, assistantMeta] = useSelectedAssistant(null)
-  const sessionScopeReady = connectionScopeReady && !assistantMeta?.isLoading
+  const needsDraftOwner = chatDraftAddress !== null || isChatDraftHandle(sessionStore.chatDraftHandle)
+  const sessionScopeReady = connectionScopeReady && !assistantMeta?.isLoading &&
+    (!needsDraftOwner || draftOwnerKey !== null)
   const readOwnedSelection = assistantMeta?.readSelection
   // Form handoffs can arrive before initial hydration starts or while its DB
   // read is pending, even with identical values. Observe accepted intent, not
   // value equality; this baseline is used only for the initial saved target.
   const initialSourceSelectionRef = useRef({
+    restoreRevision: sessionStore.restoreRevision,
     revision: sessionStore.sourceSelectionRevision,
     scopeKey: sessionStore.scopeKey,
     historyId: sessionStore.historyId,
@@ -189,14 +206,50 @@ export function usePlaygroundSessionPersistence() {
     }
   }, [lastConfigUpdatedAt, resolveCurrentScopeKey, serverUrl])
 
+  const hasInitialRestoreTarget = useCallback(() => {
+    if (hasCurrentServerChatSelection(useStoreMessageOption.getState().serverChatId)) return false
+    if (isSessionValid(currentScopeKey)) return true
+    try { return Boolean(selectionRef.current?.getStoredReference()) }
+    catch { return true }
+  }, [currentScopeKey, isSessionValid])
+
   const buildPersistableSessionSnapshot = useCallback(() => {
     if (!isCurrentPersistence()) return null
     // Don't save while a restore is replaying into the stores.
-    if (isRestoringRef.current) return null
+    if (isRestoringRef.current?.isCurrent()) return null
+    if (!initialRestoreSettledRef.current && hasInitialRestoreTarget()) return null
 
-    // Allow queue-only restores even before a history/server chat id exists.
-    if (temporaryChat && queuedMessages.length === 0) return null
-    if (!historyId && !serverChatId && queuedMessages.length === 0) return null
+    const live = useStoreMessageOption.getState()
+    if (live.chatDraftAddress !== chatDraftAddress || live.chatDraftRevision !== chatDraftRevision ||
+        live.historyId !== historyId || live.serverChatId !== serverChatId) return null
+    let chatDraftHandle = null
+    if (chatDraftAddress) {
+      if (!draftOwnerKey || !isCurrentDraftOwner()) return null
+      // The composer's automatic fresh allocation must not replace a cold restore target.
+      if (chatDraftAddress.kind === "fresh") {
+        if (
+          (historyId !== null && !(temporaryChat && historyId === "temp")) ||
+          serverChatId ||
+          chatDraftAddress.temporary !== temporaryChat ||
+          (temporaryChat &&
+            (live.history !== temporaryHistory || live.messages !== temporaryMessages))
+        ) return null
+      } else {
+        const selected = historySelection?.getCurrent()
+        const qualified = selected?.owner && selected.view
+          ? chatDraftAddressForReceipt({ owner: selected.owner, view: selected.view }) : null
+        if (temporaryChat || !qualified || chatDraftAddressKey(qualified) !== chatDraftAddressKey(chatDraftAddress)) return null
+        if (chatDraftAddress.kind === "local"
+          ? historyId !== chatDraftAddress.id || serverChatId !== null
+          : serverChatId !== chatDraftAddress.id || selected?.owner?.kind !== "native" ||
+            chatDraftOwnerKey(selected.owner.request_scope) !== draftOwnerKey) return null
+      }
+      chatDraftHandle = { address: chatDraftAddress, ownerHash: draftOwnerKey }
+    } else {
+      // Retain legacy queue/session compatibility until a qualified address exists.
+      if (temporaryChat && queuedMessages.length === 0) return null
+      if (!historyId && !serverChatId && queuedMessages.length === 0) return null
+    }
 
     const trackedAssistantSelection =
       serverChatId == null
@@ -259,8 +312,12 @@ export function usePlaygroundSessionPersistence() {
       null
 
     return {
-      historySelectionReference: selectionRef.current?.getReference() ?? null,
-      historyId,
+      chatDraftHandle,
+      temporaryTranscript: chatDraftAddress?.kind === "fresh" && temporaryChat
+        ? { history: temporaryHistory!, messages: temporaryMessages! } : null,
+      historySelectionReference: chatDraftAddress?.kind === "fresh" ? null : historySelection?.getReference() ?? null,
+      // Native authority is the validated server address; a mirror is rediscovered on load.
+      historyId: chatDraftAddress?.kind === "native" || temporaryChat ? null : historyId,
       serverChatId,
       trackedAssistantSelection,
       trackedAssistantKind,
@@ -279,9 +336,22 @@ export function usePlaygroundSessionPersistence() {
       ragTopK,
       ragEnableGeneration,
       ragEnableCitations,
-      queuedMessages
+      queuedMessages: chatDraftAddress && temporaryChat ? [] : queuedMessages,
+      ...(chatDraftAddress?.kind === "fresh" ? {
+        trackedAssistantSelection: null, trackedAssistantKind: null, trackedAssistantId: null,
+        trackedCharacterId: null, trackedAssistantDisplayName: null, trackedAssistantAvatarUrl: null,
+        serverChatPersonaMemoryMode: null
+      } : {})
     }
   }, [
+    chatDraftAddress,
+    chatDraftRevision,
+    temporaryHistory,
+    temporaryMessages,
+    draftOwnerKey,
+    isCurrentDraftOwner,
+    historySelection,
+    hasInitialRestoreTarget,
     isCurrentPersistence,
     historyId,
     serverChatId,
@@ -304,10 +374,23 @@ export function usePlaygroundSessionPersistence() {
     selectedAssistant
   ])
 
-  const latestSessionSnapshotRef = useRef<ReturnType<
-    typeof buildPersistableSessionSnapshot
-  >>(null)
   const lastImmediateSaveKeyRef = useRef<string | null>(null)
+  const currentSnapshotBuilderRef = useRef(buildPersistableSessionSnapshot)
+  useLayoutEffect(() => { currentSnapshotBuilderRef.current = buildPersistableSessionSnapshot }, [buildPersistableSessionSnapshot])
+
+  const captureSaveFence = useCallback(() => {
+    const source = useStoreMessageOption.getState()
+    const inputs = selectSessionOptions(source)
+    const builder = buildPersistableSessionSnapshot
+    const ownerCurrent = isCurrentDraftOwner
+    return () => {
+      const current = useStoreMessageOption.getState()
+      return isCurrentPersistence() && !isRestoringRef.current?.isCurrent() &&
+        (initialRestoreSettledRef.current || !hasInitialRestoreTarget()) &&
+        currentSnapshotBuilderRef.current === builder && shallow(inputs, selectSessionOptions(current)) &&
+        (!source.chatDraftAddress || ownerCurrent())
+    }
+  }, [buildPersistableSessionSnapshot, isCurrentDraftOwner, hasInitialRestoreTarget, isCurrentPersistence])
 
   const enrichTrackedAssistantSnapshot = useCallback(
     async (
@@ -395,18 +478,14 @@ export function usePlaygroundSessionPersistence() {
   )
 
   useEffect(() => {
-    latestSessionSnapshotRef.current = buildPersistableSessionSnapshot()
-  }, [buildPersistableSessionSnapshot])
-
-  useEffect(() => {
     if (!sessionScopeReady) return
-    if (isSessionValid(currentScopeKey)) return
+    if (hasInitialRestoreTarget() && sessionStore.restoreRevision === initialSourceSelectionRef.current.restoreRevision) return
 
     // A fresh or invalid session has nothing to replay. Treat that initial
     // restore lifecycle as settled so the first server chat can be persisted
     // immediately, including when the user reloads before the debounce fires.
     initialRestoreSettledRef.current = true
-  }, [currentScopeKey, isSessionValid, sessionScopeReady])
+  }, [hasInitialRestoreTarget, sessionScopeReady, sessionStore.restoreRevision])
 
   useEffect(() => {
     if (!initialRestoreSettledRef.current) return
@@ -416,6 +495,7 @@ export function usePlaygroundSessionPersistence() {
     if (!snapshot) return
 
     const immediateSaveKey = JSON.stringify({
+      chatDraftHandle: snapshot.chatDraftHandle,
       historyId: snapshot.historyId,
       serverChatId: snapshot.serverChatId,
       trackedAssistantKind: snapshot.trackedAssistantKind,
@@ -427,18 +507,19 @@ export function usePlaygroundSessionPersistence() {
     }
 
     lastImmediateSaveKeyRef.current = immediateSaveKey
-
+    const isCurrentSave = captureSaveFence()
+    if (snapshot.chatDraftHandle && isCurrentSave()) saveSession({ ...snapshot, scopeKey: currentScopeKey })
     void enrichTrackedAssistantSnapshot(snapshot).then((enrichedSnapshot) => {
-      if (!isCurrentPersistence()) return
+      if (!isCurrentSave() || (snapshot.chatDraftHandle && enrichedSnapshot === snapshot)) return
       saveSession({
         ...enrichedSnapshot,
         scopeKey: currentScopeKey
       })
     })
   }, [
+    captureSaveFence,
     buildPersistableSessionSnapshot,
     currentScopeKey,
-    isCurrentPersistence,
     enrichTrackedAssistantSnapshot,
     saveSession,
     sessionScopeReady
@@ -448,6 +529,7 @@ export function usePlaygroundSessionPersistence() {
   const saveCurrentSession = useCallback(() => {
     const snapshot = buildPersistableSessionSnapshot()
     if (!snapshot) return
+    const isCurrentSave = captureSaveFence()
 
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
@@ -460,7 +542,7 @@ export function usePlaygroundSessionPersistence() {
         resolveCurrentScopeKey(),
         enrichTrackedAssistantSnapshot(snapshot)
       ]).then(([scopeKey, enrichedSnapshot]) => {
-        if (!isCurrentPersistence() || (currentScopeKey && scopeKey !== currentScopeKey)) return
+        if (!isCurrentSave() || (currentScopeKey && scopeKey !== currentScopeKey)) return
         saveSession({
           ...enrichedSnapshot,
           scopeKey
@@ -468,10 +550,10 @@ export function usePlaygroundSessionPersistence() {
       })
     }, DEBOUNCE_MS)
   }, [
+    captureSaveFence,
     buildPersistableSessionSnapshot,
     enrichTrackedAssistantSnapshot,
     currentScopeKey,
-    isCurrentPersistence,
     resolveCurrentScopeKey,
     saveSession
   ])
@@ -482,20 +564,26 @@ export function usePlaygroundSessionPersistence() {
       saveTimerRef.current = null
     }
     if (!isCurrentPersistence()) return
-    // Prefer a fresh snapshot over the ref to avoid saving stale state on unmount.
-    const snapshot = buildPersistableSessionSnapshot() ?? latestSessionSnapshotRef.current
+    const snapshot = buildPersistableSessionSnapshot()
     if (!snapshot) return
+    const isCurrentSave = captureSaveFence()
+    // Layout cleanup runs before the verified owner's passive lifetime ends.
+    if (snapshot.chatDraftHandle && currentScopeKey && isCurrentSave()) {
+      saveSession({ ...snapshot, scopeKey: currentScopeKey })
+      return
+    }
     void Promise.all([
       resolveCurrentScopeKey(),
       enrichTrackedAssistantSnapshot(snapshot)
     ]).then(([scopeKey, enrichedSnapshot]) => {
-      if (!isCurrentPersistence() || (currentScopeKey && scopeKey !== currentScopeKey)) return
+      if (!isCurrentSave() || (currentScopeKey && scopeKey !== currentScopeKey)) return
       saveSession({
         ...enrichedSnapshot,
         scopeKey
       })
     })
   }, [
+    captureSaveFence,
     buildPersistableSessionSnapshot,
     enrichTrackedAssistantSnapshot,
     currentScopeKey,
@@ -506,7 +594,7 @@ export function usePlaygroundSessionPersistence() {
 
   const flushPendingSessionSaveRef = useRef(flushPendingSessionSave)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     flushPendingSessionSaveRef.current = flushPendingSessionSave
   }, [flushPendingSessionSave])
 
@@ -522,19 +610,26 @@ export function usePlaygroundSessionPersistence() {
   }, [saveCurrentSession])
 
   // Flush the latest session state when leaving the chat page.
-  useEffect(() => {
+  useLayoutEffect(() => {
     return () => {
       flushPendingSessionSaveRef.current()
     }
   }, [])
 
+  useEffect(() => {
+    const flush = () => flushPendingSessionSaveRef.current()
+    window.addEventListener("pagehide", flush)
+    return () => window.removeEventListener("pagehide", flush)
+  }, [])
+
   // Restore session from persisted state
-  const restoreSession = useCallback(async (): Promise<PlaygroundSessionRestoreOutcome> => {
+  const restoreSessionState = useCallback(async (): Promise<PlaygroundSessionRestoreOutcome> => {
+    if (hasCurrentServerChatSelection(useStoreMessageOption.getState().serverChatId)) return "cancelled"
     // Account changes require an explicit reopen, not a fresh automatic lease.
     if (selectionRef.current?.canAutomaticallyLoad?.() === false) return "cancelled"
+    if (!sessionScopeReady) return "cancelled"
     selectionRef.current?.beginLoad()
     let selectionCurrent = selectionRef.current?.fence() || (() => true)
-    if (!sessionScopeReady) return "cancelled"
     const initialSelection = initialSourceSelectionRef.current
     const selectionBeforeRestore =
       !initialRestoreSettledRef.current &&
@@ -548,14 +643,95 @@ export function usePlaygroundSessionPersistence() {
     let snapshot: ServicePromptSnapshot | undefined
     // Opening advances the controller fence; pass only the independent caller
     // lease into the owner, then capture the controller's new fence afterward.
-    const restoreLeaseValid = () =>
+    const scopeCurrent = () =>
       !snapshot?.scopeSignal.aborted && !snapshot?.scopeInvalidatedSignal.aborted &&
-      usePlaygroundSessionStore.getState().restoreRevision === restoreRevision
+      usePlaygroundSessionStore.getState().restoreRevision === restoreRevision &&
+      (!isChatDraftHandle(sessionStore.chatDraftHandle) || isCurrentDraftOwner())
+    const acceptRestoredDraft = captureChatDraftLoad("switch", scopeCurrent)
+    const restoreLeaseValid = acceptRestoredDraft.isCurrent
     const isCurrentRestore = () => restoreLeaseValid() && selectionCurrent()
     const scopeKey = await resolveCurrentScopeKey()
     if (!isCurrentRestore()) {
-      initialRestoreSettledRef.current = true
       return "cancelled"
+    }
+    const savedHandle = isChatDraftHandle(sessionStore.chatDraftHandle) ? sessionStore.chatDraftHandle : null
+    if (savedHandle && (savedHandle.ownerHash !== draftOwnerKey || !isSessionValid(scopeKey))) return "cancelled"
+    const restoreSettings = () => {
+      if (usePlaygroundSessionStore.getState().sourceSelectionRevision === selectionBeforeRestore) {
+        setChatMode(sessionStore.chatMode)
+        setFileRetrievalEnabled(sessionStore.fileRetrievalEnabled === true)
+        if (sessionStore.ragMediaIds) setRagMediaIds(sessionStore.ragMediaIds)
+      }
+      setWebSearch(sessionStore.webSearch)
+      const restoredOwner = selectionRef.current?.getCurrent().owner
+      if (restoredOwner?.kind !== "local" || restoredOwner.conversation_id !== sessionStore.historyId) {
+        setCompareMode(sessionStore.compareMode)
+        if (sessionStore.compareSelectedModels.length > 0) setCompareSelectedModels(sessionStore.compareSelectedModels)
+      }
+      setRagSearchMode(sessionStore.ragSearchMode)
+      if (sessionStore.ragTopK !== null) setRagTopK(sessionStore.ragTopK)
+      setRagEnableGeneration(sessionStore.ragEnableGeneration)
+      setRagEnableCitations(sessionStore.ragEnableCitations)
+      setQueuedMessages(restoreQueuedRequests(savedHandle?.address.kind === "fresh" && savedHandle.address.temporary ? [] : sessionStore.queuedMessages ?? []))
+    }
+    if (savedHandle?.address.kind === "fresh") {
+      if (usePlaygroundSessionStore.getState().sourceSelectionRevision !== selectionBeforeRestore) {
+        initialRestoreSettledRef.current = true
+        usePlaygroundSessionStore.getState().cancelPendingRestore()
+        return "cancelled"
+      }
+      const transcript =
+        savedHandle.address.temporary &&
+        !sessionStore.serverChatId &&
+        (sessionStore.historyId === null || sessionStore.historyId === "temp")
+          ? sessionStore.temporaryTranscript
+          : null
+      if (
+        transcript &&
+        (!Array.isArray(transcript.history) ||
+          !Array.isArray(transcript.messages) ||
+          !transcript.history.every(
+            (row) =>
+              row &&
+              ["user", "assistant", "system"].includes(row.role) &&
+              typeof row.content === "string"
+          ) ||
+          !transcript.messages.every(
+            (row) =>
+              row &&
+              typeof row.isBot === "boolean" &&
+              typeof row.name === "string" &&
+              typeof row.message === "string"
+          ))
+      )
+        return "cancelled"
+      const source = useStoreMessageOption.getState()
+      if (!isCurrentRestore() || !source.setChatDraftAddress(savedHandle.address, {
+        kind: "switch", expectedRevision: source.chatDraftRevision, sourceAddress: source.chatDraftAddress
+      })) return "cancelled"
+      source.setTemporaryChat(savedHandle.address.temporary)
+      selectionRef.current?.reset()
+      setHistoryId(null)
+      setServerChatId(null)
+      setServerChatTitle(null)
+      setServerChatAssistantKind(null)
+      setServerChatAssistantId(null)
+      setServerChatCharacterId(null)
+      setServerChatPersonaMemoryMode(null)
+      setServerChatMetaLoaded(false)
+      setHistory(transcript?.history ?? [])
+      setMessages(transcript?.messages ?? [])
+      restoreSettings()
+      return "restored"
+    }
+    const publishRestoredDraft = () => {
+      const selected = selectionRef.current?.getCurrent()
+      if (!selected?.owner || !selected.view || selected.owner.kind === "unavailable") return true
+      const receipt = { owner: selected.owner, view: selected.view }
+      const address = chatDraftAddressForReceipt(receipt)
+      if (!address || !isCurrentRestore()) return false
+      if (savedHandle?.address.id === address.id && chatDraftAddressKey(savedHandle.address) !== chatDraftAddressKey(address)) return false
+      return acceptRestoredDraft(receipt)
     }
     const tabReference = selectionRef.current?.getStoredReference()
     const sharedReference = sessionStore.historySelectionReference
@@ -571,9 +747,10 @@ export function usePlaygroundSessionPersistence() {
       const selected = selectionRef.current!
       const loaded = await selected.loadConversation(tabReference.owner_kind === "local"
         ? { historyId: tabReference.conversation_id, isCurrent: restoreLeaseValid }
-        : { serverChatId: tabReference.conversation_id, isCurrent: restoreLeaseValid }, tabReference)
+        : { serverChatId: tabReference.conversation_id, scope: savedHandle?.address.kind === "native" && savedHandle.address.id === tabReference.conversation_id ? savedHandle.address.scope : undefined, isCurrent: restoreLeaseValid }, tabReference)
       if (!loaded || usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
       selectionCurrent = selected.fence()
+      if (!publishRestoredDraft()) return "cancelled"
       // A failed owner validation stays visible; never substitute the other tab's session.
       if (!selected.getCurrent().capture) return "restored"
       setHistoryId(tabReference.owner_kind === "local" ? tabReference.conversation_id : null)
@@ -601,7 +778,17 @@ export function usePlaygroundSessionPersistence() {
             if (chatData.historyInfo.model_id) useStoreMessageOption.getState().setSelectedModel(chatData.historyInfo.model_id)
             if (selected.getCurrent().capture?.status !== "captured") {
               if (selected.getCurrent().error === "unsupported_comparison_history") {
-                await restoreReadableLocalComparison(selected, display => { setHistory(display.history); setMessages(display.messages) }, chatData)
+                await restoreReadableLocalComparison(
+                  selected,
+                  (display) => {
+                    useStoreMessageOption.setState({
+                      history: display.history,
+                      messages: display.messages
+                    })
+                  },
+                  chatData
+                )
+
                 if (!isCurrentRestore()) return "cancelled"
               } else {
                 setHistory(formatToChatHistory(chatData.messages))
@@ -610,13 +797,11 @@ export function usePlaygroundSessionPersistence() {
             }
           }
         }
-        initialRestoreSettledRef.current = true
         return "restored"
       }
     }
     if (!tabReference && !isSessionValid(scopeKey)) {
       clearSession()
-      initialRestoreSettledRef.current = true
       return "not-restored"
     }
 
@@ -633,11 +818,8 @@ export function usePlaygroundSessionPersistence() {
       sessionStore.trackedAssistantAvatarUrl ?? null
     const savedQueue = sessionStore.queuedMessages ?? []
     if (!savedHistoryId && !savedServerChatId && savedQueue.length === 0) {
-      initialRestoreSettledRef.current = true
       return "not-restored"
     }
-
-    isRestoringRef.current = true
 
     try {
       let cachedServerTitle: string | null = null
@@ -671,9 +853,10 @@ export function usePlaygroundSessionPersistence() {
         }
 
         if (selectionRef.current && !tabReference) {
-          if (!await selectionRef.current.loadConversation({ historyId: savedHistoryId, serverChatId: savedServerChatId, isCurrent: restoreLeaseValid }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
+          if (!await selectionRef.current.loadConversation({ historyId: savedHistoryId, serverChatId: savedServerChatId, scope: savedHandle?.address.kind === "native" ? savedHandle.address.scope : undefined, isCurrent: restoreLeaseValid }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
           if (usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
           selectionCurrent = selectionRef.current.fence()
+          if (!publishRestoredDraft()) return "cancelled"
           const current = selectionRef.current.getCurrent()
           if (!current.capture && current.error) {
             if (current.error === "unbound_server_mirror") {
@@ -711,9 +894,10 @@ export function usePlaygroundSessionPersistence() {
       // Restore settings from session store
       if (savedServerChatId && selectionRef.current?.getCurrent().error !== "unbound_server_mirror") {
         if (!savedHistoryId && selectionRef.current && !tabReference) {
-          if (!await selectionRef.current.loadConversation({ serverChatId: savedServerChatId, isCurrent: restoreLeaseValid }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
+          if (!await selectionRef.current.loadConversation({ serverChatId: savedServerChatId, scope: savedHandle?.address.kind === "native" ? savedHandle.address.scope : undefined, isCurrent: restoreLeaseValid }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
           if (usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
           selectionCurrent = selectionRef.current.fence()
+          if (!publishRestoredDraft()) return "cancelled"
           if (!selectionRef.current.getCurrent().capture && selectionRef.current.getCurrent().error) return "restored"
         }
         if (!savedHistoryId) {
@@ -775,35 +959,7 @@ export function usePlaygroundSessionPersistence() {
           }
         }
       }
-      const sourceSelectionChanged =
-        usePlaygroundSessionStore.getState().sourceSelectionRevision !==
-        selectionBeforeRestore
-      if (!sourceSelectionChanged) {
-        setChatMode(sessionStore.chatMode)
-        setFileRetrievalEnabled(sessionStore.fileRetrievalEnabled === true)
-        if (sessionStore.ragMediaIds) {
-          setRagMediaIds(sessionStore.ragMediaIds)
-        }
-      }
-      setWebSearch(sessionStore.webSearch)
-      const restoredOwner = selectionRef.current?.getCurrent().owner
-      // Local H1 comparison is restored from its per-conversation compareStates.
-      // A shared session snapshot can predate that asynchronous owner hydration.
-      if (restoredOwner?.kind !== "local" || restoredOwner.conversation_id !== savedHistoryId) {
-        setCompareMode(sessionStore.compareMode)
-        if (sessionStore.compareSelectedModels.length > 0) {
-          setCompareSelectedModels(sessionStore.compareSelectedModels)
-        }
-      }
-
-      // Restore RAG settings
-      setRagSearchMode(sessionStore.ragSearchMode)
-      if (sessionStore.ragTopK !== null) {
-        setRagTopK(sessionStore.ragTopK)
-      }
-      setRagEnableGeneration(sessionStore.ragEnableGeneration)
-      setRagEnableCitations(sessionStore.ragEnableCitations)
-      setQueuedMessages(restoreQueuedRequests(savedQueue))
+      restoreSettings()
 
       return "restored"
     } catch (error) {
@@ -813,10 +969,10 @@ export function usePlaygroundSessionPersistence() {
       return "not-restored"
     } finally {
       snapshot?.release()
-      isRestoringRef.current = false
-      initialRestoreSettledRef.current = true
     }
   }, [
+    draftOwnerKey,
+    isCurrentDraftOwner,
     sessionScopeReady,
     isSessionValid,
     sessionStore,
@@ -848,6 +1004,18 @@ export function usePlaygroundSessionPersistence() {
     setQueuedMessages
   ])
 
+  const restoreSession = useCallback(async (): Promise<PlaygroundSessionRestoreOutcome> => {
+    const restore = { isCurrent: isCurrentPersistence }
+    isRestoringRef.current = restore
+    try {
+      const result = await restoreSessionState()
+      if (restore.isCurrent() && result !== "cancelled") initialRestoreSettledRef.current = true
+      return result
+    } finally {
+      if (isRestoringRef.current === restore) isRestoringRef.current = null
+    }
+  }, [isCurrentPersistence, restoreSessionState])
+
   // Clear persisted session (call when user starts new chat)
   const clearPersistedSession = useCallback(() => {
     if (saveTimerRef.current) {
@@ -865,6 +1033,10 @@ export function usePlaygroundSessionPersistence() {
     sessionScopeReady,
     hasPersistedSession:
       sessionScopeReady && isSessionValid(currentScopeKey),
+    hasPersistedDraftHandle:
+      sessionScopeReady && isSessionValid(currentScopeKey) && isChatDraftHandle(sessionStore.chatDraftHandle),
+    hasPersistedFreshDraft:
+      sessionScopeReady && isSessionValid(currentScopeKey) && isChatDraftHandle(sessionStore.chatDraftHandle) && sessionStore.chatDraftHandle.address.kind === "fresh",
     persistedHistoryId:
       sessionScopeReady && isSessionValid(currentScopeKey)
         ? sessionStore.historyId ?? null

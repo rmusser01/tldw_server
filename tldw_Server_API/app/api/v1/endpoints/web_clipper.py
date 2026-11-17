@@ -18,7 +18,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
-from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import notes_sync_http_error
+from tldw_Server_API.app.api.v1.utils.notes_sync_errors import notes_sync_http_error
 from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
     WebClipperEnrichmentPayload,
     WebClipperEnrichmentResponse,

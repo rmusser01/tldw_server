@@ -9,17 +9,59 @@ export interface StructuredApiErrorDetail {
   [key: string]: unknown
 }
 
-export class TldwApiError extends Error {
-  status: number
-  detail: unknown
+/**
+ * Canonical frontend API error (TASK-13526 stage 2 / ADR-065): one error
+ * model across both clients. The web shell's `ApiError` and this package's
+ * `TldwApiError` were two drift-prone shapes over the same backend
+ * responses; `TldwApiError` is now a strict subclass whose field set is a
+ * subset of this class. The web shell re-exports this class as its ApiError
+ * (apps/tldw-frontend/lib/api.ts), so `instanceof` checks work across both
+ * names and both shells.
+ */
+export class ApiError extends Error {
+  status?: number
+  /** Axios-compat alias kept from the web shell's previous ApiError. */
+  statusCode?: number
+  detail?: unknown
+  errorCode?: string
+  retryAfter?: number
 
-  constructor(message: string, status: number, detail: unknown) {
+  constructor(
+    message: string,
+    options?: {
+      status?: number
+      detail?: unknown
+      errorCode?: string
+      retryAfter?: number
+    }
+  ) {
     super(message)
-    this.name = "TldwApiError"
-    this.status = status
-    this.detail = detail
+    this.name = "ApiError"
+    if (options?.status !== undefined) {
+      this.status = options.status
+      this.statusCode = options.status
+    }
+    if (options?.detail !== undefined) {
+      this.detail = options.detail
+    }
+    if (options?.errorCode !== undefined) {
+      this.errorCode = options.errorCode
+    }
+    if (options?.retryAfter !== undefined) {
+      this.retryAfter = options.retryAfter
+    }
   }
 }
+
+export class TldwApiError extends ApiError {
+  declare status: number
+
+  constructor(message: string, status: number, detail: unknown) {
+    super(message, { status, detail })
+    this.name = "TldwApiError"
+  }
+}
+
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)

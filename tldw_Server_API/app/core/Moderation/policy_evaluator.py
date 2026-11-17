@@ -6,14 +6,10 @@ import json
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from tldw_Server_API.app.core.Moderation.models import (
     ModerationEvaluationResult as _ModerationEvaluationResult,
-)
-from tldw_Server_API.app.core.Moderation.models import (
-    ModerationPolicy as _ModerationPolicy,
 )
 from tldw_Server_API.app.core.Moderation.models import (
     PatternRule as _PatternRule,
@@ -55,17 +51,6 @@ class PolicyEvaluator:
     """Evaluate and redact text using explicit policy and limit inputs."""
 
     _UNCATEGORIZED_CATEGORY = "uncategorized"
-
-    @staticmethod
-    @lru_cache(maxsize=1)
-    def policy_types() -> tuple[
-        type[ModerationPolicy],
-        type[PatternRule],
-        type[ModerationEvaluationResult],
-    ]:
-        """Return canonical policy dataclasses without loading the service."""
-
-        return _ModerationPolicy, _PatternRule, _ModerationEvaluationResult
 
     @classmethod
     def effective_rule_categories(cls, rule: PatternRule) -> set[str]:
@@ -136,11 +121,10 @@ class PolicyEvaluator:
 
         if not text or not match_span:
             return None
-        _, PatternRule, _ = self.policy_types()
         replacement = policy.redact_replacement or "[REDACTED]"
         if pattern and policy.block_patterns:
             for rule in policy.block_patterns:
-                if not isinstance(rule, PatternRule):
+                if not isinstance(rule, _PatternRule):
                     continue
                 try:
                     if getattr(rule.regex, "pattern", None) == pattern:
@@ -269,7 +253,6 @@ class PolicyEvaluator:
     ) -> str:
         """Apply enabled policy redactions and return only the resulting text."""
 
-        _, PatternRule, _ = self.policy_types()
         if not text or not policy.block_patterns:
             return text
         if phase == "input" and not policy.input_enabled:
@@ -280,20 +263,20 @@ class PolicyEvaluator:
         for rule in policy.block_patterns:
             if isinstance(
                 rule,
-                PatternRule,
+                _PatternRule,
             ) and not self.rule_applies_to_phase(rule, phase):
                 continue
             if isinstance(
                 rule,
-                PatternRule,
+                _PatternRule,
             ) and not self.rule_matches_enabled_categories(
                 rule,
                 policy.categories_enabled,
             ):
                 continue
-            pattern = rule.regex if isinstance(rule, PatternRule) else rule
+            pattern = rule.regex if isinstance(rule, _PatternRule) else rule
             replacement_override = None
-            if isinstance(rule, PatternRule) and rule.replacement:
+            if isinstance(rule, _PatternRule) and rule.replacement:
                 replacement_override = rule.replacement
             try:
                 replacement = replacement_override or policy.redact_replacement
@@ -335,7 +318,6 @@ class PolicyEvaluator:
     ) -> tuple[str, int]:
         """Apply enabled policy redactions and return text plus replacement count."""
 
-        _, PatternRule, _ = self.policy_types()
         if not text or not policy.block_patterns:
             return text, 0
         if phase == "input" and not policy.input_enabled:
@@ -345,19 +327,19 @@ class PolicyEvaluator:
         redacted = text
         total_count = 0
         for rule in policy.block_patterns:
-            if isinstance(rule, PatternRule) and not self.rule_applies_to_phase(
+            if isinstance(rule, _PatternRule) and not self.rule_applies_to_phase(
                 rule,
                 phase,
             ):
                 continue
-            if isinstance(rule, PatternRule) and not self.rule_matches_enabled_categories(
+            if isinstance(rule, _PatternRule) and not self.rule_matches_enabled_categories(
                 rule,
                 policy.categories_enabled,
             ):
                 continue
-            pattern = rule.regex if isinstance(rule, PatternRule) else rule
+            pattern = rule.regex if isinstance(rule, _PatternRule) else rule
             replacement_override = None
-            if isinstance(rule, PatternRule) and rule.replacement:
+            if isinstance(rule, _PatternRule) and rule.replacement:
                 replacement_override = rule.replacement
             try:
                 replacement = replacement_override or policy.redact_replacement
@@ -403,16 +385,15 @@ class PolicyEvaluator:
     ) -> ModerationEvaluationResult:
         """Evaluate text against a policy without mutating borrowed inputs."""
 
-        _, PatternRule, ModerationEvaluationResult = self.policy_types()
         if not text or not policy.enabled:
-            return ModerationEvaluationResult()
+            return _ModerationEvaluationResult()
         enabled_phase = True
         if phase == "input":
             enabled_phase = policy.input_enabled
         elif phase == "output":
             enabled_phase = policy.output_enabled
         if not enabled_phase:
-            return ModerationEvaluationResult()
+            return _ModerationEvaluationResult()
         default_action = "warn"
         if phase == "input":
             default_action = policy.input_action
@@ -427,10 +408,10 @@ class PolicyEvaluator:
         best_match_span = None
         best_replacement = None
         for rule in policy.block_patterns or []:
-            pattern = rule.regex if isinstance(rule, PatternRule) else rule
-            if isinstance(rule, PatternRule) and not self.rule_applies_to_phase(rule, phase):
+            pattern = rule.regex if isinstance(rule, _PatternRule) else rule
+            if isinstance(rule, _PatternRule) and not self.rule_applies_to_phase(rule, phase):
                 continue
-            if isinstance(rule, PatternRule) and not self.rule_matches_enabled_categories(
+            if isinstance(rule, _PatternRule) and not self.rule_matches_enabled_categories(
                 rule,
                 policy.categories_enabled,
             ):
@@ -438,7 +419,7 @@ class PolicyEvaluator:
             match_span = self.find_match_span(pattern, text, limits)
             if not match_span:
                 continue
-            action = rule.action if isinstance(rule, PatternRule) and rule.action else default_action
+            action = rule.action if isinstance(rule, _PatternRule) and rule.action else default_action
             action = (action or "warn").lower()
             if action not in {"block", "redact", "warn"}:
                 action = "warn"
@@ -452,10 +433,10 @@ class PolicyEvaluator:
                 best_pattern = pattern.pattern
                 best_replacement = (
                     rule.replacement
-                    if isinstance(rule, PatternRule) and rule.replacement
+                    if isinstance(rule, _PatternRule) and rule.replacement
                     else policy.redact_replacement
                 )
-                if isinstance(rule, PatternRule):
+                if isinstance(rule, _PatternRule):
                     try:
                         categories = self.effective_rule_categories(rule)
                         if policy.categories_enabled:
@@ -469,7 +450,7 @@ class PolicyEvaluator:
                     best_category = None
 
         if best_action == "pass" or best_match_span is None:
-            return ModerationEvaluationResult()
+            return _ModerationEvaluationResult()
         sample = self.build_sanitized_snippet_for_replacement(
             text,
             best_match_span,
@@ -478,7 +459,7 @@ class PolicyEvaluator:
         redacted_text = None
         if include_redacted_text and best_action == "redact":
             redacted_text = self.redact_text(text, policy, phase, limits)
-        return ModerationEvaluationResult(
+        return _ModerationEvaluationResult(
             action=best_action,
             redacted_text=redacted_text,
             matched_pattern=best_pattern,

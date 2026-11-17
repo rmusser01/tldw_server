@@ -32,7 +32,7 @@ describe("PlaygroundChatErrorBanner", () => {
     try {
       const payload = decodeChatErrorPayload(buildFriendlyErrorMessage(Object.assign(new Error("Selected model is unavailable"), { status: 400, details: { detail: { error_code: "model_not_available" } } })))!
       render(<MemoryRouter><PlaygroundChatErrorBanner error={{ ...payload, key: "real-model-error" }} diagnosticsLabel="Health & diagnostics" dismissLabel="Dismiss error" retryLabel="Retry chat" onRetry={inline ? retry : undefined} onSwitchProvider={() => openModelSelector()} onDismiss={() => undefined} /></MemoryRouter>)
-      expect(screen.getByRole("alert")).toHaveTextContent("The selected model is not available.")
+      expect(screen.getByTestId("playground-chat-error-banner")).toHaveTextContent("The selected model is not available.")
       fireEvent.click(screen.getByRole("button", { name: inline ? "Switch provider" : "Choose another model" }))
       expect(listener).toHaveBeenCalledTimes(1)
       if (inline) {
@@ -73,7 +73,8 @@ describe("PlaygroundChatErrorBanner", () => {
     const banner = screen.getByTestId("playground-chat-error-banner")
 
     expect(banner).toHaveAttribute("data-ds-component", "RecoveryCallout")
-    expect(banner).toHaveAttribute("role", "alert")
+    // The banner repeats an error bubble that already announced it (CC-N2).
+    expect(banner).not.toHaveAttribute("role", "alert")
     expect(banner).toHaveTextContent("Generation failed")
     expect(banner).toHaveTextContent("Open diagnostics for details")
     fireEvent.click(screen.getByRole("button", { name: "Health & diagnostics" }))

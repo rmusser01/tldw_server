@@ -1,10 +1,13 @@
 import React from "react"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
+import { act, fireEvent, render as renderUI, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { useTutorialStore } from "@/store/tutorials"
 import { PageHelpModalHost } from "../PageHelpModalHost"
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }) }))
+
+const render = (ui: React.ReactNode) => renderUI(<MemoryRouter initialEntries={["/chat"]}>{ui}</MemoryRouter>)
 
 const Help = () => <div role="dialog" aria-label="Help">Help content</div>
 beforeEach(() => { useTutorialStore.getState().closeHelpModal() })
@@ -61,3 +64,56 @@ it("dismisses a failed load without requesting another chunk", async () => {
   await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument())
   expect(loadModal).toHaveBeenCalledOnce()
 })
+
+
+it.each(["resolve", "reject"])(
+  "ignores a dismissed lazy load that later %ss and preserves the reopened intent",
+  async (result) => {
+    let resolveOld!: (value: { PageHelpModal: React.ComponentType }) => void
+    let rejectOld!: (error: Error) => void
+    let resolveCurrent!: (value: {
+      PageHelpModal: React.ComponentType<{ initialTab?: string }>
+    }) => void
+    const old = new Promise<{ PageHelpModal: React.ComponentType }>(
+      (resolve, reject) => {
+        resolveOld = resolve
+        rejectOld = reject
+      }
+    )
+    const current = new Promise<{
+      PageHelpModal: React.ComponentType<{ initialTab?: string }>
+    }>((resolve) => {
+      resolveCurrent = resolve
+    })
+    const loadModal = vi
+      .fn()
+      .mockReturnValueOnce(old)
+      .mockReturnValueOnce(current)
+    render(<PageHelpModalHost loadModal={loadModal} />)
+    act(() => window.dispatchEvent(new CustomEvent("tldw:open-help-modal")))
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
+    act(() =>
+      window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal"))
+    )
+    await act(async () => {
+      if (result === "resolve") resolveOld({ PageHelpModal: Help })
+      else rejectOld(new Error("old offline result"))
+      await Promise.resolve()
+    })
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    await act(async () =>
+      resolveCurrent({
+        PageHelpModal: ({ initialTab }) => (
+          <div role="dialog" aria-label="Current help">
+            {initialTab}
+          </div>
+        )
+      })
+    )
+    expect(
+      await screen.findByRole("dialog", { name: "Current help" })
+    ).toHaveTextContent("shortcuts")
+    expect(loadModal).toHaveBeenCalledTimes(2)
+  }
+)

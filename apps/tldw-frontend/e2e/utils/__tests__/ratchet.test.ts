@@ -24,6 +24,15 @@ const compare = (observed: Record<string, number>, baseline: RatchetEntry[]) =>
   })
 
 describe("compareRatchet", () => {
+  it("passes a clean observation against an empty baseline", () => {
+    expect(compare({}, [])).toEqual([])
+  })
+
+  it("rejects a new problem against an empty baseline", () => {
+    const [problem] = compare({ "color-contrast": 1 }, [])
+    expect(problem).toContain('new axe violation "color-contrast" (1)')
+  })
+
   it("passes when observations match the baseline", () => {
     expect(compare({ "color-contrast": 3 }, [entry()])).toEqual([])
   })
@@ -65,7 +74,8 @@ describe("committed ux-regression baselines", () => {
 
   it("tag every a11y entry with a review id, issue and note", () => {
     const { entries } = read("a11y.json") as { entries: Array<RatchetEntry & { rule: string; nodes: number }> }
-    expect(entries.length).toBeGreaterThan(0)
+    // An empty list is valid: every baselined violation has been fixed.
+    expect(Array.isArray(entries)).toBe(true)
     const problems = entries.flatMap((item, index) =>
       ratchetEntryProblems({ ...item, key: item.rule, count: item.nodes }, `a11y.json entries[${index}]`)
     )

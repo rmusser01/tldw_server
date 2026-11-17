@@ -14,7 +14,9 @@ module.exports = {
         surface2: "rgb(var(--color-surface-2) / <alpha-value>)",
         elevated: "rgb(var(--color-elevated) / <alpha-value>)",
         primary: "rgb(var(--color-primary) / <alpha-value>)",
+        "primary-foreground": "rgb(var(--color-primary-foreground) / <alpha-value>)",
         primaryStrong: "rgb(var(--color-primary-strong) / <alpha-value>)",
+        "primary-strong-foreground": "rgb(var(--color-primary-strong-foreground) / <alpha-value>)",
         accent: "rgb(var(--color-accent) / <alpha-value>)",
         success: "rgb(var(--color-success) / <alpha-value>)",
         warn: "rgb(var(--color-warn) / <alpha-value>)",
@@ -39,6 +41,15 @@ module.exports = {
           loading: "rgb(var(--state-loading) / <alpha-value>)",
           error: "rgb(var(--state-error) / <alpha-value>)"
         }
+      },
+      // Text utilities read text-on-tint shades, so text-success stays
+      // readable on bg-success/10 (#3124). Fills, borders and rings keep the
+      // base colours above. Values: tailwind-shared.css, themes/text-on-tint.ts.
+      textColor: {
+        primary: "rgb(var(--color-primary-text) / <alpha-value>)",
+        success: "rgb(var(--color-success-text) / <alpha-value>)",
+        warn: "rgb(var(--color-warn-text) / <alpha-value>)",
+        danger: "rgb(var(--color-danger-text) / <alpha-value>)"
       },
       fontFamily: {
         display: ["Space Grotesk", "Inter", "sans-serif"],

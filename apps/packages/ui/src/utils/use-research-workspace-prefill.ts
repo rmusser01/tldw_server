@@ -16,6 +16,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   createWorkspaceStorage,
+  flushWorkspacePersistence,
   hasResearchWorkspaceMigrationTombstone,
   useWorkspaceStore,
 } from "@/store/workspace"
@@ -296,7 +297,7 @@ export function useResearchWorkspacePrefill(
               // changed; the completed upload must not be repeated on return.
               await saveResearchWorkspacePrefill(payload)
               assertCurrent()
-            } catch (error) {
+            } catch {
               assertCurrent()
               failed += 1
               for (const item of sources)
@@ -685,6 +686,12 @@ export function useResearchWorkspacePrefill(
             stopWatchingDraft()
           }
         } else {
+          // The persist writer coalesces writes off the set() path; this
+          // read verifies that the just-imported draft/sources PERSISTED, so
+          // drain any still-buffered write (and await an in-flight chain)
+          // before reading — otherwise a write still inside the coalescing
+          // window would read back as "not persisted".
+          await flushWorkspacePersistence()
           const stored = await createWorkspaceStorage().getItem(
             WORKSPACE_STORAGE_KEY,
           )

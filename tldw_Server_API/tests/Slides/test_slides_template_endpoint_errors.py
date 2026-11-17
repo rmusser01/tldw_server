@@ -11,7 +11,7 @@ async def test_list_templates_sanitizes_invalid_template_error(monkeypatch):
     def _raise_invalid_templates():
         raise SlidesTemplateInvalidError("template manifest exploded")
 
-    monkeypatch.setattr(slides_endpoints, "list_slide_templates", _raise_invalid_templates)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_templates.list_slide_templates", _raise_invalid_templates)
 
     with pytest.raises(HTTPException) as exc_info:
         await slides_endpoints.list_templates()
@@ -27,7 +27,7 @@ async def test_get_template_sanitizes_invalid_template_error(monkeypatch):
         assert template_id == "broken-template"
         raise SlidesTemplateInvalidError("template manifest exploded")
 
-    monkeypatch.setattr(slides_endpoints, "get_slide_template", _raise_invalid_template)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_templates.get_slide_template", _raise_invalid_template)
 
     with pytest.raises(HTTPException) as exc_info:
         await slides_endpoints.get_template("broken-template")

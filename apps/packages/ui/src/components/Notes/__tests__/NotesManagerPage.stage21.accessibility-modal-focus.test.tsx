@@ -2,6 +2,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { ConfigProvider } from "antd"
 import NotesManagerPage from "../NotesManagerPage"
 
 const {
@@ -207,9 +208,15 @@ const renderPage = () => {
       mutations: { retry: false }
     }
   })
+  // The notes overlay host stays mounted once opened (AX-09), so a closed
+  // dialog leaves the DOM only after its close animation. jsdom never ends
+  // that animation; turning motion off closes dialogs in the same pass, as a
+  // browser does once the animation finishes.
   return render(
     <QueryClientProvider client={queryClient}>
-      <NotesManagerPage />
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <NotesManagerPage />
+      </ConfigProvider>
     </QueryClientProvider>
   )
 }

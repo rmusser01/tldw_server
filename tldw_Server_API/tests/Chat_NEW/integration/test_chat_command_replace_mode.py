@@ -20,7 +20,7 @@ def test_chat_command_replace_mode(monkeypatch, credentialed_test_client, auth_h
         captured["messages"] = kwargs.get("messages_payload")
         return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
 
     # Submit a slash command
     payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
@@ -74,7 +74,7 @@ def test_chat_command_revalidates_after_injection(monkeypatch, test_client, auth
 
         raise AssertionError("Provider call should not occur when post-injection validation fails")
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fail_call)
 
     from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 
@@ -118,7 +118,7 @@ def test_chat_command_replace_mode_truncates_injected_text(
         captured["messages"] = kwargs.get("messages_payload")
         return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
 
     payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
     response = credentialed_test_client.post(
@@ -170,7 +170,7 @@ def test_chat_command_non_audit_503_does_not_abort_request(
     def fake_call(**_kwargs):
         return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
 
     payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
     resp = credentialed_test_client.post(

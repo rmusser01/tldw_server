@@ -12,12 +12,17 @@ from __future__ import annotations
 import codecs
 import html as html_lib
 import re
+from collections.abc import Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urljoin, urlsplit
 
+import httpx
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import EgressPolicyError
+from tldw_Server_API.app.core.http_client import RetryPolicy, astream_bytes, create_async_client
 from tldw_Server_API.app.core.MCP_unified.tool_observability import (
     build_tool_eval_metadata,
 )
@@ -111,13 +116,13 @@ def _safe_host(url: str) -> str:
 
 
 class HttpxWebFetchClient:
-    """Default :class:`WebFetchHttpClient` backed by ``httpx`` with a byte cap.
+    """Default :class:`WebFetchHttpClient`: ``core.http_client.astream_bytes`` with a byte cap.
 
-    Redirects are NOT auto-followed: a redirect response is returned with its
-    resolved ``location`` so the caller can re-apply the outbound policy. The
-    body is only downloaded for terminal responses with a supported content
-    type, avoiding fetching binary payloads (images/video/PDF) just to reject
-    them later.
+    http_client checks the egress policy on the address the connection is pinned
+    to and does not read env proxies. Redirects are NOT followed: a redirect
+    response is returned with its resolved ``location`` so the caller can
+    re-apply the outbound policy. The body is only read for terminal responses
+    with a supported content type.
     """
 
     def __init__(self, *, transport: Any | None = None) -> None:
@@ -132,43 +137,34 @@ class HttpxWebFetchClient:
         max_bytes: int,
         user_agent: str,
     ) -> WebFetchResponse:
-        import httpx  # Local import: keeps module import cheap and httpx optional at import time.
+        head: dict[str, Any] = {}
 
-        async with httpx.AsyncClient(
-            follow_redirects=False,
-            timeout=timeout_seconds,
-            headers={"User-Agent": user_agent},
-            transport=self._transport,
-        ) as client:
-            async with client.stream("GET", url) as response:
-                content_type = response.headers.get("content-type", "")
+        def _on_response(status_code: int, headers: Mapping[str, str]) -> None:
+            head["status_code"] = status_code
+            head["content_type"] = headers.get("content-type", "")
+            head["location"] = headers.get("location")
 
-                if response.status_code in _REDIRECT_STATUS:
-                    location_header = response.headers.get("location")
-                    location = urljoin(url, location_header) if location_header else None
-                    return WebFetchResponse(
-                        final_url=str(response.url),
-                        status_code=response.status_code,
-                        content_type=content_type,
-                        body=b"",
-                        truncated=False,
-                        location=location,
-                    )
-
-                if not _is_supported_content_type(content_type):
-                    # Reject unsupported (binary) payloads without downloading them.
-                    return WebFetchResponse(
-                        final_url=str(response.url),
-                        status_code=response.status_code,
-                        content_type=content_type,
-                        body=b"",
-                        truncated=False,
-                    )
-
-                chunks: list[bytes] = []
-                downloaded = 0
-                truncated = False
-                async for chunk in response.aiter_bytes():
+        chunks: list[bytes] = []
+        downloaded = 0
+        truncated = False
+        async with create_async_client(transport=self._transport) as client:
+            stream = astream_bytes(
+                method="GET",
+                url=url,
+                client=client,
+                headers={"User-Agent": user_agent},
+                timeout=httpx.Timeout(timeout_seconds),
+                retry=RetryPolicy(attempts=1),
+                on_response=_on_response,
+                raise_for_status=False,
+            )
+            async with aclosing(stream):
+                async for chunk in stream:
+                    # Redirects and unsupported (binary) payloads: stop without reading the body.
+                    if head["status_code"] in _REDIRECT_STATUS or not _is_supported_content_type(
+                        head["content_type"]
+                    ):
+                        break
                     remaining = max_bytes - downloaded
                     if remaining <= 0:
                         truncated = True
@@ -180,13 +176,19 @@ class HttpxWebFetchClient:
                         break
                     chunks.append(chunk)
                     downloaded += len(chunk)
-                return WebFetchResponse(
-                    final_url=str(response.url),
-                    status_code=response.status_code,
-                    content_type=content_type,
-                    body=b"".join(chunks),
-                    truncated=truncated,
-                )
+
+        status_code = head["status_code"]
+        location = None
+        if status_code in _REDIRECT_STATUS and head["location"]:
+            location = urljoin(url, head["location"])
+        return WebFetchResponse(
+            final_url=str(httpx.URL(url)),
+            status_code=status_code,
+            content_type=head["content_type"],
+            body=b"".join(chunks),
+            truncated=truncated,
+            location=location,
+        )
 
 
 class WebFetchModule(WebToolBase):
@@ -363,6 +365,15 @@ class WebFetchModule(WebToolBase):
                     timeout_seconds=timeout_seconds,
                     max_bytes=max_bytes,
                     user_agent=_DEFAULT_USER_AGENT,
+                )
+            except EgressPolicyError as exc:
+                # The connection-time egress check disagreed with the policy check above
+                # (e.g. a DNS answer that changed in between).
+                return self._structured_error(
+                    tool_name,
+                    "outbound_policy_denied",
+                    f"Outbound policy denied the request ({exc.reason_code or 'egress'}).",
+                    context=context,
                 )
             except Exception as exc:  # noqa: BLE001 - network/client errors are expected and mapped.
                 logger.bind(stage="web.fetch", host=_safe_host(current_url)).opt(exception=exc).warning(

@@ -572,3 +572,195 @@ def test_export_json_preserves_html_discriminator_and_unicode_source():
     assert '"content_kind": "standalone_html"' in exported
     assert "\u4e09" in exported
     assert "\\u4e09" not in exported
+
+
+@pytest.fixture
+def pdf_renderer(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock, create_autospec
+
+    from playwright.async_api import Page
+
+    from tldw_Server_API.app.core.Slides import slides_export
+
+    page = create_autospec(Page, instance=True)
+    page.pdf.return_value = b"%PDF-public-contract"
+    browser = MagicMock()
+    browser.new_page = AsyncMock(return_value=page)
+    browser.close = AsyncMock()
+    playwright = MagicMock()
+    playwright.chromium.launch = AsyncMock(return_value=browser)
+    playwright.stop = AsyncMock()
+    manager = MagicMock()
+    manager.start = AsyncMock(return_value=playwright)
+    monkeypatch.setattr(slides_export, "async_playwright", lambda: manager)
+    return page, browser, playwright
+
+
+def test_pdf_export_uses_public_page_contract_and_releases_browser(tmp_path, pdf_renderer):
+    from tldw_Server_API.app.core.Slides import slides_export
+
+    page, browser, context = pdf_renderer
+    body = slides_export.export_presentation_pdf(
+        title="Rowan",
+        slides=[{"title": "Selene", "content": "Verified source"}],
+        theme="black",
+        settings=None,
+        custom_css=None,
+        assets_dir=_build_assets(tmp_path),
+        pdf_options={"format": "Letter"},
+    )
+
+    assert body == b"%PDF-public-contract"  # nosec B101 -- pytest behavior assertion.
+    assert page.pdf.call_args.kwargs["format"] == "Letter"  # nosec B101 -- pytest behavior assertion.
+    methods = [call[0] for call in page.method_calls]
+    assert (
+        methods.index("add_init_script")
+        < methods.index("goto")
+        < methods.index("wait_for_function")
+        < methods.index("pdf")
+    )  # nosec B101 -- pytest checks the capture-before-load and ready-before-print contract.
+    browser.close.assert_awaited_once()
+    context.stop.assert_awaited_once()
+
+
+@pytest.mark.parametrize("suppress_cancellation", [False, True])
+def test_pdf_deadline_refuses_late_bytes_and_awaits_cleanup(tmp_path, monkeypatch, pdf_renderer, suppress_cancellation):
+    import asyncio
+
+    from tldw_Server_API.app.core.Slides import slides_export
+
+    page, browser, context = pdf_renderer
+    cancelled = []
+
+    async def held_pdf(**_kwargs):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            if not suppress_cancellation:
+                raise
+            return b"%PDF-too-late"
+
+    page.pdf.side_effect = held_pdf
+    monkeypatch.setattr(slides_export, "_resolve_pdf_timeout_ms", lambda: 20)
+
+    with pytest.raises(slides_export.SlidesExportError, match="^pdf_timeout$"):
+        slides_export.export_presentation_pdf(
+            title="Rowan",
+            slides=[{"title": "Selene", "content": "Verified source"}],
+            theme="black",
+            settings=None,
+            custom_css=None,
+            assets_dir=_build_assets(tmp_path),
+        )
+
+    assert cancelled == [True]  # nosec B101 -- pytest behavior assertion.
+    assert (browser.close.await_count, context.stop.await_count) == (1, 1)  # nosec B101 - renderer deadline drains both owned resources exactly once.
+
+
+def test_pdf_render_error_awaits_browser_and_context_cleanup(tmp_path, pdf_renderer):
+    from tldw_Server_API.app.core.Slides import slides_export
+
+    page, browser, context = pdf_renderer
+    page.pdf.side_effect = slides_export.PlaywrightError("renderer failure")
+    with pytest.raises(slides_export.SlidesExportError, match="^pdf_render_failed$"):
+        slides_export.export_presentation_pdf(
+            title="Rowan",
+            slides=[{"title": "Selene", "content": "Verified source"}],
+            theme="black",
+            settings=None,
+            custom_css=None,
+            assets_dir=_build_assets(tmp_path),
+        )
+    browser.close.assert_awaited_once()
+    context.stop.assert_awaited_once()
+
+
+def test_pdf_incomplete_print_layout_refuses_export_and_releases_resources(tmp_path, pdf_renderer):
+    from tldw_Server_API.app.core.Slides import slides_export
+
+    page, browser, context = pdf_renderer
+    page.wait_for_function.side_effect = slides_export.PlaywrightTimeoutError("print layout pending")
+    with pytest.raises(slides_export.SlidesExportError, match="^pdf_timeout$"):
+        slides_export.export_presentation_pdf(
+            title="Rowan",
+            slides=[{"content": "Selene"}],
+            theme="black",
+            settings=None,
+            custom_css=None,
+            assets_dir=_build_assets(tmp_path),
+        )
+
+    page.pdf.assert_not_awaited()
+    browser.close.assert_awaited_once()
+    context.stop.assert_awaited_once()
+
+
+@pytest.mark.parametrize("failed_cleanup", ["browser", "playwright"])
+def test_pdf_cleanup_failure_preserves_the_primary_timeout(tmp_path, pdf_renderer, failed_cleanup):
+    from tldw_Server_API.app.core.Slides import slides_export
+
+    page, browser, context = pdf_renderer
+    primary = slides_export.PlaywrightTimeoutError("render timed out")
+    page.pdf.side_effect = primary
+    cleanup = browser.close if failed_cleanup == "browser" else context.stop
+    cleanup.side_effect = slides_export.PlaywrightError("cleanup failure")
+
+    with pytest.raises(slides_export.SlidesExportError, match="^pdf_timeout$") as caught:
+        slides_export.export_presentation_pdf(
+            title="Rowan",
+            slides=[{"title": "Selene", "content": "Verified source"}],
+            theme="black",
+            settings=None,
+            custom_css=None,
+            assets_dir=_build_assets(tmp_path),
+        )
+    assert caught.value.__cause__ is primary  # nosec B101 -- pytest behavior assertion.
+    assert primary.__notes__ == ["PDF cleanup failed: Error"]  # nosec B101 -- pytest behavior assertion.
+    browser.close.assert_awaited_once()
+    context.stop.assert_awaited_once()
+
+
+@pytest.mark.parametrize("failed_cleanup", ["browser", "playwright"])
+def test_pdf_cleanup_failure_cannot_report_export_success(tmp_path, pdf_renderer, failed_cleanup):
+    from tldw_Server_API.app.core.Slides import slides_export
+
+    _page, browser, context = pdf_renderer
+    cleanup = browser.close if failed_cleanup == "browser" else context.stop
+    cleanup.side_effect = slides_export.PlaywrightError("cleanup failure")
+    with pytest.raises(slides_export.SlidesExportError, match="^pdf_render_failed$"):
+        slides_export.export_presentation_pdf(
+            title="Rowan",
+            slides=[{"title": "Selene", "content": "Verified source"}],
+            theme="black",
+            settings=None,
+            custom_css=None,
+            assets_dir=_build_assets(tmp_path),
+        )
+    browser.close.assert_awaited_once()
+    context.stop.assert_awaited_once()
+
+
+@pytest.mark.parametrize("failure_stage", ["launch", "new_page"])
+def test_pdf_acquisition_failure_retires_acquired_resources(tmp_path, pdf_renderer, failure_stage):
+    from tldw_Server_API.app.core.Slides import slides_export
+
+    _page, browser, context = pdf_renderer
+    if failure_stage == "launch":
+        context.chromium.launch.side_effect = slides_export.PlaywrightError("launch failure")
+    else:
+        browser.new_page.side_effect = slides_export.PlaywrightError("page failure")
+    with pytest.raises(slides_export.SlidesExportError, match="^pdf_render_failed$"):
+        slides_export.export_presentation_pdf(
+            title="Rowan",
+            slides=[{"title": "Selene", "content": "Verified source"}],
+            theme="black",
+            settings=None,
+            custom_css=None,
+            assets_dir=_build_assets(tmp_path),
+        )
+    if failure_stage == "launch":
+        browser.close.assert_not_awaited()
+    else:
+        browser.close.assert_awaited_once()
+    context.stop.assert_awaited_once()

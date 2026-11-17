@@ -16,7 +16,8 @@ const mocks = vi.hoisted(() => ({
   maybeInjectActorMessage: vi.fn(),
   getModels: vi.fn(),
   runChatPipeline: vi.fn(),
-  captureNormalHistoryTurn: vi.fn(),
+  captureHistorySnapshot: vi.fn(),
+  dismissHistoryTurnRecovery: vi.fn(),
   appendSystemPromptSuffix: vi.fn()
 }))
 
@@ -124,9 +125,17 @@ vi.mock("../chatModePipeline", async (importOriginal) => ({
   }
 }))
 
-vi.mock("../normalChatMode", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../normalChatMode")>(),
-  captureNormalHistoryTurn: (...args: unknown[]) => mocks.captureNormalHistoryTurn(...args)
+vi.mock("@/services/chat-history-selection", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/chat-history-selection")>(),
+  captureHistorySnapshot: (...args: unknown[]) => mocks.captureHistorySnapshot(...args)
+}))
+vi.mock("@/services/tldw/server-capabilities", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/tldw/server-capabilities")>(),
+  getSelectedDurableTurnSupport: async () => true
+}))
+vi.mock("@/db/dexie/history-selection", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/db/dexie/history-selection")>(),
+  dismissHistoryTurnRecovery: (...args: unknown[]) => mocks.dismissHistoryTurnRecovery(...args)
 }))
 
 vi.mock("@/utils/output-formatting-guide", () => ({
@@ -135,6 +144,8 @@ vi.mock("@/utils/output-formatting-guide", () => ({
 }))
 
 import { __testing__, ragMode } from "../ragMode"
+import { onHistoryTurnReleased } from "@/services/history-turn-keep"
+import type { HistorySendTurn } from "@/types/chat-modes"
 
 const servicePromptSnapshot = {
   scopeKey: "test-scope",
@@ -231,24 +242,50 @@ const createRagContext = (overrides: Record<string, unknown> = {}) =>
 
 describe("ragMode captured-turn lifecycle", () => {
   it.each(["submitted", "failed", "throws"])("releases its captured turn when the pipeline %s", async (status) => {
-    const turn = {
-      capture: { rows: [], selected_content: [], snapshot: { owner_key: "native-owner", nodes: [] }, view: { conversation_id: "chat-1" } },
-      resultId: status === "submitted" ? "result-1" : null,
-      followResult: vi.fn().mockResolvedValue(true),
-      finish: vi.fn().mockResolvedValue(undefined),
-      release: vi.fn()
+    const view = { owner_key: "native-owner", conversation_id: "chat-1", view_session_id: "view-1",
+      selection_revision: 1, cursor: { kind: "empty" }, interpretation: { kind: "parent_graph_v1" } }
+    const capture = { status: "captured", rows: [], selected_content: [], snapshot: { owner_key: "native-owner", nodes: [] }, view }
+    const owner = { ...view, kind: "native", request_scope: servicePromptSnapshot.requestScope, validate_lease: () => true }
+    const bookmarkScope = { profile_id: "test-profile", client_session_id: "test-tab" }
+    const current = { status: "ready", owner, view, bookmarkScope, capture }
+    const controller = {
+      getCurrent: () => current,
+      fence: () => () => true,
+      recoveries: [],
+      followResult: vi.fn().mockResolvedValue(true)
     }
-    mocks.captureNormalHistoryTurn.mockResolvedValue(turn)
-    mocks.runChatPipeline.mockReset()
-    if (status === "throws") mocks.runChatPipeline.mockRejectedValue(new Error("preparation failed"))
-    else mocks.runChatPipeline.mockResolvedValue({ status })
-    const context = createRagContext({ historySelection: {}, tldwTurn: { user_message_id: "input-1" } })
-    const request = ragMode(context.message, "", false, [], [], context.signal, context)
-    if (status === "throws") await expect(request).rejects.toThrow("preparation failed")
-    else await expect(request).resolves.toEqual({ status })
-    expect(turn.release).toHaveBeenCalledOnce()
-    if (status === "submitted") expect(turn.finish).toHaveBeenCalledWith(true)
-    else expect(turn.finish).not.toHaveBeenCalled()
+    mocks.captureHistorySnapshot.mockReset().mockResolvedValue(capture)
+    mocks.dismissHistoryTurnRecovery.mockReset().mockResolvedValue(true)
+    mocks.runChatPipeline.mockReset().mockImplementation(async (...args: unknown[]) => {
+      const turn = (args[7] as { historyTurn: HistorySendTurn }).historyTurn
+      expect(turn).toMatchObject({ serverOwned: true, capture })
+      if (status === "throws") throw new Error("preparation failed")
+      if (status === "submitted") turn.resultId = "result-1"
+      return { status }
+    })
+    const release = vi.fn()
+    const stop = onHistoryTurnReleased(release)
+    try {
+      const context = createRagContext({
+        serverChatId: "chat-1",
+        historySelection: { controller, originIsCurrent: () => true },
+        tldwTurn: { user_message_id: "12409645-7bce-4cba-b03b-bc4b0b27cc68" }
+      })
+      const request = ragMode(context.message, "", false, [], [], context.signal, context)
+      if (status === "throws") await expect(request).rejects.toThrow("preparation failed")
+      else await expect(request).resolves.toEqual({ status })
+      expect(mocks.runChatPipeline).toHaveBeenCalledOnce()
+      expect(release).toHaveBeenCalledOnce()
+      if (status === "submitted") {
+        expect(controller.followResult).toHaveBeenCalledWith(view, "result-1", expect.any(Function))
+        expect(mocks.dismissHistoryTurnRecovery).toHaveBeenCalledWith(bookmarkScope, view, expect.any(String), "completed")
+      } else {
+        expect(controller.followResult).not.toHaveBeenCalled()
+        expect(mocks.dismissHistoryTurnRecovery).not.toHaveBeenCalled()
+      }
+    } finally {
+      stop()
+    }
   })
 })
 

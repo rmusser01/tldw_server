@@ -104,9 +104,7 @@ const CRITICAL_ROUTES: CriticalRoute[] = [
   { path: "/content-review", name: "Content Review" },
   {
     path: "/claims-review",
-    name: "Claims Review",
-    expectedPath: "/content-review",
-    allowRedirectPanel: true
+    name: "Claims Review"
   },
   { path: "/research-workspace", name: "Research Workspace" },
   { path: "/writing-playground", name: "Writing Playground" },

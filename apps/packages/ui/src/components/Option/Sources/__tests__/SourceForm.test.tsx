@@ -496,6 +496,33 @@ describe("SourceForm", () => {
     })
   })
 
+  it.each(["local_directory", "git_repository"] as const)(
+    "omits obsolete Git configuration guidance for locked %s sources",
+    (sourceType) => {
+      render(
+        <SourceForm
+          mode="edit"
+          source={{
+            id: "42",
+            user_id: 7,
+            source_type: sourceType,
+            sink_type: "notes",
+            policy: "canonical",
+            enabled: true,
+            schedule_enabled: false,
+            schedule_config: {},
+            config: { path: "/allowed/docs" },
+            last_successful_snapshot_id: "9"
+          }}
+        />
+      )
+      expect(
+        screen.queryByText("Git repository details are configured below.")
+      ).not.toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument()
+    }
+  )
+
   it("keeps source identity editable until a successful snapshot exists", () => {
     render(
       <SourceForm

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import React from "react"
 import type { WizardResultItem } from "../types"
+import { extractCompletedIngestJobWarning } from "@/services/tldw/ingest-job-results"
 
 const wizardHarness = vi.hoisted(() => ({
   results: [] as WizardResultItem[],
@@ -74,6 +75,15 @@ describe("WizardResultsStep navigation buttons", () => {
     expect(onReviewSavedItems).toHaveBeenCalledWith(count === 1 ? [42] : [42, 43])
   })
 
+  it("labels and opens exactly 3 saved items", () => {
+    setSinglePdfResult({ mediaId: 42, persisted: true })
+    wizardHarness.results = Array.from({ length: 3 }, (_, index) => ({ ...wizardHarness.results[0], id: `saved-${index}`, mediaId: 42 + index }))
+    const onReviewSavedItems = vi.fn()
+    render(<WizardResultsStep onClose={vi.fn()} onReviewSavedItems={onReviewSavedItems} />)
+    fireEvent.click(screen.getByRole("button", { name: "Review these 3 saved items" }))
+    expect(onReviewSavedItems).toHaveBeenCalledWith([42, 43, 44])
+  })
+
   it("shows saved warnings separately from clean success while keeping source navigation", () => {
     setSinglePdfResult({ warning: "Analysis failed for chunk 1" })
     const onOpenMedia = vi.fn()
@@ -140,6 +150,27 @@ describe("WizardResultsStep navigation buttons", () => {
     render(<WizardResultsStep onClose={vi.fn()} onCorrectItems={onCorrectItems} />)
     fireEvent.click(screen.getByRole("button", { name: /Correct.*auth/ }))
     expect(onCorrectItems).toHaveBeenCalledWith(["auth"])
+  })
+
+  it.each([
+    "Daily ingestion size budget exceeded.",
+    "HTTP 429: Daily ingestion size budget exceeded.",
+  ])("offers a manual daily upload recovery for %s", error => {
+    wizardHarness.results = [{ id: "quota", title: "quota.txt", type: "document", status: "error", outcome: "failed", error }]
+    wizardHarness.queueItems = [{ id: "quota", kind: "file", file: new File(["content"], "quota.txt", { type: "text/plain" }), detectedType: "document", icon: "FileText", fileSize: 7, validation: { valid: true } }]
+    const onRetryItems = vi.fn()
+    render(<WizardResultsStep onClose={vi.fn()} onRetryItems={onRetryItems} />)
+    expect(screen.getByText("Daily upload limit")).toBeVisible()
+    expect(screen.getByText(/administrator/)).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Retry quota.txt", exact: true }))
+    expect(onRetryItems).toHaveBeenCalledWith(["quota"])
+  })
+
+  it.each(["missing file", "invalid input", "cancelled"])("does not bypass %s when offering daily upload recovery", boundary => {
+    wizardHarness.results = [{ id: "quota", title: "quota.txt", type: "document", status: "error", outcome: boundary === "cancelled" ? "cancelled" : "failed", error: "Daily ingestion size budget exceeded." }]
+    wizardHarness.queueItems = [{ id: "quota", kind: "file", file: boundary === "missing file" ? undefined : new File(["content"], "quota.txt"), detectedType: "document", icon: "FileText", fileSize: 7, validation: { valid: boundary !== "invalid input" } }]
+    render(<WizardResultsStep onClose={vi.fn()} onRetryItems={vi.fn()} />)
+    expect(screen.queryByRole("button", { name: /retry/i })).toBeNull()
   })
 
   const setSinglePdfResult = (overrides: Partial<WizardResultItem> = {}) => {
@@ -370,6 +401,28 @@ describe("WizardResultsStep navigation buttons", () => {
 
     expect(screen.getByText(/already in library/i)).toBeTruthy()
     expect(screen.getByText(/overwrite existing/i)).toBeTruthy()
+  })
+
+  it("explains skipped analysis and opens the existing Media item", () => {
+    const warning = "Analysis skipped because this item is already in your library."
+    const data = {
+      status: "Skipped",
+      media_id: 42,
+      db_message: "Media already exists. Overwrite not enabled.",
+      warnings: [warning],
+    }
+    setSinglePdfResult({
+      outcome: "skipped",
+      mediaId: 42,
+      data,
+      warning: extractCompletedIngestJobWarning(data),
+    })
+    const onOpenMedia = vi.fn()
+    render(<WizardResultsStep onClose={vi.fn()} onOpenMedia={onOpenMedia} />)
+
+    expect(screen.getByText(warning)).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: /open .* in media/i }))
+    expect(onOpenMedia).toHaveBeenCalledWith(expect.objectContaining({ mediaId: 42 }))
   })
 
   it("does not render Open in Document Workspace when the original file was not persisted", () => {
@@ -686,5 +739,18 @@ describe("WizardResultsStep navigation buttons", () => {
         },
       ]
     )
+  })
+
+  it("discloses safe failure details without claiming a corrupt file was saved", () => {
+    wizardHarness.results = [{
+      id: "corrupt", status: "error", outcome: "failed", type: "document", fileName: "corrupt.docx",
+      error: "DOCX extraction failed: /Users/private/corrupt.docx api_key=private-value\nTraceback: private internals",
+    }]
+    render(<WizardResultsStep onClose={vi.fn()} onCorrectItems={vi.fn()} onOpenMedia={vi.fn()} />)
+    fireEvent.click(screen.getByText("Error details"))
+    expect(screen.getByText("DOCX extraction failed: [redacted-path] api_key=[redacted-secret]")).toBeVisible()
+    expect(screen.queryByText(/private-value|private internals|\/Users\/private/)).toBeNull()
+    expect(screen.getByText(/0 succeeded \(0 saved\).*1 failed/)).toBeVisible()
+    expect(screen.queryByRole("button", { name: /Open .* in Media/ })).toBeNull()
   })
 })

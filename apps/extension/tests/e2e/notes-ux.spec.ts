@@ -1,15 +1,13 @@
 import {
-  test,
-  expect,
   type BrowserContext,
   type Page,
-  type Worker
+  type Worker,
+  expect,
+  test
 } from '@playwright/test'
+
+import { forceConnected, waitForConnectionStore } from './utils/connection'
 import { launchWithBuiltExtension } from './utils/extension-build'
-import {
-  waitForConnectionStore,
-  forceConnected
-} from './utils/connection'
 
 const NOTE_ID = 'extension-source-note'
 const NOW = '2026-08-28T12:00:00Z'
@@ -36,23 +34,27 @@ const installNotesGraphMocks = async (
   authorized: boolean
 ): Promise<Worker> => {
   const worker =
-    context.serviceWorkers()[0] ??
-    (await context.waitForEvent('serviceworker'))
+    context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'))
   const installed = await worker.evaluate(
     ({ authorized, constants }) => {
       try {
         let accepted = false
+        let semanticConverted = false
         const suggestionRequests: SuggestionRequest[] = []
         const apiRequests: string[] = []
+        const semanticGraphUrls: string[] = []
         let graphRequests = 0
         ;(globalThis as any).__notesGraphSuggestionRequests = suggestionRequests
         ;(globalThis as any).__notesGraphApiRequests = apiRequests
         ;(globalThis as any).__notesGraphRequestCount = () => graphRequests
+        ;(globalThis as any).__notesSemanticGraphUrls = semanticGraphUrls
+        ;(globalThis as any).__notesSemanticManualLinkBody = null
 
         const note = {
           id: constants.noteId,
           title: 'Extension source note',
-          content: 'Durable synchronization and grounded graph review evidence.',
+          content:
+            'Durable synchronization and grounded graph review evidence.',
           version: 2,
           keywords: [],
           created_at: constants.now,
@@ -72,7 +74,100 @@ const installNotesGraphMocks = async (
           tag_count: type === 'note' ? 0 : null,
           primary_source_id: null
         })
-        const graph = () => ({
+        const semanticEvidence = {
+          similarity: 0.8765,
+          qualitative_band: 'high',
+          source_note_id: `note:${constants.noteId}`,
+          target_note_id: 'note:extension-target',
+          source_content_version: 2,
+          target_content_version: 3,
+          generation_id: 'extension-semantic-generation',
+          semantic_index_revision: 4,
+          configuration_revision: 1,
+          normalization_version: 'normalize-v1',
+          chunker_version: 'chunk-v1',
+          provider_label: 'Extension local embedding provider',
+          model_label: 'extension-semantic-model-with-a-long-version-label',
+          model_revision: 'model-r1',
+          excerpt_pairs: [
+            {
+              source: {
+                field: 'content',
+                start_code_point: 0,
+                end_code_point:
+                  'Extension source passage for semantic evidence.'.length,
+                text: 'Extension source passage for semantic evidence.'
+              },
+              target: {
+                field: 'content',
+                start_code_point: 0,
+                end_code_point:
+                  'Extension target passage for semantic evidence.'.length,
+                text: 'Extension target passage for semantic evidence.'
+              }
+            }
+          ]
+        }
+        const semanticGraphStatus = {
+          available: true,
+          state: 'ready',
+          detail_reason: null,
+          generation_id: 'extension-semantic-generation',
+          semantic_index_revision: 4,
+          configuration_revision: 1,
+          active_notes: 2,
+          indexed_notes: 2,
+          dirty_notes: 0,
+          excluded_notes: 0,
+          failed_notes: 0,
+          effective_top_k: 10,
+          effective_threshold: 0.75,
+          max_top_k: 50,
+          max_admission_nodes: 50,
+          max_admission_edges: 50,
+          max_evidence_pairs: 3,
+          max_excerpt_code_points: 480,
+          max_edge_evidence_code_points: 2880,
+          max_response_evidence_bytes: 262144,
+          truncated_by: []
+        }
+        const semanticCapabilities = {
+          active_note_count: 2,
+          estimated_chunk_count: 6,
+          estimated_run_count: 1,
+          provider_label: 'Extension local embedding provider',
+          model: 'extension-semantic-model-with-a-long-version-label',
+          endpoint_display: 'http://127.0.0.1:8099',
+          execution_boundary: 'local',
+          storage_boundary: 'local',
+          storage_label: 'Extension local vector store',
+          outbound_data_categories: ['note_content_chunks', 'note_title'],
+          capability_revision: constants.capabilityRevision,
+          indexing_available: true,
+          unavailable_reason: null,
+          metric: 'cosine',
+          resolved_dimensions: 384,
+          dimension_probe_required: false,
+          renewal_requires_delete: false,
+          manage_authorized: authorized
+        }
+        const semanticStatus = {
+          state: 'ready',
+          detail_reason: null,
+          desired_state: 'enabled',
+          configuration_revision: 1,
+          semantic_index_revision: 4,
+          active_generation_id: 'extension-semantic-generation',
+          active_generation_usable: true,
+          indexed_notes: 2,
+          excluded_notes: 0,
+          failed_notes: 0,
+          pending_notes: 0,
+          published_chunks: 6,
+          cleanup_pending: false,
+          active_run: null
+        }
+        const graph = (includeSemantic: boolean) => ({
           nodes: [
             node(`note:${constants.noteId}`, note.title),
             node('note:extension-target', constants.targetTitle),
@@ -88,6 +183,33 @@ const installNotesGraphMocks = async (
               weight: 1,
               label: null
             },
+            ...(includeSemantic
+              ? [
+                  {
+                    id: 'extension-semantic-edge',
+                    source: `note:${constants.noteId}`,
+                    target: 'note:extension-target',
+                    type: 'semantic',
+                    directed: false,
+                    weight: 0.8765,
+                    label: null,
+                    evidence: semanticEvidence
+                  }
+                ]
+              : []),
+            ...(semanticConverted
+              ? [
+                  {
+                    id: 'semantic-converted-edge',
+                    source: `note:${constants.noteId}`,
+                    target: 'note:extension-target',
+                    type: 'manual',
+                    directed: false,
+                    weight: 1,
+                    label: null
+                  }
+                ]
+              : []),
             ...(accepted
               ? [
                   {
@@ -111,7 +233,9 @@ const installNotesGraphMocks = async (
           active_note_count: 9,
           all_notes_note_cap: 8,
           all_notes_eligible: false,
-          suggestions_authorized: authorized
+          suggestions_authorized: authorized,
+          manual_link_authorized: authorized,
+          ...(includeSemantic ? { semantic_status: semanticGraphStatus } : {})
         })
         const capability = {
           provider: constants.provider,
@@ -208,12 +332,55 @@ const installNotesGraphMocks = async (
           const request = input instanceof Request ? input : null
           const url = new URL(request?.url ?? String(input))
           const path = url.pathname
-          const method = String(init?.method ?? request?.method ?? 'GET').toUpperCase()
+          const method = String(
+            init?.method ?? request?.method ?? 'GET'
+          ).toUpperCase()
           if (path.startsWith('/api/v1/')) apiRequests.push(`${method} ${path}`)
 
+          if (
+            path === '/api/v1/notes/graph/semantic-index/capabilities' &&
+            method === 'GET'
+          ) {
+            return ok(semanticCapabilities)
+          }
+          if (
+            path === '/api/v1/notes/graph/semantic-index' &&
+            method === 'GET'
+          ) {
+            return ok(semanticStatus)
+          }
           if (path === '/api/v1/notes/graph' && method === 'GET') {
             graphRequests += 1
-            return ok(graph())
+            semanticGraphUrls.push(url.toString())
+            const includeSemantic =
+              url.searchParams
+                .get('edge_types')
+                ?.split(',')
+                .includes('semantic') ?? false
+            return ok(graph(includeSemantic))
+          }
+          if (
+            path === `/api/v1/notes/${constants.noteId}/links` &&
+            method === 'POST'
+          ) {
+            semanticConverted = true
+            const bodyText =
+              typeof init?.body === 'string'
+                ? init.body
+                : request
+                  ? await request.clone().text()
+                  : ''
+            ;(globalThis as any).__notesSemanticManualLinkBody = bodyText
+              ? JSON.parse(bodyText)
+              : null
+            return ok({
+              status: 'created',
+              edge: {
+                edge_id: 'semantic-converted-edge',
+                from_note_id: constants.noteId,
+                to_note_id: 'extension-target'
+              }
+            })
           }
           if (path.includes('/graph/suggestions')) {
             const headers = new Headers(init?.headers ?? request?.headers)
@@ -221,7 +388,9 @@ const installNotesGraphMocks = async (
               method,
               path,
               commandUuid:
-                headers.get('Idempotency-Key') || headers.get('idempotency-key') || null
+                headers.get('Idempotency-Key') ||
+                headers.get('idempotency-key') ||
+                null
             })
             if (path.endsWith('/capabilities') && method === 'GET') {
               return ok(capability, {
@@ -289,10 +458,13 @@ const installNotesGraphMocks = async (
             })
           }
           if (path.startsWith('/api/v1/')) {
-            return new Response(JSON.stringify({ detail: 'Not found in fixture' }), {
-              status: 404,
-              headers: { 'content-type': 'application/json' }
-            })
+            return new Response(
+              JSON.stringify({ detail: 'Not found in fixture' }),
+              {
+                status: 404,
+                headers: { 'content-type': 'application/json' }
+              }
+            )
           }
           return originalFetch(input, init)
         }
@@ -395,7 +567,9 @@ test.describe('Notes workspace UX', () => {
     await page.goto(optionsUrl + '#/notes')
     await page.waitForLoadState('networkidle')
 
-    const headline = page.getByText(/Connect to use Notes|Explore Notes in demo mode/i)
+    const headline = page.getByText(
+      /Connect to use Notes|Explore Notes in demo mode/i
+    )
     await expect(headline).toBeVisible()
 
     const editorPanel = page.locator('div[aria-disabled="true"]').last()
@@ -431,7 +605,11 @@ test.describe('Notes workspace UX', () => {
 
     await page.goto(optionsUrl, { waitUntil: 'networkidle' })
     await waitForConnectionStore(page, 'notes-connected')
-    await forceConnected(page, { serverUrl: 'http://dummy-tldw' }, 'notes-connected')
+    await forceConnected(
+      page,
+      { serverUrl: 'http://dummy-tldw' },
+      'notes-connected'
+    )
 
     await page.goto(optionsUrl + '#/notes')
     await page.waitForLoadState('networkidle')
@@ -444,7 +622,9 @@ test.describe('Notes workspace UX', () => {
     await expect(newNoteButton).toBeEnabled()
     await newNoteButton.click()
 
-    const discardDialog = page.getByRole('dialog', { name: /Discard changes\?/i })
+    const discardDialog = page.getByRole('dialog', {
+      name: /Discard changes\?/i
+    })
     await expect(discardDialog).toBeVisible()
 
     const cancelButton = discardDialog.getByRole('button', { name: /Cancel/i })
@@ -453,9 +633,13 @@ test.describe('Notes workspace UX', () => {
     await expect(textarea).toHaveValue('Unsaved note content')
 
     await newNoteButton.click()
-    const discardDialogAgain = page.getByRole('dialog', { name: /Discard changes\?/i })
+    const discardDialogAgain = page.getByRole('dialog', {
+      name: /Discard changes\?/i
+    })
     await expect(discardDialogAgain).toBeVisible()
-    const discardButton = discardDialogAgain.getByRole('button', { name: /Discard/i })
+    const discardButton = discardDialogAgain.getByRole('button', {
+      name: /Discard/i
+    })
     await discardButton.click()
     await expect(textarea).toHaveValue('')
 
@@ -466,7 +650,9 @@ test.describe('Notes workspace UX', () => {
     const { context, page, optionsUrl } = await launchWithBuiltExtension(
       connectedLaunchOptions
     )
-    await page.goto(optionsUrl + '#/settings/tldw', { waitUntil: 'domcontentloaded' })
+    await page.goto(optionsUrl + '#/settings/tldw', {
+      waitUntil: 'domcontentloaded'
+    })
     await page.reload({ waitUntil: 'domcontentloaded' })
     const worker = await installNotesGraphMocks(context, true)
     await page.evaluate(() => {
@@ -485,35 +671,46 @@ test.describe('Notes workspace UX', () => {
         worker.evaluate(() => (globalThis as any).__notesGraphApiRequests ?? [])
       )
       .toContain('GET /api/v1/notes/')
-    await page.getByRole('button', { name: 'Open note Extension source note' }).click()
+    await page
+      .getByRole('button', { name: 'Open note Extension source note' })
+      .click()
 
     await expect(page.getByTestId('notes-view-mode-graph')).toBeVisible()
     await page.getByTestId('notes-view-mode-graph').click()
     await expect(page.getByTestId('notes-graph-canvas')).toBeVisible()
     await expect(page.getByRole('button', { name: 'All notes' })).toBeDisabled()
-    await expect(page.getByTestId('notes-graph-all-disabled-reason')).toContainText(
-      'up to 8 active notes'
-    )
+    await expect(
+      page.getByTestId('notes-graph-all-disabled-reason')
+    ).toContainText('up to 8 active notes')
 
     await page.getByRole('tab', { name: 'Suggestions' }).click()
     await expect(page.getByText(PROVIDER, { exact: true })).toBeVisible()
     await expect(page.getByText(MODEL, { exact: true })).toBeVisible()
     await expect(page.getByText('External', { exact: true })).toBeVisible()
-    await expect(page.getByText('Candidate note excerpts', { exact: true })).toBeVisible()
+    await expect(
+      page.getByText('Candidate note excerpts', { exact: true })
+    ).toBeVisible()
     await expect(page.getByText(TARGET_TITLE, { exact: true })).toBeVisible()
 
-    const pixels = await page.getByTestId('notes-graph-canvas').evaluate((root) => {
-      let painted = 0
-      for (const canvas of Array.from(root.querySelectorAll('canvas'))) {
-        const context = canvas.getContext('2d')
-        if (!context) continue
-        const data = context.getImageData(0, 0, canvas.width, canvas.height).data
-        for (let index = 3; index < data.length; index += 32) {
-          if (data[index] > 0) painted += 1
+    const pixels = await page
+      .getByTestId('notes-graph-canvas')
+      .evaluate((root) => {
+        let painted = 0
+        for (const canvas of Array.from(root.querySelectorAll('canvas'))) {
+          const context = canvas.getContext('2d')
+          if (!context) continue
+          const data = context.getImageData(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          ).data
+          for (let index = 3; index < data.length; index += 32) {
+            if (data[index] > 0) painted += 1
+          }
         }
-      }
-      return painted
-    })
+        return painted
+      })
     expect(pixels).toBeGreaterThan(20)
 
     const graphCallsBeforeAccept = await worker.evaluate(
@@ -521,44 +718,52 @@ test.describe('Notes workspace UX', () => {
     )
     await page.getByRole('button', { name: `Accept ${TARGET_TITLE}` }).click()
     await expect(
-      page.locator('[data-suggestion-review-row="extension-related-suggestion"]')
+      page.locator(
+        '[data-suggestion-review-row="extension-related-suggestion"]'
+      )
     ).toHaveCount(0)
     await expect
       .poll(() =>
-        worker.evaluate(() => (globalThis as any).__notesGraphRequestCount?.() ?? 0)
+        worker.evaluate(
+          () => (globalThis as any).__notesGraphRequestCount?.() ?? 0
+        )
       )
       .toBeGreaterThan(graphCallsBeforeAccept)
-    await page.getByRole('button', { name: 'Relationships', exact: true }).click()
+    await page
+      .getByRole('button', { name: 'Relationships', exact: true })
+      .click()
     await expect(
       page.getByTestId('notes-graph-relationships-view').getByText(TARGET_TITLE)
     ).toBeVisible()
 
     await page.setViewportSize({ width: 320, height: 900 })
     await closeMobileNotesList(page)
-    const geometry = await page.getByTestId('notes-graph-workspace').evaluate((root) => {
-      const rect = root.getBoundingClientRect()
-      return {
-        left: rect.left,
-        right: rect.right,
-        viewport: innerWidth,
-        overflow: document.documentElement.scrollWidth - innerWidth,
-        visibleOverlays: Array.from(
-          document.querySelectorAll(
-            '[role="dialog"], [data-testid="notes-mobile-sidebar-backdrop"], .ant-drawer-mask'
-          )
-        ).filter((element) => {
-          const bounds = element.getBoundingClientRect()
-          const style = getComputedStyle(element)
-          return (
-            bounds.width > 0 &&
-            bounds.height > 0 &&
-            style.visibility !== 'hidden' &&
-            style.display !== 'none' &&
-            Number(style.opacity || '1') > 0
-          )
-        }).length
-      }
-    })
+    const geometry = await page
+      .getByTestId('notes-graph-workspace')
+      .evaluate((root) => {
+        const rect = root.getBoundingClientRect()
+        return {
+          left: rect.left,
+          right: rect.right,
+          viewport: innerWidth,
+          overflow: document.documentElement.scrollWidth - innerWidth,
+          visibleOverlays: Array.from(
+            document.querySelectorAll(
+              '[role="dialog"], [data-testid="notes-mobile-sidebar-backdrop"], .ant-drawer-mask'
+            )
+          ).filter((element) => {
+            const bounds = element.getBoundingClientRect()
+            const style = getComputedStyle(element)
+            return (
+              bounds.width > 0 &&
+              bounds.height > 0 &&
+              style.visibility !== 'hidden' &&
+              style.display !== 'none' &&
+              Number(style.opacity || '1') > 0
+            )
+          }).length
+        }
+      })
     expect(geometry.left).toBeGreaterThanOrEqual(-1)
     expect(geometry.right).toBeLessThanOrEqual(geometry.viewport + 1)
     expect(geometry.overflow).toBeLessThanOrEqual(1)
@@ -572,11 +777,129 @@ test.describe('Notes workspace UX', () => {
     await context.close()
   })
 
+  test('uses semantic graph evidence and canonical conversion in Chromium at desktop and 320px', async () => {
+    const { context, page, optionsUrl } = await launchWithBuiltExtension(
+      connectedLaunchOptions
+    )
+    await page.goto(optionsUrl + '#/settings/tldw', {
+      waitUntil: 'domcontentloaded'
+    })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    const worker = await installNotesGraphMocks(context, true)
+    await page.evaluate(() => {
+      window.location.hash = '/notes'
+    })
+    await expect(page).toHaveURL(optionsUrl + '#/notes')
+    await dismissTourIfVisible(page)
+    await waitForConnectionStore(page, 'notes-semantic-connected')
+    await forceConnected(
+      page,
+      { serverUrl: 'http://dummy-tldw' },
+      'notes-semantic-connected'
+    )
+    await page
+      .getByRole('button', { name: 'Open note Extension source note' })
+      .click()
+    await page.getByTestId('notes-view-mode-graph').click()
+
+    const similar = page.getByRole('checkbox', {
+      name: 'Similar content',
+      exact: true
+    })
+    await expect(similar).toBeVisible()
+    await expect(similar).not.toBeChecked()
+    await similar.check()
+    await expect
+      .poll(async () => {
+        const urls = await worker.evaluate<string[]>(
+          () => (globalThis as any).__notesSemanticGraphUrls ?? []
+        )
+        return urls.at(-1) ?? ''
+      })
+      .toContain('semantic_top_k=10')
+
+    await page
+      .getByRole('button', { name: 'Relationships', exact: true })
+      .click()
+    const relationships = page.getByTestId('notes-graph-relationships-view')
+    const evidenceDisclosure = relationships.getByTestId(
+      'notes-graph-semantic-evidence-toggle'
+    )
+    await expect(evidenceDisclosure).toContainText('Passage similarity: 0.8765')
+    await expect(
+      relationships.getByText('Extension source passage for semantic evidence.')
+    ).not.toBeVisible()
+    await evidenceDisclosure.click()
+    await expect(
+      relationships.getByText('Extension source passage for semantic evidence.')
+    ).toBeVisible()
+    await evidenceDisclosure.click()
+    await relationships
+      .getByRole('button', { name: 'Similar content', exact: true })
+      .click()
+    const inspector = page.getByTestId('notes-graph-inspector-region')
+    await expect(
+      inspector.getByText('Extension target passage for semantic evidence.')
+    ).toBeVisible()
+    await inspector
+      .getByRole('button', { name: 'Create manual link', exact: true })
+      .click()
+
+    await expect
+      .poll(() =>
+        worker.evaluate(
+          () => (globalThis as any).__notesSemanticManualLinkBody ?? null
+        )
+      )
+      .toEqual({
+        to_note_id: 'extension-target',
+        directed: false,
+        weight: 1,
+        idempotency_key: expect.any(String),
+        semantic_conversion: {
+          generation_id: 'extension-semantic-generation'
+        }
+      })
+    await expect(
+      page.getByRole('button', { name: 'Create manual link', exact: true })
+    ).toHaveCount(0)
+
+    await page.setViewportSize({ width: 320, height: 900 })
+    await closeMobileNotesList(page)
+    const geometry = await page
+      .getByTestId('notes-graph-workspace')
+      .evaluate((root) => {
+        const rect = root.getBoundingClientRect()
+        return {
+          left: rect.left,
+          right: rect.right,
+          viewport: innerWidth,
+          overflow: document.documentElement.scrollWidth - innerWidth,
+          nestedCards: root.querySelectorAll(
+            '[data-ui="card"] [data-ui="card"]'
+          ).length
+        }
+      })
+    expect(geometry.left).toBeGreaterThanOrEqual(-1)
+    expect(geometry.right).toBeLessThanOrEqual(geometry.viewport + 1)
+    expect(geometry.overflow).toBeLessThanOrEqual(1)
+    expect(geometry.nestedCards).toBe(0)
+    const apiRequests = await worker.evaluate<string[]>(
+      () => (globalThis as any).__notesGraphApiRequests ?? []
+    )
+    expect(
+      apiRequests.some((request) => request.includes('/api/v1/jobs'))
+    ).toBe(false)
+    await context.close()
+  })
+
   test('makes no nested suggestion requests for a read-only graph', async () => {
     const { context, page, optionsUrl } = await launchWithBuiltExtension(
       connectedLaunchOptions
     )
-    await page.goto(optionsUrl + '#/settings/tldw', { waitUntil: 'domcontentloaded' })
+    await page.goto(optionsUrl + '#/settings/tldw', {
+      waitUntil: 'domcontentloaded'
+    })
     await page.reload({ waitUntil: 'domcontentloaded' })
     const worker = await installNotesGraphMocks(context, false)
     await page.evaluate(() => {
@@ -595,7 +918,9 @@ test.describe('Notes workspace UX', () => {
         worker.evaluate(() => (globalThis as any).__notesGraphApiRequests ?? [])
       )
       .toContain('GET /api/v1/notes/')
-    await page.getByRole('button', { name: 'Open note Extension source note' }).click()
+    await page
+      .getByRole('button', { name: 'Open note Extension source note' })
+      .click()
     await page.getByTestId('notes-view-mode-graph').click()
     await expect(page.getByTestId('notes-graph-canvas')).toBeVisible()
     await expect(page.getByRole('tab', { name: 'Suggestions' })).toHaveCount(0)

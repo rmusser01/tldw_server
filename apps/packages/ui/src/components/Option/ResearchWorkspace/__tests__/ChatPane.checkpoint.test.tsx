@@ -4,6 +4,9 @@ import { MemoryRouter } from "react-router-dom"
 import { beforeEach, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
 import type { HistoryTurnRecovery } from "@/db/dexie/types"
+import type { ServicePromptScope } from "@/services/service-prompts"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { readSavedResearchWorkspaceChatReference } from "@/store/workspace-migration"
 import { buildUnknownResearchWorkspaceCapabilities, type ResearchWorkspaceCapabilitiesResponse } from "../research-workspace-capabilities"
 
 const uuid = "00000000-0000-4000-8000-000000000001"
@@ -16,12 +19,16 @@ const recovery: HistoryTurnRecovery = {
   input_text: "Original recovered question", input_images: [], result_text: "", state: "unknown"
 }
 const state = vi.hoisted(() => ({ active: true, restoring: false, epoch: 0, referenceId: "reference-A", ownerKey: "native-A", onSubmit: vi.fn(), getMediaDetails: vi.fn(), captureHead: vi.fn(), captureScope: vi.fn(), regenerate: vi.fn() }))
+const referenceOwner = vi.hoisted(() => ({
+  resolveScope: vi.fn(), requestScope: undefined as ServicePromptRequestScope | undefined
+}))
 vi.mock("@/utils/research-web-capture", async () => ({
   ...(await vi.importActual<typeof import("@/utils/research-web-capture")>("@/utils/research-web-capture")),
   assertWebCaptureHeadCurrent: (...args: unknown[]) => state.captureHead(...args)
 }))
 vi.mock("@/services/service-prompts", async () => ({
   ...(await vi.importActual<typeof import("@/services/service-prompts")>("@/services/service-prompts")),
+  resolveServicePromptScope: referenceOwner.resolveScope,
   loadServicePromptSnapshot: (...args: unknown[]) => state.captureScope(...args)
 }))
 vi.mock("@/hooks/chat/useWorkspaceChatCheckpoint", () => ({
@@ -34,7 +41,10 @@ vi.mock("@/hooks/chat/useWorkspaceChatCheckpoint", () => ({
     controller: state.active ? {
       recoveries: [{ turn: recovery }],
       getReference: () => ({ owner_key: state.ownerKey, conversation_id: "chat-A" }),
-      getCurrent: () => ({ status: "ready", owner: { kind: "native", validate_lease: () => true } }),
+      getCurrent: () => ({ status: "ready", owner: {
+        kind: "native", validate_lease: () => true, conversation_id: "chat-A",
+        request_scope: referenceOwner.requestScope
+      } }),
       fence: () => {
       const token = state.epoch
       return () => token === state.epoch
@@ -89,11 +99,14 @@ beforeEach(() => {
   state.getMediaDetails.mockReset().mockResolvedValue({ content: { text: "Operator source text" } })
   state.captureHead.mockReset()
   state.captureScope.mockReset()
+  referenceOwner.resolveScope.mockReset().mockRejectedValue(new Error("No verified account for this fixture"))
+  referenceOwner.requestScope = undefined
   state.regenerate.mockReset()
   recovery.logical_user_message_id = uuid
   recovery.input_text = "Original recovered question"
   useWorkspaceStore.setState({ workspaceId: "workspace-A", workspaceChatReferenceId: "reference-A", storeHydrated: true,
-    sources: [], selectedSourceIds: [], selectedSourceFolderIds: [], sourceFolders: [], sourceFolderMemberships: [] })
+    sources: [], selectedSourceIds: [], selectedSourceFolderIds: [], sourceFolders: [], sourceFolderMemberships: [],
+    sourceContentCache: new Map() })
   useStoreMessageOption.setState({ selectedModel: "test-model", messages: [], history: [], historyId: null,
     serverChatId: null, temporaryChat: false, streaming: false, isProcessing: false, chatMode: "normal" })
 })
@@ -101,6 +114,28 @@ const submit = () => {
   fireEvent.change(screen.getByRole("textbox", { name: "Chat message" }), { target: { value: "New question" } })
   fireEvent.click(screen.getByRole("button", { name: "Send" }))
 }
+
+it.each(["manual", "cookie-session"] as const)(
+  "remembers a canonical reload location only for its verified auth source (%s)",
+  async authSource => {
+    const scope: ServicePromptScope = {
+      config: { serverUrl: "https://example.test", authMode: "multi-user", authSource: "manual" },
+      userId: 7, scopeKey: "test-reference-hint", clientPrincipalVerified: true
+    }
+    referenceOwner.resolveScope.mockResolvedValue(scope)
+    referenceOwner.requestScope = { config: { ...scope.config, authSource }, userId: scope.userId }
+    const savedReference = () => readSavedResearchWorkspaceChatReference(localStorage, "workspace-A", scope.scopeKey)
+    try {
+      useStoreMessageOption.setState({ serverChatId: "chat-A" })
+      await act(async () => { render(<MemoryRouter><ChatPane /></MemoryRouter>) })
+      expect(referenceOwner.resolveScope).toHaveBeenCalled()
+      expect(savedReference().value).toEqual(authSource === "manual"
+        ? { referenceId: "reference-A", serverChatId: "chat-A" } : undefined)
+    } finally {
+      localStorage.removeItem(savedReference().key)
+    }
+  }
+)
 
 it.each(["local", "workspace", "note"])("checks the live %s destination before capturing a reply", async destination => {
   useWorkspaceStore.setState({ serverWorkspace: null })

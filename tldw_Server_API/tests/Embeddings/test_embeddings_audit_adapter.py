@@ -10,7 +10,6 @@ from tldw_Server_API.app.core.Embeddings.audit_adapter import (
     emit_model_evicted_async,
     emit_memory_limit_exceeded_async,
     log_security_violation,
-    _in_test_mode,
     _parse_cache_size,
     shutdown_audit_adapter_services,
 )
@@ -191,12 +190,3 @@ def test_embeddings_atexit_only_stops_local_loop(monkeypatch):
 def test_embeddings_audit_cache_size_clamped(monkeypatch):
     monkeypatch.setenv("EMBEDDINGS_AUDIT_MAX_CACHED_SERVICES", "0")
     assert _parse_cache_size("EMBEDDINGS_AUDIT_MAX_CACHED_SERVICES", 20) == 1
-
-
-def test_embeddings_audit_test_mode_parsing(monkeypatch):
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.setenv("TEST_MODE", "0")
-    monkeypatch.setenv("TLDW_TEST_MODE", "false")
-    assert _in_test_mode() is False
-    monkeypatch.setenv("TEST_MODE", "true")
-    assert _in_test_mode() is True

@@ -6,7 +6,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
 const mocks = vi.hoisted(() => ({
-  hasResumableSidepanelChat: vi.fn<() => Promise<boolean>>()
+  hasResumableSidepanelChat: vi.fn<() => Promise<boolean>>(),
+  getServerCapabilities: vi.fn<() => Promise<{ hasPersonalization?: boolean } | null>>(),
+  fetchPersonalizationProfile: vi.fn<() => Promise<{ enabled?: boolean } | null>>()
+}))
+
+vi.mock("@/services/tldw/server-capabilities", () => ({
+  getServerCapabilities: () => mocks.getServerCapabilities()
+}))
+
+vi.mock("@/services/companion", () => ({
+  fetchPersonalizationProfile: () => mocks.fetchPersonalizationProfile()
 }))
 
 vi.mock("../sidepanel-chat", () => ({
@@ -31,9 +41,18 @@ vi.mock("../sidepanel-companion", () => ({
 
 import SidepanelHomeResolver from "../sidepanel-home-resolver"
 
+const renderResolver = (initialEntries?: string[]) =>
+  render(
+    <MemoryRouter initialEntries={initialEntries}>
+      <SidepanelHomeResolver />
+    </MemoryRouter>
+  )
+
 describe("SidepanelHomeResolver", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.getServerCapabilities.mockResolvedValue({ hasPersonalization: true })
+    mocks.fetchPersonalizationProfile.mockResolvedValue({ enabled: true })
   })
 
   it("renders chat from sidepanel / when resumable chat exists", async () => {
@@ -54,7 +73,42 @@ describe("SidepanelHomeResolver", () => {
     ).toBeInTheDocument()
   })
 
-  it("renders Companion Home from sidepanel / when no resumable chat exists", async () => {
+  it("XS-17: opens chat, not a Companion of setup cards, when personalization is unavailable", async () => {
+    mocks.hasResumableSidepanelChat.mockResolvedValueOnce(false)
+    mocks.getServerCapabilities.mockResolvedValueOnce({ hasPersonalization: false })
+
+    renderResolver()
+
+    expect(
+      await screen.findByTestId("sidepanel-chat-root", undefined, { timeout: 15_000 })
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("sidepanel-companion-root")).toBeNull()
+    expect(mocks.fetchPersonalizationProfile).not.toHaveBeenCalled()
+  })
+
+  it("XS-17: opens chat when the Companion has not been turned on", async () => {
+    mocks.hasResumableSidepanelChat.mockResolvedValueOnce(false)
+    mocks.fetchPersonalizationProfile.mockResolvedValueOnce({ enabled: false })
+
+    renderResolver()
+
+    expect(
+      await screen.findByTestId("sidepanel-chat-root", undefined, { timeout: 15_000 })
+    ).toBeInTheDocument()
+  })
+
+  it("XS-17: opens chat when the server cannot say whether the Companion is ready", async () => {
+    mocks.hasResumableSidepanelChat.mockResolvedValueOnce(false)
+    mocks.getServerCapabilities.mockRejectedValueOnce(new Error("offline"))
+
+    renderResolver()
+
+    expect(
+      await screen.findByTestId("sidepanel-chat-root", undefined, { timeout: 15_000 })
+    ).toBeInTheDocument()
+  })
+
+  it("renders Companion Home from sidepanel / when no resumable chat exists and the Companion is on", async () => {
     mocks.hasResumableSidepanelChat.mockResolvedValueOnce(false)
 
     render(

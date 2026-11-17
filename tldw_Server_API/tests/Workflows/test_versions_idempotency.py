@@ -121,22 +121,19 @@ def test_retry_from_failed_step(client_with_wf: TestClient):
         time.sleep(0.02)
     assert data["status"] == "failed"
 
-    # Retry should continue after s1 and run s2
+    # Retry must attempt s1 again; it cannot bypass the failed prerequisite.
     rr = client.post(f"/api/v1/workflows/runs/{run_id}/retry")
     assert rr.status_code == 200
 
-    # Poll until completion
-    saw_retry_transition = False
+    db = app.dependency_overrides[wf_mod._get_db]()
     for _ in range(200):
-        response = client.get(f"/api/v1/workflows/runs/{run_id}")
-        assert response.status_code == 200, response.text
-        data2 = response.json()
-        if data2["status"] == "running":
-            saw_retry_transition = True
-        if data2["status"] == "succeeded":
-            break
-        if saw_retry_transition and data2["status"] == "failed":
+        data2 = client.get(f"/api/v1/workflows/runs/{run_id}").json()
+        failed_steps = [row for row in db.list_step_runs(run_id=run_id) if row["step_id"] == "s1"]
+        if len(failed_steps) == 2 and all(row["status"] == "failed" for row in failed_steps):
             break
         time.sleep(0.02)
-    assert data2["status"] == "succeeded"
-    assert (data2.get("outputs") or {}).get("text") == "OK"
+    assert data2["status"] == "failed"  # nosec B101 -- a failed prerequisite cannot become success by skipping.
+    assert len(failed_steps) == 2  # nosec B101 -- original failure and actual retry remain recorded.
+    assert not any(  # nosec B101 -- dependent stays blocked.
+        row["step_id"] == "s2" for row in db.list_step_runs(run_id=run_id)
+    )

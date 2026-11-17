@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+
 import {
   buildDictionaryDeactivationWarning,
   buildDictionaryDeletionConfirmationCopy,
@@ -7,12 +8,13 @@ import {
   compareDictionaryEntryCount,
   compareDictionaryName,
   filterDictionariesBySearch,
-  isDictionaryVersionConflictError,
   formatDictionaryChatReferenceTitle,
   formatDictionaryUsageLabel,
   formatRelativeTimestamp,
-  normalizeDictionaryTags,
+  isDictionaryVersionConflictError,
   normalizeDictionaryChatState,
+  normalizeDictionaryTags,
+  parseDictionaryTimestamp,
   resolveDictionaryChatReferenceId
 } from "../listUtils"
 
@@ -46,18 +48,20 @@ describe("dictionary list utils", () => {
   })
 
   it("normalizes dictionary tags from list and string representations", () => {
-    expect(normalizeDictionaryTags(["One", " two ", "ONE"])).toEqual(["One", "two"])
-    expect(normalizeDictionaryTags('["alpha","beta"]')).toEqual(["alpha", "beta"])
+    expect(normalizeDictionaryTags(["One", " two ", "ONE"])).toEqual([
+      "One",
+      "two"
+    ])
+    expect(normalizeDictionaryTags('["alpha","beta"]')).toEqual([
+      "alpha",
+      "beta"
+    ])
     expect(normalizeDictionaryTags("foo, bar")).toEqual(["foo", "bar"])
     expect(normalizeDictionaryTags("")).toEqual([])
   })
 
   it("sorts by dictionary name alphabetically", () => {
-    const dictionaries = [
-      { name: "zeta" },
-      { name: "Alpha" },
-      { name: "beta" }
-    ]
+    const dictionaries = [{ name: "zeta" }, { name: "Alpha" }, { name: "beta" }]
     const sorted = [...dictionaries].sort(compareDictionaryName)
     expect(sorted.map((item) => item.name)).toEqual(["Alpha", "beta", "zeta"])
   })
@@ -91,6 +95,58 @@ describe("dictionary list utils", () => {
     expect(formatRelativeTimestamp(null, now)).toBe("—")
   })
 
+  it.each([
+    "2026-10-08T16:06:52",
+    "2026-10-08 16:06:52",
+    "2026-10-08T16:06:52.123456"
+  ])(
+    "reads deployed zone-less dictionary timestamps as UTC: %s",
+    (timestamp) => {
+      expect(
+        formatRelativeTimestamp(timestamp, new Date("2026-10-08T16:06:53Z"))
+      ).toBe("just now")
+    }
+  )
+
+  it("does not describe a future timestamp as a past update", () => {
+    expect(
+      formatRelativeTimestamp(
+        "2026-10-08T16:08:52Z",
+        new Date("2026-10-08T16:06:52Z")
+      )
+    ).toBe("in 2 minutes")
+  })
+
+  it.each([
+    "2026-10-08T16:06:52Z",
+    "2026-10-08T09:06:52-07:00",
+    "2026-10-08T18:06:52+02:00"
+  ])("preserves an explicit timestamp zone: %s", (timestamp) => {
+    expect(
+      formatRelativeTimestamp(timestamp, new Date("2026-10-08T16:07:52Z"))
+    ).toBe("1 minute ago")
+  })
+
+  it("uses one UTC instant for relative text, absolute tooltip and sorting", () => {
+    expect(parseDictionaryTimestamp("2026-10-08T16:06:52")?.toISOString()).toBe(
+      "2026-10-08T16:06:52.000Z"
+    )
+  })
+
+  it("preserves Date inputs and unknown timestamps", () => {
+    const date = new Date("2026-10-08T16:06:52Z")
+    expect(parseDictionaryTimestamp(date)).toBe(date)
+    expect(parseDictionaryTimestamp("unknown")).toBeNull()
+    expect(parseDictionaryTimestamp(new Date("invalid"))).toBeNull()
+  })
+
+  it.each([{}, [], 42, true].map((timestamp) => ({ timestamp })))(
+    "keeps malformed timestamp metadata from crashing the library: $timestamp",
+    ({ timestamp }) => {
+      expect(parseDictionaryTimestamp(timestamp as never)).toBeNull()
+    }
+  )
+
   it("builds unique duplicate names with copy suffixes", () => {
     const existing = [
       "Medical Terms",
@@ -107,27 +163,41 @@ describe("dictionary list utils", () => {
 
   it("formats used-by labels with active context", () => {
     expect(
-      formatDictionaryUsageLabel({ used_by_chat_count: 0, used_by_active_chat_count: 0 })
+      formatDictionaryUsageLabel({
+        used_by_chat_count: 0,
+        used_by_active_chat_count: 0
+      })
     ).toBe("—")
     expect(
-      formatDictionaryUsageLabel({ used_by_chat_count: 2, used_by_active_chat_count: 0 })
+      formatDictionaryUsageLabel({
+        used_by_chat_count: 2,
+        used_by_active_chat_count: 0
+      })
     ).toBe("2 chats")
     expect(
-      formatDictionaryUsageLabel({ used_by_chat_count: 5, used_by_active_chat_count: 2 })
+      formatDictionaryUsageLabel({
+        used_by_chat_count: 5,
+        used_by_active_chat_count: 2
+      })
     ).toBe("5 chats (2 active)")
   })
 
   it("normalizes chat references for list/table renderers", () => {
-    expect(resolveDictionaryChatReferenceId({ chat_id: "abc-123" })).toBe("abc-123")
+    expect(resolveDictionaryChatReferenceId({ chat_id: "abc-123" })).toBe(
+      "abc-123"
+    )
     expect(resolveDictionaryChatReferenceId({ id: 42 })).toBe("42")
     expect(resolveDictionaryChatReferenceId(null)).toBe("")
 
-    expect(formatDictionaryChatReferenceTitle({ chat_id: "abcdef123456", title: "" })).toBe(
-      "Chat abcdef12"
-    )
-    expect(formatDictionaryChatReferenceTitle({ id: "chat-7", title: "Triage Session" })).toBe(
-      "Triage Session"
-    )
+    expect(
+      formatDictionaryChatReferenceTitle({ chat_id: "abcdef123456", title: "" })
+    ).toBe("Chat abcdef12")
+    expect(
+      formatDictionaryChatReferenceTitle({
+        id: "chat-7",
+        title: "Triage Session"
+      })
+    ).toBe("Triage Session")
 
     expect(normalizeDictionaryChatState("resolved")).toBe("resolved")
     expect(normalizeDictionaryChatState(" backlog ")).toBe("backlog")
@@ -178,14 +248,20 @@ describe("dictionary list utils", () => {
   it("detects optimistic-locking version conflicts without flagging name conflicts", () => {
     expect(
       isDictionaryVersionConflictError(
-        new Error("Dictionary was modified by another session. Expected version 2, current version 3.")
+        new Error(
+          "Dictionary was modified by another session. Expected version 2, current version 3."
+        )
       )
     ).toBe(true)
     expect(
-      isDictionaryVersionConflictError(new Error("409 conflict: expected version mismatch"))
+      isDictionaryVersionConflictError(
+        new Error("409 conflict: expected version mismatch")
+      )
     ).toBe(true)
     expect(
-      isDictionaryVersionConflictError(new Error("Dictionary name already exists"))
+      isDictionaryVersionConflictError(
+        new Error("Dictionary name already exists")
+      )
     ).toBe(false)
   })
 })

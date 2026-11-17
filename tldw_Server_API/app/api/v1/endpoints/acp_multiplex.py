@@ -12,12 +12,13 @@ from __future__ import annotations
 import contextlib
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, WebSocketException
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import (
     _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS,
     _acp_ws_release_quota,
+    _acp_ws_subprotocol,
     _acp_ws_try_acquire_quota,
     _authenticate_ws,
     _require_session_access,
@@ -25,42 +26,25 @@ from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import (
     get_runner_client,
     get_session_event_bus,
 )
-from tldw_Server_API.app.core.Agent_Client_Protocol.multiplex.manager import MultiplexManager
 from tldw_Server_API.app.core.Agent_Client_Protocol.multiplex.protocol import MultiplexMessage
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
-)
+import tldw_Server_API.app.core.Agent_Client_Protocol.multiplex.manager as _manager
 
 router = APIRouter(prefix="/acp", tags=["acp-multiplex"])
 
 
 @router.websocket("/multiplex")
-async def acp_multiplex_ws(
-    websocket: WebSocket,
-    token: str | None = Query(None),
-    api_key: str | None = Query(None),
-) -> None:
+async def acp_multiplex_ws(websocket: WebSocket) -> None:
     """Multi-session event multiplexer.
 
-    Accepts a WebSocket, creates a :class:`MultiplexManager` backed by the
-    shared session event-bus registry, and loops reading client frames until
-    disconnect.
+    Authenticates like the ACP session stream (write scope for API keys), accepts,
+    creates a :class:`MultiplexManager` backed by the shared session event-bus
+    registry, and loops reading client frames until disconnect.
     """
-    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
-    user_id = (
-        cookie_identity.user_id
-        if cookie_identity is not None
-        else await _authenticate_ws(
-            websocket,
-            token=token,
-            api_key=api_key,
-            required_scope="write",
-        )
-    )
-    if user_id is None:
+    try:
+        user_id = await _authenticate_ws(websocket, required_scope="write")
+    except WebSocketException as exc:
         with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
-            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
+            await websocket.close(code=exc.code)
         return
 
     try:
@@ -71,7 +55,7 @@ async def acp_multiplex_ws(
             await websocket.close(code=4404)
         return
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=_acp_ws_subprotocol(websocket))
     connection_id = uuid.uuid4().hex[:12]
     logger.info("Multiplex WS connected: {}", connection_id)
 
@@ -104,7 +88,7 @@ async def acp_multiplex_ws(
         del stream_id
         _acp_ws_release_quota(quota_token)
 
-    manager = MultiplexManager(
+    manager = _manager.MultiplexManager(
         connection_id=connection_id,
         send_fn=websocket.send_text,
         get_bus_fn=get_session_event_bus,

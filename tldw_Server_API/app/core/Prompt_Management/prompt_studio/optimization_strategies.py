@@ -6,15 +6,16 @@ import random
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, Optional
+from uuid import uuid4
 
 import numpy as np
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCallCredentials,
-)
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 from tldw_Server_API.app.core.Logging.log_context import log_context
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCallCredentials,
+)
 
 from .prompt_executor import PromptExecutor
 from .test_runner import TestRunner
@@ -364,8 +365,8 @@ class IterativeRefinementOptimizer:
                 error_info = {
                     "test_case": run.get("test_case_name"),
                     "input": run.get("inputs"),
-                    "expected": run.get("expected_outputs"),
-                    "actual": run.get("actual_output"),
+                    "expected": run.get("expected", run.get("expected_outputs")),
+                    "actual": run.get("actual", run.get("actual_output")),
                     "score": run.get("scores", {}).get("aggregate_score", 0),
                     "error": run.get("error")
                 }
@@ -450,7 +451,7 @@ Suggest specific refinements to fix these errors:"""
                 user_prompt, version_number, parent_version_id, client_id
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            f"refined-{datetime.utcnow().timestamp()}",
+            str(uuid4()),
             prompt["project_id"],
             prompt.get("signature_id"),
             f"{prompt['name']} (Refined)",
@@ -797,7 +798,7 @@ Mutated user prompt:"""
                 user_prompt, version_number, parent_version_id, client_id
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            f"genetic-{datetime.utcnow().timestamp()}",
+            str(uuid4()),
             project_id,
             prompt_name,
             individual.get("system_prompt"),

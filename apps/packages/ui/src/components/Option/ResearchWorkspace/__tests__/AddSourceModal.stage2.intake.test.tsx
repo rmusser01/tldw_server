@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AddSourceModal } from "../SourcesPane/AddSourceModal"
@@ -7,7 +7,6 @@ import type { AddSourceTab } from "@/types/workspace"
 
 const ADD_SOURCE_TAB_USAGE_STORAGE_KEY =
   "tldw:research-workspace:add-source-tab-usage:v1"
-const EXISTING_MEDIA_CACHE_TTL_MS = 60_000
 
 const {
   mockUploadMedia,
@@ -41,7 +40,6 @@ const workspaceStoreState = {
   workspaceTag: "workspace:test"
 }
 
-let mediaCacheClock = Date.now()
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -90,8 +88,6 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     vi.clearAllMocks()
-    mediaCacheClock += EXISTING_MEDIA_CACHE_TTL_MS + 1
-    vi.spyOn(Date, "now").mockReturnValue(mediaCacheClock)
     window.localStorage.removeItem(ADD_SOURCE_TAB_USAGE_STORAGE_KEY)
     workspaceStoreState.addSourceModalOpen = true
     workspaceStoreState.addSourceError = null
@@ -100,6 +96,192 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     mockWebSearch.mockResolvedValue({ results: [] })
     mockSearchMedia.mockResolvedValue({ results: [] })
     mockListMedia.mockResolvedValue({ media: [] })
+  })
+
+  it.each(["account", "server"])(
+    "isolates My Media across a %s change within the old cache window",
+    async (boundary) => {
+      workspaceStoreState.addSourceModalTab = "existing"
+      let owner = "Alice"
+      mockListMedia.mockImplementation(async () => ({
+        items: [
+          {
+            id: owner === "Alice" ? 901 : 902,
+            title: `${owner} private ${boundary} source`,
+            type: "document"
+          }
+        ],
+        total: 1
+      }))
+      const first = render(<AddSourceModal />)
+      expect(
+        await screen.findByText(`Alice private ${boundary} source`)
+      ).toBeInTheDocument()
+      first.unmount()
+      owner = "Bob"
+      render(<AddSourceModal />)
+      expect(
+        screen.queryByText(`Alice private ${boundary} source`)
+      ).not.toBeInTheDocument()
+      expect(
+        await screen.findByText(`Bob private ${boundary} source`)
+      ).toBeInTheDocument()
+      expect(mockListMedia).toHaveBeenCalledTimes(2)
+    }
+  )
+
+  it("ignores a late previous-view Media response when another account reopens the library", async () => {
+    workspaceStoreState.addSourceModalTab = "existing"
+    let releaseAlice!: (value: unknown) => void
+    let calls = 0
+    mockListMedia.mockImplementation(() => {
+      calls += 1
+      return calls === 1
+        ? new Promise((resolve) => {
+            releaseAlice = resolve
+          })
+        : Promise.resolve({
+            items: [{ id: 902, title: "Bob private source", type: "document" }],
+            total: 1
+          })
+    })
+    const first = render(<AddSourceModal />)
+    await waitFor(() => expect(mockListMedia).toHaveBeenCalledTimes(1))
+    first.unmount()
+    const second = render(<AddSourceModal />)
+    expect(await screen.findByText("Bob private source")).toBeInTheDocument()
+    second.unmount()
+    await act(async () =>
+      releaseAlice({
+        items: [
+          { id: 901, title: "Alice late private source", type: "document" }
+        ],
+        total: 1
+      })
+    )
+    render(<AddSourceModal />)
+    expect(
+      screen.queryByText("Alice late private source")
+    ).not.toBeInTheDocument()
+    expect(await screen.findByText("Bob private source")).toBeInTheDocument()
+    expect(mockListMedia).toHaveBeenCalledTimes(3)
+  })
+
+  it.each([
+    {
+      name: "root error",
+      response: { status: "Error", media_id: 8001, error: "Conversion failed" }
+    },
+    {
+      name: "item error",
+      response: { results: [{ status: "Error", db_id: 8001 }] }
+    },
+    {
+      name: "warning with error",
+      response: {
+        results: [
+          { status: "Warning", db_id: 8001, error: "Conversion failed" }
+        ]
+      }
+    },
+    {
+      name: "failed item with root id",
+      response: { id: 9000, results: [{ status: "Error", db_id: 8001 }] }
+    }
+  ])(
+    "refuses an ingestion ID from $name instead of attaching it",
+    async ({ response }) => {
+      workspaceStoreState.addSourceModalTab = "url"
+      mockAddMedia.mockResolvedValueOnce(response)
+      render(<AddSourceModal />)
+      const input = screen.getByPlaceholderText(
+        "https://example.com/article or YouTube URL"
+      )
+      fireEvent.change(input, {
+        target: { value: "https://example.com/failed-source" }
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Add URL" }))
+      })
+      expect(mockAddMedia).toHaveBeenCalledTimes(1)
+      expect(mockAddSource).not.toHaveBeenCalled()
+      expect(workspaceStoreState.setAddSourceError).toHaveBeenLastCalledWith(
+        "Failed to add URL"
+      )
+      expect(input).toHaveValue("https://example.com/failed-source")
+    }
+  )
+
+  it.each(["Warning", "Skipped"])(
+    "retains a valid %s ingestion ID without an error",
+    async (status) => {
+      workspaceStoreState.addSourceModalTab = "url"
+      mockAddMedia.mockResolvedValueOnce({
+        results: [{ status, db_id: 8002, warnings: ["Existing usable record"] }]
+      })
+      render(<AddSourceModal />)
+      fireEvent.change(
+        screen.getByPlaceholderText(
+          "https://example.com/article or YouTube URL"
+        ),
+        { target: { value: "https://example.com/usable-source" } }
+      )
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Add URL" }))
+      })
+      expect(mockAddSource).toHaveBeenCalledWith(
+        expect.objectContaining({ mediaId: 8002 })
+      )
+    }
+  )
+
+  it("selects the successful ingestion item after a failed item with an ID", async () => {
+    workspaceStoreState.addSourceModalTab = "url"
+    mockAddMedia.mockResolvedValueOnce({
+      results: [
+        { status: "Error", db_id: 8001 },
+        { status: "Success", db_id: 8002, title: "Usable source" }
+      ]
+    })
+    render(<AddSourceModal />)
+    fireEvent.change(
+      screen.getByPlaceholderText("https://example.com/article or YouTube URL"),
+      { target: { value: "https://example.com/usable-source" } }
+    )
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add URL" }))
+    })
+    expect(mockAddSource).toHaveBeenCalledTimes(1)
+    expect(mockAddSource).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaId: 8002 })
+    )
+  })
+
+  it("retains a failed Search Server result instead of marking an error ID imported", async () => {
+    workspaceStoreState.addSourceModalTab = "search"
+    mockWebSearch.mockResolvedValueOnce({
+      results: [
+        { title: "Failed search source", url: "https://example.com/failure" }
+      ]
+    })
+    mockAddMedia.mockResolvedValueOnce({
+      results: [{ status: "Error", db_id: 8001, error: "Conversion failed" }]
+    })
+    render(<AddSourceModal />)
+    fireEvent.change(screen.getByLabelText("Search the web"), {
+      target: { value: "controlled search" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Search" }))
+    expect(await screen.findByText("Failed search source")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("Failed search source"))
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add 1 selected" }))
+    })
+    expect(mockAddSource).not.toHaveBeenCalled()
+    expect(
+      screen.queryByText("Queued as workspace source")
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Add 1 selected" })).toBeEnabled()
   })
 
   it("explains supported source imports and Google-specific skips", () => {

@@ -26,6 +26,7 @@ import numpy as np
 from loguru import logger
 from prometheus_client import REGISTRY, Counter, Gauge  # Assuming these are defined elsewhere or used directly
 from pydantic import BaseModel, Field
+
 # Was a fourth copy with NO message-text branch and inverted attribute precedence
 # (exc.status_code before exc.response, never exc.status), so an aiohttp
 # ClientResponseError returned None here and the right status elsewhere.
@@ -119,6 +120,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     await_bounded_sync_call,
 )
 from tldw_Server_API.app.core.config import resolve_repo_relative_path, rg_policy_path
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Embeddings.async_embeddings import (
     EmbeddingEndpointError,
     EmbeddingProviderError,
@@ -134,9 +136,13 @@ from tldw_Server_API.app.core.Embeddings.vector_validation import (
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.LLM_Calls.chat_calls import get_openai_embeddings_batch
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram  # Keep your existing metrics
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from tldw_Server_API.app.core.testing import (
+    env_flag_enabled,
+    is_explicit_pytest_runtime,
+    is_production_like_env,
+    is_test_mode,
+)
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 _EMBEDDINGS_NONCRITICAL_EXCEPTIONS = (
     ImportError,
@@ -352,10 +358,6 @@ def _synthetic_test_embedding(text: str, dims: int = 384) -> list[float]:
     if norm <= 0.0:
         return vec
     return [float(val) / norm for val in vec]
-
-
-def _should_use_inprocess_test_embeddings(provider: str) -> bool:
-    return provider.strip().lower() == "huggingface" and is_test_mode() and env_flag_enabled("E2E_INPROCESS")
 
 
 def _log_rejected_path(
@@ -982,12 +984,9 @@ def _rg_emb_server_async_lock() -> asyncio.Lock:
 
 
 def _should_enforce_rg_in_production() -> bool:
-    env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "dev").lower()
-    if env not in {"prod", "production"}:
+    if not is_production_like_env():
         return False
-    test_mode = is_test_mode()
-    pytest_active = bool(os.getenv("PYTEST_CURRENT_TEST"))
-    return not (test_mode or pytest_active)
+    return not (is_test_mode() or is_explicit_pytest_runtime())
 
 
 def _assert_rg_enabled_in_production() -> None:
@@ -1163,7 +1162,7 @@ def exponential_backoff(max_retries: int = 3, base_delay: int = 1):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+            from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
                 PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
             )
 
@@ -2018,7 +2017,7 @@ def create_embeddings_batch(
     try:
         embedder_instance: Any = None  # To hold HFEmbedder or ONNXEmbedder
 
-        if _should_use_inprocess_test_embeddings(provider):
+        if provider.strip().lower() == "huggingface" and is_test_mode() and env_flag_enabled("E2E_INPROCESS"):
             logger.info(
                 "Using deterministic synthetic embeddings for {} in in-process test mode",
                 model_id_to_use,

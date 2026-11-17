@@ -32,16 +32,16 @@ from typing import Any, Optional, Union
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call as chat_api_call
 
 # Local imports
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+)
 
 _DOCGEN_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -137,7 +137,8 @@ class DocumentGeneratorService:
         self.db = db
         # Load external overrides from Prompts/chat if available
         try:
-            from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt  # local import to avoid cycles
+            # local import to avoid cycles
+            from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
             overrides = {
                 DocumentType.TIMELINE: (load_prompt("chat", "timeline_system"), load_prompt("chat", "timeline_user")),
                 DocumentType.STUDY_GUIDE: (load_prompt("chat", "study_guide_system"), load_prompt("chat", "study_guide_user")),

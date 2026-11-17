@@ -37,7 +37,6 @@ const baseProps = {
   isMobileViewport: false,
   mobileSidebarOpen: false,
   sidebarCollapsed: false,
-  sidebarHeight: 720,
   listMode: "active",
   listViewMode: "list",
   page: 1,

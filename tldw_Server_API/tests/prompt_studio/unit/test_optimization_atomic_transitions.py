@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio import (
     optimization_engine as optimization_engine_module,
 )
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.job_processor import (
     JobProcessor,
 )
@@ -340,12 +341,7 @@ async def test_concurrent_direct_engine_completion_emits_once_for_cas_winner(
         async def broadcast_event(self, **kwargs: Any) -> None:
             completion_events.append(int(kwargs["data"]["optimization_id"]))
 
-    monkeypatch.setattr(
-        optimization_engine_module.mcts_optimizer_module,
-        "ws_connection_manager",
-        object(),
-        raising=True,
-    )
+    monkeypatch.setattr(ws_connections, "current", lambda: object())
     monkeypatch.setattr(
         optimization_engine_module.mcts_optimizer_module,
         "EventBroadcaster",
@@ -650,12 +646,7 @@ async def test_current_jobs_lease_uses_prompt_cas_winner_result_and_event(
         async def broadcast_event(self, **kwargs: Any) -> None:
             completion_events.append(dict(kwargs["data"]))
 
-    monkeypatch.setattr(
-        optimization_engine_module.mcts_optimizer_module,
-        "ws_connection_manager",
-        object(),
-        raising=True,
-    )
+    monkeypatch.setattr(ws_connections, "current", lambda: object())
     monkeypatch.setattr(
         optimization_engine_module.mcts_optimizer_module,
         "EventBroadcaster",

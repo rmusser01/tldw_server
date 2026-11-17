@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from "vitest"
+import React from "react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 
 // ---------------------------------------------------------------------------
@@ -23,6 +25,16 @@ vi.mock("@/services/moderation", () => ({
 
 import { useBlocklist } from "../hooks/useBlocklist"
 
+const clients: QueryClient[] = []
+const renderBlocklist = () => {
+  const client = new QueryClient()
+  clients.push(client)
+  return renderHook(() => useBlocklist(), {
+    wrapper: ({ children }) => React.createElement(QueryClientProvider, { client }, children)
+  })
+}
+afterEach(() => { clients.splice(0).forEach((client) => client.clear()) })
+
 describe("useBlocklist", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -45,7 +57,7 @@ describe("useBlocklist", () => {
   })
 
   it("returns initial state", () => {
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
     expect(result.current.rawText).toBe("")
     expect(result.current.rawLint).toBeNull()
     expect(result.current.isDirtyRaw).toBe(false)
@@ -59,7 +71,7 @@ describe("useBlocklist", () => {
   it("loadRaw fetches blocklist and joins lines", async () => {
     getBlocklistMock.mockResolvedValue(["line1", "line2", "line3"])
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     await act(async () => {
       await result.current.loadRaw()
@@ -72,7 +84,7 @@ describe("useBlocklist", () => {
   it("loadRaw handles null response", async () => {
     getBlocklistMock.mockResolvedValue(null)
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     await act(async () => {
       await result.current.loadRaw()
@@ -85,7 +97,7 @@ describe("useBlocklist", () => {
     updateBlocklistMock.mockResolvedValue({ status: "ok", count: 2 })
     lintBlocklistMock.mockResolvedValue({ items: [], valid_count: 2, invalid_count: 0 })
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     act(() => {
       result.current.setRawText("rule1\nrule2  ")
@@ -113,7 +125,7 @@ describe("useBlocklist", () => {
   it("tracks raw editor dirtiness relative to the loaded baseline", async () => {
     getBlocklistMock.mockResolvedValue(["rule1", "rule2"])
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     await act(async () => {
       await result.current.loadRaw()
@@ -132,7 +144,7 @@ describe("useBlocklist", () => {
     const lintResult = { items: [], valid_count: 1, invalid_count: 0 }
     lintBlocklistMock.mockResolvedValue(lintResult)
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     act(() => {
       result.current.setRawText("test rule")
@@ -167,7 +179,7 @@ describe("useBlocklist", () => {
       invalid_count: 0
     })
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     await act(async () => {
       await result.current.loadManaged()
@@ -196,7 +208,7 @@ describe("useBlocklist", () => {
       etag: null
     })
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     await act(async () => {
       await result.current.loadManaged()
@@ -217,7 +229,7 @@ describe("useBlocklist", () => {
       invalid_count: 1
     })
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     await act(async () => {
       await result.current.previewRawReplace("/[bad/")
@@ -236,7 +248,7 @@ describe("useBlocklist", () => {
     lintBlocklistMock.mockResolvedValue({ items: [], valid_count: 1, invalid_count: 0 })
     updateBlocklistMock.mockResolvedValue({ status: "ok", count: 1 })
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     await act(async () => {
       await result.current.loadRaw()
@@ -262,7 +274,7 @@ describe("useBlocklist", () => {
       etag: "etag-fallback"
     })
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     await act(async () => {
       await result.current.loadManaged()
@@ -272,7 +284,7 @@ describe("useBlocklist", () => {
   })
 
   it("appendManaged throws if no version loaded", async () => {
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     act(() => {
       result.current.setManagedLine("new rule")
@@ -291,7 +303,7 @@ describe("useBlocklist", () => {
       etag: null
     })
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     await act(async () => {
       await result.current.loadManaged()
@@ -316,7 +328,7 @@ describe("useBlocklist", () => {
         etag: null
       })
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     await act(async () => {
       await result.current.loadManaged()
@@ -348,7 +360,7 @@ describe("useBlocklist", () => {
         etag: null
       })
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     await act(async () => {
       await result.current.loadManaged()
@@ -363,7 +375,7 @@ describe("useBlocklist", () => {
   })
 
   it("lintManagedLine throws if line is empty", async () => {
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     await expect(
       act(async () => {
@@ -376,7 +388,7 @@ describe("useBlocklist", () => {
     const lintResult = { items: [{ index: 0, line: "test", ok: true }], valid_count: 1, invalid_count: 0 }
     lintBlocklistMock.mockResolvedValue(lintResult)
 
-    const { result } = renderHook(() => useBlocklist())
+    const { result } = renderBlocklist()
 
     act(() => {
       result.current.setManagedLine("test")

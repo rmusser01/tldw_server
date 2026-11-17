@@ -18,7 +18,7 @@ import asyncio
 import contextlib
 import os
 import tempfile
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 import numpy as np
@@ -31,7 +31,7 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool
+from ..utils import hold_tts_engine, parse_bool, tts_model_load_lock
 from .base import (
     AudioFormat,
     ProviderStatus,
@@ -66,6 +66,8 @@ class NeuTTSAdapter(TTSAdapter):
 
         # Will be set after init
         self._engine = None
+        # Engine calls run on worker threads; one at a time, as a llama-cpp context is not thread-safe.
+        self._engine_lock = asyncio.Lock()
         self._is_quantized_model = False
         self._supports_streaming = False
         self.audio_normalizer = None
@@ -73,22 +75,12 @@ class NeuTTSAdapter(TTSAdapter):
     async def initialize(self) -> bool:
         """Initialize NeuTTS Air engine and dependencies."""
         try:
-            # Lazy import of vendored engine to avoid global import failures
-            from tldw_Server_API.app.core.TTS.vendors.neuttsair.neutts import NeuTTSAir as _NeuTTSAir
-
-            # Create engine instance
             logger.info(
                 f"NeuTTS: loading backbone={self.backbone_repo} codec={self.codec_repo}"
             )
-            # Respect auto_download toggle from provider config (default True)
-            auto_download = parse_bool(self.config.get("auto_download", True), default=True)
-            self._engine = _NeuTTSAir(
-                backbone_repo=self.backbone_repo,
-                backbone_device=self.backbone_device,
-                codec_repo=self.codec_repo,
-                codec_device=self.codec_device,
-                auto_download=auto_download,
-            )
+            load_lock = tts_model_load_lock(self.provider_key, f"{self.backbone_repo}:{self.codec_repo}")
+            async with hold_tts_engine(load_lock) as run:
+                self._engine = await run(self._load_engine)
             try:
                 from ..tts_resource_manager import get_resource_manager
                 resource_manager = await get_resource_manager()
@@ -143,6 +135,20 @@ class NeuTTSAdapter(TTSAdapter):
                 provider=self.provider_name,
                 details={"error": str(e)},
             ) from e
+
+    def _load_engine(self) -> Any:
+        """Import the vendored NeuTTS engine and load its model; blocks, so it runs on a worker thread."""
+        # Lazy import of vendored engine to avoid global import failures
+        from tldw_Server_API.app.core.TTS.vendors.neuttsair.neutts import NeuTTSAir
+
+        return NeuTTSAir(
+            backbone_repo=self.backbone_repo,
+            backbone_device=self.backbone_device,
+            codec_repo=self.codec_repo,
+            codec_device=self.codec_device,
+            # Respect auto_download toggle from provider config (default True)
+            auto_download=parse_bool(self.config.get("auto_download", True), default=True),
+        )
 
     async def get_capabilities(self) -> TTSCapabilities:
         return TTSCapabilities(
@@ -247,7 +253,7 @@ class NeuTTSAdapter(TTSAdapter):
                     f.write(request.voice_reference)
                 # Encode reference
                 logger.info("NeuTTS: encoding reference audio")
-                ref_codes = self._engine.encode_reference(temp_path)  # type: ignore
+                ref_codes = await self._engine_call(self._engine.encode_reference, temp_path)  # type: ignore
 
             if not ref_text or not isinstance(ref_text, str) or not ref_text.strip():
                 raise TTSValidationError(
@@ -257,7 +263,7 @@ class NeuTTSAdapter(TTSAdapter):
 
             # Generate waveform
             logger.info("NeuTTS: generating waveform")
-            wav = self._engine.infer(request.text, ref_codes, ref_text)  # type: ignore
+            wav = await self._engine_call(self._engine.infer, request.text, ref_codes, ref_text)  # type: ignore
             # Normalize to int16
             from tldw_Server_API.app.core.TTS.streaming_audio_writer import AudioNormalizer
             normalizer = self.audio_normalizer or AudioNormalizer()
@@ -341,7 +347,7 @@ class NeuTTSAdapter(TTSAdapter):
                 os.close(temp_fd)
                 with open(temp_path, "wb") as f:
                     f.write(request.voice_reference)
-                ref_codes = self._engine.encode_reference(temp_path)  # type: ignore
+                ref_codes = await self._engine_call(self._engine.encode_reference, temp_path)  # type: ignore
 
             if not ref_text or not isinstance(ref_text, str) or not ref_text.strip():
                 raise TTSValidationError(
@@ -358,15 +364,22 @@ class NeuTTSAdapter(TTSAdapter):
             )
             chunk_idx = 0
             try:
-                for chunk in self._engine.infer_stream(request.text, ref_codes, ref_text):  # type: ignore
-                    if chunk is None or len(chunk) == 0:
-                        continue
-                    chunk_idx += 1
-                    # Normalize float32 -> int16, then encode
-                    normalized = self.audio_normalizer.normalize(chunk, target_dtype=np.int16)
-                    encoded = writer.write_chunk(normalized)
-                    if encoded:
-                        yield encoded
+                # The generator drives the engine between chunks, so the stream holds the lock until it ends.
+                async with hold_tts_engine(self._engine_lock) as run:
+                    chunks = self._engine.infer_stream(request.text, ref_codes, ref_text)  # type: ignore
+                    done = object()
+                    while True:
+                        chunk = await run(next, chunks, done)
+                        if chunk is done:
+                            break
+                        if chunk is None or len(chunk) == 0:
+                            continue
+                        chunk_idx += 1
+                        # Normalize float32 -> int16, then encode
+                        normalized = self.audio_normalizer.normalize(chunk, target_dtype=np.int16)
+                        encoded = writer.write_chunk(normalized)
+                        if encoded:
+                            yield encoded
                 # Finalize
                 final_bytes = writer.write_chunk(finalize=True)
                 if final_bytes:
@@ -391,6 +404,11 @@ class NeuTTSAdapter(TTSAdapter):
             if temp_path and os.path.exists(temp_path):
                 with contextlib.suppress(Exception):
                     os.remove(temp_path)
+
+    async def _engine_call(self, func: Callable[..., Any], *args: Any) -> Any:
+        """Run one engine call on a worker thread, holding the engine lock until it returns."""
+        async with hold_tts_engine(self._engine_lock) as run:
+            return await run(func, *args)
 
     def _maybe_override_engine(self, extras: dict[str, Any]):
         """Allow per-request override of model repos/devices via extra_params."""

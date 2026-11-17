@@ -61,7 +61,7 @@ def test_rebuild_helper_falls_back_when_jobs_owner_missing(monkeypatch):
     submissions: list[tuple[int, str]] = []
 
     class _FakeSvc:
-        def submit(self, media_id: int, db_path: str):
+        def submit(self, media_id: int, db_path: str, owner_user_id: object = None):
             submissions.append((int(media_id), db_path))
 
     monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
@@ -100,7 +100,7 @@ def test_rebuild_all_media_uses_jobs_when_enabled(monkeypatch):
         is_admin = True
 
     class _FakeSvc:
-        def submit(self, media_id: int, db_path: str):
+        def submit(self, media_id: int, db_path: str, owner_user_id: object = None):
             legacy_submissions.append((int(media_id), db_path))
 
     monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
@@ -144,7 +144,7 @@ def test_rebuild_all_media_jobs_retry_uses_bounded_idempotency_scope(monkeypatch
         db_path_str = "/tmp/user-1/Media_DB_v2.db"
 
     class _FakeSvc:
-        def submit(self, media_id: int, db_path: str):
+        def submit(self, media_id: int, db_path: str, owner_user_id: object = None):
             raise AssertionError(f"legacy submit should not run for {media_id} at {db_path}")
 
     def _enqueue(**kwargs):
@@ -264,12 +264,12 @@ def test_rebuild_all_stale_policy_enqueues_expected_media(monkeypatch):
     submissions = []
 
     class _FakeSvc:
-        def submit(self, media_id: int, db_path: str):
+        def submit(self, media_id: int, db_path: str, owner_user_id: object = None):
             submissions.append((int(media_id), db_path))
 
     # Patch the endpoints module import
     import tldw_Server_API.app.api.v1.endpoints.claims as claims_ep
-    monkeypatch.setattr(claims_ep, "get_claims_rebuild_service", lambda: _FakeSvc())
+    monkeypatch.setattr("tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service.get_claims_rebuild_service", lambda: _FakeSvc())
 
     with TestClient(fastapi_app) as client:
         r = client.post("/api/v1/claims/rebuild/all", params={"policy": "stale"})

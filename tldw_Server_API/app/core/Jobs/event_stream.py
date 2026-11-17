@@ -134,18 +134,36 @@ def emit_job_event(
                     pass
 
             from tldw_Server_API.app.core.Jobs.manager import JobManager
-            # Admin context for outbox writes (RLS bypass)
-            with contextlib.suppress(_OUTBOX_NONCRITICAL_EXCEPTIONS):
-                JobManager.set_rls_context(is_admin=True, domain_allowlist=None, owner_user_id=None)
-            jm = JobManager()
-            conn = jm._connect()
-            try:
-                if jm.backend == "postgres":
-                    with jm._pg_cursor(conn) as cur:
-                        cur.execute(
+            # Restore caller authority even when outbox setup fails.
+            with JobManager.scoped_rls_context(is_admin=True, domain_allowlist=None, owner_user_id=None):
+                jm = JobManager()
+                conn = jm._connect()
+                try:
+                    if jm.backend == "postgres":
+                        with jm._pg_cursor(conn) as cur:
+                            cur.execute(
+                                (
+                                    "INSERT INTO job_events(job_id, domain, queue, job_type, event_type, attrs_json, owner_user_id, request_id, trace_id, created_at) "
+                                    "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, NOW())"
+                                ),
+                                (
+                                    (job or {}).get("id"),
+                                    (job or {}).get("domain"),
+                                    (job or {}).get("queue"),
+                                    (job or {}).get("job_type"),
+                                    event,
+                                    json.dumps(attrs or {}),
+                                    (job or {}).get("owner_user_id"),
+                                    (job or {}).get("request_id"),
+                                    (job or {}).get("trace_id"),
+                                ),
+                            )
+                            conn.commit()
+                    else:
+                        conn.execute(
                             (
                                 "INSERT INTO job_events(job_id, domain, queue, job_type, event_type, attrs_json, owner_user_id, request_id, trace_id, created_at) "
-                                "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, NOW())"
+                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now'))"
                             ),
                             (
                                 (job or {}).get("id"),
@@ -160,30 +178,9 @@ def emit_job_event(
                             ),
                         )
                         conn.commit()
-                else:
-                    conn.execute(
-                        (
-                            "INSERT INTO job_events(job_id, domain, queue, job_type, event_type, attrs_json, owner_user_id, request_id, trace_id, created_at) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now'))"
-                        ),
-                        (
-                            (job or {}).get("id"),
-                            (job or {}).get("domain"),
-                            (job or {}).get("queue"),
-                            (job or {}).get("job_type"),
-                            event,
-                            json.dumps(attrs or {}),
-                            (job or {}).get("owner_user_id"),
-                            (job or {}).get("request_id"),
-                            (job or {}).get("trace_id"),
-                        ),
-                    )
-                    conn.commit()
-            finally:
-                with contextlib.suppress(_OUTBOX_NONCRITICAL_EXCEPTIONS):
-                    conn.close()
-                with contextlib.suppress(_OUTBOX_NONCRITICAL_EXCEPTIONS):
-                    JobManager.clear_rls_context()
+                finally:
+                    with contextlib.suppress(_OUTBOX_NONCRITICAL_EXCEPTIONS):
+                        conn.close()
     except _OUTBOX_NONCRITICAL_EXCEPTIONS:
         # Swallow outbox errors; logging already occurred
         pass

@@ -1025,7 +1025,7 @@ git commit -m "test: guard recipe card tool result replay"
 
 **Files:**
 - Update if needed: files touched in earlier tasks only.
-- Update: `backlog/tasks/task-12150 - Design-cooking-recipe-card-tool-result-UI.md`
+- Update: `backlog/tasks/task-15071 - Design-cooking-recipe-card-tool-result-UI.md`
 
 - [ ] **Step 1: Run backend targeted tests**
 
@@ -1112,7 +1112,7 @@ git add tldw_Server_API/app/core/MCP_unified/modules/implementations/cooking_mod
   apps/packages/ui/src/components/Sidepanel/Chat/ToolCallBlock.tsx \
   apps/packages/ui/src/components/Sidepanel/Chat/__tests__/ToolCallBlock.recipe-card.test.tsx \
   apps/packages/ui/src/components/Common/Playground/__tests__/tool-results-replay.guard.test.ts \
-  "backlog/tasks/task-12150 - Design-cooking-recipe-card-tool-result-UI.md"
+  "backlog/tasks/task-15071 - Design-cooking-recipe-card-tool-result-UI.md"
 git commit -m "feat: render cooking recipe card tool results"
 ```
 

@@ -20,6 +20,8 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
     DEFAULT_CHARACTER_NAME,
 )
+from tldw_Server_API.app.core import config_llm_providers
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 
 @pytest.fixture
@@ -118,7 +120,7 @@ def test_client(test_db):
 
     try:
         # Mock API keys to prevent 503 errors
-        with patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "sk-mock-key-12345"}):
+        with patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "sk-mock-key-12345"})):
             # Mock the actual chat API call
             mock_response = {
                 "id": "chatcmpl-test",
@@ -135,7 +137,7 @@ def test_client(test_db):
                 "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
             }
 
-            with patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=mock_response):
+            with patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=mock_response):
                 # Override authentication to use test user
                 async def mock_get_request_user(api_key=None, token=None):
                     return test_user

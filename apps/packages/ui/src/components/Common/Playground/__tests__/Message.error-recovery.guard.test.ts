@@ -18,20 +18,13 @@ describe("PlaygroundMessage error recovery guard", () => {
       messageSourcesSectionPath,
       "utf8"
     )
-    const combinedSource = [
-      messageSource,
-      messageContentSource,
-      messageStateSource,
-      messageSourcesSectionSource
-    ].join("\n")
-
     expect(messageSource).toContain("playground:errorRecovery.retrySameModel")
     expect(messageSource).toContain("playground:errorRecovery.switchModel")
     expect(messageSource).toContain("playground:errorRecovery.tryProviderFallback")
     expect(messageSource).toContain("playground:errorRecovery.continueFromPartial")
     expect(messageSource).toContain("playground:errorRecovery.interruptedSummary")
     expect(messageSource).toContain("interruptedGeneration")
-    expect(combinedSource).toContain("Recommended next actions:")
+    expect(messageSource).not.toContain("Recommended next actions:")
     expect(messageContentSource).toContain("role=\"alert\"")
     expect(messageContentSource).toContain("aria-live=\"assertive\"")
     expect(messageSource).toContain("role=\"status\"")

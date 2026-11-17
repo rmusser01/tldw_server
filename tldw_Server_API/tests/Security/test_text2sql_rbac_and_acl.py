@@ -84,7 +84,7 @@ class _ExplodingText2SQLCoreService:
 
 @pytest.mark.security
 def test_text2sql_requires_sql_read_permission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(text2sql_mod, "Text2SQLCoreService", _FakeText2SQLCoreService)
+    monkeypatch.setattr("tldw_Server_API.app.core.Text2SQL.service.Text2SQLCoreService", _FakeText2SQLCoreService)
 
     app = _build_test_app(
         principal=_make_principal(permissions=["media.read"]),
@@ -112,7 +112,7 @@ def test_text2sql_requires_sql_read_permission(tmp_path: Path, monkeypatch: pyte
 
 @pytest.mark.security
 def test_text2sql_requires_explicit_target_acl_permission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(text2sql_mod, "Text2SQLCoreService", _FakeText2SQLCoreService)
+    monkeypatch.setattr("tldw_Server_API.app.core.Text2SQL.service.Text2SQLCoreService", _FakeText2SQLCoreService)
 
     app = _build_test_app(
         principal=_make_principal(permissions=["sql.read", "media.read"]),
@@ -144,7 +144,7 @@ def test_text2sql_requires_explicit_target_acl_permission(tmp_path: Path, monkey
 
 @pytest.mark.security
 def test_text2sql_enforces_connector_acl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(text2sql_mod, "Text2SQLCoreService", _FakeText2SQLCoreService)
+    monkeypatch.setattr("tldw_Server_API.app.core.Text2SQL.service.Text2SQLCoreService", _FakeText2SQLCoreService)
     monkeypatch.setattr(
         text2sql_mod,
         "_connector_acl_allows",
@@ -182,7 +182,7 @@ def test_text2sql_enforces_connector_acl(tmp_path: Path, monkeypatch: pytest.Mon
 
 @pytest.mark.security
 def test_text2sql_allows_explicit_target_acl_permission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(text2sql_mod, "Text2SQLCoreService", _FakeText2SQLCoreService)
+    monkeypatch.setattr("tldw_Server_API.app.core.Text2SQL.service.Text2SQLCoreService", _FakeText2SQLCoreService)
 
     app = _build_test_app(
         principal=_make_principal(permissions=["sql.read", "sql.target:media_db"]),
@@ -209,7 +209,7 @@ def test_text2sql_allows_explicit_target_acl_permission(tmp_path: Path, monkeypa
 
 @pytest.mark.security
 def test_text2sql_sanitizes_execution_backend_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(text2sql_mod, "Text2SQLCoreService", _ExplodingText2SQLCoreService)
+    monkeypatch.setattr("tldw_Server_API.app.core.Text2SQL.service.Text2SQLCoreService", _ExplodingText2SQLCoreService)
 
     app = _build_test_app(
         principal=_make_principal(permissions=["sql.read", "sql.target:media_db"]),

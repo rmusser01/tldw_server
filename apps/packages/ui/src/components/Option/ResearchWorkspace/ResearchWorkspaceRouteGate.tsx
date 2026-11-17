@@ -3,17 +3,25 @@ import { Link, useLocation } from "react-router-dom";
 import { FolderOpen, RefreshCw } from "lucide-react";
 import { Button } from "@/components/Common/Button";
 import { parseSharedWorkspaceRoute } from "./shared-workspace-route-state";
-import { getResearchWorkspaceSearchFromLocation } from "./research-workspace-route-state";
+import {
+  getResearchWorkspaceDeepResearchReturnContext,
+  getResearchWorkspaceSearchFromLocation,
+} from "./research-workspace-route-state";
 import { useWorkspaceStore } from "@/store/workspace";
 import { hydrateWorkspaceFromServer } from "@/store/workspace-api";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { resolveServicePromptScope } from "@/services/service-prompts";
 import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error";
 import { watchChatAccountChanges } from "@/services/chat-account-boundary";
+import { rememberCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
+import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import { hydrateCanonicalWorkspaceCapturePins, hydrateCanonicalWorkspaceNote } from "./workspace-server-restore";
 
 const LocalResearchWorkspace = React.lazy(() =>
   import("./index").then((module) => ({ default: module.ResearchWorkspace })),
+);
+const RequestedResearchWorkspace = React.lazy(
+  () => import("./RequestedResearchWorkspace"),
 );
 const SharedResearchWorkspace = React.lazy(
   () => import("./SharedResearchWorkspace"),
@@ -110,12 +118,15 @@ export const ActivatedLocalWorkspace: React.FC<{ workspaceId: string; webClip: b
         if (verified.scopeKey !== scope.scopeKey || !servicePromptTargetsMatch(verified.config, scope.config) ||
             (verified.config.expectedSingleUserApiKeyScope ?? null) !== (scope.config.expectedSingleUserApiKeyScope ?? null) ||
             String(verified.userId) !== String(scope.userId)) throw new Error("Workspace account changed");
+        staged.artifacts.forEach(artifact => bindWorkspaceArtifactOrigin(artifact, scope.scopeKey, staged.id));
         stopWorkspace();
         // No await between the final fence and the atomic snapshot install.
         if (useWorkspaceStore.getState().installServerWorkspace(staged, {
           scopeKey: scope.scopeKey, expectedWorkspaceId: origin
-        })) setStatus("ready");
-        else setStatus("failed");
+        })) {
+          rememberCanonicalArtifactWorkspace(staged.id, scope.scopeKey);
+          setStatus("ready");
+        } else setStatus("failed");
       } catch {
         controller.abort();
         if (mounted) setStatus("failed");
@@ -148,9 +159,24 @@ export const ResearchWorkspaceRouteGate: React.FC = () => {
       return <ActivatedLocalWorkspace key={`${location.key || ""}:${search}`} workspaceId={target}
         webClip={params.get("agent_task_handoff") === "web_clip"} />;
     }
+    const targets = params.getAll("source_workspace_id");
+    const requested =
+      targets.length === 1 &&
+      targets[0].trim() &&
+      targets[0].trim().length <= 128
+        ? targets[0].trim()
+        : null;
     return (
       <Suspense fallback={<RouteFallback />}>
-        <LocalResearchWorkspace />
+        {targets.length &&
+        !(
+          targets.length === 1 &&
+          getResearchWorkspaceDeepResearchReturnContext(params)
+        ) ? (
+          <RequestedResearchWorkspace workspaceId={requested} />
+        ) : (
+          <LocalResearchWorkspace />
+        )}
       </Suspense>
     );
   }

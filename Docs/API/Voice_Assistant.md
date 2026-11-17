@@ -103,7 +103,16 @@ High-level protocol:
 
 ### Client → Server Messages
 
-First message must be `auth`.
+First message must be `auth`. It is the only frame the server reads before it knows the caller, and its token is
+verified like `Authorization: Bearer` on HTTP (revocation, API-key `read` scope, single-user key and IP allowlist):
+
+- any other first message: `auth_error` "Expected AUTH message", then close `4400`;
+- a missing, refused or revoked token: `auth_error` "Invalid credentials", then close `4401`;
+- no `auth` message within 10 seconds: `auth_error` "Authentication timeout", then close `4401`.
+
+A frame without a token falls back to the single-user WebUI session cookie, then to a credential on the upgrade
+request, then to the deprecated `?token=` query parameter (logged as deprecated; URLs end up in access logs).
+`?api_key=` is not read. A first message over 16,384 characters is refused like any other non-`auth` message, unparsed.
 
 Auth:
 
@@ -217,4 +226,3 @@ Targeted test commands:
   - `python -m pytest -q tldw_Server_API/tests/VoiceAssistant/test_rest_endpoints.py`
 - Pipeline behaviors:
   - `python -m pytest -q tldw_Server_API/tests/VoiceAssistant/test_e2e_pipeline.py`
-

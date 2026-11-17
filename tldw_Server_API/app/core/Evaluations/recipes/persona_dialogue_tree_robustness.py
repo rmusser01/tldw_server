@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import RecipeManifest
+from tldw_Server_API.app.core.Evaluations.evaluation_recipe_schemas import RecipeManifest
 from tldw_Server_API.app.core.Evaluations.recipes.base import RecipeDefinition
 from tldw_Server_API.app.core.Persona.dialogue_tree_context import redact_sensitive_payload
 
@@ -389,11 +389,12 @@ def _build_target(
         character=character,
         index=index,
     )
-    return {
-        "target_id": target_id,
-        "persona": persona or {},
-        "character": character or {},
-    }
+    target: dict[str, Any] = {"target_id": target_id}
+    if persona:
+        target["persona"] = persona
+    if character:
+        target["character"] = character
+    return target
 
 
 def _derive_target_id(

@@ -5,15 +5,16 @@ const isRecord = (value: unknown): value is UnknownRecord =>
 
 const firstNonEmptyString = (...values: unknown[]): string => {
   for (const value of values) {
+    // Check emptiness without changing editable source text.
     if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim()
+      return value
     }
   }
   return ""
 }
 
 const extractNestedContent = (value: unknown): string => {
-  if (typeof value === "string") return value.trim()
+  if (typeof value === "string") return firstNonEmptyString(value)
   if (!isRecord(value)) return ""
 
   return firstNonEmptyString(
@@ -37,7 +38,7 @@ const extractAnalysisEntry = (value: unknown): string => {
     value.analysis_content,
     value.analysisContent,
     value.analysis
-  )
+  ).trim()
 }
 
 const getVersionNumber = (value: UnknownRecord): number => {
@@ -61,7 +62,7 @@ const findLatestVersion = (detail: UnknownRecord): UnknownRecord | null => {
 }
 
 export const extractMediaDetailContent = (detail: unknown): string => {
-  if (typeof detail === "string") return detail.trim()
+  if (typeof detail === "string") return firstNonEmptyString(detail)
   if (!isRecord(detail)) return ""
 
   const fromContentObject = extractNestedContent(detail.content)
@@ -125,7 +126,7 @@ export const extractMediaDetailAnalysis = (detail: unknown): string => {
     detail.analysis_content,
     detail.analysisContent
   )
-  if (fromRoot) return fromRoot
+  if (fromRoot) return fromRoot.trim()
 
   if (Array.isArray(detail.analyses)) {
     for (const entry of detail.analyses) {
@@ -141,8 +142,8 @@ export const extractMediaDetailAnalysis = (detail: unknown): string => {
       latestVersion.analysisContent,
       latestVersion.analysis
     )
-    if (fromVersion) return fromVersion
+    if (fromVersion) return fromVersion.trim()
   }
 
-  return firstNonEmptyString(detail.summary)
+  return firstNonEmptyString(detail.summary).trim()
 }

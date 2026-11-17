@@ -5,16 +5,22 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import hashlib
+import json
 from functools import partial
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     CurrentPrincipal,
     RequirePermission,
     RequireRole,
+    User,
+    get_request_user,
 )
 from tldw_Server_API.app.api.v1.schemas.moderation_schemas import (
     BlocklistAppendRequest,
@@ -26,6 +32,7 @@ from tldw_Server_API.app.api.v1.schemas.moderation_schemas import (
     BlocklistManagedItem,
     BlocklistManagedResponse,
     ModerationBlocklistUpdate,
+    ModerationClassificationRequest,
     ModerationReviewAuditResponse,
     ModerationReviewBulkDecisionRequest,
     ModerationReviewBulkDecisionResponse,
@@ -42,6 +49,11 @@ from tldw_Server_API.app.api.v1.schemas.moderation_schemas import (
     ModerationUserOverrideLookupResponse,
     ModerationUserOverridesResponse,
 )
+from tldw_Server_API.app.core.Audit.unified_audit_service import (
+    AuditContext,
+    AuditEventCategory,
+    AuditEventType,
+)
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     MODERATION_AUDIT_READ,
     MODERATION_REVIEW_BULK_DECIDE,
@@ -49,12 +61,27 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     MODERATION_REVIEW_READ,
     SYSTEM_CONFIGURE,
 )
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
+from tldw_Server_API.app.core.Moderation.classification import (
+    ClassificationError,
+    audited_transport,
+    classify_sample,
+    saved_classification,
+)
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
-from tldw_Server_API.app.core.Moderation.review_service import get_moderation_review_service
+from tldw_Server_API.app.core.Moderation.review_service import ModerationReviewService, get_moderation_review_service
 from tldw_Server_API.app.core.Moderation.supervised_policy import (
     GuardianModerationProxy,
     bootstrap_guardian_moderation_runtime,
 )
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    derive_trusted_credential_scope,
+    load_server_config_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import capture_provider_override_call_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import ProviderCredentialRuntime
+from tldw_Server_API.app.core.Slides.generation_disconnect import generation_disconnected
 
 router = APIRouter()
 
@@ -66,6 +93,43 @@ rules_router = APIRouter(
 )
 
 review_router = APIRouter()
+
+
+async def _audit_rules_action(
+    request: Request,
+    principal: CurrentPrincipal,
+    action: str,
+    metadata: dict[str, Any],
+    *,
+    evaluation: bool = False,
+) -> None:
+    """Persist attributed Rules activity without copying rule or sample contents."""
+    try:
+        audit = await Audit_DB_Deps.get_or_create_audit_service_for_user_id_optional(principal.user_id)
+        event_id = await audit.log_event(
+            event_type=AuditEventType.SECURITY_SCAN if evaluation else AuditEventType.CONFIG_CHANGED,
+            category=AuditEventCategory.SECURITY if evaluation else AuditEventCategory.SYSTEM,
+            context=AuditContext(
+                user_id=str(principal.user_id) if principal.user_id is not None else None,
+                endpoint=request.url.path,
+                method=request.method,
+                request_id=getattr(request.state, "request_id", None),
+            ),
+            resource_type="moderation_rules",
+            resource_id="global",
+            action=action,
+            metadata={**metadata, "actor_id": principal.principal_id},
+        )
+        await audit.flush_event(event_id)
+    except Exception as exc:
+        logger.bind(audit_error_type=type(exc).__name__).error("Moderation Rules audit persistence failed")
+        detail = (
+            "Moderation audit persistence failed; the test result was not accepted."
+            if evaluation
+            else "Moderation audit persistence failed. The change may already be applied; "
+            "read the current rules/settings before retrying."
+        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail) from exc
 
 
 def _normalize_etag_list(value: str | None) -> list[str]:
@@ -128,7 +192,9 @@ async def get_user_override(user_id: str) -> ModerationUserOverrideLookupRespons
 
 
 @rules_router.put("/moderation/users/{user_id}", response_model=dict, summary="Set per-user moderation override", tags=["moderation"])
-async def set_user_override(user_id: str, override: ModerationUserOverride) -> dict[str, Any]:
+async def set_user_override(
+    user_id: str, override: ModerationUserOverride, request: Request, principal: CurrentPrincipal
+) -> dict[str, Any]:
     """Set or replace a per-user moderation override entry."""
     svc = get_moderation_service()
     status_info = svc.set_user_override(user_id, override.model_dump(exclude_none=True))
@@ -154,11 +220,17 @@ async def set_user_override(user_id: str, override: ModerationUserOverride) -> d
     # Surface whether the change was persisted
     if isinstance(data, dict):
         data = {**data, "persisted": bool(status_dict.get("persisted", False))}
+    await _audit_rules_action(
+        request,
+        principal,
+        "moderation.override.set",
+        {"target_user_id": user_id, "persisted": bool(status_dict.get("persisted", False))},
+    )
     return data
 
 
 @rules_router.delete("/moderation/users/{user_id}", summary="Delete per-user moderation override", tags=["moderation"])
-async def delete_user_override(user_id: str) -> dict[str, Any]:
+async def delete_user_override(user_id: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
     """Delete a per-user moderation override entry."""
     svc = get_moderation_service()
     status_info = svc.delete_user_override(user_id)
@@ -171,6 +243,12 @@ async def delete_user_override(user_id: str) -> dict[str, Any]:
             else status.HTTP_500_INTERNAL_SERVER_ERROR
         )
         raise HTTPException(status_code=code, detail=detail)
+    await _audit_rules_action(
+        request,
+        principal,
+        "moderation.override.delete",
+        {"target_user_id": user_id, "persisted": bool(status_dict.get("persisted", False))},
+    )
     return {"status": "deleted", "persisted": bool(status_dict.get("persisted", False))}
 
 
@@ -182,7 +260,9 @@ async def get_blocklist() -> list[str]:
 
 
 @rules_router.put("/moderation/blocklist", summary="Replace blocklist with provided lines", tags=["moderation"])
-async def update_blocklist(data: ModerationBlocklistUpdate) -> dict[str, Any]:
+async def update_blocklist(
+    data: ModerationBlocklistUpdate, request: Request, principal: CurrentPrincipal
+) -> dict[str, Any]:
     """Replace the entire blocklist with the provided lines."""
     svc = get_moderation_service()
     lines = data.lines or []
@@ -203,6 +283,12 @@ async def update_blocklist(data: ModerationBlocklistUpdate) -> dict[str, Any]:
     ok = svc.set_blocklist_lines(lines)
     if not ok:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to persist blocklist")
+    await _audit_rules_action(
+        request,
+        principal,
+        "moderation.blocklist.replace",
+        {"count": len(lines), "version": svc.get_blocklist_state().get("version", ""), "persisted": True},
+    )
     return {"status": "ok", "count": len(lines)}
 
 
@@ -231,7 +317,7 @@ async def get_effective_policy(user_id: str | None = Query(None, description="Us
     summary="Reload moderation configuration from disk",
     tags=["moderation"],
 )
-async def reload_moderation() -> dict[str, Any]:
+async def reload_moderation(request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
     """Reload moderation configuration from disk."""
     svc = get_moderation_service()
     try:
@@ -243,6 +329,7 @@ async def reload_moderation() -> dict[str, Any]:
             detail="Failed to reload moderation",
         ) from exc
     else:
+        await _audit_rules_action(request, principal, "moderation.reload", {})
         return {"status": "ok"}
 
 
@@ -273,13 +360,15 @@ async def get_moderation_settings() -> ModerationSettingsResponse:
     summary="Update runtime moderation settings (non-persistent)",
     tags=["moderation"],
 )
-async def update_moderation_settings(body: ModerationSettingsUpdate) -> ModerationSettingsResponse:
+async def update_moderation_settings(
+    body: ModerationSettingsUpdate, request: Request, principal: CurrentPrincipal
+) -> ModerationSettingsResponse:
     """Update runtime moderation settings without persisting by default."""
     svc = get_moderation_service()
     try:
         fields_set = getattr(body, "model_fields_set", set())
-        clear_pii = ("pii_enabled" in fields_set and body.pii_enabled is None)
-        clear_categories = ("categories_enabled" in fields_set and body.categories_enabled is None)
+        clear_pii = "pii_enabled" in fields_set and body.pii_enabled is None
+        clear_categories = "categories_enabled" in fields_set and body.categories_enabled is None
         data = svc.update_settings(
             pii_enabled=body.pii_enabled,
             categories_enabled=body.categories_enabled,
@@ -308,6 +397,9 @@ async def update_moderation_settings(body: ModerationSettingsUpdate) -> Moderati
             detail="Failed to update moderation settings",
         ) from exc
     else:
+        await _audit_rules_action(
+            request, principal, "moderation.settings.update", {"persist_requested": bool(body.persist)}
+        )
         return data
 
 
@@ -337,6 +429,8 @@ async def get_blocklist_managed(response: Response) -> BlocklistManagedResponse:
 async def append_blocklist_line(
     payload: BlocklistAppendRequest,
     response: Response,
+    request: Request,
+    principal: CurrentPrincipal,
     if_match: str | None = Header(None, alias="If-Match"),
 ) -> BlocklistAppendResponse:
     """Append a blocklist line using optimistic concurrency via If-Match."""
@@ -374,7 +468,10 @@ async def append_blocklist_line(
     items = state.get("items") or []
     # New index is last
     index = len(items) - 1
-    response.headers["ETag"] = f"\"{version}\"" if version else ""
+    response.headers["ETag"] = f'"{version}"' if version else ""
+    await _audit_rules_action(
+        request, principal, "moderation.blocklist.append", {"version": version, "count": len(items), "persisted": True}
+    )
     return BlocklistAppendResponse(version=version, index=index, count=len(items))
 
 
@@ -387,6 +484,8 @@ async def append_blocklist_line(
 async def delete_blocklist_item(
     item_id: int,
     response: Response,
+    request: Request,
+    principal: CurrentPrincipal,
     if_match: str | None = Header(None, alias="If-Match"),
 ) -> BlocklistDeleteResponse:
     """Delete a blocklist entry by index using optimistic concurrency."""
@@ -412,7 +511,10 @@ async def delete_blocklist_item(
         raise HTTPException(status_code=code, detail=detail)
     version = str(state.get("version", ""))
     items = state.get("items") or []
-    response.headers["ETag"] = f"\"{version}\"" if version else ""
+    response.headers["ETag"] = f'"{version}"' if version else ""
+    await _audit_rules_action(
+        request, principal, "moderation.blocklist.delete", {"version": version, "count": len(items), "persisted": True}
+    )
     return BlocklistDeleteResponse(version=version, count=len(items))
 
 
@@ -457,7 +559,9 @@ async def lint_blocklist(
     summary="Test moderation against sample text for a user",
     tags=["moderation"],
 )
-async def test_moderation(payload: ModerationTestRequest) -> ModerationTestResponse:
+async def test_moderation(
+    payload: ModerationTestRequest, request: Request, principal: CurrentPrincipal
+) -> ModerationTestResponse:
     """Evaluate sample text against the effective moderation policy for a user."""
     base_service = get_moderation_service()
     service = base_service
@@ -526,14 +630,112 @@ async def test_moderation(payload: ModerationTestRequest) -> ModerationTestRespo
                 action = "notify"
                 category = supervised_result.matched_category or category
 
-    return ModerationTestResponse(
+    snapshot = effective_policy.to_dict()
+    response = ModerationTestResponse(
         flagged=action != "pass",
         action=action,
         sample=result.sample,
         redacted_text=result.redacted_text,
-        effective=effective_policy.to_dict(),
+        effective=snapshot,
         category=category,
     )
+    await _audit_rules_action(
+        request,
+        principal,
+        "moderation.test",
+        {
+            "flagged": response.flagged,
+            "verdict": action,
+            "phase": payload.phase,
+            "policy_fingerprint": hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode("utf-8")).hexdigest(),
+        },
+        evaluation=True,
+    )
+    return response
+
+
+
+@rules_router.post(
+    "/moderation/classify",
+    response_model=ModerationReviewItem,
+    tags=["moderation"],
+    summary="Classify an explicit sample with a configured model for human review",
+)
+async def classify_moderation_sample(
+    payload: ModerationClassificationRequest,
+    request: Request,
+    principal: CurrentPrincipal,
+    current_user: User = Depends(get_request_user),
+    review: ModerationReviewService = Depends(get_moderation_review_service),
+) -> ModerationReviewItem:
+    """Save advisory model evidence; never change enforcement or make a human decision."""
+    runtime = None
+    try:
+        owner, team_ids, org_ids, trusted_override = derive_trusted_credential_scope(request, current_user)
+        current_owner = getattr(current_user, "id_int", None) or getattr(current_user, "id", None)
+        if owner is None or principal.user_id != owner or str(current_owner) != str(owner):
+            raise HTTPException(status_code=403, detail="Classification requires an authenticated user owner.")
+        saved = saved_classification(payload, actor_id=principal.principal_id, review=review)
+        if saved is not None:
+            return ModerationReviewItem.model_validate(saved)
+        if not audited_transport(payload.provider):
+            raise ClassificationError("unsupported_provider")
+        runtime = ProviderCredentialRuntime(
+            user_id=owner,
+            team_ids=team_ids,
+            org_ids=org_ids,
+            trusted_base_url_override=trusted_override,
+            server_config_snapshot=copy.deepcopy(load_server_config_snapshot()),
+            override_snapshot_resolver=capture_provider_override_call_snapshot,
+        )
+        credentials = await runtime.resolve(payload.provider, model=payload.model)
+
+        async def watch_disconnect() -> None:
+            while not await generation_disconnected(request):
+                await asyncio.sleep(0.05)
+
+        if await generation_disconnected(request):
+            raise HTTPException(status_code=499, detail="Classification stopped before inference.")
+
+        operation = asyncio.create_task(
+            classify_sample(
+                payload,
+                actor_id=principal.principal_id,
+                user_id=owner,
+                credentials=credentials,
+                review=review,
+                credential_runtime=runtime,
+            )
+        )
+        monitor = asyncio.create_task(watch_disconnect())
+        try:
+            await asyncio.wait({operation, monitor}, return_when=asyncio.FIRST_COMPLETED)
+            if monitor.done():
+                monitor.result()
+                raise HTTPException(
+                    status_code=499, detail="Classification stopped. Check the saved receipt before retrying."
+                )
+            return ModerationReviewItem.model_validate(await operation)
+        finally:
+            operation.cancel()
+            monitor.cancel()
+            await await_owned_worker(asyncio.gather(operation, monitor, return_exceptions=True))
+    except ClassificationError as exc:
+        code = str(exc)
+        status_code = {"receipt_conflict": 409, "unsupported_provider": 422, "invalid_result": 502}.get(code, 503)
+        messages = {
+            "receipt_conflict": "This request ID already belongs to a different or redacted sample. Open its Review item.",
+            "unsupported_provider": "Model classification currently requires a configured llama.cpp model.",
+            "invalid_result": "The model returned an incomplete or ungrounded result. No classification was saved.",
+            "provider_not_configured": "The selected model provider is not configured.",
+            "provider_failed": "The model request failed or timed out. Check the saved receipt before an explicit retry.",
+        }
+        raise HTTPException(status_code=status_code, detail={"code": code, "message": messages[code]}) from None
+    except ByokResolutionError:
+        raise HTTPException(status_code=503, detail="Provider credentials or configuration are unavailable.") from None
+    finally:
+        if runtime is not None:
+            await await_owned_worker(runtime.close())
 
 
 @review_router.get(

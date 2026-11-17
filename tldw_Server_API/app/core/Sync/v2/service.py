@@ -218,6 +218,14 @@ APPLIED_ON_RETRY_RESOLUTION_ACTION = "apply_on_retry"
 # A dataset holds at most one projection blocker at a time, so this only bounds the loop
 # against a settlement that does not take effect.
 _MAX_STRANDED_TOMBSTONE_SETTLEMENTS = 8
+# The conflict each materializer used to record for a tombstone of an object the dataset
+# holds no state for (#3198 for messages; §5.4 Q7 for chats and notes). Such a tombstone
+# is now applied as satisfied, so a conflict of this shape is one the old rule stranded.
+_STRANDED_TOMBSTONE_CONFLICTS: dict[str, tuple[str, str]] = {
+    "chat.message": ("message_base_conflict", "missing_server_message"),
+    "chat.conversation": ("whole_object_conflict", "missing_server_object"),
+    "notes.note": ("whole_object_conflict", "missing_server_object"),
+}
 
 
 def _routing_metadata_without_authority_tag(
@@ -4659,8 +4667,8 @@ class SyncV2Service:
             else None
         )
         device = self._require_registered_device(user_id, device_id)
-        # A stranded chat.message tombstone would refuse every envelope below. Settling it
-        # here lets a user who writes only from devices recover without a server write.
+        # A stranded tombstone would refuse every envelope below. Settling it here lets a
+        # user who writes only from devices recover without a server write.
         self.recover_stranded_tombstones(user_id=user_id, dataset_id=dataset.dataset_id)
 
         accepted: list[SyncPushAccepted] = []
@@ -4942,6 +4950,8 @@ class SyncV2Service:
                     )
                 )
                 continue
+            if isinstance(outcome, AdapterAccepted):
+                outcome = self._foreign_device_tombstone_conflict(envelope) or outcome
 
             if isinstance(outcome, AdapterRejected):
                 rejected.append(
@@ -7713,6 +7723,33 @@ class SyncV2Service:
             list_heads=list_heads,
         )
 
+    def _foreign_device_tombstone_conflict(self, envelope: SyncEnvelopeCreate) -> AdapterConflict | None:
+        """Refuse a device's tombstone of an object other Sync history holds, blocking nothing.
+
+        A chat, note or message this dataset has no history for, but that
+        another dataset of the owner (or a native chat, or a message row with
+        its own Sync history) holds, is not this tombstone's to delete. Applying
+        it would record a projection conflict that holds up every later write in
+        the dataset, so the push refuses it instead: the device is told, the
+        object stays, and nothing waits on it (owner decision, PR #3299). The
+        materializers keep their own check for an object that turns foreign
+        between push and apply.
+        """
+
+        if envelope.operation != "tombstone" or not envelope.object_id:
+            return None
+        probe = getattr(self.materializers.get(envelope.domain), "foreign_device_tombstone", None)
+        if probe is None or not probe(self.store, envelope):
+            return None
+        return AdapterConflict(
+            client_envelope_id=envelope.client_envelope_id,
+            domain=envelope.domain,
+            entity_id=envelope.object_id,
+            conflict_type="message_base_conflict" if envelope.domain == "chat.message" else "whole_object_conflict",
+            message=f"{envelope.domain} tombstone names an object that other Sync history holds",
+            metadata={"reason": "held_by_other_sync_history"},
+        )
+
     def _evaluate_envelope(
         self,
         dataset: SyncDataset,
@@ -10083,7 +10120,7 @@ class SyncV2Service:
             )
 
     def recover_stranded_tombstones(self, *, user_id: str, dataset_id: str) -> bool:
-        """Unblock a dataset held up by a stranded ``chat.message`` tombstone, if it is.
+        """Unblock a dataset held up by a stranded tombstone, if it is.
 
         Best effort and safe to call before any write: it never raises, and it
         reports whether a tombstone was settled. See ``settle_stranded_tombstones``.
@@ -10114,17 +10151,21 @@ class SyncV2Service:
         dataset_id: str,
         store: SyncV2Store,
     ) -> tuple[SyncConflict | None, bool]:
-        """Settle the projection conflict a tombstone of an unknown chat message left behind.
+        """Settle the projection conflict a tombstone of an object without Sync state left behind.
 
-        A ``chat.message`` tombstone for a message the dataset holds no state
-        for used to be rejected as ``message_base_conflict`` /
-        ``missing_server_message``, and the unresolved conflict refused every
-        later append. Such a tombstone is now applied as satisfied, so the
-        conflict is settled by where the tombstone came from:
+        A tombstone of a ``chat.message``, ``chat.conversation`` or
+        ``notes.note`` the dataset holds no state for used to be rejected as a
+        projection conflict (``message_base_conflict`` /
+        ``missing_server_message`` for a message, ``whole_object_conflict`` /
+        ``missing_server_object`` for a chat or a note), and the unresolved
+        conflict refused every later append. Such a tombstone is now applied as
+        satisfied, so the conflict is settled by where the tombstone came from:
 
         * A device's tombstone is applied under the current rule. The device
-          deleted the message on its side and was told "conflict"; applying the
+          deleted the object on its side and was told "conflict"; applying the
           delete makes both sides agree and delivers it to the other devices.
+          If the rule still refuses it (the row has other Sync history), the
+          conflict stays for review.
         * The server's own tombstone (a delete route, before those routes
           deleted such rows directly) is resolved with ``skip``. Its request
           answered 503, so no client was told the delete happened, and the row
@@ -10173,18 +10214,20 @@ class SyncV2Service:
                             raise SyncStoreError("Sync stranded tombstone could not be applied as satisfied")
             except SyncStoreError as exc:
                 logger.warning(
-                    "Sync could not settle a stranded chat.message tombstone. dataset={} conflict={} error={}",
+                    "Sync could not settle a stranded tombstone. dataset={} conflict={} domain={} error={}",
                     dataset_id,
                     blocker.conflict_id,
+                    blocker.domain,
                     type(exc).__name__,
                 )
                 break
             settled = True
             logger.warning(
-                "Sync settled a stranded chat.message tombstone of an object without Sync state. "
-                "dataset={} conflict={} object={} origin={} outcome={}",
+                "Sync settled a stranded tombstone of an object without Sync state. "
+                "dataset={} conflict={} domain={} object={} origin={} outcome={}",
                 dataset_id,
                 blocker.conflict_id,
+                blocker.domain,
                 blocker.object_id,
                 "server" if from_server else "device",
                 "skipped" if from_server else "applied",
@@ -10198,12 +10241,16 @@ class SyncV2Service:
         dataset_id: str,
         conflict: SyncConflict,
     ) -> SyncEnvelope | None:
-        """Return the conflict's envelope if it is a tombstone of a message with no Sync state."""
+        """Return the conflict's envelope if it is a tombstone of an object with no Sync state.
+
+        A message tombstone must also have no base, as before (#3198). The chat
+        and notes materializers recorded ``missing_server_object`` only for a
+        tombstone that named a base, so for those a base is expected.
+        """
 
         if (
-            conflict.domain != "chat.message"
-            or conflict.conflict_type != "message_base_conflict"
-            or conflict.metadata.get("reason") != "missing_server_message"
+            _STRANDED_TOMBSTONE_CONFLICTS.get(conflict.domain)
+            != (conflict.conflict_type, conflict.metadata.get("reason"))
             or conflict.server_sequence is None
         ):
             return None
@@ -10217,10 +10264,13 @@ class SyncV2Service:
             or source.operation != "tombstone"
             or source.status != "accepted"
             or source.apply_status != "conflict"
-            or source.base_server_cursor is not None
+            or store.get_object_state(dataset_id, source.domain, source.object_id) is not None
+        ):
+            return None
+        if source.domain == "chat.message" and (
+            source.base_server_cursor is not None
             or source.base_object_revision is not None
             or source.base_object_hash is not None
-            or store.get_object_state(dataset_id, source.domain, source.object_id) is not None
         ):
             return None
         return source

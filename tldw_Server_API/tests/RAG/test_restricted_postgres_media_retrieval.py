@@ -15,6 +15,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.media_db.api import search_media
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
@@ -24,6 +25,7 @@ from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
 )
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.main import app as fastapi_app
+from tldw_Server_API.tests._plugins.postgres import _drop_restricted_role
 
 pytestmark = pytest.mark.integration
 
@@ -69,12 +71,12 @@ def restricted_media_store(request, tmp_path):
         db.close_connection()
         if backend is not None:
             backend.get_pool().close_all()
-        if role is not None:
-            with admin.transaction() as conn:
-                conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
-                conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
-        if admin is not None:
-            admin.get_pool().close_all()
+        try:
+            if role is not None:
+                _drop_restricted_role(admin, role)
+        finally:
+            if admin is not None:
+                admin.get_pool().close_all()
 
 
 @pytest.mark.parametrize("id_kind", ["integer", "uuid"])
@@ -290,6 +292,7 @@ def authenticated_media_client(restricted_media_store, monkeypatch):
         )
     assert get_scope() is None
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(item.router, prefix="/media")
     app.include_router(rag_unified.router)
 
@@ -497,3 +500,52 @@ async def test_media_evidence_respects_shared_visibility(
     with scoped_context(user_id=reader, team_ids=teams, org_ids=orgs, is_admin=is_admin):
         documents = await retriever.retrieve("Rowan", allowed_media_ids=[media_id])
     assert [doc.metadata["source_id"] for doc in documents] == ([str(media_id)] if visible else [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fts_level", ["media", "chunk"])
+async def test_selected_media_retains_distinct_facets_after_strict_fts_miss(
+    restricted_media_store,
+    fts_level,
+):
+    """Selected evidence remains discoverable without admitting other owners or sources."""
+    db = restricted_media_store
+    texts = [
+        "Rowan Observatory opened in 2019. The telescope is named Selene. Tours start on Friday at 18:00.",
+        "Rowan Observatory field report: the dome opens at 17:30. Visitors enter through the east gate.",
+    ]
+    selected = []
+    for owner, title, text in [
+        (1, "S04 Rowan.txt", texts[0]),
+        (1, "S04 Rowan field report", texts[1]),
+        (1, "Unselected Rowan field report", texts[1]),
+    ]:
+        with scoped_context(user_id=owner, is_admin=False):
+            media_id, _, _ = db.add_media_with_keywords(
+                title=title,
+                media_type="document",
+                content=text,
+                owner_user_id=owner,
+                chunks=[{"text": text, "start_char": 0, "end_char": len(text)}],
+            )
+        if len(selected) < 2:
+            selected.append(media_id)
+    retriever = MediaDBRetriever(
+        db_path=db.db_path_str,
+        media_db=db,
+        user_id="1",
+        config=RetrievalConfig(max_results=8, min_score=0, use_fts=True, use_vector=False, fts_level=fts_level),
+    )
+    question = (
+        "From the two selected sources only, list the telescope, Friday tour time, "
+        "dome opening time and visitor entrance in four short cited bullets. /no_think"
+    )
+    with scoped_context(user_id=1, is_admin=False):
+        documents = await retriever.retrieve(question, allowed_media_ids=selected)
+    actual_ids = {str(document.metadata.get("media_id", document.id)) for document in documents}
+    assert actual_ids == {str(mid) for mid in selected}  # nosec B101 -- Real selected-evidence retrieval boundary.
+    with scoped_context(user_id=1, is_admin=False):
+        unscoped = await retriever.retrieve(question)
+    assert {str(document.metadata.get("media_id", document.id)) for document in unscoped} == {str(selected[0])}  # nosec B101 -- Keep the unscoped three-term fallback contract.
+    with scoped_context(user_id=2, is_admin=False):
+        assert await retriever.retrieve(question, allowed_media_ids=selected) == []  # nosec B101 -- Foreign-owner denial is required.

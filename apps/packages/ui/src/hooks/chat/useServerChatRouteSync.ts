@@ -1,0 +1,111 @@
+import React from "react"
+import { useLocation, useNavigate } from "react-router-dom"
+import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
+import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
+import { useStoreMessageOption } from "@/store/option"
+import {
+  historyHandoffState,
+  isAddressableServerChatId,
+  isCharacterChatRouteLocation,
+  isServerChatNavigationPending,
+  readServerChatRouteId,
+  reportMountedChatRoute,
+  serverChatNavigationWaitMs,
+  settleServerChatNavigation,
+  withoutConsumedParams,
+  withServerChatRouteId
+} from "@/hooks/chat/server-chat-route"
+
+/**
+ * Keep the chat page's address and the open saved chat in step (XP-05).
+ *
+ * - When the address changes (Back, Forward, a pasted `/chat?chat=<id>` link)
+ *   and names another chat, open that chat.
+ * - When the open chat changes without a navigation (a restored session, a new
+ *   chat's first saved turn, a chat the server no longer has), rewrite the
+ *   address in place so reloading reopens what is on screen. New chat plans
+ *   its own navigation, which adds a history entry.
+ *
+ * Character chat routes (`?mode=character`, also in a hash route) keep their
+ * own address handling.
+ */
+export const useServerChatRouteSync = () => {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const selectServerChat = useSelectServerChat()
+  const serverChatId = useStoreMessageOption((state) => state.serverChatId)
+  const temporaryChat = useStoreMessageOption((state) => state.temporaryChat)
+  const search = location.search ?? ""
+  const routeChatId = readServerChatRouteId(search)
+  const characterRoute = isCharacterChatRouteLocation(search, location.hash)
+  const handledLocationKey = React.useRef<string | null>(null)
+  // Bumped when a planned navigation is given up, to write the address then.
+  const [plannedNavigationExpiry, setPlannedNavigationExpiry] = React.useState(0)
+
+  React.useEffect(() => {
+    reportMountedChatRoute({ namesChat: characterRoute || routeChatId !== null })
+  }, [characterRoute, routeChatId])
+  React.useEffect(() => () => reportMountedChatRoute(null), [])
+
+  React.useEffect(() => {
+    const locationChanged = handledLocationKey.current !== location.key
+    handledLocationKey.current = location.key
+    if (characterRoute) return
+    const state = useStoreMessageOption.getState()
+    if (locationChanged) settleServerChatNavigation()
+    if (locationChanged && routeChatId) {
+      if (routeChatId === state.serverChatId) return
+      const opened = selectServerChat(
+        { id: routeChatId } as ServerChatSummary,
+        { fromAddress: true }
+      )
+      if (opened !== false) return
+      // The user kept the chat on screen (for example a temporary chat they
+      // chose not to discard), so the address goes back to naming that chat.
+    }
+    const current = useStoreMessageOption.getState()
+    // No saved chat open (null or not yet set) means the address names none.
+    const openChatId = current.temporaryChat ? null : current.serverChatId ?? null
+    const activeChatId =
+      openChatId && isAddressableServerChatId(openChatId) ? openChatId : null
+    if (activeChatId === routeChatId) return
+    // A navigation that names this chat is on its way; let it land, and look
+    // again if it never does. A same-page push slower than the wait
+    // (PLANNED_CHAT_NAVIGATION_TIMEOUT_MS, 3 s) is treated like a lost one:
+    // the address is then written with replace, which on the WebUI cancels
+    // the push still in flight, so that slow push adds no history entry.
+    if (isServerChatNavigationPending(activeChatId)) {
+      const timer = setTimeout(
+        () => setPlannedNavigationExpiry((count) => count + 1),
+        serverChatNavigationWaitMs()
+      )
+      return () => clearTimeout(timer)
+    }
+    // A history handoff link is consumed by the Playground first; writing the
+    // address meanwhile would drop it. Once it and any Settings or research
+    // return parameters are consumed, writing from the router's stale query
+    // must not bring them back.
+    if (historyHandoffState(search) === "pending") return
+    const baseSearch = withoutConsumedParams(search)
+    navigate(
+      {
+        pathname: location.pathname,
+        search: withServerChatRouteId(baseSearch, activeChatId),
+        hash: location.hash
+      },
+      { replace: true }
+    )
+  }, [
+    characterRoute,
+    location.hash,
+    location.key,
+    location.pathname,
+    navigate,
+    plannedNavigationExpiry,
+    routeChatId,
+    search,
+    selectServerChat,
+    serverChatId,
+    temporaryChat
+  ])
+}

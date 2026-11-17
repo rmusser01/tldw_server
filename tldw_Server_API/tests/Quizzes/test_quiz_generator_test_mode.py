@@ -1467,3 +1467,42 @@ async def test_generate_quiz_revalidates_llm_assertion_reasoning_immediately_bef
         )
 
     persistence.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("count", "minimum", "maximum"),
+    [(1, 2000, 2000), (5, 4000, 8000), (50, 8000, 8000)],
+)
+async def test_generation_budget_allows_structured_questions_within_existing_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+    quizzes_db: CharactersRAGDB,
+    media_db: MediaDatabase,
+    count: int,
+    minimum: int,
+    maximum: int,
+):
+    monkeypatch.setenv("TEST_MODE", "0")
+    note_id = quizzes_db.add_note(title="Biology", content="DNA stands for deoxyribonucleic acid.")
+    budgets = []
+
+    class ProviderBoundaryReached(RuntimeError):
+        pass
+
+    async def capture_budget(**kwargs):
+        budgets.append(kwargs["max_tokens"])
+        raise ProviderBoundaryReached
+
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", capture_budget)
+    with pytest.raises(ProviderBoundaryReached):
+        await generate_quiz_from_sources(
+            db=quizzes_db,
+            media_db=media_db,
+            sources=[{"source_type": "note", "source_id": note_id}],
+            num_questions=count,
+            question_plan=[{"question_type": "multiple_choice", "count": count, "option_count": 4}],
+            api_provider="llamacpp",
+        )
+
+    assert len(budgets) == 1  # nosec B101 -- Exactly one provider request; no hidden retry.
+    assert minimum <= budgets[0] <= maximum  # nosec B101 -- Output headroom retains the floor and ceiling.

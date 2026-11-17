@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import QueryResult
@@ -10,7 +11,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import QueryResult
 class RowAdapter:
     """Row adapter that supports both key and index access."""
 
-    def __init__(self, row_dict: dict[str, Any], description: list[tuple] | None = None):
+    def __init__(self, row_dict: dict[str, Any], description: Sequence[Sequence[Any]] | None = None):
         self._data = row_dict
         self._cols = [entry[0] for entry in (description or []) if entry and len(entry) > 0]
 
