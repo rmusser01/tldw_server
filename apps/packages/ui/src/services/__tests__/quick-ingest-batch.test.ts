@@ -42,6 +42,125 @@ const startQuickIngestSession = (input: Parameters<typeof startBatch>[0]) => sta
 const cancelQuickIngestSession = (input: Parameters<typeof cancelBatch>[0]) => cancelBatch({ requestScope, ...input })
 
 describe("submitQuickIngestBatch", () => {
+  it.each(["file", "url"] as const)("submits the next native file while its first accepted %s is still processing", async (firstKind) => {
+    vi.useFakeTimers()
+    const owner = new AbortController()
+    try {
+      const first = { id: "first", directFile: new File(["sample"], "first.pdf") }
+      const second = { id: "second", directFile: new File(["sample"], "second.pdf") }
+      let firstComplete = false
+      mocks.bgUpload
+        .mockResolvedValueOnce({ batch_id: "batch-first", jobs: [{ id: 50 }] })
+        .mockResolvedValueOnce({ batch_id: "batch-second", jobs: [{ id: 51 }] })
+      mocks.bgRequest.mockImplementation(({ path }) =>
+        path.endsWith("/50") && !firstComplete
+          ? { ok: true, data: { status: "processing" } }
+          : { ok: true, data: { status: "completed", result: { media_id: path.endsWith("/50") ? 450 : 451 } } }
+      )
+      const onTrackingMetadata = vi.fn()
+      const onItemResult = vi.fn()
+      const run = submitQuickIngestBatch({
+        entries: firstKind === "url" ? [{ id: "first", url: "https://example.com/first.pdf", type: "pdf" }] : [],
+        files: firstKind === "file" ? [first, second] : [second],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: "qi-direct-parallel-poll",
+        signal: owner.signal,
+        onTrackingMetadata,
+        onItemResult,
+      })
+      void run.catch(() => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.bgUpload).toHaveBeenCalledTimes(2)
+      expect(mocks.bgUpload.mock.calls[1][0].directFile).toBe(second.directFile)
+      expect(onTrackingMetadata.mock.calls.map(([item]) => [item.batchIds, item.jobIdToItemId])).toEqual([
+        [["batch-first"], { 50: "first" }],
+        [["batch-second"], { 51: "second" }],
+      ])
+      expect(onItemResult).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: "second", mediaId: 451 }))
+      firstComplete = true
+      await vi.advanceTimersByTimeAsync(1_200)
+      expect((await run).results).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "first", mediaId: 450 }),
+        expect.objectContaining({ id: "second", mediaId: 451 }),
+      ]))
+    } finally {
+      owner.abort()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([403, 404, 410])("interrupts monitoring on an authoritative HTTP %i without failing the server job", async (status) => {
+    vi.useFakeTimers()
+    const owner = new AbortController()
+    try {
+      mocks.bgUpload.mockResolvedValue({ batch_id: "inaccessible", jobs: [{ id: 77 }] })
+      mocks.bgRequest.mockResolvedValue({ ok: false, status })
+      const onItemResult = vi.fn()
+      const finished = vi.fn()
+      const run = submitQuickIngestBatch({
+        entries: [],
+        files: [{ id: "pdf", directFile: new File(["sample"], "sample.pdf") }],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: "qi-direct-interrupted",
+        signal: owner.signal,
+        onItemResult,
+      })
+      void run.then(finished, () => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(finished).toHaveBeenCalledWith(expect.objectContaining({ ok: true, results: [], interruptedJobIds: [77] }))
+      expect(onItemResult).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    } finally {
+      owner.abort()
+      vi.useRealTimers()
+    }
+  })
+
+  it("keeps an accepted native job after five minutes and recovers its last known status after an outage", async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.bgUpload.mockResolvedValue({ batch_id: "long-job-batch", jobs: [{ id: 77 }] })
+      mocks.bgRequest
+        .mockResolvedValueOnce({ ok: true, data: { status: "queued" } })
+        .mockRejectedValueOnce(Object.assign(new Error("Service unavailable"), { status: 503 }))
+        .mockResolvedValueOnce({ ok: true, data: { status: "running", progress_message: "Extracting PDF text" } })
+        .mockResolvedValueOnce({ ok: true, data: { status: "completed", result: { media_id: 42 } } })
+      const onJobProgress = vi.fn()
+      const onJobStatusUnavailable = vi.fn()
+      const onItemResult = vi.fn()
+      const startedAt = Date.now()
+      const run = submitQuickIngestBatch({
+        entries: [],
+        files: [{ id: "pdf", directFile: new File(["sample"], "sample.pdf") }],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: "qi-direct-long-job",
+        onJobProgress,
+        onJobStatusUnavailable,
+        onItemResult,
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(onJobProgress).toHaveBeenCalledWith("pdf", expect.objectContaining({ status: "queued" }))
+      vi.setSystemTime(startedAt + 6 * 60_000)
+      await vi.advanceTimersByTimeAsync(1_200)
+      expect(onJobStatusUnavailable).toHaveBeenLastCalledWith(true)
+      expect(onItemResult).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(9_999)
+      expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(onJobStatusUnavailable).toHaveBeenLastCalledWith(false)
+      expect(onJobProgress).toHaveBeenLastCalledWith("pdf", expect.objectContaining({ status: "running" }))
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect((await run).results).toEqual([expect.objectContaining({ status: "ok", mediaId: 42 })])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+
   it.each([
     ["doc.pdf", "application/pdf", 250 * 1024 ** 2, "250 MB"],
     ["book.epub", "application/epub+zip", 250 * 1024 ** 2, "250 MB"],
@@ -134,7 +253,7 @@ describe("submitQuickIngestBatch", () => {
         processOnly: false,
         __quickIngestSessionId: "qi-direct-large-poll",
       })
-      await vi.advanceTimersByTimeAsync(2_000)
+      await vi.advanceTimersByTimeAsync(10_000)
       expect((await run).results).toEqual([expect.objectContaining({ id: "large", status: "ok" })])
       expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
     } finally {
@@ -1164,25 +1283,53 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
-  it("stops submitting later direct items once the session is cancelled", async () => {
+  it("releases a slow accepted-job monitor when cancelling the direct session", async () => {
     vi.useFakeTimers()
+    const owner = new AbortController()
+    try {
+      const startedAt = Date.now()
+      const sessionId = "qi-direct-long-cancel"
+      mocks.bgUpload.mockResolvedValue({ batch_id: "long-cancel", jobs: [{ id: 70 }] })
+      mocks.bgRequest.mockImplementation(({ method }) => {
+        if (method === "POST") return { ok: true, data: { success: true } }
+        vi.setSystemTime(startedAt + 6 * 60_000)
+        return { ok: true, data: { status: "queued" } }
+      })
+      const settled = vi.fn()
+      const run = submitQuickIngestBatch({
+        entries: [],
+        files: [{ id: "pdf", directFile: new File(["sample"], "sample.pdf") }],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: sessionId,
+        signal: owner.signal,
+      })
+      void run.then(settled, () => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+
+      await cancelQuickIngestSession({ sessionId, signal: owner.signal })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(owner.signal.aborted).toBe(false)
+      expect(settled).toHaveBeenCalledWith(expect.objectContaining({
+        results: [expect.objectContaining({ id: "pdf", outcome: "cancelled" })],
+      }))
+    } finally {
+      owner.abort()
+      vi.useRealTimers()
+    }
+  })
+
+  it("stops submitting later direct items once the session is cancelled", async () => {
     mocks.bgUpload.mockResolvedValue({
       batch_id: "batch-stop-1",
       jobs: [{ id: 901 }]
     })
 
-    let statusPollCount = 0
     mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
       const path = String(request?.path || "")
       if (path.includes("/api/v1/media/ingest/jobs/cancel?batch_id=batch-stop-1")) {
         return { ok: true, data: { success: true } }
-      }
-      if (path === "/api/v1/media/ingest/jobs/901") {
-        statusPollCount += 1
-        return {
-          ok: true,
-          data: { status: statusPollCount > 1 ? "cancelled" : "processing" }
-        }
       }
       return { ok: false, error: "unexpected path" }
     })
@@ -1203,7 +1350,10 @@ describe("submitQuickIngestBatch", () => {
       files: [],
       storeRemote: true,
       processOnly: false,
-      __quickIngestSessionId: "direct-session-stop",
+      __quickIngestSessionId: "qi-direct-session-stop",
+      onTrackingMetadata: () => {
+        void cancelQuickIngestSession({ sessionId: "qi-direct-session-stop" })
+      },
       common: {
         perform_analysis: true,
         perform_chunking: false,
@@ -1212,23 +1362,12 @@ describe("submitQuickIngestBatch", () => {
       advancedValues: {}
     })
 
-    await vi.waitFor(() => {
-      expect(mocks.bgRequest).toHaveBeenCalledWith(
-        expect.objectContaining({
-          path: "/api/v1/media/ingest/jobs/901",
-          method: "GET"
-        })
-      )
-    })
-
-    await cancelQuickIngestSession({
-      sessionId: "direct-session-stop",
-      reason: "user_cancelled"
-    })
-    await vi.advanceTimersByTimeAsync(2_000)
     const runResult = await runPromise
 
     expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/media/ingest/jobs/cancel?batch_id=batch-stop-1&reason=user_cancelled",
+    }))
     expect(runResult.results?.map((item) => item.id)).not.toContain("entry-stop-2")
   })
 

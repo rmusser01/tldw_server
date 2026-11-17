@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import json
@@ -10,6 +11,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from fastapi import HTTPException
 from loguru import logger
@@ -785,6 +787,8 @@ async def run_media_ingest_jobs_worker(
     queue: str | None = None,
     worker_id: str | None = None,
 ) -> None:
+    if stop_event is not None and stop_event.is_set():
+        return
     if JobManager._ACQUIRE_GATE_ENABLED:
         logger.warning("Media Ingest Jobs worker starting with acquire gate enabled; clearing stale gate state")
     JobManager.set_acquire_gate(False)
@@ -822,26 +826,39 @@ async def run_media_ingest_jobs_worker(
         except Exception:
             sdk.stop()
 
-    logger.info("Starting Media Ingest Jobs worker (queue={})", queue_name)
+    logger.info("Starting Media Ingest Jobs worker (queue={}, worker={})", queue_name, resolved_worker_id)
     watcher = asyncio.create_task(_watch_stop())
     try:
         # The trusted dispatcher crosses Job owners; content work still uses each persisted owner.
         with JobManager.scoped_rls_context(is_admin=True, domain_allowlist=_MEDIA_DOMAIN, owner_user_id=None):
             await sdk.run(handler=_handler, cancel_check=_cancel_check, progress_cb=_progress_cb)
     finally:
-        with contextlib.suppress(Exception):
-            watcher.cancel()
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher
 
 
 async def run_media_ingest_heavy_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
     heavy_queue = (os.getenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE") or "").strip() or "low"
-    await run_media_ingest_jobs_worker(
-        stop_event,
-        queue=heavy_queue,
-        worker_id=f"media-ingest-worker-{heavy_queue}",
-    )
+    concurrency = max(1, min(4, _coerce_int(os.getenv("MEDIA_INGEST_HEAVY_JOBS_CONCURRENCY"), 2)))
+    worker_prefix = f"media-ingest-worker-{heavy_queue}"
+    if concurrency == 1:
+        await run_media_ingest_jobs_worker(stop_event, queue=heavy_queue, worker_id=worker_prefix)
+        return
+
+    pool_id = uuid4().hex
+    async with asyncio.TaskGroup() as pool:
+        for slot in range(1, concurrency + 1):
+            worker_id = f"{worker_prefix}-{pool_id}-{slot}"
+            pool.create_task(
+                run_media_ingest_jobs_worker(stop_event, queue=heavy_queue, worker_id=worker_id),
+                name=worker_id,
+            )
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run a media ingest Jobs worker")
+    parser.add_argument("--heavy", action="store_true", help="Run the heavy ingest worker pool")
+    run_worker = run_media_ingest_heavy_jobs_worker if parser.parse_args().heavy else run_media_ingest_jobs_worker
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run_media_ingest_jobs_worker())
+        asyncio.run(run_worker())

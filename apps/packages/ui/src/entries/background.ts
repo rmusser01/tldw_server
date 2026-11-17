@@ -84,6 +84,9 @@ import {
 import {
   createIngestJobsTracker,
   extractIngestJobSubmitError,
+  getQuickIngestJobPollInterval,
+  isTransientIngestStatusRead,
+  type IngestJobStatusResponse,
   pollTrackedIngestJobs,
   requireSubmittedIngestJobs,
 } from "@/services/tldw/ingest-jobs-orchestrator";
@@ -2015,7 +2018,7 @@ export default defineBackground({
         return result;
       };
       return {
-        requestScope, assertCurrent, validate,
+        requestScope, assertCurrent, validate, signal: controller.signal,
         request: (payload: WorkerPayload) => dispatch(false, payload),
         upload: (payload: WorkerPayload) => dispatch(true, payload),
         release: () => { active = false; quickIngestAuthorityControllers.delete(controller); quickIngestAuthorityValidators.delete(validate); },
@@ -2076,19 +2079,31 @@ export default defineBackground({
     // Poll the remote ingest jobs held by `tracker` to terminal state. This is
     // the single implementation used by both the live quick-ingest run and the
     // resume-after-restart path, so both map results identically.
-    const pollRemoteIngestJobs = (opts: {
+    const pollRemoteIngestJobs = async (opts: {
       lease: QuickIngestLease;
       tracker: ReturnType<
         typeof createIngestJobsTracker<QuickIngestRemoteResultMeta>
       >;
-      ingestTimeoutMs: number;
       isCancelled: () => boolean;
       onPendingJobIds?: (jobIds: number[]) => void;
-    }): Promise<any[]> => {
-      return pollTrackedIngestJobs({
+    }) => {
+      const startedAt = Date.now();
+      const interruptedJobIds: number[] = [];
+      const readStatus = async (path: string): Promise<IngestJobStatusResponse | undefined> => {
+        try {
+          return await opts.lease.request({ path, method: "GET", timeoutMs: 4200 });
+        } catch (error) {
+          opts.lease.assertCurrent();
+          if (isRequestConfigScopeChangedError(error)) throw error;
+          const status = (error as { status?: number } | null)?.status;
+          return { ok: false, status: status ?? 0 };
+        }
+      };
+      const results = await pollTrackedIngestJobs({
         tracker: opts.tracker,
-        timeoutMs: opts.ingestTimeoutMs,
-        pollIntervalMs: 1200,
+        timeoutMs: Infinity,
+        pollIntervalMs: () => getQuickIngestJobPollInterval(startedAt, 1200),
+        signal: opts.lease.signal,
         isCancelled: opts.isCancelled,
         onCancel: async () => {
           await cancelRemoteIngestBatches(opts.lease, opts.tracker, "user_cancelled");
@@ -2102,15 +2117,9 @@ export default defineBackground({
           const limit = Math.min(500, Math.max(jobIds.length, 100));
           let offset = 0;
           for (let page = 0; page < 10; page += 1) {
-            const response = (await opts.lease.request({
-              path: `/api/v1/media/ingest/jobs?batch_id=${encodeURIComponent(
-                batchId,
-              )}&limit=${limit}&offset=${offset}`,
-              method: "GET",
-              timeoutMs: 4200,
-            })) as
-              | { ok: boolean; status?: number; data?: any; error?: string }
-              | undefined;
+            const response = await readStatus(
+              `/api/v1/media/ingest/jobs?batch_id=${encodeURIComponent(batchId)}&limit=${limit}&offset=${offset}`,
+            );
             if (!response?.ok) {
               // First page failure carries the error for the whole batch;
               // later-page failures keep whatever was already collected.
@@ -2145,29 +2154,13 @@ export default defineBackground({
             data: { jobs: collected },
           } as { ok: boolean; status?: number; data?: any; error?: string };
         },
-        fetchJob: async (jobId) =>
-          (await opts.lease.request({
-            path: `/api/v1/media/ingest/jobs/${jobId}`,
-            method: "GET",
-            timeoutMs: 4200,
-          })) as
-            | { ok: boolean; status?: number; data?: any; error?: string }
-            | undefined,
+        fetchJob: (jobId) => readStatus(`/api/v1/media/ingest/jobs/${jobId}`),
         mapRequestError: (item, response) => {
-          if (
-            isLikelyAuthError(Number(response?.status || 0), response?.error)
-          ) {
-            return {
-              id: item.meta.id,
-              status: "error",
-              url: item.meta.url,
-              fileName: item.meta.fileName,
-              type: item.meta.type,
-              error: response?.error || "Authentication required.",
-              data: undefined,
-            };
+          if (response?.status === undefined || isTransientIngestStatusRead(response.status)) {
+            return undefined;
           }
-          return undefined;
+          interruptedJobIds.push(item.jobId);
+          return null;
         },
         mapCompleted: (item, data) => ({
           id: item.meta.id,
@@ -2196,6 +2189,7 @@ export default defineBackground({
           data: details.data,
         }),
       });
+      return { results: results.filter((result) => result !== null), interruptedJobIds };
     };
 
     // Resume + finalize a quick-ingest batch's remote-job polling phase from its
@@ -2219,6 +2213,7 @@ export default defineBackground({
         ? record.collectedResults.slice()
         : [];
       let processedCount = record.processedCount;
+      let interruptedJobIds: number[] = [];
       const plannedItems = new Map<
         string,
         { collectionId: number; itemId: number; idempotencyKey?: string | null }
@@ -2269,12 +2264,9 @@ export default defineBackground({
         }
 
         if (tracker.hasItems()) {
-          const remoteResults = await pollRemoteIngestJobs({
-            lease,
-            tracker,
-            ingestTimeoutMs,
-            isCancelled,
-          });
+          const terminal = await pollRemoteIngestJobs({ lease, tracker, isCancelled });
+          const remoteResults = terminal.results;
+          interruptedJobIds = terminal.interruptedJobIds;
           // Terminal PATCHes are independent per item: fan them out together
           // (WP-38), then emit the per-item progress events sequentially in
           // result order so the wizard observes the same event stream.
@@ -2314,7 +2306,10 @@ export default defineBackground({
           await emitBackgroundMessage(undefined, "tldw:quick-ingest/completed", {
             sessionId,
             results: out,
-            summary: { resumedAfterRestart: true },
+            summary: {
+              resumedAfterRestart: true,
+              ...(interruptedJobIds.length ? { interruptedJobIds } : {}),
+            },
           });
         }
       } catch (error) {
@@ -3086,7 +3081,7 @@ export default defineBackground({
     const runQuickIngestBatch = async (
       payload: any,
       runtimeContext?: QuickIngestSessionRunContext,
-    ): Promise<{ ok: boolean; results: any[] }> => {
+    ): Promise<{ ok: boolean; results: any[]; interruptedJobIds?: number[] }> => {
       const lease = createQuickIngestLease(payload?.requestScope);
       try {
       await lease.validate();
@@ -3132,6 +3127,7 @@ export default defineBackground({
       const totalCount = entries.length + files.length;
       let processedCount = 0;
       const out: any[] = [];
+      let interruptedJobIds: number[] = [];
       const queuedRemoteJobs =
         createIngestJobsTracker<QuickIngestRemoteResultMeta>();
       const conferenceBatchMetadata =
@@ -3535,11 +3531,10 @@ export default defineBackground({
 
       // Poll the queued remote jobs to completion using the shared implementation
       // (also used by the post-restart resume path) so both map results the same.
-      const pollQueuedRemoteJobs = async (): Promise<any[]> =>
+      const pollQueuedRemoteJobs = () =>
         pollRemoteIngestJobs({
           lease,
           tracker: queuedRemoteJobs,
-          ingestTimeoutMs,
           isCancelled,
           onPendingJobIds: (jobIds) => {
             runtimeContext?.setJobIds(jobIds);
@@ -4188,7 +4183,9 @@ export default defineBackground({
         // worker suspension mid-poll can be resumed from the alarm/startup path.
         persistQuickIngestBatchRecord();
         try {
-          const remoteResults = await pollQueuedRemoteJobs();
+          const terminal = await pollQueuedRemoteJobs();
+          const remoteResults = terminal.results;
+          interruptedJobIds = terminal.interruptedJobIds;
           // Order the per-item results by their input position so pooled
           // submissions cannot permute the event stream: the wizard sees the
           // results in the same order the sequential loop produced them.
@@ -4236,7 +4233,7 @@ export default defineBackground({
       }
 
       lease.assertCurrent();
-      return { ok: true, results: out };
+      return { ok: true, results: out, ...(interruptedJobIds.length ? { interruptedJobIds } : {}) };
       } finally { lease.release(); }
     };
 
@@ -4245,6 +4242,7 @@ export default defineBackground({
         const result = await runQuickIngestBatch(payload, context);
         return {
           results: result.results,
+          summary: result.interruptedJobIds ? { interruptedJobIds: result.interruptedJobIds } : undefined,
         };
       },
       emit: async (type, payload) => {
