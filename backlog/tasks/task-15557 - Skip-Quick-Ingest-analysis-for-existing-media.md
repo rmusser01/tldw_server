@@ -2,6 +2,8 @@
 id: TASK-15557
 title: Skip Quick Ingest analysis for existing media
 status: In Progress
+references:
+- https://github.com/rmusser01/tldw_server/pull/3493
 ---
 
 ## Description
@@ -22,6 +24,7 @@ Check the existing media identity before Quick Ingest analysis when overwrite is
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation follows upstream ADR-020 for owner-scoped Media storage and ADR-003 for the Jobs boundary. No new ADR. Reuse the persisted source URL or upload identity before admission and analysis. Keep save-time dedupe for content-only matches and concurrent first submissions. The synchronous fallback admits analysis once for any inputs that still need it. Direct Quick Ingest web scraping opts in on a persisted single URL. Results retain the existing Media ID and surface the skip warning.
 Observed the duplicate worker and result view fail before the fix. Verified 97 backend tests plus 2 provider-quota endpoint cases, 256 focused frontend tests plus 53 wizard integration tests, the generated OpenAPI fingerprint and path union, and zero Bandit findings on the changed modules. Human Change summary and public dev merge are pending.
+Requester waived the PR change summary. Rebased on dev and reviewed the duplicate paths independently. The follow-up defers audio/video admission and AI-assisted chunking, preserves planned collection links and upload-byte accounting, and repairs the failing CI fixtures. The targeted media suite passed 76 tests, and Bandit reported no findings on the follow-up application modules. Public merge-queue verification is pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -64,17 +64,18 @@ class _CollectionUpdateRecorder:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("source_kind", "input_ref", "owner", "overwrite", "skipped"),
+    ("media_type", "source_kind", "input_ref", "owner", "overwrite", "skipped"),
     [
-        ("file", "report.pdf", "2", False, True),
-        ("url", "https://example.com/report.pdf", "2", False, True),
-        ("file", "report.pdf", "2", True, False),
-        ("file", "new-report.pdf", "2", False, False),
-        ("file", "report.pdf", "3", False, False),
+        ("pdf", "file", "report.pdf", "2", False, True),
+        ("pdf", "url", "https://example.com/report.pdf", "2", False, True),
+        ("video", "url", "https://example.com/video.mp4", "2", False, True),
+        ("pdf", "file", "report.pdf", "2", True, False),
+        ("pdf", "file", "new-report.pdf", "2", False, False),
+        ("pdf", "file", "report.pdf", "3", False, False),
     ],
 )
-async def test_document_worker_checks_existing_media_before_analysis(
-    monkeypatch, tmp_path, source_kind, input_ref, owner, overwrite, skipped,
+async def test_worker_checks_existing_media_before_analysis(
+    monkeypatch, tmp_path, media_type, source_kind, input_ref, owner, overwrite, skipped,
 ):
     from tldw_Server_API.app.core.Jobs.manager import JobManager
     from tldw_Server_API.app.services import media_ingest_jobs_worker as worker
@@ -87,7 +88,7 @@ async def test_document_worker_checks_existing_media_before_analysis(
         media_id, media_uuid, _ = db.add_media_with_keywords(
             url="report.pdf" if source_kind == "file" else input_ref,
             title="Report",
-            media_type="pdf",
+            media_type=media_type,
             content="Previously saved report.",
             keywords=[],
         )
@@ -103,9 +104,8 @@ async def test_document_worker_checks_existing_media_before_analysis(
     monkeypatch.setattr(worker, "_admit_or_refuse_analysis", admit_analysis)
     monkeypatch.setattr(worker, "process_document_like_item", process_document)
     monkeypatch.setattr(worker, "_schedule_embeddings", schedule_embeddings)
-    monkeypatch.setattr(
-        worker, "async_resolve_chunking_options_and_plan", AsyncMock(return_value=(None, None)),
-    )
+    plan_chunks = AsyncMock(return_value=(None, None))
+    monkeypatch.setattr(worker, "async_resolve_chunking_options_and_plan", plan_chunks)
     manager = JobManager()
     job = manager.create_job(
         domain="media_ingest",
@@ -118,7 +118,10 @@ async def test_document_worker_checks_existing_media_before_analysis(
             "input_ref": input_ref,
             "temp_dir": str(tmp_path),
             "options": {
-                "media_type": "pdf",
+                "media_type": media_type,
+                "perform_chunking": True,
+                "chunking_mode": "auto",
+                "auto_chunking_use_llm": True,
                 "perform_analysis": True,
                 "api_name": "deepseek",
                 "overwrite_existing": overwrite,
@@ -136,15 +139,18 @@ async def test_document_worker_checks_existing_media_before_analysis(
     if skipped:
         assert result["status"] == "Skipped"
         assert result["media_id"] == media_id
-        assert result["media_uuid"] == media_uuid
+        if media_type == "pdf":
+            assert result["media_uuid"] == media_uuid
         assert result["warnings"] == ["Analysis skipped because this item is already in your library."]
         admit_analysis.assert_not_awaited()
+        plan_chunks.assert_not_awaited()
         process_document.assert_not_awaited()
         schedule_embeddings.assert_not_called()
     else:
         assert result["status"] == "Success"
         assert result["media_id"] == 99
         admit_analysis.assert_awaited_once()
+        plan_chunks.assert_awaited_once()
         process_document.assert_awaited_once()
 
 

@@ -20,7 +20,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     get_usage_event_logger,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
+from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
 from tldw_Server_API.app.api.v1.schemas.media_request_models import WebScrapingRequest
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_url
@@ -94,7 +94,7 @@ async def process_web_scraping_endpoint(
                         "warnings": [DUPLICATE_ANALYSIS_WARNING],
                     }
             # Summaries may use a default provider. Admit analysis before any page is fetched.
-            await enforce_llm_quota(current_user.id)
+            await usage_quota_deps.enforce_llm_quota(current_user.id)
 
         # Usage logging is best-effort; never fail the request.
         with contextlib.suppress(Exception):

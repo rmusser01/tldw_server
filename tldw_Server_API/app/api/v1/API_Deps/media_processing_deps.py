@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.exceptions import APIValidationError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter import (
     resolve_default_transcription_model,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.media_request_models import media_analysis_requested
 
 try:
     HTTP_422_UNPROCESSABLE = status.HTTP_422_UNPROCESSABLE_CONTENT
@@ -659,16 +660,6 @@ async def get_process_emails_form(
         )
     except ValidationError as exc:
         _raise_422(exc)
-
-
-def media_analysis_requested(form_data: Any) -> bool:
-    """True when a media request asks for LLM analysis.
-
-    The same condition the audio and video libraries use before they call the
-    LLM: analysis on, and a provider named that is not "none".
-    """
-    api_name = getattr(form_data, "api_name", None)
-    return bool(getattr(form_data, "perform_analysis", False) and api_name and str(api_name).lower() != "none")
 
 
 def media_analysis_provider(form_data: Any) -> str | None:

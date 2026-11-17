@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     prepare_chunking_options_dict,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
+    PreparedMediaBatch,
     _enforce_and_record_media_bytes,
     find_duplicate_document_before_analysis,
     process_batch_media,
@@ -635,7 +636,9 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
         )
         analysis_refusal = None
         chunking_plan = None
-        if result_item is None:
+
+        async def prepare_new_item() -> PreparedMediaBatch:
+            nonlocal form_data, analysis_refusal, chunking_plan
             analysis_refusal = await _admit_or_refuse_analysis(form_data)
             if analysis_refusal is not None:
                 form_data = form_data.model_copy(update={"perform_analysis": False})
@@ -661,14 +664,17 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
                 except Exception as exc:
                     logger.debug("Chunking template auto-apply failed: {}", exc)
 
+            return form_data, chunk_options, analysis_refusal
+
+        if result_item is None:
+            progress.percent = 20.0
+            progress.message = "process"
+            jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
             if str(form_data.media_type) in {"video", "audio"}:
                 urls = [source] if source_kind == "url" else []
                 uploaded_paths = [source] if source_kind == "file" else []
                 source_to_ref_map = {str(source): input_ref}
-
-                progress.percent = 20.0
-                progress.message = "process"
-                jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
                 results = await process_batch_media(
                     media_type=str(form_data.media_type),
@@ -676,20 +682,17 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
                     uploaded_file_paths=uploaded_paths,
                     source_to_ref_map=source_to_ref_map,
                     form_data=form_data,
-                    chunk_options=chunk_options,
+                    chunk_options=None,
                     loop=loop,
                     db_path=str(db_path),
                     client_id=str(client_id),
-                    temp_dir=temp_dir,
+                    temp_dir=Path(temp_dir),
                     user_id=int(user_id) if user_id.isdigit() else None,
                     cancel_check=cancel_check,
-                    analysis_refusal=analysis_refusal,
+                    prepare_new_items=prepare_new_item,
                 )
             else:
-                progress.percent = 20.0
-                progress.message = "process"
-                jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
-
+                form_data, chunk_options, _ = await prepare_new_item()
                 result = await process_document_like_item(
                     item_input_ref=str(input_ref),
                     processing_source=str(source),
