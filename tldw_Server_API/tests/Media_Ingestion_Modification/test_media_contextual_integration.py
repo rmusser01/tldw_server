@@ -15,6 +15,10 @@ from pathlib import Path
 
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
+from tldw_Server_API.tests.Media_Ingestion_Modification.test_add_media_endpoint import SAMPLE_EPUB_PATH, SAMPLE_PDF_PATH
+
+# A real extension per media type, so the downloaded file passes the add flow's validation.
+_URL_EXTENSION = {"document": "txt", "ebook": "epub", "video": "mp4", "audio": "mp3"}
 
 
 def _ensure_media_add_route_registered(app) -> None:
@@ -74,6 +78,29 @@ class TestMediaEndpointContextualIntegration:
             else:
                 app.dependency_overrides[dep_get_db] = original_db_override
 
+    @pytest.fixture(autouse=True)
+    def _offline_url_download(self):
+        """Every example.com URL lands as a type-valid local file (the sample PDF or EPUB by extension, text otherwise).
+
+        No lookup or connect leaves the machine, and the file passes the add flow's MIME validation, so the
+        mocked processor is reached.
+        """
+
+        async def fake_download_url_async(**kwargs):
+            target = Path(str(kwargs["target_dir"])) / Path(kwargs["url"]).name
+            sample = {".pdf": SAMPLE_PDF_PATH, ".epub": SAMPLE_EPUB_PATH}.get(target.suffix)
+            if sample is None:
+                target.write_text("Controlled document content.", encoding="utf-8")
+            else:
+                target.write_bytes(sample.read_bytes())
+            return target
+
+        with patch(
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils.download_url_async",
+            side_effect=fake_download_url_async,
+        ), patch("tldw_Server_API.app.core.Security.url_validation.assert_url_safe", return_value=None):
+            yield
+
     @pytest.fixture
     def auth_headers(self):
         # Real app runs in single_user mode by default in tests; use test API key
@@ -108,13 +135,13 @@ class TestMediaEndpointContextualIntegration:
             )
 
             # Verify the chunking options were passed correctly
-            if mock_process.called:
-                call_args = mock_process.call_args
-                chunk_options = call_args[1].get('chunk_options', {})
+            assert mock_process.called, response.text
+            call_args = mock_process.call_args
+            chunk_options = call_args[1].get('chunk_options', {})
 
-                assert chunk_options.get('enable_contextual_chunking') == True
-                assert chunk_options.get('contextual_llm_model') == "gpt-4"
-                assert chunk_options.get('context_window_size') == 750
+            assert chunk_options.get('enable_contextual_chunking') == True
+            assert chunk_options.get('contextual_llm_model') == "gpt-4"
+            assert chunk_options.get('context_window_size') == 750
 
     def test_add_media_with_contextual_chunking_disabled(self, test_client, auth_headers):
 
@@ -137,11 +164,11 @@ class TestMediaEndpointContextualIntegration:
                 headers=auth_headers
             )
 
-            if mock_process.called:
-                call_args = mock_process.call_args
-                chunk_options = call_args[1].get('chunk_options', {})
+            assert mock_process.called, response.text
+            call_args = mock_process.call_args
+            chunk_options = call_args[1].get('chunk_options', {})
 
-                assert chunk_options.get('enable_contextual_chunking') == False
+            assert chunk_options.get('enable_contextual_chunking') == False
 
     def test_add_media_contextual_defaults_from_config(self, test_client, auth_headers):
 
@@ -164,14 +191,14 @@ class TestMediaEndpointContextualIntegration:
                 headers=auth_headers
             )
 
-            if mock_process.called:
-                call_args = mock_process.call_args
-                chunk_options = call_args[1].get('chunk_options', {})
+            assert mock_process.called, response.text
+            call_args = mock_process.call_args
+            chunk_options = call_args[1].get('chunk_options', {})
 
-                # Should have default value (False based on our config)
-                assert chunk_options.get('enable_contextual_chunking') == False
-                assert chunk_options.get('contextual_llm_model') is None
-                assert chunk_options.get('context_window_size') is None
+            # Should have default value (False based on our config)
+            assert chunk_options.get('enable_contextual_chunking') == False
+            assert chunk_options.get('contextual_llm_model') is None
+            assert chunk_options.get('context_window_size') is None
 
     def test_add_media_file_upload_with_contextual(self, test_client):
 
@@ -179,6 +206,12 @@ class TestMediaEndpointContextualIntegration:
         # Create a test file
         test_content = b"Test document content for contextual chunking"
         test_file = io.BytesIO(test_content)
+
+        async def fake_save_uploaded_files(files, temp_dir, *_args, **_kwargs):
+            # The documented return shape, with the file inside the endpoint's temp dir (paths outside it are rejected).
+            saved = Path(temp_dir) / "test.txt"
+            saved.write_bytes(test_content)
+            return [{"path": saved, "original_filename": "test.txt", "input_ref": "test.txt"}], []
 
         files = {
             "files": ("test.txt", test_file, "text/plain")
@@ -195,7 +228,7 @@ class TestMediaEndpointContextualIntegration:
             "tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing.save_uploaded_files"
         ) as mock_upload:
             with patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.process_document_content') as mock_process:
-                mock_upload.return_value = (["/tmp/test.txt"], [])  # nosec B108
+                mock_upload.side_effect = fake_save_uploaded_files
                 mock_process.return_value = {"success": True, "media_id": 124}
 
                 response = test_client.post(
@@ -206,12 +239,12 @@ class TestMediaEndpointContextualIntegration:
                 )
 
                 # Verify contextual options were passed
-                if mock_process.called:
-                    call_args = mock_process.call_args
-                    chunk_options = call_args[1].get('chunk_options', {})
+                assert mock_process.called, response.text
+                call_args = mock_process.call_args
+                chunk_options = call_args[1].get('chunk_options', {})
 
-                    assert chunk_options.get('enable_contextual_chunking') == True
-                    assert chunk_options.get('contextual_llm_model') == "gpt-3.5-turbo"
+                assert chunk_options.get('enable_contextual_chunking') == True
+                assert chunk_options.get('contextual_llm_model') == "gpt-3.5-turbo"
 
     @pytest.mark.parametrize("media_type,expected_method", [
         ("document", "sentences"),
@@ -230,18 +263,18 @@ class TestMediaEndpointContextualIntegration:
         """Test contextual chunking works with different media types."""
         form_data = {
             "media_type": media_type,
-            "urls": json.dumps([f"https://example.com/test.{media_type}"]),
+            "urls": json.dumps([f"https://example.com/test.{_URL_EXTENSION.get(media_type, media_type)}"]),
             "perform_chunking": "true",
             "enable_contextual_chunking": "true"
         }
 
-        # Mock the appropriate processing function based on media type.
-        # For video/audio, patch the orchestrator-level batch helper to avoid
-        # importing heavyweight STT/transcription dependencies during tests.
+        # Mock the processing function where the add flow looks it up at call time (the library module;
+        # the old endpoint-module targets were never called). For video/audio, patch the orchestrator-level
+        # batch helper to avoid importing heavyweight STT/transcription dependencies during tests.
         process_target = {
             "document": "tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.process_document_content",
-            "pdf": "tldw_Server_API.app.api.v1.endpoints.media.process_pdf_task",
-            "ebook": "tldw_Server_API.app.api.v1.endpoints.media.process_epub",
+            "pdf": "tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib.process_pdf_task",
+            "ebook": "tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib.process_epub",
             "video": "tldw_Server_API.app.core.Ingestion_Media_Processing.persistence.process_batch_media",
             "audio": "tldw_Server_API.app.core.Ingestion_Media_Processing.persistence.process_batch_media",
         }.get(
@@ -249,7 +282,7 @@ class TestMediaEndpointContextualIntegration:
             "tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.process_document_content",
         )
 
-        patch_kwargs = {"new_callable": AsyncMock} if media_type in {"video", "audio"} else {}
+        patch_kwargs = {"new_callable": AsyncMock} if media_type in {"video", "audio", "pdf"} else {}
         with patch(process_target, **patch_kwargs) as mock_process:
             if media_type in {"video", "audio"}:
                 mock_process.return_value = [{"status": "Success", "media_id": 125}]
@@ -262,10 +295,14 @@ class TestMediaEndpointContextualIntegration:
                 headers=auth_headers
             )
 
-            if mock_process.called:
-                call_args = mock_process.call_args
-                chunk_options = call_args[1].get('chunk_options', {})
-
+            assert mock_process.called, response.text
+            kwargs = mock_process.call_args.kwargs
+            if media_type == "pdf":
+                # The add flow hands the PDF processor chunk_method / max_chunk_size / chunk_overlap and drops
+                # chunk_options, so the contextual flag never reaches it (a gap recorded in TASK-15486's notes).
+                assert kwargs.get("chunk_method") == expected_method
+            else:
+                chunk_options = kwargs.get('chunk_options', {})
                 assert chunk_options.get('enable_contextual_chunking') == True
                 assert chunk_options.get('method') == expected_method
 
@@ -375,16 +412,16 @@ class TestMediaEndpointContextualIntegration:
                 headers={"Authorization": "Bearer test_token"}
             )
 
-            if mock_process.called:
-                call_args = mock_process.call_args
-                chunk_options = call_args[1].get('chunk_options', {})
+            assert mock_process.called, response.text
+            call_args = mock_process.call_args
+            chunk_options = call_args[1].get('chunk_options', {})
 
-                # All options should be preserved
-                assert chunk_options.get('method') == "semantic"
-                assert chunk_options.get('max_size') == 1000
-                assert chunk_options.get('overlap') == 200
-                assert chunk_options.get('adaptive') == True
-                assert chunk_options.get('multi_level') == True
-                assert chunk_options.get('language') == "en"
-                assert chunk_options.get('enable_contextual_chunking') == True
-                assert chunk_options.get('contextual_llm_model') == "gpt-4"
+            # All options should be preserved
+            assert chunk_options.get('method') == "semantic"
+            assert chunk_options.get('max_size') == 1000
+            assert chunk_options.get('overlap') == 200
+            assert chunk_options.get('adaptive') == True
+            assert chunk_options.get('multi_level') == True
+            assert chunk_options.get('language') == "en"
+            assert chunk_options.get('enable_contextual_chunking') == True
+            assert chunk_options.get('contextual_llm_model') == "gpt-4"
