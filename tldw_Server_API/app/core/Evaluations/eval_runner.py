@@ -11,6 +11,7 @@ Handles:
 
 import asyncio
 import os
+import re
 import statistics
 import time
 from collections.abc import Mapping
@@ -44,6 +45,7 @@ from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
 from tldw_Server_API.app.core.Evaluations.rag_evaluator import _CANONICAL_METRIC_FOR_ALIAS, RAGEvaluator
 from tldw_Server_API.app.core.Evaluations.response_quality_evaluator import ResponseQualityEvaluator
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
     get_adapter_or_raise,
@@ -173,6 +175,16 @@ def run_llm_provider(
     return (None, None) if api_key else (canonical_provider_name(api_name), model)
 
 
+def _is_known_provider(name: str) -> bool:
+    return bool(name) and canonical_provider_name(name) in ChatProviderRegistry.DEFAULT_ADAPTERS
+
+
+def _split_provider_prefix(api_name: str, value: str) -> tuple[str, str]:
+    """``("openai", "gpt-4")`` for ``"openai:gpt-4"`` or ``"openai/gpt-4"``; ``(api_name, value)`` when the prefix is no provider."""
+    match = re.fullmatch(r"([^:/]+)[:/](.+)", value, re.DOTALL)
+    return (normalize_provider(match[1]), match[2]) if match and _is_known_provider(match[1]) else (api_name, value)
+
+
 class EvaluationRunner:
     """Manages asynchronous evaluation execution"""
 
@@ -210,14 +222,14 @@ class EvaluationRunner:
         if not isinstance(run_config, dict):
             run_config = {}
 
-        api_name = (
+        named = str(
             eval_spec.get("api_name")
             or eval_spec.get("provider")
             or run_config.get("api_name")
             or run_config.get("provider")
-            or "openai"
-        )
-        api_name = str(api_name).strip() or "openai"
+            or ""
+        ).strip()
+        api_name = named or "openai"
         api_key = (
             eval_spec.get("api_key")
             or eval_spec.get("apiKey")
@@ -225,25 +237,19 @@ class EvaluationRunner:
         )
         model_override = eval_spec.get("model") or run_config.get("model")
 
-        # Backward compatibility: evaluator_model may refer to provider OR model
-        evaluator_model = eval_spec.get("evaluator_model")
-        if evaluator_model:
-            normalized_provider = normalize_provider(str(evaluator_model))
-            if normalized_provider:
-                api_name = normalized_provider
-            elif not model_override:
-                model_override = str(evaluator_model)
+        # evaluator_model names a provider, a model, or "provider:model" / "provider/model". Only a
+        # registered provider counts as one, so a model name such as "gpt-4" stays a model (TASK-15492).
+        evaluator_model = str(eval_spec.get("evaluator_model") or "").strip()
+        if _is_known_provider(evaluator_model):
+            api_name = normalize_provider(evaluator_model)
+        elif evaluator_model:
+            if not named:  # a provider named in api_name/provider keeps "anthropic/claude-3.5-sonnet" a model id
+                api_name, evaluator_model = _split_provider_prefix(api_name, evaluator_model)
+            model_override = model_override or evaluator_model
 
-        # Allow model strings like "provider:model" or "provider/model" to override provider
-        if isinstance(model_override, str) and model_override:
-            for sep in (":", "/"):
-                if sep in model_override:
-                    prefix, rest = model_override.split(sep, 1)
-                    normalized_provider = normalize_provider(prefix)
-                    if normalized_provider and rest:
-                        api_name = normalized_provider
-                        model_override = rest
-                    break
+        # Allow model strings like "provider:model" or "provider/model" to override provider, unless one is named
+        if not named and isinstance(model_override, str) and model_override:
+            api_name, model_override = _split_provider_prefix(api_name, model_override)
 
         return api_name, model_override, api_key
 

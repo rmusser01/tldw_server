@@ -52,7 +52,7 @@ Creates a new evaluation definition.
   "eval_spec": {              // Required, evaluation configuration
     // For model_graded evaluations:
     "sub_type": "string",     // Required for model_graded: "summarization" | "rag" | "response_quality"
-    "evaluator_model": "string", // Model to use (default: "gpt-4")
+    "evaluator_model": "string", // A provider ("openai"), a model ("gpt-4") or "provider:model"; a model runs on api_name/provider, else OpenAI
     "metrics": ["string"],    // Metrics to evaluate (type-specific)
     "threshold": 0.7,         // Pass/fail threshold (0-1, default: 0.7)
     "scoring_prompt": "string", // Optional custom scoring prompt

@@ -52,7 +52,7 @@ Creates a new evaluation definition.
   "eval_spec": {              // Required, evaluation configuration
     // For model_graded evaluations:
     "sub_type": "string",     // Required for model_graded: "summarization" | "rag" | "response_quality"
-    "evaluator_model": "string", // Model to use (default: "gpt-4")
+    "evaluator_model": "string", // A provider ("openai"), a model ("gpt-4") or "provider:model"; a model runs on api_name/provider, else OpenAI
     "metrics": ["string"],    // Metrics to evaluate (type-specific)
     "threshold": 0.7,         // Pass/fail threshold (0-1, default: 0.7)
     "scoring_prompt": "string", // Optional custom scoring prompt
@@ -354,7 +354,7 @@ Gets complete results for a finished run.
       "max_score": 0.98,       // Maximum score
       "pass_rate": 0.75,       // Percentage passing threshold (0-1)
       "total_samples": 100,
-      "failed_samples": 25
+      "failed_samples": 25   // Unscored (no score; a failed judge call): in no mean_score or pass_rate
     },
     "by_metric": {             // Breakdown by metric (if applicable)
       "fluency": {
