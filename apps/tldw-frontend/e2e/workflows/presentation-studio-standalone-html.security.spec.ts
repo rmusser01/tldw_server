@@ -3028,7 +3028,11 @@ test.describe("Standalone HTML Presentation Studio browser security", () => {
         context,
         fixture,
         protocol,
-        beforeMainNavigation: () => context.route(outlineWorkerPattern, outlineWorkerRoute)
+        // context.route() returns Promise<Disposable> on Playwright 1.61+; the
+        // callback contract is Promise<void>, so discard the registration handle.
+        beforeMainNavigation: async () => {
+          await context.route(outlineWorkerPattern, outlineWorkerRoute)
+        }
       })
       const editor = page.locator(".monaco-editor").first()
       await expect(editor).toBeVisible()
