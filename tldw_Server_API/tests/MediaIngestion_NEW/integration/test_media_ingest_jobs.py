@@ -250,7 +250,7 @@ def test_media_ingest_jobs_routes_audio_to_default_queue_when_heavy_worker_unava
     monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
     monkeypatch.setenv("JOBS_ALLOWED_QUEUES", "default,media-heavy")
     monkeypatch.delenv("ROUTES_ENABLE", raising=False)
-    monkeypatch.delenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", raising=False)
+    monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "false")
     monkeypatch.delenv("TLDW_WORKERS_SIDECAR_MODE", raising=False)
 
     resp = test_client.post(

@@ -311,8 +311,29 @@ describe("reattachQuickIngestSession", () => {
     })
 
     expect(result.lifecycle).toBe("interrupted")
-    expect(result.errorMessage).toMatch(/could not reconnect/i)
+    expect(result.errorMessage).toMatch(/could not confirm/i)
     expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps reachable pending jobs visible beside an inaccessible job and preserves their terminal result", async () => {
+    const tracking = { mode: "webui-direct" as const, jobIds: [77, 78], startedAt: Date.now() }
+    mocks.bgRequest
+      .mockResolvedValueOnce({ ok: false, status: 403 })
+      .mockResolvedValueOnce({ ok: true, data: { status: "queued" } })
+      .mockResolvedValueOnce({ ok: false, status: 403 })
+      .mockResolvedValueOnce({ ok: true, data: { status: "completed", result: { media_id: 178 } } })
+
+    await expect(reattachQuickIngestSession(tracking)).resolves.toMatchObject({
+      lifecycle: "processing",
+      jobs: [{ jobId: 78, status: "queued" }],
+      statusUnavailable: true,
+    })
+    await expect(reattachQuickIngestSession(tracking)).resolves.toMatchObject({
+      lifecycle: "interrupted",
+      jobs: [{ jobId: 78, status: "completed", result: { media_id: 178 } }],
+      errorMessage: expect.stringMatching(/could not confirm/i),
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(4)
   })
 
   it.each([401, 403])(
@@ -352,7 +373,7 @@ describe("reattachQuickIngestSession", () => {
   })
 
   it.each([408, 429])(
-    "stops after three transient HTTP %i status-read attempts",
+    "keeps monitoring available after three transient HTTP %i status-read attempts",
     async (status) => {
       vi.useFakeTimers()
       mocks.bgRequest.mockResolvedValue({
@@ -370,7 +391,7 @@ describe("reattachQuickIngestSession", () => {
       await vi.runAllTimersAsync()
       const result = await pendingSnapshot
 
-      expect(result.lifecycle).toBe("interrupted")
+      expect(result).toMatchObject({ lifecycle: "processing", jobs: [], statusUnavailable: true })
       expect(mocks.bgRequest).toHaveBeenCalledTimes(3)
     }
   )

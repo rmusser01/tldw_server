@@ -15,8 +15,16 @@ import {
   type QuickIngestChunkingMode,
 } from "@/services/tldw/quick-ingest-chunking";
 import {
+  ACTIVE_INGEST_JOB_STATUSES,
+  INGEST_JOB_STATUS_INTERRUPTED,
+  TERMINAL_INGEST_JOB_STATUSES,
   createIngestJobsTracker,
+  getQuickIngestJobPollInterval,
+  isTransientIngestStatusRead,
   pollSingleIngestJob,
+  readIngestJobProgress,
+  type IngestJobProgress,
+  type IngestJobStatusResponse,
   requireSubmittedIngestJobs,
 } from "@/services/tldw/ingest-jobs-orchestrator";
 import {
@@ -103,6 +111,10 @@ type QuickIngestBatchInput = QuickIngestRequestContext & {
   autoApplyTemplate?: boolean;
   __quickIngestSessionId?: string;
   onTrackingMetadata?: (tracking: PersistedQuickIngestTracking) => void;
+  onJobProgress?: (itemId: string, progress: IngestJobProgress) => void;
+  onJobStatusUnavailable?: (unavailable: boolean) => void;
+  onItemResult?: (result: QuickIngestBatchResult) => void;
+  isJobCancellationConfirmed?: (itemId: string) => boolean;
 };
 
 type QuickIngestBatchResult = {
@@ -126,6 +138,7 @@ type QuickIngestBatchResponse = {
   ok: boolean;
   error?: string;
   results?: QuickIngestBatchResult[];
+  interruptedJobIds?: number[];
 };
 
 export const QUICK_INGEST_ANALYSIS_PROVIDER_WARNING =
@@ -181,7 +194,7 @@ const directQuickIngestSessionTrackers = new Map<
   DirectQuickIngestTracker
 >();
 const directQuickIngestCancelledSessions = new Set<string>();
-const directQuickIngestUploadControllers = new Map<string, AbortController>();
+const directQuickIngestStopControllers = new Map<string, AbortController>();
 let lastQuickIngestRuntimeHealthCheckAt = 0;
 let quickIngestRuntimeMessagingUsable: boolean | null = null;
 
@@ -255,7 +268,7 @@ const clearDirectSessionTracking = (sessionId: string | undefined) => {
   const normalizedSessionId = String(sessionId || "").trim();
   if (!normalizedSessionId) return;
   directQuickIngestSessionTrackers.delete(normalizedSessionId);
-  directQuickIngestUploadControllers.delete(normalizedSessionId);
+  directQuickIngestStopControllers.delete(normalizedSessionId);
   directQuickIngestCancelledSessions.delete(normalizedSessionId);
 };
 
@@ -799,52 +812,89 @@ const runDirectQuickIngestBatch = async (
     Boolean(input.storeRemote) && !input.processOnly;
   const directSessionId =
     String(input.__quickIngestSessionId || "").trim() || undefined;
-  const nativeUploadController = directSessionId && hasNativeFile(files)
-    ? new AbortController()
-    : undefined;
-  const nativeUploadContext = nativeUploadController
-    ? {
-        ...input,
-        signal: input.signal
-          ? AbortSignal.any([input.signal, nativeUploadController.signal])
-          : nativeUploadController.signal,
-      }
-    : input;
+  const runController = new AbortController();
+  const runContext = {
+    ...input,
+    signal: input.signal
+      ? AbortSignal.any([input.signal, runController.signal])
+      : runController.signal,
+  };
 
   const out: QuickIngestBatchResult[] = [];
+  const interruptedJobIds = new Set<number>();
+  const unavailableJobIds = new Set<number>();
+  const inputOrder = new Map([...entries, ...files].map((item, index) => [item.id, index]));
+  const acceptedMonitors: Promise<{ error: unknown } | void>[] = [];
+  const monitorAcceptedJob = (monitor: Promise<void>) => {
+    // Observe failures immediately while later POSTs are still in flight.
+    acceptedMonitors.push(monitor.then(() => undefined, (error) => ({ error })));
+  };
+  const recordResult = (result: QuickIngestBatchResult) => {
+    out.push(result);
+    input.onItemResult?.(result);
+  };
   let conferencePlan: PlannedConferenceCollection | null = null;
-  const pollIngestJobStatus = async (
-    jobId: number,
-    timeoutMs: number,
-  ): Promise<{ ok: boolean; data?: any; error?: string }> => {
-    const pollResult = await pollSingleIngestJob({
-      jobId,
-      timeoutMs,
-      pollIntervalMs: DIRECT_REMOTE_POLL_INTERVAL_MS,
-      fetchJob: async (trackedJobId) =>
-        (await scopedQuickIngestRequest<any>(input, {
-          path: `/api/v1/media/ingest/jobs/${trackedJobId}`,
-          method: "GET",
-          timeoutMs: DIRECT_REMOTE_POLL_INTERVAL_MS + 3000,
-          returnResponse: true,
-          ...DIRECT_QUICK_INGEST_TRANSPORT,
-        })) as
-          | { ok: boolean; status?: number; data?: any; error?: string }
-          | undefined,
-      isCancelled: () => isDirectSessionCancelled(directSessionId),
-      onCancel: async () => {
-        await cancelDirectSessionBatches(input, directSessionId, "user_cancelled");
-      },
-    });
 
-    if (pollResult.terminalStatus === "completed") {
-      return { ok: true, data: pollResult.data };
-    }
-    return {
-      ok: false,
-      error: String(pollResult.error || "Ingest failed"),
-      data: pollResult.data,
+  const pollIngestJobStatus = async (jobId: number, itemId: string) => {
+    const startedAt = Date.now();
+    let statusUnavailable = false;
+    const reportStatusUnavailable = (unavailable: boolean) => {
+      statusUnavailable = unavailable;
+      if (unavailable) unavailableJobIds.add(jobId);
+      else unavailableJobIds.delete(jobId);
+      input.onJobStatusUnavailable?.(unavailableJobIds.size > 0);
     };
+    const invalidStatusResponse = { ok: false };
+    const result = await pollSingleIngestJob({
+      jobId,
+      timeoutMs: Infinity,
+      pollIntervalMs: () => getQuickIngestJobPollInterval(startedAt, DIRECT_REMOTE_POLL_INTERVAL_MS, statusUnavailable),
+      signal: runContext.signal,
+      fetchJob: async (trackedJobId) => {
+        try {
+          const response = await scopedQuickIngestRequest<IngestJobStatusResponse | undefined>(runContext, {
+            path: `/api/v1/media/ingest/jobs/${trackedJobId}`,
+            method: "GET",
+            timeoutMs: DIRECT_REMOTE_POLL_INTERVAL_MS + 3000,
+            returnResponse: true,
+            ...DIRECT_QUICK_INGEST_TRANSPORT,
+          });
+          if (response?.ok) {
+            const { status } = readIngestJobProgress(response.data);
+            if (!ACTIVE_INGEST_JOB_STATUSES.has(status) && !TERMINAL_INGEST_JOB_STATUSES.has(status)) {
+              reportStatusUnavailable(true);
+              return invalidStatusResponse;
+            }
+          }
+          reportStatusUnavailable(!response?.ok);
+          return response;
+        } catch (error) {
+          assertQuickIngestRequestCurrent(runContext, error);
+          reportStatusUnavailable(true);
+          const status = (error as { status?: number } | null)?.status;
+          return status === undefined ? undefined : { ok: false, status };
+        }
+      },
+      onRequestError: (response) => response === invalidStatusResponse ||
+        (response?.status !== undefined && !isTransientIngestStatusRead(response.status))
+          ? { terminalStatus: "interrupted", error: INGEST_JOB_STATUS_INTERRUPTED }
+          : undefined,
+      onProgress: (progress) => input.onJobProgress?.(itemId, progress),
+      isCancelled: () => input.isJobCancellationConfirmed?.(itemId) === true ||
+        isDirectSessionCancelled(directSessionId),
+      onCancel: async () => {
+        if (!input.isJobCancellationConfirmed?.(itemId)) {
+          await cancelDirectSessionBatches(input, directSessionId, "user_cancelled");
+        }
+      },
+    }).catch((error) => {
+      assertQuickIngestRequestCurrent(input, error);
+      if (!isDirectSessionCancelled(directSessionId)) throw error;
+      return { terminalStatus: "cancelled" as const, error: "Cancelled by user." };
+    });
+    if (result.terminalStatus === "interrupted") interruptedJobIds.add(jobId);
+    else if (statusUnavailable) reportStatusUnavailable(false);
+    return result;
   };
 
   try {
@@ -854,9 +904,7 @@ const runDirectQuickIngestBatch = async (
         directSessionId,
         createIngestJobsTracker<{ sourceId: string }>(),
       );
-      if (nativeUploadController) {
-        directQuickIngestUploadControllers.set(directSessionId, nativeUploadController);
-      }
+      directQuickIngestStopControllers.set(directSessionId, runController);
     }
 
     if (shouldStoreRemote) {
@@ -892,6 +940,57 @@ const runDirectQuickIngestBatch = async (
       let jobSubmitted = false;
       let localProcessingAttempted = false;
       let latestJobId: number | undefined;
+      let data: unknown;
+      let resultOutcome: QuickIngestBatchResult["outcome"];
+      let resultMessage: string | undefined;
+      let resultError: string | undefined;
+      let resultMediaId: string | number | null = null;
+      let resultPersisted = false;
+      const recordEntryResult = () => {
+        recordResult({
+          id: entry.id,
+          status: resultError ? "error" : "ok",
+          outcome: resultError ? "failed" : resultOutcome,
+          url,
+          type: resolvedType,
+          data,
+          error: resultError,
+          message: resultMessage,
+          persisted: resultPersisted,
+          mediaId: resultMediaId,
+          collectionItemId: plannedConferenceItem?.itemId ?? null,
+          retryAttempt: plannedConferenceItem ? plannedConferenceItem.retryAttempt ?? 0 : null,
+          idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
+        });
+      };
+      const recordEntryFailure = async (error: unknown) => {
+        assertQuickIngestRequestCurrent(input, error);
+        const outcome =
+          jobSubmitted || localProcessingAttempted ? "failed" : "submit_failed";
+        await patchConferenceCollectionItem(input, plannedConferenceItem, {
+          status: outcome,
+          latest_job_id:
+            typeof latestJobId === "number" ? String(latestJobId) : undefined,
+          error_summary:
+            error instanceof Error
+              ? error.message
+              : String(error || "Request failed"),
+        });
+        recordResult({
+          id: entry.id,
+          status: "error",
+          outcome,
+          url,
+          type: resolvedType,
+          error:
+            error instanceof Error
+              ? error.message
+              : String(error || "Request failed"),
+          collectionItemId: plannedConferenceItem?.itemId ?? null,
+          retryAttempt: plannedConferenceItem ? plannedConferenceItem.retryAttempt ?? 0 : null,
+          idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
+        });
+      };
       try {
         if (
           shouldStoreRemote &&
@@ -902,7 +1001,7 @@ const runDirectQuickIngestBatch = async (
             status: duplicatePolicyResolution.plannedStatus,
             retry_count: 0,
           });
-          out.push({
+          recordResult({
             id: entry.id,
             status: "ok",
             outcome: "skipped",
@@ -917,12 +1016,6 @@ const runDirectQuickIngestBatch = async (
           continue;
         }
 
-        let data: unknown;
-        let resultOutcome: QuickIngestBatchResult["outcome"];
-        let resultMessage: string | undefined;
-        let resultError: string | undefined;
-        let resultMediaId: string | number | null = null;
-        let resultPersisted = false;
         if (resolvedType === "html") {
           localProcessingAttempted = true;
           data = await processWebScrape(input, {
@@ -1012,34 +1105,58 @@ const runDirectQuickIngestBatch = async (
               durableMode: plannedConferenceItem ? "durable_collection" : undefined,
               startedAt: Date.now(),
             });
-            const pollResult = await pollIngestJobStatus(
-              firstJobId,
-              DIRECT_INGEST_TIMEOUT_MS,
-            );
-            if (!pollResult.ok) {
-              throw new Error(String(pollResult.error || "Ingest failed"));
-            }
-            data = pollResult.data;
-            resultMediaId = extractCompletedIngestJobMediaId(pollResult.data);
-            const completedDuplicate = completedIngestJobIndicatesSkipped(
-              pollResult.data,
-            );
-            if (completedDuplicate) {
-              resultOutcome = "skipped";
-              resultMessage = DUPLICATE_SKIP_MESSAGE;
-            } else if (completedIngestJobIndicatesFailure(pollResult.data)) {
-              resultError =
-                extractCompletedIngestJobError(pollResult.data) || "Ingest failed";
-            }
-            await patchConferenceCollectionItem(input, plannedConferenceItem, {
-              status: getConferenceTerminalStatus(
-                completedDuplicate,
-                Boolean(resultError),
-              ),
-              latest_job_id: String(latestJobId),
-              media_id: resultMediaId,
-              error_summary: resultError,
-            });
+            const pollEntry = async () => {
+              const pollResult = await pollIngestJobStatus(firstJobId, entry.id);
+              if (pollResult.terminalStatus === "interrupted") return false;
+              if (pollResult.terminalStatus === "cancelled") {
+                await patchConferenceCollectionItem(input, plannedConferenceItem, {
+                  status: "cancelled",
+                  latest_job_id: String(firstJobId),
+                  error_summary: pollResult.error,
+                });
+                recordResult({
+                  id: entry.id,
+                  status: "error",
+                  outcome: "cancelled",
+                  url,
+                  type: resolvedType,
+                  error: pollResult.error,
+                  collectionItemId: plannedConferenceItem?.itemId ?? null,
+                  retryAttempt: plannedConferenceItem?.retryAttempt ?? null,
+                  idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
+                });
+                return false;
+              }
+              if (pollResult.terminalStatus !== "completed") {
+                throw new Error(String(pollResult.error || "Ingest failed"));
+              }
+              data = pollResult.data;
+              resultMediaId = extractCompletedIngestJobMediaId(pollResult.data);
+              const completedDuplicate = completedIngestJobIndicatesSkipped(
+                pollResult.data,
+              );
+              if (completedDuplicate) {
+                resultOutcome = "skipped";
+                resultMessage = DUPLICATE_SKIP_MESSAGE;
+              } else if (completedIngestJobIndicatesFailure(pollResult.data)) {
+                resultError =
+                  extractCompletedIngestJobError(pollResult.data) || "Ingest failed";
+              }
+              await patchConferenceCollectionItem(input, plannedConferenceItem, {
+                status: getConferenceTerminalStatus(
+                  completedDuplicate,
+                  Boolean(resultError),
+                ),
+                latest_job_id: String(latestJobId),
+                media_id: resultMediaId,
+                error_summary: resultError,
+              });
+              return true;
+            };
+            monitorAcceptedJob(pollEntry().then((completed) => {
+              if (completed) recordEntryResult();
+            }).catch(recordEntryFailure));
+            continue;
           } catch (error) {
       assertQuickIngestRequestCurrent(input, error);
             if (!shouldFallbackToPersistentAdd(error)) {
@@ -1109,48 +1226,9 @@ const runDirectQuickIngestBatch = async (
           }
         }
 
-        out.push({
-          id: entry.id,
-          status: resultError ? "error" : "ok",
-          outcome: resultError ? "failed" : resultOutcome,
-          url,
-          type: resolvedType,
-          data,
-          error: resultError,
-          message: resultMessage,
-          persisted: resultPersisted,
-          mediaId: resultMediaId,
-          collectionItemId: plannedConferenceItem?.itemId ?? null,
-          retryAttempt: plannedConferenceItem ? plannedConferenceItem.retryAttempt ?? 0 : null,
-          idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
-        });
+        recordEntryResult();
       } catch (error) {
-      assertQuickIngestRequestCurrent(input, error);
-        const outcome =
-          jobSubmitted || localProcessingAttempted ? "failed" : "submit_failed";
-        await patchConferenceCollectionItem(input, plannedConferenceItem, {
-          status: outcome,
-          latest_job_id:
-            typeof latestJobId === "number" ? String(latestJobId) : undefined,
-          error_summary:
-            error instanceof Error
-              ? error.message
-              : String(error || "Request failed"),
-        });
-        out.push({
-          id: entry.id,
-          status: "error",
-          outcome,
-          url,
-          type: resolvedType,
-          error:
-            error instanceof Error
-              ? error.message
-              : String(error || "Request failed"),
-          collectionItemId: plannedConferenceItem?.itemId ?? null,
-          retryAttempt: plannedConferenceItem ? plannedConferenceItem.retryAttempt ?? 0 : null,
-          idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
-        });
+        await recordEntryFailure(error);
       }
     }
 
@@ -1165,9 +1243,19 @@ const runDirectQuickIngestBatch = async (
       const mimeType = directFile ? directFile.type : file?.type;
       const mediaType = inferUploadMediaTypeFromFile(fileName, mimeType);
       const bytes = file?.data;
-      const requestContext = directFile ? nativeUploadContext : input;
+      const requestContext = directFile ? runContext : input;
       const timeoutMs = getNativeFileTimeout(directFile);
       let jobAcknowledged = false;
+      const recordFileFailure = (error: unknown) => {
+        assertQuickIngestRequestCurrent(input, error);
+        recordResult({
+          id,
+          status: "error",
+          fileName,
+          type: "file",
+          error: error instanceof Error ? error.message : String(error || "Upload failed"),
+        });
+      };
 
       try {
         const size = directFile?.size ?? (Array.isArray(bytes) ? bytes.length : bytes?.byteLength ?? 0);
@@ -1216,25 +1304,37 @@ const runDirectQuickIngestBatch = async (
               startedAt: Date.now(),
             });
             const firstJobId = jobIds[0];
-            const pollResult = await pollIngestJobStatus(
-              firstJobId,
-              timeoutMs,
-            );
-            if (!pollResult.ok) {
-              throw new Error(String(pollResult.error || "Upload failed"));
-            }
-            const isDuplicate = isDbMessageDuplicate(pollResult.data);
-            out.push({
-              id,
-              status: "ok",
-              outcome: isDuplicate ? ("skipped" as const) : undefined,
-              fileName,
-              type: mediaType,
-              data: pollResult.data,
-              message: isDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined,
-              mediaId: extractCompletedIngestJobMediaId(pollResult.data),
-              persisted: shouldStoreRemote && shouldKeepOriginalFile(mediaType),
-            });
+            const pollFile = async () => {
+              const pollResult = await pollIngestJobStatus(firstJobId, id);
+              if (pollResult.terminalStatus === "interrupted") return;
+              if (pollResult.terminalStatus === "cancelled") {
+                recordResult({
+                  id,
+                  status: "error",
+                  outcome: "cancelled",
+                  fileName,
+                  type: mediaType,
+                  error: pollResult.error,
+                });
+                return;
+              }
+              if (pollResult.terminalStatus !== "completed") {
+                throw new Error(String(pollResult.error || "Upload failed"));
+              }
+              const isDuplicate = isDbMessageDuplicate(pollResult.data);
+              recordResult({
+                id,
+                status: "ok",
+                outcome: isDuplicate ? ("skipped" as const) : undefined,
+                fileName,
+                type: mediaType,
+                data: pollResult.data,
+                message: isDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined,
+                mediaId: extractCompletedIngestJobMediaId(pollResult.data),
+                persisted: shouldStoreRemote && shouldKeepOriginalFile(mediaType),
+              });
+            };
+            monitorAcceptedJob(pollFile().catch(recordFileFailure));
           } catch (error) {
       assertQuickIngestRequestCurrent(input, error);
             if (!shouldFallbackToPersistentAdd(error)) {
@@ -1245,7 +1345,7 @@ const runDirectQuickIngestBatch = async (
               ...upload,
             });
             const fallbackDuplicate = isDbMessageDuplicate(data);
-            out.push({
+            recordResult({
               id,
               status: "ok",
               outcome: fallbackDuplicate ? ("skipped" as const) : undefined,
@@ -1271,7 +1371,7 @@ const runDirectQuickIngestBatch = async (
         });
 
         const directDuplicate = isDbMessageDuplicate(data);
-        out.push({
+        recordResult({
           id,
           status: "ok",
           outcome: directDuplicate ? ("skipped" as const) : undefined,
@@ -1284,29 +1384,37 @@ const runDirectQuickIngestBatch = async (
         });
       } catch (error) {
         assertQuickIngestRequestCurrent(input, error);
-        if (directFile && !jobAcknowledged && nativeUploadController?.signal.aborted) break;
-        out.push({
-          id,
-          status: "error",
-          fileName,
-          type: "file",
-          error:
-            error instanceof Error
-              ? error.message
-              : String(error || "Upload failed"),
-        });
+        if (directFile && !jobAcknowledged && runController.signal.aborted) break;
+        recordFileFailure(error);
       }
     }
 
+    for (const failure of await Promise.all(acceptedMonitors)) {
+      if (failure) throw failure.error;
+    }
     assertQuickIngestRequestCurrent(input);
-    return { ok: true, results: out };
+    return {
+      ok: true,
+      results: out.sort((a, b) => (inputOrder.get(a.id) ?? inputOrder.size) - (inputOrder.get(b.id) ?? inputOrder.size)),
+      ...(interruptedJobIds.size ? { interruptedJobIds: [...interruptedJobIds] } : {}),
+    };
   } finally {
+    runController.abort();
     clearDirectSessionTracking(directSessionId);
   }
 };
 
 const runtimePayload = (input: QuickIngestBatchInput) => {
-  const { signal: _signal, assertCurrent: _assertCurrent, onTrackingMetadata: _tracking, ...payload } = input;
+  const {
+    signal: _signal,
+    assertCurrent: _assertCurrent,
+    onTrackingMetadata: _tracking,
+    onJobProgress: _progress,
+    onJobStatusUnavailable: _statusUnavailable,
+    onItemResult: _result,
+    isJobCancellationConfirmed: _cancelled,
+    ...payload
+  } = input;
   return payload;
 };
 
@@ -1401,7 +1509,7 @@ export const cancelQuickIngestSession = async (
   }
 
   directQuickIngestCancelledSessions.add(sessionId);
-  directQuickIngestUploadControllers.get(sessionId)?.abort();
+  directQuickIngestStopControllers.get(sessionId)?.abort();
   await cancelDirectSessionBatches(
     input,
     sessionId,
