@@ -7,6 +7,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tldw_Server_API.tests.CI.test_required_workflow_contracts import (
+    _assert_browser_runner_supports_locked_playwright,
+)
+
 
 def test_frontend_required_enforces_strict_shared_security_boundaries() -> None:
     """The incremental strict project must execute as a failing merge gate."""
@@ -247,9 +251,11 @@ def test_shared_coverage_merge_rejects_missing_shards(
 def test_ux_browser_jobs_select_a_host_supported_by_locked_playwright(
     workflow_name: str, job_name: str,
 ) -> None:
-    """Playwright 1.58 cannot install Chromium on an Ubuntu 26.04 runner."""
+    """Keep every UX host compatible with the actual locked browser toolchain."""
     data = yaml.safe_load((Path(".github/workflows") / workflow_name).read_text())
-    assert data["jobs"][job_name]["runs-on"] in {"ubuntu-22.04", "ubuntu-24.04"}
+    _assert_browser_runner_supports_locked_playwright(
+        data["jobs"][job_name]["runs-on"], Path("apps/bun.lock").read_text(encoding="utf-8")
+    )
 
 
 @pytest.mark.unit

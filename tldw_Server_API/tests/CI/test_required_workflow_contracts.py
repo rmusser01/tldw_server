@@ -452,7 +452,50 @@ def test_e2e_required_explicitly_loads_pytest_asyncio_plugin() -> None:
     assert "-p pytest_asyncio.plugin" in retry["run"]
 
 
-# Checked-in browser bundles predate ubuntu-latest's move to Ubuntu 26.
+def _assert_browser_runner_supports_locked_playwright(runner: str, lock: str) -> None:
+    """Ubuntu 26 requires the Playwright upgrade accepted in TASK-15552."""
+    if runner in {"ubuntu-22.04", "ubuntu-24.04"}:
+        return
+    assert runner in {"ubuntu-latest", "ubuntu-26.04"}
+    versions = re.findall(
+        r'^\s*"[^"]+":\s*\["(@playwright/test|playwright|playwright-core)@(\d+)\.(\d+)\.(\d+)"',
+        lock,
+        re.MULTILINE,
+    )
+    assert {name for name, *_ in versions} == {"@playwright/test", "playwright", "playwright-core"}
+    assert all(tuple(map(int, version)) >= (1, 61, 0) for _, *version in versions)
+
+
+@pytest.mark.parametrize(
+    ("runner", "versions", "supported"),
+    [
+        ("ubuntu-24.04", [], True),
+        ("ubuntu-22.04", ["1.58.0"] * 3, True),
+        ("ubuntu-latest", ["1.65.1"] * 3, True),
+        ("ubuntu-26.04", ["1.61.0"] * 3, True),
+        ("ubuntu-latest", ["1.60.0"] * 3, False),
+        ("ubuntu-latest", ["1.65.1", "1.65.1", "1.58.0"], False),
+        ("ubuntu-latest", ["1.65.1"] * 3 + ["1.58.0"], False),
+        ("ubuntu-latest", [], False),
+        ("ubuntu-latest", ["1.65.1"] * 2, False),
+        ("ubuntu-28.04", ["1.65.1"] * 3, False),
+    ],
+)
+def test_browser_runner_guard_rejects_unsupported_or_incomplete_locks(
+    runner: str, versions: list[str], supported: bool,
+) -> None:
+    names = ["@playwright/test", "playwright", "playwright-core", "playwright-core"]
+    lock = "\n".join(
+        f'"package-{index}": ["{name}@{version}", "", {{}}],'
+        for index, (name, version) in enumerate(zip(names, versions))
+    )
+    if supported:
+        _assert_browser_runner_supports_locked_playwright(runner, lock)
+    else:
+        with pytest.raises(AssertionError):
+            _assert_browser_runner_supports_locked_playwright(runner, lock)
+
+
 PLAYWRIGHT_BROWSER_JOBS = {
     "frontend-e2e-tiers.yml": [
         "critical",
@@ -496,7 +539,9 @@ def test_playwright_browser_jobs_use_supported_ubuntu_image(
     workflow_name: str, job_name: str
 ) -> None:
     job = _load(f".github/workflows/{workflow_name}")["jobs"][job_name]
-    assert job["runs-on"] in {"ubuntu-22.04", "ubuntu-24.04"}
+    _assert_browser_runner_supports_locked_playwright(
+        job["runs-on"], Path("apps/bun.lock").read_text(encoding="utf-8")
+    )
 
 
 def test_playwright_browser_job_inventory_is_complete() -> None:
