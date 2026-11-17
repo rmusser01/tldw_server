@@ -712,6 +712,10 @@ def test_an_all_unscored_run_reports_every_sample_failed(tmp_path):
     ({"model": "mistral:7b", "api_name": "ollama"}, ("ollama", "mistral:7b")),
     ({"model": "qwen:14b", "provider": "ollama"}, ("ollama", "qwen:14b")),
     ({"evaluator_model": "openai/gpt-4o", "api_name": "openrouter"}, ("openrouter", "openai/gpt-4o")),
+    # evaluator_model is split once: the remainder is a model id, not "provider/model" again
+    ({"evaluator_model": "openrouter/openai/gpt-4o"}, ("openrouter", "openai/gpt-4o")),
+    ({"evaluator_model": "ollama:mistral:7b"}, ("ollama", "mistral:7b")),
+    ({"evaluator_model": "together/Qwen/Qwen2-72B-Instruct"}, ("together", "Qwen/Qwen2-72B-Instruct")),
 ])
 def test_evaluator_model_is_a_provider_only_when_it_names_one(spec, want):
     """A model name is a model, a provider name a provider, "provider:model" both; the run route names the same one."""

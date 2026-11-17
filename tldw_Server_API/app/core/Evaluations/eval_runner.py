@@ -236,6 +236,7 @@ class EvaluationRunner:
             or run_config.get("api_key")
         )
         model_override = eval_spec.get("model") or run_config.get("model")
+        model_from_spec = isinstance(model_override, str) and bool(model_override)
 
         # evaluator_model names a provider, a model, or "provider:model" / "provider/model". Only a
         # registered provider counts as one, so a model name such as "gpt-4" stays a model (TASK-15492).
@@ -248,7 +249,8 @@ class EvaluationRunner:
             model_override = model_override or evaluator_model
 
         # Allow model strings like "provider:model" or "provider/model" to override provider, unless one is named
-        if not named and isinstance(model_override, str) and model_override:
+        # (a remainder taken from evaluator_model was already split once and is never split again)
+        if not named and model_from_spec:
             api_name, model_override = _split_provider_prefix(api_name, model_override)
 
         return api_name, model_override, api_key
