@@ -28,6 +28,7 @@ import { useIngestWizard } from "./IngestWizardContext"
 import { PlaylistPreflightPanel } from "./PlaylistPreflightPanel"
 import { FileDropZone } from "./QueueTab/FileDropZone"
 import {
+  createQuickIngestId,
   getQuickIngestFileLimit,
   QUICK_INGEST_AV_LIMIT,
   QUICK_INGEST_DOCUMENT_LIMIT
@@ -210,7 +211,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       for (const file of files) {
         const detectedType = detectTypeFromFile(file)
         const item: WizardQueueItem = {
-          id: crypto.randomUUID(),
+          id: createQuickIngestId(),
           fileName: file.name,
           file,
           detectedType,
@@ -248,7 +249,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     })
     const detectedType = detectTypeFromFile(file)
     const item: WizardQueueItem = {
-      id: crypto.randomUUID(),
+      id: createQuickIngestId(),
       fileName: file.name,
       file,
       detectedType,
@@ -336,7 +337,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     for (const preflightItem of selectedItems) {
       const detectedType = detectTypeFromUrl(preflightItem.sourceUrl)
       const item: WizardQueueItem = {
-        id: crypto.randomUUID(),
+        id: createQuickIngestId(),
         url: preflightItem.sourceUrl,
         detectedType,
         icon: ICON_NAME_MAP[detectedType],

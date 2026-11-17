@@ -418,6 +418,15 @@ CREATE INDEX IF NOT EXISTS idx_jobs_archive_migration
     COALESCE(uuid, '')
   );
 
+CREATE TABLE IF NOT EXISTS media_ingest_upload_cancellations (
+  owner_user_id TEXT NOT NULL,
+  batch_group TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (owner_user_id, batch_group)
+);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_upload_cancellations_expiry
+  ON media_ingest_upload_cancellations(owner_user_id, expires_at);
+
 -- Immutable correlation for user-facing idempotent operations. Job state,
 -- progress, result, and errors remain exclusively in jobs/jobs_archive.
 CREATE TABLE IF NOT EXISTS job_idempotency_receipts (
@@ -1775,6 +1784,8 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                         "ALTER TABLE jobs_archive FORCE ROW LEVEL SECURITY",
                         "ALTER TABLE job_idempotency_receipts ENABLE ROW LEVEL SECURITY",
                         "ALTER TABLE job_idempotency_receipts FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE media_ingest_upload_cancellations ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE media_ingest_upload_cancellations FORCE ROW LEVEL SECURITY",
                         "ALTER TABLE job_resource_heads ENABLE ROW LEVEL SECURITY",
                         "ALTER TABLE job_resource_heads FORCE ROW LEVEL SECURITY",
                         "ALTER TABLE job_resource_request_receipts ENABLE ROW LEVEL SECURITY",
@@ -1909,6 +1920,16 @@ def _ensure_pg_idempotency_receipt_rls(cur: Any, *, admin_expr: str, domain_filt
                     """)
 
 
+def _ensure_media_upload_cancellation_rls(cur: Any) -> None:
+    cur.execute("DROP POLICY IF EXISTS media_ingest_upload_cancellations_owner ON media_ingest_upload_cancellations")
+    cur.execute("""
+        CREATE POLICY media_ingest_upload_cancellations_owner
+        ON media_ingest_upload_cancellations FOR ALL
+        USING (owner_user_id = NULLIF(current_setting('app.owner_user_id', true), ''))
+        WITH CHECK (owner_user_id = NULLIF(current_setting('app.owner_user_id', true), ''))
+    """)
+
+
 def ensure_jobs_rls_policies_pg(db_url: str) -> None:
     """Enable Postgres Row Level Security (RLS) for domain scoping.
 
@@ -1970,6 +1991,12 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     )
                     cur.execute(
                         _sql.SQL("GRANT INSERT ON TABLE {}.job_counters TO {}").format(
+                            _sql.Identifier(schema_name),
+                            _sql.Identifier(role),
+                        )
+                    )
+                    cur.execute(
+                        _sql.SQL("GRANT INSERT ON TABLE {}.media_ingest_upload_cancellations TO {}").format(
                             _sql.Identifier(schema_name),
                             _sql.Identifier(role),
                         )
@@ -2091,6 +2118,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     )
                     """
             )
+            _ensure_media_upload_cancellation_rls(cur)
             _ensure_pg_idempotency_receipt_rls(
                 cur, admin_expr=admin_expr, domain_filter=domain_filter, owner_filter=owner_filter
             )

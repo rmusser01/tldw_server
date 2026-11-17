@@ -504,6 +504,15 @@ CREATE INDEX IF NOT EXISTS idx_jobs_archive_migration
     COALESCE(uuid, '')
   );
 
+CREATE TABLE IF NOT EXISTS media_ingest_upload_cancellations (
+  owner_user_id TEXT NOT NULL,
+  batch_group TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  PRIMARY KEY (owner_user_id, batch_group)
+);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_upload_cancellations_expiry
+  ON media_ingest_upload_cancellations(owner_user_id, expires_at);
+
 -- Immutable correlation for user-facing idempotent operations. Job state,
 -- progress, result, and errors remain exclusively in jobs/jobs_archive.
 CREATE TABLE IF NOT EXISTS job_idempotency_receipts (

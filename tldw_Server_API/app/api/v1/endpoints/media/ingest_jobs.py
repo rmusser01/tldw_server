@@ -9,14 +9,15 @@ import threading
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
+from tempfile import gettempdir
 from typing import Any
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from cachetools import LRUCache
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, UUID4
 from starlette.responses import JSONResponse
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import try_get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
@@ -42,7 +43,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
 )
-from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.manager import JobManager, MediaUploadConflict
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.exceptions import BadRequestError
@@ -405,6 +406,7 @@ def _create_media_ingest_job(
     batch_id: str,
     request_id: str | None,
     trace_id: str | None,
+    cancellable_upload: bool = False,
 ) -> dict[str, Any]:
     try:
         return jm.create_job(
@@ -419,7 +421,10 @@ def _create_media_ingest_job(
             idempotency_key=payload.get("idempotency_key"),
             request_id=request_id,
             trace_id=trace_id,
+            **({"cancellable_upload": True} if cancellable_upload else {}),
         )
+    except MediaUploadConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except BadRequestError as exc:
         message = str(exc).strip() or "Invalid media ingest job request"
         normalized = message.lower()
@@ -427,6 +432,10 @@ def _create_media_ingest_job(
             status.HTTP_429_TOO_MANY_REQUESTS if "concurrent job limit" in normalized else status.HTTP_400_BAD_REQUEST
         )
         raise HTTPException(status_code=status_code, detail=message) from exc
+
+
+def _owned_upload_batch_id(user: User, upload_batch_id: UUID4) -> str:
+    return str(uuid5(NAMESPACE_URL, f"vadem:quick-ingest:{user.id}:{upload_batch_id}"))
 
 
 def _principal_has_admin_claims(principal: AuthPrincipal) -> bool:
@@ -601,6 +610,7 @@ async def submit_media_ingest_jobs(
     request: Request,
     form_data: AddMediaForm = Depends(get_add_media_form),
     files: list[UploadFile] | None = File(None, description="Optional media uploads"),
+    upload_batch_id: UUID4 | None = Form(None, description="Cancellation identity for a single-file upload"),
     media_collection_id: str | None = Form(
         None,
         description="Optional durable media collection id for this job batch",
@@ -643,7 +653,9 @@ async def submit_media_ingest_jobs(
     options.pop("keywords", None)
     selected_queue = _resolve_media_ingest_queue(form_data)
 
-    batch_id = str(uuid4())
+    if upload_batch_id is not None and (len(files or []) != 1 or form_data.urls):
+        raise HTTPException(status_code=400, detail="Upload cancellation identity requires one file")
+    batch_id = _owned_upload_batch_id(current_user, upload_batch_id) if upload_batch_id else str(uuid4())
     jobs: list[MediaIngestJobItem] = []
     errors: list[str] = []
     first_url_submit_exception: Exception | None = None
@@ -724,6 +736,7 @@ async def submit_media_ingest_jobs(
     if files:
         for upload in files:
             temp_dir_path = None
+            row = None
             try:
                 with TempDirManager(prefix="media_ingest_job_", cleanup=False) as temp_dir:
                     temp_dir_path = str(temp_dir)
@@ -737,13 +750,9 @@ async def submit_media_ingest_jobs(
                     for err in file_errors:
                         msg = err.get("error") or "Failed to stage upload"
                         errors.append(msg)
-                    if temp_dir_path:
-                        _cleanup_dir(temp_dir_path)
                     continue
                 if not saved_files:
                     errors.append("Failed to stage upload")
-                    if temp_dir_path:
-                        _cleanup_dir(temp_dir_path)
                     continue
 
                 saved = saved_files[0]
@@ -770,6 +779,7 @@ async def submit_media_ingest_jobs(
                     batch_id=batch_id,
                     request_id=rid,
                     trace_id=tp or None,
+                    cancellable_upload=upload_batch_id is not None,
                 )
                 row_id = row.get("id")
                 if row_id is None:
@@ -788,7 +798,8 @@ async def submit_media_ingest_jobs(
             except Exception:
                 logger.warning("Failed to stage upload for ingest jobs")
                 errors.append("Upload staging failed")
-                if temp_dir_path:
+            finally:
+                if row is None and temp_dir_path:
                     _cleanup_dir(temp_dir_path)
 
     if not jobs:
@@ -1031,6 +1042,26 @@ async def stream_media_ingest_job_events(
     )
 
 
+def _cleanup_queued_upload(job: dict[str, Any]) -> None:
+    payload = _normalize_payload(job.get("payload"))
+    raw_directory, raw_source = payload.get("temp_dir"), payload.get("source")
+    if (
+        payload.get("source_kind") != "file"
+        or payload.get("cleanup_temp_dir") is not True
+        or not isinstance(raw_directory, str)
+        or not isinstance(raw_source, str)
+    ):
+        return
+    directory = Path(raw_directory)
+    if (
+        directory.name.startswith("media_ingest_job_")
+        and directory.parent.resolve() == Path(gettempdir()).resolve()
+        and not directory.is_symlink()
+        and Path(raw_source).parent == directory
+    ):
+        _cleanup_dir(str(directory))
+
+
 @router.delete(
     "/ingest/jobs/{job_id}",
     response_model=CancelMediaIngestJobResponse,
@@ -1083,25 +1114,42 @@ async def cancel_media_ingest_jobs_batch(
         min_length=1,
         description="Session identifier alias for batch-level cancellation",
     ),
+    upload_batch_id: UUID4 | None = Query(None, description="Cancellation identity for a single-file upload"),
     reason: str | None = Query(None, description="Reason for cancellation"),
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     jm: JobManager = Depends(get_scoped_job_manager),
 ) -> CancelMediaIngestBatchResponse:
-    resolved_batch_id = _resolve_batch_or_session_id(batch_id=batch_id, session_id=session_id)
-    is_admin = _principal_has_admin_claims(principal)
-    owner_filter = None if is_admin else str(current_user.id)
-
-    matched_jobs = _collect_jobs_for_batch(
-        jm=jm,
-        batch_id=resolved_batch_id,
-        owner_filter=owner_filter,
-        limit=5000,
-    )
-    if not matched_jobs:
-        if not is_admin and _batch_exists_for_any_owner(jm=jm, batch_id=resolved_batch_id):
-            raise HTTPException(status_code=403, detail="Not authorized for this batch")
-        raise HTTPException(status_code=404, detail="Batch not found")
+    if upload_batch_id is None:
+        resolved_batch_id = _resolve_batch_or_session_id(batch_id=batch_id, session_id=session_id)
+        is_admin = _principal_has_admin_claims(principal)
+        owner_filter = None if is_admin else str(current_user.id)
+        matched_jobs = _collect_jobs_for_batch(
+            jm=jm,
+            batch_id=resolved_batch_id,
+            owner_filter=owner_filter,
+            limit=5000,
+        )
+        if not matched_jobs:
+            if not is_admin and _batch_exists_for_any_owner(jm=jm, batch_id=resolved_batch_id):
+                raise HTTPException(status_code=403, detail="Not authorized for this batch")
+            raise HTTPException(status_code=404, detail="Batch not found")
+    else:
+        if batch_id is not None or session_id is not None:
+            raise HTTPException(status_code=400, detail="Choose one cancellation identity")
+        owner = str(current_user.id)
+        resolved_batch_id = _owned_upload_batch_id(current_user, upload_batch_id)
+        # Once committed, the intent prevents a job from appearing after this lookup.
+        jm.record_media_upload_cancellation(owner_user_id=owner, batch_group=resolved_batch_id)
+        matched_jobs = jm.list_jobs(
+            domain="media_ingest", job_type="media_ingest_item", batch_group=resolved_batch_id,
+            owner_user_id=owner, limit=1,
+        )
+        if not matched_jobs:
+            return CancelMediaIngestBatchResponse(
+                success=True, batch_id=resolved_batch_id, requested=0, cancelled=0,
+                already_terminal=0, message="Pending upload cancelled",
+            )
 
     requested = len(matched_jobs)
     cancelled = 0
@@ -1117,8 +1165,23 @@ async def cancel_media_ingest_jobs_batch(
         status_value = str(job.get("status") or "").lower()
         if status_value in _TERMINAL_MEDIA_INGEST_JOB_STATUSES:
             already_terminal += 1
+            if upload_batch_id is not None and status_value != "cancelled":
+                failed += 1
             continue
-        if jm.cancel_job(job_id, reason=reason):
+
+        cancel_args = {}
+        if upload_batch_id is not None:
+            cancel_args = {
+                "expected_uuid": str(job.get("uuid") or ""),
+                "expected_domain": "media_ingest",
+                "expected_job_type": "media_ingest_item",
+            }
+            if status_value == "queued" and jm.cancel_job(job_id, reason=reason, queued_only=True, **cancel_args):
+                # Only the successful queued-only transition proves no worker owns the file.
+                _cleanup_queued_upload(job)
+                cancelled += 1
+                continue
+        if jm.cancel_job(job_id, reason=reason, **cancel_args):
             cancelled += 1
             continue
 
@@ -1126,6 +1189,8 @@ async def cancel_media_ingest_jobs_batch(
         refreshed_status = str(refreshed.get("status") or "").lower()
         if refreshed_status in _TERMINAL_MEDIA_INGEST_JOB_STATUSES:
             already_terminal += 1
+            if upload_batch_id is not None and refreshed_status != "cancelled":
+                failed += 1
         else:
             failed += 1
 
