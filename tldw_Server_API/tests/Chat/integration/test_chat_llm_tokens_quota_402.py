@@ -334,8 +334,10 @@ def test_a_hosted_over_limit_request_on_the_users_own_key_looks_the_key_up_once(
 
 
 # The four failover paths of /chat/completions, each by the request that reaches it: the pre-dispatch health
-# check (stream and not), the stream retry loop, execute_streaming_call's own fallback and
-# _execute_non_stream_call_impl's (TASK-15481).
+# check (stream and not), the stream retry loop (entered by an eager error: the endpoint's stream wrapper turns a
+# provider's error into a lazy one, so execute_streaming_call's own fallback cannot fire from the endpoint here;
+# the request flag at chat.py enable_provider_fallback=... is its only guard) and _execute_non_stream_call_impl's
+# (TASK-15481).
 _FAILOVER_PATHS = ("health_switch", "health_switch_stream", "stream_retry", "stream_in_call", "non_stream_in_call")
 _STREAM_PATHS = ("health_switch_stream", "stream_retry", "stream_in_call")
 
