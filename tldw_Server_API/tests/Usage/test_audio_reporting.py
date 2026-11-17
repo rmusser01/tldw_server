@@ -215,18 +215,13 @@ def test_monthly_breach_message_names_the_month(
             """Resolve to the external stub."""
             return "external", "external:stub", None
 
-    original_shim = audio_tx._audio_shim_attr
-
-    def _shim(name: str):
-        """Serve the fake monthly check; defer everything else."""
-        return _exhausted if name == "monthly_minutes_exhausted" else original_shim(name)
-
+    quota = "tldw_Server_API.app.core.Usage.audio_quota"
     for name in ("can_start_job", "check_daily_minutes_allow"):
-        monkeypatch.setattr(audio_ep, name, _allow)
+        monkeypatch.setattr(f"{quota}.{name}", _allow)
     for name in ("increment_jobs_started", "finish_job", "add_daily_minutes"):
-        monkeypatch.setattr(audio_ep, name, _noop)
+        monkeypatch.setattr(f"{quota}.{name}", _noop)
     monkeypatch.setattr(audio_tx, "_consume_daily_minutes", _deny)
-    monkeypatch.setattr(audio_tx, "_audio_shim_attr", _shim)
+    monkeypatch.setattr(f"{quota}.monthly_minutes_exhausted", _exhausted)
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _Registry())
     monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *_a, **_k: path)
 
@@ -257,11 +252,6 @@ async def test_ws_minutes_quota_name_follows_the_monthly_check(
         asked.append((user_id, minutes))
         return monthly
 
-    original = audio_streaming._audio_shim_attr
-    monkeypatch.setattr(
-        audio_streaming,
-        "_audio_shim_attr",
-        lambda name: _exhausted if name == "monthly_minutes_exhausted" else original(name),
-    )
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.monthly_minutes_exhausted", _exhausted)
     assert await audio_streaming._minutes_quota_name(7, 0.5) == expected
     assert asked == [(7, 0.5)]

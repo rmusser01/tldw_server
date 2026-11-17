@@ -471,14 +471,11 @@ async def test_gateway_speech_job_rejects_allowlisted_authority_extra_params(
         allowed_request_options=[allowed_pointer],
     )
 
-    def _shim(name: str):
-        if name == "_sanitize_speech_request":
-            return lambda *_args, **_kwargs: None
-        if name == "_resolve_tts_byok":
-            raise AssertionError("explicit gateway enqueue must not resolve credentials")
-        raise KeyError(name)
+    def _no_credentials(**_kwargs):
+        raise AssertionError("explicit gateway enqueue must not resolve credentials")
 
-    monkeypatch.setattr(audio_tts, "_audio_shim_attr", _shim)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _no_credentials)
     monkeypatch.setattr(
         audio_tts,
         "get_tts_config_manager",
@@ -516,14 +513,11 @@ async def test_gateway_speech_job_enqueue_is_config_only_and_secret_free(monkeyp
             self.payload = kwargs["payload"]
             return {"id": 91, "status": "queued"}
 
-    def _shim(name: str):
-        if name == "_sanitize_speech_request":
-            return lambda *_args, **_kwargs: None
-        if name == "_resolve_tts_byok":
-            raise AssertionError("explicit gateway enqueue must not resolve credentials")
-        raise KeyError(name)
+    def _no_credentials(**_kwargs):
+        raise AssertionError("explicit gateway enqueue must not resolve credentials")
 
-    monkeypatch.setattr(audio_tts, "_audio_shim_attr", _shim)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _no_credentials)
     monkeypatch.setattr(
         audio_tts,
         "get_tts_config_manager",

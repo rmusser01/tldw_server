@@ -33,8 +33,8 @@ def test_setup_failure_after_admission_leaves_no_slot_held(monkeypatch: pytest.M
         setup_calls.append(True)
         raise RuntimeError("setup failed")
 
-    monkeypatch.setattr(audio_ep, "can_start_stream", _start)
-    monkeypatch.setattr(audio_ep, "finish_stream", _finish)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _start)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_stream", _finish)
     monkeypatch.setattr(audio_streaming, "_get_failopen_cap_minutes", _broken_setup)
     token = get_settings().SINGLE_USER_API_KEY
 

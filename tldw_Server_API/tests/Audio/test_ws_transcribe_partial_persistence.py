@@ -107,20 +107,16 @@ def _mock_transcribe_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _finish_stream(_user_id: int) -> None:
         return None
 
-    async def _allow_minutes(_uid: int, _minutes: float) -> tuple[bool, float | None]:
+    async def _allow_minutes(_uid: int, _minutes: float, **_kwargs) -> tuple[bool, float | None]:
         return True, None
-
-    async def _add_minutes(_uid: int, _minutes: float) -> None:
-        return None
 
     async def _heartbeat(_uid: int) -> None:
         return None
 
     monkeypatch.setattr(audio, "_audio_ws_authenticate", _auth)
-    monkeypatch.setattr(audio, "can_start_stream", _can_start_stream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _can_start_stream)
     monkeypatch.setattr(audio, "finish_stream", _finish_stream)
-    monkeypatch.setattr(audio, "check_daily_minutes_allow", _allow_minutes)
-    monkeypatch.setattr(audio, "add_daily_minutes", _add_minutes)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_minutes)
     monkeypatch.setattr(audio, "heartbeat_stream", _heartbeat)
     monkeypatch.setattr(audio_streaming, "is_multi_user_mode", lambda: False)
 

@@ -91,7 +91,7 @@ async def test_chat_stream_sessions_return_every_checkout_while_the_server_runs(
     async def _db_for_user(_user_id, client_id=None):  # noqa: ARG001 - one call per session
         return owners[next(order)]
 
-    monkeypatch.setattr(audio, "get_tts_service", _tts)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _tts)
     monkeypatch.setattr(audio, "get_chacha_db_for_user_id", _db_for_user, raising=False)
     sockets = [_persisting_session() for _ in range(len(owners) * sessions_per_user)]
 

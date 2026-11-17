@@ -529,7 +529,7 @@ async def test_audio_websocket_handlers_block_new_work_when_draining(
     async def _unexpected_handle(*args, **kwargs):
         raise AssertionError("expensive audio work should not start while draining")
 
-    monkeypatch.setattr(audio_streaming, "_shim_audio_ws_authenticate", _fake_authenticate)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", _fake_authenticate)
     monkeypatch.setattr(audio_streaming, "assert_may_start_work", _fake_guard)
     monkeypatch.setattr(audio_streaming, "handle_unified_websocket", _unexpected_handle)
     monkeypatch.setattr(audio_streaming, "_stream_tts_to_websocket", _unexpected_handle)

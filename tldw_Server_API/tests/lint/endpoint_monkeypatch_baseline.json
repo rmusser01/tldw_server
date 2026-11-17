@@ -36,7 +36,7 @@
   "api/v1/endpoints/audio/audio_streaming.py": {"monkeypatch": 90, "other": 0, "reason": null},
   "api/v1/endpoints/audio/audio_studio.py": {"monkeypatch": 1, "other": 0, "reason": null},
   "api/v1/endpoints/audio/audio_transcriptions.py": {"monkeypatch": 44, "other": 0, "reason": null},
-  "api/v1/endpoints/audio/audio_tts.py": {"monkeypatch": 36, "other": 0, "reason": null},
+  "api/v1/endpoints/audio/audio_tts.py": {"monkeypatch": 81, "other": 4, "reason": "TASK-13950.20 E3 (8a): the audio package shims are gone; streaming and TTS read get_tts_service and _resolve_tts_byok on audio_tts, so their package patches move here (audio/__init__.py 164 -> 70)"},
   "api/v1/endpoints/audio/audio_voice_conversion.py": {"monkeypatch": 1, "other": 0, "reason": null},
   "api/v1/endpoints/audio/audio_voices.py": {"monkeypatch": 8, "other": 0, "reason": null},
   "api/v1/endpoints/audio/audiobooks.py": {"monkeypatch": 10, "other": 0, "reason": null},

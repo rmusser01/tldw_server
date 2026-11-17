@@ -23,6 +23,8 @@ from tldw_Server_API.app.core.config_llm_providers import get_api_keys
 from tldw_Server_API.app.core.Metrics.metrics_manager import (
     get_metrics_registry,
 )
+import tldw_Server_API.app.core.config as _config
+import tldw_Server_API.app.core.Provider_Credentials.byok_runtime as _byok_runtime
 
 from . import (
     audio_health,
@@ -151,17 +153,11 @@ def _tts_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
 
 def _resolve_tts_byok_resolver():
     local_resolver = resolve_byok_credentials
-    package_resolver = _default_resolve_byok_credentials
-    try:
-        from tldw_Server_API.app.api.v1.endpoints import audio as _audio_pkg
-
-        package_resolver = getattr(_audio_pkg, "resolve_byok_credentials", _default_resolve_byok_credentials)
-    except (AttributeError, ImportError):
-        logger.debug("Falling back to default BYOK resolver after audio package resolver lookup failed")
+    home_resolver = _byok_runtime.resolve_byok_credentials
     if local_resolver is not _default_resolve_byok_credentials:
         return local_resolver
-    if package_resolver is not _default_resolve_byok_credentials:
-        return package_resolver
+    if home_resolver is not _default_resolve_byok_credentials:
+        return home_resolver
     try:
         from tldw_Server_API.app.core.Audio import tts_service as core_tts_service
 
@@ -222,13 +218,7 @@ def _get_failopen_cap_minutes() -> float:
         except (ValueError, TypeError):
             logger.debug("AUDIO_FAILOPEN_CAP_MINUTES parse failed")
     try:
-        try:
-            from tldw_Server_API.app.api.v1.endpoints import audio as _audio_pkg
-
-            cfg_loader = getattr(_audio_pkg, "load_comprehensive_config", load_comprehensive_config)
-        except Exception:
-            cfg_loader = load_comprehensive_config
-        cfg = cfg_loader()
+        cfg = _config.load_comprehensive_config()
         if cfg is not None:
             if cfg.has_section("Audio-Quota"):
                 try:

@@ -141,16 +141,15 @@ def test_audio_transcriptions_default_flow_normalizes_en_us_for_whisper(monkeypa
         def get_adapter(self, _provider):
             return _StubAdapter()
 
-    shim_map = {
+    quota_fakes = {
         "can_start_job": _allow_job,
         "increment_jobs_started": _noop_async,
         "finish_job": _noop_async,
-        "check_daily_minutes_allow": _allow_job,
-        "add_daily_minutes": _noop_async,
+        "consume_daily_minutes": _allow_job,
         "get_limits_for_user": _get_limits_for_user,
-        "sf": sf,
     }
-    monkeypatch.setattr(audio_tx, "_audio_shim_attr", lambda name: shim_map[name])
+    for name, fake in quota_fakes.items():
+        monkeypatch.setattr(f"tldw_Server_API.app.core.Usage.audio_quota.{name}", fake)
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
     monkeypatch.setattr(stt_adapter, "resolve_default_transcription_model", lambda _fallback: "whisper-1")
 
@@ -282,16 +281,15 @@ def test_audio_transcriptions_allows_whisper_first_use_download_when_model_not_c
         def get_adapter(self, _provider):
             return _StubAdapter()
 
-    shim_map = {
+    quota_fakes = {
         "can_start_job": _allow_job,
         "increment_jobs_started": _noop_async,
         "finish_job": _noop_async,
-        "check_daily_minutes_allow": _allow_job,
-        "add_daily_minutes": _noop_async,
+        "consume_daily_minutes": _allow_job,
         "get_limits_for_user": _get_limits_for_user,
-        "sf": sf,
     }
-    monkeypatch.setattr(audio_tx, "_audio_shim_attr", lambda name: shim_map[name])
+    for name, fake in quota_fakes.items():
+        monkeypatch.setattr(f"tldw_Server_API.app.core.Usage.audio_quota.{name}", fake)
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
 
     app = FastAPI()

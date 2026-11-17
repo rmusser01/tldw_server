@@ -51,14 +51,10 @@ async def test_ws_failopen_cap_exhausted_sends_error_and_closes(monkeypatch):
     monkeypatch.setenv("AUDIO_FAILOPEN_CAP_MINUTES", "0.0003")
 
     # Monkeypatch quota helpers to raise DB-like errors that are caught by EXPECTED_DB_EXC
-    async def _check_raises(user_id: int, minutes_requested: float):
+    async def _check_raises(user_id: int, minutes_requested: float, **_kwargs):
         raise sqlite3.OperationalError("simulated db unavailable (check)")
 
-    async def _add_raises(user_id: int, minutes: float):
-        raise sqlite3.OperationalError("simulated db unavailable (add)")
-
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _check_raises, raising=True)
-    monkeypatch.setattr(audio_ep, "add_daily_minutes", _add_raises, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _check_raises)
 
     settings = get_settings()
     token = settings.SINGLE_USER_API_KEY

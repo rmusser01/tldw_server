@@ -183,6 +183,19 @@ def _scoped_worker_job(
     }
 
 
+def _patch_speech_job_collaborators(monkeypatch, resolve_tts_byok) -> None:
+    """The provider is openai and credentials come from ``resolve_tts_byok``; a job never saves audio."""
+
+    def _no_save(*_args, **_kwargs):
+        raise AssertionError("save_and_register_tts_audio")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda _data, *, request_id: "openai"
+    )
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", resolve_tts_byok)
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.generated_file_helpers.save_and_register_tts_audio", _no_save)
+
+
 @pytest.mark.asyncio
 async def test_create_speech_job_never_persists_resolved_credentials(monkeypatch) -> None:
     """Long-form jobs persist identity/scope, never the resolved secret snapshot."""
@@ -202,14 +215,7 @@ async def test_create_speech_job_never_persists_resolved_credentials(monkeypatch
             ),
         )
 
-    def _shim(name: str):
-        if name == "_sanitize_speech_request":
-            return lambda _data, *, request_id: "openai"
-        if name == "_resolve_tts_byok":
-            return _resolve_tts_byok
-        raise AssertionError(name)
-
-    monkeypatch.setattr(audio_tts, "_audio_shim_attr", _shim)
+    _patch_speech_job_collaborators(monkeypatch, _resolve_tts_byok)
     manager = _CapturingJobManager()
     request = Request({"type": "http", "method": "POST", "path": "/", "headers": []})
 
@@ -248,14 +254,7 @@ async def test_create_speech_job_rejects_nested_request_credentials(monkeypatch)
         resolved = True
         return (7, None, None)
 
-    def _shim(name: str):
-        if name == "_sanitize_speech_request":
-            return lambda _data, *, request_id: "openai"
-        if name == "_resolve_tts_byok":
-            return _unexpected_resolve
-        raise AssertionError(name)
-
-    monkeypatch.setattr(audio_tts, "_audio_shim_attr", _shim)
+    _patch_speech_job_collaborators(monkeypatch, _unexpected_resolve)
     manager = _CapturingJobManager()
     request = Request({"type": "http", "method": "POST", "path": "/", "headers": []})
 

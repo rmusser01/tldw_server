@@ -48,7 +48,7 @@ async def test_return_download_link_persists_tts_audio(monkeypatch):
     async def _resolve_tts_byok(*args, **kwargs):
         return (1, {}, None)
 
-    monkeypatch.setattr(audio_endpoint, "_resolve_tts_byok", _resolve_tts_byok)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _resolve_tts_byok)
 
     save_mock = AsyncMock(return_value={"id": 123})
     monkeypatch.setattr(audio_endpoint, "save_and_register_tts_audio", save_mock)
@@ -86,7 +86,7 @@ async def test_return_download_link_rejected_for_streaming(monkeypatch):
     async def _resolve_tts_byok(*args, **kwargs):
         return (1, {}, None)
 
-    monkeypatch.setattr(audio_endpoint, "_resolve_tts_byok", _resolve_tts_byok)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _resolve_tts_byok)
 
     req = OpenAISpeechRequest(
         input="hello world",
@@ -119,7 +119,7 @@ def test_tts_headers_via_http(monkeypatch):
     async def _resolve_tts_byok(*args, **kwargs):
         return (1, {}, None)
 
-    monkeypatch.setattr(audio_endpoint, "_resolve_tts_byok", _resolve_tts_byok)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _resolve_tts_byok)
 
     save_mock = AsyncMock(return_value={"id": 456})
     monkeypatch.setattr(audio_endpoint, "save_and_register_tts_audio", save_mock)

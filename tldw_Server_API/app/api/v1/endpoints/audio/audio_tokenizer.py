@@ -1,7 +1,7 @@
 # audio_tokenizer.py
 # Description: Audio tokenizer encode/decode endpoints.
 import io
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 import soundfile as sf
@@ -19,8 +19,6 @@ from tldw_Server_API.app.core.Audio.tokenizer_service import (
     _decode_base64_payload,
     _enforce_payload_limit,
     _enforce_payload_size,
-    _get_qwen3_tokenizer_settings,
-    _load_qwen3_tokenizer,
     _normalize_tokens,
     _read_audio_from_bytes,
     _resolve_tokenizer_frame_rate,
@@ -29,6 +27,7 @@ from tldw_Server_API.app.core.Audio.tokenizer_service import (
     _serialize_tokens,
 )
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
+import tldw_Server_API.app.core.Audio.tokenizer_service as _tokenizer_service
 
 router = APIRouter(
     tags=["Audio"],
@@ -38,23 +37,6 @@ router = APIRouter(
         429: {"description": "Rate limit exceeded"},
     },
 )
-
-
-def _audio_shim_attr(name: str):
-    defaults: dict[str, Any] = {
-        "_get_qwen3_tokenizer_settings": _get_qwen3_tokenizer_settings,
-        "_load_qwen3_tokenizer": _load_qwen3_tokenizer,
-    }
-    try:
-        from tldw_Server_API.app.api.v1.endpoints import audio as audio_shim
-
-        if hasattr(audio_shim, name):
-            return getattr(audio_shim, name)
-    except Exception as resolve_error:
-        _ = resolve_error  # best-effort shim resolution; default map below
-    if name in defaults:
-        return defaults[name]
-    raise NameError(name)
 
 
 @router.post(
@@ -77,7 +59,7 @@ async def encode_audio_tokenizer(
     current_user: User = Depends(get_request_user),
 ):
     request_id = ensure_request_id(request)
-    settings = _audio_shim_attr("_get_qwen3_tokenizer_settings")()
+    settings = _tokenizer_service._get_qwen3_tokenizer_settings()
     tokenizer_model = settings["tokenizer_model"]
     # Response format label, not a credential.
     token_format = "list"  # nosec B105
@@ -134,7 +116,7 @@ async def encode_audio_tokenizer(
             ),
         )
 
-    tokenizer = _audio_shim_attr("_load_qwen3_tokenizer")(tokenizer_model, settings["auto_download"])
+    tokenizer = _tokenizer_service._load_qwen3_tokenizer(tokenizer_model, settings["auto_download"])
     encode_fn = getattr(tokenizer, "encode", None)
     if not callable(encode_fn):
         raise HTTPException(
@@ -207,7 +189,7 @@ async def decode_audio_tokenizer(
     current_user: User = Depends(get_request_user),
 ):
     request_id = ensure_request_id(request)
-    settings = _audio_shim_attr("_get_qwen3_tokenizer_settings")()
+    settings = _tokenizer_service._get_qwen3_tokenizer_settings()
     tokenizer_model = payload.tokenizer_model or settings["tokenizer_model"]
 
     if isinstance(payload.tokens, str):
@@ -234,7 +216,7 @@ async def decode_audio_tokenizer(
             ),
         )
 
-    tokenizer = _audio_shim_attr("_load_qwen3_tokenizer")(tokenizer_model, settings["auto_download"])
+    tokenizer = _tokenizer_service._load_qwen3_tokenizer(tokenizer_model, settings["auto_download"])
     decode_fn = getattr(tokenizer, "decode", None)
     if not callable(decode_fn):
         raise HTTPException(
