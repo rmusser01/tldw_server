@@ -85,7 +85,20 @@ python Helper_Scripts/Evals/run_political_pdf_eval.py run \
 
 The eight supplied controls include supported and deliberately incorrect claims about NGI procurement, Financial endnote 53, a CFPB condition, Khan's reported position, a wrong citation and an uncited statement. Their exact excerpts must resolve uniquely in the canonical source. Expected statuses are source-audited agent expectations, with human decisions explicitly null; this is a regression suite, not a calibrated accuracy benchmark. A negative control passes its regression expectation when the verifier rejects the unsupported claim, while its claim-support result remains false. Raw requests, reports and failed first attempts remain saved. The fixture hash participates in run identity and resume validation; changing a claim or quote requires a new config/hash/run.
 
-The current v4 fixture retains the original eight controls and four Financial footnote controls. Three further cases preserve a wrongly accepted mixed-contributor claim from R04, pair the same passages with their correct separate contributors, and check a supported Hazelton attribution. V1–v3 and their first results remain unchanged. These development cases do not qualify performance on untouched documents.
+The v4 fixture retains the original eight controls and four Financial footnote controls. Three further cases preserve a wrongly accepted mixed-contributor claim from R04, pair the same passages with their correct separate contributors, and check a supported Hazelton attribution. V1–v3 and their first results remain unchanged. These development cases do not qualify performance on untouched documents.
+
+The additive [v5 fixture](../../Helper_Scripts/Evals/configs/political_pdf_verification_regressions.v5.json) preserves all 15 v4 cases and adds a pair from completed Job 60's overview: the observed statement that note 53's attribution/context is unclear, and a corrected statement identifying its verified link to Bowes's CFPB contribution while declining to claim personal note authorship or endorsement. The model accepted the original wording; source review records a false-acceptance candidate, not an accuracy score. Only the original E citation tokens are reversibly remapped to the fixture's P IDs; prose and exact passages are preserved. The [design and provenance record](../Design/2026-11-17-observed-note-context-regressions.md) describes the source spans and offline checks.
+
+To include these development controls, use a **new copied configuration and run directory** with this fixture identity; leave existing runs and their v4 configuration unchanged:
+
+```json
+"verification_regressions": {
+  "path": "Helper_Scripts/Evals/configs/political_pdf_verification_regressions.v5.json",
+  "sha256": "d846e28a43cd00d376e74ccb6eaa6520641fa3f4fe867292b0b98995a259ee82"
+}
+```
+
+Plan first, then explicitly select `source,verification_regressions --execute` as above when a provider run is intended. V5 has 17 fixed cases per selected model. Adding the fixture makes no provider calls, changes no judge prompt, and does not establish that the observed model error is repaired. Both new expected outcomes remain agent-reviewed development expectations with human review pending.
 
 QA generation receives the selected numbered passages; it does not currently receive the verifier's additional source-heading context. A response that cannot identify a contributor from those passages must be distinguished from one that ignores a supplied byline. Verification still resolves attribution separately against the owned canonical source. The CLI's QA branch exercises the extraction-prompt contract, not the browser's conversational QA prompt end to end.
 

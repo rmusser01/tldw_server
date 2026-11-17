@@ -254,3 +254,131 @@ async def test_frozen_note_locator_gets_linkage_from_production_resolver(fixture
     assert len(headings) == 1
     assert headings[0]["start_char"] == note["contribution_start_char"] == len(opening)
     assert "Robert Bowes" in headings[0]["heading_quote"]
+
+
+@pytest.fixture
+def fixture_v5():
+    path = CONFIGS / "political_pdf_verification_regressions.v5.json"
+    assert path.is_file(), "Freeze the observed note-context pair without rewriting v4"
+    return json.loads(path.read_text()), path
+
+
+def test_v5_loader_preserves_v4_and_adds_human_pending_observed_pair(runner_module):
+    path = CONFIGS / "political_pdf_verification_regressions.v5.json"
+    assert path.is_file(), "Freeze the observed note-context pair without rewriting v4"
+    prior_path = CONFIGS / "political_pdf_verification_regressions.v4.json"
+    prior = json.loads(prior_path.read_text())
+    assert hashlib.sha256(prior_path.read_bytes()).hexdigest() == (
+        "f9aed5aa157b52c03b03751945abb507da3a899c5e5f8da1c4cdff22510fac94"
+    )
+    fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
+    cases, loaded_fingerprint = runner_module.load_verification_regressions({
+        "source": {"sha256": SOURCE_SHA256},
+        "verification_regressions": {"path": str(path), "sha256": fingerprint},
+    })
+    assert loaded_fingerprint == fingerprint
+    assert cases[:15] == prior["cases"]
+    assert [case["id"] for case in cases[15:]] == [
+        "financial-note-soft-context-denial-observed-job60",
+        "financial-note-context-link-with-authorship-limitation",
+    ]
+    assert [case["expected_statuses"] for case in cases[15:]] == [
+        ["unsupported", "contradicted"], ["supported"],
+    ]
+    for case in cases[15:]:
+        assert case["label_provenance"] == "agent_source_audit"
+        assert case["human_review"] == {"status": "pending", "decision": None}
+
+
+def test_v5_negative_recovers_observed_text_after_reversible_citation_remap(fixture_v5):
+    fixture, _ = fixture_v5
+    negative, positive = fixture["cases"][15:]
+    original = negative["text"]
+    for declared, observed in (("P1", "E3.2.10"), ("P2", "E3.3.2"), ("P3", "E3.3.6")):
+        original = original.replace(f"[{declared}]", f"[{observed}]")
+    assert hashlib.sha256(original.encode()).hexdigest() == (
+        "333f845776003be5f0cc10a2ab2c7479a060f2623fe4f6760d5ae48dae61b0dc"
+    )
+    assert negative["text"].split(". ", 1)[0] == positive["text"].split(". ", 1)[0]
+    assert negative["evidence"] == positive["evidence"]
+
+
+@pytest.mark.parametrize("case_index", [15, 16])
+def test_v5_pair_resolves_complete_units_with_original_source_quotes(fixture_v5, case_index):
+    from tldw_Server_API.app.core.Claims_Extraction.citation_support import _evidence_for_unit, _units
+
+    fixture, _ = fixture_v5
+    case = fixture["cases"][case_index]
+    units = _units(case["text"])
+    assert len(units) == 1 and units[0]["text"] == case["text"]
+    assert units[0]["evidence_ids"] == ["P1", "P2", "P3"]
+    documents, _, error = _evidence_for_unit(
+        units[0], {row["id"]: {"text": row["quote"]} for row in case["evidence"]},
+    )
+    assert error is None
+    assert [(doc.id, hashlib.sha256(doc.content.encode()).hexdigest()) for doc in documents] == [
+        ("P1", "5dd10197ea972aa5fa8a74f92905494c406c75ed555797e8c33c7bbce93aa3ae"),
+        ("P2", "77ff2eb73b735a2d14c3b2c46c5c8139732083778ec7f58ce7775590301f0a3d"),
+        ("P3", "91dece22421251a66123a3af9a55a26e317ee8d424955f9915b9fb3f9460ea9b"),
+    ]
+    assert all(set(row) == {"id", "quote"} for row in case["evidence"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case_index", [15, 16])
+async def test_v5_pair_recovers_bowes_link_from_source_not_supplied_context(
+    fixture_v5, fixture_v3, monkeypatch, case_index,
+):
+    from tldw_Server_API.app.core.Claims_Extraction import workspace_citations
+
+    fixture, _ = fixture_v5
+    prior, _ = fixture_v3
+    case = fixture["cases"][case_index]
+    body = next(row for row in prior["cases"] if row["id"] == "financial-note-link-supported")["evidence"][0]["quote"]
+    opening = (
+        "## **27**\n\n###### **FINANCIAL** **REGULATORY** **AGENCIES**\n\n"
+        "**SECURITIES AND EXCHANGE COMMISSION**\n\n**AND RELATED AGENCIES**\n\n**David R. Burton**\n\n"
+    )
+    contribution = "**CONSUMER FINANCIAL PROTECTION BUREAU**\n\n**Robert Bowes**\n\n"
+    # Audited exact excerpts in compact synthetic navigation; original offsets are documented.
+    p1, p2, p3 = (row["quote"] for row in case["evidence"])
+    content = opening + contribution + body + "\n\n**ENDNOTES**\n\n" + p1 + "\n" + p2 + "\n53. " + p3
+    snapshot = {
+        "content": content, "navigation_version": "fixture-nav", "page_map": [],
+        "nodes": [
+            {"id": "financial", "title": "27. FINANCIAL REGULATORY AGENCIES", "level": 1,
+             "target_type": "char_range", "target_start": 0, "target_end": len(content)},
+            {"id": "securities", "title": "AND RELATED AGENCIES", "parent_id": "financial", "level": 2,
+             "target_type": "char_range", "target_start": content.index("**AND RELATED AGENCIES**"),
+             "target_end": len(opening)},
+            {"id": "cfpb", "title": "CONSUMER FINANCIAL PROTECTION BUREAU", "parent_id": "financial", "level": 2,
+             "target_type": "char_range", "target_start": len(opening), "target_end": len(content)},
+        ],
+    }
+
+    async def load(media_id, db):
+        return snapshot
+
+    monkeypatch.setattr(workspace_citations, "load_navigation_sections", load)
+    workspace_db = SimpleNamespace(
+        get_workspace=lambda workspace_id: {"id": workspace_id},
+        list_workspace_sources=lambda _: [{"id": "source1", "media_id": 1}],
+    )
+    resolved = await workspace_citations.resolve_workspace_citations(
+        "workspace", [{**row, "source_id": "source1"} for row in case["evidence"]],
+        workspace_db=workspace_db, media_db=object(),
+    )
+    for locator in case["evidence"]:
+        evidence = resolved[locator["id"]]
+        assert evidence["text"] == content[evidence["start_char"]:evidence["end_char"]] == locator["quote"]
+    evidence = resolved["P3"]
+    assert "David R. Burton" in evidence["text"] and "Robert Bowes" not in evidence["text"]
+    contexts = json.loads(evidence["attribution_context"].rsplit("\n", 1)[-1])
+    note = next(note for context in contexts for note in context.get("footnotes", [])
+                if note["label_quote"] == "53. ")
+    assert note["status"] == "linked"
+    assert note["contribution_start_char"] == len(opening)
+    marker = note["body_marker"]
+    assert content[marker["start_char"]:marker["end_char"]] == "[53]"
+    headings = [context for context in contexts if context["type"] == "heading"]
+    assert len(headings) == 1 and "Robert Bowes" in headings[0]["heading_quote"]
