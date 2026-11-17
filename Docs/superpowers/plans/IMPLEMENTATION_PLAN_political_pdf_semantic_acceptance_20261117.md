@@ -68,7 +68,7 @@
 
 - [x] Extend offline reporting and its tests for exact per-finding samples, independent agent proposals and nullable human labels; preserve decisions only when their evidence fingerprint is unchanged.
 - [x] Freeze new config/run directories and API/worker/runner revisions. Plan the run, then execute the new frozen verification controls and targeted QA/summary cases with no automatic retry.
-- [ ] Repair the Job 55 evidence-ID/source-range handoff exposed by the targeted run. Bind only validated note-overlapping evidence allowed in each chapter reduction/final call, preserve context budgets and retry work, add RED→GREEN controls and independent review, then freeze a new runtime for explicit retesting.
+- [x] Repair the Job 55 evidence-ID/source-range handoff exposed by the targeted run. Bind only validated note-overlapping evidence allowed in each chapter reduction/final call, preserve context budgets and retry work, add RED→GREEN controls and independent review, then freeze a new runtime for explicit retesting.
 - [ ] Run one full Luna evaluation on the original PDF. Retain first failures, ledger entries and any explicit recovery; audit chapter representation, source spans, Claims verdicts and attribution separately.
 - [ ] Source-review the agreed sample as agent review, keeping known regressions separate from untouched samples. Do not report human calibration scores while labels are absent.
 - [ ] Exercise review/save/reload/export of new findings and record NN/g issues and verification limits. Publish tested changes/results to the existing draft PR; follow CI to terminal.
