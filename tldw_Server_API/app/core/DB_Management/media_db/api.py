@@ -350,20 +350,26 @@ def get_media_source_projection(
     *,
     max_chars: int,
     owner_user_id: str | None = None,
+    prefer_current_content: bool = False,
 ) -> dict[str, Any] | None:
-    """Return a bounded active text projection for standalone Slides generation."""
+    """Return a bounded active text projection for generation from stored media."""
     db_instance = unwrap_media_database_like(db)
     if is_media_database_like(db_instance):
         return MediaLookupRepository.from_legacy_db(db_instance).source_projection_by_id(
             media_id,
             max_chars=max_chars,
             owner_user_id=owner_user_id,
+            prefer_current_content=prefer_current_content,
         )
     reader = _require_read_method(
         db,
         "get_media_source_projection",
         error_message="db must expose the bounded Media DB source read contract.",
     )
+    if prefer_current_content:
+        return reader.get_media_source_projection(
+            media_id, max_chars=max_chars, owner_user_id=owner_user_id, prefer_current_content=True,
+        )
     if owner_user_id is None:
         return reader.get_media_source_projection(media_id, max_chars=max_chars)
     return reader.get_media_source_projection(

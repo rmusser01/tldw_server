@@ -207,3 +207,42 @@ async def test_create_version_sanitizes_unexpected_error_log(monkeypatch):
         logger_stub,
         "Unexpected error creating version for media {}",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", [False, True])
+async def test_create_version_requires_the_analyzed_source(monkeypatch, changed):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.api.v1.schemas.media_response_models import MediaDetailResponse
+    from tldw_Server_API.app.api.v1.utils.media_analysis import media_source_sha256
+
+    db = _BrokenCreateVersionDb()
+    db.create_document_version = Mock(return_value={"version_number": 2, "uuid": "version-uuid-2"})
+    text = "x" * 1_405_967
+    monkeypatch.setattr(media_versions_endpoint, "check_media_exists", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(media_versions_endpoint, "read_saved_media_text", lambda *_args, **_kwargs: text)
+    monkeypatch.setattr(media_versions_endpoint, "get_full_media_details_rich", lambda **_kwargs: {"id": 42})
+    monkeypatch.setattr(media_versions_endpoint, "MediaDetailResponse", lambda **_kwargs: MediaDetailResponse.model_construct(id=42))
+
+    request = create_version(
+        media_id=42,
+        request_body=VersionCreateRequest(
+            prompt="prompt", analysis_content="analysis",
+            source_sha256=media_source_sha256("previous text" if changed else text),
+        ),
+        request=_FakeRequest(),
+        db=db,
+        current_user=User(id=1, username="tester", email=None, is_active=True),
+    )
+    if changed:
+        with pytest.raises(HTTPException) as error:
+            await request
+        assert error.value.status_code == 409
+        db.create_document_version.assert_not_called()
+        return
+
+    await request
+    db.create_document_version.assert_called_once_with(
+        media_id=42, content=text, prompt="prompt", analysis_content="analysis", safe_metadata=None
+    )

@@ -111,6 +111,7 @@ export const isServicePromptRequestPath = (
     /^\/api\/v1\/agent-orchestration\/tasks\/[1-9][0-9]*$/.test(pathname) ||
     pathname === "/api/v1/acp/sessions"
   )) return true
+  if (/^\/api\/v1\/chat\/completions\/media\/[1-9][0-9]*$/.test(pathname)) return requestMethod === "POST"
   if (requestMethod === "POST" && [
     "/api/v1/research-workspace/artifacts/generate", "/api/v1/quizzes/generate",
     "/api/v1/slides/generate/from-media", "/api/v1/audio/speech",
