@@ -650,8 +650,9 @@ class EvaluationManager:
                 number = r'((?>\d+(?:\.\d+)?))(?![eE][-+]?\d)'
                 score_patterns = [
                     # the labelled "SCORE: 8" (also "**SCORE:** 8") wins over prose such as "Score 10 for a correct answer"
-                    rf'score[*_\s]*:[*_\s]*{number}\s*(?:/\s*10)?',
-                    rf'[Ss]core[:\s]+{number}\s*(?:/\s*10)?',  # Score: 8 or Score: 8/10
+                    rf'(?:score|rating)[*_\s]*:[*_\s]*{number}\s*(?:/\s*10)?',
+                    # a separator is required: a restated rubric ("Score 10 for a correct answer") is not the score
+                    rf'score\s*(?:=|is)\s*{number}\s*(?:/\s*10)?',
                     rf'{number}\s*(?:/\s*10)\s+points?',  # 8/10 points
                     rf'^{number}\s*$'  # Just a number on its own line
                 ]

@@ -212,3 +212,21 @@ def test_every_formatter_asks_for_the_1_to_10_scale_the_manager_reads(formatter)
     assert "from 1 (worst) to 10 (best)" in text or "SCORE: [1-10]" in text, text
     for stale in ("X.X", "0-10", "1.0", "0.0", "% of score"):
         assert stale not in text, (stale, text)
+
+
+def test_a_simpleqa_row_in_openais_csv_shape_formats_for_the_judge(monkeypatch):
+    """OpenAI's CSV has a string 'metadata' column; the row must still format (it raised TypeError: every run was a 500)."""
+    monkeypatch.setattr(
+        DatasetLoader,
+        "load_csv",
+        staticmethod(
+            lambda source, delimiter=",": [
+                {"metadata": "{'topic': 'Art'}", "problem": "Who painted the Mona Lisa?", "answer": "Leonardo da Vinci"}
+            ]
+        ),
+    )
+
+    (row,) = load_benchmark_dataset("simpleqa")
+    data = get_registry().create_evaluator("simpleqa").format_for_custom_metric(row)
+
+    assert data["input_data"]["question"] == "Who painted the Mona Lisa?"

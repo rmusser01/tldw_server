@@ -676,9 +676,13 @@ async def test_a_benchmark_item_is_scored_from_the_judges_reply(
         # the judge echoes the prompt's format line before its grade: the echo is not a grade
         ("GRADE: [correct/incorrect/not_attempted]\nGRADE: incorrect\nEXPLANATION: Lyon.", True, 0.0),
         ("GRADE: not attempted\nEXPLANATION: it refused.", True, 0.0),
+        # a restated rubric ("Score 10 for a correct answer") is not the score; the labelled rating is
+        ("Per the rubric: Score 10 for a correct answer, 1 for an incorrect one. The model chose A, which is wrong.\n"
+         "Rating: 1/10", False, 0.0),
+        ("I should score 10 for a correct answer. The model picked A; the answer is B.", False, None),
     ],
     ids=["bare-number", "numeric-string", "exponent", "exponent-15e3", "exponent-1.5e3", "exponent-10e5",
-         "exponent-3.0e2", "underscore-string", "grade-format-echo", "grade-not-attempted"],
+         "exponent-3.0e2", "underscore-string", "grade-format-echo", "grade-not-attempted", "rubric-echo-rating", "rubric-echo-only"],
 )
 async def test_a_judge_reply_a_human_would_read_as_a_score_is_read(evaluation_manager, reply, asks_grade, expected):
     """Replies a human reads as a score (or a grade) are read as one; one that only looks like a score is not
