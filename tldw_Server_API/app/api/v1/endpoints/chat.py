@@ -410,8 +410,10 @@ async def _the_hosted_plan_refuses(billing_org_id: Any, estimated_tokens: int) -
     """Whether the hosted plan would refuse a server-key call of this size for the org now (TASK-15481).
 
     The pre-check's own answer, so an own-key request learns it without being checked or counted: the
-    enforcer entered here records nothing and is dropped. A lookup that fails answers True (fail-closed,
-    unlike the server-key pre-check): the request still runs on the user's key, only its failover is withheld.
+    enforcer entered here records nothing and is dropped. A billing data-source failure follows
+    ``BILLING_ENFORCEMENT_FAILURE_MODE`` inside the enforcer, as for the server-key pre-check (open: the plan
+    admits; closed: it refuses). Any other error from the check answers True: the request still runs on the
+    user's key, only its failover is withheld.
     """
     try:
         await _billing_deps.LimitEnforcer(
@@ -419,8 +421,8 @@ async def _the_hosted_plan_refuses(billing_org_id: Any, estimated_tokens: int) -
         ).__aenter__()
     except HTTPException:
         return True
-    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as billing_err:
-        logger.warning(f"Hosted plan check for a failover failed; failover withheld (fail-closed): {billing_err}")
+    except Exception as billing_err:  # noqa: BLE001 - asking about a failover must never fail an own-key request
+        logger.warning(f"Hosted plan check for a failover failed; failover withheld: {type(billing_err).__name__}")
         return True
     return False
 

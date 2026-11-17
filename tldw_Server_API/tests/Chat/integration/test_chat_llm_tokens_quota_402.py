@@ -12,6 +12,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
 )
 from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import NativeQuotaUnavailableError
 from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 
@@ -346,8 +347,8 @@ class _PlanBroken:
         """Any org, category and estimate."""
 
     async def __aenter__(self):
-        """Fail as LimitEnforcer does when the billing store is unreachable."""
-        raise RuntimeError("billing store unavailable")
+        """Fail as LimitEnforcer does when the native storage ledger cannot be read (not governed by the failure mode)."""
+        raise NativeQuotaUnavailableError("Native retained storage usage is unavailable")
 
 
 @pytest.fixture
