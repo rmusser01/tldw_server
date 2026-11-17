@@ -421,14 +421,14 @@ _POST_ANSWER_STAGES = {"enable_suggestions": True, "enable_post_verification": T
 
 
 def _stream_without_pipeline(monkeypatch):
-    """Stand in for the stream's body, so a request past the quota check ends at once."""
-    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    """Stop the stream's generation at its executor, so a request past the quota check ends at once."""
+    import tldw_Server_API.app.core.RAG.rag_service.streaming_executor as streaming_executor
 
     async def _no_events(*args, **kwargs):  # noqa: ARG001
         return
         yield
 
-    monkeypatch.setattr(rag_ep, "stream_rag_events", _no_events)
+    monkeypatch.setattr(streaming_executor, "_stream_generation_events", _no_events)
 
 
 def test_rag_stream_admits_an_own_key_answer_with_only_post_answer_stages(client_with_agentic_overrides, monkeypatch):
@@ -439,7 +439,7 @@ def test_rag_stream_admits_an_own_key_answer_with_only_post_answer_stages(client
     _stream_without_pipeline(monkeypatch)
     body = {"query": "q", "enable_generation": True, "generation_provider": "openai", **_POST_ANSWER_STAGES}
     resp = client_with_agentic_overrides.post("/api/v1/rag/search/stream", json=body)
-    assert resp.status_code != 402, resp.text
+    assert resp.status_code == 200, resp.text
     assert asked == ["openai"]
     assert_llm_quota_402(client_with_agentic_overrides.post("/api/v1/rag/search", json=body))
 

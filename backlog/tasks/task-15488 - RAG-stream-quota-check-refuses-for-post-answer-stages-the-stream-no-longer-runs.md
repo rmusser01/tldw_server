@@ -31,6 +31,7 @@ It fails closed (refuses more, never less), and no hosted deployment exists. Fou
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/superpowers/plans/2026-11-17-rag-stream-quota-stages.md. Owner decisions 2026-11-16: (1) keep both skip-set and run-set in the test; (2) enable_evidence_accumulation stays run, guarded by the evidence-accumulation refuse case, nothing filed; (3) ADR-004 Change summary waiver covered, controller writes the PR body.
 RED 2 failed/5 passed (plan: same); GREEN 7 passed; wider set 235 passed, 1 skipped, netlines 0; function-size ratchet 13 passed; Bandit clean. Usage_Quotas.md updated (not mirrored).
+Review fix: stream tests stop generation at streaming_executor._stream_generation_events, not rag_unified.stream_rag_events (endpoint-monkeypatch ratchet 165>164 RED, then GREEN); admit case asserts == 200.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
