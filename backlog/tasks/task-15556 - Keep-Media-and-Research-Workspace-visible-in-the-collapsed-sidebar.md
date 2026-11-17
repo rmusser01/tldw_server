@@ -4,6 +4,8 @@ title: Keep Media and Research Workspace visible in the collapsed sidebar
 status: Done
 labels:
 - webui
+references:
+- https://github.com/rmusser01/tldw_server/pull/3490
 ---
 
 ## Description
@@ -22,6 +24,7 @@ The collapsed sidebar puts both selected shortcuts at the end of its scrolling l
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 New placement assertion failed on dev before the fix. 54 focused sidebar tests and scoped ESLint passed. Chromium hit-tested both buttons with the rendered sidebar and compiled shared stylesheet before scrolling at 1200 × 440 and 1200 × 320; the last shortcut remained reachable by scrolling.
+The verified fix is open against dev. Merge awaits the repository-required human-written Change summary and the protected checks. The repository exposes no public dev WebUI deployment target.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
