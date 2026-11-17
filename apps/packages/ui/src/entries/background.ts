@@ -2171,7 +2171,7 @@ export default defineBackground({
             data: { jobs: collected },
           } as { ok: boolean; status?: number; data?: any; error?: string };
         },
-        fetchJob: async (jobId) => {
+        fetchMissingJob: async (jobId) => {
           const response = await readStatus(`/api/v1/media/ingest/jobs/${jobId}`);
           return response?.ok && !hasJobStatus(response.data) ? invalidStatusResponse : response;
         },

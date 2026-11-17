@@ -235,7 +235,7 @@ type BatchedJobsFetch = {
    * returned response is expected to carry the reconciled status of every
    * requested job under `data.jobs` (an array of job status objects with an
    * `id` field, matching `GET /api/v1/media/ingest/jobs?batch_id=...`).
-   * Missing jobs use the per-job transport when one is supplied.
+   * Callers can opt in to individual reads for omitted jobs with `fetchMissingJob`.
    */
   fetchJobs: (
     batchId: string,
@@ -250,12 +250,13 @@ type PollTrackedIngestJobsBase<TMeta, TResult> = {
    * returned response is expected to carry the reconciled status of every
    * requested job under `data.jobs` (an array of job status objects with an
    * `id` field, matching `GET /api/v1/media/ingest/jobs?batch_id=...`).
-   * Missing jobs use the per-job transport when one is supplied.
+   * Callers can opt in to individual reads for omitted jobs with `fetchMissingJob`.
    */
   fetchJobs?: (
     batchId: string,
     jobIds: number[]
   ) => Promise<IngestJobStatusResponse | undefined>
+  fetchMissingJob?: LegacyPerJobFetch["fetchJob"]
   timeoutMs: number
   pollIntervalMs?: number | (() => number)
   signal?: AbortSignal
@@ -437,8 +438,8 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
     for (const [jobId, item] of Array.from(unresolved.entries())) {
       const response = responsesByJob.has(jobId)
         ? responsesByJob.get(jobId)
-        : options.fetchJob
-          ? await options.fetchJob(jobId)
+        : options.fetchMissingJob
+          ? await options.fetchMissingJob(jobId)
           : { ok: false, status: 404, error: "Ingest job missing from batch status response." }
       if (consumeJobResponse(jobId, item, response)) {
         observedTerminal = true
