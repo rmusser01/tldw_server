@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
+from itertools import islice
 from typing import Any
 
 from tldw_Server_API.app.core.Media.page_provenance import page_spans_for_range, resolve_navigation_span
@@ -11,6 +13,10 @@ from tldw_Server_API.app.core.Media.page_provenance import page_spans_for_range,
 _HEADING_CHARS = 800
 _TOTAL_HEADING_CHARS = 8_000
 _RENDER_CHARS = 16_000
+_FOOTNOTE_LIMIT = 128
+_NOTE_LABEL = re.compile(r"(?:^[ \t]*|(?=\[))(?P<label>\[?(?P<number>[1-9]\d{0,3})\.[ \t]+)", re.MULTILINE)
+_BODY_MARKER = re.compile(r"\[(?P<number>[1-9]\d{0,3})\]")
+_OMITTED_CONTEXT = '{"type":"unresolved","omitted":true,"reason":"context_limit"}'
 _REFERENCE_HEADINGS = frozenset({"endnotes", "references", "bibliography", "works cited", "notes and references"})
 _AUTHOR_NOTE_LABEL = re.compile(
     r"^[ \t]*(?:#{1,6}[ \t]+)?[*_`]*(?:AUTHOR['’]S|AUTHORS['’])"
@@ -26,6 +32,14 @@ _CONTEXT_INSTRUCTION = (
     "Use a byline only for supported claims in its own range. Missing bylines and processing "
     "boundaries never establish a new contributor. Reference and unresolved ranges do not "
     "authorize inherited attribution. Preserve uncertainty; cited speakers are not necessarily authors.\n"
+)
+_FOOTNOTE_INSTRUCTION = (
+    "Footnotes link exact numbered labels to body markers and the verified contribution at contribution_start_char. "
+    "Use each link only within that note's range; multiple notes do not acquire one shared author. "
+    "A link supplies contribution context, not personal note authorship, endorsement, or additional policy evidence. "
+    "footnotes_omitted means no note relationships were supplied within the context limit. "
+    "Distinguish a name's literal absence in a cited excerpt from absence of a supplied source-backed contribution link. "
+    "Evaluate the claim's actual wording with the linked heading and author-note qualifications; do not force a verdict.\n"
 )
 
 
@@ -86,6 +100,85 @@ def _context(
     }
 
 
+def _footnote_scope(section: dict[str, Any], snapshot: dict[str, Any], node: dict[str, Any]) -> str:
+    """Require complete reference scope without interpreting titles as chapter names."""
+    nodes, content = snapshot["nodes"], snapshot["content"]
+    by_id = {item["id"]: item for item in nodes}
+    current, visited, ancestors = node, {node["id"]}, []
+    child_span = (section["start_char"], section["end_char"])
+    while parent_id := current.get("parent_id"):
+        parent = by_id.get(parent_id)
+        if parent is None or parent_id in visited or parent.get("level", 1) >= current.get("level", 1):
+            return "unresolved"
+        parent_span = resolve_navigation_span(parent, nodes, snapshot.get("page_map"), len(content), content=content)
+        if not parent_span or not parent_span[0] <= child_span[0] < child_span[1] <= parent_span[1]:
+            return "unresolved"
+        visited.add(parent_id)
+        ancestors.append(parent_span)
+        current, child_span = parent, parent_span
+    for left, right in ancestors:
+        if (left < section["start_char"] and right == section["end_char"]
+                and _reference_start(content, left, section["start_char"]) is None):
+            return "selected_scope"
+    return "verified"
+
+
+def _add_footnotes(
+    contexts: list[dict[str, Any]], section: dict[str, Any], snapshot: dict[str, Any], node: dict[str, Any],
+) -> bool:
+    """Attach bounded literal relationships; ambiguous notes never name a contributor."""
+    content = snapshot["content"]
+    scope = _footnote_scope(section, snapshot, node)
+    if any(item["type"] == "unresolved" for item in contexts):
+        scope = "unresolved"
+    body_start, count = section["start_char"], 0
+    for reference in (item for item in contexts if item["type"] == "reference"):
+        matches = list(islice(_NOTE_LABEL.finditer(content, reference["start_char"], reference["end_char"]), _FOOTNOTE_LIMIT + 1))
+        count += len(matches)
+        if count > _FOOTNOTE_LIMIT:
+            return False
+        reference["footnote_scope"] = scope
+        reference["footnotes"] = []
+        duplicates = Counter(match["number"] for match in matches)
+        markers: dict[str, list[tuple[re.Match[str], dict[str, Any]]]] = {}
+        for heading in contexts:
+            if heading["type"] != "heading" or not body_start <= heading["start_char"] < reference["start_char"]:
+                continue
+            for marker in _BODY_MARKER.finditer(content, heading["start_char"], heading["end_char"]):
+                if marker["number"] not in duplicates or any(
+                    note["start_char"] <= marker.start() and (note["truncated"] or marker.start() < note["end_char"])
+                    for note in heading["author_notes"]
+                ):
+                    continue
+                backlinks = markers.setdefault(marker["number"], [])
+                if len(backlinks) < 2:  # Two hits already prove ambiguity; further matches add no authority.
+                    backlinks.append((marker, heading))
+        for index, match in enumerate(matches):
+            following = matches[index + 1] if index + 1 < len(matches) else None
+            end = following.start("label") if following else reference["end_char"]
+            note_start = match.start("label")
+            end = note_start + len(content[note_start:end].rstrip())
+            note = {"start_char": match.start("label"), "end_char": end,
+                    "label_end_char": match.end("label"), "label_quote": match["label"], "status": "unresolved"}
+            backlinks = markers.get(match["number"], [])
+            reason = (
+                scope if scope != "verified" else
+                "duplicate_label" if duplicates[match["number"]] != 1 else
+                "missing_boundary" if following is None or int(following["number"]) != int(match["number"]) + 1 else
+                "ambiguous_backlink" if len(backlinks) != 1 else ""
+            )
+            if reason:
+                note["reason"] = reason
+            else:
+                marker, heading = backlinks[0]
+                note.update(status="linked", contribution_start_char=heading["start_char"], body_marker={
+                    "start_char": marker.start(), "end_char": marker.end(), "quote": marker.group(),
+                })
+            reference["footnotes"].append(note)
+        body_start = reference["end_char"]
+    return True
+
+
 def build_section_attribution_contexts(section: dict[str, Any], snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     """Resolve disjoint selected-source ranges; ambiguous outlines authorize nothing.
 
@@ -139,6 +232,8 @@ def build_section_attribution_contexts(section: dict[str, Any], snapshot: dict[s
             break
         if not start <= child_span[0] < child_span[1] <= end:
             return unresolved()
+        if _footnote_scope({"start_char": child_span[0], "end_char": child_span[1]}, snapshot, child) == "unresolved":
+            return unresolved()
         candidates.append((*child_span, child, "heading"))
     candidates.sort(key=lambda item: (item[0], item[2].get("level", 1)))
     contexts, cursor = [], start
@@ -171,6 +266,12 @@ def build_section_attribution_contexts(section: dict[str, Any], snapshot: dict[s
         or len(_CONTEXT_INSTRUCTION) + len(json.dumps(contexts, ensure_ascii=False)) > _RENDER_CHARS
     ):
         return unresolved(omitted=True)
+    if (not _add_footnotes(contexts, section, snapshot, node)
+            or render_attribution_context(contexts) == _CONTEXT_INSTRUCTION + _OMITTED_CONTEXT):
+        # Footnote overflow must not discard otherwise valid body bylines or author caveats.
+        for context in contexts:
+            if context["type"] == "reference":
+                context.update(footnotes=[], footnote_scope="unresolved", footnotes_omitted=True)
     return contexts
 
 
@@ -180,18 +281,53 @@ def render_attribution_context(contexts: list[dict[str, Any]], start: int | None
         "type", "title", "start_char", "end_char", "heading_start_char", "heading_end_char",
         "heading_quote", "heading_truncated", "author_notes", "omitted",
     )
-    selected = [{key: context[key] for key in prompt_fields if key in context} for context in contexts if
-                (start is None or context["end_char"] > start) and
-                (end is None or context["start_char"] < end)]
+
+    def overlaps(item: dict[str, Any]) -> bool:
+        return (start is None or item["end_char"] > start) and (end is None or item["start_char"] < end)
+
+    notes_by_start = {context["start_char"]: [note for note in context.get("footnotes", []) if overlaps(note)]
+                      for context in contexts if overlaps(context)}
+    linked_starts = {note["contribution_start_char"] for notes in notes_by_start.values() for note in notes
+                     if note.get("status") == "linked"}
+    selected = []
+    for context in contexts:
+        if not overlaps(context) and context["start_char"] not in linked_starts:
+            continue
+        projected = {key: context[key] for key in prompt_fields if key in context}
+        if notes := notes_by_start.get(context["start_char"]):
+            projected.update(footnotes=notes, footnote_scope=context["footnote_scope"])
+        if context.get("footnotes_omitted"):
+            projected.update(footnotes_omitted=True, footnote_scope="unresolved")
+        selected.append(projected)
     if not selected:
         return ""
     for context in selected:
         if "author_notes" in context:
             context["author_notes"] = [{key: note[key] for key in ("start_char", "end_char", "quote", "truncated")}
                                        for note in context["author_notes"]]
-    rendered = _CONTEXT_INSTRUCTION + json.dumps(selected, ensure_ascii=False)
+    has_footnotes = any(context.get("footnotes") or context.get("footnotes_omitted") for context in selected)
+    instruction = _CONTEXT_INSTRUCTION + (_FOOTNOTE_INSTRUCTION if has_footnotes else "")
+    rendered = instruction + json.dumps(selected, ensure_ascii=False, separators=(",", ":") if has_footnotes else None)
     if len(rendered) > _RENDER_CHARS:
-        return _CONTEXT_INSTRUCTION + '{"type":"unresolved","omitted":true,"reason":"context_limit"}'
+        for context in selected:
+            if "footnotes" not in context:
+                continue
+            compact = []
+            for note in context["footnotes"]:
+                item = {"note": [note["start_char"], note["end_char"], note["label_quote"]], "status": note["status"]}
+                if note["status"] == "linked":
+                    marker = note["body_marker"]
+                    item.update(body_marker=[marker["start_char"], marker["end_char"], marker["quote"]],
+                                contribution_start_char=note["contribution_start_char"])
+                else:
+                    item["reason"] = note["reason"]
+                compact.append(item)
+            context["footnotes"] = compact
+        rendered = (instruction + "Compact footnotes: note=[start_char,end_char,label_quote]; "
+                    "body_marker=[start_char,end_char,quote]. Label end is start plus label_quote length.\n"
+                    + json.dumps(selected, ensure_ascii=False, separators=(",", ":")))
+    if len(rendered) > _RENDER_CHARS:
+        return _CONTEXT_INSTRUCTION + _OMITTED_CONTEXT
     return rendered
 
 

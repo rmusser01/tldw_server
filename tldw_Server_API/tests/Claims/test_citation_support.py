@@ -148,6 +148,41 @@ async def test_identical_attribution_context_is_deduplicated_without_dropping_pa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("label,status", [("supported", "supported"), ("refuted", "contradicted"), ("nei", "unsupported")])
+async def test_linked_note_context_guides_attribution_without_forcing_judgment(label, status):
+    from tldw_Server_API.app.core.Research_Workspace.section_attribution import (
+        build_section_attribution_contexts,
+        render_attribution_context,
+    )
+
+    seen = []
+
+    async def analyze(*args, **kwargs):
+        seen.append(args[2])
+        return response(label)
+
+    quote = "The reference supplies transfer details."
+    source = ("# Agency\n**Ada Example**\nThe agency should change.[53]\n"
+        "AUTHOR'S NOTE: These are collective views.\nENDNOTES\n53. " + quote + "\n54. Other reference.\n")
+    node = {"id": "agency", "title": "Agency", "level": 1, "target_type": "char_range",
+        "target_start": 0, "target_end": len(source)}
+    snapshot = {"content": source, "nodes": [node], "navigation_version": "version", "page_map": []}
+    section = {"node_id": "agency", "source_id": "source", "media_id": 1,
+        "start_char": 0, "end_char": len(source), "navigation_version": "version"}
+    contexts = build_section_attribution_contexts(section, snapshot)
+    start = source.index(quote)
+    context = render_attribution_context(contexts, start, start + len(quote))
+    report = await verify_cited_text("This excerpt does not name an author. [P1]",
+        {"P1": {"text": quote, "attribution_context": context},
+            "P2": {"text": "UNRELATED POLICY", "attribution_context": "UNRELATED BYLINE"}},
+        provider="openai", model="context-test", analyze_fn=analyze)
+    assert report["findings"][0]["status"] == status
+    assert "Ada Example" in seen[0] and "[53]" in seen[0] and "These are collective views." in seen[0]
+    assert seen[0].endswith("policy-claim evidence or repair an unrelated citation):\n" + context)
+    assert "UNRELATED" not in seen[0]
+
+
+@pytest.mark.asyncio
 async def test_concurrency_and_caps_keep_unchecked_units_visible(monkeypatch):
     from tldw_Server_API.app.core.Claims_Extraction import citation_support
 

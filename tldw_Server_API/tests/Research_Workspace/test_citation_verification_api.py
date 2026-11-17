@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -216,7 +217,8 @@ def test_cited_nested_contribution_retains_its_byline_without_whole_part_omissio
     start = snapshot["content"].index(policy)
     rendered = workspace_citations._attribution_context(snapshot, {"id": "source", "media_id": 1}, start, start + len(policy))
     assert name in rendered and note in rendered and other not in rendered
-    assert '"title": "' + ("First" if name == "Ada Example" else "Second") + '"' in rendered
+    contexts = json.loads(rendered.rsplit("\n", 1)[-1])
+    assert {context["title"] for context in contexts} == {"First" if name == "Ada Example" else "Second"}
 
 
 @pytest.mark.parametrize("problem", ["missing_parent", "cycle", "overlapping_sibling"])
@@ -237,7 +239,9 @@ def test_nested_reference_does_not_inherit_body_author():
     snapshot = _nested_source_context_fixture()
     start = snapshot["content"].index("A reference.")
     rendered = workspace_citations._attribution_context(snapshot, {"id": "source", "media_id": 1}, start, start + 12)
-    assert '"type": "reference"' in rendered and "Bea Example" not in rendered and "Ada Example" not in rendered
+    contexts = json.loads(rendered.rsplit("\n", 1)[-1])
+    assert {context["type"] for context in contexts} == {"reference"}
+    assert "Bea Example" not in rendered and "Ada Example" not in rendered
 
 
 def test_quote_crossing_contributions_retains_both_bounded_contexts():
@@ -246,5 +250,117 @@ def test_quote_crossing_contributions_retains_both_bounded_contexts():
     end = snapshot["content"].index("Second policy.") + len("Second policy.")
     rendered = workspace_citations._attribution_context(snapshot, {"id": "source", "media_id": 1}, start, end)
     assert "Ada Example" in rendered and "Bea Example" in rendered
-    assert '"title": "First"' in rendered and '"title": "Second"' in rendered
-    assert '"title": "Part"' not in rendered
+    contexts = json.loads(rendered.rsplit("\n", 1)[-1])
+    assert {context["title"] for context in contexts} == {"First", "Second"}
+
+
+def _shared_reference_snapshot():
+    text = "# Part\n## 27. Financial Regulatory Agencies\n"
+    first = len(text)
+    text += ("### Consumer Financial Protection Bureau\n**Robert Bowes**\n"
+        "The bureau should change.[53]\nAUTHOR'S NOTE: These are collective views.\n")
+    second = len(text)
+    text += ("### Securities and Exchange Commission\n**David Burton**\n"
+        "A different policy applies.[54]\nENDNOTES\n"
+        "53. Transfer details cite Bibliography Person.\n"
+        "54. A separate reference.\n55. Closing reference.\n")
+    chapter_end = len(text)
+    text += "## 28. Other Agency\n**Unrelated Author**\nUNRELATED CHAPTER POLICY.[53]\nENDNOTES\n53. Unrelated note.\n"
+    nodes = [
+        {"id": "part", "title": "Part", "level": 1, "parent_id": None, "target_start": 0, "target_end": len(text)},
+        {"id": "chapter", "title": "27. Financial Regulatory Agencies", "level": 2, "parent_id": "part",
+            "target_start": text.index("## 27."), "target_end": chapter_end},
+        {"id": "cfpb", "title": "Consumer Financial Protection Bureau", "level": 3, "parent_id": "chapter",
+            "target_start": first, "target_end": second},
+        {"id": "sec", "title": "Securities and Exchange Commission", "level": 3, "parent_id": "chapter",
+            "target_start": second, "target_end": chapter_end},
+        {"id": "other", "title": "28. Other Agency", "level": 2, "parent_id": "part",
+            "target_start": chapter_end, "target_end": len(text)},
+    ]
+    return {"content": text, "nodes": [{**node, "target_type": "char_range"} for node in nodes],
+        "navigation_version": "shared-notes-version", "page_map": []}
+
+
+def test_shared_note_after_last_contributor_resolves_earlier_verified_contribution():
+    snapshot = _shared_reference_snapshot()
+    source = snapshot["content"]
+    start, end = source.index("53. Transfer") + 4, source.index("54. A separate")
+    rendered = workspace_citations._attribution_context(snapshot, {"id": "source", "media_id": 1}, start, end)
+    assert "Robert Bowes" in rendered and "These are collective views." in rendered
+    assert "David Burton" not in rendered and "Unrelated Author" not in rendered
+    contexts = json.loads(rendered.rsplit("\n", 1)[-1])
+    notes = [note for context in contexts for note in context.get("footnotes", [])]
+    assert len(notes) == 1
+    assert (notes[0]["start_char"], notes[0]["end_char"]) == (start - 4, end - 1)
+    assert notes[0]["body_marker"] == {"start_char": source.index("[53]"), "end_char": source.index("[53]") + 4, "quote": "[53]"}
+
+
+def test_shared_reference_passage_keeps_each_note_contribution_bounded():
+    snapshot = _shared_reference_snapshot()
+    source = snapshot["content"]
+    start, end = source.index("53. Transfer") + 4, source.index("55. Closing")
+    rendered = workspace_citations._attribution_context(snapshot, {"id": "source", "media_id": 1}, start, end)
+    contexts = json.loads(rendered.rsplit("\n", 1)[-1])
+    notes = [note for context in contexts for note in context.get("footnotes", [])]
+    assert [(note["start_char"], note["end_char"]) for note in notes] == [
+        (start - 4, source.index("54. A separate") - 1), (source.index("54. A separate"), end - 1)]
+    assert [note["contribution_start_char"] for note in notes] == [source.index("### Consumer"), source.index("### Securities")]
+    assert "Robert Bowes" in rendered and "David Burton" in rendered
+    assert "Unrelated Author" not in rendered
+
+
+@pytest.mark.parametrize("problem", ["missing_marker", "duplicate_marker", "broken_ancestry"])
+def test_unresolved_shared_note_cannot_borrow_another_contribution_or_chapter(problem):
+    snapshot = _shared_reference_snapshot()
+    if problem == "missing_marker":
+        snapshot["content"] = snapshot["content"].replace("[53]", "(53)", 1)
+    elif problem == "duplicate_marker":
+        snapshot["content"] = snapshot["content"].replace("[54]", "[53]", 1)
+    else:
+        snapshot["nodes"][2]["parent_id"] = "missing"
+    source = snapshot["content"]
+    start, end = source.index("53. Transfer") + 4, source.index("54. A separate")
+    rendered = workspace_citations._attribution_context(snapshot, {"id": "source", "media_id": 1}, start, end)
+    assert "Robert Bowes" not in rendered and "David Burton" not in rendered and "Unrelated Author" not in rendered
+
+
+def test_shared_reference_api_keeps_owned_quote_and_invalidates_changed_link_context(client, monkeypatch):
+    from tldw_Server_API.app.core.Research_Workspace.section_verification import evidence_digest
+
+    http, _, calls, loads, workspace_db = client
+    snapshot = _shared_reference_snapshot()
+
+    async def load(media_id, db):
+        loads.append((media_id, db))
+        return snapshot
+
+    monkeypatch.setattr(workspace_citations, "load_navigation_sections", load)
+    source = snapshot["content"]
+    start, end = source.index("53. Transfer") + 4, source.index("54. A separate")
+    locator = {"id": "P1", "source_id": "source", "quote": source[start:end], "start_char": start,
+        "end_char": end, "navigation_version": snapshot["navigation_version"]}
+    request = {**payload(), "text": "The cited note is linked to the CFPB contribution. [P1]", "evidence": [locator]}
+    first = http.post("/api/v1/research-workspace/citations/verify", json=request).json()
+    resolved = asyncio.run(workspace_citations.resolve_workspace_citations("workspace", [locator],
+        workspace_db=workspace_db, media_db=None))
+    assert resolved["P1"]["text"] == source[start:end]
+    assert "Robert Bowes" in resolved["P1"]["attribution_context"]
+    evidence_prompt = calls[0].split("EVIDENCE:\n", 1)[1].split("\n\nVerify EVERY", 1)[0]
+    assert source[start:end] in evidence_prompt
+    assert "bureau should change" not in evidence_prompt and "different policy" not in evidence_prompt
+    assert "UNRELATED CHAPTER POLICY" not in calls[0]
+
+    snapshot["content"] = source.replace("[53]", "(53)", 1)
+    second = http.post("/api/v1/research-workspace/citations/verify", json=request).json()
+    changed = asyncio.run(workspace_citations.resolve_workspace_citations("workspace", [locator],
+        workspace_db=workspace_db, media_db=None))
+    assert first["evidence"]["P1"]["text_sha256"] == second["evidence"]["P1"]["text_sha256"]
+    assert first["evidence"]["P1"]["attribution_context_sha256"] != second["evidence"]["P1"]["attribution_context_sha256"]
+    assert evidence_digest(resolved) != evidence_digest(changed)
+
+    before = len(loads), len(calls)
+    for change in ({"source_id": "foreign-source"}, {"navigation_version": "stale"}):
+        response = http.post("/api/v1/research-workspace/citations/verify",
+            json={**request, "evidence": [{**locator, **change}]}).json()
+        assert response["coverage"]["evaluated"] == 0
+    assert len(loads) == before[0] + 1 and len(calls) == before[1]

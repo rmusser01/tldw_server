@@ -24,9 +24,13 @@ Use existing artifact state and versioning. Derive display/export/evaluation cov
 
 Extend the existing attribution builder with bounded, literal note-to-body-marker-to-verified-contribution relationships. Keep exact coordinates and excerpts, contribution heading and author-note caveats. Carry these relationships through extraction, synthesis, section evidence and the QA resolver. They establish attribution context only; they do not add policy evidence, authorize citation IDs, establish endorsement, or assign one author to every note in a multi-note passage.
 
+Use compact relationships on reference ranges and project them by the cited note span. Chapter extraction/synthesis receives verified links; corrected chapter text carries the result into overview generation. The existing merged evidence map supplies exact links to overview Claims checks. Preserve the overview's existing literal author-note renderer and 16,000-character limit: the original 30-chapter notes already occupy 15,916 characters, so duplicating footnote context there would break the full-book path.
+
 Resolve unique boundaries and backlinks conservatively. Preserve unresolved status for duplicate labels, missing boundaries, repeated markers across contributors, stale navigation, malformed hierarchy, or context overflow. Real reference lists contain inline numbered entries; a line-only parser must not swallow later notes into an earlier one. Shared endnotes require verified chapter ancestry in QA rather than inheriting the last contributor. Existing evidence digests invalidate affected cached checks when context changes.
 
 Regression cases include correct Bowes linkage, wrong Burton attribution, the retained denial, passage/label splits, multiple notes, unrelated bibliography names, collective-authorship notes and selected-child isolation. Freeze a new fixture version; do not rewrite earlier fixtures or receipts.
+
+Visual source audit confirms the body marker on physical page 872/printed 839 and note 53 on physical 876/printed 843. Note 53's content after its label is 303 characters and contains no personal name; the longer original cited passage also contains note 54's bibliography naming David R. Burton. Keep the literal excerpt-limitation control separate from a false denial of the chapter's verified link.
 
 ## 3. Evaluation and review
 

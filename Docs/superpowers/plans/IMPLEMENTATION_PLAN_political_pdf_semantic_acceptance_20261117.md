@@ -36,7 +36,7 @@
 - [x] Wire truthful reader/status text, Markdown/offline export and eval metrics. Test a retained nonempty candidate plus error, legacy unchecked artifacts, save/restore and changed text.
 - [x] Run targeted RED→GREEN suites, connected section/Claims/export tests, scoped lint/types/Bandit and an independent review. Record exact commands/results in Backlog and commit before stage 2.
 
-**Verification:** 319 connected backend tests, 121 eval tests, 88 frontend integration tests and 131 StudioPane tests; final parser delta54 tests. Full frontend TypeScript, scoped Ruff/ESLint and production Bandit pass. Independent backend/eval and frontend reviews clear after two bounded parser review rounds. Frozen Job52 reproduces29/30 overview chapters, missing Financial; each30saved chapter inputs has cited prose. Live provider/browser qualification remains Stage3. RED and final logs are recorded in TASK-15505.12.
+**Verification:** Commit `10b6162644`. 319 connected backend tests, 121 eval tests, 88 focused frontend tests and 131 StudioPane tests; the final parser changes pass 54 tests. Full frontend TypeScript, scoped Ruff/ESLint and production Bandit pass. Independent backend/eval and frontend reviews are clear after two bounded parser review rounds. Frozen Job 52 reproduces 29/30 overview chapters, missing Financial; each of the 30 saved chapter inputs has cited prose. Live provider/browser qualification remains Stage 3. RED and final logs are recorded in TASK-15505.12.
 
 **Test example:** an overview `Agency A proposes reform [E1.1.1].` over two completed sections with registered IDs `E1.1.1` and `E2.1.1` must expose section 2 as missing even when both chapters and all portions completed. A later explicit retry returning cited prose for both must retain prior completed chapter dictionaries and avoid extraction calls.
 
@@ -44,15 +44,17 @@
 
 **Goal:** Claims and generation receive verified note/backreference context without broadening policy evidence.
 **Success Criteria:** Exact Financial note53 resolves to its verified Bowes contribution, ambiguity remains unresolved, and all summary/QA callers receive the same bounded context.
-**Status:** Not Started
+**Status:** Complete
 
 **Files:** `core/Research_Workspace/section_attribution.py`, `section_verification.py`, `section_summaries.py`; `core/Claims_Extraction/workspace_citations.py`, `claims_engine.py`; existing attribution, section-Claims, citation API and Claims unit tests. Add a new versioned political regression fixture through the existing loader.
 
-- [ ] Add RED source fixtures for a citation starting after its note label, a shared reference list following multiple contributors, and multiple notes in one cited passage. Assert exact linked marker/heading excerpts, not inferred author strings.
-- [ ] Add controls for duplicate/inline labels, absent boundaries, backlinks crossing contributors, unrelated bibliography names, malformed/stale navigation, source scope, author caveats and bounded overflow.
-- [ ] Extend the existing context builder/renderer and QA resolver; retain current policy passages and citation allowlists. Update existing verifier guidance for explicit linked attribution and absence claims.
-- [ ] Verify context reaches extraction, chapter/overview and QA; changed context invalidates cached checks; existing saved findings/export remain correctly bound.
-- [ ] Run connected tests, parser properties, scoped lint/Bandit and independent review; commit the qualified repair.
+- [x] Add RED source fixtures for a citation starting after its note label, a shared reference list following multiple contributors, and multiple notes in one cited passage. Assert exact linked marker/heading excerpts, not inferred author strings.
+- [x] Add controls for duplicate/inline labels, absent boundaries, backlinks crossing contributors, unrelated bibliography names, malformed/stale navigation, source scope, author caveats and bounded overflow.
+- [x] Extend the existing context builder/renderer and QA resolver; retain current policy passages and citation allowlists. Update existing verifier guidance for explicit linked attribution and absence claims.
+- [x] Verify context reaches extraction, chapter/overview and QA; changed context invalidates cached checks; existing saved findings/export remain correctly bound.
+- [x] Run connected tests, parser properties, scoped lint/Bandit and independent review; commit the qualified repair.
+
+**Verification:** Final combined suite: 534 passed, 10 existing warnings, 48.30 seconds. Scoped Ruff, Bandit and independent review pass. Source audit preserves 2,679 body-only contexts and the 15,916-character overview author notes. Financial note 53 links to the exact Bowes contribution; 55 of 56 notes resolve and the final note remains unresolved without a closing boundary. Agriculture/Energy omit only oversized footnote maps explicitly. The v2 fixture retains all eight previous controls and adds four agent-reviewed attribution controls; human decisions remain null. Logs: `/tmp/political-semantic-stage2-combined.log`, `/tmp/political-semantic-stage2-bandit.json`, `/tmp/footnote-core-final-source-audit.json`.
 
 **Test example:** body `Contribution B\nAuthor B\nTransfer is proposed[53].` and uniquely bounded `53. Transfer details.\n54. Another reference.` must link a cited substring after `53. ` to the exact marker and contribution. Repeating `[53]` under a different contributor must not manufacture a single-author result.
 

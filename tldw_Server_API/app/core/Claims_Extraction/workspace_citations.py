@@ -13,7 +13,7 @@ from tldw_Server_API.app.core.Research_Workspace.section_attribution import (
 
 
 def _attribution_context(snapshot: dict[str, Any], source: dict[str, Any], start: int, end: int) -> str:
-    """Carry the uniquely most-specific verified enclosing section's literal context."""
+    """Keep body context local; resolve shared notes only within verified ancestry."""
     nodes = snapshot.get("nodes") or []
     by_id = {node.get("id"): node for node in nodes}
     if len(by_id) != len(nodes):
@@ -38,12 +38,19 @@ def _attribution_context(snapshot: dict[str, Any], source: dict[str, Any], start
     if len(selected) != 1:
         return ""
     node = selected[0]
-    left, right = spans[node["id"]]
-    section = {"source_id": source["id"], "media_id": source["media_id"], "node_id": node["id"],
-        "title": node.get("title", ""), "navigation_version": snapshot["navigation_version"],
-        "start_char": left, "end_char": right}
-    contexts = build_section_attribution_contexts(section, snapshot)
-    return render_attribution_context(contexts, start, end)
+    while True:
+        left, right = spans[node["id"]]
+        section = {"source_id": source["id"], "media_id": source["media_id"], "node_id": node["id"],
+            "title": node.get("title", ""), "navigation_version": snapshot["navigation_version"],
+            "start_char": left, "end_char": right}
+        contexts = build_section_attribution_contexts(section, snapshot)
+        shared_reference = any(context["type"] == "reference"
+            and context["start_char"] <= start < end <= context["end_char"]
+            and context.get("footnote_scope") == "selected_scope" for context in contexts)
+        if not shared_reference or not node.get("parent_id"):
+            return render_attribution_context(contexts, start, end)
+        # Only an explicit shared-reference boundary permits broader attribution context.
+        node = by_id[node["parent_id"]]
 
 
 def _resolve_quote(locator: dict[str, Any], snapshot: dict[str, Any]) -> tuple[int, int] | None:

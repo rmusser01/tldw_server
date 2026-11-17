@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib
 import json
 
@@ -412,3 +413,161 @@ def test_overview_note_budget_excess_is_explicit_instead_of_silent_omission(mode
     ]}] if mode == "oversized" else [{"type": "unresolved", "omitted": True}]
     with pytest.raises(module().AuthorNoteContextTooLarge):
         module().render_overview_author_notes([{"title": "Selected", "status": "completed", "attribution_contexts": contexts}])
+
+
+def footnote_fixture(*, first_marker="[52]", references=None):
+    first = "# Finance\nDavid Burton\nFirst policy " + first_marker + ".\nAUTHOR’S NOTE: The authors alone are responsible.\n"
+    second = "## CFPB\nRobert Bowes\nTransfer functions [53]. Further policy [54] and [55].\n"
+    refs = references or "52. First details.\n53. Transfer details.\n54. David Burton is cited. [55. Other details.]\n56. Final entry.\n"
+    source = first + second + "ENDNOTES\n" + refs
+    child = {"id": "cfpb", "title": "CFPB", "level": 2, "parent_id": "root", "target_type": "char_range",
+             "target_start": len(first), "target_end": len(source)}
+    section, snapshot = note_fixture(source, [child])
+    return section, snapshot
+
+
+def test_note_substring_links_exact_label_and_body_marker_to_verified_heading():
+    section, snapshot = footnote_fixture()
+    source = snapshot["content"]
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    start = source.index("Transfer details.")
+    rendered = module().render_attribution_context(contexts, start, start + len("Transfer details."))
+    projected = json.loads(rendered.rsplit("\n", 1)[-1])
+    reference = next(item for item in projected if item["type"] == "reference")
+    linked = reference["footnotes"]
+    assert len(linked) == 1
+    note = linked[0]
+    assert note["status"] == "linked"
+    assert source[note["start_char"]:note["label_end_char"]] == note["label_quote"] == "53. "
+    assert source[note["start_char"]:note["end_char"]] == "53. Transfer details."
+    marker = note["body_marker"]
+    assert source[marker["start_char"]:marker["end_char"]] == marker["quote"] == "[53]"
+    heading = next(item for item in projected if item["type"] == "heading")
+    assert note["contribution_start_char"] == heading["start_char"] == source.index("## CFPB")
+    assert "Robert Bowes" in heading["heading_quote"] and "David Burton" not in rendered
+    assert module().contextual_author("Robert Bowes", start, start + 17, source[start:start + 17], contexts) == ""
+
+
+def test_multi_note_passage_keeps_separate_relationships_and_author_caveats():
+    section, snapshot = footnote_fixture()
+    source = snapshot["content"]
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    projected = json.loads(module().render_attribution_context(
+        contexts, source.index("First details."), source.index("54. David")
+    ).rsplit("\n", 1)[-1])
+    reference = next(item for item in projected if item["type"] == "reference")
+    assert [note["label_quote"] for note in reference["footnotes"]] == ["52. ", "53. "]
+    headings = [item for item in projected if item["type"] == "heading"]
+    assert len(headings) == 2
+    assert headings[0]["author_notes"][0]["quote"].strip() == "AUTHOR’S NOTE: The authors alone are responsible."
+    assert {note["contribution_start_char"] for note in reference["footnotes"]} == {item["start_char"] for item in headings}
+
+
+def test_inline_bracketed_note_stops_previous_note_before_its_label():
+    section, snapshot = footnote_fixture()
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    notes = contexts[-1]["footnotes"]
+    source = snapshot["content"]
+    note54 = next(note for note in notes if note["label_quote"] == "54. ")
+    note55 = next(note for note in notes if note["label_quote"] == "[55. ")
+    assert source[note54["start_char"]:note54["end_char"]] == "54. David Burton is cited."
+    assert source[note55["start_char"]:note55["end_char"]] == "[55. Other details.]"
+    assert note55["status"] == "linked"
+
+
+@pytest.mark.parametrize("references,first_marker,reason", [
+    ("53. One.\n53. Duplicate.\n54. Boundary.\n", "[52]", "duplicate_label"),
+    ("53. One.\n55. Missing next note.\n", "[52]", "missing_boundary"),
+    ("53. Only note.\n", "[52]", "missing_boundary"),
+    ("53. One.\n54. Boundary.\n", "[53]", "ambiguous_backlink"),
+    pytest.param("53. One.\n54. Boundary.\n", " ".join(["[53]"] * 1000), "ambiguous_backlink", id="many_repeated_markers"),
+])
+def test_ambiguous_notes_never_claim_a_contributor(references, first_marker, reason):
+    section, snapshot = footnote_fixture(references=references, first_marker=first_marker)
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    notes = [note for note in contexts[-1]["footnotes"] if note["label_quote"] == "53. "]
+    assert notes and all(note["status"] == "unresolved" and note["reason"] == reason for note in notes)
+    assert all("contribution_start_char" not in note and "body_marker" not in note for note in notes)
+
+
+def test_selected_child_does_not_resolve_a_shared_reference_from_its_last_byline():
+    section, snapshot = footnote_fixture()
+    section.update(node_id="cfpb", start_char=snapshot["content"].index("## CFPB"))
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    reference = contexts[-1]
+    assert reference["footnote_scope"] == "selected_scope"
+    assert all(note["status"] == "unresolved" for note in reference["footnotes"])
+    rendered = module().render_attribution_context(contexts, snapshot["content"].index("53. Transfer"), section["end_char"])
+    assert "Robert Bowes" not in rendered and "David Burton" not in rendered
+
+
+def test_many_footnotes_share_headings_without_losing_the_last_note_boundary():
+    body = "# Policy\nAda Example\n" + " ".join(f"Proposal [{number}]." for number in range(1, 57))
+    source = body + "\nENDNOTES\n" + "\n".join(f"{number}. Note details." for number in range(1, 57))
+    section, snapshot = note_fixture(source)
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    assert not any(item["omitted"] for item in contexts)
+    assert len(contexts[-1]["footnotes"]) == 56
+    assert contexts[-1]["footnotes"][-1]["reason"] == "missing_boundary"
+    rendered = module().render_attribution_context(contexts)
+    assert len(rendered) <= 16_000 and '"omitted":true' not in rendered
+
+
+@pytest.mark.parametrize("parent", ["missing", "cfpb", "root"])
+def test_invalid_selected_ancestry_cannot_resolve_footnotes(parent):
+    section, snapshot = footnote_fixture()
+    snapshot["nodes"][0]["parent_id"] = parent
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    assert any(context["type"] == "unresolved" or context.get("footnote_scope") == "unresolved" for context in contexts)
+    assert not any(note["status"] == "linked" for context in contexts for note in context.get("footnotes", []))
+
+
+def test_malformed_descendant_parent_cannot_supply_a_contribution_link():
+    source = "# Policy\nAda\n## First\nBert\nFirst policy.\n## Second\nCy\nSecond policy [53].\nENDNOTES\n53. Details.\n54. Boundary."
+    first, second = source.index("## First"), source.index("## Second")
+    section, snapshot = note_fixture(source, [
+        {"id": "first", "parent_id": "root", "level": 3, "title": "First", "target_type": "char_range", "target_start": first, "target_end": second},
+        {"id": "second", "parent_id": "first", "level": 2, "title": "Second", "target_type": "char_range", "target_start": second, "target_end": len(source)},
+    ])
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    assert not any(note["status"] == "linked" for context in contexts for note in context.get("footnotes", []))
+
+
+def test_footnote_count_overflow_is_explicit_without_a_partial_author_map():
+    source = "# Policy\nAda\nProposal [1].\nAUTHOR’S NOTE: Collective responsibility.\nENDNOTES\n" + "\n".join(f"{number}. Details." for number in range(1, 131))
+    section, snapshot = note_fixture(source)
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    assert not any(context["omitted"] for context in contexts)
+    assert contexts[0]["author_notes"][0]["quote"].strip() == "AUTHOR’S NOTE: Collective responsibility."
+    assert contexts[-1]["footnote_scope"] == "unresolved" and contexts[-1]["footnotes_omitted"] is True
+    assert contexts[-1]["footnotes"] == []
+    rendered = module().render_attribution_context(contexts, source.index("1. Details"), len(source))
+    assert '"footnotes_omitted":true' in rendered and "Ada" not in rendered
+
+
+@pytest.mark.parametrize("padding", ["", "acknowledgment " * 60])
+def test_names_or_markers_in_author_notes_and_bibliography_do_not_create_backlinks(padding):
+    source = "# Policy\nAda\nAUTHOR’S NOTE: " + padding + "Thanks to Robert Bowes [53].\nENDNOTES\n53. Robert Bowes [53].\n54. Boundary."
+    section, snapshot = note_fixture(source)
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    assert contexts[-1]["footnotes"][0]["reason"] == "ambiguous_backlink"
+
+
+def test_body_only_context_retains_existing_bytes_for_cached_claims():
+    section, snapshot = footnote_fixture()
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    start = snapshot["content"].index("Transfer functions")
+    rendered = module().render_attribution_context(contexts, start, start + 18)
+    # Frozen from the pre-link renderer: unrelated body checks must not become paid retries.
+    assert hashlib.sha256(rendered.encode()).hexdigest() == "bb3770bb84b1309abe8d559809a1a39ef12f034476da4bd507aa61114dce3822"
+
+
+@given(st.integers(min_value=1, max_value=998), st.text(alphabet="abc XYZ", min_size=1, max_size=100))
+def test_inline_note_boundaries_remain_exact_and_disjoint(number, text):
+    source = f"# Policy\nAda\nProposal [{number}].\nENDNOTES\n{number}. {text} [{number + 1}. Next.]"
+    section, snapshot = note_fixture(source)
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    first, second = contexts[-1]["footnotes"]
+    assert first["end_char"] <= second["start_char"]
+    assert source[first["start_char"]:first["end_char"]] == f"{number}. {text}".rstrip()
+    assert first["status"] == "linked" and second["status"] == "unresolved"

@@ -16,6 +16,72 @@ from tldw_Server_API.tests.Research_Workspace.test_section_summary_jobs import a
 pytestmark = pytest.mark.unit
 
 
+def test_note_link_context_preserves_policy_evidence_and_invalidates_older_checks():
+    from tldw_Server_API.app.core.Research_Workspace.section_attribution import build_section_attribution_contexts
+    from tldw_Server_API.app.core.Research_Workspace.section_verification import evidence_digest, section_evidence_map
+    from tldw_Server_API.tests.Research_Workspace.test_section_attribution import footnote_fixture
+
+    section, snapshot = footnote_fixture()
+    source = snapshot["content"]
+    start = source.index("Transfer details.")
+    end = start + len("Transfer details.")
+    section["batches"] = [{"evidence": [{"id": "E1.1.1", "quote": source[start:end], "start_char": start, "end_char": end}]}]
+    section["attribution_contexts"] = build_section_attribution_contexts(section, snapshot)
+    linked = section_evidence_map(section, snapshot)
+    assert list(linked) == ["E1.1.1"] and linked["E1.1.1"]["text"] == "Transfer details."
+    projected = json.loads(linked["E1.1.1"]["attribution_context"].rsplit("\n", 1)[-1])
+    assert next(item for item in projected if item["type"] == "reference")["footnotes"][0]["body_marker"]["quote"] == "[53]"
+    assert "Robert Bowes" in linked["E1.1.1"]["attribution_context"]
+    section["attribution_contexts"][-1].pop("footnotes")
+    previous = section_evidence_map(section, snapshot)
+    assert previous["E1.1.1"]["text"] == linked["E1.1.1"]["text"]
+    assert evidence_digest(previous) != evidence_digest(linked)
+
+
+@pytest.mark.asyncio
+async def test_note_links_reach_extraction_chapter_and_every_verification_stage(monkeypatch):
+    from tldw_Server_API.tests.Research_Workspace.test_section_attribution import footnote_fixture
+
+    _, snapshot = footnote_fixture()
+    snapshot["navigation_version"] = "v1"
+    snapshot["nodes"][0]["id"] = "dsi:1"
+    snapshot["nodes"][1]["parent_id"] = "dsi:1"
+    prompts, verified_evidence = [], []
+
+    async def load(*args, **kwargs):
+        return snapshot
+
+    async def chat(**kwargs):
+        prompt = kwargs["messages_payload"][0]["content"]
+        prompts.append(prompt)
+        content = json.dumps({"summary": "The note is linked to a contribution.", "evidence": [{
+            "claim": "Transfer details.", "source_span_ids": ["P1"], "author": "Robert Bowes",
+        }]}) if "SOURCE:" in prompt else "The note is linked to the Bowes contribution [E1.1.1]."
+        return {"choices": [{"message": {"content": content}, "finish_reason": "stop"}]}
+
+    async def verify(text, evidence_by_id, **kwargs):
+        verified_evidence.append(copy.deepcopy(evidence_by_id))
+        return report(text, status="supported", evidence=evidence_by_id)
+
+    monkeypatch.setattr(mod, "load_navigation_sections", load)
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    monkeypatch.setattr(mod, "verify_section_text", verify)
+    options = args(request().settings.model_copy(update={"provider": "openai", "model": "test-model"}))
+    await mod.process_section_summary(**options)
+    row = options["workspace_db"].row
+    assert row["status"] == "complete"
+    for prompt in (prompts[0], next(value for value in prompts if value.startswith("Summarize all portions"))):
+        context = prompt.split("SOURCE:\n", 1)[0]
+        assert '"label_quote":"53. "' in context and '"quote":"[53]"' in context
+    assert len(verified_evidence) == 3
+    for evidence in verified_evidence:
+        assert list(evidence) == ["E1.1.1"]
+        assert evidence["E1.1.1"]["text"] == snapshot["content"]
+        assert '"label_quote":"53. "' in evidence["E1.1.1"]["attribution_context"]
+    section = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]
+    assert section["batches"][0]["evidence"][0]["author"] == ""
+
+
 @pytest.fixture
 def generation(monkeypatch):
     text = "The chapter proposes buying at least 64 Next Generation Interceptors."
