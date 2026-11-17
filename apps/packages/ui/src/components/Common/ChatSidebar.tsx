@@ -36,6 +36,7 @@ import {
   useChatSurfaceCoordinatorStore
 } from "@/store/chat-surface-coordinator"
 import { cn } from "@/libs/utils"
+import { focusRing } from "@/styles/tokens/focus"
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
 import { ServerChatList } from "./ChatSidebar/ServerChatList"
 import { LocalChatList } from "./ChatSidebar/LocalChatList"
@@ -201,7 +202,7 @@ export function ChatSidebar({
           data-testid={`chat-sidebar-shortcut-${item.id}`}
           className={cn(
             "p-2 rounded-lg",
-            focusRingClasses,
+            focusRing.inset,
             isActive
               ? "border border-border bg-surface text-text"
               : "text-text-muted hover:bg-surface hover:text-text"
@@ -346,8 +347,7 @@ export function ChatSidebar({
         data-testid="chat-sidebar"
       data-chat-sidebar
         className={cn(
-          "flex flex-col h-screen items-center py-4 gap-2 w-12 border-r border-border bg-surface2",
-          pinnedShortcuts.length > 0 ? "overflow-x-hidden overflow-y-auto" : "overflow-hidden",
+          "flex flex-col h-screen items-center py-4 gap-2 w-12 overflow-x-hidden overflow-y-auto no-scrollbar border-r border-border bg-surface2",
           className
         )}
       >
@@ -409,8 +409,8 @@ export function ChatSidebar({
         {pinnedShortcuts.map(renderShortcutIcon)}
 
         <div className={cn(
-          "flex flex-1 w-full flex-col items-center gap-2 overflow-y-auto overflow-x-hidden px-1",
-          pinnedShortcuts.length > 0 ? "min-h-10" : "min-h-0"
+          "flex flex-1 w-full flex-col items-center gap-2 overflow-y-auto overflow-x-hidden px-1 [scrollbar-width:thin]",
+          sidebarShortcuts.length > pinnedShortcuts.length ? "min-h-10" : "min-h-0"
         )}>
           {sidebarShortcuts
             .filter((item) => !pinnedShortcuts.includes(item))
