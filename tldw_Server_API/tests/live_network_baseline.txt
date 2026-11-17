@@ -1,0 +1,3 @@
+# Tests still allowed to reach a non-loopback host (TASK-15486), one pytest node id per line, sorted.
+# The autouse blocker in tests/conftest.py stands down for these; tests/lint/test_live_network_baseline_ratchet.py
+# keeps this file from growing. Stub the test's seam and delete its line.
