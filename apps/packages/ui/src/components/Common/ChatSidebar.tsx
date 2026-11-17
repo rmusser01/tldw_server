@@ -193,7 +193,7 @@ export function ChatSidebar({
   const renderShortcutIcon = (item: SidebarShortcutAction) => {
     const isActive = isShortcutRouteActive(item)
     return (
-      <Tooltip title={t(item.labelKey, item.labelDefault)} placement="right">
+      <Tooltip key={item.id} title={t(item.labelKey, item.labelDefault)} placement="right">
         <button
           aria-label={t(item.labelKey, item.labelDefault)}
           aria-current={isActive ? "page" : undefined}
@@ -335,6 +335,10 @@ export function ChatSidebar({
 
   // Collapsed view - just icons
   if (collapsed) {
+    const pinnedShortcuts = sidebarShortcuts.filter(({ id }) =>
+      id === "media" || id === "research-workspace"
+    )
+
     return (
       <nav
         aria-label={historyLandmarkLabel}
@@ -342,7 +346,8 @@ export function ChatSidebar({
         data-testid="chat-sidebar"
       data-chat-sidebar
         className={cn(
-          "flex flex-col h-screen items-center py-4 gap-2 w-12 overflow-hidden border-r border-border bg-surface2",
+          "flex flex-col h-screen items-center py-4 gap-2 w-12 border-r border-border bg-surface2",
+          pinnedShortcuts.length > 0 ? "overflow-x-hidden overflow-y-auto" : "overflow-hidden",
           className
         )}
       >
@@ -401,12 +406,15 @@ export function ChatSidebar({
           </button>
         </Tooltip>
 
-        <div className="flex min-h-0 flex-1 w-full flex-col items-center gap-2 overflow-y-auto overflow-x-hidden px-1">
-          {sidebarShortcuts.map((item) => (
-            <React.Fragment key={item.id}>
-              {renderShortcutIcon(item)}
-            </React.Fragment>
-          ))}
+        {pinnedShortcuts.map(renderShortcutIcon)}
+
+        <div className={cn(
+          "flex flex-1 w-full flex-col items-center gap-2 overflow-y-auto overflow-x-hidden px-1",
+          pinnedShortcuts.length > 0 ? "min-h-10" : "min-h-0"
+        )}>
+          {sidebarShortcuts
+            .filter((item) => !pinnedShortcuts.includes(item))
+            .map(renderShortcutIcon)}
         </div>
 
         <div className="flex shrink-0 flex-col items-center gap-2">

@@ -233,6 +233,29 @@ describe("history-first sidebar navigation", () => {
     },
   );
 
+  it("keeps selected Media and Research Workspace outside the collapsed shortcut scroller", async () => {
+    io.values.set("tldw:sidebar:shortcutSelection", [
+      "quick-ingest", "chat", "media", "research-workspace",
+    ]);
+    renderSidebar({ collapsed: true });
+
+    const media = await screen.findByRole("button", { name: "Media" });
+    const research = screen.getByRole("button", { name: "Research Workspace" });
+    const scroller = screen.getByTestId("chat-sidebar-shortcut-quick-ingest")
+      .closest(".overflow-y-auto");
+    expect(scroller).toContainElement(screen.getByTestId("chat-sidebar-shortcut-chat"));
+    expect(scroller).not.toContainElement(media);
+    expect(scroller).not.toContainElement(research);
+  });
+
+  it("keeps omitted priority shortcuts out of the collapsed sidebar", async () => {
+    renderSidebar({ collapsed: true });
+
+    await screen.findByTestId("chat-sidebar-shortcut-chat");
+    expect(screen.queryByRole("button", { name: "Media" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Research Workspace" })).not.toBeInTheDocument();
+  });
+
   it("names the global Server total while searching both sources", async () => {
     io.historyTotal = 60;
     renderSidebar();
