@@ -2792,8 +2792,18 @@ describe("StandaloneHtmlWorkspace", () => {
     })
     const { StandaloneHtmlWorkspace } = await loadWorkspace()
     const view = render(<StandaloneHtmlWorkspace presentationId="html-1" />)
-    fireEvent.change(await screen.findByLabelText("HTML source"), { target: { value: EDITED } })
+    await waitFor(() => {
+      const editor = screen.getByLabelText("HTML source")
+      expect(editor.isConnected).toBe(true)
+      expect(editor).toHaveAttribute("data-workspace-monaco")
+      expect(editor).toHaveValue(SOURCE)
+      expect(mocks.editorProps?.value).toBe(SOURCE)
+      expect(mocks.editorProps?.options?.readOnly).toBe(false)
+    })
+    fireEvent.change(screen.getByLabelText("HTML source"), { target: { value: EDITED } })
     await waitFor(() => expect(sessionStorage.length).toBe(1))
+    const draftKey = sessionStorage.key(0)!
+    await waitFor(() => expect(sessionStorage.getItem(draftKey)).toContain(EDITED))
     const storagePrototype = Object.getPrototypeOf(sessionStorage)
     const blockedRemove = vi.spyOn(storagePrototype, "removeItem").mockImplementation(() => {
       throw new DOMException("cleanup blocked", "SecurityError")
@@ -2806,12 +2816,11 @@ describe("StandaloneHtmlWorkspace", () => {
     expect(screen.getByText(/Recovery unavailable/i)).toBeVisible()
     fireEvent.change(screen.getByLabelText("HTML source"), { target: { value: SECOND_EDIT } })
     await waitFor(() => expect(screen.getByLabelText("HTML source")).toHaveValue(SECOND_EDIT))
-    await waitFor(() => {
-      const beforeReload = Array.from({ length: sessionStorage.length }, (_, index) =>
-        sessionStorage.getItem(sessionStorage.key(index)!)
-      ).join("\n")
-      expect(beforeReload).toContain(SECOND_EDIT)
-    })
+    await waitFor(() => expect(sessionStorage.getItem(draftKey)).toContain(SECOND_EDIT))
+    const beforeReload = Array.from({ length: sessionStorage.length }, (_, index) =>
+      sessionStorage.getItem(sessionStorage.key(index)!)
+    ).join("\n")
+    expect(beforeReload).toContain(SECOND_EDIT)
 
     blockedRemove.mockRestore()
     mocks.slidesCapabilities = {
@@ -2831,6 +2840,145 @@ describe("StandaloneHtmlWorkspace", () => {
       sessionStorage.getItem(sessionStorage.key(index)!)
     ).join("\n")
     expect(afterReload).toContain(SECOND_EDIT)
+  })
+
+  it("replaces old same-key recovery after a delayed real hash without a stale cleanup deleting the new draft", async () => {
+    mocks.saveStandaloneHtmlSource.mockResolvedValueOnce({
+      record: detail({
+        title: "Edited",
+        version: 8,
+        html_document: EDITED,
+        html_sha256: EDITED_DIGEST,
+        html_bytes: 36
+      }).record,
+      etag: '"v8"'
+    })
+    const { StandaloneHtmlWorkspace } = await loadWorkspace()
+    const view = render(<StandaloneHtmlWorkspace presentationId="html-1" />)
+    await waitFor(() => {
+      const editor = screen.getByLabelText("HTML source")
+      expect(editor.isConnected).toBe(true)
+      expect(editor).toHaveAttribute("data-workspace-monaco")
+      expect(editor).toHaveValue(SOURCE)
+      expect(mocks.editorProps?.value).toBe(SOURCE)
+      expect(mocks.editorProps?.options?.readOnly).toBe(false)
+    })
+    fireEvent.change(screen.getByLabelText("HTML source"), { target: { value: EDITED } })
+    await waitFor(() => expect(sessionStorage.length).toBe(1))
+    const draftKey = sessionStorage.key(0)!
+    await waitFor(() => expect(sessionStorage.getItem(draftKey)).toContain(EDITED))
+    const oldRecovery = sessionStorage.getItem(draftKey)
+    expect(JSON.parse(oldRecovery!)).toMatchObject({
+      principalScope: "https://tldw.example|42",
+      presentationId: "html-1",
+      source: EDITED,
+      baseEtag: '"v7"',
+      baseDigest: SOURCE_DIGEST
+    })
+    const blockedRemove = vi.spyOn(Object.getPrototypeOf(sessionStorage), "removeItem")
+      .mockImplementation(() => {
+        throw new DOMException("cleanup blocked", "SecurityError")
+      })
+    const realDigest = crypto.subtle.digest.bind(crypto.subtle)
+    let releaseHash!: () => void
+    const hashGate = new Promise<void>((resolve) => { releaseHash = resolve })
+    let targetEntered = false
+    let realHashCompleted = false
+    const heldDigests: Promise<ArrayBuffer>[] = []
+    let digestSpy: ReturnType<typeof vi.spyOn> | undefined
+
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+      await waitFor(() =>
+        expect(screen.getByTestId("standalone-html-save-status")).toHaveTextContent("Saved")
+      )
+      expect(mocks.saveStandaloneHtmlSource).toHaveBeenCalledWith(
+        "html-1", EDITED, expect.objectContaining({ ifMatch: '"v7"' })
+      )
+      expect(screen.getByText(/Recovery unavailable/i)).toBeVisible()
+      const cleanupAttemptsAfterSave = blockedRemove.mock.calls
+        .filter(([key]) => key === draftKey).length
+      expect(cleanupAttemptsAfterSave).toBeGreaterThanOrEqual(1)
+
+      // Every target call hashes real bytes, but acceptance waits for the explicit gate.
+      digestSpy = vi.spyOn(crypto.subtle, "digest").mockImplementation((algorithm, data) => {
+        const hashed = realDigest(algorithm, data)
+        if (new TextDecoder().decode(data) !== SECOND_EDIT) return hashed
+        targetEntered = true
+        const held = hashed.then(async (result) => {
+          realHashCompleted = true
+          await hashGate
+          return result
+        })
+        heldDigests.push(held)
+        return held
+      })
+      fireEvent.change(screen.getByLabelText("HTML source"), { target: { value: SECOND_EDIT } })
+      await waitFor(() => {
+        expect(targetEntered).toBe(true)
+        expect(realHashCompleted).toBe(true)
+      })
+      expect(screen.getByLabelText("HTML source")).toHaveValue(SECOND_EDIT)
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+      expect(screen.getByRole("button", { name: "Download current draft" })).toBeDisabled()
+      expect(mocks.promptActive).toBe(true)
+      const unload = new Event("beforeunload", { cancelable: true }) as BeforeUnloadEvent
+      act(() => window.dispatchEvent(unload))
+      expect(unload.defaultPrevented).toBe(true)
+      expect(mocks.saveStandaloneHtmlSource).toHaveBeenCalledTimes(1)
+      expect(mocks.downloadStandaloneHtmlDraft).not.toHaveBeenCalled()
+      expect(sessionStorage.getItem(draftKey)).toBe(oldRecovery)
+      expect(screen.getByText(/Recovery unavailable/i)).toBeVisible()
+
+      await act(async () => {
+        releaseHash()
+        await Promise.all(heldDigests)
+      })
+      await waitFor(() => expect(sessionStorage.getItem(draftKey)).toContain(SECOND_EDIT))
+      expect(sessionStorage.key(0)).toBe(draftKey)
+      expect(JSON.parse(sessionStorage.getItem(draftKey)!)).toMatchObject({
+        principalScope: "https://tldw.example|42",
+        presentationId: "html-1",
+        source: SECOND_EDIT,
+        baseEtag: '"v8"',
+        baseDigest: EDITED_DIGEST
+      })
+      expect(blockedRemove.mock.calls.filter(([key]) => key === draftKey).length)
+        .toBeGreaterThan(cleanupAttemptsAfterSave)
+      await waitFor(() => expect(screen.queryByText(/Recovery unavailable/i)).not.toBeInTheDocument())
+      const beforeReload = Array.from({ length: sessionStorage.length }, (_, index) =>
+        sessionStorage.getItem(sessionStorage.key(index)!)
+      ).join("\n")
+      expect(beforeReload).toContain(SECOND_EDIT)
+
+      blockedRemove.mockRestore()
+      mocks.slidesCapabilities = {
+        ...readyCapabilities,
+        canReadStandalone: false,
+        canDraftStandalone: false,
+        canEditStandalone: false
+      }
+      view.rerender(<StandaloneHtmlWorkspace presentationId="html-1" />)
+      await waitFor(() => expect(screen.queryByLabelText("HTML source")).not.toBeInTheDocument())
+      mocks.slidesCapabilities = readyCapabilities
+      view.rerender(<StandaloneHtmlWorkspace presentationId="html-1" />)
+
+      expect(await screen.findByLabelText("HTML source")).toHaveValue(SOURCE)
+      expect(await screen.findByRole("region", { name: "Recovered draft" })).toBeVisible()
+      const afterReload = Array.from({ length: sessionStorage.length }, (_, index) =>
+        sessionStorage.getItem(sessionStorage.key(index)!)
+      ).join("\n")
+      expect(afterReload).toContain(SECOND_EDIT)
+      expect(sessionStorage.getItem(draftKey)).toContain(SECOND_EDIT)
+      expect(localStorage.length).toBe(0)
+    } finally {
+      await act(async () => {
+        releaseHash()
+        await Promise.allSettled(heldDigests)
+      })
+      digestSpy?.mockRestore()
+      blockedRemove.mockRestore()
+    }
   })
 
   it("does not read or offer an unresolved same-key recovery until its cleanup succeeds", async () => {

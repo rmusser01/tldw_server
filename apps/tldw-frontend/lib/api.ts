@@ -1,6 +1,6 @@
 import { addRequestHistory, clearRequestHistory } from '@web/lib/history';
 import { dispatchAuthCredentialsChanged } from '@web/lib/auth-events';
-import { getApiBearer, getApiKey, getSessionAccessToken, hasEnvApiAuth } from '@web/lib/authStorage';
+import { getApiBearer, getApiKey, getFreshSessionAccessToken, getSessionAccessToken, hasEnvApiAuth } from '@web/lib/authStorage';
 import { buildApiBaseUrl, resolvePublicApiOrigin } from '@web/lib/api-base';
 import { captureSessionIdFromHeaders, getOrCreateSessionId, SESSION_HEADER_NAME } from '@web/lib/session';
 import {
@@ -462,7 +462,9 @@ function handleUnauthorized(
   const requestToken = authorization.toLowerCase().startsWith('bearer ')
     ? authorization.slice(7).trim()
     : null;
-  const currentToken = getSessionAccessToken();
+  // Uncached on purpose: deciding whether to sign the user out must observe
+  // a rotation that landed after this request's generation was cached.
+  const currentToken = getFreshSessionAccessToken();
   if (
     !requestToken ||
     !sessionTokenAtStart ||

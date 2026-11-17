@@ -4,8 +4,7 @@ import React, { useCallback } from "react"
 import { useTranslation } from "react-i18next"
 import {
   QUICK_INGEST_ACCEPT_STRING,
-  QUICK_INGEST_MAX_FILE_SIZE_LABEL,
-  QUICK_INGEST_MAX_FILE_SIZE
+  getQuickIngestFileSizeError
 } from "../constants"
 
 interface FileDropZoneProps {
@@ -95,11 +94,6 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
 
   const validateFile = useCallback(
     (file: File): string | null => {
-      // Size check
-      if (file.size > QUICK_INGEST_MAX_FILE_SIZE) {
-        return `${file.name} exceeds ${QUICK_INGEST_MAX_FILE_SIZE_LABEL} quick-ingest limit`
-      }
-
       // Type check - allow if extension matches OR MIME type matches
       const fileExt = "." + (file.name.split(".").pop()?.toLowerCase() || "")
       const isValidExtension = validExtensions.includes(fileExt)
@@ -109,7 +103,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
         return `${file.name} is not a supported file type`
       }
 
-      return null
+      return getQuickIngestFileSizeError(file, file.name)
     },
     [isMimeTypeAllowed, validExtensions]
   )
@@ -339,9 +333,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
               {qi("dropzoneRejectTitle", "Some files not supported")}
             </p>
             <p className="text-xs text-text-subtle">
-              {qi("dropzoneRejectHint", "Check file type and size (max {{maxSize}})", {
-                maxSize: QUICK_INGEST_MAX_FILE_SIZE_LABEL
-              })}
+              {qi("dropzoneRejectHint", "Check the file type and size.")}
             </p>
           </>
         ) : isDragging ? (

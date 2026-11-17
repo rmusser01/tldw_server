@@ -114,8 +114,6 @@ import {
   TRASH_LOOKUP_MAX_PAGES,
   sortNotesByPinnedIds,
   promptModal,
-  NOTES_TUTORIAL_SHOWN_STORAGE_KEY,
-  notesUiStorage,
   hasNotesGraphActiveNotes,
   resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
@@ -2713,56 +2711,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [duplicateSelectedNote, ed.setEditorMode, focusSearchInput, handleNewNote])
-
-  // Auto-trigger notes tutorial on first visit
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return
-    let cancelled = false
-    let timer: number | null = null
-    let userInteracted = false
-
-    function removeInteractionListeners() {
-      window.removeEventListener('pointerdown', handleUserInteraction, true)
-      window.removeEventListener('keydown', handleUserInteraction, true)
-    }
-
-    function handleUserInteraction() {
-      if (cancelled || userInteracted) return
-      userInteracted = true
-      if (timer != null) {
-        window.clearTimeout(timer)
-        timer = null
-      }
-      removeInteractionListeners()
-      void notesUiStorage
-        .set(NOTES_TUTORIAL_SHOWN_STORAGE_KEY, '1')
-        .catch(() => undefined)
-    }
-
-    window.addEventListener('pointerdown', handleUserInteraction, { capture: true, once: true })
-    window.addEventListener('keydown', handleUserInteraction, { capture: true, once: true })
-
-    void (async () => {
-      const alreadyShown = await notesUiStorage
-        .get<string | null>(NOTES_TUTORIAL_SHOWN_STORAGE_KEY)
-        .catch(() => null)
-      if (cancelled || alreadyShown || userInteracted) return
-      timer = window.setTimeout(() => {
-        if (cancelled || userInteracted) return
-        removeInteractionListeners()
-        void notesUiStorage
-          .set(NOTES_TUTORIAL_SHOWN_STORAGE_KEY, '1')
-          .catch(() => undefined)
-        useTutorialStore.getState().startTutorial('notes-basics')
-      }, 1000)
-    })()
-
-    return () => {
-      cancelled = true
-      if (timer != null) window.clearTimeout(timer)
-      removeInteractionListeners()
-    }
-  }, [])
 
   const clearSearchQueryTimeout = list.clearSearchQueryTimeout
   const keywordSearchTimeoutRef = kw.keywordSearchTimeoutRef

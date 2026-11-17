@@ -55,7 +55,7 @@ def perform_transcription(*args, **kwargs):
     )
     return _perform_transcription(*args, **kwargs)
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
-from tldw_Server_API.app.core.config import loaded_config_data
+from tldw_Server_API.app.core.config import MAX_STANDARD_MEDIA_UPLOAD_MIB, loaded_config_data
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
     custom_openai_provider_number,
@@ -142,7 +142,7 @@ _PROVIDER_ENV_MAP: dict[str, str] = {
 }
 
 media_config = loaded_config_data.get('media_processing', {}) if loaded_config_data else {}
-DEFAULT_MAX_VIDEO_FILE_SIZE_MB = media_config.get('max_video_file_size_mb', 1000)
+DEFAULT_MAX_VIDEO_FILE_SIZE_MB = media_config.get('max_video_file_size_mb', MAX_STANDARD_MEDIA_UPLOAD_MIB)
 DEFAULT_MAX_VIDEO_FILE_SIZE_BYTES = DEFAULT_MAX_VIDEO_FILE_SIZE_MB * 1024 * 1024
 _TRANSCRIPTION_EXTRACTION_ERROR_SENTINEL = "Error: Unable to extract transcription"
 _KEEP_VIDEO_MAX_FILES = max(0, int(media_config.get('kept_video_max_files', 5)))  # per-user file cap

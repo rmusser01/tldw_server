@@ -269,9 +269,13 @@ export async function seedAuth(
     } catch {}
     try {
       localStorage.setItem('assistant_setup_dismissed', 'true');
-      // Authenticated workflow fixtures begin after onboarding. Notes starts
-      // its own tour after one second unless this shared-storage flag is set.
-      writeStorageValue('notes-tutorial-shown', '1');
+      // Authenticated workflow fixtures begin after the Notes offer is dismissed.
+      const tutorials = JSON.parse(localStorage.getItem('tldw-tutorials') ?? '{"state":{},"version":0}');
+      const seen = tutorials.state.seenPromptPages ?? [];
+      if (!seen.includes('/notes')) {
+        tutorials.state.seenPromptPages = [...seen, '/notes'];
+        localStorage.setItem('tldw-tutorials', JSON.stringify(tutorials));
+      }
     } catch {}
     try {
       if (cfg.allowOffline) {

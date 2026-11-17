@@ -175,11 +175,6 @@ for (const surface of ['WebUI', 'extension options'] as const) {
     const route = extension ? `chrome-extension://${extension.extensionId}/options.html#/notes` : '/notes'
     try {
       await page.setViewportSize({ width: 1280, height: 900 })
-      if (extension) {
-        await extension.context.serviceWorkers()[0].evaluate(() =>
-          chrome.storage.local.set({ "notes-tutorial-shown": JSON.stringify("1") })
-        )
-      }
       await page.goto(route)
       if (extension) {
         const prompt = page.getByText('New to this page?', { exact: true })
@@ -247,11 +242,6 @@ for (const surface of ['WebUI', 'extension options'] as const) {
     const route = extension ? `chrome-extension://${extension.extensionId}/options.html#/notes` : '/notes'
     try {
       await page.setViewportSize({ width: 1280, height: 900 })
-      if (extension) {
-        await extension.context.serviceWorkers()[0].evaluate(() =>
-          chrome.storage.local.set({ "notes-tutorial-shown": JSON.stringify("1") })
-        )
-      }
       await page.goto(route)
       // Opening a note changes the route and can close the first-visit prompt.
       if (extension) {

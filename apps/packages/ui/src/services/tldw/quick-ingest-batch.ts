@@ -1,4 +1,5 @@
 import { browser } from "wxt/browser";
+import type { BgUploadInit } from "@/services/background-proxy";
 import { assertQuickIngestRequestCurrent, scopedQuickIngestRequest, scopedQuickIngestUpload, type QuickIngestRequestContext } from "./quick-ingest-request-scope";
 import {
   getProcessPathForType,
@@ -36,6 +37,7 @@ import type {
 } from "@/components/Common/QuickIngest/types";
 import {
   DUPLICATE_SKIP_MESSAGE,
+  getQuickIngestFileSizeError,
   isDbMessageDuplicate,
 } from "@/components/Common/QuickIngest/constants";
 import {
@@ -75,6 +77,7 @@ type QuickIngestFilePayload = {
   name?: string;
   type?: string;
   data?: number[] | Uint8Array | ArrayBuffer;
+  directFile?: File;
   defaults?: TypeDefaults;
   conferenceOverride?: ConferenceItemMetadataOverride;
 };
@@ -166,6 +169,8 @@ const EXTENSION_TIMEOUT_MS = 10_000;
 const QUICK_INGEST_RUNTIME_PING_TIMEOUT_MS = 400;
 const QUICK_INGEST_RUNTIME_HEALTH_TTL_MS = 30_000;
 const DIRECT_INGEST_TIMEOUT_MS = 5 * 60 * 1000;
+const LARGE_NATIVE_FILE_TIMEOUT_MS = 20 * 60_000;
+const LARGE_NATIVE_UPLOAD_THRESHOLD_BYTES = 50 * 1024 ** 2;
 const DIRECT_REMOTE_POLL_INTERVAL_MS = 1_200;
 type DirectQuickIngestTracker = ReturnType<
   typeof createIngestJobsTracker<{ sourceId: string }>
@@ -176,6 +181,7 @@ const directQuickIngestSessionTrackers = new Map<
   DirectQuickIngestTracker
 >();
 const directQuickIngestCancelledSessions = new Set<string>();
+const directQuickIngestUploadControllers = new Map<string, AbortController>();
 let lastQuickIngestRuntimeHealthCheckAt = 0;
 let quickIngestRuntimeMessagingUsable: boolean | null = null;
 
@@ -249,6 +255,7 @@ const clearDirectSessionTracking = (sessionId: string | undefined) => {
   const normalizedSessionId = String(sessionId || "").trim();
   if (!normalizedSessionId) return;
   directQuickIngestSessionTrackers.delete(normalizedSessionId);
+  directQuickIngestUploadControllers.delete(normalizedSessionId);
   directQuickIngestCancelledSessions.delete(normalizedSessionId);
 };
 
@@ -415,25 +422,28 @@ const serializeUploadFields = (
   return serialized;
 };
 
+const hasNativeFile = (files: QuickIngestFilePayload[]): boolean =>
+  Array.isArray(files) && files.some((file) => file?.directFile);
+
+const getNativeFileTimeout = (file?: File): number =>
+  file && file.size > LARGE_NATIVE_UPLOAD_THRESHOLD_BYTES
+    ? LARGE_NATIVE_FILE_TIMEOUT_MS
+    : DIRECT_INGEST_TIMEOUT_MS;
+
 const submitPersistentAdd = async (input: QuickIngestRequestContext, {
   fields,
   file,
-}: {
-  fields: Record<string, any>;
-  file?: {
-    name: string;
-    type: string;
-    data: number[] | Uint8Array | ArrayBuffer;
-  };
-}): Promise<any> =>
+  directFile,
+}: Pick<BgUploadInit, "file" | "directFile"> & { fields: Record<string, any> }): Promise<any> =>
   normalizePersistentAddResponse(
     await scopedQuickIngestUpload<any>(input, {
       path: "/api/v1/media/add",
       method: "POST",
       fields: serializeUploadFields(fields),
       file,
-      fileFieldName: file ? "files" : undefined,
-      timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
+      ...(directFile ? { directFile } : {}),
+      fileFieldName: file || directFile ? "files" : undefined,
+      timeoutMs: getNativeFileTimeout(directFile),
       ...DIRECT_QUICK_INGEST_TRANSPORT,
     }),
   );
@@ -789,19 +799,20 @@ const runDirectQuickIngestBatch = async (
     Boolean(input.storeRemote) && !input.processOnly;
   const directSessionId =
     String(input.__quickIngestSessionId || "").trim() || undefined;
+  const nativeUploadController = directSessionId && hasNativeFile(files)
+    ? new AbortController()
+    : undefined;
+  const nativeUploadContext = nativeUploadController
+    ? {
+        ...input,
+        signal: input.signal
+          ? AbortSignal.any([input.signal, nativeUploadController.signal])
+          : nativeUploadController.signal,
+      }
+    : input;
 
   const out: QuickIngestBatchResult[] = [];
   let conferencePlan: PlannedConferenceCollection | null = null;
-  if (shouldStoreRemote) {
-    try {
-      conferencePlan = await createPlannedConferenceCollection(input, entries);
-    } catch (error) {
-      assertQuickIngestRequestCurrent(input, error);
-      if (input.conferenceRetry) throw error;
-      console.warn("[tldw] Conference collection planning failed", error);
-    }
-  }
-
   const pollIngestJobStatus = async (
     jobId: number,
     timeoutMs: number,
@@ -843,6 +854,19 @@ const runDirectQuickIngestBatch = async (
         directSessionId,
         createIngestJobsTracker<{ sourceId: string }>(),
       );
+      if (nativeUploadController) {
+        directQuickIngestUploadControllers.set(directSessionId, nativeUploadController);
+      }
+    }
+
+    if (shouldStoreRemote) {
+      try {
+        conferencePlan = await createPlannedConferenceCollection(input, entries);
+      } catch (error) {
+        assertQuickIngestRequestCurrent(input, error);
+        if (input.conferenceRetry) throw error;
+        console.warn("[tldw] Conference collection planning failed", error);
+      }
     }
 
     for (const entry of entries) {
@@ -1136,10 +1160,20 @@ const runDirectQuickIngestBatch = async (
         break;
       }
       const id = String(file?.id || crypto.randomUUID());
-      const fileName = String(file?.name || "upload");
-      const mediaType = inferUploadMediaTypeFromFile(fileName, file?.type);
+      const directFile = file?.directFile;
+      const fileName = String(directFile?.name || file?.name || "upload");
+      const mimeType = directFile ? directFile.type : file?.type;
+      const mediaType = inferUploadMediaTypeFromFile(fileName, mimeType);
+      const bytes = file?.data;
+      const requestContext = directFile ? nativeUploadContext : input;
+      const timeoutMs = getNativeFileTimeout(directFile);
+      let jobAcknowledged = false;
 
       try {
+        const size = directFile?.size ?? (Array.isArray(bytes) ? bytes.length : bytes?.byteLength ?? 0);
+        const sizeError = getQuickIngestFileSizeError({ name: fileName, type: mimeType, size });
+        if (sizeError) throw new Error(sizeError);
+
         const fields = buildFields({
           rawType: mediaType,
           defaults:
@@ -1152,25 +1186,22 @@ const runDirectQuickIngestBatch = async (
           autoApplyTemplate: input.autoApplyTemplate,
           persist: shouldStoreRemote,
         });
-        const uploadFile = {
-          name: fileName,
-          type: file?.type || "application/octet-stream",
-          data:
-            (file?.data as number[] | Uint8Array | ArrayBuffer | undefined) ||
-            [],
-        };
+        const upload = directFile
+          ? { directFile }
+          : { file: { name: fileName, type: mimeType || "application/octet-stream", data: bytes || [] } };
         if (shouldStoreRemote) {
           try {
-            const submitData = await scopedQuickIngestUpload<any>(input, {
+            const submitData = await scopedQuickIngestUpload<any>(requestContext, {
               path: "/api/v1/media/ingest/jobs",
               method: "POST",
               fields: serializeUploadFields(fields),
-              file: uploadFile,
+              ...upload,
               fileFieldName: "files",
-              timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
+              timeoutMs,
               ...DIRECT_QUICK_INGEST_TRANSPORT,
             });
             const { batchId, jobIds } = requireSubmittedIngestJobs(submitData);
+            jobAcknowledged = true;
             const directTracker = ensureDirectSessionTracker(directSessionId);
             directTracker?.trackJobs(batchId, jobIds, { sourceId: id });
             input.onTrackingMetadata?.({
@@ -1187,7 +1218,7 @@ const runDirectQuickIngestBatch = async (
             const firstJobId = jobIds[0];
             const pollResult = await pollIngestJobStatus(
               firstJobId,
-              DIRECT_INGEST_TIMEOUT_MS,
+              timeoutMs,
             );
             if (!pollResult.ok) {
               throw new Error(String(pollResult.error || "Upload failed"));
@@ -1209,9 +1240,9 @@ const runDirectQuickIngestBatch = async (
             if (!shouldFallbackToPersistentAdd(error)) {
               throw error;
             }
-            const data = await submitPersistentAdd(input, {
+            const data = await submitPersistentAdd(requestContext, {
               fields,
-              file: uploadFile,
+              ...upload,
             });
             const fallbackDuplicate = isDbMessageDuplicate(data);
             out.push({
@@ -1229,13 +1260,13 @@ const runDirectQuickIngestBatch = async (
           continue;
         }
 
-        const data = await scopedQuickIngestUpload<any>(input, {
+        const data = await scopedQuickIngestUpload<any>(requestContext, {
           path: getProcessPathForType(mediaType),
           method: "POST",
           fields: serializeUploadFields(fields),
-          file: uploadFile,
+          ...upload,
           fileFieldName: "files",
-          timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
+          timeoutMs,
           ...DIRECT_QUICK_INGEST_TRANSPORT,
         });
 
@@ -1252,7 +1283,8 @@ const runDirectQuickIngestBatch = async (
           persisted: false,
         });
       } catch (error) {
-      assertQuickIngestRequestCurrent(input, error);
+        assertQuickIngestRequestCurrent(input, error);
+        if (directFile && !jobAcknowledged && nativeUploadController?.signal.aborted) break;
         out.push({
           id,
           status: "error",
@@ -1285,6 +1317,7 @@ export const submitQuickIngestBatch = async (
   if (
     !input.conferenceRetry &&
     !isDirectQuickIngestSessionId(input?.__quickIngestSessionId) &&
+    !hasNativeFile(input.files) &&
     (await canUseExtensionMessagingRuntime())
   ) {
     try {
@@ -1308,8 +1341,13 @@ export const startQuickIngestSession = async (
   input: QuickIngestBatchInput,
 ): Promise<QuickIngestStartAck> => {
   assertQuickIngestRequestCurrent(input);
-  // The legacy background planner does not understand existing collection retry identities.
-  if (!input.conferenceRetry && !shouldPreferDirectQuickIngestSession() && (await canUseExtensionMessagingRuntime())) {
+  // Native Files and collection retries require the direct executor.
+  if (
+    !input.conferenceRetry &&
+    !hasNativeFile(input.files) &&
+    !shouldPreferDirectQuickIngestSession() &&
+    (await canUseExtensionMessagingRuntime())
+  ) {
     try {
       assertQuickIngestRequestCurrent(input);
       return await sendExtensionMessageWithTimeout<QuickIngestStartAck>({
@@ -1363,6 +1401,7 @@ export const cancelQuickIngestSession = async (
   }
 
   directQuickIngestCancelledSessions.add(sessionId);
+  directQuickIngestUploadControllers.get(sessionId)?.abort();
   await cancelDirectSessionBatches(
     input,
     sessionId,

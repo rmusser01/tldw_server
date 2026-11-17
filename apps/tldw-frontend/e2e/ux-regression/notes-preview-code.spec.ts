@@ -149,13 +149,6 @@ for (const surface of ['WebUI', 'extension options'] as const) {
     try {
       await page.setViewportSize({ width: 1280, height: 900 });
       await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-      if (extension) {
-        await extension.context
-          .serviceWorkers()[0]
-          .evaluate(() =>
-            chrome.storage.local.set({ 'notes-tutorial-shown': JSON.stringify('1') })
-          );
-      }
       await page.goto(url('/notes'));
       const notes = new NotesPage(page);
       const prompt = page.getByText('New to this page?', { exact: true });

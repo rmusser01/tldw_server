@@ -76,6 +76,7 @@ import {
   type TransferSourcesModalLaunchRequest
 } from "./TransferSourcesModal"
 import { useSourceListViewState } from "./use-source-list-view-state"
+import { startWorkspaceStatusPoll } from "./workspace-status-poll-scheduler"
 import { useSourceSavedViews } from "./SourcesPane/use-source-saved-views"
 import {
   SourceViewOverlayHost,
@@ -140,7 +141,7 @@ import {
 import type { WorkspaceAgentTaskPrefill } from "./WorkspaceAgentTaskHandoffModal"
 import { isEditableTarget } from "@/utils/editable-target"
 import { restoreMigratedResearchWorkspace } from "@/services/workspace-server-restore"
-import { isTransientSourceStatusError, isWorkspaceSourceActivelyProcessing } from "@/store/workspace-source-status"
+import { isTransientSourceStatusError, isWorkspaceSourceActivelyProcessing, isWorkspaceSourceAvailabilityUnknown } from "@/store/workspace-source-status"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))
@@ -1604,6 +1605,25 @@ const ResearchWorkspaceBody: React.FC = () => {
         .map((source) => source.mediaId),
     [sources]
   )
+  // WP-42: the consolidated poller reads the latest ticks and recovery state
+  // through refs so neither restarting itself nor re-rendering the workspace
+  // disturbs the polling effect.
+  const workspaceStatusTickRef = React.useRef<(() => void) | null>(null)
+  const processingSourceTickRef = React.useRef<(() => void) | null>(null)
+  const sourceStatusNeedsPoll = processingMediaIds.length > 0 ||
+    sources.some((source) => isWorkspaceSourceAvailabilityUnknown(source.statusDetails))
+  const sourceStatusNeedsPollRef = React.useRef(sourceStatusNeedsPoll)
+  React.useEffect(() => {
+    sourceStatusNeedsPollRef.current = sourceStatusNeedsPoll
+  }, [sourceStatusNeedsPoll])
+  // WP-42 follow-up: an in-flight migration is workspace activity too — the
+  // status projection should keep refreshing while the migration promise is
+  // pending (stage3 pins this; idle workspaces with the migration already
+  // settled still poll zero).
+  const workspaceMigrationLoadingRef = React.useRef(workspaceMigrationLoading)
+  React.useEffect(() => {
+    workspaceMigrationLoadingRef.current = workspaceMigrationLoading
+  }, [workspaceMigrationLoading])
   const activeWorkspaceOperations = React.useMemo(() => {
     const operations: string[] = []
     const activeSourceCount = sources.filter(isWorkspaceSourceActivelyProcessing).length
@@ -2102,15 +2122,14 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
 
     void refreshWorkspaceStatusProjection()
-    const timer = window.setInterval(
-      () => void refreshWorkspaceStatusProjection(),
-      WORKSPACE_SOURCE_STATUS_POLL_INTERVAL_MS
-    )
+    // WP-42: no private interval here — the consolidated scheduler below
+    // drives this tick while sources are processing and the page is visible.
+    workspaceStatusTickRef.current = () => void refreshWorkspaceStatusProjection()
     return () => {
       cancelled = true
       workspaceStatusRequestSeqRef.current += 1
       workspaceStatusInFlightRef.current = false
-      window.clearInterval(timer)
+      workspaceStatusTickRef.current = null
     }
   }, [
     isStoreHydrated,
@@ -3304,13 +3323,12 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
 
     void pollStatuses()
-    const timer = window.setInterval(
-      () => void pollStatuses(),
-      WORKSPACE_SOURCE_STATUS_POLL_INTERVAL_MS
-    )
+    // WP-42: the readiness tick joins the projection tick in the single
+    // consolidated scheduler below.
+    processingSourceTickRef.current = () => void pollStatuses()
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      processingSourceTickRef.current = null
     }
   }, [
     isStoreHydrated,
@@ -3320,6 +3338,23 @@ const ResearchWorkspaceBody: React.FC = () => {
     workspaceStatusProjectionReadyVersion,
     workspaceId
   ])
+
+  useEffect(() => {
+    // WP-42: one poller replaces the two independent 5 s intervals. It only
+    // ticks while sources are processing or their availability needs recovery
+    // and skips hidden pages, catching up once when shown again.
+    const poll = startWorkspaceStatusPoll({
+      intervalMs: WORKSPACE_SOURCE_STATUS_POLL_INTERVAL_MS,
+      shouldPoll: () =>
+        sourceStatusNeedsPollRef.current ||
+        workspaceMigrationLoadingRef.current,
+      poll: () => {
+        workspaceStatusTickRef.current?.()
+        processingSourceTickRef.current?.()
+      }
+    })
+    return () => poll.stop()
+  }, [])
 
   useEffect(() => {
     return () => {

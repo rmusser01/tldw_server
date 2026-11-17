@@ -1464,9 +1464,14 @@ describe("SourceViewControls", () => {
     ).toBeInTheDocument()
   })
 
-  it.each(["Cancel", "Close", "Escape"])(
-      "dismisses a rapid reopened native Save via %s",
-      async (action) => {
+  it.each([
+    { opener: "pointer", action: "Cancel" },
+    { opener: "pointer", action: "Close" },
+    { opener: "keyboard", action: "Escape" },
+    { opener: "pointer", action: "Escape" }
+  ])(
+      "dismisses a rapid reopened native Save via $action after a $opener open",
+      async ({ opener, action }) => {
         const user = userEvent.setup()
         rtlRender(
           <Harness
@@ -1474,8 +1479,13 @@ describe("SourceViewControls", () => {
           />
         )
         const invoker = screen.getByRole("button", { name: "Save source view" })
-        await user.click(invoker)
-        const tooltip = action === "Escape"
+        if (opener === "keyboard") {
+          invoker.focus()
+          await user.keyboard("{Enter}")
+        } else {
+          await user.click(invoker)
+        }
+        const tooltip = opener === "pointer" && action === "Escape"
           ? (await screen.findByRole("tooltip")).closest(".ant-tooltip")!
           : null
         const first = await screen.findByRole("dialog")
@@ -1502,22 +1512,19 @@ describe("SourceViewControls", () => {
         fireEvent.animationEnd(current)
         await waitFor(() => expect(current.className).not.toContain("ant-zoom"))
         if (action === "Escape") {
-          // Finish the hovered trigger's real leave motion before keyboard dismissal.
-          await waitFor(() =>
-            expect(tooltip!.className).toMatch(/leave-active|ant-tooltip-hidden/)
-          )
-          if (tooltip!.className.includes("leave-active")) {
-            fireEvent(tooltip!, new Event("webkitAnimationEnd", { bubbles: true }))
-            fireEvent.animationEnd(tooltip!)
+          if (opener === "pointer") {
+            // Finish the hovered trigger's real leave motion before keyboard dismissal.
+            await waitFor(() =>
+              expect(tooltip!.className).toMatch(/leave-active|ant-tooltip-hidden/)
+            )
+            if (tooltip!.className.includes("leave-active")) {
+              fireEvent(tooltip!, new Event("webkitAnimationEnd", { bubbles: true }))
+              fireEvent.animationEnd(tooltip!)
+            }
+            await waitFor(() => expect(tooltip).not.toBeVisible())
           }
-          await waitFor(() => expect(tooltip).not.toBeVisible())
-          expect(input).toHaveFocus()
-          fireEvent.keyDown(current, {
-            key: "Escape",
-            code: "Escape",
-            keyCode: 27,
-            which: 27
-          })
+          await waitFor(() => expect(input).toHaveFocus())
+          await user.keyboard("{Escape}")
         } else
           await user.click(within(current).getByRole("button", { name: action }))
         await waitFor(() =>

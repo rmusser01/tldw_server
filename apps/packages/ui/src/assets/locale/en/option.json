@@ -1175,7 +1175,7 @@
     "dropzoneOffline": "Server not connected",
     "dropzoneConnectHint": "Connect to add files",
     "dropzoneRejectTitle": "Some files not supported",
-    "dropzoneRejectHint": "Check file type and size (max {{maxSize}})",
+    "dropzoneRejectHint": "Check the file type and size.",
     "dropzoneRelease": "Release to add files",
     "dropzoneReleaseSingle": "Release to add 1 file",
     "dropzoneReleaseMultiple": "Release to add {{count}} files",

@@ -36,7 +36,7 @@ import zipfile
 
 #
 # Local Imports (adjust path as per your project structure)
-from tldw_Server_API.app.core.config import MAGIC_FILE_PATH, loaded_config_data
+from tldw_Server_API.app.core.config import MAGIC_FILE_PATH, MAX_STANDARD_MEDIA_UPLOAD_MIB, loaded_config_data
 from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.Utils.Utils import logging
@@ -150,6 +150,7 @@ class ValidationResult:
 
 # Get configuration values or use defaults
 media_config = loaded_config_data.get('media_processing', {}) if loaded_config_data else {}
+_STANDARD_MEDIA_UPLOAD_TYPES = frozenset({"audio", "video", "pdf", "ebook", "document"})
 
 # Additional extension sets for specialized categories
 CODE_FILE_EXTENSIONS: set[str] = {
@@ -180,13 +181,13 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
         "allowed_extensions": {'.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'},
         "allowed_mimetypes": {'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/flac', 'audio/aac', 'audio/ogg',
                               'audio/mp4', 'audio/x-m4a', 'audio/mp4a-latm', 'application/ogg'},
-        "max_size_mb": media_config.get('max_audio_file_size_mb', 500),
+        "max_size_mb": media_config.get('max_audio_file_size_mb', MAX_STANDARD_MEDIA_UPLOAD_MIB),
     },
     "video": {
         "allowed_extensions": {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv'},
         "allowed_mimetypes": {'video/mp4', 'video/x-msvideo', 'video/quicktime', 'video/x-matroska', 'video/webm',
                               'video/x-flv', 'video/avi'},
-        "max_size_mb": media_config.get('max_video_file_size_mb', 1000),
+        "max_size_mb": media_config.get('max_video_file_size_mb', MAX_STANDARD_MEDIA_UPLOAD_MIB),
     },
     "image": {
         "allowed_extensions": {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'},
@@ -212,17 +213,17 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
             'application/rtf', 'application/x-rtf', 'application/json',
             'text/vtt', 'application/x-subrip', 'text/x-ssa', 'text/x-ass', 'application/x-ass',
         },
-        "max_size_mb": media_config.get('max_document_file_size_mb', 50),
+        "max_size_mb": media_config.get('max_document_file_size_mb', MAX_STANDARD_MEDIA_UPLOAD_MIB),
     },
     "ebook": {
         "allowed_extensions": {'.epub', '.mobi', '.azw'},
         "allowed_mimetypes": {'application/epub+zip', 'application/x-mobipocket-ebook'},
-        "max_size_mb": media_config.get('max_epub_file_size_mb', 100),
+        "max_size_mb": media_config.get('max_epub_file_size_mb', MAX_STANDARD_MEDIA_UPLOAD_MIB),
     },
     "pdf": {
         "allowed_extensions": {'.pdf'},
         "allowed_mimetypes": {'application/pdf'},
-        "max_size_mb": media_config.get('max_pdf_file_size_mb', 50),
+        "max_size_mb": media_config.get('max_pdf_file_size_mb', MAX_STANDARD_MEDIA_UPLOAD_MIB),
     },
     "email": {
         "allowed_extensions": {'.eml', '.mbox', '.pst', '.ost'},
@@ -231,7 +232,7 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
             'message/rfc822', 'text/plain', 'application/mbox',
             'application/vnd.ms-outlook', 'application/vnd.ms-office',
         },
-        "max_size_mb": media_config.get('max_document_file_size_mb', 50),
+        "max_size_mb": media_config.get('max_email_file_size_mb', 50),
     },
     "html": {
         "allowed_extensions": {'.html', '.htm', '.xhtml'},
@@ -266,7 +267,7 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
     "code": {
         "allowed_extensions": CODE_FILE_EXTENSIONS,
         "allowed_mimetypes": CODE_MIME_TYPES,
-        "max_size_mb": media_config.get('max_code_file_size_mb', media_config.get('max_document_file_size_mb', 50)),
+        "max_size_mb": media_config.get('max_code_file_size_mb', 50),
     },
 }
 
@@ -536,6 +537,13 @@ class FileValidator:
         custom_cfg = self._custom_media_configs.get(key)
         if custom_cfg:
             merged.update(custom_cfg)
+        if key in _STANDARD_MEDIA_UPLOAD_TYPES:
+            configured_size = merged.get("max_size_mb")
+            merged["max_size_mb"] = (
+                min(configured_size, MAX_STANDARD_MEDIA_UPLOAD_MIB)
+                if isinstance(configured_size, (int, float))
+                else MAX_STANDARD_MEDIA_UPLOAD_MIB
+            )
         return merged or None
 
     def validate_file(

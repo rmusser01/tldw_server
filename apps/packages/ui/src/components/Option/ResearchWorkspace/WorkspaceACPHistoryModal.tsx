@@ -1,7 +1,7 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
-import { Button, Empty, Modal, Spin, Tag } from "antd"
+import { Button, Collapse, Empty, Modal, Spin, Tag } from "antd"
 import { ExternalLink } from "lucide-react"
 
 import { Alert as DSAlert } from "@/components/ui/primitives"
@@ -26,7 +26,7 @@ const AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE =
   "Agent orchestration is not available on this server."
 const AGENT_ORCHESTRATION_UNSUPPORTED_CODE =
   "AGENT_ORCHESTRATION_UNSUPPORTED"
-const MAX_TASK_DETAILS = 12
+const MAX_TASK_ROWS = 12
 const MAX_RECENT_RUNS = 6
 
 type CanonicalWorkspaceLink = {
@@ -86,12 +86,16 @@ type TaskDetail = TaskSummary & {
   runs?: RunItem[]
 }
 
-type WorkspaceRunHistoryEntry = {
-  projectId: number
-  projectName: string
-  taskId: number
-  taskTitle: string
-  run: RunItem
+type WorkspaceTaskRow = {
+  project: ProjectSummary
+  task: TaskSummary
+}
+
+type TaskDetailState = {
+  runs?: RunItem[]
+  task?: TaskDetail
+  loading?: boolean
+  error?: string | null
 }
 
 type WorkspaceACPHistoryError =
@@ -172,6 +176,14 @@ const getTaskTimestamp = (task: TaskSummary): number => {
   return Number.isNaN(timestamp) ? task.id : timestamp
 }
 
+const formatTaskTimestamp = (task: TaskSummary): string => {
+  const candidate = task.updated_at || task.created_at
+  if (!candidate) return ""
+  const timestamp = Date.parse(candidate)
+  if (Number.isNaN(timestamp)) return ""
+  return new Date(timestamp).toLocaleString()
+}
+
 const getDirectSessionTimestamp = (session: ACPSessionListItem): number => {
   const candidate = session.last_activity_at || session.created_at
   if (!candidate) return 0
@@ -217,6 +229,190 @@ const isUnsupportedError = (
       (error as { code?: string }).code === AGENT_ORCHESTRATION_UNSUPPORTED_CODE
   )
 
+type WorkspaceRunCardProps = {
+  projectId: number
+  projectName: string
+  taskId: number
+  taskTitle: string
+  run: RunItem
+  onOpenSessionRoute: (run: RunItem, view?: string) => void
+  saveEnabled: boolean
+  savingRunId: number | null
+  onSaveRun?: (
+    input: Omit<
+      WorkspaceACPRunArtifactSaveInput,
+      "workspaceId" | "scope" | "isCurrent"
+    >
+  ) => void
+}
+
+const WorkspaceACPRunCard: React.FC<WorkspaceRunCardProps> = ({
+  projectId,
+  projectName,
+  taskId,
+  taskTitle,
+  run,
+  onOpenSessionRoute,
+  saveEnabled,
+  savingRunId,
+  onSaveRun
+}) => {
+  const { t } = useTranslation(["playground", "common"])
+  const sessionId = getSessionId(run)
+  const failureMessage = run.failure_context?.message || run.error || null
+  const resultPreview = run.result_summary?.trim()
+    ? run.result_summary
+    : run.history?.result?.preview || null
+  const artifactCount = run.history?.artifact_count ?? 0
+  const diagnosticCount = run.history?.diagnostic_count ?? 0
+  const auditEventCount = run.history?.audit_event_count ?? 0
+  const eventCount = run.history?.event_count ?? 0
+  const observableActivityLabel = t(
+    "playground:workspace.acpRunObservableActivity",
+    "Observable activity: {{artifactCount}} artifacts/files, {{diagnosticCount}} diagnostics/warnings, {{auditEventCount}} audit/approvals, {{eventCount}} events/tool activity",
+    {
+      artifactCount,
+      diagnosticCount,
+      auditEventCount,
+      eventCount
+    }
+  )
+  const canSaveRunArtifact = Boolean(
+    saveEnabled &&
+      resultPreview?.trim() &&
+      isCompletedRunStatus(run.status)
+  )
+
+  return (
+    <div
+      key={`${taskId}-${run.id}`}
+      className="rounded-lg border border-border p-4"
+    >
+      <div className="flex flex-wrap items-start justify-end gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Tag color={statusColor(run.status)}>{run.status}</Tag>
+          {run.agent_type && <Tag>{run.agent_type}</Tag>}
+        </div>
+      </div>
+
+      {sessionId && (
+        <div className="mt-2 text-xs text-muted-foreground">{sessionId}</div>
+      )}
+
+      <div
+        className="mt-3 grid grid-cols-4 gap-2 text-xs text-muted-foreground"
+        aria-label={observableActivityLabel}
+      >
+        <span>
+          {t(
+            "playground:workspace.acpArtifactsFilesCount",
+            "{{count}} artifacts/files",
+            { count: artifactCount }
+          )}
+        </span>
+        <span>
+          {t(
+            "playground:workspace.acpDiagnosticsWarningsCount",
+            "{{count}} diagnostics/warnings",
+            { count: diagnosticCount }
+          )}
+        </span>
+        <span>
+          {t(
+            "playground:workspace.acpAuditApprovalsCount",
+            "{{count}} audit/approvals",
+            { count: auditEventCount }
+          )}
+        </span>
+        <span>
+          {t(
+            "playground:workspace.acpEventsActivityCount",
+            "{{count}} events/tool activity",
+            { count: eventCount }
+          )}
+        </span>
+      </div>
+
+      {failureMessage && (
+        <div className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
+          {failureMessage}
+        </div>
+      )}
+      {!failureMessage && resultPreview && (
+        <div className="mt-3 text-sm">{resultPreview}</div>
+      )}
+
+      {(sessionId || canSaveRunArtifact) && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {sessionId && (
+            <Button
+              size="small"
+              icon={<ExternalLink className="h-3 w-3" />}
+              onClick={() => onOpenSessionRoute(run)}
+            >
+              {t("playground:workspace.openSession", "Open session")}
+            </Button>
+          )}
+          {sessionId && run.session?.links?.diagnostics && (
+            <Button
+              size="small"
+              icon={<ExternalLink className="h-3 w-3" />}
+              onClick={() => onOpenSessionRoute(run, "diagnostics")}
+            >
+              {t("playground:workspace.openDiagnostics", "Open diagnostics")}
+            </Button>
+          )}
+          {sessionId && run.session?.links?.artifacts && (
+            <Button
+              size="small"
+              icon={<ExternalLink className="h-3 w-3" />}
+              onClick={() => onOpenSessionRoute(run, "artifacts")}
+            >
+              {t("playground:workspace.openArtifacts", "Open artifacts")}
+            </Button>
+          )}
+          {canSaveRunArtifact && (
+            <Button
+              size="small"
+              aria-label="Save to Studio"
+              loading={savingRunId === run.id}
+              disabled={savingRunId !== null}
+              onClick={() =>
+                onSaveRun?.({
+                  projectId,
+                  projectName,
+                  taskId,
+                  taskTitle,
+                  runId: run.id,
+                  status: run.status,
+                  resultPreview: resultPreview?.trim() || "",
+                  sessionId,
+                  agentType: run.agent_type,
+                  startedAt: run.started_at,
+                  completedAt: run.completed_at,
+                  links: run.session?.links,
+                  history: run.history
+                })
+              }
+            >
+              {t("playground:workspace.saveRunToStudio", "Save to Studio")}
+            </Button>
+          )}
+          {sessionId && run.session?.links?.audit && (
+            <Button
+              size="small"
+              icon={<ExternalLink className="h-3 w-3" />}
+              onClick={() => onOpenSessionRoute(run, "audit")}
+            >
+              {t("playground:workspace.openAudit", "Open audit")}
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export const WorkspaceACPHistoryModal: React.FC<
   WorkspaceACPHistoryModalProps
 > = ({
@@ -235,8 +431,20 @@ export const WorkspaceACPHistoryModal: React.FC<
   } = useCanonicalConnectionConfig()
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<WorkspaceACPHistoryError | null>(null)
-  const [entries, setEntries] = React.useState<WorkspaceRunHistoryEntry[]>([])
+  const [taskRows, setTaskRows] = React.useState<WorkspaceTaskRow[]>([])
   const [directSessions, setDirectSessions] = React.useState<ACPSessionListItem[]>([])
+  const [expandedTaskIds, setExpandedTaskIds] = React.useState<string[]>([])
+  const [taskDetails, setTaskDetails] = React.useState<
+    Record<number, TaskDetailState>
+  >({})
+
+  // WP-44: task detail layers are fetched lazily on row expand (first page
+  // only) instead of eagerly fanning out 2+N+M requests on open.
+  const detailFetchAbortRef = React.useRef<AbortController | null>(null)
+  const inFlightDetailTasksRef = React.useRef<Set<number>>(new Set())
+  const detailFetchRef = React.useRef<
+    ((taskId: number) => Promise<TaskDetail>) | null
+  >(null)
 
   const [historyAuthority, setHistoryAuthority] = React.useState<{
     workspaceId: string; scope: ServicePromptSnapshot; isCurrent: () => boolean
@@ -251,6 +459,8 @@ export const WorkspaceACPHistoryModal: React.FC<
     let cancelled = false
     let retired = false
     const abortController = new AbortController()
+    detailFetchAbortRef.current = abortController
+    inFlightDetailTasksRef.current = new Set()
     let timedOut = false
     const timer = setTimeout(() => { timedOut = true; abortController.abort() }, 15000)
     const deadline = performance.now() + 15000
@@ -259,8 +469,10 @@ export const WorkspaceACPHistoryModal: React.FC<
       !scope.scopeSignal.aborted && !scope.scopeInvalidatedSignal.aborted
     const retire = () => {
       if (cancelled) return
-      setEntries([])
+      setTaskRows([])
       setDirectSessions([])
+      setExpandedTaskIds([])
+      setTaskDetails({})
       setHistoryAuthority(null)
       setError(null)
       setLoading(false)
@@ -290,13 +502,28 @@ export const WorkspaceACPHistoryModal: React.FC<
         throw err
       }
     }
+    // WP-44: detail layers stay outside the open-flow deadline so a lazy
+    // expand well after the list loaded still gets a full request budget.
+    // The fetch keeps the verified-principal scope headers (dev) so lazy
+    // reads run under the same authority as the list reads.
+    detailFetchRef.current = async (taskId: number): Promise<TaskDetail> => {
+      if (!isCurrent()) throw createServicePromptScopeChangedError()
+      const detail = await getWorkspaceTaskDetail<TaskDetail>(taskId, {
+        ...requestScopeFields(scope!.requestScope),
+        abortSignal: abortController.signal
+      })
+      if (!isCurrent()) throw createServicePromptScopeChangedError()
+      return detail
+    }
 
     const loadHistory = async () => {
       const canonicalWorkspaceId = workspaceId?.trim()
       setLoading(true)
       setError(null)
-      setEntries([])
+      setTaskRows([])
       setDirectSessions([])
+      setExpandedTaskIds([])
+      setTaskDetails({})
       setHistoryAuthority(null)
       setSaveError(null)
 
@@ -313,9 +540,7 @@ export const WorkspaceACPHistoryModal: React.FC<
         if (!isCurrent()) throw createServicePromptScopeChangedError()
         scope.scopeInvalidatedSignal.addEventListener("abort", retire, { once: true })
 
-        const agentTaskHistoryPromise = (async (): Promise<
-          WorkspaceRunHistoryEntry[]
-        > => {
+        const agentTasksPromise = (async (): Promise<WorkspaceTaskRow[]> => {
           const projectsPayload = await fetchJson<unknown>(
             (options) => listCanonicalWorkspaceProjects(canonicalWorkspaceId, options), true
           )
@@ -327,7 +552,7 @@ export const WorkspaceACPHistoryModal: React.FC<
             (project) => getCanonicalWorkspaceId(project) === canonicalWorkspaceId
           )
 
-          const taskRows = (
+          return (
             await Promise.all(
               matchingProjects.map(async (project) => {
                 const tasksPayload = await fetchJson<unknown>(
@@ -340,35 +565,13 @@ export const WorkspaceACPHistoryModal: React.FC<
                 return tasks.map((task) => ({ project, task }))
               })
             )
-          ).flat()
-
-          const taskDetails = await Promise.all(
-            [...taskRows]
-              .sort(
-                (left, right) =>
-                  getTaskTimestamp(right.task) - getTaskTimestamp(left.task)
-              )
-              .slice(0, MAX_TASK_DETAILS)
-              .map(async ({ project, task }) => {
-                const detail = await fetchJson<TaskDetail>(
-                  (options) => getWorkspaceTaskDetail<TaskDetail>(task.id, options)
-                )
-                return { project, task: detail }
-              })
           )
-
-          return taskDetails
-            .flatMap(({ project, task }) =>
-              (task.runs || []).map((run) => ({
-                projectId: project.id,
-                projectName: project.name,
-                taskId: task.id,
-                taskTitle: task.title,
-                run
-              }))
+            .flat()
+            .sort(
+              (left, right) =>
+                getTaskTimestamp(right.task) - getTaskTimestamp(left.task)
             )
-            .sort((left, right) => getRunTimestamp(right.run) - getRunTimestamp(left.run))
-            .slice(0, MAX_RECENT_RUNS)
+            .slice(0, MAX_TASK_ROWS)
         })()
 
         const directSessionsPromise = (async (): Promise<ACPSessionListItem[]> => {
@@ -390,43 +593,43 @@ export const WorkspaceACPHistoryModal: React.FC<
             .slice(0, MAX_RECENT_RUNS)
         })()
 
-        const [agentTaskHistoryResult, directSessionsResult] =
-          await Promise.allSettled([agentTaskHistoryPromise, directSessionsPromise])
+        const [agentTasksResult, directSessionsResult] =
+          await Promise.allSettled([agentTasksPromise, directSessionsPromise])
         if (timedOut) throw new Error("Loading history exceeded 15 seconds. Reopen history to retry.")
         if (!isCurrent()) throw createServicePromptScopeChangedError()
 
         if (
-          agentTaskHistoryResult.status === "rejected" &&
+          agentTasksResult.status === "rejected" &&
           directSessionsResult.status === "rejected"
         ) {
           const errors = [
-            agentTaskHistoryResult.reason,
+            agentTasksResult.reason,
             directSessionsResult.reason
           ]
           throw errors.find(isUnsupportedError) || errors[0]
         }
         if (
-          agentTaskHistoryResult.status === "rejected" &&
-          !isUnsupportedError(agentTaskHistoryResult.reason) &&
+          agentTasksResult.status === "rejected" &&
+          !isUnsupportedError(agentTasksResult.reason) &&
           directSessionsResult.status === "fulfilled" &&
           directSessionsResult.value.length === 0
         ) {
-          throw agentTaskHistoryResult.reason
+          throw agentTasksResult.reason
         }
         if (
           directSessionsResult.status === "rejected" &&
           !isUnsupportedError(directSessionsResult.reason) &&
-          agentTaskHistoryResult.status === "fulfilled" &&
-          agentTaskHistoryResult.value.length === 0
+          agentTasksResult.status === "fulfilled" &&
+          agentTasksResult.value.length === 0
         ) {
           throw directSessionsResult.reason
         }
 
         if (isCurrent()) {
           setHistoryAuthority({ workspaceId: canonicalWorkspaceId, scope: scope!, isCurrent })
-          setEntries(
-            agentTaskHistoryResult.status === "fulfilled"
-              ? agentTaskHistoryResult.value
+          setTaskRows(
+            agentTasksResult.status === "fulfilled"
+              ? agentTasksResult.value
               : []
           )
           setDirectSessions(
@@ -470,6 +673,9 @@ export const WorkspaceACPHistoryModal: React.FC<
       abortController.abort()
       scope?.scopeInvalidatedSignal.removeEventListener("abort", retire)
       scope?.release()
+      detailFetchRef.current = null
+      detailFetchAbortRef.current = null
+      inFlightDetailTasksRef.current = new Set()
     }
   }, [connectionConfig, connectionConfigLoading, open, workspaceId])
 
@@ -488,6 +694,73 @@ export const WorkspaceACPHistoryModal: React.FC<
       setSavingRun(null)
     }
   }
+
+  const loadTaskDetail = React.useCallback(
+    (taskId: number) => {
+      if (inFlightDetailTasksRef.current.has(taskId)) return
+      inFlightDetailTasksRef.current.add(taskId)
+
+      setTaskDetails((current) => ({
+        ...current,
+        [taskId]: { ...current[taskId], loading: true, error: null }
+      }))
+
+      void (async () => {
+        try {
+          const fetchTaskDetail = detailFetchRef.current
+          if (!fetchTaskDetail) throw new Error("ACP run history is still loading.")
+          const detail = await fetchTaskDetail(taskId)
+          setTaskDetails((current) => ({
+            ...current,
+            [taskId]: {
+              ...current[taskId],
+              // Merge the detail layer over the list layer where possible.
+              task: detail,
+              runs: [...(detail.runs || [])].sort(
+                (left, right) => getRunTimestamp(right) - getRunTimestamp(left)
+              ),
+              loading: false,
+              error: null
+            }
+          }))
+        } catch (err) {
+          // Allow a later expand to retry after a failed detail fetch.
+          inFlightDetailTasksRef.current.delete(taskId)
+          const detail = (err as { details?: { detail?: unknown } })?.details?.detail
+          const value = detail && typeof detail === "object"
+            ? (detail as Record<string, unknown>).message ?? (detail as Record<string, unknown>).code
+            : detail
+          setTaskDetails((current) => ({
+            ...current,
+            [taskId]: {
+              ...current[taskId],
+              loading: false,
+              error: formatErrorMessage(
+                value,
+                err instanceof Error ? err.message : "Failed to load task runs"
+              )
+            }
+          }))
+        }
+      })()
+    },
+    []
+  )
+
+  const handleExpandChange = React.useCallback(
+    (keys: string | string[]) => {
+      const nextKeys = Array.isArray(keys) ? keys : [keys]
+      setExpandedTaskIds(nextKeys)
+      for (const key of nextKeys) {
+        const taskId = Number(key)
+        if (!Number.isFinite(taskId)) continue
+        const existing = taskDetails[taskId]
+        if (existing?.runs || existing?.loading) continue
+        loadTaskDetail(taskId)
+      }
+    },
+    [loadTaskDetail, taskDetails]
+  )
 
   const openSessionRoute = React.useCallback(
     (run: RunItem, view?: string) => {
@@ -516,7 +789,7 @@ export const WorkspaceACPHistoryModal: React.FC<
           AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE
         )
       : error?.message
-  const hasHistory = entries.length > 0 || directSessions.length > 0
+  const hasHistory = taskRows.length > 0 || directSessions.length > 0
 
   return (
     <Modal
@@ -571,172 +844,94 @@ export const WorkspaceACPHistoryModal: React.FC<
 
         {!loading && !error && hasHistory && (
           <div className="space-y-3">
-            {entries.map((entry) => {
-              const { run } = entry
-              const sessionId = getSessionId(run)
-              const failureMessage =
-                run.failure_context?.message || run.error || null
-              const resultPreview = run.result_summary?.trim()
-                ? run.result_summary
-                : run.history?.result?.preview || null
-              const artifactCount = run.history?.artifact_count ?? 0
-              const diagnosticCount = run.history?.diagnostic_count ?? 0
-              const auditEventCount = run.history?.audit_event_count ?? 0
-              const eventCount = run.history?.event_count ?? 0
-              const observableActivityLabel = t(
-                "playground:workspace.acpRunObservableActivity",
-                "Observable activity: {{artifactCount}} artifacts/files, {{diagnosticCount}} diagnostics/warnings, {{auditEventCount}} audit/approvals, {{eventCount}} events/tool activity",
-                {
-                  artifactCount,
-                  diagnosticCount,
-                  auditEventCount,
-                  eventCount
-                }
-              )
-              const canSaveRunArtifact = Boolean(
-                onSaveRunArtifact &&
-                  resultPreview?.trim() &&
-                  isCompletedRunStatus(run.status) && historyAuthority?.isCurrent()
-              )
-
-              return (
-                <div
-                  key={`${entry.taskId}-${run.id}`}
-                  className="rounded-lg border border-border p-4"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium">{entry.taskTitle}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {entry.projectName}
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Tag color={statusColor(run.status)}>{run.status}</Tag>
-                      {run.agent_type && <Tag>{run.agent_type}</Tag>}
-                    </div>
-                  </div>
-
-                  {sessionId && (
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      {sessionId}
-                    </div>
-                  )}
-
-                  <div
-                    className="mt-3 grid grid-cols-4 gap-2 text-xs text-muted-foreground"
-                    aria-label={observableActivityLabel}
-                  >
-                    <span>
-                      {t(
-                        "playground:workspace.acpArtifactsFilesCount",
-                        "{{count}} artifacts/files",
-                        { count: artifactCount }
-                      )}
-                    </span>
-                    <span>
-                      {t(
-                        "playground:workspace.acpDiagnosticsWarningsCount",
-                        "{{count}} diagnostics/warnings",
-                        { count: diagnosticCount }
-                      )}
-                    </span>
-                    <span>
-                      {t(
-                        "playground:workspace.acpAuditApprovalsCount",
-                        "{{count}} audit/approvals",
-                        { count: auditEventCount }
-                      )}
-                    </span>
-                    <span>
-                      {t(
-                        "playground:workspace.acpEventsActivityCount",
-                        "{{count}} events/tool activity",
-                        { count: eventCount }
-                      )}
-                    </span>
-                  </div>
-
-                  {failureMessage && (
-                    <div className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
-                      {failureMessage}
-                    </div>
-                  )}
-                  {!failureMessage && resultPreview && (
-                    <div className="mt-3 text-sm">{resultPreview}</div>
-                  )}
-
-                  {(sessionId || canSaveRunArtifact) && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {sessionId && (
-                        <Button
-                          size="small"
-                          icon={<ExternalLink className="h-3 w-3" />}
-                          onClick={() => openSessionRoute(run)}
-                        >
-                          {t("playground:workspace.openSession", "Open session")}
-                        </Button>
-                      )}
-                      {sessionId && run.session?.links?.diagnostics && (
-                        <Button
-                          size="small"
-                          icon={<ExternalLink className="h-3 w-3" />}
-                          onClick={() => openSessionRoute(run, "diagnostics")}
-                        >
-                          {t(
-                            "playground:workspace.openDiagnostics",
-                            "Open diagnostics"
-                          )}
-                        </Button>
-                      )}
-                      {sessionId && run.session?.links?.artifacts && (
-                        <Button
-                          size="small"
-                          icon={<ExternalLink className="h-3 w-3" />}
-                          onClick={() => openSessionRoute(run, "artifacts")}
-                        >
-                          {t("playground:workspace.openArtifacts", "Open artifacts")}
-                        </Button>
-                      )}
-                      {canSaveRunArtifact && (
-                        <Button
-                          size="small"
-                          aria-label="Save to Studio"
-                          loading={savingRun === run.id}
-                          disabled={savingRun !== null}
-                          onClick={() => void saveRun({
-                              projectId: entry.projectId,
-                              projectName: entry.projectName,
-                              taskId: entry.taskId,
-                              taskTitle: entry.taskTitle,
-                              runId: run.id,
-                              status: run.status,
-                              resultPreview: resultPreview?.trim() || "",
-                              sessionId,
-                              agentType: run.agent_type,
-                              startedAt: run.started_at,
-                              completedAt: run.completed_at,
-                              links: run.session?.links,
-                              history: run.history
-                            })}
-                        >
-                          {t("playground:workspace.saveRunToStudio", "Save to Studio")}
-                        </Button>
-                      )}
-                      {sessionId && run.session?.links?.audit && (
-                        <Button
-                          size="small"
-                          icon={<ExternalLink className="h-3 w-3" />}
-                          onClick={() => openSessionRoute(run, "audit")}
-                        >
-                          {t("playground:workspace.openAudit", "Open audit")}
-                        </Button>
-                      )}
-                    </div>
-                  )}
+            {taskRows.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-sm font-medium">
+                  {t("playground:workspace.acpTaskHistory", "Agent tasks")}
                 </div>
-              )
-            })}
+                <Collapse
+                  activeKey={expandedTaskIds}
+                  onChange={handleExpandChange}
+                  items={taskRows.map(({ project, task }) => {
+                    const detailState = taskDetails[task.id]
+                    const displayTask = detailState?.task || task
+                    return {
+                      key: String(task.id),
+                      label: (
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-medium">
+                              {displayTask.title}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {project.name}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Tag color={statusColor(displayTask.status)}>
+                              {displayTask.status}
+                            </Tag>
+                            {formatTaskTimestamp(displayTask) && (
+                              <span className="text-xs text-muted-foreground">
+                                {formatTaskTimestamp(displayTask)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ),
+                      children: (
+                        <div className="space-y-3">
+                          {detailState?.loading && (
+                            <div className="flex justify-center py-4">
+                              <Spin />
+                            </div>
+                          )}
+                          {!detailState?.loading && detailState?.error && (
+                            <DSAlert
+                              variant="error"
+                              title={t(
+                                "playground:workspace.acpTaskRunsLoadFailed",
+                                "Could not load runs for this task"
+                              )}
+                            >
+                              {detailState.error}
+                            </DSAlert>
+                          )}
+                          {!detailState?.loading &&
+                            !detailState?.error &&
+                            (detailState?.runs || []).length === 0 && (
+                              <Empty
+                                description={t(
+                                  "playground:workspace.acpTaskNoRuns",
+                                  "No runs recorded for this task"
+                                )}
+                              />
+                            )}
+                          {!detailState?.loading &&
+                            !detailState?.error &&
+                            (detailState?.runs || []).map((run) => (
+                              <WorkspaceACPRunCard
+                                key={run.id}
+                                projectId={project.id}
+                                projectName={project.name}
+                                taskId={task.id}
+                                taskTitle={displayTask.title}
+                                run={run}
+                                onOpenSessionRoute={openSessionRoute}
+                                saveEnabled={Boolean(
+                                  onSaveRunArtifact && historyAuthority?.isCurrent()
+                                )}
+                                savingRunId={savingRun}
+                                onSaveRun={(input) => void saveRun(input)}
+                              />
+                            ))}
+                        </div>
+                      )
+                    }
+                  })}
+                />
+              </div>
+            )}
             {directSessions.length > 0 && (
               <div className="space-y-3">
                 <div className="text-sm font-medium">
@@ -820,18 +1015,14 @@ export const WorkspaceACPHistoryModal: React.FC<
                         <Button
                           size="small"
                           icon={<ExternalLink className="h-3 w-3" />}
-                          onClick={() =>
-                            openDirectSessionRoute(session.session_id, "artifacts")
-                          }
+                          onClick={() => openDirectSessionRoute(session.session_id, "artifacts")}
                         >
                           {t("playground:workspace.openArtifacts", "Open artifacts")}
                         </Button>
                         <Button
                           size="small"
                           icon={<ExternalLink className="h-3 w-3" />}
-                          onClick={() =>
-                            openDirectSessionRoute(session.session_id, "audit")
-                          }
+                          onClick={() => openDirectSessionRoute(session.session_id, "audit")}
                         >
                           {t("playground:workspace.openAudit", "Open audit")}
                         </Button>

@@ -117,7 +117,7 @@ describe("QuickChatGuidesPanel tutorials section", () => {
       <QuickChatGuidesPanel
         onAskGuide={vi.fn()}
         onOpenRoute={vi.fn()}
-        currentRoute="/settings/health"
+        currentRoute="/unregistered-route"
       />
     )
 

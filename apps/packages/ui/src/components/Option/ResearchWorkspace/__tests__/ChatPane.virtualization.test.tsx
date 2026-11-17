@@ -6,7 +6,7 @@
 // and source guards for the removed `msg-${idx}` key fallback.
 import { readFileSync } from "node:fs"
 import path from "node:path"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
@@ -236,12 +236,21 @@ const buildMessages = (count: number, lastMessageText?: string): FixtureMessage[
     }
   })
 
-const renderChatPane = () =>
-  render(
+const windowTimeouts = new Set<number>()
+
+const renderChatPane = () => {
+  const setWindowTimeout = window.setTimeout.bind(window)
+  vi.spyOn(window, "setTimeout").mockImplementation((...args) => {
+    const timeout = setWindowTimeout(...args)
+    windowTimeouts.add(timeout)
+    return timeout
+  })
+  return render(
     <MemoryRouter>
       <ChatPane />
     </MemoryRouter>
   )
+}
 
 const transcriptScrollContainer = () =>
   document.querySelector('[role="log"][aria-label="Chat messages"]') as HTMLElement
@@ -324,6 +333,11 @@ const applyLayoutStubs = () => {
 }
 
 afterEach(() => {
+  cleanup()
+  // The real virtualizer detaches its scroll listener but leaves its debounce pending.
+  windowTimeouts.forEach((timeout) => window.clearTimeout(timeout))
+  windowTimeouts.clear()
+  vi.restoreAllMocks()
   scrollToCalls.length = 0
 })
 
@@ -582,5 +596,4 @@ afterAll(() => {
   if (clientHeightDescriptor) {
     Object.defineProperty(Element.prototype, "clientHeight", clientHeightDescriptor)
   }
-  vi.restoreAllMocks()
 })

@@ -42,6 +42,106 @@ const startQuickIngestSession = (input: Parameters<typeof startBatch>[0]) => sta
 const cancelQuickIngestSession = (input: Parameters<typeof cancelBatch>[0]) => cancelBatch({ requestScope, ...input })
 
 describe("submitQuickIngestBatch", () => {
+  it.each([
+    ["doc.pdf", "application/pdf", 250 * 1024 ** 2, "250 MB"],
+    ["book.epub", "application/epub+zip", 250 * 1024 ** 2, "250 MB"],
+    ["notes.txt", "text/plain", 250 * 1024 ** 2, "250 MB"],
+    ["clip.wav", "audio/wav", 1024 ** 3, "1 GB"],
+    ["clip.mkv", "", 1024 ** 3, "1 GB"],
+  ] as const)("dispatches a native %s at the limit and rejects an oversized submission", async (name, type, limit, label) => {
+    mocks.runtimeId = "legacy-extension"
+    mocks.manifestVersion = 2
+    mocks.sendMessage.mockResolvedValue({ ok: true, sessionId: "legacy-session" })
+    mocks.bgUpload.mockResolvedValue({ batch_id: "batch", jobs: [{ id: 77 }] })
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result: { media_id: 77 } } })
+    const exact = new File([], name, { type })
+    const oversized = new File([], name, { type })
+    Object.defineProperty(exact, "size", { value: limit })
+    Object.defineProperty(oversized, "size", { value: limit + 1 })
+    const input = {
+      entries: [],
+      files: [{ id: "accepted", directFile: exact }, { id: "rejected", directFile: oversized }],
+      storeRemote: true,
+      processOnly: false,
+    }
+
+    const ack = await startQuickIngestSession(input)
+    expect(ack.sessionId).toMatch(/^qi-direct-/)
+    const result = await submitQuickIngestBatch(input)
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(mocks.bgUpload.mock.calls[0][0]).toMatchObject({
+      path: "/api/v1/media/ingest/jobs",
+      fileFieldName: "files",
+      timeoutMs: 20 * 60_000,
+      preferDirect: true,
+    })
+    expect(mocks.bgUpload.mock.calls[0][0].directFile).toBe(exact)
+    expect(result.results).toMatchObject([
+      { id: "accepted", status: "ok", fileName: name },
+      { id: "rejected", status: "error", error: `File exceeds ${label} quick-ingest limit` },
+    ])
+  })
+
+  it("aborts the in-flight native upload on Cancel All without aborting the owner signal", async () => {
+    const owner = new AbortController()
+    const first = new File([], "pending.pdf", { type: "application/pdf" })
+    Object.defineProperty(first, "size", { value: 250 * 1024 ** 2 })
+    const next = new File([], "next.pdf", { type: "application/pdf" })
+    mocks.bgUpload.mockImplementation(({ abortSignal }: { abortSignal: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        abortSignal.addEventListener("abort", () => reject(abortSignal.reason), { once: true })
+      })
+    )
+    const sessionId = "qi-direct-upload-cancel"
+    const run = submitQuickIngestBatch({
+      entries: [],
+      files: [{ id: "first", directFile: first }, { id: "next", directFile: next }],
+      storeRemote: true,
+      processOnly: false,
+      signal: owner.signal,
+      __quickIngestSessionId: sessionId,
+    })
+    await vi.waitFor(() => expect(mocks.bgUpload).toHaveBeenCalledTimes(1))
+
+    await cancelQuickIngestSession({ sessionId, signal: owner.signal })
+
+    expect(mocks.bgUpload.mock.calls[0][0].abortSignal.aborted).toBe(true)
+    expect(owner.signal.aborted).toBe(false)
+    expect(await run).toEqual({ ok: true, results: [] })
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("allows a large native job to keep processing beyond the normal polling deadline", async () => {
+    vi.useFakeTimers()
+    try {
+      const file = new File([], "clip.mkv")
+      Object.defineProperty(file, "size", { value: 1024 ** 3 })
+      mocks.bgUpload.mockResolvedValue({ batch_id: "large-batch", jobs: [{ id: 77 }] })
+      const startedAt = Date.now()
+      mocks.bgRequest
+        .mockImplementationOnce(() => {
+          vi.setSystemTime(startedAt + 6 * 60_000)
+          return { ok: true, data: { status: "running" } }
+        })
+        .mockResolvedValueOnce({ ok: true, data: { status: "completed", result: { media_id: 77 } } })
+
+      const run = submitQuickIngestBatch({
+        entries: [],
+        files: [{ id: "large", directFile: file }],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: "qi-direct-large-poll",
+      })
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect((await run).results).toEqual([expect.objectContaining({ id: "large", status: "ok" })])
+      expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("keeps conference retry identities on the shared executor in a legacy messaging runtime", async () => {
     mocks.runtimeId = "legacy-extension"
     mocks.manifestVersion = 2

@@ -12,30 +12,23 @@ const promptsBasics: TutorialDefinition = {
   labelFallback: "Prompts Basics",
   descriptionKey: "tutorials:prompts.basics.description",
   descriptionFallback:
-    "Create reusable prompts, search your library, and manage prompt workflow segments",
+    "Save instructions you can reuse in Chat.",
   icon: SquarePen,
   priority: 1,
+  requireFirstTargetForPrompt: true,
   steps: [
     {
-      target: '[data-testid="prompts-segmented"]',
-      titleKey: "tutorials:prompts.basics.segmentedTitle",
-      titleFallback: "Prompt Workspaces",
-      contentKey: "tutorials:prompts.basics.segmentedContent",
-      contentFallback:
-        "Switch between Custom, Copilot, Studio, and Trash to manage different prompt sources.",
-      placement: "bottom",
-      disableBeacon: true
-    },
-    {
+      disableBeacon: true,
       target: '[data-testid="prompts-add"]',
       titleKey: "tutorials:prompts.basics.createTitle",
       titleFallback: "Create Prompt",
       contentKey: "tutorials:prompts.basics.createContent",
       contentFallback:
-        "Create a reusable prompt template you can insert into chat conversations.",
+        "Choose New prompt and save a set of instructions you use often. Insert the saved prompt in Chat when you need it.",
       placement: "bottom"
     },
     {
+      optional: true,
       target: '[data-testid="prompts-search"]',
       titleKey: "tutorials:prompts.basics.searchTitle",
       titleFallback: "Search Prompts",
@@ -45,22 +38,15 @@ const promptsBasics: TutorialDefinition = {
       placement: "bottom"
     },
     {
-      target: '[data-testid="prompts-type-filter"], [data-testid="prompts-tag-filter"]',
-      titleKey: "tutorials:prompts.basics.filtersTitle",
-      titleFallback: "Filter and Scope",
-      contentKey: "tutorials:prompts.basics.filtersContent",
+      optional: true,
+      target: '[data-testid="prompts-segmented"]',
+      titleKey: "tutorials:prompts.basics.segmentedTitle",
+      titleFallback: "Prompt Workspaces",
+      contentKey: "tutorials:prompts.basics.segmentedContent",
       contentFallback:
-        "Use type and tag filters to narrow your prompt list before editing or running prompts.",
-      placement: "bottom"
-    },
-    {
-      target: '[data-testid="prompts-export"], [data-testid="prompts-import"]',
-      titleKey: "tutorials:prompts.basics.transferTitle",
-      titleFallback: "Import and Export",
-      contentKey: "tutorials:prompts.basics.transferContent",
-      contentFallback:
-        "Export prompts for backup or sharing, and import prompt sets to bootstrap new workflows.",
-      placement: "left"
+        "Switch between Custom, Copilot, Studio, and Trash to manage different prompt sources.",
+      placement: "bottom",
+      disableBeacon: true
     }
   ]
 }
