@@ -388,6 +388,45 @@ async def _own_key_before_the_hosted_plan(current_user: Any, provider: str, bill
     return await _usage_quota_deps.users_own_key_serves(getattr(current_user, "id", None), provider)
 
 
+async def _enter_the_hosted_plans_enforcer(billing_org_id: Any, estimated_tokens: int) -> LimitEnforcer | None:
+    """Enter the hosted plan's LLM-token enforcer for this request; None when its lookup fails (fail-open).
+
+    Raises the plan's 402 or 429 when the org is over its plan.
+    """
+    try:
+        enforcer = _billing_deps.LimitEnforcer(
+            billing_org_id, LimitCategory.LLM_TOKENS_MONTH, estimated_units=max(1, estimated_tokens),
+        )
+        await enforcer.__aenter__()
+        return enforcer
+    except HTTPException:
+        raise
+    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as billing_err:
+        logger.debug(f"Billing token pre-check failed (fail-open): {billing_err}")
+        return None
+
+
+async def _the_hosted_plan_refuses(billing_org_id: Any, estimated_tokens: int) -> bool:
+    """Whether the hosted plan would refuse a server-key call of this size for the org now (TASK-15481).
+
+    The pre-check's own answer, so an own-key request learns it without being checked or counted: the
+    enforcer entered here records nothing and is dropped. A billing data-source failure follows
+    ``BILLING_ENFORCEMENT_FAILURE_MODE`` inside the enforcer, as for the server-key pre-check (open: the plan
+    admits; closed: it refuses). Any other error from the check answers True: the request still runs on the
+    user's key, only its failover is withheld.
+    """
+    try:
+        await _billing_deps.LimitEnforcer(
+            billing_org_id, LimitCategory.LLM_TOKENS_MONTH, estimated_units=max(1, estimated_tokens),
+        ).__aenter__()
+    except HTTPException:
+        return True
+    except Exception as billing_err:  # noqa: BLE001 - asking about a failover must never fail an own-key request
+        logger.warning(f"Hosted plan check for a failover failed; failover withheld: {type(billing_err).__name__}")
+        return True
+    return False
+
+
 def _request_has_endpoint_override(request_data: Any) -> bool:
     """Return whether parsed request data contains an explicit endpoint override."""
     return any(
@@ -4399,22 +4438,16 @@ async def create_chat_completion(
                 _estimated_request_tokens = 1000
 
             # Billing: LLM token enforcement via context manager (tracks actual usage). A request whose
-            # provider runs on the user's own key is neither checked nor counted as plan usage (ADR-083).
+            # provider runs on the user's own key is neither checked nor counted as plan usage (ADR-083),
+            # and fails over to another key only while its org is within the plan (TASK-15481).
             own_key = await _own_key_before_the_hosted_plan(current_user, selected_provider, billing_org_id)
             if own_key is False and not _billing_enforcer_entered:
-                try:
-                    _billing_enforcer = _billing_deps.LimitEnforcer(
-                        billing_org_id,
-                        LimitCategory.LLM_TOKENS_MONTH,
-                        estimated_units=max(1, _estimated_request_tokens),
-                    )
-                    await _billing_enforcer.__aenter__()
-                    _billing_enforcer_entered = True
-                except HTTPException:
-                    raise
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
-                    logger.debug(f"Billing token pre-check failed (fail-open): {_billing_err}")
-                    _billing_enforcer = None
+                _billing_enforcer = await _enter_the_hosted_plans_enforcer(billing_org_id, _estimated_request_tokens)
+                _billing_enforcer_entered = _billing_enforcer is not None
+            elif own_key and allow_provider_fallback_for_request:
+                allow_provider_fallback_for_request = not await _the_hosted_plan_refuses(
+                    billing_org_id, _estimated_request_tokens
+                )
 
             # Usage quotas (LLM usage accounting spec §4a): monthly LLM tokens, and daily and monthly LLM spend.
             await enforce_llm_quota(
