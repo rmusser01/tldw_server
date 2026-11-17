@@ -220,14 +220,20 @@ _RAG_OTHER_LLM_STAGES = (
 )
 # Every other switch of the RAG request schemas makes no LLM call of its own, or makes it only inside a listed
 # stage; test_rag_agentic_api.py's _NO_OTHER_LLM_CALL declares each one (TASK-15427).
+# Of those, the stages that run only after the answer; /search/stream's retrieval step generates nothing (TASK-15482),
+# so it never runs them. The rest run there (claims in the streamer, the others in retrieval); a test pins both sets.
+_RAG_STREAM_SKIPPED_LLM_STAGES = frozenset({
+    "enable_fast_hallucination_check", "enable_utility_grading", "enable_post_verification",
+    "enable_multi_turn_synthesis", "enable_suggestions", "enable_faithfulness_eval",
+})
 
 
-def _rag_llm_providers(settings: Mapping[str, Any]) -> list[str | None]:
+def _rag_llm_providers(settings: Mapping[str, Any], *, stream: bool = False) -> list[str | None]:
     """The provider of each LLM call a RAG request makes, for ``enforce_llm_quota`` (TASK-13956).
 
     The answer's provider, as the generator resolves it, and the reformulation's when a chat history
     is reformulated, both canonical (TASK-15427). Any other LLM stage adds None, so an over-limit user
-    is refused as before.
+    is refused as before. ``stream`` leaves out the stages the stream does not run (TASK-15488).
     """
     # ponytail: a stage this list misses is still checked at its own call (refused there, never counted).
     from tldw_Server_API.app.core.config import load_and_log_configs
@@ -244,7 +250,11 @@ def _rag_llm_providers(settings: Mapping[str, Any]) -> list[str | None]:
         str(settings.get("strategy") or "standard") != "standard"
         or settings.get("search_depth_mode") == "quality"
         or (settings.get("enable_reranking", True) and settings.get("reranking_strategy") in {"llm_scoring", "two_tier"})
-        or any(settings.get(flag) for flag in _RAG_OTHER_LLM_STAGES)
+        or any(
+            settings.get(flag)
+            for flag in _RAG_OTHER_LLM_STAGES
+            if not (stream and flag in _RAG_STREAM_SKIPPED_LLM_STAGES)
+        )
     ):
         providers.append(None)
     return providers
@@ -2311,7 +2321,9 @@ async def unified_search_stream_endpoint(
     # Usage quotas (LLM usage accounting spec §4a), before the streaming response starts. The providers come
     # from the resolved request, which carries a profile's switches and the server's search defaults (TASK-13956).
     resolved_settings = _resolved_rag_settings(request, current_user)
-    await enforce_llm_quota(getattr(current_user, "id", None), provider=_rag_llm_providers(resolved_settings))
+    await enforce_llm_quota(
+        getattr(current_user, "id", None), provider=_rag_llm_providers(resolved_settings, stream=True)
+    )
     request = _apply_media_collection_scope(request, collections_db)
 
     # Streaming search counts as a single RAG query.
