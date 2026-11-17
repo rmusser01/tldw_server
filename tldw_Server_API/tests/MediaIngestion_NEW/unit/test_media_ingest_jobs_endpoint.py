@@ -796,3 +796,89 @@ def test_submit_media_ingest_jobs_routes_heavy_request_to_heavy_queue_when_route
 
     assert resp.status_code == 200, resp.text
     assert captured == ["media-heavy"]
+
+
+@pytest.mark.parametrize("cancel_at", ["staged", "queued", "claimed"])
+def test_cancel_native_upload_without_submit_ack(media_ingest_jobs_client, monkeypatch, cancel_at):
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    upload_id = "97a926db-9a38-4b8f-b37a-ee8c3e677c5f"
+    origin = "/api/v1/media/ingest/jobs"
+    headers = {"X-API-KEY": "test-api-key-12345"}
+    staged = Event()
+    release = Event()
+    staged_dirs = []
+    save = ingest_jobs.save_uploaded_files
+
+    async def save_then_wait(*args, temp_dir, **kwargs):
+        result = await save(*args, temp_dir=temp_dir, **kwargs)
+        staged_dirs.append(temp_dir)
+        staged.set()
+        assert await asyncio.to_thread(release.wait, 5)
+        return result
+
+    if cancel_at == "staged":
+        monkeypatch.setattr(ingest_jobs, "save_uploaded_files", save_then_wait)
+
+    def submit():
+        return media_ingest_jobs_client.post(
+            origin,
+            data={"media_type": "document", "upload_batch_id": upload_id},
+            files={"files": ("sample.txt", b"cancel this sample ingestion", "text/plain")},
+            headers=headers,
+        )
+
+    def cancel():
+        return media_ingest_jobs_client.post(
+            origin + "/cancel", params={"upload_batch_id": upload_id}, headers=headers,
+        )
+
+    if cancel_at == "staged":
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(submit)
+            try:
+                assert staged.wait(5)
+                response = cancel()
+            finally:
+                release.set()
+            rejected = pending.result(timeout=5)
+        assert response.status_code == 200, response.text
+        assert response.json()["success"] and response.json()["requested"] == 0
+        assert rejected.status_code == 409, rejected.text
+        assert not staged_dirs[0].exists()
+        assert JobManager().list_jobs(domain="media_ingest") == []
+        return
+
+    response = submit()
+    assert response.status_code == 200, response.text
+    job = response.json()["jobs"][0]
+    staged_dir = Path(job["source"]).parent
+    try:
+        assert staged_dir.is_dir()
+        duplicate = submit()
+        assert duplicate.status_code == 409, duplicate.text
+        if cancel_at == "claimed":
+            original_cancel = JobManager.cancel_job
+
+            def claim_before_queued_cancel(manager, job_id, **kwargs):
+                if kwargs.get("queued_only"):
+                    claimed = manager.acquire_next_job(
+                        domain="media_ingest", queue="default", worker_id="test-worker", lease_seconds=120,
+                    )
+                    assert claimed and claimed["id"] == job_id
+                return original_cancel(manager, job_id, **kwargs)
+
+            monkeypatch.setattr(JobManager, "cancel_job", claim_before_queued_cancel)
+        cancelled = cancel()
+        assert cancelled.status_code == 200, cancelled.text
+        assert cancelled.json()["batch_id"] == response.json()["batch_id"]
+        assert cancelled.json()["cancelled"] == 1
+        assert JobManager().get_job(job["id"])["status"] == "cancelled"
+        assert staged_dir.exists() == (cancel_at == "claimed")
+    finally:
+        shutil.rmtree(staged_dir, ignore_errors=True)

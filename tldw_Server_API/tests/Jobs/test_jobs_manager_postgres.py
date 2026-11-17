@@ -835,3 +835,87 @@ def test_pg_reschedule_persists_updates():
     assert after is None
     acq = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=5, worker_id="w-resched")
     assert acq and int(acq["id"]) == int(job["id"])
+
+
+def test_pg_media_upload_cancellation_serializes_publication_and_enforces_owner(jobs_pg_dsn, monkeypatch):
+    from uuid import uuid4
+
+    from tldw_Server_API.app.core.Jobs.manager import MediaUploadConflict
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+
+    role = f"jobs_upload_{uuid4().hex[:12]}"
+    monkeypatch.setenv("JOBS_PG_RLS_ENABLE", "true")
+    monkeypatch.setenv("JOBS_PG_RLS_ROLE", role)
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+        conn.execute("DROP TABLE media_ingest_upload_cancellations")
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    batch_group = str(uuid4())
+    publisher = _new_pg_manager()
+    canceller = _new_pg_manager()
+    publish_locked = threading.Event()
+    release = threading.Event()
+    check_admission = publisher._check_media_upload_admission
+
+    def hold_admission(executor, command):
+        check_admission(executor, command)
+        publish_locked.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(publisher, "_check_media_upload_admission", hold_admission)
+
+    def publish(manager, owner, batch=batch_group):
+        with manager.scoped_rls_context(is_admin=False, domain_allowlist="media_ingest", owner_user_id=owner):
+            return manager.create_job(
+                domain="media_ingest", queue="default", job_type="media_ingest_item",
+                payload={"source_kind": "file"}, owner_user_id=owner, batch_group=batch, cancellable_upload=True,
+            )
+
+    def cancel_then_lookup(owner, batch=batch_group):
+        with canceller.scoped_rls_context(is_admin=False, domain_allowlist="media_ingest", owner_user_id=owner):
+            canceller.record_media_upload_cancellation(owner_user_id=owner, batch_group=batch)
+            return canceller.list_jobs(domain="media_ingest", owner_user_id=owner, batch_group=batch)
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as threads:
+            publishing = threads.submit(publish, publisher, "owner-a")
+            try:
+                assert publish_locked.wait(5)
+                cancelling = threads.submit(cancel_then_lookup, "owner-a")
+                with psycopg.connect(jobs_pg_dsn, autocommit=True) as observer:
+                    for _ in range(100):
+                        locked = observer.execute(
+                            "SELECT EXISTS (SELECT 1 FROM pg_locks JOIN pg_stat_activity USING (pid) "
+                            "WHERE locktype = 'advisory' AND NOT granted AND datname = current_database())"
+                        ).fetchone()[0]
+                        if locked:
+                            break
+                        threading.Event().wait(0.025)
+                assert locked
+            finally:
+                release.set()
+            first_job = publishing.result(timeout=5)
+            assert [job["id"] for job in cancelling.result(timeout=5)] == [first_job["id"]]
+
+        with pytest.raises(MediaUploadConflict, match="Upload was cancelled"):
+            publish(canceller, "owner-a")
+        assert publish(canceller, "owner-b")["owner_user_id"] == "owner-b"
+        with canceller.scoped_rls_context(is_admin=False, domain_allowlist="media_ingest", owner_user_id="owner-b"):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                canceller.record_media_upload_cancellation(owner_user_id="owner-a", batch_group=batch_group)
+
+        expired_batch = str(uuid4())
+        assert cancel_then_lookup("owner-a", expired_batch) == []
+        with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+            conn.execute(
+                "UPDATE media_ingest_upload_cancellations SET expires_at = clock_timestamp() - interval '1 second' "
+                "WHERE owner_user_id = %s AND batch_group = %s",
+                ("owner-a", expired_batch),
+            )
+        assert publish(canceller, "owner-a", expired_batch)["batch_group"] == expired_batch
+    finally:
+        with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+            identifier = psycopg.sql.Identifier(role)
+            conn.execute(psycopg.sql.SQL("DROP OWNED BY {}").format(identifier))
+            conn.execute(psycopg.sql.SQL("REVOKE {} FROM CURRENT_USER").format(identifier))
+            conn.execute(psycopg.sql.SQL("DROP ROLE {}").format(identifier))

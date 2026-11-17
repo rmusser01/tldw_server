@@ -20,6 +20,7 @@ import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/q
 import {
   cancelQuickIngestSession,
   getQuickIngestAnalysisProviderWarning,
+  hasPendingQuickIngestUpload,
   startQuickIngestSession,
   submitQuickIngestBatch,
 } from "@/services/tldw/quick-ingest-batch"
@@ -55,6 +56,7 @@ import { ReviewStep } from "./QuickIngest/ReviewStep"
 import { WizardConfigureStep } from "./QuickIngest/WizardConfigureStep"
 import { WizardResultsStep } from "./QuickIngest/WizardResultsStep"
 import {
+  createQuickIngestId,
   DUPLICATE_SKIP_MESSAGE,
   isDbMessageDuplicate,
 } from "./QuickIngest/constants"
@@ -956,6 +958,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
   const cancelRequestedRef = useRef(false)
+  const pendingUploadCancelSessionIdRef = useRef<string | null>(null)
+  const [cancelAllPending, setCancelAllPending] = useState(false)
   const [retryIds, setRetryIds] = useState<string[] | null>(() =>
     currentStep === 4 && processingState.perItemProgress.length
       ? processingState.perItemProgress.map(item => item.id)
@@ -1325,13 +1329,20 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       activeSessionIdRef.current || persistedTracking?.sessionId || ""
     ).trim()
     if (sessionId) {
-      cancelledSessionIdsRef.current.add(sessionId)
-      cancelQuickIngestSessionBestEffort({
+      const request = {
         requestScope: operation.requestScope, signal: operation.signal, assertCurrent: operation.assertCurrent,
         sessionId,
         batchIds: resolveTrackingBatchIds(persistedTracking),
         reason: "user_cancelled",
-      })
+      }
+      if (hasPendingQuickIngestUpload(sessionId)) {
+        pendingUploadCancelSessionIdRef.current = sessionId
+        setCancelAllPending(true)
+        cancelQuickIngestSessionBestEffort(request)
+        return
+      }
+      cancelledSessionIdsRef.current.add(sessionId)
+      cancelQuickIngestSessionBestEffort(request)
     }
 
     finalizeFailure("Cancelled by user.", "cancelled")
@@ -1549,6 +1560,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         return
       }
 
+      const cancelledPendingUpload = pendingUploadCancelSessionIdRef.current === sessionId
+      if (cancelledPendingUpload) {
+        pendingUploadCancelSessionIdRef.current = null
+        setCancelAllPending(false)
+      }
       if (!response?.ok) {
         finalizeFailure(
           response?.error ||
@@ -1562,6 +1578,22 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         .map((item) => normalizeWizardResult(item))
         .filter((item): item is WizardResultItem => Boolean(item))
 
+      if (cancelledPendingUpload) {
+        const resolved = new Set([...resultsRef.current, ...normalizedResults].map((item) => item.id))
+        const stoppedResults = [
+          ...normalizedResults,
+          ...buildFailureResults(
+            validQueueItems.filter((item) => !resolved.has(item.id)),
+            "Cancelled by user.",
+            "cancelled",
+            retryRequestsRef.current.length ? retryRequestsRef.current : persistedTrackingRef.current?.retryItems
+          ),
+        ]
+        const failed = stoppedResults.some((item) => item.status === "error" && item.outcome !== "cancelled")
+        finalizeRun(failed ? "error" : "cancelled", stoppedResults)
+        return
+      }
+
       if (normalizedResults.length === 0) {
         finalizeFailure("Ingest request finished without item results.", "failed")
         return
@@ -1569,7 +1601,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
       finalizeRun("complete", normalizedResults)
     } catch (error) {
-      if (!operation.isCurrent() || cancelRequestedRef.current) return
+      if (!operation.isCurrent() || (cancelRequestedRef.current && !pendingUploadCancelSessionIdRef.current)) return
+      pendingUploadCancelSessionIdRef.current = null
+      setCancelAllPending(false)
       finalizeFailure(
         error instanceof Error ? error.message : "Quick ingest failed.",
         "failed"
@@ -1758,7 +1792,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       // Persist this attempt before upload/acknowledgment; old jobs must not be reattached.
       markProcessingTracking({
         mode: "webui-direct",
-        sessionId: `qi-direct-retry-${crypto.randomUUID()}`,
+        sessionId: `qi-direct-retry-${createQuickIngestId()}`,
         ...(retryCollectionIdRef.current && retryRequestsRef.current.length
           ? {
               collectionId: retryCollectionIdRef.current,
@@ -1976,7 +2010,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         )
       case 4:
         return (
-          <ProcessingStep onCancelAll={handleCancelAll} onMinimize={onClose} />
+          <ProcessingStep onCancelAll={handleCancelAll} cancelAllPending={cancelAllPending} onMinimize={onClose} />
         )
       case 5:
         return (
@@ -2014,6 +2048,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     navigationError,
     qi,
     handleCancelAll,
+    cancelAllPending,
     handleOpenMedia,
     handleOpenCollection,
     handleRetryItems,

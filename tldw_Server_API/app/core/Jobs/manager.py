@@ -198,6 +198,10 @@ OWNER_SCOPE_ACTIVE_LIMIT_EXCEEDED = "jobs_owner_scope_active_limit_exceeded"
 OWNER_SCOPE_ADMISSION_LIMIT_EXCEEDED = "jobs_owner_scope_admission_limit_exceeded"
 
 
+class MediaUploadConflict(Exception):
+    """The single-file upload was cancelled or already published."""
+
+
 @dataclass(frozen=True, slots=True)
 class OwnerScopeAdmissionPolicy:
     """Atomic active-work and rolling-admission limits for one owner/job scope."""
@@ -3900,6 +3904,68 @@ class JobManager:
             self._assert_invariants(result.row)
         return ResourceAdmission("created", result.row, None)
 
+    def _media_upload_lock_key(self, owner_user_id: str, batch_group: str) -> int:
+        return self._pg_advisory_key("media-upload", owner_user_id, batch_group)
+
+    def record_media_upload_cancellation(self, *, owner_user_id: str, batch_group: str) -> None:
+        """Stop future publication for this authenticated upload for 30 minutes."""
+        conn = self._connect()
+        params = (owner_user_id, batch_group)
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute("SELECT pg_advisory_xact_lock(%s)", (self._media_upload_lock_key(*params),))
+                    cur.execute(
+                        "DELETE FROM media_ingest_upload_cancellations WHERE owner_user_id = %s AND expires_at <= clock_timestamp()",
+                        (owner_user_id,),
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO media_ingest_upload_cancellations (owner_user_id, batch_group, expires_at)
+                        VALUES (%s, %s, clock_timestamp() + interval '30 minutes')
+                        ON CONFLICT (owner_user_id, batch_group) DO UPDATE SET expires_at = excluded.expires_at
+                        """,
+                        params,
+                    )
+            else:
+                with conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    conn.execute(
+                        "DELETE FROM media_ingest_upload_cancellations WHERE owner_user_id = ? AND expires_at <= datetime('now')",
+                        (owner_user_id,),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO media_ingest_upload_cancellations (owner_user_id, batch_group, expires_at)
+                        VALUES (?, ?, datetime('now', '+30 minutes'))
+                        ON CONFLICT (owner_user_id, batch_group) DO UPDATE SET expires_at = excluded.expires_at
+                        """,
+                        params,
+                    )
+        finally:
+            conn.close()
+
+    def _check_media_upload_admission(self, executor: Any, command: CreateJobCommand) -> None:
+        """Check an upload under the same lock as cancellation intent writes."""
+        postgres = self.backend == "postgres"
+        placeholder = "%s" if postgres else "?"
+        now = "clock_timestamp()" if postgres else "datetime('now')"
+        params = (command.owner_user_id, command.batch_group)
+        result = executor.execute(
+            f"SELECT 1 FROM media_ingest_upload_cancellations WHERE owner_user_id = {placeholder}"
+            f" AND batch_group = {placeholder} AND expires_at > {now}",  # nosec B608
+            params,
+        )
+        if result.fetchone() is not None:
+            raise MediaUploadConflict("Upload was cancelled")
+        result = executor.execute(
+            "SELECT 1 FROM jobs WHERE domain = 'media_ingest' AND job_type = 'media_ingest_item'"
+            f" AND owner_user_id = {placeholder} AND batch_group = {placeholder} LIMIT 1",  # nosec B608
+            params,
+        )
+        if result.fetchone() is not None:
+            raise MediaUploadConflict("Upload was already submitted")
+
     def admit_job(
         self,
         *,
@@ -3921,6 +3987,7 @@ class JobManager:
         quarantine_threshold: int | None = None,
         fair_share_exempt: bool = False,
         quota_exempt: bool = False,
+        cancellable_upload: bool = False,
     ) -> AdmissionResult:
         """Run the complete admission pipeline and return its typed outcome.
 
@@ -3949,6 +4016,15 @@ class JobManager:
         its legacy dict/exception contract.
         """
         reject_resource_required(domain, job_type)
+        if cancellable_upload and (
+            domain != "media_ingest"
+            or job_type != "media_ingest_item"
+            or payload.get("source_kind") != "file"
+            or not owner_user_id
+            or not batch_group
+            or owner_scope_admission is not None
+        ):
+            raise ValueError("Cancellable uploads require one owned media intake batch")
         try:
             expired_lease_policy = ExpiredLeasePolicy(expired_lease_policy)
         except (TypeError, ValueError):
@@ -4056,6 +4132,10 @@ class JobManager:
                 0 if quota_exempt else self._quota_get("JOBS_QUOTA_SUBMITS_PER_MIN", domain, owner_user_id)
             )
             if self.backend == "postgres":
+                if cancellable_upload:
+                    from psycopg import IsolationLevel
+
+                    conn.isolation_level = IsolationLevel.READ_COMMITTED
                 command = self._build_create_job_command(
                     domain=domain,
                     queue=queue,
@@ -4075,7 +4155,13 @@ class JobManager:
                 )
                 advisory_xact_lock_key = None
                 pre_admission_lookup = None
-                if owner_scope_admission is not None:
+                if cancellable_upload:
+                    advisory_xact_lock_key = self._media_upload_lock_key(str(owner_user_id), str(batch_group))
+
+                    def pre_admission_lookup(cur: Any) -> None:
+                        self._check_media_upload_admission(cur, command)
+
+                elif owner_scope_admission is not None:
                     advisory_xact_lock_key = self._pg_advisory_key(
                         "owner-scope-admission",
                         str(owner_user_id),
@@ -4178,7 +4264,11 @@ class JobManager:
                     quarantine_threshold=quarantine_threshold,
                 )
                 pre_admission_lookup = None
-                if owner_scope_admission is not None:
+                if cancellable_upload:
+                    def pre_admission_lookup(active_conn: Any) -> None:
+                        self._check_media_upload_admission(active_conn, command)
+
+                elif owner_scope_admission is not None:
                     def pre_admission_lookup(active_conn: Any) -> dict[str, Any] | None:
                         return self._owner_scope_admission_lookup(
                             active_conn,
@@ -4207,7 +4297,7 @@ class JobManager:
                             submits_per_minute_quota=submits_per_minute_quota,
                             counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                             begin_immediate=(
-                                slides_generation or owner_scope_admission is not None
+                                slides_generation or owner_scope_admission is not None or cancellable_upload
                             ),
                             pre_admission_lookup=pre_admission_lookup,
                         )
@@ -4263,6 +4353,7 @@ class JobManager:
         quarantine_threshold: int | None = None,
         fair_share_exempt: bool = False,
         quota_exempt: bool = False,
+        cancellable_upload: bool = False,
     ) -> dict[str, Any]:
         """Create a job using the typed admission pipeline and legacy mapping."""
 
@@ -4285,6 +4376,7 @@ class JobManager:
             quarantine_threshold=quarantine_threshold,
             fair_share_exempt=fair_share_exempt,
             quota_exempt=quota_exempt,
+            cancellable_upload=cancellable_upload,
         )
         return self._map_admission_result(result)
 

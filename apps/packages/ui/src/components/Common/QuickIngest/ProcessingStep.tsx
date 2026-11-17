@@ -242,10 +242,11 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
 
 type ProcessingStepProps = {
   onCancelAll?: () => void
+  cancelAllPending?: boolean
   onMinimize?: () => void
 }
 
-export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, onMinimize }) => {
+export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, cancelAllPending, onMinimize }) => {
   const { t } = useTranslation(["option"])
   const { state, cancelProcessing, cancelItem, minimize } = useIngestWizard()
   const { processingState, queueItems } = state
@@ -656,9 +657,11 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, onM
           <button
             type="button"
             onClick={handleCancelAll}
+            disabled={cancelAllPending}
+            aria-busy={cancelAllPending}
             className="rounded-md border border-danger/30 px-3 py-1.5 text-xs font-medium text-danger transition hover:bg-danger/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus"
           >
-            {qi("processing.cancelAll", "Cancel All")}
+            {cancelAllPending ? qi("processing.cancelling", "Cancelling…") : qi("processing.cancelAll", "Cancel All")}
           </button>
         )}
         {processingState.status === "running" && (

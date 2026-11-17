@@ -36,6 +36,7 @@ import type {
   PlaylistQueueMetadata,
 } from "@/components/Common/QuickIngest/types";
 import {
+  createQuickIngestId,
   DUPLICATE_SKIP_MESSAGE,
   getQuickIngestFileSizeError,
   isDbMessageDuplicate,
@@ -182,6 +183,14 @@ const directQuickIngestSessionTrackers = new Map<
 >();
 const directQuickIngestCancelledSessions = new Set<string>();
 const directQuickIngestUploadControllers = new Map<string, AbortController>();
+type PendingQuickIngestUpload = {
+  uploadBatchId: string;
+  cancelRequest?: Promise<boolean>;
+};
+const pendingQuickIngestUploads = new Map<string, PendingQuickIngestUpload>();
+
+export const hasPendingQuickIngestUpload = (sessionId: string): boolean =>
+  pendingQuickIngestUploads.has(sessionId);
 let lastQuickIngestRuntimeHealthCheckAt = 0;
 let quickIngestRuntimeMessagingUsable: boolean | null = null;
 
@@ -256,6 +265,7 @@ const clearDirectSessionTracking = (sessionId: string | undefined) => {
   if (!normalizedSessionId) return;
   directQuickIngestSessionTrackers.delete(normalizedSessionId);
   directQuickIngestUploadControllers.delete(normalizedSessionId);
+  pendingQuickIngestUploads.delete(normalizedSessionId);
   directQuickIngestCancelledSessions.delete(normalizedSessionId);
 };
 
@@ -1159,7 +1169,7 @@ const runDirectQuickIngestBatch = async (
       if (isDirectSessionCancelled(directSessionId)) {
         break;
       }
-      const id = String(file?.id || crypto.randomUUID());
+      const id = String(file?.id || createQuickIngestId());
       const directFile = file?.directFile;
       const fileName = String(directFile?.name || file?.name || "upload");
       const mimeType = directFile ? directFile.type : file?.type;
@@ -1168,6 +1178,7 @@ const runDirectQuickIngestBatch = async (
       const requestContext = directFile ? nativeUploadContext : input;
       const timeoutMs = getNativeFileTimeout(directFile);
       let jobAcknowledged = false;
+      let pendingUpload: PendingQuickIngestUpload | undefined;
 
       try {
         const size = directFile?.size ?? (Array.isArray(bytes) ? bytes.length : bytes?.byteLength ?? 0);
@@ -1191,19 +1202,30 @@ const runDirectQuickIngestBatch = async (
           : { file: { name: fileName, type: mimeType || "application/octet-stream", data: bytes || [] } };
         if (shouldStoreRemote) {
           try {
-            const submitData = await scopedQuickIngestUpload<any>(requestContext, {
+            if (directFile && directSessionId) {
+              pendingUpload = { uploadBatchId: createQuickIngestId() };
+              pendingQuickIngestUploads.set(directSessionId, pendingUpload);
+            }
+            const { batchId, jobIds } = await scopedQuickIngestUpload<any>(requestContext, {
               path: "/api/v1/media/ingest/jobs",
               method: "POST",
-              fields: serializeUploadFields(fields),
+              fields: serializeUploadFields(pendingUpload
+                ? { ...fields, upload_batch_id: pendingUpload.uploadBatchId }
+                : fields),
               ...upload,
               fileFieldName: "files",
               timeoutMs,
               ...DIRECT_QUICK_INGEST_TRANSPORT,
+            }).then((submitData) => {
+              const submission = requireSubmittedIngestJobs(submitData);
+              jobAcknowledged = true;
+              ensureDirectSessionTracker(directSessionId)?.trackJobs(
+                submission.batchId, submission.jobIds, { sourceId: id },
+              );
+              return submission;
+            }).finally(() => {
+              if (directSessionId && pendingUpload) pendingQuickIngestUploads.delete(directSessionId);
             });
-            const { batchId, jobIds } = requireSubmittedIngestJobs(submitData);
-            jobAcknowledged = true;
-            const directTracker = ensureDirectSessionTracker(directSessionId);
-            directTracker?.trackJobs(batchId, jobIds, { sourceId: id });
             input.onTrackingMetadata?.({
               mode: "webui-direct",
               sessionId: directSessionId,
@@ -1284,7 +1306,22 @@ const runDirectQuickIngestBatch = async (
         });
       } catch (error) {
         assertQuickIngestRequestCurrent(input, error);
-        if (directFile && !jobAcknowledged && nativeUploadController?.signal.aborted) break;
+        if (directFile && !jobAcknowledged && nativeUploadController?.signal.aborted) {
+          if (pendingUpload?.cancelRequest) {
+            const cancelled = await pendingUpload.cancelRequest;
+            out.push({
+              id,
+              status: "error",
+              outcome: cancelled ? "cancelled" : "failed",
+              fileName,
+              type: mediaType,
+              error: cancelled
+                ? "Cancelled by user."
+                : "Could not confirm upload cancellation. The server may still process this file.",
+            });
+          }
+          break;
+        }
         out.push({
           id,
           status: "error",
@@ -1400,8 +1437,26 @@ export const cancelQuickIngestSession = async (
     }
   }
 
+  const pendingUpload = pendingQuickIngestUploads.get(sessionId);
   directQuickIngestCancelledSessions.add(sessionId);
   directQuickIngestUploadControllers.get(sessionId)?.abort();
+  if (pendingUpload) {
+    const nonce = encodeURIComponent(pendingUpload.uploadBatchId);
+    const reason = encodeURIComponent(input.reason || "user_cancelled");
+    pendingUpload.cancelRequest ??= scopedQuickIngestRequest<{
+      ok: boolean;
+      data?: { success?: boolean };
+    }>(input, {
+      path: `/api/v1/media/ingest/jobs/cancel?upload_batch_id=${nonce}&reason=${reason}`,
+      method: "POST",
+      timeoutMs: 10_000,
+      returnResponse: true,
+      ...DIRECT_QUICK_INGEST_TRANSPORT,
+    }).then(
+      (response) => response?.ok === true && response.data?.success === true,
+      () => false,
+    );
+  }
   await cancelDirectSessionBatches(
     input,
     sessionId,
@@ -1426,6 +1481,11 @@ export const cancelQuickIngestSession = async (
       assertQuickIngestRequestCurrent(input, error);
       // best effort cancellation for resumed sessions without in-memory trackers
     }
+  }
+  if (pendingUpload?.cancelRequest) {
+    const ok = await pendingUpload.cancelRequest;
+    assertQuickIngestRequestCurrent(input);
+    return { ok };
   }
   return { ok: true };
 };

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   startQuickIngestSession: vi.fn(),
   submitQuickIngestBatch: vi.fn(),
   cancelQuickIngestSession: vi.fn(),
+  hasPendingQuickIngestUpload: vi.fn(),
   reattachQuickIngestSession: vi.fn(),
   initialize: vi.fn(),
   getQuickIngestAnalysisProviderWarning: vi.fn(),
@@ -242,6 +243,7 @@ vi.mock("@/services/tldw/quick-ingest-batch", () => ({
   startQuickIngestSession: (...args: unknown[]) => mocks.startQuickIngestSession(...args),
   submitQuickIngestBatch: (...args: unknown[]) => mocks.submitQuickIngestBatch(...args),
   cancelQuickIngestSession: (...args: unknown[]) => mocks.cancelQuickIngestSession(...args),
+  hasPendingQuickIngestUpload: (...args: unknown[]) => mocks.hasPendingQuickIngestUpload(...args),
   getQuickIngestAnalysisProviderWarning: (...args: unknown[]) =>
     mocks.getQuickIngestAnalysisProviderWarning(...args),
 }))
@@ -1647,6 +1649,8 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.startQuickIngestSession.mockReset()
     mocks.submitQuickIngestBatch.mockReset()
     mocks.cancelQuickIngestSession.mockReset()
+    mocks.hasPendingQuickIngestUpload.mockReset()
+    mocks.hasPendingQuickIngestUpload.mockReturnValue(false)
     mocks.reattachQuickIngestSession.mockReset()
     mocks.initialize.mockReset()
     mocks.initialize.mockResolvedValue(undefined)
@@ -2829,6 +2833,43 @@ describe("QuickIngestWizardModal session runtime", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent(/HTTP.*HTTPS/)
       expect(useQuickIngestSessionStore.getState().session?.queueItems).toHaveLength(1)
     } finally { vi.unstubAllGlobals() }
+  })
+
+  it.each([true, false])("shows confirmed pre-ack cancellation with server success=%s", async (success) => {
+    const batch = await vi.importActual<typeof import("@/services/tldw/quick-ingest-batch")>("@/services/tldw/quick-ingest-batch")
+    mocks.useActualProcessingStep = true
+    mocks.queuedReviewFile = new NodeFile(["pending"], "pending.pdf", { type: "application/pdf" }) as unknown as File
+    mocks.startQuickIngestSession.mockImplementation(batch.startQuickIngestSession)
+    mocks.submitQuickIngestBatch.mockImplementation(batch.submitQuickIngestBatch)
+    mocks.cancelQuickIngestSession.mockImplementation(batch.cancelQuickIngestSession)
+    mocks.hasPendingQuickIngestUpload.mockImplementation(batch.hasPendingQuickIngestUpload)
+    mocks.bgUpload.mockImplementation(({ abortSignal }) => new Promise((_resolve, reject) => {
+      abortSignal.addEventListener("abort", () => reject(abortSignal.reason), { once: true })
+    }))
+    const confirmation = deferred<any>()
+    mocks.bgRequest.mockReturnValue(confirmation.promise)
+    useQuickIngestSessionStore.getState().createDraftSession({
+      presetConfig: { ...resolvePresetMap().quick, storeRemote: true },
+    })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Attach source file" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Submit current queue" }))
+    await waitFor(() => expect(mocks.bgUpload).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel All" }))
+
+    expect(screen.getByRole("button", { name: "Cancelling…" })).toBeDisabled()
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
+    expect(mocks.bgUpload.mock.calls[0][0].abortSignal.aborted).toBe(true)
+    await act(async () => {
+      confirmation.resolve({ ok: true, data: { success, requested: 0 } })
+      await confirmation.promise
+    })
+    expect(await screen.findByTestId("wizard-results")).toHaveTextContent(success ? "cancelled:1" : "error:1")
+    expect(screen.getByTestId("wizard-result-attached-file")).toHaveTextContent(success ? "cancelled" : "failed")
+    expect(useQuickIngestSessionStore.getState().session?.results[0].error).toContain(
+      success ? "Cancelled by user" : "Could not confirm upload cancellation"
+    )
   })
 
   it("keeps a live mixed executor authoritative when durable tracking arrives and the wizard is minimized", async () => {

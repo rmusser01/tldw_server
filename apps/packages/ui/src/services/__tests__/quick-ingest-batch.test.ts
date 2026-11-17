@@ -83,16 +83,18 @@ describe("submitQuickIngestBatch", () => {
     ])
   })
 
-  it("aborts the in-flight native upload on Cancel All without aborting the owner signal", async () => {
+  it.each(["confirmed", "rejected", "unsupported"])("aborts the upload and waits for a %s cancellation response", async (receipt) => {
+    const success = receipt === "confirmed"
     const owner = new AbortController()
     const first = new File([], "pending.pdf", { type: "application/pdf" })
-    Object.defineProperty(first, "size", { value: 250 * 1024 ** 2 })
     const next = new File([], "next.pdf", { type: "application/pdf" })
     mocks.bgUpload.mockImplementation(({ abortSignal }: { abortSignal: AbortSignal }) =>
       new Promise((_resolve, reject) => {
         abortSignal.addEventListener("abort", () => reject(abortSignal.reason), { once: true })
       })
     )
+    let confirm!: (response: unknown) => void
+    mocks.bgRequest.mockReturnValue(new Promise(resolve => { confirm = resolve }))
     const sessionId = "qi-direct-upload-cancel"
     const run = submitQuickIngestBatch({
       entries: [],
@@ -102,15 +104,92 @@ describe("submitQuickIngestBatch", () => {
       signal: owner.signal,
       __quickIngestSessionId: sessionId,
     })
+    const finish = vi.fn()
+    void run.then(finish)
     await vi.waitFor(() => expect(mocks.bgUpload).toHaveBeenCalledTimes(1))
+    const upload = mocks.bgUpload.mock.calls[0][0]
+    const token = upload.fields.upload_batch_id
 
-    await cancelQuickIngestSession({ sessionId, signal: owner.signal })
+    const cancel = cancelQuickIngestSession({ sessionId, signal: owner.signal })
 
-    expect(mocks.bgUpload.mock.calls[0][0].abortSignal.aborted).toBe(true)
+    expect(token).toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/)
+    expect(upload.abortSignal.aborted).toBe(true)
     expect(owner.signal.aborted).toBe(false)
-    expect(await run).toEqual({ ok: true, results: [] })
+    expect(mocks.bgRequest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      path: `/api/v1/media/ingest/jobs/cancel?upload_batch_id=${token}&reason=user_cancelled`,
+      method: "POST",
+      abortSignal: owner.signal,
+      preferDirect: true,
+    }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(finish).not.toHaveBeenCalled()
+    confirm(receipt === "unsupported" ? { ok: false, status: 422 } : { ok: true, data: { success } })
+    expect(await cancel).toMatchObject({ ok: success })
+    expect((await run).results).toEqual([
+      expect.objectContaining({ id: "first", outcome: success ? "cancelled" : "failed" }),
+    ])
     expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
-    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("cancels a confirmed batch and a distinct pending UUID even when its response races abort", async () => {
+    mocks.bgUpload
+      .mockResolvedValueOnce({ batch_id: "server-confirmed", jobs: [{ id: 77 }] })
+      .mockImplementationOnce(({ abortSignal }: { abortSignal: AbortSignal }) => new Promise(resolve => {
+        abortSignal.addEventListener("abort", () =>
+          resolve({ batch_id: "server-late", jobs: [{ id: 78 }] }), { once: true })
+      }))
+    mocks.bgRequest.mockImplementation(({ method }) => method === "GET"
+      ? { ok: true, data: { status: "completed", result: { media_id: 77 } } }
+      : { ok: true, data: { success: true } })
+    const sessionId = "qi-direct-overlap"
+    const run = submitQuickIngestBatch({
+      entries: [],
+      files: ["first", "second"].map(id => ({ id, directFile: new File([], `${id}.pdf`) })),
+      storeRemote: true,
+      processOnly: false,
+      __quickIngestSessionId: sessionId,
+    })
+    await vi.waitFor(() => expect(mocks.bgUpload).toHaveBeenCalledTimes(2))
+    const [first, second] = mocks.bgUpload.mock.calls.map(([request]) => request.fields.upload_batch_id)
+    expect(first).not.toBe(second)
+
+    expect(await cancelQuickIngestSession({ sessionId })).toEqual({ ok: true })
+    expect((await run).results).toEqual([
+      expect.objectContaining({ id: "first", status: "ok", mediaId: 77 }),
+      expect.objectContaining({ id: "second", outcome: "cancelled" }),
+    ])
+    expect(mocks.bgRequest.mock.calls.filter(([request]) => request.method === "POST").map(([request]) => request.path)).toEqual([
+      `/api/v1/media/ingest/jobs/cancel?upload_batch_id=${second}&reason=user_cancelled`,
+      "/api/v1/media/ingest/jobs/cancel?batch_id=server-confirmed&reason=user_cancelled",
+    ])
+  })
+
+  it("submits and tracks a native file when HTTP Web Crypto lacks randomUUID", async () => {
+    const getRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto)
+    vi.stubGlobal("crypto", { getRandomValues })
+    try {
+      mocks.bgUpload.mockResolvedValue({ batch_id: "server-batch", jobs: [{ id: 77 }] })
+      mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result: { media_id: 77 } } })
+      const onTrackingMetadata = vi.fn()
+      const run = await submitQuickIngestBatch({
+        entries: [],
+        files: [{ directFile: new File([], "lan.pdf") }],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: "qi-direct-lan",
+        onTrackingMetadata,
+      })
+
+      expect(run.results).toEqual([expect.objectContaining({ status: "ok", mediaId: 77 })])
+      expect(mocks.bgUpload.mock.calls[0][0].fields.upload_batch_id)
+        .toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/)
+      expect(onTrackingMetadata).toHaveBeenCalledWith(expect.objectContaining({
+        batchIds: ["server-batch"],
+        jobIds: [77],
+      }))
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("allows a large native job to keep processing beyond the normal polling deadline", async () => {

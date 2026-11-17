@@ -5,6 +5,7 @@ import type {
 } from "./types"
 import { normalizeUrlForDedupe } from "@/entries/shared/ingest-payloads"
 import {
+  createQuickIngestId,
   getQuickIngestFileSizeError
 } from "./constants"
 
@@ -88,7 +89,7 @@ export const createUrlQueueItems = (input: string): WizardQueueItem[] =>
   parseQueueUrls(input).map((url) => {
     const detectedType = detectTypeFromUrl(url)
     const item: WizardQueueItem = {
-      id: crypto.randomUUID(),
+      id: createQuickIngestId(),
       kind: "url",
       url,
       detectedType,
