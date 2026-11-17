@@ -2,7 +2,7 @@
 id: TASK-15488
 title: RAG stream quota check refuses for post-answer stages the stream no longer
   runs
-status: In Progress
+status: Done
 labels:
 - rag
 - quotas
@@ -21,28 +21,30 @@ It fails closed (refuses more, never less), and no hosted deployment exists. Fou
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 On `/search/stream`, an over-limit user whose named providers are all their own keys, with only stages the stream does not run turned on, is not refused; the same request on `/search` is still refused.
-- [ ] #2 Every flag in `_RAG_OTHER_LLM_STAGES` is classified for the stream route as run there or not, and a test pins the classification, so a new flag must be classified (as TASK-15427's `_NO_OTHER_LLM_CALL` does for the schemas).
-- [ ] #3 A stage the stream does run (for example query classification or document grading) still gets an over-limit own-key user refused on `/search/stream`.
+- [x] #1 On `/search/stream`, an over-limit user whose named providers are all their own keys, with only stages the stream does not run turned on, is not refused; the same request on `/search` is still refused.
+- [x] #2 Every flag in `_RAG_OTHER_LLM_STAGES` is classified for the stream route as run there or not, and a test pins the classification, so a new flag must be classified (as TASK-15427's `_NO_OTHER_LLM_CALL` does for the schemas).
+- [x] #3 A stage the stream does run (for example query classification or document grading) still gets an over-limit own-key user refused on `/search/stream`.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/superpowers/plans/2026-11-17-rag-stream-quota-stages.md. Owner decisions 2026-11-16: (1) keep both skip-set and run-set in the test; (2) enable_evidence_accumulation stays run, guarded by the evidence-accumulation refuse case, nothing filed; (3) ADR-004 Change summary waiver covered, controller writes the PR body.
+RED 2 failed/5 passed (plan: same); GREEN 7 passed; wider set 235 passed, 1 skipped, netlines 0; function-size ratchet 13 passed; Bandit clean. Usage_Quotas.md updated (not mirrored).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The stream quota check no longer counts the six post-answer stages (stream=True); a drift test partitions the stage list; five refuse cases guard the stages the stream runs.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
