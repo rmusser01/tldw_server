@@ -17,6 +17,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from tldw_Server_API.app.core.Claims_Extraction.citation_syntax import extract_citation_ids
+from tldw_Server_API.app.core.Research_Workspace.section_overview_coverage import overview_coverage
 
 _IDENTITY = ("stage", "case_id", "model_key", "context", "mode")
 _PATHS = ("request_path", "response_path", "artifact_path")
@@ -292,10 +293,19 @@ def _attempt(root: Path, record: dict, case: dict, config: dict) -> dict:
         if stage == "verification_regression":
             expected = (request.get("context_evidence") or {}).get("expected_statuses", [])
             row["metrics"].update(regression_metrics(body, submitted, expected))
-    elif stage == "summary" and isinstance(body, dict):
-        analysis = (body.get("artifact") or {}).get("version_metadata", {}).get("workspaceClient", {}).get("data", {}).get("sectionAnalysis", {})
-        configured = next((model for model in config.get("models", []) if model.get("key") == record.get("model_key")), {})
-        row["metrics"]["strict_verification"] = summary_verification_metrics(analysis, expected_identity=(configured.get("provider"), configured.get("model")))
+    elif stage == "summary":
+        metrics = row["metrics"]
+        metrics.pop("overview_coverage", None)
+        if isinstance(body, dict):
+            analysis = (body.get("artifact") or {}).get("version_metadata", {}).get("workspaceClient", {}).get("data", {}).get("sectionAnalysis", {})
+            analysis = analysis if isinstance(analysis, dict) else {}
+            metrics["overview_coverage"] = overview_coverage(analysis.get("synthesis", ""), analysis.get("sections", []))
+            configured = next((model for model in config.get("models", []) if model.get("key") == record.get("model_key")), {})
+            metrics["strict_verification"] = summary_verification_metrics(analysis, expected_identity=(configured.get("provider"), configured.get("model")))
+        if not metrics.get("overview_coverage", {}).get("complete"):
+            for key in ("structural_passed", "passed"):
+                if key in metrics:
+                    metrics[key] = False
     elif stage == "retrieval":
         expected = _pages(case)
         covered = checks.get("covered_pages", [])
@@ -361,6 +371,10 @@ def _markdown(report: dict) -> str:
                     f"persisted={metrics.get('artifact_readback_matches', 'unavailable')}; "
                     f"job seconds={cell(metrics.get('job_elapsed_seconds'))} "
                     f"({metrics.get('job_latency_basis', 'unavailable')})")
+                if coverage := metrics.get("overview_coverage"):
+                    detail += f". Overview cites {coverage['cited_sections']}/{coverage['completed_sections']} completed chapters"
+                    if missing := coverage["missing_sections"]:
+                        detail += ". Missing chapters are " + ", ".join(section["title"] for section in missing)
             lines.append("| " + " | ".join(cell(value) for value in (op["operation_id"], row["attempt"],
                 row["outcome"], row.get("elapsed_seconds"), row["usage_status"], row.get("returned_model"), detail)) + " |")
     strict_rows = [(op, row, row["metrics"].get("strict_verification")) for op in report["operations"] for row in op["attempts"]]

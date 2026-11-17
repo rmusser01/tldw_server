@@ -154,6 +154,67 @@ def test_summary_retains_partial_counts_and_never_estimates_job_usage(run_dir: P
     assert attempt["reported_usage"] is None
 
 
+@pytest.mark.parametrize("cite_second", [False, True])
+def test_summary_report_recomputes_overview_coverage_from_frozen_evidence(run_dir: Path, cite_second: bool) -> None:
+    sections = [
+        {"title": title, "status": "completed", "batches": [{"status": "completed",
+            "evidence": [{"id": evidence_id, "quote": "Exact source."}]}]}
+        for title, evidence_id in [("First chapter", "E1.1.1"), ("Financial agencies", "E2.1.1")]
+    ]
+    second = " Agencies propose new rules [E2.1.1]."
+    overview = "Offices should stay open [E1.1.1]."
+    analysis = {"sections": sections, "synthesis": overview + (second if cite_second else "")}
+    checks = {"passed": True, "structural_passed": True, "completed_sections": 2, "total_sections": 2}
+    if not cite_second:
+        analysis["overview_coverage"] = checks["overview_coverage"] = {"complete": True, "cited_sections": 2}
+    response = run_dir / "responses/job.json"
+    _json(response, {"status_code": 200, "body": {"status": "completed", "artifact": {
+        "status": "complete", "content": f"{analysis['synthesis']}\n\n## Financial agencies\n{second.strip()}",
+        "version_metadata": {"workspaceClient": {"data": {"sectionAnalysis": analysis}}},
+    }}})
+    _event(run_dir, event="started", stage="summary")
+    _event(run_dir, stage="summary", outcome="completed", response_path="responses/job.json", checks=checks)
+    frozen = response.read_bytes(), (run_dir / "attempts.jsonl").read_bytes()
+
+    attempt = _report(run_dir)["operations"][0]["attempts"][0]
+
+    assert attempt["metrics"]["overview_coverage"] == {
+        "selected_sections": 2, "completed_sections": 2, "cited_sections": 2 if cite_second else 1,
+        "missing_sections": [] if cite_second else [{"index": 1, "title": "Financial agencies"}], "complete": cite_second,
+    }
+    assert attempt["metrics"]["structural_passed"] is cite_second
+    assert attempt["metrics"]["passed"] is cite_second
+    assert attempt["checks"] == checks
+    assert attempt["outcome"] == "completed"
+    assert attempt["metrics"]["strict_verification"]["human_review"] == "pending"
+    markdown = (run_dir / "report.md").read_text()
+    assert f"Overview cites {2 if cite_second else 1}/2 completed chapters" in markdown
+    assert ("Financial agencies" in markdown) is (not cite_second)
+    packet = json.loads((run_dir / "semantic-review.json").read_text())
+    assert packet["items"][0]["status"] == "pending"
+    assert all(label is None for label in packet["items"][0]["labels"].values())
+    assert (response.read_bytes(), (run_dir / "attempts.jsonl").read_bytes()) == frozen
+
+
+@pytest.mark.parametrize("response", [{"status_code": 200}, {"status_code": 200, "body": []}])
+def test_summary_report_rejects_stale_acceptance_without_readable_overview(run_dir: Path, response: dict) -> None:
+    _json(run_dir / "responses/job.json", response)
+    _event(run_dir, event="started", stage="summary")
+    checks = {"passed": True, "structural_passed": True, "overview_coverage": {"complete": True}}
+    _event(run_dir, stage="summary", outcome="completed", response_path="responses/job.json", checks=checks)
+
+    attempt = _report(run_dir)["operations"][0]["attempts"][0]
+
+    assert attempt["metrics"]["passed"] is False
+    assert attempt["metrics"]["structural_passed"] is False
+    assert "overview_coverage" not in attempt["metrics"]
+    assert attempt["checks"] == checks
+    assert attempt["outcome"] == "completed"
+    item = json.loads((run_dir / "semantic-review.json").read_text())["items"][0]
+    assert item["status"] == "pending"
+    assert all(label is None for label in item["labels"].values())
+
+
 @pytest.mark.parametrize("path", ["../outside.json", "/tmp/outside.json", "responses/link.json"])
 def test_evidence_paths_cannot_escape_run_directory(run_dir: Path, path: str) -> None:
     outside = run_dir.parent / "outside.json"

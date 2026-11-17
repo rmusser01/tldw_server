@@ -20,6 +20,178 @@ from tldw_Server_API.app.core.Research_Workspace.research_workspace_outputs impo
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture
+def two_chapter_overview(monkeypatch):
+    """Use the real job while isolating only source loading and provider responses."""
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    first = "Agency A proposes reform.\n\n"
+    second = "Financial regulators propose oversight.\n"
+    source = first + second
+    nodes = [
+        {"id": "dsi:1", "title": "Agency A", "level": 1, "target_type": "char_range",
+         "target_start": 0, "target_end": len(first)},
+        {"id": "dsi:2", "title": "Financial Regulatory Agencies", "level": 1, "target_type": "char_range",
+         "target_start": len(first), "target_end": len(source)},
+    ]
+
+    async def load(*args, **kwargs):
+        return {"content": source, "navigation_version": "v1", "page_map": [], "nodes": nodes}
+
+    monkeypatch.setattr(mod, "load_navigation_sections", load)
+    settings = request().settings
+    settings.sections.append(settings.sections[0].model_copy(update={"node_id": "dsi:2"}))
+    state = {"overview": "Agency A proposes reform [E1.1.1].", "uncited_chapter": False, "calls": []}
+
+    async def chat(**kwargs):
+        prompt = kwargs["messages_payload"][0]["content"]
+        state["calls"].append(prompt)
+        if "SOURCE:" in prompt:
+            content = json.dumps({"summary": "A source-backed proposal.", "evidence": [
+                {"claim": "A proposal", "source_span_ids": ["P1"]},
+            ]})
+        elif prompt.startswith("Summarize all portions of Agency A"):
+            content = "Agency A proposes reform [E1.1.1]."
+        elif prompt.startswith("Summarize all portions of Financial Regulatory Agencies"):
+            content = "Financial regulators propose oversight." if state["uncited_chapter"] else "Financial regulators propose oversight [E2.1.1]."
+        else:
+            content = state["overview"]
+        return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    return mod, args(settings), state
+
+
+@pytest.mark.asyncio
+async def test_missing_overview_chapter_fails_and_explicit_retry_preserves_completed_chapters(two_chapter_overview):
+    mod, options, state = two_chapter_overview
+    result = await mod.process_section_summary(**options)
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    original_sections = copy.deepcopy(analysis["sections"])
+    assert result["partial"] is True
+    assert options["workspace_db"].row["status"] == "failed"
+    assert analysis["synthesis"] == "Agency A proposes reform [E1.1.1]."
+    assert analysis["synthesis_error_code"] == "overview_sections_missing"
+    assert "Financial Regulatory Agencies" in analysis["synthesis_error"]
+    assert analysis["generation_failures"][0]["stage"] == "overview_synthesis"
+
+    # Explicit retry repeats only the missing overview stage.
+    state["overview"] = "Agency A proposes reform [E1.1.1].\n\nFinancial regulators propose oversight [E2.1.1]."
+    state["calls"].clear()
+    result = await mod.process_section_summary(**options)
+    recovered = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert result["partial"] is False
+    assert len(state["calls"]) == 1
+    assert state["calls"][0].startswith("Synthesize the completed")
+    assert recovered["sections"] == original_sections
+    assert recovered["synthesis"] == state["overview"]
+    assert "synthesis_error_code" not in recovered
+    assert recovered["generation_failures"][0] == analysis["generation_failures"][0]
+
+
+@pytest.mark.asyncio
+async def test_uncited_saved_chapter_fails_before_paid_overview_call(two_chapter_overview):
+    mod, options, state = two_chapter_overview
+    state["uncited_chapter"] = True
+    result = await mod.process_section_summary(**options)
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert result["partial"] is True
+    assert analysis["synthesis_error_code"] == "overview_input_uncited"
+    assert "Financial Regulatory Agencies" in analysis["synthesis_error"]
+    assert all(section["status"] == "completed" for section in analysis["sections"])
+    assert not any(prompt.startswith("Synthesize the completed") for prompt in state["calls"])
+
+
+@pytest.mark.asyncio
+async def test_legacy_matching_hash_and_saved_coverage_cannot_authorize_incomplete_overview_reuse(two_chapter_overview):
+    mod, options, state = two_chapter_overview
+    state["overview"] = "Agency A proposes reform [E1.1.1].\n\nFinancial regulators propose oversight [E2.1.1]."
+    await mod.process_section_summary(**options)
+    saved = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    prior_hash = saved["synthesis_input_sha256"]
+    saved["synthesis"] = "Agency A proposes reform [E1.1.1]."
+    saved["synthesis_coverage"] = {"complete": True, "cited_sections": 2}
+    original_sections = copy.deepcopy(saved["sections"])
+    state["calls"].clear()
+    await mod.process_section_summary(**options)
+    recovered = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert len(state["calls"]) == 1
+    assert recovered["synthesis"] == state["overview"]
+    assert recovered["synthesis_input_sha256"] == prior_hash
+    assert recovered["sections"] == original_sections
+
+
+@pytest.mark.asyncio
+async def test_overview_reduction_cannot_drop_a_registered_chapter(monkeypatch):
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    sections = [
+        {"title": "Agency A", "status": "completed", "content": "A proposes reform [E7.1.1].",
+         "batches": [{"evidence": [{"id": "E7.1.1"}]}]},
+        {"title": "Financial Regulatory Agencies", "status": "completed", "content": "B proposes oversight [E2.1.1].",
+         "batches": [{"evidence": [{"id": "E2.1.1"}]}]},
+        {"title": "Agency C", "status": "completed", "content": "C proposes changes [E3.1.1].",
+         "batches": [{"evidence": [{"id": "E3.1.1"}]}]},
+    ]
+    parts = [section["content"] + " Extra detail." * 10 for section in sections]
+    monkeypatch.setattr(mod, "BATCH_CHARS", 400)
+    calls = []
+
+    async def complete(prompt, **kwargs):
+        calls.append((prompt, kwargs))
+        return "Agency A proposes reform [E7.1.1]."
+
+    with pytest.raises(mod.SectionGenerationError, match="Financial Regulatory Agencies") as error:
+        await mod._synthesize_sections(parts, "Overview.", complete=complete, report_progress=lambda *args: None,
+                                       stage="overview_synthesis", overview_sections=sections)
+    assert error.value.code == "overview_sections_missing"
+    assert len(calls) == 1 and calls[0][1]["reduction"] is True
+    assert calls[0][1]["supplied_parts"] == parts[:2]
+
+
+@pytest.mark.asyncio
+async def test_overview_checklist_overflow_stops_before_provider_call(monkeypatch):
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    sections = [{"title": "A" * 500, "status": "completed", "content": "Agency proposes reform [E1.1.1].",
+                 "batches": [{"evidence": [{"id": "E1.1.1"}]}]}]
+    monkeypatch.setattr(mod, "BATCH_CHARS", 400)
+    calls = []
+
+    async def complete(*args, **kwargs):
+        calls.append((args, kwargs))
+        return "Agency proposes reform [E1.1.1]."
+
+    with pytest.raises(mod.SectionGenerationError) as error:
+        await mod._synthesize_sections([sections[0]["content"]], "Overview.", complete=complete,
+                                       report_progress=lambda *args: None, stage="overview_synthesis", overview_sections=sections)
+    assert error.value.code == "overview_coverage_too_large"
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_overview_multiple_reduction_rounds_preserve_actual_registered_chapter_ids(monkeypatch):
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+    from tldw_Server_API.app.core.Research_Workspace.section_overview_coverage import overview_coverage
+
+    sections = [{"title": f"Agency {index}", "status": "completed", "content": f"Agency proposes reform [E{index}.1.1].",
+                 "batches": [{"evidence": [{"id": f"E{index}.1.1"}]}]} for index in (7, 2, 3)]
+    parts = [section["content"] + " Extra detail." * 16 for section in sections]
+    monkeypatch.setattr(mod, "BATCH_CHARS", 400)
+    calls = []
+
+    async def complete(prompt, **kwargs):
+        calls.append(kwargs)
+        ids = sorted(set(re.findall(r"\bE\d+\.\d+\.\d+\b", "\n".join(kwargs["supplied_parts"]))))
+        suffix = " Extra detail." * 9 if kwargs["call_context"]["reduction_round"] == 1 else ""
+        return "A source-backed proposal " + " ".join(f"[{citation_id}]" for citation_id in ids) + suffix
+
+    result = await mod._synthesize_sections(parts, "Overview.", complete=complete, report_progress=lambda *args: None,
+                                            stage="overview_synthesis", overview_sections=sections)
+    assert {call["call_context"]["reduction_round"] for call in calls} == {0, 1, 2}
+    assert overview_coverage(result, sections)["complete"] is True
+
+
 @pytest.fixture(autouse=True)
 def stub_claims_provider(monkeypatch):
     """Generation contract tests isolate the separate, externally judged Claims stage."""
@@ -1230,7 +1402,8 @@ async def test_comparison_uses_exact_child_boundaries_and_keeps_shared_reference
             prompts.append(prompt.split("SOURCE:", 1)[1])
             text = json.dumps({"summary": "An attributed position", "evidence": [{"claim": "Position", "source_span_ids": ["P1"]}]})
         else:
-            text = "Two positions remain distinct."
+            allowed_ids = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+            text = "The supplied positions remain distinct " + " ".join(f"[{citation_id}]" for citation_id in allowed_ids) + "."
         return {"choices": [{"message": {"content": text}}]}
 
     monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
@@ -1415,7 +1588,7 @@ async def test_synthesis_vocabulary_contains_only_literal_registered_ids_for_tha
             content = json.dumps({"summary": "Source summary includes an invented reference E99.1.1.", "evidence": [
                 {"claim": "A combined claim", "source_span_ids": ["P1", "P2", "P3"]}]})
         elif len(prompts) == 2:
-            content = "A supported range [E1.1.1–E1.1.3]."
+            content = "A supported endpoint [E1.1.1]. A supported range [E1.1.1–E1.1.3]."
         else:
             content = "An inferred range interior [E1.1.2]."
         return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}

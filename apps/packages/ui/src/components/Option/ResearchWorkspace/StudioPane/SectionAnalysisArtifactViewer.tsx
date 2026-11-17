@@ -4,6 +4,7 @@ import { getArtifactRunIdentity } from "./output-identity"
 import { ClaimVerificationPanel } from "../ClaimVerificationPanel"
 import { SectionArtifactReviewPanel, type SaveSectionArtifactReview } from "./SectionArtifactReviewPanel"
 import { getSectionReviewTarget } from "@/utils/section-artifact-review"
+import { getSectionOverviewCoverage } from "@/utils/section-overview-coverage"
 import { Link } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
@@ -93,6 +94,7 @@ export const SectionAnalysisArtifactViewer: React.FC<{
   const sourceTitle = section ? sources.find(source => source.id === section.source_id ||
     source.mediaId === section.media_id)?.title : undefined
   const summary = section ? text(section.content) : text(analysis.synthesis)
+  const overviewCoverage = getSectionOverviewCoverage(analysis.synthesis, analysis.sections)
   const reviewTarget = getSectionReviewTarget(reviewArtifact, selection)
 
   return <div className="max-h-[70vh] space-y-4 overflow-y-auto text-text">
@@ -104,7 +106,7 @@ export const SectionAnalysisArtifactViewer: React.FC<{
       {!generating && completed !== analysis.sections.length && <p className="text-sm text-warning">{t("studio.sectionReader.partial", "Partial coverage: failed or unread sections are excluded from the overview.")}</p>}
       {text(analysis.stopped_error) && <p className="text-sm text-error">{text(analysis.stopped_error)}</p>}
       {!section && text(analysis.synthesis_error) && <p className="text-sm text-error">{text(analysis.synthesis_error)}</p>}
-      {!section && summary && text(analysis.synthesis_error) && <p className="text-sm text-text-muted">{t("studio.sectionReader.retainedOverview", "The overview below is from an earlier attempt. Completed chapters and evidence remain available.")}</p>}
+      {!section && summary && text(analysis.synthesis_error) && <p className="text-sm text-text-muted">{t("studio.sectionReader.retainedOverview", "This overview is retained for review. Completed chapters and evidence remain available.")}</p>}
       {!section && summary && generating && <p className="text-sm text-text-muted">{t("studio.sectionReader.runningOverview", "This saved overview may change while generation continues.")}</p>}
       <label htmlFor={selectorId} className="block text-sm font-medium">{t("studio.sectionReader.selector", "Chapter or section")}</label>
       <select id={selectorId} value={selection} onChange={event => {
@@ -120,6 +122,18 @@ export const SectionAnalysisArtifactViewer: React.FC<{
 
     <section key={selection} className="space-y-3" aria-label={section?.title || t("studio.sectionReader.overview", "Overview")}>
       <h3 className="text-lg font-semibold">{section?.title || t("studio.sectionReader.overview", "Overview")}</h3>
+      {!section && summary && <div className="space-y-1 text-sm">
+        <p>{t("studio.sectionReader.overviewCoverage", {
+          count: overviewCoverage.completed_sections, cited: overviewCoverage.cited_sections,
+          defaultValue_one: "Chapters cited in overview: {{cited}} of {{count}} completed chapter.",
+          defaultValue_other: "Chapters cited in overview: {{cited}} of {{count}} completed chapters."
+        })}</p>
+        {overviewCoverage.missing_sections.length > 0 && <p className="text-warning">{t("studio.sectionReader.overviewMissing", {
+          titles: overviewCoverage.missing_sections.map(item => item.title).join("; "),
+          defaultValue: "Missing overview citations: {{titles}}."
+        })}</p>}
+        <p className="text-xs text-text-muted">{t("studio.sectionReader.overviewSupport", "Citation support is assessed separately below.")}</p>
+      </div>}
       {section && <div className="space-y-1 text-sm text-text-muted">
         {sourceTitle && <p>{sourceTitle}</p>}
         <PageLinks mediaId={section.media_id} spans={section.page_spans} range />

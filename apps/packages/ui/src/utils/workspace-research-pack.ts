@@ -5,7 +5,9 @@ import {
   type WorkspaceExportBundle
 } from "@/store/workspace-bundle"
 import { OUTPUT_TYPES, type WorkspaceNote } from "@/types/workspace"
+import { readWorkspaceArtifactClientPayload } from "@/store/workspace-artifact-codec"
 import { renderSectionReviewExport } from "./section-artifact-review"
+import { getSectionOverviewCoverage } from "./section-overview-coverage"
 import { projectPdfPageSpans, stripKnowledgeNoteProvenance } from "./knowledge-note-provenance"
 import { CLAIM_VERIFICATION_IMPORTED_KEY, CLAIM_VERIFICATION_KEY, readClaimVerification, renderClaimVerification } from "./claim-verification"
 
@@ -187,7 +189,8 @@ export const buildCompleteResearchPack = async ({ bundle, chatbook, notes, sourc
     const stem = `artifact-${index + 1}`
     const imported = ["workspace_snapshot_import", "research_pack_import"].includes(String(artifact.producerMetadata?.origin))
     zip.file(`offline/reports/${stem}.md`, artifact.reviewMetadata ? renderSectionReviewExport(artifact) : artifact.content || "")
-    const analysis = record(artifact.data?.sectionAnalysis) ? artifact.data.sectionAnalysis : null
+    const savedAnalysis = artifact.data?.sectionAnalysis ?? readWorkspaceArtifactClientPayload(artifact.versionMetadata).data?.sectionAnalysis
+    const analysis = record(savedAnalysis) ? savedAnalysis : null
     let body = textBlock(artifact.content || artifact.errorMessage || "No completed text is available.")
     if (analysis && Array.isArray(analysis.sections)) {
       const links: string[] = []
@@ -199,9 +202,15 @@ export const buildCompleteResearchPack = async ({ bundle, chatbook, notes, sourc
           checksHtml(batch.claim_verification, batch.verification_text, imported)).join("")
         const review = renderSectionReviewExport({ ...artifact, content: "" }, `section:${sectionIndex}`)
         zip.file(`offline/reports/${path}`, htmlPage(String(section.title || `Section ${sectionIndex + 1}`), `<p><a href="${stem}.html">Overview</a></p>${textBlock(section.content || section.error || "No completed summary.")}<p>${pageLinks(section.media_id, section.page_spans)}</p>${checksHtml(section.claim_verification, section.content, imported)}${review ? `<h2>Reviewer corrections</h2>${textBlock(review)}` : ""}<h2>Exact evidence</h2>${evidenceHtml}${batchChecks}`))
-        links.push(`<li><a href="${path}">${escapeHtml(section.title || `Section ${sectionIndex + 1}`)}</a></li>`)
+        const status = section.status && section.status !== "completed" ? ` — ${escapeHtml(section.status)}` : ""
+        links.push(`<li><a href="${path}">${escapeHtml(section.title || `Section ${sectionIndex + 1}`)}</a>${status}</li>`)
       }
-      body = `${textBlock(analysis.synthesis || analysis.synthesis_error || "No overview is available.")}${checksHtml(analysis.synthesis_verification, analysis.synthesis, imported)}<h2>Chapters and sections</h2><ol>${links.join("")}</ol>`
+      const coverage = getSectionOverviewCoverage(analysis.synthesis, analysis.sections)
+      const processingText = `${coverage.completed_sections} of ${coverage.selected_sections} sections completed.`
+      const coverageText = `Chapters cited in overview: ${coverage.cited_sections} of ${coverage.completed_sections} completed ${coverage.completed_sections === 1 ? "chapter" : "chapters"}.`
+      const missingText = coverage.missing_sections.length
+        ? `Missing overview citations: ${coverage.missing_sections.map(item => item.title).join("; ")}.` : ""
+      body = `${textBlock(processingText)}${textBlock(analysis.synthesis || "No overview is available.")}${analysis.synthesis_error ? textBlock(analysis.synthesis_error) : ""}${textBlock(coverageText)}${missingText ? textBlock(missingText) : ""}<p>Citation support is assessed separately.</p>${checksHtml(analysis.synthesis_verification, analysis.synthesis, imported)}<h2>Chapters and sections</h2><ol>${links.join("")}</ol>`
     }
     if (artifact.reviewMetadata) body += `<h2>Reviewer corrections</h2>${textBlock(renderSectionReviewExport({ ...artifact, content: "" }))}<details><summary>Technical review record</summary>${textBlock(JSON.stringify(artifact.reviewMetadata, null, 2))}</details>`
     zip.file(`offline/reports/${stem}.html`, htmlPage(artifact.title, `<p><a href="../index.html">Research index</a> · <a href="${stem}.md">Full original Markdown</a></p>${body}`))

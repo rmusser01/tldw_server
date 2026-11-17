@@ -638,6 +638,8 @@ class Runner:
 
     def summarize(self, model: dict) -> dict:
         """Poll a durable job; terminal failures retain portions and never trigger a new POST."""
+        from tldw_Server_API.app.core.Research_Workspace.section_overview_coverage import overview_coverage
+
         summary = self.config.get("summary", {})
         if "reasoning_effort" in model:
             raise ValueError("Summary Jobs cannot represent explicit reasoning_effort; use a separate default-reasoning summary config")
@@ -683,7 +685,8 @@ class Runner:
         readback = self.request(f"summary:{model['key']}:readback", "summary_readback", "GET", f"/api/v1/workspaces/{workspace}/artifacts", metadata={"model_key": model["key"]})
         saved = self.body(readback)
         rows = saved if isinstance(saved, list) else saved.get("artifacts", [])
-        sections = artifact.get("version_metadata", {}).get("workspaceClient", {}).get("data", {}).get("sectionAnalysis", {}).get("sections", [])
+        analysis = artifact.get("version_metadata", {}).get("workspaceClient", {}).get("data", {}).get("sectionAnalysis", {})
+        sections = analysis.get("sections", [])
         batches = [batch for section in sections for batch in section.get("batches", [])]
         contents = {}
         for selected in summary["sections"]:
@@ -694,17 +697,19 @@ class Runner:
                 contents[node_id] = self.body(node)
         spans_valid = section_spans_valid(sections, contents, self.config["source"]["media_id"])
         selected_scope_valid = len(sections) == len(summary["sections"]) and {(row.get("source_id"), row.get("node_id"), row.get("navigation_version")) for row in sections} == {(row["source_id"], row["node_id"], row["navigation_version"]) for row in summary["sections"]}
+        # The rendered artifact also contains individual chapter summaries and evidence lists.
+        coverage = overview_coverage(analysis.get("synthesis", ""), sections)
+        structural_passed = (result["status"] == "completed" and artifact.get("status") in {"complete", "completed"}
+            and artifact in rows and spans_valid and selected_scope_valid and coverage["complete"])
         checks = {"job_status": result["status"], "total_sections": len(sections), "completed_sections": sum(row.get("status") == "completed" for row in sections),
                   "failed_sections": sum(row.get("status") == "failed" for row in sections), "completed_portions": sum(row.get("status") == "completed" for row in batches),
                   "failed_portions": sum(row.get("status") == "failed" for row in batches), "artifact_readback_matches": artifact in rows, "usage_available": False,
                   "adopted_job": adopted, "job_elapsed_seconds": (datetime.now(timezone.utc) - datetime.fromisoformat(submitted["utc_time"])).total_seconds() if submitted else None,
                   "job_latency_basis": "submission-to-observed-terminal wall clock, including resume downtime" if submitted else "unavailable for adopted job",
                   "evidence_spans_valid": spans_valid, "selected_scope_valid": selected_scope_valid,
-                  "passed": result["status"] == "completed" and artifact.get("status") in {"complete", "completed"} and artifact in rows and spans_valid and selected_scope_valid}
+                  "overview_coverage": coverage, "structural_passed": structural_passed, "passed": structural_passed}
         if self.config.get("verification", {}).get("required"):
             from Helper_Scripts.Evals.political_pdf_eval_report import summary_verification_metrics
-            analysis = artifact.get("version_metadata", {}).get("workspaceClient", {}).get("data", {}).get("sectionAnalysis", {})
-            checks["structural_passed"] = checks["passed"]
             checks["strict_verification"] = summary_verification_metrics(analysis, expected_identity=(model["provider"], model["model"]))
             checks["passed"] &= checks["strict_verification"]["all_claims_supported"]
         return self.request(final_id, "summary", "LOCAL", "saved-job-artifact", local=lambda: result,

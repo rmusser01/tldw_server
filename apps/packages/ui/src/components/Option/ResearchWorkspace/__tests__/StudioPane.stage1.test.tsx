@@ -2507,13 +2507,13 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(await dialog.findByText("Readable summary for chapter 30.")).toBeInTheDocument()
   })
 
-  it("labels a retained overview from an earlier attempt when synthesis failed", async () => {
+  it("labels the retained overview for review when synthesis failed", async () => {
     const artifact = sectionReaderArtifact()
     const analysis = artifact.data!.sectionAnalysis as { synthesis_error?: string }
     analysis.synthesis_error = "The latest overview could not be completed."
     const dialog = await openReader(artifact)
     expect(await dialog.findByText("Readable whole-book overview.")).toBeInTheDocument()
-    expect(dialog.getByText("The overview below is from an earlier attempt. Completed chapters and evidence remain available.")).toBeInTheDocument()
+    expect(dialog.getByText("This overview is retained for review. Completed chapters and evidence remain available.")).toBeInTheDocument()
   })
 
   it("uses the extension router for authenticated PDF page links", async () => {

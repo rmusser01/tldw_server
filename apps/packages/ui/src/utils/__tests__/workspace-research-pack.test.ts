@@ -22,6 +22,60 @@ const chatbook = async (missing = false) => {
 }
 
 describe("complete research pack archive", () => {
+  it("shows processing and overview coverage separately for a partial canonical-only artifact", async () => {
+    const bundle = portableFixture()
+    const artifact = bundle.workspace.snapshot.generatedArtifacts[0]
+    artifact.status = "failed"
+    const draft = "Agency reform is proposed [E1.1.1]."
+    const message = "A retained overview needs review; Financial is not processed."
+    const analysis = { schemaVersion: 1, synthesis: draft, synthesis_error: message, sections: [
+      { title: "Agency", status: "completed", content: draft, batches: [{ evidence: [{ id: "E1.1.1" }] }] },
+      { title: "Financial", status: "failed", error: "Generation failed.", batches: [] }
+    ] }
+    artifact.versionMetadata = { workspaceClient: { schemaVersion: 1, data: { sectionAnalysis: analysis } } }
+    delete artifact.data
+    const original = JSON.stringify(bundle)
+    const blob = await buildCompleteResearchPack({ bundle, chatbook: await chatbook(), notes: [bundle.workspace.snapshot.currentNote], sourceWorkspaceId: "old" })
+    const zip = await JSZip.loadAsync(await readBlobBytes(blob))
+    const doc = new DOMParser().parseFromString(await zip.file("offline/reports/artifact-1.html")!.async("string"), "text/html")
+    expect(doc.body.textContent).toContain(draft)
+    expect(doc.body.textContent).toContain(message)
+    expect(doc.body.textContent).toContain("1 of 2 sections completed.")
+    expect(doc.body.textContent).toContain("Chapters cited in overview: 1 of 1 completed chapter.")
+    expect(doc.body.textContent).toContain("Financial — failed")
+    expect(doc.body.textContent).not.toContain("separately below")
+    expect(JSON.stringify(bundle)).toBe(original)
+  })
+
+  it("exports missing overview coverage and its error beside a retained draft without changing the saved artifact", async () => {
+    const bundle = portableFixture()
+    const artifact = bundle.workspace.snapshot.generatedArtifacts[0]
+    artifact.status = "failed"
+    const analysis = artifact.data!.sectionAnalysis as Record<string, unknown>
+    const draft = "Agency reform is proposed [E1.1.1]."
+    const message = "The overview omits a cited point from Financial <review>. Retry the overview from saved chapters."
+    analysis.synthesis = draft
+    analysis.synthesis_error = message
+    analysis.synthesis_error_code = "overview_sections_missing"
+    analysis.synthesis_coverage = { complete: true, cited_sections: 2 }
+    analysis.sections = [
+      { title: "Agency", status: "completed", content: draft, batches: [{ evidence: [{ id: "E1.1.1", quote: "Agency source." }] }] },
+      { title: "Financial <review>", status: "completed", content: "Financial reform [E2.1.1].", batches: [{ evidence: [{ id: "E2.1.1", quote: "Financial source." }] }] }
+    ]
+    const original = JSON.stringify(bundle)
+    const blob = await buildCompleteResearchPack({ bundle, chatbook: await chatbook(), notes: [bundle.workspace.snapshot.currentNote], sourceWorkspaceId: "old" })
+    const zip = await JSZip.loadAsync(await readBlobBytes(blob))
+    const doc = new DOMParser().parseFromString(await zip.file("offline/reports/artifact-1.html")!.async("string"), "text/html")
+    expect(doc.body.textContent).toContain(draft)
+    expect(doc.body.textContent).toContain(message)
+    expect(doc.body.textContent).toContain("Chapters cited in overview: 1 of 2 completed chapters.")
+    expect(doc.body.textContent).toContain("Missing overview citations: Financial <review>.")
+    expect(doc.querySelector("review")).toBeNull()
+    const restored = await parseCompleteResearchPack(new File([await readBlobBytes(blob)], "overview.zip"))
+    expect(restored!.bundle.workspace.snapshot.generatedArtifacts[0].data!.sectionAnalysis).toEqual(analysis)
+    expect(JSON.stringify(bundle)).toBe(original)
+  })
+
   it("withholds historical report links after Media 1 becomes 2, retaining restored source navigation", async () => {
     const original = portableFixture()
     const draft = "Historical answer [1]"

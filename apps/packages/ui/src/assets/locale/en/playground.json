@@ -1185,6 +1185,11 @@
       "generating": "Generation continues. Completed chapters update here. Review changes can be saved after generation finishes.",
       "pendingOverview": "The overview is pending while generation continues. Choose a completed chapter to read now.",
       "runningOverview": "This saved overview may change while generation continues.",
+      "retainedOverview": "This overview is retained for review. Completed chapters and evidence remain available.",
+      "overviewCoverage_one": "Chapters cited in overview: {{cited}} of {{count}} completed chapter.",
+      "overviewCoverage_other": "Chapters cited in overview: {{cited}} of {{count}} completed chapters.",
+      "overviewMissing": "Missing overview citations: {{titles}}.",
+      "overviewSupport": "Citation support is assessed separately below.",
       "unreadSection": "This section has not been processed yet.",
       "generatingSection": "This section is still being processed. Saved evidence remains available below.",
       "unavailable": "This output is no longer available in the current workspace."

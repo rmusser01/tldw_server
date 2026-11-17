@@ -8,8 +8,8 @@ import { claimTextHash } from "@/utils/claim-verification"
 import { portableFixture } from "@/utils/__tests__/fixtures/portable-workspace"
 import { remapPortableWorkspace } from "@/utils/workspace-reference-remap"
 
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (_key: string, fallback: string | { count: number; defaultValue_one: string; defaultValue_other: string }) =>
-  typeof fallback === "string" ? fallback : (fallback.count === 1 ? fallback.defaultValue_one : fallback.defaultValue_other).replace("{{count}}", String(fallback.count)) }) }))
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (_key: string, fallback: string | { count?: number; defaultValue?: string; defaultValue_one?: string; defaultValue_other?: string; [key: string]: unknown }) =>
+  typeof fallback === "string" ? fallback : (fallback.defaultValue ?? (fallback.count === 1 ? fallback.defaultValue_one : fallback.defaultValue_other) ?? "").replace(/\{\{(\w+)\}\}/g, (_match, key: string) => String(fallback[key])) }) }))
 
 const checkpoint = (status: GeneratedArtifact["status"], version: number): GeneratedArtifact => ({
   id: "reading", workspaceArtifactId: "canonical-reading", workspaceArtifactVersion: version,
@@ -21,6 +21,42 @@ const checkpoint = (status: GeneratedArtifact["status"], version: number): Gener
 })
 
 describe("section reader checkpoint updates", () => {
+  it("exposes an omitted chapter separately from completed processing and retains the failed overview", () => {
+    const artifact = checkpoint("failed", 1)
+    const analysis = getSectionAnalysis(artifact)!
+    analysis.synthesis = "Agency reform is proposed [E1.1.1]."
+    analysis.synthesis_error = "The overview omits a cited point from Financial. Retry the overview from saved chapters."
+    analysis.synthesis_error_code = "overview_sections_missing"
+    analysis.synthesis_coverage = { complete: true, cited_sections: 2 }
+    analysis.sections.push({ title: "Financial", status: "completed", content: "Financial reform is proposed [E2.1.1].",
+      batches: [{ status: "completed", evidence: [{ id: "E2.1.1", quote: "Exact financial source." }] }] })
+    const original = JSON.stringify(artifact)
+    render(<MemoryRouter><SectionAnalysisArtifactViewer artifact={artifact} analysis={analysis} sources={[]} /></MemoryRouter>)
+    expect(screen.getByText("2 of 2 sections completed")).toBeInTheDocument()
+    expect(screen.getByText("Chapters cited in overview: 1 of 2 completed chapters.")).toBeInTheDocument()
+    expect(screen.getByText("Missing overview citations: Financial.")).toBeInTheDocument()
+    expect(screen.getByText(String(analysis.synthesis_error))).toBeInTheDocument()
+    expect(screen.getByText("This overview is retained for review. Completed chapters and evidence remain available.")).toBeInTheDocument()
+    expect(screen.queryByText(/from an earlier attempt/)).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole("combobox", { name: "Chapter or section" }), { target: { value: "1" } })
+    expect(screen.queryByText(/Missing overview citations/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Financial reform is proposed/)).toBeInTheDocument()
+    expect(JSON.stringify(artifact)).toBe(original)
+  })
+
+  it("recomputes cited chapter coverage for legacy artifacts when the overview changes", () => {
+    const artifact = checkpoint("completed", 1)
+    const analysis = getSectionAnalysis(artifact)!
+    analysis.synthesis = "Agency reform is proposed [E1.1.1]."
+    analysis.sections.push({ title: "Financial", status: "completed", batches: [{ evidence: [{ id: "E2.1.1" }] }] })
+    const view = render(<MemoryRouter><SectionAnalysisArtifactViewer artifact={artifact} analysis={analysis} sources={[]} /></MemoryRouter>)
+    expect(screen.getByText("Missing overview citations: Financial.")).toBeInTheDocument()
+    const updated = { ...analysis, synthesis: "Agency reform is proposed [E1.1.1].\n\nFinancial reform is proposed [E2.1.1]." }
+    view.rerender(<MemoryRouter><SectionAnalysisArtifactViewer artifact={artifact} analysis={updated} sources={[]} /></MemoryRouter>)
+    expect(screen.getByText("Chapters cited in overview: 2 of 2 completed chapters.")).toBeInTheDocument()
+    expect(screen.queryByText(/Missing overview citations/)).not.toBeInTheDocument()
+  })
+
   it("opens remapped chapter evidence while keeping historical report IDs noninteractive", () => {
     const bundle = portableFixture()
     const original = bundle.workspace.snapshot.generatedArtifacts[0]

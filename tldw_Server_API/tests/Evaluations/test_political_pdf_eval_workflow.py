@@ -381,31 +381,58 @@ def test_http_client_call_matches_actual_response_adapter(runner_module, config_
         assert result["outcome"] == "completed"
 
 
-def test_complete_summary_checks_saved_selected_scope_and_exact_evidence(runner_module, config_file, tmp_path):
-    section = {"source_id": "source-7", "node_id": "chapter", "navigation_version": "v1", "media_id": 7,
-        "start_char": 0, "end_char": 6, "status": "completed", "batches": [{"start_char": 0, "end_char": 6, "status": "completed",
-            "evidence": [{"start_char": 0, "end_char": 6, "quote": "Source"}]}]}
-    artifact = {"id": "summary-1", "artifact_type": "summary", "status": "complete", "content": "Summary", "version_metadata": {
-        "workspaceClient": {"data": {"sectionAnalysis": {"sections": [section]}}}}}
+@pytest.mark.parametrize("cite_second", [False, True])
+def test_complete_summary_checks_overview_scope_and_exact_evidence(runner_module, config_file, tmp_path, cite_second):
+    config = json.loads(config_file.read_text())
+    config["summary"]["sections"].append({"source_id": "source-7", "node_id": "financial", "navigation_version": "v1"})
+    config_file.write_text(json.dumps(config))
+    sections = []
+    sources = {}
+    for selection, title, start, quote, evidence_id in [
+        (config["summary"]["sections"][0], "First chapter", 0, "Source", "E1.1.1"),
+        (config["summary"]["sections"][1], "Financial agencies", 6, "Other source", "E2.1.1"),
+    ]:
+        end = start + len(quote)
+        sections.append({**selection, "title": title, "media_id": 7,
+            "start_char": start, "end_char": end, "status": "completed", "batches": [
+                {"start_char": start, "end_char": end, "status": "completed", "evidence": [
+                    {"id": evidence_id, "start_char": start, "end_char": end, "quote": quote}]}]})
+        sources[selection["node_id"]] = {"node_id": selection["node_id"], "navigation_version": "v1", "media_id": 7,
+            "resolved_start_char": start, "resolved_end_char": end, "content": quote, "coverage_status": "exact"}
+    first = "Offices should stay open [E1.1.1]."
+    second = " Agencies propose new rules [E2.1.1]."
+    analysis = {"sections": sections, "synthesis": first + (second if cite_second else ""),
+        "overview_coverage": {"complete": True, "cited_sections": 2}}
+    artifact = {"id": "summary-1", "artifact_type": "summary", "status": "complete",
+        "content": f"{analysis['synthesis']}\n\n## Financial agencies\n{second.strip()}",
+        "version_metadata": {"workspaceClient": {"data": {"sectionAnalysis": analysis}}}}
+
     def server(**kwargs):
         path = kwargs["url"]
         if kwargs["method"] == "POST":
             return httpx.Response(202, json={"job_id": 12, "artifact_id": "summary-1", "status": "queued"})
         if "/outputs/12" in path:
             return httpx.Response(200, json={"job_id": 12, "artifact_id": "summary-1", "status": "completed", "artifact": artifact})
-        if "/navigation/chapter/content" in path:
-            return httpx.Response(200, json={"node_id": "chapter", "navigation_version": "v1", "media_id": 7,
-                "resolved_start_char": 0, "resolved_end_char": 6, "content": "Source", "coverage_status": "exact"})
+        for node_id, source in sources.items():
+            if f"/navigation/{node_id}/content" in path:
+                return httpx.Response(200, json=source)
         return httpx.Response(200, json=[artifact])
+
+    outcome = "completed" if cite_second else "failed"
     with runner_module.Runner(runner_module.load_plan(config_file), tmp_path / "run", fetch=server) as run:
         result = run.summarize(run.config["models"][0])
-        assert result["outcome"] == "completed"
+        assert result["outcome"] == outcome
+        assert result["checks"]["structural_passed"] is cite_second
+        assert result["checks"]["overview_coverage"]["complete"] is cite_second
+        assert result["checks"]["completed_sections"] == 2
+        assert result["checks"]["artifact_readback_matches"] is True
         assert result["checks"]["evidence_spans_valid"] is True
         assert result["checks"]["selected_scope_valid"] is True
         assert result["checks"]["job_elapsed_seconds"] >= 0
+        assert run.body(result)["artifact"] == artifact
     from Helper_Scripts.Evals.political_pdf_eval_report import write_report
     report = write_report(tmp_path / "run")
-    assert next(row for row in report["operations"] if row["stage"] == "summary")["latest_outcome"] == "completed"
+    assert next(row for row in report["operations"] if row["stage"] == "summary")["latest_outcome"] == outcome
     with runner_module.Runner(runner_module.load_plan(config_file), tmp_path / "run", fetch=server, resume=True,
                               retry_operations={"summary:test:submit"}) as run:
         with pytest.raises(runner_module.UnsafeResume, match="known summary job"):
@@ -423,7 +450,7 @@ def test_summary_verifies_intrinsic_text_offsets_independently_of_synthesis_stat
         "start_char": 0, "end_char": len(source), "status": "completed", "batches": [
             {"start_char": 0, "end_char": len(source), "status": "completed", "evidence": [
                 {"id": "E1.1.1", "start_char": 0, "end_char": len(source), "quote": source}]}]}
-    analysis = {"sections": [section]}
+    analysis = {"sections": [section], "synthesis": "A summary cites canonical source text [E1.1.1]."}
     if artifact_status == "failed":
         analysis["synthesis_error_code"] = "unknown_evidence_reference"
     artifact = {"id": "summary-1", "artifact_type": "summary", "status": artifact_status,
@@ -602,8 +629,8 @@ def test_strict_verifier_unknown_outcome_resumes_without_regenerating_answer(run
 
 @pytest.mark.parametrize("status", ["supported", "unsupported", "error"])
 def test_strict_summary_generation_status_is_separate_from_all_report_coverage(runner_module, strict_config, tmp_path, status):
-    text, quote = "Claim [P1]", "Source"
-    evidence = [{"id": "P1", "quote": quote, "claim": "Claim", "start_char": 0, "end_char": len(quote)}]
+    text, quote = "Claim [E1.1.1]", "Source"
+    evidence = [{"id": "E1.1.1", "quote": quote, "claim": "Claim", "start_char": 0, "end_char": len(quote)}]
     report = {**_strict_receipt(text, evidence, status), "model": "test-model"}
     section = {"source_id": "source-7", "node_id": "chapter", "navigation_version": "v1", "media_id": 7,
         "start_char": 0, "end_char": len(quote), "status": "completed", "content": text, "claim_verification": report,
