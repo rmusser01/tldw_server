@@ -2,7 +2,7 @@
 id: TASK-15481
 title: The hosted plan never checks a server-key failover reply inside an own-key
   /chat/completions request
-status: To Do
+status: In Progress
 labels:
 - quotas
 - billing
@@ -25,6 +25,7 @@ Follow-up of TASK-13955 (ADR-083), from its final review (declined to judge) and
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-11-16-hosted-plan-own-key-failover.md. Owner decision (AC #1), 2026-11-16: option B, the plan is asked at the boundary and fallback is refused for an own-key request only when the plan would refuse a server-key call. Fail-closed on a non-HTTP billing error (owner, 2026-11-16). AC #2 read as: no failover reply on another key for an org over its plan, by any of the four paths, and an org within its plan keeps failover (AC text unchanged). The within-plan failover reply stays out of the hot cache, as documented in the ADR-083 amendment.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
