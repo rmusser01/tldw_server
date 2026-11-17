@@ -9,6 +9,7 @@ import json
 import sys
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -299,8 +300,7 @@ def test_summary_pending_status_is_journaled_without_a_success_claim(runner_modu
     def sleep(seconds):
         elapsed[0] += seconds
 
-    monkeypatch.setattr(runner_module.time, "monotonic", lambda: elapsed[0])
-    monkeypatch.setattr(runner_module.time, "sleep", sleep)
+    monkeypatch.setattr(runner_module, "time", SimpleNamespace(monotonic=lambda: elapsed[0], sleep=sleep))
     def server(**kwargs):
         if kwargs["method"] == "POST":
             return httpx.Response(202, json={"job_id": 12, "artifact_id": "summary-1", "status": "queued"})
@@ -331,8 +331,7 @@ def test_summary_poll_cadence_is_bounded_by_deadline_and_resume_keeps_job(
         assert kwargs["url"].endswith("/outputs/12")
         return httpx.Response(200, json={"job_id": 12, "artifact_id": "summary-1", "status": "processing"})
 
-    monkeypatch.setattr(runner_module.time, "monotonic", lambda: elapsed[0])
-    monkeypatch.setattr(runner_module.time, "sleep", sleep)
+    monkeypatch.setattr(runner_module, "time", SimpleNamespace(monotonic=lambda: elapsed[0], sleep=sleep))
     plan, directory = runner_module.load_plan(config_file), tmp_path / "run"
     for resume in (False, True):
         with runner_module.Runner(plan, directory, fetch=server, resume=resume) as run:
@@ -381,8 +380,11 @@ def test_http_client_call_matches_actual_response_adapter(runner_module, config_
         assert result["outcome"] == "completed"
 
 
-@pytest.mark.parametrize(("cite_second", "synthesis_failed"), [(False, False), (True, False), (True, True)])
-def test_complete_summary_checks_overview_scope_and_exact_evidence(runner_module, config_file, tmp_path, cite_second, synthesis_failed):
+@pytest.mark.parametrize(("cite_second", "disposition"), [
+    (False, "available"), (True, "available"), (True, "synthesis_failed"),
+    (True, "stopped_before_overview"), (True, "attempt_unconfirmed"), (True, "different_job"),
+])
+def test_complete_summary_checks_overview_scope_and_exact_evidence(runner_module, config_file, tmp_path, cite_second, disposition):
     config = json.loads(config_file.read_text())
     config["summary"]["sections"].append({"source_id": "source-7", "node_id": "financial", "navigation_version": "v1"})
     config_file.write_text(json.dumps(config))
@@ -403,9 +405,12 @@ def test_complete_summary_checks_overview_scope_and_exact_evidence(runner_module
     second = " Agencies propose new rules [E2.1.1]."
     analysis = {"sections": sections, "synthesis": first + (second if cite_second else ""),
         "overview_coverage": {"complete": True, "cited_sections": 2}}
-    if synthesis_failed:
+    if disposition == "stopped_before_overview":
+        analysis["stopped_error_code"] = "output_truncated"
+    if disposition == "synthesis_failed":
         analysis["synthesis_error"] = "The new draft used an unknown evidence reference."
     artifact = {"id": "summary-1", "artifact_type": "summary", "status": "complete",
+        "producer_metadata": {"job_id": 13 if disposition == "different_job" else 12},
         "content": f"{analysis['synthesis']}\n\n## Financial agencies\n{second.strip()}",
         "version_metadata": {"workspaceClient": {"data": {"sectionAnalysis": analysis}}}}
 
@@ -414,18 +419,20 @@ def test_complete_summary_checks_overview_scope_and_exact_evidence(runner_module
         if kwargs["method"] == "POST":
             return httpx.Response(202, json={"job_id": 12, "artifact_id": "summary-1", "status": "queued"})
         if "/outputs/12" in path:
-            return httpx.Response(200, json={"job_id": 12, "artifact_id": "summary-1", "status": "completed", "artifact": artifact})
+            job_status = "cancelled" if disposition == "attempt_unconfirmed" else "completed"
+            return httpx.Response(200, json={"job_id": 12, "artifact_id": "summary-1", "status": job_status, "artifact": artifact})
         for node_id, source in sources.items():
             if f"/navigation/{node_id}/content" in path:
                 return httpx.Response(200, json=source)
         return httpx.Response(200, json=[artifact])
 
-    passed = cite_second and not synthesis_failed
+    passed = cite_second and disposition == "available"
     outcome = "completed" if passed else "failed"
     with runner_module.Runner(runner_module.load_plan(config_file), tmp_path / "run", fetch=server) as run:
         result = run.summarize(run.config["models"][0])
         assert result["outcome"] == outcome
         assert result["checks"]["structural_passed"] is passed
+        assert result["checks"]["overview_attempt_status"] == disposition
         assert result["checks"]["overview_coverage"]["complete"] is cite_second
         assert result["checks"]["completed_sections"] == 2
         assert result["checks"]["artifact_readback_matches"] is True
@@ -457,6 +464,7 @@ def test_summary_verifies_intrinsic_text_offsets_independently_of_synthesis_stat
     if artifact_status == "failed":
         analysis["synthesis_error_code"] = "unknown_evidence_reference"
     artifact = {"id": "summary-1", "artifact_type": "summary", "status": artifact_status,
+        "producer_metadata": {"job_id": 12},
         "version_metadata": {"workspaceClient": {"data": {"sectionAnalysis": analysis}}}}
 
     def server(**kwargs):
@@ -641,13 +649,14 @@ def test_strict_summary_generation_status_is_separate_from_all_report_coverage(r
             "verification_text": text, "claim_verification": report}]}
     analysis = {"sections": [section], "synthesis": text, "synthesis_verification": report}
     artifact = {"id": "summary", "artifact_type": "summary", "status": "complete", "content": text,
+        "producer_metadata": {"job_id": 12},
         "version_metadata": {"workspaceClient": {"data": {"sectionAnalysis": analysis}}}}
     def server(**kwargs):
         path = kwargs["url"]
         if kwargs["method"] == "POST":
             return httpx.Response(202, json={"job_id": 12})
         if "/outputs/12" in path:
-            return httpx.Response(200, json={"status": "completed", "artifact": artifact})
+            return httpx.Response(200, json={"job_id": 12, "status": "completed", "artifact": artifact})
         if "/navigation/chapter/content" in path:
             return httpx.Response(200, json={"node_id": "chapter", "navigation_version": "v1", "media_id": 7,
                 "resolved_start_char": 0, "resolved_end_char": len(quote), "content": quote, "coverage_status": "exact"})

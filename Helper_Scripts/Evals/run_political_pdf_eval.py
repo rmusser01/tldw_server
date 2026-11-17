@@ -706,21 +706,23 @@ class Runner:
         spans_valid = section_spans_valid(sections, contents, self.config["source"]["media_id"])
         selected_scope_valid = len(sections) == len(summary["sections"]) and {(row.get("source_id"), row.get("node_id"), row.get("navigation_version")) for row in sections} == {(row["source_id"], row["node_id"], row["navigation_version"]) for row in summary["sections"]}
         # The rendered artifact also contains individual chapter summaries and evidence lists.
+        from Helper_Scripts.Evals.political_pdf_eval_report import overview_attempt_status, summary_verification_metrics
+
         coverage = overview_coverage(analysis.get("synthesis", ""), sections)
-        synthesis_failed = bool(analysis.get("synthesis_error_code") or analysis.get("synthesis_error"))
+        attempt_status = overview_attempt_status(analysis, result)
         structural_passed = (result["status"] == "completed" and artifact.get("status") in {"complete", "completed"}
-            and artifact in rows and spans_valid and selected_scope_valid and coverage["complete"] and not synthesis_failed)
+            and artifact in rows and spans_valid and selected_scope_valid and coverage["complete"] and attempt_status == "available")
         checks = {"job_status": result["status"], "total_sections": len(sections), "completed_sections": sum(row.get("status") == "completed" for row in sections),
                   "failed_sections": sum(row.get("status") == "failed" for row in sections), "completed_portions": sum(row.get("status") == "completed" for row in batches),
                   "failed_portions": sum(row.get("status") == "failed" for row in batches), "artifact_readback_matches": artifact in rows, "usage_available": False,
                   "adopted_job": adopted, "job_elapsed_seconds": (datetime.now(timezone.utc) - datetime.fromisoformat(submitted["utc_time"])).total_seconds() if submitted else None,
                   "job_latency_basis": "submission-to-observed-terminal wall clock, including resume downtime" if submitted else "unavailable for adopted job",
                   "evidence_spans_valid": spans_valid, "selected_scope_valid": selected_scope_valid,
-                  "overview_coverage": coverage, "overview_synthesis_failed": synthesis_failed,
+                  "overview_coverage": coverage, "overview_attempt_status": attempt_status,
+                  "overview_synthesis_failed": bool(analysis.get("synthesis_error_code") or analysis.get("synthesis_error")),
                   "structural_passed": structural_passed, "passed": structural_passed}
         if self.config.get("verification", {}).get("required"):
-            from Helper_Scripts.Evals.political_pdf_eval_report import summary_verification_metrics
-            checks["strict_verification"] = summary_verification_metrics(analysis, expected_identity=(model["provider"], model["model"]))
+            checks["strict_verification"] = summary_verification_metrics(analysis, job=result, expected_identity=(model["provider"], model["model"]))
             checks["passed"] &= checks["strict_verification"]["all_claims_supported"]
         return self.request(final_id, "summary", "LOCAL", "saved-job-artifact", local=lambda: result,
                             metadata={"model_key": model["key"]}, checks=lambda _: checks)

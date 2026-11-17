@@ -242,7 +242,24 @@ def regression_metrics(report: Any, submitted: dict, expected: list[str]) -> dic
         "expected_statuses": expected, "expectation_provenance": "agent_source_audit"}
 
 
-def summary_verification_metrics(analysis: Any, *, expected_identity: tuple | None = None) -> dict:
+def overview_attempt_status(analysis: dict, job: dict | None = None) -> str:
+    """Identify whether the saved overview can be scored for this terminal job."""
+    if job is not None:
+        producer = (job.get("artifact") or {}).get("producer_metadata") or {}
+        if job.get("job_id") is None or producer.get("job_id") is None:
+            return "attempt_unconfirmed"
+        if producer["job_id"] != job["job_id"]:
+            return "different_job"
+        if job.get("status") != "completed":
+            return "attempt_unconfirmed"
+    if analysis.get("stopped_error_code") or analysis.get("stopped_error"):
+        return "stopped_before_overview"
+    if analysis.get("synthesis_error_code") or analysis.get("synthesis_error"):
+        return "synthesis_failed"
+    return "available"
+
+
+def summary_verification_metrics(analysis: Any, *, expected_identity: tuple | None = None, job: dict | None = None) -> dict:
     """Account for every selected chapter, extraction portion and final overview."""
     from tldw_Server_API.app.core.Research_Workspace.section_verification import batch_claim_text
 
@@ -263,13 +280,14 @@ def summary_verification_metrics(analysis: Any, *, expected_identity: tuple | No
         rows.append({"kind": "chapters", "section": section_index, "title": section.get("title"), "generation_status": section.get("status"),
             **verification_metrics(section.get("claim_verification"), section.get("content", ""), evidence, expected_identity=expected_identity)})
     rows.append({"kind": "overview", **verification_metrics(analysis.get("synthesis_verification"), analysis.get("synthesis", ""), all_evidence, expected_identity=expected_identity)})
-    synthesis_failed = bool(analysis.get("synthesis_error_code") or analysis.get("synthesis_error"))
+    attempt_status = overview_attempt_status(analysis, job)
     kinds = ("batches", "chapters", "overview")
     return {"expected_reports": {kind: sum(row["kind"] == kind for row in rows) for kind in kinds},
         "valid_reports": {kind: sum(row["kind"] == kind and row["integrity_valid"] for row in rows) for kind in kinds},
-        "overview_synthesis_failed": synthesis_failed,
-        "all_claims_supported": bool(sections) and not synthesis_failed and all(row["all_claims_supported"] for row in rows),
-        "all_claims_evaluated": bool(sections) and not synthesis_failed and all(row["all_claims_evaluated"] for row in rows),
+        "overview_synthesis_failed": bool(analysis.get("synthesis_error_code") or analysis.get("synthesis_error")),
+        "overview_attempt_status": attempt_status,
+        "all_claims_supported": bool(sections) and attempt_status == "available" and all(row["all_claims_supported"] for row in rows),
+        "all_claims_evaluated": bool(sections) and attempt_status == "available" and all(row["all_claims_evaluated"] for row in rows),
         "human_review": "pending", "reports": rows}
 
 def _attempt(root: Path, record: dict, case: dict, config: dict) -> dict:
@@ -301,14 +319,17 @@ def _attempt(root: Path, record: dict, case: dict, config: dict) -> dict:
         metrics.pop("overview_coverage", None)
         metrics.pop("strict_verification", None)
         metrics.pop("overview_synthesis_failed", None)
+        metrics.pop("overview_attempt_status", None)
         if isinstance(body, dict):
             analysis = (body.get("artifact") or {}).get("version_metadata", {}).get("workspaceClient", {}).get("data", {}).get("sectionAnalysis", {})
             analysis = analysis if isinstance(analysis, dict) else {}
+            metrics["overview_text_present"] = isinstance(analysis.get("synthesis"), str) and bool(analysis["synthesis"].strip())
             metrics["overview_coverage"] = overview_coverage(analysis.get("synthesis", ""), analysis.get("sections", []))
             configured = next((model for model in config.get("models", []) if model.get("key") == record.get("model_key")), {})
-            metrics["strict_verification"] = summary_verification_metrics(analysis, expected_identity=(configured.get("provider"), configured.get("model")))
+            metrics["strict_verification"] = summary_verification_metrics(analysis, job=body, expected_identity=(configured.get("provider"), configured.get("model")))
             metrics["overview_synthesis_failed"] = metrics["strict_verification"]["overview_synthesis_failed"]
-        if metrics.get("overview_synthesis_failed") or not metrics.get("overview_coverage", {}).get("complete"):
+            metrics["overview_attempt_status"] = metrics["strict_verification"]["overview_attempt_status"]
+        if metrics.get("overview_attempt_status") != "available" or not metrics.get("overview_coverage", {}).get("complete"):
             for key in ("structural_passed", "passed"):
                 if key in metrics:
                     metrics[key] = False
@@ -377,8 +398,10 @@ def _markdown(report: dict) -> str:
                     f"persisted={metrics.get('artifact_readback_matches', 'unavailable')}; "
                     f"job seconds={cell(metrics.get('job_elapsed_seconds'))} "
                     f"({metrics.get('job_latency_basis', 'unavailable')})")
-                if coverage := metrics.get("overview_coverage"):
-                    subject = "Saved draft" if metrics.get("overview_synthesis_failed") else "Overview"
+                if metrics.get("overview_text_present") is False:
+                    detail += ". No saved overview text"
+                elif coverage := metrics.get("overview_coverage"):
+                    subject = "Overview" if metrics.get("overview_attempt_status") == "available" else "Saved draft"
                     detail += f". {subject} cites {coverage['cited_sections']}/{coverage['completed_sections']} completed chapters"
                     if missing := coverage["missing_sections"]:
                         detail += ". Missing chapters are " + ", ".join(section["title"] for section in missing)
@@ -409,8 +432,8 @@ def _markdown(report: dict) -> str:
             coverage = next((receipt["coverage"] for receipt in checks["reports"]
                              if receipt["kind"] == "overview" and receipt["integrity_valid"]), None)
             support = f"{coverage['supported']}/{coverage['total']}" if coverage else None
-            if checks.get("overview_synthesis_failed"):
-                support = "unscored (synthesis failed)"
+            if checks["overview_attempt_status"] != "available":
+                support = "unscored (" + checks["overview_attempt_status"].replace("_", " ") + ")"
             lines.append("| " + " | ".join(cell(value) for value in (op["operation_id"], row["attempt"],
                 checks["valid_reports"], checks["expected_reports"], checks["all_claims_evaluated"],
                 checks["all_claims_supported"], support)) + " |")
@@ -635,6 +658,8 @@ def write_report(run_dir: Path) -> dict:
             evidence_sha256 = hashlib.sha256(json.dumps(frozen, sort_keys=True).encode()).hexdigest()
             finding_reviews, finding_gaps = _finding_reviews(root, record, manifest, evidence_sha256)
             reviews.append({"operation_id": record["operation_id"], "attempt": record["attempt"],
+                **({"overview_attempt_status": row["metrics"].get("overview_attempt_status", "attempt_unconfirmed")}
+                   if record["stage"] == "summary" else {}),
                 **{key: record[key] for key in (*_IDENTITY, *_PATHS) if key in record},
                 "outcome": row["outcome"], "question": case.get("question"),
                 "expected_source_facts": case.get("expected_source_facts", []),

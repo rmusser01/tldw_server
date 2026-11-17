@@ -149,6 +149,7 @@ def test_summary_retains_partial_counts_and_never_estimates_job_usage(run_dir: P
 
     assert attempt["metrics"]["completed_sections"] == 2
     assert attempt["metrics"]["failed_sections"] == 1
+    assert "No saved overview text" in (run_dir / "report.md").read_text()
     assert attempt["elapsed_seconds"] == 30
     assert attempt["usage_status"] == "unavailable"
     assert attempt["reported_usage"] is None
@@ -168,7 +169,8 @@ def test_summary_report_recomputes_overview_coverage_from_frozen_evidence(run_di
     if not cite_second:
         analysis["overview_coverage"] = checks["overview_coverage"] = {"complete": True, "cited_sections": 2}
     response = run_dir / "responses/job.json"
-    _json(response, {"status_code": 200, "body": {"status": "completed", "artifact": {
+    _json(response, {"status_code": 200, "body": {"job_id": 12, "status": "completed", "artifact": {
+        "producer_metadata": {"job_id": 12},
         "status": "complete", "content": f"{analysis['synthesis']}\n\n## Financial agencies\n{second.strip()}",
         "version_metadata": {"workspaceClient": {"data": {"sectionAnalysis": analysis}}},
     }}})
@@ -436,7 +438,11 @@ def _strict_report(text: str, status: str = "supported") -> dict:
 
 @pytest.mark.parametrize(("status", "expected"), [
     ("supported", "1/1"), ("unsupported", "0/1"), ("stale", "unavailable"), ("missing", "unavailable"),
-    ("retained", "unscored (synthesis failed)"),
+    ("retained", "unscored (synthesis failed)"), ("stopped", "unscored (stopped before overview)"),
+    ("failed", "unscored (attempt unconfirmed)"), ("cancelled", "unscored (attempt unconfirmed)"),
+    ("no_job_status", "unscored (attempt unconfirmed)"), ("other_job", "unscored (different job)"),
+    ("no_job_id", "unscored (attempt unconfirmed)"), ("no_producer", "unscored (attempt unconfirmed)"),
+    ("partial", "1/1"),
 ])
 def test_summary_markdown_shows_verified_overview_counts_separately_from_chapters(run_dir, status, expected):
     text = "Claim [P1]"
@@ -444,13 +450,25 @@ def test_summary_markdown_shows_verified_overview_counts_separately_from_chapter
                "batches": [{"evidence": [{"id": "P1", "quote": "Exact source."}]}]}
     analysis = {"sections": [section], "synthesis": text}
     if status != "missing":
-        receipt = _strict_report(text, "supported" if status in ("stale", "retained") else status)
+        receipt = _strict_report(text, status if status == "unsupported" else "supported")
         receipt["model"] = "other-model" if status == "stale" else "gpt-6-luna"
         analysis["synthesis_verification"] = receipt
     if status == "retained":
         analysis["synthesis_error_code"] = "unknown_evidence_reference"
-    _json(run_dir / "response.json", {"body": {"artifact": {
-        "version_metadata": {"workspaceClient": {"data": {"sectionAnalysis": analysis}}}}}})
+    if status == "stopped":
+        analysis["stopped_error_code"] = "output_truncated"
+    job_status = status if status in ("failed", "cancelled") else "completed"
+    body = {"job_id": 12, "status": job_status, "result": {"partial": status == "partial"}, "artifact": {
+        "status": "failed" if status == "partial" else "complete",
+        "producer_metadata": {"job_id": 13 if status == "other_job" else 12},
+        "version_metadata": {"workspaceClient": {"data": {"sectionAnalysis": analysis}}}}}
+    if status == "no_job_status":
+        body.pop("status")
+    if status == "no_job_id":
+        body.pop("job_id")
+    if status == "no_producer":
+        body["artifact"].pop("producer_metadata")
+    _json(run_dir / "response.json", {"body": body})
     _event(run_dir, event="started", stage="summary", operation_id="summary-luna")
     _event(run_dir, stage="summary", operation_id="summary-luna", outcome="partial", response_path="response.json")
 
@@ -460,8 +478,18 @@ def test_summary_markdown_shows_verified_overview_counts_separately_from_chapter
     assert "Overview units supported by verifier / total" in table
     assert next(line for line in table.splitlines() if line.startswith("| summary-luna ")).endswith(f"| {expected} |")
     assert "## Strict verification" not in markdown
-    if status == "retained":
+    if expected.startswith("unscored"):
         assert "Saved draft cites" in markdown
+        path = run_dir / "semantic-review.json"
+        packet = json.loads(path.read_text())
+        item = packet["items"][0]
+        assert item.pop("overview_attempt_status").replace("_", " ") in expected
+        row = next(r for r in item["finding_reviews"] if r["target"]["kind"] == "overview")
+        row["agent_review"] = _decision(row, "agent_source_audit")
+        row["human_review"] = _decision(row, "human_source_review")
+        _json(path, packet)  # Existing packet without the new attempt-level annotation.
+        _report(run_dir)
+        assert json.loads(path.read_text())["items"][0]["finding_reviews"] == item["finding_reviews"]
 
 
 @pytest.mark.parametrize("failure,status", [

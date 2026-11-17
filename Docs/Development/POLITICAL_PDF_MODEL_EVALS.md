@@ -161,6 +161,8 @@ Every poll retains its full response, so large artifacts and long jobs can consu
 
 With strict verification required, each saved extraction batch, chapter and overview must have a receipt bound to its actual text and cited evidence. Report coverage includes all selected portions and chapters, including missing checks. Generation completion and structural scope/span/readback success remain visible separately; unsupported, unverified or missing reports keep the strict check unsuccessful.
 
+Each summary in `semantic-review.json` records `overview_attempt_status`. A completed job can produce a verifiable overview even when some chapters failed. The report leaves an attempt's overview unscored if the job stopped before the overview, synthesis failed, or the saved response cannot link the artifact to the completed job. Any saved draft, receipt and reviewer decisions remain available for inspection. Receipt validity describes the saved text and does not establish that the job generated new text.
+
 Terminal summary results, including failures and partial evidence, are retained on resume. The runner rejects `--retry-operation` for a known summary job, whether running or terminal. Resume its recorded job or use a new run directory for a new intentional generation.
 
 To review or export CLI-created outputs in an already-open browser, choose **Workspaces → Manage server Workspaces → Open** for the same workspace. This reopens its canonical server state. A reload of the generic Research Workspace page can retain its older local artifact list, and Complete Pack exports that local list. Resolve any unsaved-work warning before reopening; verify that the new output is visible before exporting.
