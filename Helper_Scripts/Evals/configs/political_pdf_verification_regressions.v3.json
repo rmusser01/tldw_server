@@ -1,0 +1,250 @@
+{
+  "schema_version": 1,
+  "source_sha256": "7f2e97507370bbadb109034ecda0085c5a2e5f3837cfb843da272c3a41523c4c",
+  "purpose": "Frozen v3 source-audited strict-verifier regressions; preserves all eight v1 controls and adds development footnote-attribution controls. Agent judgments are not human labels or calibrated accuracy. Exact quotes must resolve uniquely in the owned canonical source; attribution context must come from the production resolver. Canonical content SHA256 f1beb788a6cb84add31d14ec24b89742f9723bae499adc38a1e8092064b36a1a; source review 2026-11-17.",
+  "cases": [
+    {
+      "id": "ngi-purchase-supported",
+      "text": "The proposal is to buy at least 64 Next Generation Interceptors; it says the Biden Administration plans to buy only 20. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "1. Buy at least 64 of the Next Generation Interceptor (NGI), which is more advanced than the GBI, for an eventual uniform fleet of interceptors. [44] The Biden Administration currently plans to buy only 20."
+        }
+      ],
+      "expected_statuses": [
+        "supported"
+      ],
+      "reason": "Preserve procurement quantity and source-reported comparison.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "ngi-maintenance-error",
+      "text": "The proposal is to maintain a fleet of at least 64 existing Ground-Based Interceptors. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "1. Buy at least 64 of the Next Generation Interceptor (NGI), which is more advanced than the GBI, for an eventual uniform fleet of interceptors. [44] The Biden Administration currently plans to buy only 20."
+        }
+      ],
+      "expected_statuses": [
+        "unsupported",
+        "contradicted"
+      ],
+      "reason": "Known overview error conflates buying new NGIs with maintaining existing GBIs.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "financial-note-link-supported",
+      "text": "The CFPB proposal links its return of consumer protection functions to banking regulators to endnote 53. That endnote says former OTS functions should go to OCC because OTS merged with OCC. [P1] [P2]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "Congress should abolish the CFPB and reverse Dodd–Frank Section 1061, thus returning the consumer protection function of the CFPB to banking regulators [53] and the Federal Trade Commission. Provided the Supreme Court affirms the Fifth Circuit holding in _Community Financial Ser­_ _vices Association of America_, the next conservative President should order the immediate dissolution of the agency—pull down its prior rules, regulations and guidance, return its staff to their prior agencies and its building to the General Services Administration."
+        },
+        {
+          "id": "P2",
+          "quote": "53. The Office of the Comptroller of the Currency (OCC), Federal Deposit Insurance Corporation, Federal Reserve,\n\nand National Credit Union Administration. Those functions performed by the Office of Thrift Supervision (OTS) prior to Dodd–Frank should be transferred to the OCC since OTS has merged with OCC."
+        }
+      ],
+      "expected_statuses": [
+        "supported"
+      ],
+      "reason": "The literal [53] cross-reference connects body proposal to endnote commentary; no new contributor is inferred.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "financial-note-link-denied",
+      "text": "There is no explicit source link between the CFPB contribution’s banking-regulator transfer proposal and endnote 53 about OTS and OCC. [P1] [P2]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "Congress should abolish the CFPB and reverse Dodd–Frank Section 1061, thus returning the consumer protection function of the CFPB to banking regulators [53] and the Federal Trade Commission. Provided the Supreme Court affirms the Fifth Circuit holding in _Community Financial Ser­_ _vices Association of America_, the next conservative President should order the immediate dissolution of the agency—pull down its prior rules, regulations and guidance, return its staff to their prior agencies and its building to the General Services Administration."
+        },
+        {
+          "id": "P2",
+          "quote": "53. The Office of the Comptroller of the Currency (OCC), Federal Deposit Insurance Corporation, Federal Reserve,\n\nand National Credit Union Administration. Those functions performed by the Office of Thrift Supervision (OTS) prior to Dodd–Frank should be transferred to the OCC since OTS has merged with OCC."
+        }
+      ],
+      "expected_statuses": [
+        "unsupported",
+        "contradicted"
+      ],
+      "reason": "Known Financial endnote denial overlooks explicit [53] reference.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "cfpb-qualifier-dropped",
+      "text": "The proposal tells the next conservative President to dissolve the CFPB immediately regardless of the Supreme Court’s decision. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "Congress should abolish the CFPB and reverse Dodd–Frank Section 1061, thus returning the consumer protection function of the CFPB to banking regulators [53] and the Federal Trade Commission. Provided the Supreme Court affirms the Fifth Circuit holding in _Community Financial Ser­_ _vices Association of America_, the next conservative President should order the immediate dissolution of the agency—pull down its prior rules, regulations and guidance, return its staff to their prior agencies and its building to the General Services Administration."
+        }
+      ],
+      "expected_statuses": [
+        "unsupported",
+        "contradicted"
+      ],
+      "reason": "The source conditions immediate dissolution on Supreme Court affirmation of the Fifth Circuit holding.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "khan-attribution-error",
+      "text": "Lina Khan offered firms merger approval in exchange for their social justice policies. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "In a recent Senate Judiciary hear­ ing, Senator Josh Hawley asked FTC Chair Lina Khan if the FTC had conditioned merger reviews on ESG or critical race theories adopted by the firms involved. Khan responded by saying that she turned down deals when firms offered social justice policies in return for approving unlawful deals. In response to a similar question from Senator Tom Cotton, Khan responded that firms try to come to the FTC to get out of antitrust liability by offering climate, diversity, or other forms of ESG-type offerings, but that there is no ESG loophole in the antitrust laws. [14]"
+        }
+      ],
+      "expected_statuses": [
+        "unsupported",
+        "contradicted"
+      ],
+      "reason": "The reported actor/action direction is reversed; Khan says she turned down those offers.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "ngi-wrong-citation",
+      "text": "The source proposes buying at least 64 Next Generation Interceptors. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "In a recent Senate Judiciary hear­ ing, Senator Josh Hawley asked FTC Chair Lina Khan if the FTC had conditioned merger reviews on ESG or critical race theories adopted by the firms involved. Khan responded by saying that she turned down deals when firms offered social justice policies in return for approving unlawful deals. In response to a similar question from Senator Tom Cotton, Khan responded that firms try to come to the FTC to get out of antitrust liability by offering climate, diversity, or other forms of ESG-type offerings, but that there is no ESG loophole in the antitrust laws. [14]"
+        }
+      ],
+      "expected_statuses": [
+        "unsupported",
+        "contradicted"
+      ],
+      "reason": "Claim may appear elsewhere but this cited passage is about merger reviews; corpus-wide truth is not citation support.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "ngi-uncited",
+      "text": "The source proposes buying at least 64 Next Generation Interceptors.",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "1. Buy at least 64 of the Next Generation Interceptor (NGI), which is more advanced than the GBI, for an eventual uniform fleet of interceptors. [44] The Biden Administration currently plans to buy only 20."
+        }
+      ],
+      "expected_statuses": [
+        "uncited"
+      ],
+      "reason": "An available passage cannot silently supply a missing citation.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "financial-note-bowes-link-supported",
+      "text": "Endnote 53’s OTS-to-OCC transfer statement is linked by the body marker numbered 53 to the Consumer Financial Protection Bureau contribution headed Robert Bowes. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "The Office of the Comptroller of the Currency (OCC), Federal Deposit Insurance Corporation, Federal Reserve,\n\nand National Credit Union Administration. Those functions performed by the Office of Thrift Supervision (OTS) prior to Dodd–Frank should be transferred to the OCC since OTS has merged with OCC."
+        }
+      ],
+      "expected_statuses": [
+        "supported"
+      ],
+      "reason": "Agent source audit: note 53 [2499293,2499600), label-excluded quote [2499297,2499600), physical PDF page 876 / printed 843; unique body marker [53] at [2470570,2470574), physical page 872 / printed 839; CFPB contribution heading starts at 2464593 with Robert Bowes byline, physical page 870 / printed 837. This verifies a contribution link, not personal footnote authorship or endorsement of every note.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "financial-note-burton-link-error",
+      "text": "Endnote 53’s OTS-to-OCC transfer statement is linked by its body marker to David R. Burton’s Securities and Exchange Commission and Related Agencies contribution. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "The Office of the Comptroller of the Currency (OCC), Federal Deposit Insurance Corporation, Federal Reserve,\n\nand National Credit Union Administration. Those functions performed by the Office of Thrift Supervision (OTS) prior to Dodd–Frank should be transferred to the OCC since OTS has merged with OCC."
+        }
+      ],
+      "expected_statuses": [
+        "unsupported",
+        "contradicted"
+      ],
+      "reason": "Agent source audit: note 53 [2499293,2499600), label-excluded quote [2499297,2499600), physical PDF page 876 / printed 843; unique body marker [53] at [2470570,2470574), physical page 872 / printed 839; CFPB contribution heading starts at 2464593 with Robert Bowes byline, physical page 870 / printed 837. This verifies a contribution link, not personal footnote authorship or endorsement of every note. The unique marker is in the Bowes CFPB contribution; Burton’s earlier byline and later bibliography entry do not relocate it.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "financial-note-contributor-link-denied",
+      "text": "The cited endnote passage has no source-backed link from note 53 to any named Financial Regulatory Agencies contribution. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "The Office of the Comptroller of the Currency (OCC), Federal Deposit Insurance Corporation, Federal Reserve,\n\nand National Credit Union Administration. Those functions performed by the Office of Thrift Supervision (OTS) prior to Dodd–Frank should be transferred to the OCC since OTS has merged with OCC.\n54. See “Section 1071 of the Dodd–Frank Act” in David R. Burton, “Improving Small Business Access to Capital,”\n\nConsumer Financial Protection Bureau Symposium on Section 1071 of the Dodd–Frank Act, Small Business [Lending Panel, November 6, 2019, https://files.consumerfinance.gov/f/documents/cfpb_burton-written-](https://files.consumerfinance.gov/f/documents/cfpb_burton-written-statement_symposium-section-1071.pdf) [statement_symposium-section-1071.pdf (accessed March 23, 2023).](https://files.consumerfinance.gov/f/documents/cfpb_burton-written-statement_symposium-section-1071.pdf) [55. 5 U.S. "
+        }
+      ],
+      "expected_statuses": [
+        "unsupported",
+        "contradicted"
+      ],
+      "reason": "Agent source audit: note 53 [2499293,2499600), label-excluded quote [2499297,2499600), physical PDF page 876 / printed 843; unique body marker [53] at [2470570,2470574), physical page 872 / printed 839; CFPB contribution heading starts at 2464593 with Robert Bowes byline, physical page 870 / printed 837. This verifies a contribution link, not personal footnote authorship or endorsement of every note. P1 is the retained E27.3.2 span [2499297,2500202): it starts after label 53 and also overlaps notes 54 and 55. The Burton name in note 54 is bibliographic. This deliberately broader denial differs from the historical claim-21 limitation that the excerpt itself does not establish a contributor; do not label that narrower wording a contradiction.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "financial-note-literal-name-absence",
+      "text": "The quoted text of note 53 does not itself name a contributor for the OTS-to-OCC transfer statement. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "The Office of the Comptroller of the Currency (OCC), Federal Deposit Insurance Corporation, Federal Reserve,\n\nand National Credit Union Administration. Those functions performed by the Office of Thrift Supervision (OTS) prior to Dodd–Frank should be transferred to the OCC since OTS has merged with OCC."
+        }
+      ],
+      "expected_statuses": [
+        "supported"
+      ],
+      "reason": "Agent source audit: note 53 [2499293,2499600), label-excluded quote [2499297,2499600), physical PDF page 876 / printed 843; unique body marker [53] at [2470570,2470574), physical page 872 / printed 839; CFPB contribution heading starts at 2464593 with Robert Bowes byline, physical page 870 / printed 837. This verifies a contribution link, not personal footnote authorship or endorsement of every note. The literal 303-character excerpt contains no contributor name. This narrow observation remains true alongside the verified backlink; it does not deny the broader contribution link. The multi-note E27.3.2 passage is intentionally excluded because note 54 names Burton.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    }
+  ]
+}

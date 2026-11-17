@@ -41,7 +41,7 @@
     "required": true
   },
   "verification_regressions": {
-    "path": "Helper_Scripts/Evals/configs/political_pdf_verification_regressions.v2.json",
-    "sha256": "97ef0509f7a25c2e885c8a3262ac393c3e485692e23afd7a73525fe8bf70a6ac"
+    "path": "Helper_Scripts/Evals/configs/political_pdf_verification_regressions.v3.json",
+    "sha256": "c19f78e97d8e47704843517aef9e437f66117045918c2e1be04a5ced7c5c7979"
   }
 }

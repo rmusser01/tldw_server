@@ -31,6 +31,12 @@ def fixture_v2():
 
 
 @pytest.fixture
+def fixture_v3():
+    path = CONFIGS / "political_pdf_verification_regressions.v3.json"
+    return json.loads(path.read_text()), path
+
+
+@pytest.fixture
 def runner_module():
     if sys.platform == "win32":
         pytest.skip("Political PDF CLI requires Unix file locking")
@@ -95,6 +101,62 @@ def test_new_locators_preserve_audited_label_split_and_multi_note_span(fixture_v
     assert "Robert Bowes" not in narrow and "David R. Burton" not in narrow
     assert "David R. Burton" in broad
     assert all(set(row) == {"id", "quote"} for key in NEW_CASES for row in cases[key]["evidence"])
+
+
+def test_positive_footnote_control_reaches_claims_as_one_complete_cited_unit(fixture_v3):
+    from tldw_Server_API.app.core.Claims_Extraction.citation_support import _units
+
+    fixture, _ = fixture_v3
+    case = next(case for case in fixture["cases"] if case["id"] == NEW_CASES[0])
+    units = _units(case["text"])
+    assert len(units) == 1
+    assert units[0]["text"] == case["text"]
+    assert units[0]["evidence_ids"] == ["P1"]
+
+
+def test_v2_retains_the_source_marker_citation_collision(fixture_v2):
+    from tldw_Server_API.app.core.Claims_Extraction.citation_support import _evidence_for_unit, _units
+
+    fixture, _ = fixture_v2
+    case = next(case for case in fixture["cases"] if case["id"] == NEW_CASES[0])
+    units = _units(case["text"])
+    assert [unit["evidence_ids"] for unit in units] == [["53"], ["P1"]]
+    _, _, error = _evidence_for_unit(units[0], {row["id"]: {"text": row["quote"]} for row in case["evidence"]})
+    assert error == "citation_not_resolved"
+
+
+def test_v3_preserves_labels_and_sources_while_correcting_only_marker_wording(fixture_v2, fixture_v3, runner_module):
+    prior, _ = fixture_v2
+    fixture, path = fixture_v3
+    expected = copy.deepcopy(prior)
+    expected["purpose"] = expected["purpose"].replace("Frozen v2 ", "Frozen v3 ")
+    positive = next(case for case in expected["cases"] if case["id"] == NEW_CASES[0])
+    positive["text"] = positive["text"].replace("body marker [53]", "body marker numbered 53")
+    assert fixture == expected
+    fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
+    cases, loaded_fingerprint = runner_module.load_verification_regressions({
+        "source": {"sha256": SOURCE_SHA256},
+        "verification_regressions": {"path": str(path), "sha256": fingerprint},
+    })
+    assert loaded_fingerprint == fingerprint
+    assert cases == expected["cases"]
+
+
+def test_v3_control_grammar_resolves_declared_passages_and_preserves_uncited_control(fixture_v3):
+    from tldw_Server_API.app.core.Claims_Extraction.citation_support import _evidence_for_unit, _units
+
+    fixture, _ = fixture_v3
+    for case in fixture["cases"]:
+        units = _units(case["text"])
+        assert len(units) == 1, case["id"]
+        assert units[0]["text"] == case["text"], case["id"]
+        expected_ids = [] if case["id"] == "ngi-uncited" else [row["id"] for row in case["evidence"]]
+        assert units[0]["evidence_ids"] == expected_ids, case["id"]
+        documents, _, error = _evidence_for_unit(
+            units[0], {row["id"]: {"text": row["quote"]} for row in case["evidence"]},
+        )
+        assert error is None, case["id"]
+        assert [document.id for document in documents] == expected_ids, case["id"]
 
 
 @pytest.mark.asyncio
