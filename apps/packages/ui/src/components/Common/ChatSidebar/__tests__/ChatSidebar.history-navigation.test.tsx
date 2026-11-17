@@ -233,6 +233,38 @@ describe("history-first sidebar navigation", () => {
     },
   );
 
+  it("keeps selected Media and Research Workspace above the collapsed shortcut scroller", async () => {
+    io.values.set("tldw:sidebar:shortcutSelection", [
+      "flashcards", "chat", "media", "research-workspace",
+    ]);
+    renderSidebar({ collapsed: true });
+
+    const flashcards = await screen.findByTestId("chat-sidebar-shortcut-flashcards");
+    const rail = screen.getByTestId("chat-sidebar");
+    const scroller = flashcards.closest(".overflow-y-auto");
+    expect(scroller).toContainElement(screen.getByTestId("chat-sidebar-shortcut-chat"));
+    expect(Array.from(rail.querySelectorAll("[data-testid^='chat-sidebar-shortcut-']"), (button) =>
+      button.getAttribute("data-testid")
+    )).toEqual([
+      "chat-sidebar-shortcut-media",
+      "chat-sidebar-shortcut-research-workspace",
+      "chat-sidebar-shortcut-flashcards",
+      "chat-sidebar-shortcut-chat",
+    ]);
+    expect(scroller).not.toContainElement(screen.getByRole("button", { name: "Media" }));
+    expect(scroller).not.toContainElement(screen.getByRole("button", { name: "Research Workspace" }));
+  });
+
+  it("lets the collapsed rail scroll when both priority shortcuts are omitted", async () => {
+    renderSidebar({ collapsed: true });
+
+    const chat = await screen.findByTestId("chat-sidebar-shortcut-chat");
+    expect(screen.queryByRole("button", { name: "Media" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Research Workspace" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-sidebar")).toHaveClass("overflow-y-auto");
+    expect(chat.closest(".overflow-y-auto")).toHaveClass("min-h-10");
+  });
+
   it("names the global Server total while searching both sources", async () => {
     io.historyTotal = 60;
     renderSidebar();
