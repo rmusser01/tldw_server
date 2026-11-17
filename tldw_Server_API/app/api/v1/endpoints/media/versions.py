@@ -31,6 +31,7 @@ from tldw_Server_API.app.api.v1.schemas.media_response_models import (
     VersionDetailResponse,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.utils.media_analysis import media_source_sha256, read_saved_media_text
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     check_media_exists,
     get_active_document_version_uuid,
@@ -321,8 +322,7 @@ async def create_version(
     try:
         import json as _json
 
-        media_exists = check_media_exists(db, media_id=media_id)
-        if not media_exists:
+        if request_body.content is not None and not check_media_exists(db, media_id=media_id):
             logger.warning(
                 "Cannot create version: Media ID {} not found or deleted.",
                 media_id,
@@ -351,9 +351,17 @@ async def create_version(
                         detail="safe_metadata is not JSON-serializable",
                     ) from exc
 
+            content = request_body.content
+            if content is None:
+                content = read_saved_media_text(db, media_id, owner_user_id=current_user.id)
+                if media_source_sha256(content) != request_body.source_sha256:
+                    raise HTTPException(409, detail={
+                        "code": "media_analysis_source_changed",
+                        "message": "This item changed during analysis. Run the analysis again.",
+                    })
             result_dict = db.create_document_version(
                 media_id=media_id,
-                content=request_body.content,
+                content=content,
                 prompt=request_body.prompt,
                 analysis_content=request_body.analysis_content,
                 safe_metadata=safe_metadata_json,
@@ -369,7 +377,7 @@ async def create_version(
         details = get_full_media_details_rich(
             db=db,
             media_id=media_id,
-            include_content=True,
+            include_content=request_body.content is not None,
             include_versions=True,
             include_version_content=False,
         )

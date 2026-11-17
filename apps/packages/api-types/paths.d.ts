@@ -419,6 +419,7 @@ export type ApiPath =
   | "/api/v1/chat/analytics"
   | "/api/v1/chat/commands"
   | "/api/v1/chat/completions"
+  | "/api/v1/chat/completions/media/{media_analysis_id}"
   | "/api/v1/chat/conversations"
   | "/api/v1/chat/conversations/{conversation_id}"
   | "/api/v1/chat/conversations/{conversation_id}/citations"

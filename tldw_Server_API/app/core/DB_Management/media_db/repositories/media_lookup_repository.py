@@ -123,8 +123,9 @@ class MediaLookupRepository:
         *,
         max_chars: int,
         owner_user_id: str | None = None,
+        prefer_current_content: bool = False,
     ) -> dict[str, Any] | None:
-        """Return bounded text-only fields for standalone Slides generation."""
+        """Return bounded text with the source precedence requested by the caller."""
         if isinstance(media_id, bool) or not isinstance(media_id, int) or not 1 <= media_id <= 2**63 - 1:
             raise InputError("media_id must be a positive 64-bit integer.")  # noqa: TRY003
         if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 1:
@@ -187,11 +188,22 @@ class MediaLookupRepository:
                 NULLIF(TRIM(m.content), '')
             )
         """
+        source_type_column = ""
+        if prefer_current_content:
+            resolved_text = f"""
+                COALESCE(
+                    CASE WHEN NULLIF(TRIM(m.content), '') IS NOT NULL THEN m.content END,
+                    NULLIF(TRIM({transcript_text}), ''),
+                    NULLIF(TRIM(dv.content), '')
+                )
+            """
+            source_type_column = "m.type AS media_type,"
         invalid_expression = "FALSE" if is_postgres else f"COALESCE(INSTR({resolved_text}, CHAR(0)), 0) > 0"
 
         query = f"""
             SELECT
                 m.id AS id,
+                {source_type_column}
                 SUBSTR(
                     {resolved_text},
                     1,

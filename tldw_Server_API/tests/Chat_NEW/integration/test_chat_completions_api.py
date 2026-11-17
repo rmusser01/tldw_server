@@ -1056,3 +1056,61 @@ class TestParameterValidation:
             headers=auth_headers
         )
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("window, stream, expected_status", [
+    (1_000_000, False, 200),
+    (1_000_000, True, 200),
+    (16_384, True, 413),
+])
+def test_saved_media_analysis_dispatches_the_whole_book_only_when_it_fits(
+    monkeypatch, test_client, auth_headers, window, stream, expected_status
+):
+    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+    from tldw_Server_API.app.core.Chat import chat_service, rate_limiter
+
+    monkeypatch.setattr(rate_limiter.get_rate_limiter().config, "per_user_tokens_per_minute", 1_000_000)
+    text = "x" * 1_405_967
+    dispatched = []
+
+    async def media_db(_request, current_user):
+        assert current_user.id == 1
+        yield object()
+
+    def call_provider(**kwargs):
+        dispatched.extend(kwargs["messages_payload"])
+        if stream:
+            return iter([
+                'data: {"choices":[{"delta":{"content":"book analyzed"}}]}\n\n',
+                "data: [DONE]\n\n",
+            ])
+        return {"choices": [{"message": {"role": "assistant", "content": "book analyzed"}}]}
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "0")
+    monkeypatch.setattr(chat_endpoint, "get_media_db_for_user", media_db)
+    monkeypatch.setattr(chat_endpoint, "read_saved_media_text", lambda _db, media_id, **_kwargs: text if media_id == 42 else "")
+    monkeypatch.setattr(chat_endpoint, "resolve_model_context_window", lambda *_args: window)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", call_provider)
+    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", call_provider)
+
+    response = test_client.post(
+        "/api/v1/chat/completions/media/42",
+        headers=auth_headers,
+        json={
+            "model": "openai/gpt-4o-mini", "stream": stream,
+            "messages": [{"role": "user", "content": ""}],
+        },
+    )
+    assert response.status_code == expected_status, response.text
+    if expected_status == 200:
+        assert _message_text(dispatched[-1]) == text
+        metadata = (
+            json.loads(response.text.splitlines()[0].removeprefix("data: "))
+            if stream else response.json()
+        )
+        assert metadata["tldw_media_source_sha256"] == chat_endpoint.media_source_sha256(text)
+    else:
+        assert response.json()["detail"]["code"] == "media_analysis_context_too_large"
+        assert dispatched == []

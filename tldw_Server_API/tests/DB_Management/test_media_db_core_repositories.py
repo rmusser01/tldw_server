@@ -541,6 +541,12 @@ def test_media_source_projection_is_explicit_bounded_and_uses_current_precedence
         assert "limit 1" in sql
         assert "dv.deleted = 0" in sql
         assert "t.deleted = 0" in sql
+
+        edited_text = "  Edited book text.\n"
+        db.apply_media_item_update(media_id=media_id, fields={"content": edited_text})
+        edited = lookup_repo.source_projection_by_id(media_id, max_chars=24, prefer_current_content=True)
+        assert edited["source_text"] == edited_text
+        assert edited["media_type"] == "text"
     finally:
         db.close_connection()
 
