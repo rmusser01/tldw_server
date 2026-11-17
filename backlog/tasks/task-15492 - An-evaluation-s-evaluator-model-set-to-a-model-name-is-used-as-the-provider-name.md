@@ -2,7 +2,7 @@
 id: TASK-15492
 title: An evaluation's evaluator_model set to a model name is used as the provider
   name
-status: To Do
+status: Done
 labels:
 - evaluations
 - bug
@@ -18,27 +18,31 @@ Pre-existing, the same on the server's key. Since TASK-15426 PR C (#3460) the ru
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An `evaluator_model` that is a known provider name (for example `openai`, `anthropic`) still selects that provider, with a test.
-- [ ] #2 An `evaluator_model` that is a model name (for example `gpt-4`) is used as the model, and the provider comes from `api_name`/`provider` or the default, with a test.
-- [ ] #3 A `provider:model` or `provider/model` `evaluator_model` selects both, with a test; the run route's `run_llm_provider` names the same provider the runner uses.
+- [x] #1 An `evaluator_model` that is a known provider name (for example `openai`, `anthropic`) still selects that provider, with a test.
+- [x] #2 An `evaluator_model` that is a model name (for example `gpt-4`) is used as the model, and the provider comes from `api_name`/`provider` or the default, with a test.
+- [x] #3 A `provider:model` or `provider/model` `evaluator_model` selects both, with a test; the run route's `run_llm_provider` names the same provider the runner uses.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Owner decisions 2026-11-16 (plan Docs/superpowers/plans/2026-11-17-evals-runner-cli.md): (1) a label-choice or NLI call that succeeds but returns an unparseable reply keeps accuracy 0.0, since that call is the system under test, not a judge; (2) the known-provider check is the built-in adapter table (ChatProviderRegistry.DEFAULT_ADAPTERS plus canonical_provider_name aliases); (3) --save/--no-save removed from eval custom; (4) an unscored eval custom exits 1; (5) an explicitly named provider stops the prefix:/prefix/ split; (6) eval rag and eval quality runners are filed as TASK-15561, not fixed here; (7) ADR-004 waiver covers this PR. PR #3499.
+Evidence: AC1 the two provider-name rows (regression guard, pass on base); AC2 the model rows incl. the meta-llama/llama-3 split fix; AC3 provider:model, provider/model and the run_llm_provider equality assertion on every row.
+Final review fix (PR #3499, I1): evaluator_model is split once. openrouter/openai/gpt-4o, ollama:mistral:7b and together/Qwen/Qwen2-72B-Instruct keep their provider (3 rows added to the parametrized test: 3 failed before, 19 passed after).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+evaluator_model is a provider only when it names a known one; provider:model and provider/model give both; an explicitly named provider stops the split; run_llm_provider names the same pair as the runner. test_evaluator_model_is_a_provider_only_when_it_names_one: 14 of 16 rows failed on base, 16 passed GREEN; wider set 316 passed. PR #3499.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

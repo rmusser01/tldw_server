@@ -246,7 +246,9 @@ def print_evaluation_results(results: dict[str, Any]):
                 explanation = ""
 
             # Color code scores
-            if isinstance(score, (int, float)):
+            if score is None:
+                score_display = "[dim]unscored[/dim]"
+            elif isinstance(score, (int, float)):
                 if score >= 0.8:
                     score_color = "bold green"
                 elif score >= 0.6:
