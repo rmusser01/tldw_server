@@ -91,10 +91,15 @@ def _is_local(host: str, allowed: frozenset[str]) -> bool:
 def block_live_network() -> Iterator[Attempts]:
     attempts = Attempts()
     allowed = _allowed_names()
+    # monkeypatch is set up before the autouse fixture, so its undo runs after this block exits and can
+    # reinstall the wrappers it saw; once closed they pass straight through.
+    active = True
 
     def resolver(real):
         def resolve(host, *args, **kwargs):
             name = _host(host)
+            if not active:
+                return real(host, *args, **kwargs)
             # A numeric host resolves on the machine; only its connect can leave it.
             if _is_local(name, allowed) or _ip(name) is not None:
                 return real(host, *args, **kwargs)
@@ -106,7 +111,7 @@ def block_live_network() -> Iterator[Attempts]:
     def guarded(real):
         def connect(self, address, *args, **kwargs):
             # A str address is an AF_UNIX path; only (host, port) tuples can leave the machine.
-            if isinstance(address, tuple) and not _is_local(_host(address[0]), allowed):
+            if active and isinstance(address, tuple) and not _is_local(_host(address[0]), allowed):
                 attempts.record("connect", _host(address[0]))
                 raise OSError("live connect blocked by the test")
             return real(self, address, *args, **kwargs)
@@ -119,7 +124,10 @@ def block_live_network() -> Iterator[Attempts]:
         mock.patch.object(socket.socket, "connect", guarded(socket.socket.connect)),
         mock.patch.object(socket.socket, "connect_ex", guarded(socket.socket.connect_ex)),
     ):
-        yield attempts
+        try:
+            yield attempts
+        finally:
+            active = False
 
 
 @lru_cache(maxsize=1)

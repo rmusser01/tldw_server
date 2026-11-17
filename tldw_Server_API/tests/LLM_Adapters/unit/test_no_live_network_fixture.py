@@ -165,3 +165,21 @@ def test_probe_target_swallows_a_live_lookup():
         pytest.skip("runs only as the subprocess target of test_the_session_blocker_errors_a_test_whose_live_lookup_was_swallowed")
     with contextlib.suppress(OSError):
         socket.getaddrinfo("example.com", 80)
+
+
+@pytest.mark.unit
+@pytest.mark.live_network
+def test_a_closed_block_stays_closed_after_a_monkeypatch_undo():
+    """monkeypatch is set up before the autouse fixture, so its undo runs after the block exits and reinstalls what it saved."""
+    original, looked_up = socket.getaddrinfo, []
+    socket.getaddrinfo = lambda host, *_args, **_kwargs: looked_up.append(host) or []
+    patcher = pytest.MonkeyPatch()
+    try:
+        with block_live_network() as attempts:
+            patcher.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: [])
+        patcher.undo()
+        socket.getaddrinfo("blocked.example", 80)
+        assert attempts == []
+        assert looked_up == ["blocked.example"]
+    finally:
+        socket.getaddrinfo = original
