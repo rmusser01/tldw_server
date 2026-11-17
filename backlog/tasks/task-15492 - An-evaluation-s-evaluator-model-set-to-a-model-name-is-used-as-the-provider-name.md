@@ -2,7 +2,7 @@
 id: TASK-15492
 title: An evaluation's evaluator_model set to a model name is used as the provider
   name
-status: To Do
+status: In Progress
 labels:
 - evaluations
 - bug

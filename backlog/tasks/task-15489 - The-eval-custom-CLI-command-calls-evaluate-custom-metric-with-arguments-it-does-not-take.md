@@ -2,7 +2,7 @@
 id: TASK-15489
 title: The eval custom CLI command calls evaluate_custom_metric with arguments it
   does not take
-status: To Do
+status: In Progress
 labels:
 - evaluations
 - cli

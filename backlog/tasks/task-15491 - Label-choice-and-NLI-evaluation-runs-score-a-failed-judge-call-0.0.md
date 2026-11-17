@@ -1,7 +1,7 @@
 ---
 id: TASK-15491
 title: Label-choice and NLI evaluation runs score a failed judge call 0.0
-status: To Do
+status: In Progress
 labels:
 - evaluations
 - bug
