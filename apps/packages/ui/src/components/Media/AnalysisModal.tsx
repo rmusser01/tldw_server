@@ -10,6 +10,7 @@ import { createSafeStorage } from "@/utils/safe-storage"
 import { parseProviderQualifiedModelSelection, resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 import { buildFriendlyErrorMessage, decodeChatErrorPayload } from "@/utils/chat-error-message"
+import { parseBillingLimitError } from "@/utils/billing-error"
 import { DEFAULT_ANALYSIS_SUMMARY_PROMPT } from "@/utils/default-prompts"
 import {
   extractMediaDetailAnalysis,
@@ -554,7 +555,11 @@ function OwnedAnalysisModal({
         return
       }
       if (isUsageLimitError(err)) {
-        messageApi.error(t('mediaPage.analysisUsageLimit', 'This analysis exceeds a usage limit. Check your usage limits or contact support.'))
+        messageApi.error(
+          parseBillingLimitError(err)?.category === 'llm_tokens_month'
+            ? t('mediaPage.analysisMonthlyTokenLimit', 'Your workspace reached its monthly AI token limit. Check your usage limits or contact support.')
+            : t('mediaPage.analysisUsageLimit', 'This analysis exceeds a usage limit. Check your usage limits or contact support.')
+        )
         return
       }
       if (isTimeoutError(err)) {

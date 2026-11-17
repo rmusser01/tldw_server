@@ -233,7 +233,7 @@ describe("AnalysisModal explicit model with the mounted shared owner", () => {
     await waitFor(() => expect(generate).toBeEnabled());
     fireEvent.click(generate);
     await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith(
-      expect.stringMatching(/usage limit.*check your usage/i),
+      expect.stringMatching(/workspace.*monthly ai token limit.*contact support/i),
     ));
     expect(mocks.bgRequest).not.toHaveBeenCalled();
   });

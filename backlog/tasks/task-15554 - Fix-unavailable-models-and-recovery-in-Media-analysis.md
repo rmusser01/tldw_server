@@ -5,7 +5,7 @@ status: In Progress
 created_date: 2026-11-17 05:03
 references:
 - https://github.com/rmusser01/tldw_server/pull/3491
-updated_date: 2026-11-17 05:35
+updated_date: 2026-11-17 05:55
 ---
 
 ## Description
@@ -30,7 +30,7 @@ Reuse provider discovery, readiness, and chat error formatting. ADR-025 governs 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-87 scoped backend and 132 scoped frontend tests passed for the initial change. Bandit found no issues in the edited backend sources. Added a regression for HTTP 402 usage-limit refusals in analysis: report the limit and skip the non-streaming retry.
+87 backend readiness and catalog tests, 100 model service tests and 33 AnalysisModal tests passed. Bandit found no issues in the edited backend files. The 402 regression verifies an explicit workspace monthly token limit message when the response names that category, with no fallback generation retry.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
