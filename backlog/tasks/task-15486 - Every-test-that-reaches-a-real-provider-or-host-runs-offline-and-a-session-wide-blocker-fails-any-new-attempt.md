@@ -2,7 +2,7 @@
 id: TASK-15486
 title: Every test that reaches a real provider or host runs offline, and a session-wide
   blocker fails any new attempt
-status: To Do
+status: In Progress
 labels:
 - tests
 - ci
