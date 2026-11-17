@@ -211,47 +211,17 @@ describe('AnalysisModal stage 3 regression coverage', () => {
     expect(screen.getByDisplayValue('Reviewed key claims')).toBeVisible()
   })
 
-  it('uses the persisted selected model while the catalog is still loading', async () => {
+  it('blocks generation while the saved model is awaiting catalog verification', () => {
     state.selectedModel = 'tldw:custom-openai-api:local-uat-chat'
     mocks.getChatModels.mockImplementation(() => new Promise(() => undefined))
-    mocks.bgStream.mockImplementation(() =>
-      (async function* () {
-        yield streamChunk('Generated analysis')
-        yield 'data: [DONE]'
-      })()
-    )
-    mocks.bgRequest.mockResolvedValue({ processing: { analysis: 'Generated analysis' } })
-
-    render(
-      <AnalysisModal
-        open
-        onClose={vi.fn()}
-        mediaId={42}
-        mediaContent="media body"
-        onAnalysisGenerated={vi.fn()}
-      />
-    )
-
-    const generateButton = screen.getByRole('button', {
-      name: 'Generate Analysis'
-    })
-    expect(generateButton).not.toBeDisabled()
-    fireEvent.click(generateButton)
-
-    await waitFor(() => {
-      expect(mocks.bgStream).toHaveBeenCalledWith(
-        expect.objectContaining({
-          body: expect.objectContaining({
-            model: 'custom-openai-api:local-uat-chat'
-          })
-        })
-      )
-    })
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="media body" />)
+    expect(screen.getByRole('button', { name: 'Generate Analysis' })).toBeDisabled()
+    expect(mocks.bgStream).not.toHaveBeenCalled()
   })
 
   it('normalizes a JSON-serialized persisted model before generation', async () => {
     state.selectedModel = '"tldw:custom-openai-api:local-uat-chat"'
-    mocks.getChatModels.mockImplementation(() => new Promise(() => undefined))
+    mocks.getChatModels.mockResolvedValue([{ id: 'custom-openai-api:local-uat-chat' }])
     mocks.resolveApiProviderForModel.mockResolvedValue('custom-openai-api')
     mocks.bgStream.mockImplementation(() =>
       (async function* () {
@@ -271,10 +241,10 @@ describe('AnalysisModal stage 3 regression coverage', () => {
       />
     )
 
-    expect(screen.getByLabelText('Model')).toHaveAttribute(
+    await waitFor(() => expect(screen.getByLabelText('Model')).toHaveAttribute(
       'data-selected-value',
       'tldw:custom-openai-api:local-uat-chat'
-    )
+    ))
     fireEvent.click(
       screen.getByRole('button', { name: 'Generate Analysis' })
     )
@@ -633,7 +603,7 @@ describe('AnalysisModal stage 3 regression coverage', () => {
   })
 
   it.each([
-    ["provider unavailable", "Failed to generate analysis"],
+    ["provider unavailable", "try again"],
     ["request timed out", "timed out"],
   ])('contains %s locally and leaves analysis retry available', async (failureText, feedback) => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
@@ -654,6 +624,7 @@ describe('AnalysisModal stage 3 regression coverage', () => {
       expect(onGenerated).not.toHaveBeenCalled()
       expect(onClose).not.toHaveBeenCalled()
       expect(mocks.bgRequest.mock.calls.every(([init]) => !init.path.includes('/versions'))).toBe(true)
+      expect(JSON.stringify(mocks.messageError.mock.calls)).not.toContain('private-upstream-sentinel')
       expect(consoleError).not.toHaveBeenCalled()
       expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain('private-upstream-sentinel')
       mocks.bgStream.mockImplementation(async function* () { yield streamChunk('Recovered analysis') })

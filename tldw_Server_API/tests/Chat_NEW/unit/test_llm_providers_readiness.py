@@ -774,6 +774,10 @@ def test_llm_provider_readiness_marks_mlx_chat_supported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """mlx is a supported chat completions provider (TASK-13950.1)."""
+    from importlib import util
+    find_spec = util.find_spec
+    monkeypatch.setattr(util, "find_spec",
+                        lambda name, *a, **kw: object() if name == "mlx_lm" else find_spec(name, *a, **kw))
     parser = _config(
         {
             "API": {},
@@ -791,3 +795,41 @@ def test_llm_provider_readiness_marks_mlx_chat_supported(
     mlx = _provider(response.json(), "mlx")
     assert mlx["readiness_reason_code"] != "unsupported_chat_provider"
     assert mlx["availability"] == "enabled"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("status, reported, expected", [
+    ("unreachable", (), set()),
+    ("unsupported", (), set()),
+    ("ready", (), set()),
+    ("ready", ("installed:latest",), {"installed:latest"}),
+])
+def test_ollama_picker_uses_installed_models_without_opt_in(monkeypatch, status, reported, expected):
+    monkeypatch.delenv("LLM_PROVIDER_READINESS_PROBE_ENDPOINTS", raising=False)
+    parser = _config({"Local-API": {
+        "ollama_api_IP": "http://127.0.0.1:11434/v1",
+        "ollama_model": "gemma3:1b",
+    }})
+    with _client_for_config(monkeypatch, parser) as client:
+        monkeypatch.setattr(llm_providers, "discover_models_from_endpoint",
+                            lambda *_args, **_kwargs: ModelDiscoveryResult(status, reported))
+        result = client.get("/api/v1/llm/models/metadata")
+
+    assert result.status_code == 200
+    assert {m["name"] for m in result.json()["models"]
+            if m["provider"] == "ollama" and m["provider_enabled"]} == expected
+
+
+@pytest.mark.unit
+def test_mlx_picker_excludes_model_if_runtime_missing(monkeypatch):
+    from importlib import util
+    find_spec = util.find_spec
+    monkeypatch.setattr(util, "find_spec",
+                        lambda name, *a, **kw: None if name == "mlx_lm" else find_spec(name, *a, **kw))
+    parser = _config({"API": {}, "Local-API": {}, "MLX": {"mlx_model_path": "example/model"}})
+    with _client_for_config(monkeypatch, parser) as client:
+        result = client.get("/api/v1/llm/models/metadata")
+
+    model = _model(result.json(), "mlx", "example/model")
+    assert model["provider_enabled"] is False
+    assert model["readiness_reason_code"] == "runtime_unavailable"

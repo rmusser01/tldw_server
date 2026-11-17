@@ -1262,6 +1262,8 @@ def get_configured_providers(
                 )
             elif provider_info['type'] == 'commercial':
                 models = _with_pricing_models(provider_name, models)
+            # Ollama can only run installed models. A configured name does not prove installation.
+            probe_endpoint = endpoint_probe_enabled or provider_name == "ollama"
             should_discover = (
                 provider_info['type'] == 'local'
                 and is_configured
@@ -1270,7 +1272,7 @@ def get_configured_providers(
                 and endpoint_policy is not None
                 and endpoint_policy.allowed
                 and bool(provider_info.get('model_discovery'))
-                and (not models or endpoint_probe_enabled)
+                and (not models or probe_endpoint)
             )
             if should_discover:
                 discovery_result = _coerce_model_discovery_result(
@@ -1284,7 +1286,8 @@ def get_configured_providers(
                 )
                 if discovery_result.status == "ready":
                     models = _dedupe_preserve_order(
-                        [*models, *discovery_result.models]
+                        discovery_result.models if provider_name == "ollama"
+                        else [*models, *discovery_result.models]
                     )
 
             provider_readiness = _provider_readiness(
@@ -1307,7 +1310,7 @@ def get_configured_providers(
                 endpoint_policy=endpoint_policy,
                 discovery_result=discovery_result,
                 has_explicit_models=bool(configured_model_names),
-                endpoint_probe_enabled=endpoint_probe_enabled,
+                endpoint_probe_enabled=probe_endpoint,
             )
 
             # Build models and metadata
