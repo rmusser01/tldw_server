@@ -591,3 +591,258 @@ def test_page_annotated_citation_keeps_location_separate_from_evidence_identity(
     checks = verification_metrics(report, text, {"1": "Exact source."})
     assert checks["integrity_valid"] is accepted
     assert checks["all_claims_supported"] is accepted
+
+
+def _finding_run(run_dir: Path, *, stage: str = "summary", missing: bool = False) -> None:
+    """Freeze one exact claim at each summary target or in a verifier request."""
+    text = "Claim [P1]"
+    source = {"id": "P1", "quote": "Exact source.", "claim": "Claim", "source_id": 7,
+        "media_id": 42, "navigation_version": "nav-v1", "start_char": 100, "end_char": 113,
+        "page_spans": [{"page_number": 872, "printed_page_label": "839"}]}
+    receipt = _strict_report(text)
+    receipt["findings"][0]["confidence"] = 0.8
+    receipt["evidence"]["P1"].update({key: source[key] for key in (
+        "source_id", "navigation_version", "start_char", "end_char", "page_spans")})
+    request = {"body": {"text": text, "api_provider": "openai", "model": "test-verifier",
+        "evidence": [source]}}
+    if stage == "summary":
+        manifest = json.loads((run_dir / "manifest.json").read_text())
+        manifest["config"]["models"][0]["model"] = "test-verifier"
+        _json(run_dir / "manifest.json", manifest)
+        batch = {"status": "completed", "verification_text": text, "evidence": [source],
+            "claim_verification": receipt}
+        section = {"title": "Financial Regulatory Agencies", "status": "completed", "content": text,
+            "source_id": 7, "media_id": 42, "node_id": "chapter-27", "navigation_version": "nav-v1",
+            "batches": [batch], "claim_verification": receipt}
+        analysis = {"sections": [section], "synthesis": text, "synthesis_verification": receipt}
+        if missing:
+            section.pop("claim_verification")
+        body = {"artifact": {"id": 9, "version_metadata": {"workspaceClient": {"data": {
+            "sectionAnalysis": analysis}}}}}
+    else:
+        body = None if missing else receipt
+    _json(run_dir / "requests/findings.json", request)
+    _json(run_dir / "responses/findings.json", {"body": body})
+    _event(run_dir, event="started", operation_id="findings", stage=stage,
+        request_path="requests/findings.json")
+    _event(run_dir, operation_id="findings", stage=stage, response_path="responses/findings.json",
+        outcome="partial" if missing else "completed", checks={"passed": True})
+
+
+@pytest.mark.parametrize("stage,count", [("summary", 3), ("qa_verification", 1), ("verification_regression", 1)])
+def test_finding_packet_exposes_exact_claims_and_frozen_source_bindings(run_dir: Path, stage, count):
+    _finding_run(run_dir, stage=stage)
+    report = _report(run_dir)
+    packet = json.loads((run_dir / "semantic-review.json").read_text())
+    item = packet["items"][0]
+    rows = item["finding_reviews"]
+    assert len(rows) == count
+    assert len({row["target"]["location"] for row in rows}) == count
+    for row in rows:
+        assert (row["finding_id"], row["text"], row["start"], row["end"]) == ("C1", "Claim [P1]", 0, 10)
+        assert row["automated_finding"]["confidence"] == 0.8
+        assert row["automated_finding"]["reason"] == "Recorded cited-source verdict"
+        assert row["receipt"]["integrity_valid"] is True
+        source = row["sources"][0]
+        assert source["status"] == "resolved"
+        assert source["quote"] == "Exact source."
+        assert (source["start_char"], source["end_char"], source["source_id"]) == (100, 113, 7)
+        assert source["page_spans"] == [{"page_number": 872, "printed_page_label": "839"}]
+        assert source["attribution_context"] is None
+        assert row["agent_review"] is None and row["human_review"] is None
+        assert len(row["row_sha256"]) == 64
+    assert packet["human_calibration"] == "not_computed"
+    assert report["operations"][0]["latest_outcome"] == "completed"
+
+
+@pytest.mark.parametrize("stage", ["summary", "qa_verification"])
+def test_missing_finding_receipts_remain_explicit_unknowns(run_dir: Path, stage):
+    _finding_run(run_dir, stage=stage, missing=True)
+    report = _report(run_dir)
+    item = json.loads((run_dir / "semantic-review.json").read_text())["items"][0]
+    assert len(item["finding_review_gaps"]) == 1
+    assert item["finding_review_gaps"][0]["status"] == "unknown"
+    assert len(item["finding_reviews"]) == (2 if stage == "summary" else 0)
+    assert report["operations"][0]["latest_outcome"] == "partial"
+
+
+def _decision(row: dict, provenance: str) -> dict:
+    return {"provenance": provenance, "reviewer": "source-reader", "decision": "unsupported",
+        "rationale": "The cited passage omits the qualifier.", "reviewed_at": "2026-11-17T20:00:00Z",
+        "row_sha256": row["row_sha256"]}
+
+
+def test_finding_decisions_preserve_agent_and_human_authority_separately(run_dir: Path):
+    _finding_run(run_dir)
+    _report(run_dir)
+    path = run_dir / "semantic-review.json"
+    packet = json.loads(path.read_text())
+    rows = packet["items"][0]["finding_reviews"]
+    rows[0]["agent_review"] = _decision(rows[0], "agent_source_audit")
+    rows[1]["human_review"] = _decision(rows[1], "human_source_review")
+    _json(path, packet)
+    _report(run_dir)
+    regenerated = json.loads(path.read_text())
+    assert regenerated["items"][0]["finding_reviews"] == rows
+    assert regenerated["human_calibration"] == "not_computed"
+    assert all(value is None for value in regenerated["items"][0]["labels"].values())
+
+
+@pytest.mark.parametrize("mutation", ["text", "source", "receipt", "disappeared", "duplicate", "slot", "hash", "reviewer", "timestamp"])
+def test_invalid_finding_review_cannot_replace_existing_packet(run_dir: Path, mutation):
+    _finding_run(run_dir)
+    _report(run_dir)
+    path = run_dir / "semantic-review.json"
+    packet = json.loads(path.read_text())
+    rows = packet["items"][0]["finding_reviews"]
+    rows[0]["agent_review"] = _decision(rows[0], "agent_source_audit")
+    if mutation == "text":
+        rows[0]["text"] = "Other claim"
+    elif mutation == "source":
+        rows[0]["sources"][0]["quote"] = "Other passage"
+    elif mutation == "receipt":
+        rows[0]["automated_finding"]["reason"] = "Other rationale"
+    elif mutation == "disappeared":
+        rows[0]["finding_id"] = "missing-claim"
+    elif mutation == "duplicate":
+        rows.append(rows[0])
+    elif mutation == "slot":
+        rows[0]["human_review"] = rows[0]["agent_review"]
+    elif mutation == "hash":
+        rows[0]["agent_review"]["row_sha256"] = "0" * 64
+    elif mutation == "reviewer":
+        rows[0]["agent_review"]["reviewer"] = ""
+    else:
+        rows[0]["agent_review"]["reviewed_at"] = "yesterday"
+    _json(path, packet)
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="[Ff]inding|provenance"):
+        _report(run_dir)
+    assert path.read_bytes() == before
+
+
+def test_legacy_parent_review_upgrades_without_inventing_finding_labels(run_dir: Path):
+    _finding_run(run_dir)
+    _report(run_dir)
+    path = run_dir / "semantic-review.json"
+    packet = json.loads(path.read_text())
+    item = packet["items"][0]
+    item.pop("finding_reviews", None)
+    item.pop("finding_review_gaps", None)
+    item.update(status="reviewed", reviewer="legacy-reader", notes="Keep my decision")
+    item["labels"]["faithfulness"] = "fail"
+    _json(path, packet)
+    _report(run_dir)
+    updated = json.loads(path.read_text())["items"][0]
+    assert (updated["status"], updated["reviewer"], updated["labels"]["faithfulness"]) == ("reviewed", "legacy-reader", "fail")
+    assert all(row["human_review"] is None for row in updated["finding_reviews"])
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "different_hash", "conflicting_coordinates"])
+def test_unresolved_finding_sources_are_unknown_not_invented(run_dir: Path, mutation):
+    _finding_run(run_dir, stage="qa_verification")
+    path = run_dir / "requests/findings.json"
+    request = json.loads(path.read_text())
+    if mutation == "missing":
+        request["body"]["evidence"] = []
+    elif mutation == "duplicate":
+        request["body"]["evidence"].append(request["body"]["evidence"][0])
+    elif mutation == "different_hash":
+        request["body"]["evidence"][0]["quote"] = "Other source."
+    else:
+        request["body"]["evidence"][0]["start_char"] = 99
+    _json(path, request)
+    report = _report(run_dir)
+    item = json.loads((run_dir / "semantic-review.json").read_text())["items"][0]
+    source = item["finding_reviews"][0]["sources"][0]
+    assert source["status"] == "unknown"
+    assert source["reason"]
+    assert item["finding_reviews"][0]["receipt"]["integrity_valid"] is False
+    assert item["finding_reviews"][0]["automated_finding"]["status"] == "supported"
+    assert report["operations"][0]["latest_outcome"] == "completed"
+    assert item["finding_reviews"][0]["human_review"] is None
+
+
+@pytest.mark.parametrize("field", ["source_sha256", "fixture_sha256", "git_sha"])
+def test_finding_decision_cannot_follow_changed_frozen_run_identity(run_dir: Path, field):
+    _finding_run(run_dir)
+    _report(run_dir)
+    path = run_dir / "semantic-review.json"
+    packet = json.loads(path.read_text())
+    row = packet["items"][0]["finding_reviews"][0]
+    row["agent_review"] = _decision(row, "agent_source_audit")
+    _json(path, packet)
+    before = path.read_bytes()
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    manifest[field] = "changed-frozen-identity"
+    _json(run_dir / "manifest.json", manifest)
+    with pytest.raises(ValueError, match="changed"):
+        _report(run_dir)
+    assert path.read_bytes() == before
+
+
+def test_missing_response_is_an_explicit_gap_without_fabricated_findings(run_dir: Path):
+    _event(run_dir, event="started", stage="qa_verification")
+    report = _report(run_dir)
+    packet = json.loads((run_dir / "semantic-review.json").read_text())
+    assert report["operations"][0]["latest_outcome"] == "unknown"
+    assert packet["items"] == []
+    assert packet["finding_review_gaps"] == [{"operation_id": "qa-luna-H05", "attempt": 1,
+        "stage": "qa_verification", "status": "unknown", "reason": "response_not_saved"}]
+
+
+def test_duplicate_frozen_finding_identity_is_rejected_before_output(run_dir: Path):
+    _finding_run(run_dir, stage="qa_verification")
+    path = run_dir / "responses/findings.json"
+    response = json.loads(path.read_text())
+    response["body"]["findings"].append(response["body"]["findings"][0])
+    _json(path, response)
+    with pytest.raises(ValueError, match="Duplicate frozen finding"):
+        _report(run_dir)
+    assert not (run_dir / "semantic-review.json").exists()
+
+
+@pytest.mark.parametrize("case", ["matching", "mismatch", "missing_hash", "digest_only"])
+def test_finding_attribution_context_requires_matching_receipt_digest(run_dir: Path, case):
+    import hashlib
+
+    _finding_run(run_dir, stage="qa_verification")
+    request_path, response_path = run_dir / "requests/findings.json", run_dir / "responses/findings.json"
+    request, response = json.loads(request_path.read_text()), json.loads(response_path.read_text())
+    if case != "digest_only":
+        request["body"]["evidence"][0]["attribution_context"] = "Incorrect context" if case == "mismatch" else "Exact context"
+    if case != "missing_hash":
+        response["body"]["evidence"]["P1"]["attribution_context_sha256"] = hashlib.sha256(b"Exact context").hexdigest()
+    _json(request_path, request)
+    _json(response_path, response)
+    original_finding = response["body"]["findings"][0]
+    report = _report(run_dir)
+    row = json.loads((run_dir / "semantic-review.json").read_text())["items"][0]["finding_reviews"][0]
+    source = row["sources"][0]
+    assert source["attribution_context_status"] == ("resolved" if case == "matching" else "unknown")
+    assert source["attribution_context"] == request["body"]["evidence"][0].get("attribution_context")
+    assert source["status"] == ("unknown" if case in {"mismatch", "missing_hash"} else "resolved")
+    assert row["receipt"]["integrity_valid"] is (case in {"matching", "digest_only"})
+    assert row["automated_finding"] == original_finding
+    assert report["operations"][0]["latest_outcome"] == "completed"
+
+
+@pytest.mark.parametrize("field", ["source_sha256", "fixture_sha256"])
+def test_legacy_parent_review_rejects_changed_packet_identity_without_writing(run_dir: Path, field):
+    _finding_run(run_dir)
+    _report(run_dir)
+    path = run_dir / "semantic-review.json"
+    packet = json.loads(path.read_text())
+    parent = packet["items"][0]
+    parent.pop("finding_reviews")
+    parent.pop("finding_review_gaps")
+    parent.update(status="reviewed", reviewer="legacy-reader", notes="Retain my original decision")
+    parent["labels"]["faithfulness"] = "fail"
+    _json(path, packet)
+    before = {name: (run_dir / name).read_bytes() for name in ("semantic-review.json", "report.json", "report.md")}
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    manifest[field] = "changed-frozen-identity"
+    _json(run_dir / "manifest.json", manifest)
+    with pytest.raises(ValueError, match="changed"):
+        _report(run_dir)
+    assert before == {name: (run_dir / name).read_bytes() for name in before}

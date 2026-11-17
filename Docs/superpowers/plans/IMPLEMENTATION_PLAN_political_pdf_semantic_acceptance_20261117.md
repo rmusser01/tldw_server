@@ -62,11 +62,11 @@
 
 **Goal:** Evaluate the repairs without replacing earlier failures or calling agent review human calibration.
 **Success Criteria:** Versioned controls and targeted cases have retained first results; the same-PDF full run is structurally audited; exact per-finding review items preserve decision provenance and reject stale/unlabeled calibration inputs.
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:** existing `Helper_Scripts/Evals/` runner/reporter/configs, `tests/Evaluations/` regressions, versioned political fixtures, `Docs/Development/POLITICAL_PDF_MODEL_EVALS.md` and a dated retest/review report.
 
-- [ ] Extend offline reporting and its tests for exact per-finding samples, independent agent proposals and nullable human labels; preserve decisions only when their evidence fingerprint is unchanged.
+- [x] Extend offline reporting and its tests for exact per-finding samples, independent agent proposals and nullable human labels; preserve decisions only when their evidence fingerprint is unchanged.
 - [ ] Freeze new config/run directories and API/worker/runner revisions. Plan the run, then execute the new frozen verification controls and targeted QA/summary cases with no automatic retry.
 - [ ] Run one full Luna evaluation on the original PDF. Retain first failures, ledger entries and any explicit recovery; audit chapter representation, source spans, Claims verdicts and attribution separately.
 - [ ] Source-review the agreed sample as agent review, keeping known regressions separate from untouched samples. Do not report human calibration scores while labels are absent.

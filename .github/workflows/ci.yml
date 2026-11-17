@@ -1638,6 +1638,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
               tldw_Server_API/tests/Evaluations/test_political_pdf_eval_report.py
               tldw_Server_API/tests/Evaluations/test_political_pdf_eval_workflow.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_footnote_regressions.py
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
@@ -3406,6 +3407,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
               tldw_Server_API/tests/Evaluations/test_political_pdf_eval_report.py
               tldw_Server_API/tests/Evaluations/test_political_pdf_eval_workflow.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_footnote_regressions.py
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
@@ -4979,6 +4981,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
               tldw_Server_API/tests/Evaluations/test_political_pdf_eval_report.py
               tldw_Server_API/tests/Evaluations/test_political_pdf_eval_workflow.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_footnote_regressions.py
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
@@ -6456,6 +6459,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
               tldw_Server_API/tests/Evaluations/test_political_pdf_eval_report.py
               tldw_Server_API/tests/Evaluations/test_political_pdf_eval_workflow.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_footnote_regressions.py
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
@@ -7924,6 +7928,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
               tldw_Server_API/tests/Evaluations/test_political_pdf_eval_report.py
               tldw_Server_API/tests/Evaluations/test_political_pdf_eval_workflow.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_footnote_regressions.py
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py

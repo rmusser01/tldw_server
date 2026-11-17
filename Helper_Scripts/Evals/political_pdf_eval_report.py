@@ -25,7 +25,8 @@ _OUTPUT_NAMES = ("report.json", "report.md", "semantic-review.json")
 _LIMITATIONS = [
     "Structural checks do not measure semantic correctness; human review remains pending.",
     "Strict support verdicts are uncalibrated automated judgments, not human acceptance or real-world truth.",
-    "H05 is a tuned regression, not an untouched held-out case.",
+    "H05 and the Financial attribution controls are development/tuned regressions, not untouched held-out cases.",
+    "Human calibration is not computed; agent source audits are separate proposals, never human labels.",
     "Summary provider-call usage is unavailable through the public Jobs API.",
     "Backend evidence does not certify browser export, offline reading, or cross-server UI restore.",
 ]
@@ -403,7 +404,166 @@ def _markdown(report: dict) -> str:
     return "\n".join(lines)
 
 
-def _preserve_reviews(root: Path, reviews: list[dict]) -> None:
+def _fingerprint(value: Any) -> str:
+    """Bind a JSON value independently of object-key ordering."""
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+
+
+def _finding_sources(finding: dict, evidence: list[dict], receipt: dict) -> list[dict]:
+    """Expose frozen passages, retaining missing or ambiguous bindings as unknown."""
+    provenance = ("source_id", "media_id", "navigation_version", "start_char", "end_char", "page_spans")
+    recorded = receipt.get("evidence")
+    recorded = recorded if isinstance(recorded, dict) else {}
+    cited = finding.get("evidence_ids")
+    cited = [value for value in cited if isinstance(value, str)] if isinstance(cited, list) else []
+    text = finding.get("text")
+    cited = list(dict.fromkeys([*cited, *extract_citation_ids(text if isinstance(text, str) else "")]))
+    result = []
+    for identifier in cited:
+        matches = [item for item in evidence if isinstance(item, dict) and item.get("id") == identifier]
+        saved = recorded.get(identifier)
+        saved = saved if isinstance(saved, dict) else {}
+        source = matches[0] if len(matches) == 1 else {}
+        quote = source.get("quote")
+        quote = quote if isinstance(quote, str) else None
+        reason = "missing_evidence" if not matches else "ambiguous_evidence" if len(matches) > 1 else None
+        if reason is None and (quote is None or saved.get("text_sha256") != hashlib.sha256(quote.encode()).hexdigest()):
+            reason = "unverified_passage"
+        if reason is None and any(key in source and key in saved and source[key] != saved[key] for key in provenance):
+            reason = "conflicting_provenance"
+        context = source.get("attribution_context")
+        context_matches = isinstance(context, str) and saved.get("attribution_context_sha256") == hashlib.sha256(context.encode()).hexdigest()
+        if reason is None and context is not None and not context_matches:
+            reason = "unverified_attribution_context"
+        result.append({"id": identifier, "status": "unknown" if reason else "resolved", "reason": reason,
+            "quote": quote, **{key: source.get(key, saved.get(key)) if len(matches) == 1 else None for key in provenance},
+            "text_sha256": hashlib.sha256(quote.encode()).hexdigest() if quote is not None else None,
+            "receipt_evidence": saved or None,
+            "attribution_context": context,
+            "attribution_context_status": "resolved" if context_matches and reason is None else "unknown"})
+    return result
+
+
+def _finding_reviews(root: Path, record: dict, manifest: dict, evidence_sha256: str) -> tuple[list[dict], list[dict]]:
+    """Expand saved strict receipts without making new claims or source lookups."""
+    from tldw_Server_API.app.core.Research_Workspace.section_verification import batch_claim_text
+
+    response = _read_json(_path(root, record["response_path"]))
+    body = response.get("body") if isinstance(response, dict) else None
+    targets = []
+    if record["stage"] == "summary":
+        artifact = body.get("artifact") if isinstance(body, dict) else None
+        artifact = artifact if isinstance(artifact, dict) else {}
+        analysis = artifact.get("version_metadata", {}).get("workspaceClient", {}).get("data", {}).get("sectionAnalysis", {})
+        analysis = analysis if isinstance(analysis, dict) else {}
+        base = "/body/artifact/version_metadata/workspaceClient/data/sectionAnalysis"
+        configured = next((model for model in manifest["config"].get("models", []) if model.get("key") == record.get("model_key")), {})
+        expected_identity = (configured.get("provider"), configured.get("model"))
+        all_evidence = []
+        for section_index, section in enumerate(analysis.get("sections", [])):
+            location = f"{base}/sections/{section_index}"
+            section_target = {"section": section_index + 1, **{key: section.get(key) for key in (
+                "title", "source_id", "media_id", "node_id", "navigation_version")}}
+            evidence = [{**{key: section[key] for key in ("source_id", "media_id", "navigation_version") if key in section}, **item}
+                for batch in section.get("batches", []) for item in batch.get("evidence", []) if isinstance(item, dict)]
+            all_evidence.extend(evidence)
+            for batch_index, batch in enumerate(section.get("batches", [])):
+                ids = [item.get("id") for item in batch.get("evidence", []) if isinstance(item, dict)]
+                text = batch_claim_text(batch) if all(isinstance(identifier, str) for identifier in ids) else ""
+                targets.append(({**section_target, "kind": "batches", "batch": batch_index + 1,
+                    "location": f"{location}/batches/{batch_index}/claim_verification"}, text,
+                    batch.get("claim_verification"), [item for item in evidence if item.get("id") in ids],
+                    batch.get("verification_text") == text))
+            targets.append(({**section_target, "kind": "chapters", "location": f"{location}/claim_verification"},
+                section.get("content", ""), section.get("claim_verification"), evidence, True))
+        targets.append(({"kind": "overview", "location": f"{base}/synthesis_verification"},
+            analysis.get("synthesis", ""), analysis.get("synthesis_verification"), all_evidence, True))
+    elif record["stage"] in ("qa_verification", "verification_regression"):
+        request = _read_json(_path(root, record["request_path"])) if "request_path" in record else {}
+        submitted = request.get("body", {}) if isinstance(request, dict) else {}
+        expected_identity = (submitted.get("api_provider"), submitted.get("model"))
+        targets.append(({"kind": record["stage"], "location": "/body"}, submitted.get("text", ""),
+            body, submitted.get("evidence", []), True))
+    else:
+        return [], []
+    rows, gaps = [], []
+    for target, text, receipt, evidence, text_matches in targets:
+        findings = receipt.get("findings") if isinstance(receipt, dict) else None
+        if not isinstance(findings, list) or not findings:
+            gaps.append({"target": target, "status": "unknown", "reason": "missing_or_empty_findings"})
+            continue
+        passages = {item["id"]: item["quote"] for item in evidence if isinstance(item, dict)
+            and isinstance(item.get("id"), str) and isinstance(item.get("quote"), str)}
+        metrics = verification_metrics(receipt, text, passages, expected_identity=expected_identity)
+        seen = set()
+        for index, finding in enumerate(findings):
+            if not isinstance(finding, dict) or not isinstance(finding.get("id"), str) or not finding["id"]:
+                raise ValueError("Malformed frozen finding identity")
+            if finding["id"] in seen:
+                raise ValueError("Duplicate frozen finding identity")
+            seen.add(finding["id"])
+            sources = _finding_sources(finding, evidence, receipt)
+            row = {"target": target, "finding_id": finding["id"], "finding_index": index,
+                **{key: finding.get(key) for key in ("text", "start", "end", "evidence_ids")},
+                "automated_finding": finding, "sources": sources,
+                "receipt": {"provider": receipt.get("provider"), "model": receipt.get("model"),
+                    "text_sha256": receipt.get("text_sha256"), "evidence_sha256": receipt.get("evidence_sha256"),
+                    "receipt_sha256": _fingerprint(receipt),
+                    "integrity_valid": bool(metrics["integrity_valid"] and text_matches
+                        and all(source["status"] == "resolved" for source in sources))},
+                "target_text_sha256": hashlib.sha256(text.encode()).hexdigest() if isinstance(text, str) else None,
+                "sources_sha256": _fingerprint(sources), "operation_evidence_sha256": evidence_sha256,
+                "run_identity": {key: manifest.get(key) for key in ("source_sha256", "fixture_sha256", "git_sha")},
+                "operation_id": record["operation_id"], "attempt": record["attempt"]}
+            row.update(row_sha256=_fingerprint(row), agent_review=None, human_review=None)
+            rows.append(row)
+    return rows, gaps
+
+
+def _preserve_finding_reviews(previous: dict, current: dict) -> None:
+    """Preserve independently authored decisions only for identical, valid rows."""
+    old_rows = previous.get("finding_reviews", [])
+    if not isinstance(old_rows, list):
+        raise ValueError("Malformed finding reviews")
+    by_identity = {}
+    for row in old_rows:
+        if (not isinstance(row, dict) or not isinstance(row.get("target"), dict)
+            or not isinstance(row["target"].get("location"), str) or not isinstance(row.get("finding_id"), str)):
+            raise ValueError("Malformed finding review identity")
+        identity = (row["target"]["location"], row["finding_id"])
+        if identity in by_identity:
+            raise ValueError("Duplicate finding review identity")
+        content = {key: value for key, value in row.items() if key not in ("row_sha256", "agent_review", "human_review")}
+        if row.get("row_sha256") != _fingerprint(content):
+            raise ValueError("Finding review content changed")
+        for slot, provenance in (("agent_review", "agent_source_audit"), ("human_review", "human_source_review")):
+            decision = row.get(slot)
+            if decision is None:
+                continue
+            if (not isinstance(decision, dict) or decision.get("provenance") != provenance
+                or decision.get("row_sha256") != row["row_sha256"]
+                or any(not isinstance(decision.get(key), str) or not decision[key].strip()
+                       for key in ("reviewer", "decision", "rationale", "reviewed_at"))):
+                raise ValueError("Malformed finding review provenance")
+            try:
+                timestamp = datetime.fromisoformat(decision["reviewed_at"])
+            except ValueError as exc:
+                raise ValueError("Malformed finding review provenance timestamp") from exc
+            if timestamp.utcoffset() != timedelta(0):
+                raise ValueError("Malformed finding review provenance timestamp")
+        by_identity[identity] = row
+    for row in current["finding_reviews"]:
+        old = by_identity.pop((row["target"]["location"], row["finding_id"]), None)
+        if old is not None:
+            if old["row_sha256"] != row["row_sha256"]:
+                raise ValueError("Previously reviewed finding evidence changed")
+            for slot in ("agent_review", "human_review"):
+                row[slot] = old.get(slot)
+    if by_identity:
+        raise ValueError("Previously reviewed findings disappeared")
+
+
+def _preserve_reviews(root: Path, reviews: list[dict], manifest: dict) -> None:
     """Keep human decisions only for the exact same frozen evidence."""
     path = _path(root, "semantic-review.json")
     if not path.exists():
@@ -411,6 +571,8 @@ def _preserve_reviews(root: Path, reviews: list[dict]) -> None:
     existing = _read_json(path)
     if not isinstance(existing, dict) or existing.get("schema_version") != 1 or not isinstance(existing.get("items"), list):
         raise ValueError("Malformed existing semantic review packet")
+    if any(existing.get(key) != manifest.get(key) for key in ("source_sha256", "fixture_sha256")):
+        raise ValueError("Previously reviewed source or fixture identity changed")
     by_attempt = {}
     for item in existing["items"]:
         if not isinstance(item, dict) or not isinstance(item.get("operation_id"), str) or type(item.get("attempt")) is not int:
@@ -424,6 +586,7 @@ def _preserve_reviews(root: Path, reviews: list[dict]) -> None:
         if previous is not None:
             if previous.get("evidence_sha256") != item["evidence_sha256"]:
                 raise ValueError("Previously reviewed evidence changed")
+            _preserve_finding_reviews(previous, item)
             for key in ("status", "labels", "reviewer", "notes"):
                 if key in previous:
                     item[key] = previous[key]
@@ -454,6 +617,8 @@ def write_report(run_dir: Path) -> dict:
             frozen = {"case": case, "identity": {key: record.get(key) for key in _IDENTITY},
                 "files": {key: hashlib.sha256(_path(root, record[key]).read_bytes()).hexdigest()
                     for key in _PATHS if key in record}}
+            evidence_sha256 = hashlib.sha256(json.dumps(frozen, sort_keys=True).encode()).hexdigest()
+            finding_reviews, finding_gaps = _finding_reviews(root, record, manifest, evidence_sha256)
             reviews.append({"operation_id": record["operation_id"], "attempt": record["attempt"],
                 **{key: record[key] for key in (*_IDENTITY, *_PATHS) if key in record},
                 "outcome": row["outcome"], "question": case.get("question"),
@@ -461,19 +626,26 @@ def write_report(run_dir: Path) -> dict:
                 "regression_expected_statuses": case.get("expected_statuses"), "regression_reason": case.get("reason"),
                 "source_pages": case.get("source_pages", []),
                 "label_provenance": case.get("label_provenance"),
-                "case_note": "H05 is a tuned regression" if case.get("id") == "H05" else "Frozen case",
-                "evidence_sha256": hashlib.sha256(json.dumps(frozen, sort_keys=True).encode()).hexdigest(),
+                "case_note": ("H05 is a tuned regression" if case.get("id") == "H05" else
+                    "Development regression; not untouched held-out data" if record["stage"] == "verification_regression" else "Frozen case"),
+                "evidence_sha256": evidence_sha256, "finding_reviews": finding_reviews, "finding_review_gaps": finding_gaps,
                 "status": "pending", "labels": dict.fromkeys((
                     "faithfulness", "author_attribution", "disagreement", "completeness"))})
     report = {"schema_version": 1,
         **{key: manifest.get(key) for key in ("source_sha256", "fixture_sha256", "git_sha")},
         "operations": list(operations.values()), "limitations": _LIMITATIONS}
     report["models"] = _model_comparisons(report["operations"], manifest.get("config", {}))
-    _preserve_reviews(root, reviews)
+    _preserve_reviews(root, reviews, manifest)
     outputs = {"report.json": json.dumps(report, indent=2, ensure_ascii=False) + "\n",
         "report.md": _markdown(report),
         "semantic-review.json": json.dumps({"schema_version": 1, "source_sha256": manifest.get("source_sha256"),
-            "fixture_sha256": manifest.get("fixture_sha256"), "items": reviews}, indent=2, ensure_ascii=False) + "\n"}
+            "fixture_sha256": manifest.get("fixture_sha256"), "human_calibration": "not_computed",
+            "review_limitations": ["Finding rows enumerate saved automated findings, not completed source audits.",
+                "Agent proposals and human decisions are independent; no calibration scores are computed."],
+            "finding_review_gaps": [{**{key: record[key] for key in ("operation_id", "attempt", "stage")},
+                "status": "unknown", "reason": "response_not_saved"} for record in records
+                if record["stage"] in ("qa_verification", "verification_regression", "summary") and "response_path" not in record],
+            "items": reviews}, indent=2, ensure_ascii=False) + "\n"}
     # Replace finished files; truncating an existing hard link could erase input evidence.
     with TemporaryDirectory(dir=root, prefix=".report-") as temporary:
         for name, content in outputs.items():
