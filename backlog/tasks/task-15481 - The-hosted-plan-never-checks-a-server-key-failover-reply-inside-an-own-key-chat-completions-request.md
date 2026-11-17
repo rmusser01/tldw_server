@@ -2,7 +2,7 @@
 id: TASK-15481
 title: The hosted plan never checks a server-key failover reply inside an own-key
   /chat/completions request
-status: In Progress
+status: Done
 labels:
 - quotas
 - billing
@@ -17,28 +17,30 @@ Follow-up of TASK-13955 (ADR-083), from its final review (declined to judge) and
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The owner chooses, and the notes and ADR-083 record it: check the hosted plan at the call, refuse provider fallback for an own-key request when the plan applies, or accept and document the gap
-- [ ] #2 If a check or a refusal is chosen: an own-key /chat/completions request from an org over its plan gets no server-key failover reply, stream and non-stream, by any of the four failover paths, with tests; if the refusal is chosen, the notes and docs say that own-key requests under a hosted plan never fail over (if the check at the call is chosen, an org within its plan keeps failover)
-- [ ] #3 Docs/Operations/Usage_Quotas.md and ADR-083 (and its Docs/Published mirror) state the behaviour
+- [x] #1 The owner chooses, and the notes and ADR-083 record it: check the hosted plan at the call, refuse provider fallback for an own-key request when the plan applies, or accept and document the gap
+- [x] #2 If a check or a refusal is chosen: an own-key /chat/completions request from an org over its plan gets no server-key failover reply, stream and non-stream, by any of the four failover paths, with tests; if the refusal is chosen, the notes and docs say that own-key requests under a hosted plan never fail over (if the check at the call is chosen, an org within its plan keeps failover)
+- [x] #3 Docs/Operations/Usage_Quotas.md and ADR-083 (and its Docs/Published mirror) state the behaviour
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/superpowers/plans/2026-11-16-hosted-plan-own-key-failover.md. Owner decision (AC #1), 2026-11-16: option B, the plan is asked at the boundary and fallback is refused for an own-key request only when the plan would refuse a server-key call. Fail-closed on a non-HTTP billing error (owner, 2026-11-16). AC #2 read as: no failover reply on another key for an org over its plan, by any of the four paths, and an org within its plan keeps failover (AC text unchanged). The within-plan failover reply stays out of the hot cache, as documented in the ADR-083 amendment.
+Verification (2026-11-16): RED on dev with the test half: 6 failed (5 over-plan + broken-plan), 5 passed (within-plan), 8 deselected (plan: 5 failed/5 passed + broken-plan 1 failed). GREEN: quota file 19 passed, netlines 0. Ratchet: create_chat_completion 2902/2908, execute_streaming_call 1542/1545, _execute_non_stream_call_impl 1054/1054; function-size, endpoint-monkeypatch and test-quality ratchets 62 passed; test_quality_triage --enforce exit 0. Wider set: Billing+Usage 21 passed; tests/Docs 214 passed; Chat boundary+Audio hotwords 49 passed; test_chat_endpoint_simplified 223 passed 1 skipped 2 failed under load (test_concurrent_empty_and_valid_streams_keep_usage_accounting_isolated, test_stream_prime_bounds_endless_metadata_and_closes[elapsed]), both pass on rerun (4 passed); tests/lint+CI 1374 passed, 24 failed: 22 workflow-file assertions (ubuntu-latest not in supported images; no workflow file touched) and the 2 known coverage-module env failures; test_runtime_package_discovery.py ignored (no setuptools). All runs netlines 0. shard coverage OK, check_backlog_task_ids exit 0.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+An own-key /chat/completions request with fallback on now asks the hosted plan at the boundary whether it would refuse a server-key call; if so provider fallback is off for the request (covers all four failover paths). Within-plan orgs keep failover; a billing lookup error withholds failover (fail-closed). Documented in the ADR-083 amendment (2026-11-16) and Usage_Quotas.md; 11 new tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
