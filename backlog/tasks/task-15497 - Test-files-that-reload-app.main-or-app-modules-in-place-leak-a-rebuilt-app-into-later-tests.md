@@ -2,7 +2,7 @@
 id: TASK-15497
 title: Test files that reload app.main or app modules in place leak a rebuilt app
   into later tests
-status: To Do
+status: In Progress
 labels:
 - tests
 - ci
