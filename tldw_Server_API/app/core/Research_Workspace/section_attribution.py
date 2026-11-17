@@ -275,7 +275,10 @@ def build_section_attribution_contexts(section: dict[str, Any], snapshot: dict[s
     return contexts
 
 
-def render_attribution_context(contexts: list[dict[str, Any]], start: int | None = None, end: int | None = None) -> str:
+def render_attribution_context(
+    contexts: list[dict[str, Any]], start: int | None = None, end: int | None = None,
+    *, evidence_by_id: dict[str, Any] | None = None,
+) -> str:
     """Project attribution fields only; saved provenance IDs are not model citations."""
     prompt_fields = (
         "type", "title", "start_char", "end_char", "heading_start_char", "heading_end_char",
@@ -296,6 +299,25 @@ def render_attribution_context(contexts: list[dict[str, Any]], start: int | None
         projected = {key: context[key] for key in prompt_fields if key in context}
         if notes := notes_by_start.get(context["start_char"]):
             projected.update(footnotes=notes, footnote_scope=context["footnote_scope"])
+            ranges = {}
+            for citation_id, item in (evidence_by_id or {}).items():
+                if not isinstance(citation_id, str) or not isinstance(item, dict):
+                    continue
+                left, right = item.get("start_char"), item.get("end_char")
+                if (
+                    not re.fullmatch(r"E\d+\.\d+\.\d+", citation_id)
+                    or type(left) is not int or type(right) is not int or not 0 <= left < right
+                    or not isinstance(item.get("text"), str) or len(item["text"]) != right - left
+                    or item.get("resolution_error")
+                    or any(item.get(key) != context.get(key) or item.get(key) is None
+                           for key in ("source_id", "media_id", "navigation_version"))
+                    or not any(note["status"] == "linked" and note["start_char"] < right and note["end_char"] > left
+                               for note in notes)
+                ):
+                    continue
+                ranges[citation_id] = [left, right]
+            if ranges:
+                projected["evidence_ranges"] = ranges
         if context.get("footnotes_omitted"):
             projected.update(footnotes_omitted=True, footnote_scope="unresolved")
         selected.append(projected)
@@ -307,6 +329,12 @@ def render_attribution_context(contexts: list[dict[str, Any]], start: int | None
                                        for note in context["author_notes"]]
     has_footnotes = any(context.get("footnotes") or context.get("footnotes_omitted") for context in selected)
     instruction = _CONTEXT_INSTRUCTION + (_FOOTNOTE_INSTRUCTION if has_footnotes else "")
+    has_bindings = any(context.get("evidence_ranges") for context in selected)
+    if has_bindings:
+        instruction += (
+            "evidence_ranges maps currently supplied saved evidence IDs to exact [start_char,end_char] source ranges. "
+            "Match each range to its overlapping notes; preserve verified contribution links separately from personal authorship or endorsement.\n"
+        )
     rendered = instruction + json.dumps(selected, ensure_ascii=False, separators=(",", ":") if has_footnotes else None)
     if len(rendered) > _RENDER_CHARS:
         for context in selected:
@@ -326,6 +354,13 @@ def render_attribution_context(contexts: list[dict[str, Any]], start: int | None
         rendered = (instruction + "Compact footnotes: note=[start_char,end_char,label_quote]; "
                     "body_marker=[start_char,end_char,quote]. Label end is start plus label_quote length.\n"
                     + json.dumps(selected, ensure_ascii=False, separators=(",", ":")))
+    if len(rendered) > _RENDER_CHARS and has_bindings:
+        for context in selected:
+            if "footnotes" in context:
+                context.pop("footnotes")
+                context.pop("evidence_ranges", None)
+                context.update(footnotes_omitted=True, footnote_scope="unresolved")
+        rendered = _CONTEXT_INSTRUCTION + _FOOTNOTE_INSTRUCTION + json.dumps(selected, ensure_ascii=False, separators=(",", ":"))
     if len(rendered) > _RENDER_CHARS:
         return _CONTEXT_INSTRUCTION + _OMITTED_CONTEXT
     return rendered

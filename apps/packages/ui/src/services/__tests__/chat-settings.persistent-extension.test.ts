@@ -76,3 +76,57 @@ it.each([false, true])(
     })
   },
 )
+
+it("keeps an absent local conversation read nonblocking without creating or erasing settings", async () => {
+  const values = { "chatSettings:local:missing": JSON.stringify({ schemaVersion: 2, updatedAt: "2026-11-17T00:00:00Z", authorNote: "Retain this orphaned record" }) }
+  const before = structuredClone(values)
+  vi.stubGlobal("browser", { storage: { local: {
+    get: async () => values,
+    set: async (patch: object) => { Object.assign(values, patch) }
+  } } })
+  const error = vi.spyOn(console, "error").mockImplementation(() => undefined)
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+  const { getChatSettingsForKey } = await import("../chat-settings")
+
+  expect(await getChatSettingsForKey("local:missing")).toBeNull()
+  expect(error).not.toHaveBeenCalled()
+  expect(warning).toHaveBeenCalledOnce()
+  expect(await memory.chatHistories.get("missing")).toBeUndefined()
+  expect(values).toEqual(before)
+})
+
+it("still refuses writes and strict fork reads for an absent local conversation", async () => {
+  const values: Record<string, unknown> = {}
+  vi.stubGlobal("browser", { storage: { local: {
+    get: async () => values,
+    set: async (patch: object) => { Object.assign(values, patch) }
+  } } })
+  vi.spyOn(console, "error").mockImplementation(() => undefined)
+  const { saveChatSettingsForKey, withPlainLocalForkSettings } = await import("../chat-settings")
+
+  await expect(withPlainLocalForkSettings("missing", async () => "must not fork")).rejects.toThrow("fork_chat_settings_unavailable")
+  expect(await saveChatSettingsForKey("local:missing", { schemaVersion: 2, updatedAt: "2026-11-17T00:00:00Z" })).toBe(false)
+  expect(await memory.chatHistories.get("missing")).toBeUndefined()
+  expect(values).toEqual({})
+})
+
+it.each([
+  ["local:history-1", "storage failed"],
+  ["scratch", "missing_conversation"]
+])("retains error diagnostics for %s storage faults", async (chatKey, message) => {
+  await memory.chatHistories.update("history-1", {
+    local_settings_guard: { initialized: true, revision: "existing", pending: [] }
+  })
+  const backingStorage = {
+    get: async () => { throw new Error(message) },
+    set: async () => undefined
+  }
+  vi.stubGlobal("browser", { storage: { local: backingStorage, sync: backingStorage } })
+  const error = vi.spyOn(console, "error").mockImplementation(() => undefined)
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+  const { getChatSettingsForKey } = await import("../chat-settings")
+
+  expect(await getChatSettingsForKey(chatKey)).toBeNull()
+  expect(error).toHaveBeenCalledWith("Failed to load chat settings", expect.any(Error))
+  expect(warning).not.toHaveBeenCalled()
+})

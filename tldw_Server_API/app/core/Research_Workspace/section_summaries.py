@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import re
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from functools import partial
 from typing import Any
@@ -524,16 +525,30 @@ def _overview_checklist(
     )
 
 
+def _synthesis_evidence(section: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    """Exclude duplicate saved IDs from already source-validated evidence."""
+    counts = Counter(item["id"] for batch in section["batches"] for item in batch.get("evidence", []))
+    return {key: value for key, value in evidence.items() if counts[key] == 1}
+
+
 async def _synthesize_sections(
     parts: list[str], instruction: str, *, complete: Callable[..., Awaitable[str]],
     report_progress: Callable[[float, str], Any], progress_message: str | None = None,
     stage: str = "section_synthesis", section_number: int | None = None, attribution_context: str = "",
+    attribution_contexts: list[dict[str, Any]] | None = None, attribution_evidence: dict[str, Any] | None = None,
     overview_sections: list[dict[str, Any]] | None = None, overview_evidence: dict[str, Any] | None = None,
 ) -> str:
     """Reduce every supplied portion within the existing bounded synthesis budget."""
     call_context = {"stage": stage, "section_index": section_number, "reduction_round": 0, "reduction_group": 0}
     # Renderer-bounded source context survives independently of model compression.
-    context_suffix = "\n\n" + attribution_context if attribution_context else ""
+    def context_suffix(supplied_parts: list[str]) -> str:
+        context = attribution_context
+        if attribution_contexts is not None:
+            supplied_ids = set(re.findall(r"\bE\d+\.\d+\.\d+\b", "\n".join(supplied_parts)))
+            context = render_attribution_context(attribution_contexts, evidence_by_id={
+                key: value for key, value in (attribution_evidence or {}).items() if key in supplied_ids
+            })
+        return "\n\n" + context if context else ""
     if overview_sections is not None:
         for index, section in enumerate(overview_sections):
             if section["status"] == "completed":
@@ -563,7 +578,7 @@ async def _synthesize_sections(
                     f"{progress_message} Reduction {reduction_round}, group {group_index} of {len(groups)}.",
                 )
             checklist, required = _overview_checklist(group, overview_sections, overview_evidence) if overview_sections is not None else ("", set())
-            result = await complete(build_section_reduction_prompt(group) + context_suffix + checklist, reduction=True, supplied_parts=group,
+            result = await complete(build_section_reduction_prompt(group) + context_suffix(group) + checklist, reduction=True, supplied_parts=group,
                 call_context={**call_context, "reduction_round": reduction_round, "reduction_group": group_index})
             if overview_sections is not None:
                 _require_overview_coverage(result, overview_sections, overview_evidence, required_indexes=required)
@@ -574,7 +589,7 @@ async def _synthesize_sections(
     if progress_message:
         report_progress(95, progress_message + " Final synthesis.")
     checklist = _overview_checklist(parts, overview_sections, overview_evidence, final=True)[0] if overview_sections is not None else ""
-    return await complete(instruction + context_suffix + checklist + "\n\n" + "\n\n".join(parts), supplied_parts=parts, call_context=call_context)
+    return await complete(instruction + context_suffix(parts) + checklist + "\n\n" + "\n\n".join(parts), supplied_parts=parts, call_context=call_context)
 
 
 def _section_checkpoint_updates(
@@ -871,7 +886,8 @@ async def process_section_summary(
                     f"Summarize all portions of {section['title']}. Preserve named authors, disagreements, qualifications and evidence IDs. "
                     + _FAITHFULNESS_INSTRUCTION,
                     section_number=section_index + 1,
-                    attribution_context=render_attribution_context(section["attribution_contexts"]),
+                    attribution_contexts=section["attribution_contexts"],
+                    attribution_evidence=_synthesis_evidence(section, evidence),
                 )
                 section["status"] = "completed"
                 await verify(section, "claim_verification", section["content"], evidence, section["title"])

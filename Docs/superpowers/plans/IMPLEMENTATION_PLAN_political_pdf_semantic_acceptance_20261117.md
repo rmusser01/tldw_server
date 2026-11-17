@@ -67,10 +67,13 @@
 **Files:** existing `Helper_Scripts/Evals/` runner/reporter/configs, `tests/Evaluations/` regressions, versioned political fixtures, `Docs/Development/POLITICAL_PDF_MODEL_EVALS.md` and a dated retest/review report.
 
 - [x] Extend offline reporting and its tests for exact per-finding samples, independent agent proposals and nullable human labels; preserve decisions only when their evidence fingerprint is unchanged.
-- [ ] Freeze new config/run directories and API/worker/runner revisions. Plan the run, then execute the new frozen verification controls and targeted QA/summary cases with no automatic retry.
+- [x] Freeze new config/run directories and API/worker/runner revisions. Plan the run, then execute the new frozen verification controls and targeted QA/summary cases with no automatic retry.
+- [ ] Repair the Job 55 evidence-ID/source-range handoff exposed by the targeted run. Bind only validated note-overlapping evidence allowed in each chapter reduction/final call, preserve context budgets and retry work, add RED→GREEN controls and independent review, then freeze a new runtime for explicit retesting.
 - [ ] Run one full Luna evaluation on the original PDF. Retain first failures, ledger entries and any explicit recovery; audit chapter representation, source spans, Claims verdicts and attribution separately.
 - [ ] Source-review the agreed sample as agent review, keeping known regressions separate from untouched samples. Do not report human calibration scores while labels are absent.
 - [ ] Exercise review/save/reload/export of new findings and record NN/g issues and verification limits. Publish tested changes/results to the existing draft PR; follow CI to terminal.
+
+**Interim evidence:** V3 controls 12/12 pass; the preserved v2 first failure is a literal `[53]` fixture parsing collision. Job 55 completes two chapters/five portions and cites 2/2 in its overview but fails strict semantic acceptance. Actual target scope is Federal Reserve/Financial, not the preparatory EXIM description; the frozen full configuration includes all 30 chapters. Agent review covers 12 controls, all 25 targeted QA findings, and 34 Financial/overview units; human labels remain null. A browser-saved agent review survives reload and Markdown export, with original content, section analysis and eight reports unchanged. Details: `Docs/Reviews/POLITICAL_PDF_SEMANTIC_ACCEPTANCE_2026_11_17.md`. Full evaluation, full export and current-head CI qualification remain pending.
 
 ## Stage 4: Destination indexing and participant acceptance
 

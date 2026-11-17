@@ -1,0 +1,8 @@
+task_id,task,outcome_unassisted_assisted_failed_not_attempted,started_at,finished_at,hands_on_seconds,system_wait_seconds,assistance_exact_words,observed_errors_or_hesitation,participant_confidence_1_to_5,participant_quote,evidence_path,existing_or_new_finding_id,nng_heuristic,severity_0_to_4,frequency,impact,persistence,observer_notes
+1,"Add the PDF, explain its processing state, and return after refresh.",,,,,,,,,,,,,,,,,
+2,"Find the Education chapter summary, state its main proposal, and open its supporting physical PDF page.",,,,,,,,,,,,,,,,,
+3,"Ask the FBI supervision question, identify both receiving offices, and check the cited passage.",,,,,,,,,,,,,,,,,
+4,Compare the two EXIM contributions while keeping each author’s argument separate.,,,,,,,,,,,,,,,,,
+5,"Flag an unsupported overview claim, save a correction, reopen it, and distinguish the reviewer correction from the model draft.",,,,,,,,,,,,,,,,,
+6,"Add an answer to Notes, explain whether it is only a draft, then save and reopen the Note.",,,,,,,,,,,,,,,,,
+7,"Export the complete research pack, read it offline, and restore it on a second server. Check that source citations still open the correct PDF.",,,,,,,,,,,,,,,,,

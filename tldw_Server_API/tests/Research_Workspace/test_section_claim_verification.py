@@ -80,6 +80,16 @@ async def test_note_links_reach_extraction_chapter_and_every_verification_stage(
         assert '"label_quote":"53. "' in evidence["E1.1.1"]["attribution_context"]
     section = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]
     assert section["batches"][0]["evidence"][0]["author"] == ""
+    chapter_prompt = next(value for value in prompts if value.startswith("Summarize all portions"))
+    projected = json.loads(next(line for line in chapter_prompt.splitlines() if line.startswith('[{"type":')))
+    reference = next(item for item in projected if item["type"] == "reference")
+    assert reference["evidence_ranges"] == {"E1.1.1": [0, len(snapshot["content"])]}
+    overview_prompt = next(value for value in prompts if value.startswith("Synthesize the completed"))
+    assert "The note is linked to the Bowes contribution [E1.1.1]." in overview_prompt
+    assert "evidence_ranges" not in overview_prompt
+    prompts.clear()
+    await mod.process_section_summary(**options)
+    assert prompts == []
 
 
 @pytest.fixture

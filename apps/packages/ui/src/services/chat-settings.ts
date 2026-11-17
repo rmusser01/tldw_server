@@ -907,7 +907,12 @@ export const getChatSettingsForKey = async (chatKey: string): Promise<ChatSettin
   try {
     return await readChatSettingsForKey(chatKey)
   } catch (error) {
-    console.error("Failed to load chat settings", error)
+    if (chatKey.startsWith("local:") && error instanceof Error && error.message === "missing_conversation") {
+      // Cached local selections can outlive their history; strict writes and fork reads still reject them.
+      console.warn("Local conversation settings are unavailable", error)
+    } else {
+      console.error("Failed to load chat settings", error)
+    }
     return null
   }
 }
