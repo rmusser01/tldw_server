@@ -70,7 +70,8 @@ def _units(text: str, max_units: int | None = None) -> list[dict[str, Any]]:
 
 
 def _evidence_for_unit(unit: dict[str, Any], evidence: Mapping[str, Any]) -> tuple[list[Document], str, str | None]:
-    documents, contexts = [], []
+    documents = []
+    contexts: dict[str, dict[str, list[int] | None]] = {}
     for citation_id in unit["evidence_ids"]:
         item = evidence.get(citation_id)
         if not _ID.fullmatch(citation_id) or not isinstance(item, Mapping):
@@ -80,9 +81,16 @@ def _evidence_for_unit(unit: dict[str, Any], evidence: Mapping[str, Any]) -> tup
             return [], "", str(item.get("resolution_error") or "citation_not_resolved")
         documents.append(Document(id=citation_id, content=text, metadata={}, score=0.0))
         context = item.get("attribution_context")
-        if isinstance(context, str) and context and context not in contexts:
-            contexts.append(context)
-    context_text = "\n\n".join(contexts)
+        if isinstance(context, str) and context:
+            start, end = item.get("start_char"), item.get("end_char")
+            valid_range = type(start) is int and type(end) is int and 0 <= start < end and end - start == len(text)
+            contexts.setdefault(context, {})[citation_id] = [start, end] if valid_range else None
+    context_text = "\n\n".join(
+        "CITED PASSAGE CONTEXT BINDINGS (use the following context only for these cited IDs; "
+        "source ranges are [start, end), null means unavailable):\n"
+        + json.dumps(bindings, ensure_ascii=False, separators=(",", ":")) + "\n" + context
+        for context, bindings in contexts.items()
+    )
     if sum(len(document.content) for document in documents) + len(context_text) > LIMITS["max_evidence_chars"]:
         return [], "", "cited_evidence_limit"
     return documents, context_text, None

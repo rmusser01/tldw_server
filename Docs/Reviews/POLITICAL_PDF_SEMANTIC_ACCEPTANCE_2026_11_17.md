@@ -4,7 +4,7 @@ Tracking: TASK-15505.12 and TASK-15505.6. [Draft PR #3480](https://github.com/rm
 
 ## Current qualification
 
-The overview coverage repair and exact footnote linkage are implemented. Twelve fixed Luna controls meet their expected outcomes. The first fresh two-chapter run completes processing and cites both chapters in its overview, but fails strict semantic acceptance. Source review exposes a further generation handoff gap: chapter synthesis receives footnote coordinates without the corresponding saved evidence ID coordinates. That repair now passes deterministic qualification and independent review; fresh targeted and full-book model qualification remain pending.
+The overview coverage repair and exact footnote linkage are implemented. Twelve fixed Luna controls meet their expected outcomes again. Fresh Job 56 completes EXIM and Financial, cites both chapters in its overview, and preserves note 53's chapter connection. Strict semantic acceptance still fails. Source review identifies a separate Claims aggregation gap: the correct contributor contexts lose their association with individual citations in the judge prompt. A bounded shared fix and three new versioned controls address that handoff. Full-book qualification remains pending.
 
 These are agent source reviews, as requested. Human labels remain null and human calibration is not computed. Actual VIP usability observations remain pending. No completed Job, structural pass, or automated support count constitutes acceptance of all generated statements.
 
@@ -17,8 +17,11 @@ The original 922-page PDF is reused, with SHA256 `7f2e97507370bbadb109034ecda008
 | `luna-semantic-20261117` | First v2 controls: 11/12 expectations met. Literal `[53]` in the positive claim was parsed as an evidence citation and split the claim. The fixture and failed run are retained. |
 | `luna-semantic-v3-20261117` | V3 changes that literal to “body marker numbered 53”; evidence and expectations are unchanged. Source checks and all 12 controls pass. Full retrieval, QA and summary stages have not been submitted in this ledger. |
 | `luna-semantic-targeted-v3-20261117` | Job 55: Federal Reserve and Financial Regulatory Agencies, five portions, two completed chapters, overview cites 2/2. Canonical readback, selected scope and exact evidence spans pass. Strict semantic acceptance fails. Four H05/H08 QA answers retain their checks and first results. |
+| `luna-semantic-targeted-binding-20261117` | Job 56: EXIM and Financial, five portions, two completed chapters and overview cites 2/2. Structural checks pass; strict semantic acceptance fails. Twelve controls pass; all eight R03/R04/H05/H08 QA answers retain first results. API, worker and runner are frozen at `0bb067f229`. |
 
 Directories are under `.artifacts/political-pdf-evals/`; their ledgers, manifests and request/response files are local evidence, not tracked repository artifacts. API and worker production revision is `bba21d65e1`; the v3 runner revision is `cf0634beddf35b951ecb45ec95f2c306d862b66a`. Runtime sidecars retain production file hashes. Model: OpenAI `gpt-6-luna`, output budget 16,384, with existing settings and no automatic paid retry.
+
+The preceding runtime identities apply to the first three rows. The fourth row records its newer frozen runtime separately. No failed result is replaced by a rerun.
 
 The targeted configuration mistakenly selected Federal Reserve where the preparatory description said EXIM. Its actual scope and results remain unchanged. The full configuration was independently resolved against navigation and includes all 30 chapters, including EXIM and Financial. The targeted summary does not qualify EXIM.
 
@@ -34,6 +37,10 @@ The packet keeps exact claim spans, cited passages, receipt identity and immutab
 
 Private audit receipts are under `/tmp/tldw-political-pdf-semantic-20261117/`: `control-source-span-audit.json`, `targeted-qa-agent-audit.json`, `targeted-summary-agent-audit.json` and `targeted-footnote-cause-audit.json`.
 
+Job 56 adds 47 independently reviewed QA findings: 28 agent-supported and 19 needing revision. Exact claims, offsets, source passages and original judgments match the review packet; its regenerated report preserves all 47 agent decisions and zero human decisions. The new audit is `binding-targeted-qa-agent-audit.json`. R04 attaches a Trade passage from Kent Lassman's contribution to de Rugy and the verifier accepts it. Reconstruction in `binding-r04-attribution-context-audit.json` matches the runtime hashes for both correct headings; the shared judge assembly then loses their citation-ID association. The repair labels each deduplicated context with its cited IDs and valid source ranges, counts the wrapper within the existing limit, and invalidates affected cached checks through the existing evidence digest. Old reports remain historical evidence.
+
+The QA generation requests contain numbered body passages without the verifier's additional heading context. Some attribution abstentions reflect that input difference. The CLI QA branch uses the extraction-prompt contract; it is not a claim to test the browser's conversational prompt. V4 retains all twelve earlier fixed controls and adds the original wrongly accepted mixed-contributor claim, a corrected-contributor counterpart and a Hazelton positive control. Their expected outcomes are agent-reviewed development expectations.
+
 ## Generation handoff finding
 
 Job 55 extraction labels note 53's OTS-to-OCC statement as having an unclear relationship to the section author's position. Chapter prose broadens that caveat to say it cannot safely be attributed to Burton or Bowes, and the overview repeats it. The verified source link is to the CFPB contribution headed Robert Bowes; that link does not establish personal note authorship or endorsement.
@@ -45,6 +52,10 @@ The chapter's 28,826 characters of input trigger reduction. Both reduction and f
 Qualification: 291 connected backend tests, 136 independent focused tests, and a separate 167-test overview/evaluation regression run pass; these suites overlap and are not summed. Ruff and scoped Bandit are clean. The two UI fixes pass 132 connected tests and 26 independently rerun focused tests, full frontend TypeScript, and project ESLint with only three unchanged warnings. The CI shard guard reports no newly uncovered test files. These checks qualify code behavior, not new model output.
 
 The chapter verifier also names note 54 when explaining the transfer contradiction, although the transfer is in note 53. Its reason is retained as a model error, not copied into the source review as fact.
+
+In Job 56, extraction `E2.3.5`, Financial claim 15 and overview claim 11 describe the OTS-to-OCC transfer as a chapter-level endnote proposal. They no longer deny the chapter connection or invent personal note authorship. Seven other units are explicitly unchecked because complete quoted evidence plus attribution context exceeds 16,000 characters; overview claim 8 requires 16,409. These are enforced limits, not provider failures. The contributor-binding fix does not raise that ceiling or turn unchecked findings into support.
+
+Independent review covers all 44 Job 56 chapter/overview units: four supported, 34 needing revision and six structural headings or lead-ins. All 82 cited occurrences match canonical text. The overview's transfer clause is supported, while another clause in the same unit has a funding-cap wording ambiguity. All 91 QA and summary agent decisions survive offline regeneration; human labels remain null. The shared Claims binding fix passes 304 connected tests, 107 independently rerun focused tests, Ruff, Bandit and independent review. V4 passes the 167-test connected evaluation suite and an independent canonical-source audit. These overlapping checks qualify implementation and fixture integrity; new model results remain pending.
 
 ## Browser review and export
 
@@ -62,6 +73,7 @@ Findings use [NN/g's ten usability heuristics](https://www.nngroup.com/articles/
 | UX-PDF-96: verified endnote context loses its binding during chapter synthesis | H2 match; H5 error prevention / 3 | Exact note links and strict checks are implemented; the fresh run exposed the evidence-ID coordinate handoff gap. Per-call bindings now pass reduction, source, scope, budget and completed-work controls. Fresh model qualification pending. |
 | UX-PDF-97: a missing local chat reference opens a developer error screen during review | H1 visibility; H9 recovery / 2 | Fixed with a narrowly classified nonblocking warning for the ordinary read. Persistent writes, fork guards and real storage errors remain strict. Deterministic missing-history controls pass; the preserved `e38f1677…` workspace reopens without an overlay. The original stale-selection transition is not claimed as independently replayed. No production crash or data loss is established. |
 | UX-PDF-98: “Support safe” can be mistaken for citation support | H2 familiar language; H4 consistency / 2 | Fixed. The actual Job 55 card now says “Not redacted” beside “Needs Revision,” with an explanation separating redaction metadata, citation checks and reviewer decisions. Unknown states, neutral styling and restricted-detail hiding are regression-tested. |
+| UX-PDF-99: correct contributor context can be attached to the wrong cited passage during verification | H5 error prevention / 3 | Job 56 R04 reproduces the error. Correct source contexts are present, but shared prompt aggregation drops their citation-ID association. A bounded binding fix and versioned positive/negative controls are in qualification. |
 | UX-PDF-66: generated analysis still contains attribution, wording and citation gaps | H5 error prevention / 3 | Open. Strict checks and agent reviews expose both generation problems and verifier limitations; they do not make every statement reliable. Human calibration and VIP acceptance remain pending. |
 
 ## Remaining acceptance

@@ -64,8 +64,12 @@ async def verify_section_batches(section: dict[str, Any], snapshot: dict[str, An
 
 
 def evidence_digest(evidence: dict[str, Any]) -> str:
-    """Invalidate a check if exact passages, context or source coordinates change."""
-    return hashlib.sha256(json.dumps(evidence, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    """Bind reuse to exact evidence and the citation-to-context prompt protocol."""
+    serialized = json.dumps(evidence, sort_keys=True, ensure_ascii=False)
+    if any(isinstance(item.get("attribution_context"), str) and item["attribution_context"] for item in evidence.values()):
+        # Earlier prompts supplied these contexts without their citation bindings.
+        serialized = "citation-attribution-bindings-v1\n" + serialized
+    return hashlib.sha256(serialized.encode()).hexdigest()
 
 
 def verification_is_current(

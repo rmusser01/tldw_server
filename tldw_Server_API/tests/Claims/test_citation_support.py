@@ -144,7 +144,67 @@ async def test_identical_attribution_context_is_deduplicated_without_dropping_pa
     assert seen[0].count(note) == 1
     assert "First policy detail" in seen[0] and "Second policy detail" in seen[0]
     assert "SIBLING CAVEAT" not in seen[0]
+    bindings = json.loads(seen[0].split("CITED PASSAGE CONTEXT BINDINGS", 1)[1].splitlines()[1])
+    assert bindings == {"P1": None, "P2": None}
     assert report["evidence"]["P2"]["attribution_context_sha256"] == hashlib.sha256(note.encode()).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_mixed_contributor_contexts_keep_their_cited_passage_ranges():
+    seen = []
+    evidence = {
+        "P3": {"text": "Large beneficiaries could access private financing.", "start_char": 2126649,
+            "attribution_context": "THE EXPORT–IMPORT BANK SHOULD BE ABOLISHED\nVeronique de Rugy"},
+        "P5": {"text": "EXIM largely substitutes for other export financing.", "start_char": 2393501,
+            "attribution_context": "THE CASE FOR FREE TRADE\nKent Lassman"},
+        "P12": {"text": "Uncited financing passage.", "attribution_context": "Jennifer Hazelton"},
+    }
+    for item in evidence.values():
+        if "start_char" in item:
+            item["end_char"] = item["start_char"] + len(item["text"])
+
+    async def analyze(*args, **kwargs):
+        seen.append(args[2])
+        return response("nei")
+
+    report = await verify_cited_text("De Rugy argues both financing propositions. [P3, P5]", evidence,
+        provider="openai", model="binding-test", analyze_fn=analyze)
+    groups = seen[0].split("CITED PASSAGE CONTEXT BINDINGS")[1:]
+    assert len(groups) == 2
+    for group, identifier in zip(groups, ("P3", "P5"), strict=True):
+        item = evidence[identifier]
+        assert json.loads(group.splitlines()[1]) == {identifier: [item["start_char"], item["end_char"]]}
+        assert item["attribution_context"] in group
+        assert report["evidence"][identifier]["attribution_context_sha256"] == hashlib.sha256(item["attribution_context"].encode()).hexdigest()
+    assert "Jennifer Hazelton" not in seen[0]
+    assert report["findings"][0]["status"] == "unsupported"
+
+
+@pytest.mark.parametrize("start,end", [(None, None), (True, 2), (0, True), (-1, 0), (0, 0), (2, 1), ("0", 1), (0, 3)])
+def test_context_binding_never_invents_or_coerces_invalid_source_ranges(start, end):
+    from tldw_Server_API.app.core.Claims_Extraction.citation_support import _evidence_for_unit
+
+    documents, context, error = _evidence_for_unit({"evidence_ids": ["P1"]},
+        {"P1": {"text": "x", "start_char": start, "end_char": end, "attribution_context": "Author note"}})
+    assert json.loads(context.splitlines()[1]) == {"P1": None}
+    assert error is None and documents[0].content == "x"
+
+
+@pytest.mark.asyncio
+async def test_context_binding_wrapper_counts_toward_existing_evidence_budget(monkeypatch):
+    from tldw_Server_API.app.core.Claims_Extraction import citation_support
+
+    seen = []
+
+    async def analyze(*args, **kwargs):
+        seen.append(args)
+        return response()
+
+    monkeypatch.setitem(citation_support.LIMITS, "max_evidence_chars", 20)
+    report = await verify_cited_text("Policy. [P1]", {"P1": {"text": "Policy", "attribution_context": "Author context"}},
+        provider="openai", model="binding-test", analyze_fn=analyze)
+    assert seen == []
+    assert report["findings"][0]["reason"] == "cited_evidence_limit"
 
 
 @pytest.mark.asyncio
@@ -178,7 +238,8 @@ async def test_linked_note_context_guides_attribution_without_forcing_judgment(l
         provider="openai", model="context-test", analyze_fn=analyze)
     assert report["findings"][0]["status"] == status
     assert "Ada Example" in seen[0] and "[53]" in seen[0] and "These are collective views." in seen[0]
-    assert seen[0].endswith("policy-claim evidence or repair an unrelated citation):\n" + context)
+    assert "policy-claim evidence or repair an unrelated citation):\nCITED PASSAGE CONTEXT BINDINGS" in seen[0]
+    assert seen[0].endswith(context)
     assert "UNRELATED" not in seen[0]
 
 

@@ -28,7 +28,7 @@ Edit the copied [sample configuration](../../Helper_Scripts/Evals/configs/politi
 | `workspace_id` | An existing owned workspace with the exact Media item enrolled; required for strict QA and fixed verification regressions as well as summaries. |
 | `verification.required` | The sample enables strict QA and saved-summary report checks. Omit this additive setting only to reproduce the legacy unverified runner mode in a new run. |
 | `verification.provider`, `verification.model` | Optional pair selecting the QA/regression verifier; otherwise each matrix entry supplies both. Summary Jobs use their own recorded generation provider/model for verification. |
-| `verification_regressions.path`, `.sha256` | The frozen [v3 fixed-claim fixture](../../Helper_Scripts/Evals/configs/political_pdf_verification_regressions.v3.json) and its exact file hash. It preserves eight earlier controls and adds four footnote-attribution controls. It is only submitted when the explicit regression stage is selected. |
+| `verification_regressions.path`, `.sha256` | The frozen [v4 fixed-claim fixture](../../Helper_Scripts/Evals/configs/political_pdf_verification_regressions.v4.json) and its exact file hash. It preserves all twelve v3 controls and adds three contributor-binding controls. It is only submitted when the explicit regression stage is selected. |
 | `qa.contexts` | `reference_pages`, `retrieved`, or both. `qa.retrieval_mode` must be in the configured retrieval modes. |
 
 Paths in the config resolve from the current working directory, not the config file's directory. Model and case keys use letters, digits, `_`, `-` and `.`. Add one model entry per comparison candidate; each receives the selected question/context matrix. Use exact IDs supported by your configured server. Provider credentials stay in server configuration.
@@ -84,6 +84,10 @@ python Helper_Scripts/Evals/run_political_pdf_eval.py run \
 ```
 
 The eight supplied controls include supported and deliberately incorrect claims about NGI procurement, Financial endnote 53, a CFPB condition, Khan's reported position, a wrong citation and an uncited statement. Their exact excerpts must resolve uniquely in the canonical source. Expected statuses are source-audited agent expectations, with human decisions explicitly null; this is a regression suite, not a calibrated accuracy benchmark. A negative control passes its regression expectation when the verifier rejects the unsupported claim, while its claim-support result remains false. Raw requests, reports and failed first attempts remain saved. The fixture hash participates in run identity and resume validation; changing a claim or quote requires a new config/hash/run.
+
+The current v4 fixture retains the original eight controls and four Financial footnote controls. Three further cases preserve a wrongly accepted mixed-contributor claim from R04, pair the same passages with their correct separate contributors, and check a supported Hazelton attribution. V1–v3 and their first results remain unchanged. These development cases do not qualify performance on untouched documents.
+
+QA generation receives the selected numbered passages; it does not currently receive the verifier's additional source-heading context. A response that cannot identify a contributor from those passages must be distinguished from one that ignores a supplied byline. Verification still resolves attribution separately against the owned canonical source. The CLI's QA branch exercises the extraction-prompt contract, not the browser's conversational QA prompt end to end.
 
 Planning reports potential endpoint-request counts, not billable provider-call counts. Each check may evaluate multiple cited text units, and uncited or unresolvable units may require no provider call. Shared verification limits can leave units explicitly uncovered. Provider usage is unavailable unless the public response exposes it; do not infer zero usage from its absence.
 

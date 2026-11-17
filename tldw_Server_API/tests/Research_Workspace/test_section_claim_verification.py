@@ -229,6 +229,24 @@ async def test_resume_checks_old_completed_chapters_without_regenerating_them(ge
     assert saved["sections"][0]["content"] == "Maintain 64 interceptors [E1.1.1]."
 
 
+@pytest.mark.parametrize("context", [None, "", "A wrote the chapter."])
+def test_attribution_binding_protocol_invalidates_only_context_bearing_legacy_receipts(context):
+    from tldw_Server_API.app.core.Research_Workspace.section_verification import (
+        evidence_digest,
+        verification_is_current,
+    )
+
+    text = "A proposal [E1]."
+    evidence = {"E1": {"text": "A proposal"}}
+    if context is not None:
+        evidence["E1"]["attribution_context"] = context
+    legacy_digest = hashlib.sha256(json.dumps(evidence, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    receipt = {**report(text, evidence=evidence), "evidence_sha256": legacy_digest}
+    assert verification_is_current(receipt, text, evidence, provider="openai", model="test-model") is not bool(context)
+    receipt["evidence_sha256"] = evidence_digest(evidence)
+    assert verification_is_current(receipt, text, evidence, provider="openai", model="test-model")
+
+
 def test_changed_source_or_attribution_invalidates_completed_verification():
     from tldw_Server_API.app.core.Research_Workspace.section_verification import (
         evidence_digest,

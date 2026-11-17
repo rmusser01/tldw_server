@@ -36,6 +36,40 @@ def fixture_v3():
     return json.loads(path.read_text()), path
 
 
+def test_v4_preserves_prior_controls_and_binds_mixed_contributors(fixture_v3, runner_module):
+    """The same two policy passages cannot transfer one contributor's argument to another."""
+    from tldw_Server_API.app.core.Claims_Extraction.citation_support import _units
+
+    prior, _ = fixture_v3
+    path = CONFIGS / "political_pdf_verification_regressions.v4.json"
+    fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
+    cases, loaded_fingerprint = runner_module.load_verification_regressions({
+        "source": {"sha256": SOURCE_SHA256},
+        "verification_regressions": {"path": str(path), "sha256": fingerprint},
+    })
+    assert loaded_fingerprint == fingerprint
+    assert cases[:12] == prior["cases"]
+    negative, positive, hazelton = cases[12:]
+    assert negative["id"] == "exim-trade-mixed-contributor-error"
+    assert negative["expected_statuses"] == ["unsupported", "contradicted"]
+    assert positive["expected_statuses"] == hazelton["expected_statuses"] == ["supported"]
+    assert negative["evidence"] == positive["evidence"]
+    expected_hashes = {
+        "P3": "e9dc2ff472906e1f432a57b89b4116b72014f8304ad4ff4c871dcdf4d5cd5aad",
+        "P5": "60cc6dcb9122231c8f26e65749c5350d2367f11b28360b6a12cd3cf39f3516f2",
+        "P12": "0617f29405c1be0c4c54e6f668358be58ba262f0bf707f6080d01d9363b174ab",
+    }
+    for case in cases[12:]:
+        assert case["label_provenance"] == "agent_source_audit"
+        assert case["human_review"] == {"status": "pending", "decision": None}
+        units = _units(case["text"])
+        assert len(units) == 1 and units[0]["text"] == case["text"]
+        assert units[0]["evidence_ids"] == [row["id"] for row in case["evidence"]]
+        for row in case["evidence"]:
+            assert set(row) == {"id", "quote"}
+            assert hashlib.sha256(row["quote"].encode()).hexdigest() == expected_hashes[row["id"]]
+
+
 @pytest.fixture
 def runner_module():
     if sys.platform == "win32":
