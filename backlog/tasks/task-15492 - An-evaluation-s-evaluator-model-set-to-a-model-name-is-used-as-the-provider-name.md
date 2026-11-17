@@ -28,6 +28,7 @@ Pre-existing, the same on the server's key. Since TASK-15426 PR C (#3460) the ru
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Owner decisions 2026-11-16 (plan Docs/superpowers/plans/2026-11-17-evals-runner-cli.md): (1) a label-choice or NLI call that succeeds but returns an unparseable reply keeps accuracy 0.0, since that call is the system under test, not a judge; (2) the known-provider check is the built-in adapter table (ChatProviderRegistry.DEFAULT_ADAPTERS plus canonical_provider_name aliases); (3) --save/--no-save removed from eval custom; (4) an unscored eval custom exits 1; (5) an explicitly named provider stops the prefix:/prefix/ split; (6) eval rag and eval quality runners are filed as TASK-15561, not fixed here; (7) ADR-004 waiver covers this PR. PR #3499.
 Evidence: AC1 the two provider-name rows (regression guard, pass on base); AC2 the model rows incl. the meta-llama/llama-3 split fix; AC3 provider:model, provider/model and the run_llm_provider equality assertion on every row.
+Final review fix (PR #3499, I1): evaluator_model is split once. openrouter/openai/gpt-4o, ollama:mistral:7b and together/Qwen/Qwen2-72B-Instruct keep their provider (3 rows added to the parametrized test: 3 failed before, 19 passed after).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

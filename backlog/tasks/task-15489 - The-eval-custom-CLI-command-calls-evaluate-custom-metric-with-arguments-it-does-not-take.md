@@ -29,6 +29,7 @@ Found by code, not run, by the planner of TASK-15485's unscored fold (#3445).
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Owner decisions 2026-11-16 (plan Docs/superpowers/plans/2026-11-17-evals-runner-cli.md): (1) a label-choice or NLI call that succeeds but returns an unparseable reply keeps accuracy 0.0, since that call is the system under test, not a judge; (2) the known-provider check is the built-in adapter table (ChatProviderRegistry.DEFAULT_ADAPTERS plus canonical_provider_name aliases); (3) --save/--no-save removed from eval custom; (4) an unscored eval custom exits 1; (5) an explicitly named provider stops the prefix:/prefix/ split; (6) eval rag and eval quality runners are filed as TASK-15561, not fixed here; (7) ADR-004 waiver covers this PR. PR #3499.
 Evidence: AC1 tldw_Server_API/tests/Evaluations/unit/test_evals_cli_custom_command.py (6 failed RED, 6 passed GREEN); AC2 the unscored print and exit-1 test and the batch Unscored row; AC3 --save/--no-save removed (the command never stored anything). --model is accepted but not sent because evaluate_custom_metric has no model parameter (pre-existing). Sibling runners: TASK-15561.
+Final review fixes (PR #3499): uvx bandit on eval_runner.py, cli/commands/evaluation.py and cli/utils/output.py found no issues.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
