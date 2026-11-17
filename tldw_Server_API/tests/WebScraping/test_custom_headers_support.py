@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import CookieManager
@@ -66,3 +66,47 @@ def test_process_web_scraping_endpoint_receives_custom_headers(
     assert received_kwargs["custom_headers"] == payload["custom_headers"]  # nosec B101
     assert received_kwargs["user_agent"] == payload["user_agent"]  # nosec B101
     assert received_kwargs["mode"] == payload["mode"]  # nosec B101
+
+
+@pytest.mark.parametrize("skip_existing", [True, False])
+def test_quick_ingest_web_duplicate_precedes_analysis(client_with_single_user, monkeypatch, tmp_path, skip_existing):
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+    from fastapi import HTTPException
+    from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+    from tldw_Server_API.app.main import app
+
+    client, _ = client_with_single_user
+    url = "https://example.com/article"
+    db = MediaDatabase(client_id="2", db_path=str(tmp_path / "media.db"))
+    media_id, _, _ = db.add_media_with_keywords(
+        url=url, title="Article", media_type="web_document", content="Saved article.", keywords=[],
+    )
+    admit_analysis = AsyncMock(side_effect=HTTPException(status_code=429, detail="Monthly token quota exceeded"))
+    monkeypatch.setattr(usage_quota_deps, "enforce_llm_quota", admit_analysis)
+    app.dependency_overrides[get_media_db_for_user] = lambda: db
+    try:
+        response = client.post("/api/v1/media/process-web-scraping", json={
+            "scrape_method": "Individual URLs",
+            "url_input": url,
+            "mode": "persist",
+            "summarize_checkbox": True,
+            "skip_existing_analysis": skip_existing,
+            "system_prompt": "Summarize the article.",
+            "custom_prompt": "Keep it brief.",
+        })
+    finally:
+        app.dependency_overrides.pop(get_media_db_for_user, None)
+        db.close_connection()
+
+    result = response.json()
+    if skip_existing:
+        assert response.status_code == 200, response.text
+        assert result["status"] == "Skipped"
+        assert result["media_id"] == media_id
+        assert result["warnings"] == ["Analysis skipped because this item is already in your library."]
+        admit_analysis.assert_not_awaited()
+    else:
+        assert response.status_code == 429, response.text
+        assert result["detail"] == "Monthly token quota exceeded"
+        admit_analysis.assert_awaited_once()

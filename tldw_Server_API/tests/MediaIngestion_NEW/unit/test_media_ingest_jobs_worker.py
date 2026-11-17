@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -144,6 +145,98 @@ class _CollectionUpdateRecorder:
 
     def close(self):
         return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("media_type", "source_kind", "input_ref", "owner", "overwrite", "skipped"),
+    [
+        ("pdf", "file", "report.pdf", "2", False, True),
+        ("pdf", "url", "https://example.com/report.pdf", "2", False, True),
+        ("video", "url", "https://example.com/video.mp4", "2", False, True),
+        ("pdf", "file", "report.pdf", "2", True, False),
+        ("pdf", "file", "new-report.pdf", "2", False, False),
+        ("pdf", "file", "report.pdf", "3", False, False),
+    ],
+)
+async def test_worker_checks_existing_media_before_analysis(
+    monkeypatch, tmp_path, media_type, source_kind, input_ref, owner, overwrite, skipped,
+):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.services import media_ingest_jobs_worker as worker
+
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+    monkeypatch.setattr(worker.DatabasePaths, "get_media_db_path", lambda user: tmp_path / f"media-{user}.db")
+    db = worker._create_db("2")
+    try:
+        media_id, media_uuid, _ = db.add_media_with_keywords(
+            url="report.pdf" if source_kind == "file" else input_ref,
+            title="Report",
+            media_type=media_type,
+            content="Previously saved report.",
+            keywords=[],
+        )
+    finally:
+        db.close_connection()
+
+    upload = tmp_path / "staged-upload.pdf"
+    upload.write_bytes(b"%PDF-1.7")
+    monkeypatch.setattr(worker, "_enforce_and_record_media_bytes", AsyncMock())
+    admit_analysis = AsyncMock(return_value=None)
+    process_document = AsyncMock(return_value={"status": "Success", "db_id": 99})
+    schedule_embeddings = AsyncMock()
+    monkeypatch.setattr(worker, "_admit_or_refuse_analysis", admit_analysis)
+    monkeypatch.setattr(worker, "process_document_like_item", process_document)
+    monkeypatch.setattr(worker, "_schedule_embeddings", schedule_embeddings)
+    plan_chunks = AsyncMock(return_value=(None, None))
+    monkeypatch.setattr(worker, "async_resolve_chunking_options_and_plan", plan_chunks)
+    manager = JobManager()
+    job = manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        owner_user_id=owner,
+        payload={
+            "source": str(upload) if source_kind == "file" else input_ref,
+            "source_kind": source_kind,
+            "input_ref": input_ref,
+            "temp_dir": str(tmp_path),
+            "options": {
+                "media_type": media_type,
+                "perform_chunking": True,
+                "chunking_mode": "auto",
+                "auto_chunking_use_llm": True,
+                "perform_analysis": True,
+                "api_name": "deepseek",
+                "overwrite_existing": overwrite,
+                "generate_embeddings": skipped,
+            },
+        },
+    )
+
+    acquired = manager.acquire_next_job(
+        domain="media_ingest", queue="default", lease_seconds=120, worker_id="duplicate-test",
+    )
+    assert acquired and acquired["id"] == job["id"]
+    result = await worker._handle_job(acquired, manager, worker._ProgressState())
+
+    if skipped:
+        assert result["status"] == "Skipped"
+        assert result["media_id"] == media_id
+        if media_type == "pdf":
+            assert result["media_uuid"] == media_uuid
+        assert result["warnings"] == ["Analysis skipped because this item is already in your library."]
+        admit_analysis.assert_not_awaited()
+        plan_chunks.assert_not_awaited()
+        process_document.assert_not_awaited()
+        schedule_embeddings.assert_not_called()
+    else:
+        assert result["status"] == "Success"
+        assert result["media_id"] == 99
+        admit_analysis.assert_awaited_once()
+        plan_chunks.assert_awaited_once()
+        process_document.assert_awaited_once()
 
 
 def test_media_ingest_worker_defaults_to_responsive_idle_backoff(monkeypatch):
@@ -990,6 +1083,7 @@ async def test_media_ingest_heavy_worker_uses_configured_queue(monkeypatch):
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
 
     monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "media-heavy-q")
+    monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_CONCURRENCY", "1")
     called = {}
 
     async def _fake_run_media_ingest_jobs_worker(
@@ -1259,3 +1353,61 @@ async def test_media_worker_applies_staged_file_daily_quota(monkeypatch, tmp_pat
         assert len(processed) == (2 if case == "admitted" else 1)  # nosec B101 - Existing legitimate processing path.
     expected = [] if case == "url" else [("3", 5, "media-ingestion-job:3:" + job["uuid"])] * (2 if case == "admitted" else 1)
     assert calls == expected  # nosec B101 - Actual staged size, owner and stable retry receipt.
+
+
+@pytest.mark.asyncio
+async def test_heavy_ingest_runs_second_analysis_while_default_serves_ordinary_uploads(monkeypatch, tmp_path):
+    import asyncio
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "low")
+    monkeypatch.delenv("MEDIA_INGEST_HEAVY_JOBS_CONCURRENCY", raising=False)
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_BACKOFF_BASE_SECONDS", "1")
+
+    long_entered = asyncio.Event()
+    release_long = asyncio.Event()
+    stop = asyncio.Event()
+    workers = {}
+    jm = JobManager()
+
+    def enqueue(source, media_type, queue):
+        job = jm.create_job(
+            domain="media_ingest", queue=queue, job_type="media_ingest_item", owner_user_id="1",
+            payload={"source": source, "options": {"media_type": media_type, "perform_analysis": queue == "low"}},
+        )
+        return int(job["id"])
+
+    async def handle(job, _manager, _progress):
+        source = job["payload"]["source"]
+        workers[source] = job["worker_id"]
+        if source == "long.pdf":
+            long_entered.set()
+            await release_long.wait()
+        return {"source": source}
+
+    async def wait_for_completion(*jobs):
+        while any(jm.get_job(job_id)["status"] != "completed" for job_id in jobs):
+            await asyncio.sleep(0.01)
+
+    monkeypatch.setattr(worker, "_handle_job", handle)
+    long_id = enqueue("long.pdf", "pdf", "low")
+    heavy = asyncio.create_task(worker.run_media_ingest_heavy_jobs_worker(stop))
+    ordinary = asyncio.create_task(worker.run_media_ingest_jobs_worker(stop, queue="default"))
+    try:
+        await asyncio.wait_for(long_entered.wait(), timeout=5)
+        short_id = enqueue("short.txt", "document", "low")
+        ordinary_id = enqueue("ordinary.txt", "document", "default")
+        await asyncio.wait_for(wait_for_completion(short_id, ordinary_id), timeout=4)
+
+        assert jm.get_job(long_id)["status"] == "processing"
+        assert len(set(workers.values())) == 3
+    finally:
+        stop.set()
+        release_long.set()
+        await asyncio.wait_for(asyncio.gather(heavy, ordinary), timeout=5)
+
+    assert jm.get_job(long_id)["status"] == "completed"

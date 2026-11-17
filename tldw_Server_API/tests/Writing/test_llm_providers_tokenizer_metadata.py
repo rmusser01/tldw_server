@@ -14,7 +14,7 @@ def inventory_endpoint_for_tokenizer_fixtures(monkeypatch):
 
     # Tokenizer tests supply synthetic listings; sibling Chat fixture imports
     # can configure a loopback generation endpoint, irrelevant to this contract.
-    monkeypatch.setattr(llm_providers, "resolve_provider_models_base_url", lambda provider, *args, **kwargs:
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.resolve_provider_models_base_url", lambda provider, *args, **kwargs:
                         None if provider in {"bedrock", "zai", "minimax"} else "https://fixture.example.invalid/v1")
 
 
@@ -86,19 +86,15 @@ def test_llm_providers_tokenizer_metadata_mirrors_strict_fields(monkeypatch, tmp
     mlx_model_dir = tmp_path / "mlx-model"
     mlx_model_dir.mkdir()
     monkeypatch.setattr(
-        llm_endpoints,
-        "load_comprehensive_config",
+        "tldw_Server_API.app.core.config.load_comprehensive_config",
         lambda: _fake_config(str(mlx_model_dir)),
     )
-    monkeypatch.setattr(llm_endpoints, "discover_provider_models", _reported_models)
-    monkeypatch.setattr(llm_endpoints, "apply_llm_provider_overrides_to_listing", lambda result: result)
-    monkeypatch.setattr(llm_endpoints, "get_api_keys", lambda: {})
-    monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", lambda: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models", _reported_models)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
     monkeypatch.setattr(llm_endpoints, "_llm_registry_capability_envelopes", lambda: {})
-    monkeypatch.setattr(llm_endpoints, "_provider_readiness", _ready_provider_readiness)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_readiness.provider_readiness", _ready_provider_readiness)
     monkeypatch.setattr(
-        llm_endpoints,
-        "ALL_SUPPORTED_PROVIDER_NAMES_LIST",
+        "tldw_Server_API.app.core.config_llm_providers.ALL_SUPPORTED_PROVIDER_NAMES_LIST",
         [*llm_endpoints.ALL_SUPPORTED_PROVIDER_NAMES_LIST, "mlx"],
     )
 
@@ -125,7 +121,7 @@ def test_llm_providers_tokenizer_metadata_mirrors_strict_fields(monkeypatch, tmp
             "error": "Tokenizer not available",
         }
 
-    monkeypatch.setattr(llm_endpoints, "resolve_tokenizer_metadata", _fake_tokenizer_metadata)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver.resolve_tokenizer_metadata", _fake_tokenizer_metadata)
     monkeypatch.setattr(
         llm_endpoints,
         "_resolve_model_tokenizer_support",
@@ -160,19 +156,15 @@ def test_llm_providers_tokenizer_metadata_reflects_strict_runtime_env(monkeypatc
     mlx_model_dir = tmp_path / "mlx-model"
     mlx_model_dir.mkdir()
     monkeypatch.setattr(
-        llm_endpoints,
-        "load_comprehensive_config",
+        "tldw_Server_API.app.core.config.load_comprehensive_config",
         lambda: _fake_config(str(mlx_model_dir)),
     )
-    monkeypatch.setattr(llm_endpoints, "discover_provider_models", _reported_models)
-    monkeypatch.setattr(llm_endpoints, "apply_llm_provider_overrides_to_listing", lambda result: result)
-    monkeypatch.setattr(llm_endpoints, "get_api_keys", lambda: {})
-    monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", lambda: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models", _reported_models)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
     monkeypatch.setattr(llm_endpoints, "_llm_registry_capability_envelopes", lambda: {})
-    monkeypatch.setattr(llm_endpoints, "_provider_readiness", _ready_provider_readiness)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_readiness.provider_readiness", _ready_provider_readiness)
     monkeypatch.setattr(
-        llm_endpoints,
-        "ALL_SUPPORTED_PROVIDER_NAMES_LIST",
+        "tldw_Server_API.app.core.config_llm_providers.ALL_SUPPORTED_PROVIDER_NAMES_LIST",
         [*llm_endpoints.ALL_SUPPORTED_PROVIDER_NAMES_LIST, "mlx"],
     )
 
@@ -188,7 +180,7 @@ def test_llm_providers_tokenizer_metadata_reflects_strict_runtime_env(monkeypatc
             "strict_mode_effective": strict_effective,
         }
 
-    monkeypatch.setattr(llm_endpoints, "resolve_tokenizer_metadata", _fake_tokenizer_metadata)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver.resolve_tokenizer_metadata", _fake_tokenizer_metadata)
 
     def _fake_model_tokenizer_support(provider, model, _config):
         return _fake_tokenizer_metadata(
@@ -233,11 +225,9 @@ def test_llm_providers_real_resolver_exact_for_discovered_cloud_models(monkeypat
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE123")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret-example-key")
     monkeypatch.delenv("AWS_SESSION_TOKEN", raising=False)
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config)
-    monkeypatch.setattr(llm_endpoints, "discover_provider_models", _reported_models)
-    monkeypatch.setattr(llm_endpoints, "apply_llm_provider_overrides_to_listing", lambda result: result)
-    monkeypatch.setattr(llm_endpoints, "get_api_keys", lambda: {})
-    monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", lambda: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models", _reported_models)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
     monkeypatch.setattr(llm_endpoints, "_llm_registry_capability_envelopes", lambda: {})
 
     class _FakeTokenizer:
@@ -290,7 +280,7 @@ def test_llm_providers_real_resolver_exact_for_discovered_cloud_models(monkeypat
             }
         return resolve_tokenizer_metadata_shared(provider, model, **kwargs)
 
-    monkeypatch.setattr(llm_endpoints, "resolve_tokenizer_metadata", _safe_resolve_metadata)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver.resolve_tokenizer_metadata", _safe_resolve_metadata)
 
     payload = llm_endpoints.get_configured_providers(include_deprecated=False)
     providers = {p["name"]: p for p in payload["providers"]}
@@ -342,10 +332,8 @@ def test_llm_providers_skips_tokenizer_probe_for_non_text_models(monkeypatch):
 
     probe_calls: list[tuple[str, str]] = []
 
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config)
-    monkeypatch.setattr(llm_endpoints, "apply_llm_provider_overrides_to_listing", lambda result: result)
-    monkeypatch.setattr(llm_endpoints, "get_api_keys", lambda: {})
-    monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", lambda: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
     monkeypatch.setattr(llm_endpoints, "_llm_registry_capability_envelopes", lambda: {})
 
     def _fake_list_provider_models(provider: str, *_args, **_kwargs) -> ModelDiscoveryResult:
@@ -353,7 +341,7 @@ def test_llm_providers_skips_tokenizer_probe_for_non_text_models(monkeypatch):
             return ModelDiscoveryResult("ready", ("gemini-2.5-flash", "imagen-4.0-generate-001"))
         return _reported_models(provider)
 
-    monkeypatch.setattr(llm_endpoints, "discover_provider_models", _fake_list_provider_models)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models", _fake_list_provider_models)
 
     def _fake_tokenizer_metadata(provider: str, model: str, **_kwargs):
         probe_calls.append((provider, model))
@@ -367,7 +355,7 @@ def test_llm_providers_skips_tokenizer_probe_for_non_text_models(monkeypatch):
             "strict_mode_effective": False,
         }
 
-    monkeypatch.setattr(llm_endpoints, "resolve_tokenizer_metadata", _fake_tokenizer_metadata)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver.resolve_tokenizer_metadata", _fake_tokenizer_metadata)
 
     payload = llm_endpoints.get_configured_providers(include_deprecated=False)
     providers = {p["name"]: p for p in payload["providers"]}
@@ -391,11 +379,9 @@ def test_llm_providers_skips_runtime_tokenizer_probe_for_inprocess_test_mode(mon
 
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("E2E_INPROCESS", "1")
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_openai_only_config)
-    monkeypatch.setattr(llm_endpoints, "discover_provider_models", _reported_models)
-    monkeypatch.setattr(llm_endpoints, "apply_llm_provider_overrides_to_listing", lambda result: result)
-    monkeypatch.setattr(llm_endpoints, "get_api_keys", lambda: {})
-    monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", lambda: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_openai_only_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models", _reported_models)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
     monkeypatch.setattr(llm_endpoints, "_llm_registry_capability_envelopes", lambda: {})
 
     def _fake_tokenizer_metadata(provider: str, model: str, **_kwargs):
@@ -410,7 +396,7 @@ def test_llm_providers_skips_runtime_tokenizer_probe_for_inprocess_test_mode(mon
             "strict_mode_effective": False,
         }
 
-    monkeypatch.setattr(llm_endpoints, "resolve_tokenizer_metadata", _fake_tokenizer_metadata)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver.resolve_tokenizer_metadata", _fake_tokenizer_metadata)
 
     payload = llm_endpoints.get_configured_providers(include_deprecated=False)
     providers = {p["name"]: p for p in payload["providers"]}
@@ -427,14 +413,11 @@ def test_llm_providers_probes_only_configured_commercial_models(monkeypatch):
 
     probe_calls: list[tuple[str, str]] = []
 
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_openai_only_config)
-    monkeypatch.setattr(llm_endpoints, "apply_llm_provider_overrides_to_listing", lambda result: result)
-    monkeypatch.setattr(llm_endpoints, "get_api_keys", lambda: {})
-    monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", lambda: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_openai_only_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
     monkeypatch.setattr(llm_endpoints, "_llm_registry_capability_envelopes", lambda: {})
     monkeypatch.setattr(
-        llm_endpoints,
-        "discover_provider_models",
+        "tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models",
         lambda provider, *_args, **_kwargs: ModelDiscoveryResult("ready", ("gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo") if provider == "openai" else ()),
     )
 
@@ -450,7 +433,7 @@ def test_llm_providers_probes_only_configured_commercial_models(monkeypatch):
             "strict_mode_effective": False,
         }
 
-    monkeypatch.setattr(llm_endpoints, "resolve_tokenizer_metadata", _fake_tokenizer_metadata)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver.resolve_tokenizer_metadata", _fake_tokenizer_metadata)
 
     payload = llm_endpoints.get_configured_providers(include_deprecated=False)
     providers = {p["name"]: p for p in payload["providers"]}

@@ -120,7 +120,7 @@ async def runtime(tmp_path, monkeypatch, fresh_services):
                                   permissions=["system.configure"], org_ids=[], team_ids=[])
         app.dependency_overrides[get_auth_principal] = lambda: principal
         app.dependency_overrides[routes.get_mcp_hub_service] = lambda: service
-        patch.setattr(routes, "get_mcp_server", lambda: SimpleNamespace(initialized=True, module_registry=registry))
+        patch.setattr("tldw_Server_API.app.core.MCP_unified.server.get_mcp_server", lambda: SimpleNamespace(initialized=True, module_registry=registry))
         try:
             await registry.register_module("external_federation", ExternalFederationModule, module_config)
             module = await registry.get_module("external_federation")

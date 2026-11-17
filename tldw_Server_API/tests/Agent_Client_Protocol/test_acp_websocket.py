@@ -297,7 +297,7 @@ async def test_acp_session_stream_start_failure_skips_unset_callback_cleanup(mon
 
     monkeypatch.setattr(acp_endpoints, "_authenticate_ws", _fake_authenticate_ws)
     monkeypatch.setattr(acp_endpoints, "get_runner_client", _fake_get_runner_client)
-    monkeypatch.setattr(acp_endpoints, "WebSocketStream", _FailingStream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Streaming.streams.WebSocketStream", _FailingStream)
 
     await acp_endpoints.acp_session_stream(
         _FakeWebSocket(),
@@ -379,7 +379,7 @@ async def test_acp_session_stream_reconnect_cleans_up_replay_broadcaster(
     monkeypatch.setattr(acp_endpoints, "_resolve_acp_session_persona_id", _fake_resolve_persona_id)
     monkeypatch.setattr(acp_endpoints, "_acp_ws_try_acquire_quota", _fake_acquire_quota)
     monkeypatch.setattr(acp_endpoints, "_acp_ws_release_quota", _fake_release_quota)
-    monkeypatch.setattr(acp_endpoints, "WebSocketStream", _DisconnectingStream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Streaming.streams.WebSocketStream", _DisconnectingStream)
 
     await acp_endpoints.acp_session_stream(
         _FakeWebSocket(),
@@ -1253,7 +1253,7 @@ class TestACPMultiplexWebSocket:
         monkeypatch.setattr(multiplex_endpoints, "logger", logger_stub)
         monkeypatch.setattr(multiplex_endpoints, "_authenticate_ws", _fake_authenticate_ws)
         monkeypatch.setattr(multiplex_endpoints, "get_runner_client", _fake_get_runner_client)
-        monkeypatch.setattr(multiplex_endpoints, "MultiplexManager", _StubManager)
+        monkeypatch.setattr("tldw_Server_API.app.core.Agent_Client_Protocol.multiplex.manager.MultiplexManager", _StubManager)
 
         ws = _FakeMultiplexWebSocket(
             incoming=[multiplex_endpoints.MultiplexMessage.ping().to_json()],

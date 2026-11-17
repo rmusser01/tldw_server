@@ -37,7 +37,7 @@ def test_benchmark_helper_uses_canonical_string_scope(monkeypatch: pytest.Monkey
         def __init__(self, *, user_id=None, **_kwargs):
             captured["user_id"] = user_id
 
-    monkeypatch.setattr(benchmarks_ep, "EvaluationManager", _Manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.evaluation_manager.EvaluationManager", _Manager)
 
     identity = EvaluationIdentity(
         user_scope="tenant-user",
@@ -99,7 +99,7 @@ async def test_create_dataset_uses_canonical_identity_for_service_and_idempotenc
         captured["service_user"] = user_id
         return _Service()
 
-    monkeypatch.setattr(datasets_ep, "get_unified_evaluation_service_for_user", _get_service)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", _get_service)
 
     current_user = User(id="tenant-user", username="tenant", email=None, is_active=True)
     payload = CreateDatasetRequest(
@@ -162,8 +162,8 @@ async def test_create_embeddings_abtest_uses_canonical_identity_for_storage_and_
         captured["service_user"] = user_id
         return _Service()
 
-    monkeypatch.setattr(abtest_ep, "get_unified_evaluation_service_for_user", _get_service)
-    monkeypatch.setattr(abtest_ep, "validate_abtest_policy", lambda cfg, user: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", _get_service)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.embeddings_abtest_service.validate_abtest_policy", lambda cfg, user: None)
 
     def _capture_audit(*, user_id, eval_id, name, eval_type):
         captured["audit_user_id"] = user_id
@@ -171,7 +171,7 @@ async def test_create_embeddings_abtest_uses_canonical_identity_for_storage_and_
         captured["audit_name"] = name
         captured["audit_eval_type"] = eval_type
 
-    monkeypatch.setattr(abtest_ep, "log_evaluation_created", _capture_audit)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.audit_adapter.log_evaluation_created", _capture_audit)
 
     current_user = User(id="tenant-user", username="tenant", email=None, is_active=True)
     payload = EmbeddingsABTestCreateRequest.model_validate(
@@ -268,7 +268,7 @@ async def test_create_run_uses_canonical_identity_for_service_and_webhook_owner(
         captured["service_user"] = user_id
         return _Service()
 
-    monkeypatch.setattr(crud_ep, "get_unified_evaluation_service_for_user", _get_service)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", _get_service)
 
     result = await crud_ep.create_run(
         eval_id="eval_identity_1",

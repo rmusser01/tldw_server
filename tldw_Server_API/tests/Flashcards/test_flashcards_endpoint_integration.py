@@ -143,8 +143,7 @@ def grounded_claim_verifier(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr(
-        flashcards_endpoint,
-        "verify_generated_artifact_against_sources",
+        "tldw_Server_API.app.core.Claims_Extraction.artifact_verification.verify_generated_artifact_against_sources",
         fake_verify,
     )
 
@@ -1636,11 +1635,11 @@ def test_generate_flashcards_endpoint_returns_generated_cards(
         )
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.verify_generated_artifact_against_sources",
+        "tldw_Server_API.app.core.Claims_Extraction.artifact_verification.verify_generated_artifact_against_sources",
         fake_verify,
     )
 
@@ -1676,11 +1675,11 @@ def test_generate_flashcards_endpoint_rejects_empty_output_before_verification(
         verifier_called = True
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.verify_generated_artifact_against_sources",
+        "tldw_Server_API.app.core.Claims_Extraction.artifact_verification.verify_generated_artifact_against_sources",
         fake_verify,
     )
 
@@ -1720,11 +1719,11 @@ def test_generate_flashcards_endpoint_returns_422_when_claim_verification_fails(
         )
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.verify_generated_artifact_against_sources",
+        "tldw_Server_API.app.core.Claims_Extraction.artifact_verification.verify_generated_artifact_against_sources",
         fake_verify,
     )
 
@@ -1769,11 +1768,11 @@ def test_generate_flashcards_endpoint_returns_422_when_claim_verification_needs_
         )
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.verify_generated_artifact_against_sources",
+        "tldw_Server_API.app.core.Claims_Extraction.artifact_verification.verify_generated_artifact_against_sources",
         fake_verify,
     )
 
@@ -1827,11 +1826,11 @@ def test_generate_flashcards_endpoint_uses_claims_verification_provider_override
         )
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.verify_generated_artifact_against_sources",
+        "tldw_Server_API.app.core.Claims_Extraction.artifact_verification.verify_generated_artifact_against_sources",
         fake_verify,
     )
 
@@ -1876,7 +1875,7 @@ def test_generate_flashcards_uses_legacy_defaults(
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
 
@@ -1908,7 +1907,7 @@ def test_generate_flashcards_coerces_legacy_num_cards_string(
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
 
@@ -1947,7 +1946,7 @@ def test_generate_flashcards_accepts_mixed_card_plan(
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
 
@@ -1990,7 +1989,7 @@ def test_generate_flashcards_rejects_planned_output_count_mismatch(
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
 
@@ -2031,7 +2030,7 @@ def test_generate_flashcards_skips_junk_rows_before_planned_type_validation(
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
 
@@ -2067,7 +2066,7 @@ def test_generate_flashcards_rejects_planned_output_without_valid_generation_typ
         return {"flashcards": [raw_card], "count": 1}
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
 
@@ -2094,7 +2093,7 @@ def test_generate_flashcards_test_mode_supports_card_plan(
         return {"error": "LLM provider is required", "flashcards": [], "count": 0}
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
 
@@ -2157,8 +2156,7 @@ def test_generate_flashcards_endpoint_uses_default_provider_when_omitted(
     from tldw_Server_API.app.api.v1.endpoints import flashcards as flashcards_endpoint
 
     monkeypatch.setattr(
-        flashcards_endpoint,
-        "loaded_config_data",
+        "tldw_Server_API.app.core.config.loaded_config_data",
         {"API": {"default_api": "anthropic"}},
     )
 
@@ -2185,11 +2183,11 @@ def test_generate_flashcards_endpoint_uses_default_provider_when_omitted(
         )
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        "tldw_Server_API.app.core.Workflows.adapters.content.run_flashcard_generate_adapter",
         fake_generate_adapter,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.verify_generated_artifact_against_sources",
+        "tldw_Server_API.app.core.Claims_Extraction.artifact_verification.verify_generated_artifact_against_sources",
         fake_verify,
     )
 
@@ -3199,7 +3197,7 @@ def test_get_flashcard_assistant_returns_400_for_input_error(
         raise InputError("invalid study assistant context")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.build_flashcard_assistant_context",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.build_flashcard_assistant_context",
         fake_build_context,
     )
 
@@ -3228,7 +3226,7 @@ def test_get_flashcard_assistant_returns_500_for_db_error(
         raise CharactersRAGDBError("flashcard assistant context backend unavailable")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.build_flashcard_assistant_context",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.build_flashcard_assistant_context",
         fake_build_context,
     )
 
@@ -3257,7 +3255,7 @@ def test_get_flashcard_assistant_returns_404_for_conflict_error(
         raise ConflictError("study assistant thread missing")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.build_flashcard_assistant_context",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.build_flashcard_assistant_context",
         fake_build_context,
     )
 
@@ -3303,7 +3301,7 @@ def test_flashcard_assistant_respond_persists_user_and_assistant_messages(
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
         fake_generate_reply,
     )
 
@@ -3348,7 +3346,7 @@ def test_flashcard_assistant_respond_names_its_provider_to_the_llm_quota(
         return {"assistant_text": "Filtration.", "structured_payload": {}, "provider": "openai", "model": "gpt-test"}
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
         recording_generate_reply,
     )
     refuse_llm_work(monkeypatch)
@@ -3421,7 +3419,7 @@ def test_flashcard_assistant_respond_returns_409_for_stale_thread_version(
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
         fake_generate_reply,
     )
 
@@ -3462,7 +3460,7 @@ def test_flashcard_assistant_respond_returns_400_for_input_error(
         raise InputError("invalid study assistant action")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
         fake_generate_reply,
     )
 
@@ -3502,7 +3500,7 @@ def test_flashcard_assistant_respond_returns_500_for_db_error(
         raise CharactersRAGDBError("flashcard assistant reply backend unavailable")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
         fake_generate_reply,
     )
 
@@ -3557,7 +3555,7 @@ def test_flashcard_assistant_respond_returns_409_for_db_conflict(
         raise ConflictError("Version mismatch updating study assistant thread")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
         fake_generate_reply,
     )
     monkeypatch.setattr(flashcards_db, "append_study_assistant_message", fail_second_append)
@@ -3636,7 +3634,7 @@ def test_flashcard_assistant_fact_check_returns_required_payload_keys(
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        "tldw_Server_API.app.core.Flashcards.study_assistant.generate_study_assistant_reply",
         fake_generate_reply,
     )
 

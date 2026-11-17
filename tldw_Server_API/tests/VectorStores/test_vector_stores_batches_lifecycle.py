@@ -91,7 +91,7 @@ async def test_list_vector_batches_includes_canonical_overfetch_pagination(monke
         ]
         return rows[:limit]
 
-    monkeypatch.setattr(vs_mod, "db_list_batches", _fake_list_batches)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_batches_db.list_batches", _fake_list_batches)
 
     response = await vs_mod.list_vector_batches(
         status="queued",

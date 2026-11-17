@@ -245,11 +245,10 @@ def test_geval_capacity_exhaustion_returns_detached_503_and_closes_runtime(
     monkeypatch.setattr(service_module, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
     monkeypatch.setattr(ms_g_eval, "run_geval", _forbidden_geval)
     monkeypatch.setattr(eval_unified, "_build_eval_credential_runtime", lambda **_kwargs: runtime)
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
     monkeypatch.setattr(eval_unified, "_get_webhook_manager_for_user", lambda _uid: _WebhookManager())
     monkeypatch.setattr(
-        eval_unified,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _uid: service,
     )
 
@@ -441,11 +440,10 @@ def test_sync_evaluation_capacity_exhaustion_is_detached_503(
     monkeypatch.setattr(rag_evaluator, "analyze", forbidden_analyze)
     monkeypatch.setattr(response_quality_evaluator, "analyze", forbidden_analyze)
     monkeypatch.setattr(eval_unified, "_build_eval_credential_runtime", lambda **_kwargs: runtime)
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: AllowLimiter())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: AllowLimiter())
     monkeypatch.setattr(eval_unified, "_get_webhook_manager_for_user", lambda _uid: WebhookManager())
     monkeypatch.setattr(
-        eval_unified,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _uid: service,
     )
 
@@ -599,11 +597,10 @@ def test_response_quality_capacity_failure_drains_admitted_siblings_before_runti
     monkeypatch.setattr(response_quality_evaluator, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(response_quality_evaluator, "analyze", blocking_analyze)
     monkeypatch.setattr(eval_unified, "_build_eval_credential_runtime", lambda **_kwargs: runtime)
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: AllowLimiter())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: AllowLimiter())
     monkeypatch.setattr(eval_unified, "_get_webhook_manager_for_user", lambda _uid: WebhookManager())
     monkeypatch.setattr(
-        eval_unified,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _uid: service,
     )
 
@@ -688,7 +685,7 @@ def test_propositions_preserves_http_429_when_rate_limited(monkeypatch):
         async def check_rate_limit(self, *_args, **_kwargs):
             return False, {"error": "rate limit exceeded", "retry_after": 7}
 
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _DenyLimiter())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: _DenyLimiter())
 
     with TestClient(app) as client:
         response = client.post(
@@ -719,8 +716,7 @@ def test_history_preserves_http_403_for_non_admin_cross_user_request(monkeypatch
         return SimpleNamespace(is_admin=False, roles=[], permissions=[])
 
     monkeypatch.setattr(
-        eval_unified,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _DummyService(),
     )
     app.dependency_overrides[eval_unified.get_auth_principal] = _principal_override
@@ -752,8 +748,7 @@ def test_history_includes_canonical_offset_pagination(monkeypatch):
             return 3
 
     monkeypatch.setattr(
-        eval_unified,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _DummyService(),
     )
     app.dependency_overrides[eval_unified.get_auth_principal] = lambda: SimpleNamespace(
@@ -808,10 +803,9 @@ def test_propositions_uses_stable_user_id_instead_of_auth_context_token(monkeypa
                 "evaluation_time": 0.01,
             }
 
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
     monkeypatch.setattr(
-        eval_unified,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _DummyService(),
     )
 
@@ -853,10 +847,9 @@ def test_ocr_uses_stable_user_id_instead_of_auth_context_token(monkeypatch):
                 "evaluation_time": 0.01,
             }
 
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
     monkeypatch.setattr(
-        eval_unified,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _DummyService(),
     )
 
@@ -946,10 +939,9 @@ def test_batch_geval_uses_stable_and_webhook_user_identity(monkeypatch):
         "_build_eval_credential_runtime",
         lambda **_kwargs: _DummyCredentialRuntime(),
     )
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
     monkeypatch.setattr(
-        eval_unified,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _DummyService(),
     )
 
@@ -1017,7 +1009,7 @@ def test_sync_evaluation_llm_quota_refuses_before_the_rate_limiter(monkeypatch, 
     def _limiter_must_not_run(_uid):
         raise AssertionError("the limiter ran")
 
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", _limiter_must_not_run)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", _limiter_must_not_run)
     refuse_llm_work(monkeypatch)
 
     with TestClient(app) as client:
@@ -1040,9 +1032,9 @@ def test_batch_evaluation_llm_quota_refuses_llm_types_and_admits_propositions(mo
         async def evaluate_propositions(self, **_kwargs):
             return {"evaluation_id": "eval_props_1", "results": {"score": 1.0}}
 
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
     monkeypatch.setattr(
-        eval_unified, "get_unified_evaluation_service_for_user", lambda _uid: _PropositionsService()
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _uid: _PropositionsService()
     )
     refuse_llm_work(monkeypatch)
 
@@ -1084,7 +1076,7 @@ def _past_the_limit_on_own_keys(monkeypatch, own: set[str]) -> tuple[list[str], 
         raise HTTPException(status_code=418, detail="the quota check let the request through")
 
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
-    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", _limiter_reached)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", _limiter_reached)
     refuse_llm_work(monkeypatch)
     return asked, marked
 
@@ -1194,13 +1186,11 @@ def test_batch_client_teardown_poison_isolated_before_next_credential_resolution
         lambda **_kwargs: _CredentialRuntime(),
     )
     monkeypatch.setattr(
-        eval_unified,
-        "get_user_rate_limiter_for_user",
+        "tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user",
         lambda _uid: _AllowLimiter(),
     )
     monkeypatch.setattr(
-        eval_unified,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _DummyService(),
     )
 

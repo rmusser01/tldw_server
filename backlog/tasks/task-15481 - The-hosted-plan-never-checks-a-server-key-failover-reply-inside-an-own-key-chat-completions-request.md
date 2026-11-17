@@ -2,7 +2,7 @@
 id: TASK-15481
 title: The hosted plan never checks a server-key failover reply inside an own-key
   /chat/completions request
-status: To Do
+status: Done
 labels:
 - quotas
 - billing
@@ -17,27 +17,32 @@ Follow-up of TASK-13955 (ADR-083), from its final review (declined to judge) and
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The owner chooses, and the notes and ADR-083 record it: check the hosted plan at the call, refuse provider fallback for an own-key request when the plan applies, or accept and document the gap
-- [ ] #2 If a check or a refusal is chosen: an own-key /chat/completions request from an org over its plan gets no server-key failover reply, stream and non-stream, by any of the four failover paths, with tests; if the refusal is chosen, the notes and docs say that own-key requests under a hosted plan never fail over (if the check at the call is chosen, an org within its plan keeps failover)
-- [ ] #3 Docs/Operations/Usage_Quotas.md and ADR-083 (and its Docs/Published mirror) state the behaviour
+- [x] #1 The owner chooses, and the notes and ADR-083 record it: check the hosted plan at the call, refuse provider fallback for an own-key request when the plan applies, or accept and document the gap
+- [x] #2 If a check or a refusal is chosen: an own-key /chat/completions request from an org over its plan gets no server-key failover reply, stream and non-stream, by any of the four failover paths, with tests; if the refusal is chosen, the notes and docs say that own-key requests under a hosted plan never fail over (if the check at the call is chosen, an org within its plan keeps failover)
+- [x] #3 Docs/Operations/Usage_Quotas.md and ADR-083 (and its Docs/Published mirror) state the behaviour
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-11-16-hosted-plan-own-key-failover.md. Owner decision (AC #1), 2026-11-16: option B, the plan is asked at the boundary and fallback is refused for an own-key request only when the plan would refuse a server-key call. Fail-closed on a non-HTTP billing error (owner, 2026-11-16). AC #2 read as: no failover reply on another key for an org over its plan, by any of the four paths, and an org within its plan keeps failover (AC text unchanged). The within-plan failover reply stays out of the hot cache, as documented in the ADR-083 amendment.
+Verification (2026-11-16): RED on dev with the test half: 6 failed (5 over-plan + broken-plan), 5 passed (within-plan), 8 deselected (plan: 5 failed/5 passed + broken-plan 1 failed). GREEN: quota file 19 passed, netlines 0. Ratchet: create_chat_completion 2902/2908, execute_streaming_call 1542/1545, _execute_non_stream_call_impl 1054/1054; function-size, endpoint-monkeypatch and test-quality ratchets 62 passed; test_quality_triage --enforce exit 0. Wider set: Billing+Usage 21 passed; tests/Docs 214 passed; Chat boundary+Audio hotwords 49 passed; test_chat_endpoint_simplified 223 passed 1 skipped 2 failed under load (test_concurrent_empty_and_valid_streams_keep_usage_accounting_isolated, test_stream_prime_bounds_endless_metadata_and_closes[elapsed]), both pass on rerun (4 passed); tests/lint+CI 1374 passed, 24 failed: 22 workflow-file assertions (ubuntu-latest not in supported images; no workflow file touched) and the 2 known coverage-module env failures; test_runtime_package_discovery.py ignored (no setuptools). All runs netlines 0. shard coverage OK, check_backlog_task_ids exit 0.
+Fix pass (2026-11-17), final review Important 1 and 2. Controller ruling 1: a billing data-source failure follows BILLING_ENFORCEMENT_FAILURE_MODE (open: failover runs; closed: withheld), as the server-key pre-check does; the enforcer absorbs those failures itself, so the helper cannot override them; any other error from the check withholds the failover and the own-key request still runs. Code: _the_hosted_plan_refuses catches Exception and logs only the type name; ADR-083 amendment and Usage_Quotas.md reworded. RED: _PlanBroken raising the real NativeQuotaUnavailableError made the broken-plan test fail (error escaped); GREEN: it passes; quota file 19 passed. Follow-up: TASK-15558 (the server-key pre-check returns 500 on the same error). Controller ruling 2 (option a, a streaming-executor fallback test) was NOT implementable: the endpoint wraps the provider call in _sanitize_provider_stream_call, which turns every eager provider error into a lazy iterator error, so execute_streaming_call's own except (and its direct fallback) never fires from the endpoint, even with QUEUED_EXECUTION on and no queue (a temporary probe at that except logged nothing). The stream_in_call case is the retry loop; comment fixed, no chat.py patch added, no ratchet drain done. Minor 1 and 4 done. Verify: quota file 19 passed; function-size, endpoint-monkeypatch and test-quality ratchets 62 passed; test_quality_triage --enforce rc 0; Docs refresh and onboarding parity 37 passed; trust-boundary file 17 passed; all netlines 0.
+Controller ruling (2026-11-17, final review Important 2): option (b). The streaming executor's own fallback (chat_service.execute_streaming_call, direct and queued) cannot be reached from /chat/completions: chat.py _sanitize_provider_stream_call turns every eager provider error except LLMPolicyRefusal into a lazy iterator error, so execute_streaming_call's except never sees it and the endpoint's retry loop fails over instead (fix-pass probe: no executor 'Trying fallback provider' line with QUEUED_EXECUTION True). It is also gated by the request flag at enable_provider_fallback=(allow_provider_fallback_for_request and QUEUED_EXECUTION). AC #2 reads as: the three reachable failover paths (pre-dispatch health switch, stream retry loop entered lazily and eagerly, non-stream executor fallback) are tested over and within plan; the fourth is covered by the flag by construction. Ruling (Important 1): a billing data-source failure follows BILLING_ENFORCEMENT_FAILURE_MODE as the server-key pre-check does; any other error withholds the failover; the own-key request still runs. Follow-up: TASK-15558.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+An own-key /chat/completions request with fallback on now asks the hosted plan at the boundary whether it would refuse a server-key call; if so provider fallback is off for the request (covers all four failover paths). Within-plan orgs keep failover; a billing lookup error withholds failover (fail-closed). Documented in the ADR-083 amendment (2026-11-16) and Usage_Quotas.md; 11 new tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

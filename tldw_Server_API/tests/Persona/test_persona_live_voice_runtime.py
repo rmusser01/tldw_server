@@ -163,7 +163,7 @@ def voice_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     from tldw_Server_API.tests.Persona.test_persona_ws import _seed_persona_session, fastapi_app
 
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     async def authenticate(*args: Any, **kwargs: Any) -> Any:
         return "1", True, True

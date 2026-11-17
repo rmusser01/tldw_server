@@ -118,7 +118,7 @@ async def test_embeddings_stage_status_200_with_embeddings_admin_permission_non_
         return None
 
     monkeypatch.setattr(embeddings_mod, "_get_redis_client", _fake_get_redis_client)
-    monkeypatch.setattr(embeddings_mod, "ensure_async_client_closed", _fake_ensure_async_client_closed)
+    monkeypatch.setattr("tldw_Server_API.app.core.Infrastructure.redis_factory.ensure_async_client_closed", _fake_ensure_async_client_closed)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/embeddings/stage/status")

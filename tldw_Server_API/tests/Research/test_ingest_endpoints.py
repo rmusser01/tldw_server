@@ -163,7 +163,7 @@ async def test_ingest_by_doi_uses_media_repository_for_media_db_sessions(
     fake_repo = _FakeRepo()
     paper_search_app.dependency_overrides[get_media_db_for_user] = lambda: media_db
 
-    monkeypatch.setattr(paper_search, "get_media_repository", lambda db: fake_repo, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_media_repository", lambda db: fake_repo, raising=False)
     monkeypatch.setattr(_Unpaywall, "resolve_oa_pdf", lambda doi: ("https://example.com/oa.pdf", None))
     monkeypatch.setattr(paper_search, "_http_session", lambda: _FakeSession(b"%PDF-1.5\n..."))
 

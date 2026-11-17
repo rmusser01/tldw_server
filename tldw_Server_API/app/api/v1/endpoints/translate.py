@@ -16,11 +16,11 @@ from tldw_Server_API.app.api.v1.schemas.translate_schemas import (
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     render_service_prompt_part,
     resolve_service_prompt,
 )
+import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as _Summarization_General_Lib
 
 router = APIRouter(tags=["Translation"])
 
@@ -101,7 +101,7 @@ async def translate_text(
         # Use the existing analyze function for LLM call, off the event loop: a sync LLM call
         # on the loop blocks the server and cannot be quota-checked (LLM usage accounting spec §4b).
         result = await asyncio.to_thread(
-            analyze,
+            _Summarization_General_Lib.analyze,
             api_name=provider,
             input_data=prompt,
             custom_prompt_arg=None,

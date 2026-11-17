@@ -225,6 +225,7 @@ def test_media_handlers_name_the_analysis_provider_to_the_llm_quota(
     quota_service_stub,
     transcribed,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
     path: str,
     data: dict,
     files: list,
@@ -232,7 +233,7 @@ def test_media_handlers_name_the_analysis_provider_to_the_llm_quota(
     own_key: bool,
 ) -> None:
     """Past a limit, analysis whose provider runs on the user's own key is admitted and runs on that key; on the
-    server's key the handler answers the 402 before touching its input (TASK-15426). Nothing leaves the machine."""
+    server's key a new input gets a 402 before analysis (TASK-15426). Nothing leaves the machine."""
     client, _usage_logger = client_with_single_user
     summarized: list[dict] = []
     monkeypatch.setattr(
@@ -243,6 +244,8 @@ def test_media_handlers_name_the_analysis_provider_to_the_llm_quota(
 
     with block_live_network() as attempts:
         files = [(field, (name, body() if callable(body) else body, mime)) for field, (name, body, mime) in files]
+        if path == "/api/v1/media/add":
+            files = [(field, (f"{tmp_path.name}-{name}", body, mime)) for field, (name, body, mime) in files]
         response = client.post(path, data=data, files=files)
 
     assert attempts == []

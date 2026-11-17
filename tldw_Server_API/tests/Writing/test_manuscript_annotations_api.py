@@ -522,11 +522,10 @@ def test_review_selection_rejects_unknown_provider_like_analysis_endpoint(
     import tldw_Server_API.app.api.v1.endpoints.writing_manuscripts as writing_endpoint
 
     monkeypatch.setattr(
-        writing_endpoint,
-        "get_provider_manager",
+        "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
         lambda: SimpleNamespace(providers=["openai"], primary_provider="openai"),
     )
-    monkeypatch.setattr(writing_endpoint, "is_model_known_for_provider", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider", lambda *_args, **_kwargs: True)
 
     response = client.post(
         f"{PREFIX}/scenes/{scene['id']}/annotations/review-selection",
@@ -546,13 +545,11 @@ def test_review_selection_rejects_unknown_model_like_analysis_endpoint(
     import tldw_Server_API.app.api.v1.endpoints.writing_manuscripts as writing_endpoint
 
     monkeypatch.setattr(
-        writing_endpoint,
-        "get_provider_manager",
+        "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
         lambda: SimpleNamespace(providers=["openai"], primary_provider="openai"),
     )
     monkeypatch.setattr(
-        writing_endpoint,
-        "is_model_known_for_provider",
+        "tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider",
         lambda provider, model: False if provider == "openai" and model == "bad-model" else True,
     )
 
@@ -720,11 +717,10 @@ def test_review_scene_returns_job_response_and_passes_owner_metadata(api_context
     import tldw_Server_API.app.api.v1.endpoints.writing_manuscripts as writing_endpoint
 
     monkeypatch.setattr(
-        writing_endpoint,
-        "get_provider_manager",
+        "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
         lambda: SimpleNamespace(providers=["openai"], primary_provider="openai"),
     )
-    monkeypatch.setattr(writing_endpoint, "is_model_known_for_provider", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider", lambda *_args, **_kwargs: True)
 
     response = client.post(
         f"{PREFIX}/scenes/{scene['id']}/annotations/review-scene",
@@ -758,11 +754,10 @@ def test_review_scene_returns_sanitized_error_when_jobs_unavailable(api_context,
     import tldw_Server_API.app.api.v1.endpoints.writing_manuscripts as writing_endpoint
 
     monkeypatch.setattr(
-        writing_endpoint,
-        "get_provider_manager",
+        "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
         lambda: SimpleNamespace(providers=["openai"], primary_provider="openai"),
     )
-    monkeypatch.setattr(writing_endpoint, "is_model_known_for_provider", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider", lambda *_args, **_kwargs: True)
 
     response = client.post(
         f"{PREFIX}/scenes/{scene['id']}/annotations/review-scene",

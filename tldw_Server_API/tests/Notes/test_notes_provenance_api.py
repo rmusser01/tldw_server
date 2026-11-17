@@ -44,7 +44,7 @@ BASE = "/api/v1/notes"
 def api(request, client, sync_service, monkeypatch):
     sync_service.adapters = default_sync_v2_registry()
     if not request.param:
-        monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+        monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user", lambda _: None)
     return client, request.param
 
 
@@ -593,7 +593,7 @@ def test_bulk_lost_ack_is_immutable_and_rejects_changed_input(api, monkeypatch):
 
 
 def test_inactive_receipt_rejects_retry_with_provenance_removed(client, monkeypatch):
-    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user", lambda _: None)
     body = {"title": "First", "content": "Body", "knowledge_provenance": PAYLOAD, "expected_provenance_version": 0}
     headers = {"Idempotency-Key": "remove-provenance"}
     saved = client.post(BASE + "/", json=body, headers=headers)
@@ -609,7 +609,7 @@ def test_inactive_rest_receipt_rolls_back_organization_then_replays_after_reopen
 ):
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
-    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user", lambda _: None)
     store = chacha_db.note_provenance_store
     original = store.complete_receipt
 
@@ -684,7 +684,7 @@ def test_acknowledgment_replay_cannot_bypass_read_policy(client, sync_service, m
 
 @pytest.mark.parametrize("strategy", ["create_copy", "overwrite"])
 def test_inactive_import_lost_ack_replays_before_duplicate_or_child_checks(client, monkeypatch, strategy):
-    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user", lambda _: None)
     row = {
         "title": "Imported",
         "content": "Body",
@@ -736,7 +736,7 @@ def test_lost_retained_restore_ack_uses_original_parent_child_pair(api):
 def test_inactive_owner_receipts_and_created_ids_are_independent(client, chacha_db, monkeypatch, sourced):
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user", lambda _: None)
     body = {"title": "Owner", "content": "Body", "knowledge_provenance": PAYLOAD, "expected_provenance_version": 0}
     if not sourced:
         body.pop("knowledge_provenance")
@@ -985,7 +985,7 @@ def test_reads_fence_committed_child_ahead_of_rolled_back_applied_head(client, s
 def test_inactive_keyed_create_replays_original_ack_after_edit(client, chacha_db, monkeypatch, sourced, organized):
     from uuid import uuid4
 
-    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user", lambda _: None)
     body: dict[str, Any] = {"id": str(uuid4()), "title": "Original", "content": "Original body"}
     if sourced:
         body.update(knowledge_provenance=PAYLOAD, expected_provenance_version=0)
@@ -1015,7 +1015,7 @@ def test_inactive_keyed_create_replays_original_ack_after_edit(client, chacha_db
 def test_inactive_unkeyed_plain_create_keeps_duplicate_id_conflict(client, monkeypatch):
     from uuid import uuid4
 
-    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user", lambda _: None)
     body = {"id": str(uuid4()), "title": "Plain", "content": "Body"}
     assert client.post(BASE + "/", json=body).status_code == 201
     assert client.post(BASE + "/", json=body).status_code == 409
@@ -1024,7 +1024,7 @@ def test_inactive_unkeyed_plain_create_keeps_duplicate_id_conflict(client, monke
 @pytest.mark.parametrize("method", ["put", "patch"])
 @pytest.mark.parametrize("organized", [False, True])
 def test_inactive_keyed_plain_update_replays_exact_ack(client, chacha_db, monkeypatch, method, organized):
-    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user", lambda _: None)
     saved = client.post(BASE + "/", json={"title": "Plain", "content": "Before"}).json()
     path = BASE + "/" + saved["id"]
     body: dict[str, Any] = {"content": "Accepted"}
@@ -1049,7 +1049,7 @@ def test_inactive_keyed_plain_update_replays_exact_ack(client, chacha_db, monkey
 def test_inactive_keyed_plain_batch_replays_exact_ack(client, chacha_db, monkeypatch, route):
     from uuid import uuid4
 
-    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user", lambda _: None)
     row = {"id": str(uuid4()), "title": "Plain batch", "content": "Original", "keywords": ["Atomic"]}
     body = (
         {"notes": [row]}

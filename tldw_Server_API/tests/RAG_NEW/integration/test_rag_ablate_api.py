@@ -74,8 +74,8 @@ def _request() -> Request:
 def _install_direct_ablate_fakes(monkeypatch, runtime):
     monkeypatch.setattr(rag_endpoint, "_build_credential_runtime", lambda *_args: runtime)
     monkeypatch.setattr(rag_endpoint, "_resolve_kanban_db_path", lambda _user: "kanban.db")
-    monkeypatch.setattr(rag_endpoint, "rag_result_from_unified_search_result", lambda result: result)
-    monkeypatch.setattr(rag_endpoint, "rag_result_to_response", lambda result: result)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.response_mapping.rag_result_from_unified_search_result", lambda result: result)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.response_mapping.rag_result_to_response", lambda result: result)
 
 
 @pytest.mark.asyncio
@@ -91,8 +91,8 @@ async def test_authenticated_ablate_passes_same_real_runtime_to_all_four_calls(m
         assert handle.api_key == _SENTINEL  # nosec B101
         return UnifiedSearchResult(documents=[], query="ablate")
 
-    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", provider_boundary)
-    monkeypatch.setattr(rag_endpoint, "agentic_rag_pipeline", provider_boundary)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", provider_boundary)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", provider_boundary)
 
     response = await rag_endpoint.rag_ablate(
         request_raw=_request(),
@@ -117,8 +117,8 @@ async def test_ablate_with_answer_refuses_an_over_quota_user(monkeypatch):
         ran.append(True)
         return UnifiedSearchResult(documents=[], query="ablate")
 
-    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", recorder)
-    monkeypatch.setattr(rag_endpoint, "agentic_rag_pipeline", recorder)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", recorder)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", recorder)
     refuse_llm_work(monkeypatch)
 
     with pytest.raises(LLMQuotaExceededError):
@@ -143,8 +143,8 @@ async def test_ablate_without_answer_is_not_refused_by_the_llm_quota(monkeypatch
         ran.append(True)
         return UnifiedSearchResult(documents=[], query="ablate")
 
-    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", recorder)
-    monkeypatch.setattr(rag_endpoint, "agentic_rag_pipeline", recorder)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", recorder)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", recorder)
     refuse_llm_work(monkeypatch)
 
     await rag_endpoint.rag_ablate(
@@ -166,7 +166,7 @@ async def test_authenticated_ablate_maps_typed_failure_and_closes(monkeypatch):
     async def fail_closed(**_kwargs):
         raise ByokResolutionError("credential_store_unavailable", "openai")
 
-    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", fail_closed)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", fail_closed)
 
     with pytest.raises(HTTPException) as exc_info:
         await rag_endpoint.rag_ablate(
@@ -190,7 +190,7 @@ async def test_authenticated_ablate_propagates_cancellation_and_closes(monkeypat
     async def cancel(**_kwargs):
         raise asyncio.CancelledError
 
-    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", cancel)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", cancel)
 
     with pytest.raises(asyncio.CancelledError):
         await rag_endpoint.rag_ablate(
@@ -330,8 +330,8 @@ async def test_ablate_passes_an_llm_quota_refusal_through(monkeypatch):
             category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
         )
 
-    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", refused)
-    monkeypatch.setattr(rag_endpoint, "agentic_rag_pipeline", refused)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", refused)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", refused)
 
     with pytest.raises(LLMQuotaExceededError):
         await rag_endpoint.rag_ablate(

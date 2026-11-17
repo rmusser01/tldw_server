@@ -327,7 +327,7 @@ def test_admin_job_status_reads_completed_pack_from_owner_database(
         assert owner_user_id == 2  # nosec B101
         return owner_db
 
-    monkeypatch.setattr(flashcards_endpoints, "get_chacha_db_for_owner", _owner_db_lookup, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_owner", _owner_db_lookup, raising=False)
 
     app = FastAPI()
     app.add_middleware(ChaChaOperationMiddleware)

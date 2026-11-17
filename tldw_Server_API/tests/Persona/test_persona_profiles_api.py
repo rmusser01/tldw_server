@@ -1014,7 +1014,7 @@ def test_persona_profile_state_metrics_smoke(persona_db: CharactersRAGDB, monkey
         captured_metrics.append((str(metric_name), {str(k): str(v) for k, v in dict(labels or {}).items()}))
         return None
 
-    monkeypatch.setattr(persona_ep, "increment_counter", _fake_increment)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.increment_counter", _fake_increment)
 
     with _client_for_user(1, persona_db) as client:
         created = client.post(

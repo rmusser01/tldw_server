@@ -1988,7 +1988,7 @@ def test_new_generation_acquires_only_selected_source_databases(
         return SimpleNamespace()
 
     monkeypatch.setattr(service, "submit", _resolve_submit)
-    monkeypatch.setattr(slides_standalone_html, "resolve_standalone_html_source", _resolved_source)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.standalone_html_sources.resolve_standalone_html_source", _resolved_source)
 
     response = client.post(
         "/api/v1/slides/generations",

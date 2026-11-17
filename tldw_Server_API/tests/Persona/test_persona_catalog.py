@@ -52,13 +52,13 @@ def test_persona_catalog_smoke(client_with_persona_user: TestClient):
 
 
 def test_persona_catalog_returns_404_when_disabled(client_with_persona_user: TestClient, monkeypatch):
-    monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_persona_enabled", lambda: False)
     r = client_with_persona_user.get("/api/v1/persona/catalog")
     assert r.status_code == 404
 
 
 def test_persona_session_returns_404_when_disabled(client_with_persona_user: TestClient, monkeypatch):
-    monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_persona_enabled", lambda: False)
     r = client_with_persona_user.post("/api/v1/persona/session", json={"persona_id": "research_assistant"})
     assert r.status_code == 404
 

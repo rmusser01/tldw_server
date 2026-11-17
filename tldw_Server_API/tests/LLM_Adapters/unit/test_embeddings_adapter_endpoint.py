@@ -54,7 +54,7 @@ def test_embeddings_endpoint_uses_adapter_when_enabled(monkeypatch):
     try:
         with (
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced.get_embeddings_registry",
+                "tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry",
                 return_value=_StubRegistry(),
             ),
             patch(

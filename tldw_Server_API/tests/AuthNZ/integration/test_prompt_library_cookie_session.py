@@ -105,7 +105,7 @@ async def test_prompt_library_headerless_canonical_failure_stays_fail_closed(mon
     async def unavailable(*args, **kwargs):
         raise HTTPException(status_code=503, detail="Canonical auth unavailable")
 
-    monkeypatch.setattr(prompts, "get_request_user", unavailable)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_request_user", unavailable)
     request = Request({"type": "http", "headers": []})
     with pytest.raises(HTTPException) as rejected:
         await prompts._resolve_prompts_auth_user(request, Token=None, x_api_key=None, Authorization=None)
@@ -120,7 +120,7 @@ async def test_prompt_library_headerless_owner_retains_claim_admin_gate(monkeypa
     async def regular_owner(*args, **kwargs):
         return user
 
-    monkeypatch.setattr(prompts, "get_request_user", regular_owner)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_request_user", regular_owner)
     monkeypatch.setenv("PROMPTS_REQUIRE_ADMIN", str(require_admin).lower())
     request = Request({"type": "http", "headers": []})
     if require_admin:

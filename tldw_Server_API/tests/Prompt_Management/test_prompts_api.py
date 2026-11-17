@@ -795,11 +795,11 @@ class TestExportEndpoints:
         #     db_export_prompt_keywords_to_csv
         # )
         monkeypatch.setattr(
-            "tldw_Server_API.app.api.v1.endpoints.prompts.db_export_prompts_formatted",  # Target correct imported name
+            "tldw_Server_API.app.core.Prompt_Management.Prompts_Interop.db_export_prompts_formatted",  # Target correct imported name
             self.mock_db_export_prompts_formatted,
         )
         monkeypatch.setattr(
-            "tldw_Server_API.app.api.v1.endpoints.prompts.db_export_prompt_keywords_to_csv",  # Target correct imported name
+            "tldw_Server_API.app.core.Prompt_Management.Prompts_Interop.db_export_prompt_keywords_to_csv",  # Target correct imported name
             self.mock_db_export_prompt_keywords_to_csv,
         )
 

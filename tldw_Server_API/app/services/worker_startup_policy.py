@@ -108,3 +108,21 @@ def should_start_inprocess_worker(
         test_mode=test_mode,
         route_enabled=route_enabled,
     )
+
+
+def media_ingest_heavy_worker_available(
+    *,
+    sidecar_mode: bool,
+    path_enabled: Callable[..., bool] = worker_path_enabled,
+) -> bool:
+    """Default heavy ingest on alongside the built-in ordinary worker."""
+    ordinary_inprocess_enabled = not sidecar_mode and path_enabled(
+        "MEDIA_INGEST_JOBS_WORKER_ENABLED",
+        "media",
+        default_stable=True,
+    )
+    return path_enabled(
+        "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
+        "media-ingest-heavy-jobs",
+        default_stable=ordinary_inprocess_enabled,
+    )

@@ -232,7 +232,7 @@ class TestListSkills:
         clear_cache = getattr(skills_endpoint._get_cached_skills_service, "cache_clear", None)
         if clear_cache is not None:
             clear_cache()
-        monkeypatch.setattr(skills_endpoint, "SkillsService", StubService)
+        monkeypatch.setattr("tldw_Server_API.app.core.Skills.skills_service.SkillsService", StubService)
         db = StubDatabase()
         service = skills_endpoint._get_cached_skills_service(42, tmp_path, db)
         assert skills_endpoint._get_cached_skills_service(42, tmp_path, db) is service

@@ -212,7 +212,7 @@ def _recording_pipeline(monkeypatch) -> list[dict]:
         calls.append(kwargs)
         return up.UnifiedSearchResult(documents=[], query=kwargs.get("query", ""), errors=[])
 
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_pipeline)
     return calls
 
 
@@ -272,7 +272,7 @@ def _over_the_limit_with_own_keys(monkeypatch, own: set[str]) -> tuple[list[str]
         return up.UnifiedSearchResult(documents=[], query=kwargs.get("query", ""), errors=[])
 
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_pipeline)
     refuse_llm_work(monkeypatch)
     return asked, marked
 
@@ -545,7 +545,7 @@ def test_rag_agentic_search_uses_shared_request_resolution_and_retrieval_plan(
         )
 
     monkeypatch.setattr(rag_ep, "build_agentic_execution_context", fake_build_agentic_execution_context)
-    monkeypatch.setattr(rag_ep, "agentic_rag_pipeline", fake_agentic_rag_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", fake_agentic_rag_pipeline)
 
     payload = {
         "query": "shared contract parity",

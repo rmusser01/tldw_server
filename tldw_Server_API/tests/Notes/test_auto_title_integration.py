@@ -63,8 +63,7 @@ def client_user_only(monkeypatch, tmp_path: Path):
     fastapi_app.dependency_overrides[get_request_user] = override_user
     fastapi_app.dependency_overrides[get_prompts_db_for_user] = lambda: prompts_db
     monkeypatch.setattr(
-        notes_module,
-        "get_prompts_db_for_user",
+        "tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps.get_prompts_db_for_user",
         resolve_test_prompts_db,
     )
     fastapi_app.state.notes_title_prompts_db = prompts_db
@@ -86,7 +85,7 @@ def _enable_llm(
     }
     from tldw_Server_API.app.api.v1.endpoints import notes as notes_module
 
-    monkeypatch.setattr(notes_module, "core_settings", settings)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.settings", settings)
     monkeypatch.setattr(note_title_module, "core_settings", settings)
     adapter = _RecordingAdapter(titles)
     monkeypatch.setattr(
@@ -135,8 +134,7 @@ def _make_prompts_db_unavailable(
         raise HTTPException(status_code=500, detail="Prompts DB unavailable")
 
     monkeypatch.setattr(
-        notes_module,
-        "get_prompts_db_for_user",
+        "tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps.get_prompts_db_for_user",
         unavailable_direct,
     )
     client.app.dependency_overrides[get_prompts_db_for_user] = unavailable_dependency
@@ -189,7 +187,7 @@ def test_title_prompt_resolution_runs_off_loop_and_closes_worker_connection(
         closed_threads.append(threading.get_ident())
         real_close()
 
-    monkeypatch.setattr(notes_module, "resolve_service_prompt", resolve_off_event_loop)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.service_prompts.resolve_service_prompt", resolve_off_event_loop)
     monkeypatch.setattr(prompts_db, "close_connection", record_close)
 
     response = client_user_only.post(
@@ -289,7 +287,7 @@ def test_bulk_llm_then_heuristic_preserves_legacy_heuristic_call_shape(
             raise TypeError("legacy heuristic call received service_prompt")
         return f"{options.strategy}: {content}"
 
-    monkeypatch.setattr(notes_module, "generate_note_title", generate_title)
+    monkeypatch.setattr("tldw_Server_API.app.core.Writing.note_title.generate_note_title", generate_title)
 
     response = client_user_only.post(
         "/api/v1/notes/bulk",
@@ -434,7 +432,7 @@ def test_disabled_llm_strategy_uses_heuristic_without_loading_prompt(
         "NOTES_TITLE_DEFAULT_STRATEGY": "heuristic",
         "NOTES_TITLE_MAX_LEN": 1_000,
     }
-    monkeypatch.setattr(notes_module, "core_settings", disabled_settings)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.settings", disabled_settings)
     monkeypatch.setattr(note_title_module, "core_settings", disabled_settings)
     _make_prompts_db_unavailable(client_user_only, monkeypatch)
 

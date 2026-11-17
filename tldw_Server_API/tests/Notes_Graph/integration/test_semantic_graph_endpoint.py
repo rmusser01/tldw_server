@@ -173,7 +173,7 @@ def test_semantic_graph_is_awaited_and_rate_limited_only_when_requested(
     async def record_semantic_rate(_request, resource, _db_pool):
         rate_calls.append(resource)
 
-    monkeypatch.setattr(endpoint, "enforce_rbac_rate_limit", record_semantic_rate)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.enforce_rbac_rate_limit", record_semantic_rate)
 
     ordinary = client.get(
         "/api/v1/notes/graph",
@@ -255,7 +255,7 @@ async def test_graph_rate_limit_selects_exactly_one_request_specific_resource(
         if rate_error is not None:
             raise rate_error
 
-    monkeypatch.setattr(endpoint, "enforce_rbac_rate_limit", record_rate)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.enforce_rbac_rate_limit", record_rate)
     ordinary = Request({"type": "http", "method": "GET", "path": "/graph", "query_string": b"edge_types=manual"})
     semantic = Request(
         {
@@ -350,7 +350,7 @@ def test_cytoscape_semantic_response_preserves_status_and_evidence(
     async def no_op_rate(_request, _resource, _db_pool):
         return None
 
-    monkeypatch.setattr(endpoint, "enforce_rbac_rate_limit", no_op_rate)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.enforce_rbac_rate_limit", no_op_rate)
 
     response = client.get(
         "/api/v1/notes/graph",

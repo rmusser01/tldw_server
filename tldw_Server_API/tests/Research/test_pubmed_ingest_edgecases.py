@@ -70,7 +70,7 @@ async def test_pubmed_ingest_uses_media_repository_for_media_db_sessions(
     fake_repo = _FakeRepo()
     paper_search_app.dependency_overrides[get_media_db_for_user] = lambda: media_db
 
-    monkeypatch.setattr(paper_search, "get_media_repository", lambda db: fake_repo, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_media_repository", lambda db: fake_repo, raising=False)
     monkeypatch.setattr(_Pub, "get_pubmed_by_id", _fake_pubmed_by_id)
     monkeypatch.setattr(_OA, "download_pmc_pdf", _fake_download_pmc_pdf)
 

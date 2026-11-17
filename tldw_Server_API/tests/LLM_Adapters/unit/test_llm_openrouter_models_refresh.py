@@ -42,10 +42,10 @@ def test_llm_models_metadata_refresh_openrouter_includes_live_models(monkeypatch
             }
         )
 
-    monkeypatch.setattr(llm_providers, "load_comprehensive_config", _fake_config_openrouter)
-    monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)
-    monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {"openrouter": "sk-or-test"})
-    monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", lambda: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", _fake_config_openrouter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.apply_llm_provider_overrides_to_listing", lambda result: result)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {"openrouter": "sk-or-test"})
+    monkeypatch.setattr("tldw_Server_API.app.core.Image_Generation.listing.list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(openrouter_inventory, "_http_fetch", _fake_fetch)
     monkeypatch.setattr(openrouter_inventory, "_CACHE", OrderedDict())
     monkeypatch.setattr(openrouter_inventory, "_FAILED", OrderedDict())

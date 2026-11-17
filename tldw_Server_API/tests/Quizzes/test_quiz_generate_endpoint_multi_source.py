@@ -63,7 +63,7 @@ async def test_generate_quiz_legacy_media_id_maps_to_single_media_source(monkeyp
         captured.update(kwargs)
         return {"quiz": {"id": 1}, "questions": []}
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     request = QuizGenerateRequest.model_validate({"media_id": 42, "num_questions": 5, "workspace_id": "ws-1"})
     await quizzes_endpoint.generate_quiz(request=request, db=Mock(), media_db=Mock())
@@ -80,7 +80,7 @@ async def test_generate_quiz_forwards_sources_array(monkeypatch):
         captured.update(kwargs)
         return {"quiz": {"id": 1}, "questions": []}
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     request = QuizGenerateRequest.model_validate(
         {
@@ -103,7 +103,7 @@ async def test_generate_quiz_forwards_generation_profile(monkeypatch):
         captured.update(kwargs)
         return {"quiz": {"id": 1}, "questions": []}
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     request = QuizGenerateRequest.model_validate(
         {
@@ -125,7 +125,7 @@ async def test_generate_quiz_forwards_model_and_api_provider(monkeypatch):
         captured.update(kwargs)
         return {"quiz": {"id": 1}, "questions": []}
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     request = QuizGenerateRequest.model_validate(
         {
@@ -149,7 +149,7 @@ async def test_generate_quiz_forwards_claims_verification_provider_override(monk
         captured.update(kwargs)
         return {"quiz": {"id": 1}, "questions": [], "claim_verification": {"verdict": "grounded"}}
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     request = QuizGenerateRequest.model_validate(
         {
@@ -174,7 +174,7 @@ async def test_generate_quiz_maps_provenance_validation_error_to_422(monkeypatch
     async def fake_generate_quiz_from_sources(**kwargs):
         raise QuizProvenanceValidationError("invalid source citations")
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     request = QuizGenerateRequest.model_validate(
         {
@@ -194,7 +194,7 @@ async def test_generate_quiz_rejects_unknown_workspace_before_generation(monkeyp
     async def fake_generate_quiz_from_sources(**kwargs):
         raise AssertionError("generation should not run when workspace is invalid")
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     db = Mock()
     db.get_workspace.return_value = None
@@ -226,7 +226,7 @@ async def test_generate_quiz_maps_provider_failures_without_leaking_details(monk
     async def fail_provider(**_kwargs):
         raise error_type(provider="ollama", message="PROVIDER_SYNTHETIC_SECRET")
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fail_provider)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fail_provider)
     request = QuizGenerateRequest.model_validate(
         {"sources": [{"source_type": "note", "source_id": "note-1"}], "num_questions": 1}
     )

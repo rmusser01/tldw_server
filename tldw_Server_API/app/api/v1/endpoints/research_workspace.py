@@ -32,9 +32,7 @@ from tldw_Server_API.app.core.Research_Workspace.artifact_generation import (
     ResearchWorkspaceArtifactVerificationError,
     generate_research_workspace_artifact,
 )
-from tldw_Server_API.app.core.Research_Workspace.capabilities import (
-    collect_research_workspace_capabilities,
-)
+import tldw_Server_API.app.core.Research_Workspace.capabilities as _capabilities
 
 router = APIRouter(prefix="/research-workspace", tags=["research-workspace"])
 
@@ -51,7 +49,7 @@ async def research_workspace_capabilities(
     current_user: User = Depends(get_request_user),
 ) -> ResearchWorkspaceCapabilitiesResponse:
     """Return user-safe Research Workspace capability readiness."""
-    return await collect_research_workspace_capabilities(user_id=current_user.id)
+    return await _capabilities.collect_research_workspace_capabilities(user_id=current_user.id)
 
 
 def _media_text(row: dict[str, Any]) -> str:

@@ -50,12 +50,12 @@ def test_run_embeddings_abtest_synchronous_success(evals_client, monkeypatch):
             self.db = _DBStub()
 
     import tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_embeddings_abtest as ab
-    monkeypatch.setattr(ab, "get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
 
     async def _fake_run_abtest_full(db, cfg, test_id, user_id, media_db):
         return None
 
-    monkeypatch.setattr(ab, "run_abtest_full", _fake_run_abtest_full)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.embeddings_abtest_service.run_abtest_full", _fake_run_abtest_full)
 
     payload = {
         "config": {
@@ -99,12 +99,12 @@ def test_run_embeddings_abtest_treats_testing_y_as_synchronous(evals_client, mon
 
     import tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_embeddings_abtest as ab
 
-    monkeypatch.setattr(ab, "get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
 
     def _unexpected_jobs_manager():
         raise AssertionError("jobs path should not run")
 
-    monkeypatch.setattr(ab, "abtest_jobs_manager", _unexpected_jobs_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.embeddings_abtest_jobs.abtest_jobs_manager", _unexpected_jobs_manager)
 
     calls = {"run": 0}
 
@@ -112,7 +112,7 @@ def test_run_embeddings_abtest_treats_testing_y_as_synchronous(evals_client, mon
         calls["run"] += 1
         return None
 
-    monkeypatch.setattr(ab, "run_abtest_full", _fake_run_abtest_full)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.embeddings_abtest_service.run_abtest_full", _fake_run_abtest_full)
 
     payload = {
         "config": {
@@ -153,7 +153,7 @@ async def test_run_embeddings_abtest_idempotent_replay_uses_stored_normalized_st
             self.db = _DBStub()
 
     monkeypatch.setattr(ab, "enforce_heavy_evaluations_admin", lambda _principal: None)
-    monkeypatch.setattr(ab, "get_unified_evaluation_service_for_user", lambda _user_id: _SvcStub())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _user_id: _SvcStub())
 
     result = await ab.run_embeddings_abtest(
         test_id="mytest",
@@ -211,13 +211,13 @@ async def test_run_embeddings_abtest_sanitizes_enqueue_failure_log(monkeypatch):
     monkeypatch.setenv("TESTING", "false")
     monkeypatch.setattr(ab, "logger", logger)
     monkeypatch.setattr(ab, "enforce_heavy_evaluations_admin", lambda _principal: None)
-    monkeypatch.setattr(ab, "get_unified_evaluation_service_for_user", lambda _user_id: _SvcStub())
-    monkeypatch.setattr(ab, "log_run_started", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _user_id: _SvcStub())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.audit_adapter.log_run_started", lambda *args, **kwargs: None)
 
     def _raise_queue_error():
         raise RuntimeError("queue backend leaked /private/evals-abtest-jobs.db")
 
-    monkeypatch.setattr(ab, "abtest_jobs_manager", _raise_queue_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.embeddings_abtest_jobs.abtest_jobs_manager", _raise_queue_error)
 
     with pytest.raises(HTTPException) as exc_info:
         await ab.run_embeddings_abtest(
@@ -295,9 +295,9 @@ async def test_run_embeddings_abtest_sanitizes_synchronous_failure_warning(monke
     monkeypatch.setenv("TESTING", "true")
     monkeypatch.setattr(ab, "logger", logger)
     monkeypatch.setattr(ab, "enforce_heavy_evaluations_admin", lambda _principal: None)
-    monkeypatch.setattr(ab, "get_unified_evaluation_service_for_user", lambda _user_id: _SvcStub(db))
-    monkeypatch.setattr(ab, "log_run_started", lambda *args, **kwargs: None)
-    monkeypatch.setattr(ab, "run_abtest_full", _raise_run_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _user_id: _SvcStub(db))
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.audit_adapter.log_run_started", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.embeddings_abtest_service.run_abtest_full", _raise_run_error)
 
     result = await ab.run_embeddings_abtest(
         test_id="sensitive-test-id",

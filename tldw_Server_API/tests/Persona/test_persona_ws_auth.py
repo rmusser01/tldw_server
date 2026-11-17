@@ -81,7 +81,7 @@ async def test_missing_and_refused_credentials_are_told_apart(monkeypatch: pytes
 
 @pytest.mark.parametrize("credentials_supplied", [False, True])
 def test_persona_stream_auth_failure_rejects_before_stream_start(monkeypatch, credentials_supplied: bool):
-    monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_persona_enabled", lambda: True)
 
     async def _reject_auth(*_args, **_kwargs):
         return None, credentials_supplied, False
@@ -112,7 +112,7 @@ def test_persona_stream_negotiates_only_safe_auth_marker(
     monkeypatch: pytest.MonkeyPatch, marker: str | None, valid_credential: bool
 ) -> None:
     """Echo the bearer marker as offered (a browser compares it exactly), never the credential."""
-    monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_persona_enabled", lambda: True)
     _http_verifier(monkeypatch, {"test_api_key": AuthPrincipal(kind="user", user_id=99, token_type="api_key")})
 
     credential = "test_api_key" if valid_credential else "invalid_api_key"

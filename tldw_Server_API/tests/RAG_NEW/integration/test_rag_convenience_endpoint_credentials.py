@@ -95,8 +95,8 @@ def _install_endpoint_fakes(
         return None
 
     monkeypatch.setattr(rag_endpoint, "_log_rag_queries_for_org", no_usage_log)
-    monkeypatch.setattr(rag_endpoint, "rag_result_from_unified_search_result", lambda result: result)
-    monkeypatch.setattr(rag_endpoint, "rag_result_to_response", lambda result: {"query": result.query})
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.response_mapping.rag_result_from_unified_search_result", lambda result: result)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.response_mapping.rag_result_to_response", lambda result: {"query": result.query})
 
 
 @pytest.mark.asyncio

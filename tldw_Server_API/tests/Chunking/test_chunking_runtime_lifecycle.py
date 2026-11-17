@@ -140,11 +140,10 @@ async def test_chunking_resolver_freezes_credentials_with_provider_model_snapsho
         )
 
     monkeypatch.setattr(
-        chunking_module,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda *_args: (1, (), (), None),
     )
-    monkeypatch.setattr(chunking_module, "ProviderCredentialRuntime", Runtime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", Runtime)
     task = asyncio.create_task(
         chunking_module._resolve_chunking_credentials(
             "openai",
@@ -263,8 +262,7 @@ async def test_chunking_real_byok_resolution_cannot_mix_config_generations(
         lambda: {"openai_api": dict(live_config["openai_api"])},
     )
     monkeypatch.setattr(
-        chunking_module,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda *_args: (
             7,
             [11] if source == "team" else [],
@@ -273,8 +271,7 @@ async def test_chunking_real_byok_resolution_cannot_mix_config_generations(
         ),
     )
     monkeypatch.setattr(
-        chunking_module,
-        "capture_provider_override_call_snapshot",
+        "tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.capture_provider_override_call_snapshot",
         lambda _provider: EmptyOverrideSnapshot(),
     )
 
@@ -365,9 +362,9 @@ async def test_rolling_config_snapshot_capture_runs_off_event_loop(
         _record_provider_success(self._chunker.llm_config)
         return ["template chunk"]
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", load_snapshot)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", load_snapshot)
     monkeypatch.setattr(chunking_module, "_resolve_chunking_credentials", resolve_credentials)
-    monkeypatch.setattr(chunking_module, "improved_chunking_process", process)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", process)
     monkeypatch.setattr(TemplateProcessor, "process_template", process_template)
 
     if kind == "template":
@@ -508,9 +505,9 @@ async def test_rolling_endpoint_preserves_provider_generated_summary(
     def analyze(*_args, **_kwargs):
         return "provider-generated summary"
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _rolling_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _rolling_config)
     monkeypatch.setattr(chunking_module, "_resolve_chunking_credentials", resolve_credentials)
-    monkeypatch.setattr(chunking_module, "general_llm_analyzer", analyze)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze", analyze)
 
     result = await _invoke_rolling_endpoint(
         kind,
@@ -545,9 +542,9 @@ async def test_rolling_template_accepts_real_processor_result_contract(monkeypat
     def analyze(*_args, **_kwargs):
         return "provider-generated template summary"
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _rolling_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _rolling_config)
     monkeypatch.setattr(chunking_module, "_resolve_chunking_credentials", resolve_credentials)
-    monkeypatch.setattr(chunking_module, "general_llm_analyzer", analyze)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze", analyze)
 
     result = await _invoke_rolling_template(
         "Original template source sentence for the real processor.",
@@ -574,9 +571,9 @@ async def test_rolling_setup_failure_is_bounded_and_detached(
         raise RuntimeError(secret)
 
     if failure_site == "config":
-        monkeypatch.setattr(chunking_module, "load_server_configs", fail_config)
+        monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", fail_config)
     else:
-        monkeypatch.setattr(chunking_module, "load_server_configs", _rolling_config)
+        monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _rolling_config)
         monkeypatch.setattr(
             chunking_module,
             "_resolve_chunking_credentials",
@@ -659,12 +656,11 @@ async def test_rolling_endpoint_cancellation_drains_worker_and_mark_before_close
             }
         ]
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _rolling_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _rolling_config)
     monkeypatch.setattr(chunking_module, "_resolve_chunking_credentials", resolve_credentials)
-    monkeypatch.setattr(chunking_module, "improved_chunking_process", process)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", process)
     monkeypatch.setattr(
-        chunking_module,
-        "SYNC_ADAPTER_CALL_POOL",
+        "tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL",
         pool,
         raising=False,
     )
@@ -714,7 +710,7 @@ async def test_rolling_template_processor_runs_off_event_loop(monkeypatch):
         _record_provider_success(self._chunker.llm_config)
         return ["template chunk"]
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _rolling_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _rolling_config)
     monkeypatch.setattr(chunking_module, "_resolve_chunking_credentials", resolve_credentials)
     monkeypatch.setattr(TemplateProcessor, "process_template", process_template)
 
@@ -764,12 +760,11 @@ async def test_rolling_template_cancellation_drains_worker_and_mark_before_close
         exited.set()
         return ["template chunk"]
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _rolling_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _rolling_config)
     monkeypatch.setattr(chunking_module, "_resolve_chunking_credentials", resolve_credentials)
     monkeypatch.setattr(TemplateProcessor, "process_template", process_template)
     monkeypatch.setattr(
-        chunking_module,
-        "SYNC_ADAPTER_CALL_POOL",
+        "tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL",
         pool,
         raising=False,
     )
@@ -832,9 +827,9 @@ async def test_rolling_endpoint_fails_closed_when_pipeline_skips_provider(
         del self, text, template, options
         return ["unverified raw chunk"]
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _rolling_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _rolling_config)
     monkeypatch.setattr(chunking_module, "_resolve_chunking_credentials", resolve_credentials)
-    monkeypatch.setattr(chunking_module, "improved_chunking_process", process)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", process)
     monkeypatch.setattr(TemplateProcessor, "process_template", process_template)
 
     with pytest.raises(chunking_module.HTTPException) as exc_info:
@@ -905,12 +900,11 @@ async def test_rolling_endpoints_accept_runtime_certified_bedrock_default_chain(
         return ["bedrock template chunk"]
 
     monkeypatch.setattr(
-        chunking_module,
-        "load_server_configs",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot",
         lambda: _rolling_config("bedrock"),
     )
     monkeypatch.setattr(chunking_module, "_resolve_chunking_credentials", resolve_credentials)
-    monkeypatch.setattr(chunking_module, "improved_chunking_process", process)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", process)
     monkeypatch.setattr(TemplateProcessor, "process_template", process_template)
 
     if kind == "template":
@@ -960,12 +954,11 @@ async def test_rolling_endpoints_reject_uncertified_bedrock_default_chain(
         pytest.fail("chunking must not run with uncertified Bedrock credentials")
 
     monkeypatch.setattr(
-        chunking_module,
-        "load_server_configs",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot",
         lambda: _rolling_config("bedrock"),
     )
     monkeypatch.setattr(chunking_module, "_resolve_chunking_credentials", resolve_credentials)
-    monkeypatch.setattr(chunking_module, "improved_chunking_process", forbidden_process)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", forbidden_process)
     monkeypatch.setattr(TemplateProcessor, "process_template", forbidden_process)
 
     with pytest.raises(chunking_module.HTTPException) as exc_info:
@@ -1026,9 +1019,9 @@ async def test_rolling_setup_failure_closes_every_resolved_runtime(
             }
         ]
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", lambda: config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", lambda: config)
     monkeypatch.setattr(chunking_module, "_resolve_chunking_credentials", resolve_credentials)
-    monkeypatch.setattr(chunking_module, "improved_chunking_process", process)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", process)
 
     if kind == "file":
         with pytest.raises(chunking_module.HTTPException) as exc_info:
@@ -1079,7 +1072,7 @@ async def test_rolling_template_processor_setup_failure_closes_runtime_once(
     def fail_processor_setup(*_args, **_kwargs):
         raise RuntimeError("sensitive processor setup failure")
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _rolling_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _rolling_config)
     monkeypatch.setattr(chunking_module, "_resolve_chunking_credentials", resolve_credentials)
     monkeypatch.setattr(TemplateProcessor, "__init__", fail_processor_setup)
 
@@ -1168,9 +1161,9 @@ async def test_concurrent_rolling_endpoints_keep_runtime_snapshots_isolated(
         label = record_boundary(text, self._chunker.llm_config)
         return [f"chunk-{label}"]
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _rolling_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _rolling_config)
     monkeypatch.setattr(chunking_module, "_resolve_chunking_credentials", resolve_credentials)
-    monkeypatch.setattr(chunking_module, "improved_chunking_process", process)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", process)
     monkeypatch.setattr(TemplateProcessor, "process_template", process_template)
 
     async def invoke(label):
@@ -1279,17 +1272,16 @@ async def test_rolling_credential_dispatch_bypasses_saturated_default_executor(
         run_provider(self._chunker.llm_config)
         return ["template chunk"]
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _rolling_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _rolling_config)
     monkeypatch.setattr(
         chunking_module,
         "_resolve_chunking_credentials",
         resolve_credentials,
     )
-    monkeypatch.setattr(chunking_module, "improved_chunking_process", process)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", process)
     monkeypatch.setattr(TemplateProcessor, "process_template", process_template)
     monkeypatch.setattr(
-        chunking_module,
-        "SYNC_ADAPTER_CALL_POOL",
+        "tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL",
         pool,
         raising=False,
     )
@@ -1398,17 +1390,16 @@ async def test_rolling_pool_saturation_fails_closed_before_dispatch(
             return await _invoke_rolling_template(label)
         return await _invoke_rolling_endpoint(kind, label)
 
-    monkeypatch.setattr(chunking_module, "load_server_configs", _rolling_config)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", _rolling_config)
     monkeypatch.setattr(
         chunking_module,
         "_resolve_chunking_credentials",
         resolve_credentials,
     )
-    monkeypatch.setattr(chunking_module, "improved_chunking_process", process)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", process)
     monkeypatch.setattr(TemplateProcessor, "process_template", process_template)
     monkeypatch.setattr(
-        chunking_module,
-        "SYNC_ADAPTER_CALL_POOL",
+        "tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL",
         pool,
         raising=False,
     )
@@ -1552,8 +1543,7 @@ async def test_non_llm_chunking_ignores_saturated_provider_pool(
         )
 
     monkeypatch.setattr(
-        chunking_module,
-        "SYNC_ADAPTER_CALL_POOL",
+        "tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL",
         pool,
     )
     monkeypatch.setattr(
@@ -1561,7 +1551,7 @@ async def test_non_llm_chunking_ignores_saturated_provider_pool(
         "_resolve_chunking_credentials",
         reject_credential_resolution,
     )
-    monkeypatch.setattr(chunking_module, "improved_chunking_process", process)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", process)
     monkeypatch.setattr(TemplateProcessor, "process_template", process_template)
 
     pool.start(

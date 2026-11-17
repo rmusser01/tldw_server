@@ -120,7 +120,7 @@ async def test_apply_template_failure_log_sanitizes_exception_text(monkeypatch):
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(routes, "logger", logger_stub)
-    monkeypatch.setattr(routes, "TemplateProcessor", ExplodingTemplateProcessor)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.templates.TemplateProcessor", ExplodingTemplateProcessor)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.apply_template(

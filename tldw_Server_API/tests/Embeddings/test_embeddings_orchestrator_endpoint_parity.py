@@ -1300,7 +1300,7 @@ def test_orchestrator_path_uses_inline_runner_and_prefers_total_token_actuals(
             runner_calls.append(("executed", outcome.provider))
             return outcome
 
-    monkeypatch.setattr(mod, "EmbeddingInlineWorkflowRunner", RunnerProbe)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.workflow_runner.EmbeddingInlineWorkflowRunner", RunnerProbe)
 
     response = client.post(
         "/api/v1/embeddings",
@@ -1881,8 +1881,7 @@ def test_orchestrator_canonical_outcome_headers_are_mapped_at_endpoint(client, m
     fake_orchestrator = FakeOrchestrator(result=outcome)
     header_mapper = Mock(return_value={"X-Embeddings-Provider": "huggingface"})
     monkeypatch.setattr(
-        mod,
-        "map_embedding_response_headers",
+        "tldw_Server_API.app.core.Embeddings.result_mapping.map_embedding_response_headers",
         header_mapper,
         raising=False,
     )
@@ -2243,7 +2242,7 @@ async def test_executor_uses_adapter_registry_before_provider_execution(monkeypa
 
     provider_call = AsyncMock(side_effect=AssertionError("provider path should not be called"))
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
     monkeypatch.setattr(mod, "create_embeddings_with_circuit_breaker", provider_call)
 
     executor = mod._EndpointEmbeddingExecutor(
@@ -2305,8 +2304,8 @@ async def test_executor_adapter_runs_in_bounded_worker_and_fails_closed_safely(m
         log_messages.append(str(message))
 
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
-    monkeypatch.setattr(mod, "await_bounded_sync_call", fake_bounded_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.await_bounded_sync_call", fake_bounded_call)
     monkeypatch.setattr(mod.logger, "debug", fake_debug)
 
     executor = mod._EndpointEmbeddingExecutor(
@@ -2376,7 +2375,7 @@ async def test_adapter_cancel_starts_outside_saturated_default_executor_and_touc
 
     loop.set_default_executor(default_executor)
     default_blocker = loop.run_in_executor(None, block_default_executor)
-    monkeypatch.setattr(mod, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL", pool, raising=False)
     try:
         await _wait_for_thread_event(default_entered)
         task = asyncio.create_task(
@@ -2442,8 +2441,7 @@ async def test_adapter_cancel_does_not_touch_malformed_late_result(monkeypatch):
             return {"data": [{"index": 0, "embedding": []}]}
 
     monkeypatch.setattr(
-        mod,
-        "SYNC_ADAPTER_CALL_POOL",
+        "tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL",
         BoundedDaemonPool(capacity=1),
         raising=False,
     )
@@ -2504,10 +2502,9 @@ async def test_adapter_cancel_during_normal_touch_drains_exactly_once(monkeypatc
 
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: Registry())
     monkeypatch.setattr(
-        mod,
-        "SYNC_ADAPTER_CALL_POOL",
+        "tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL",
         BoundedDaemonPool(capacity=1),
     )
     executor = mod._EndpointEmbeddingExecutor(
@@ -2563,7 +2560,7 @@ async def test_adapter_capacity_rejection_is_predispatch_and_never_touches(monke
                 assert release.wait(timeout=2.0)
             return {"data": [{"index": 0, "embedding": [1.0, 0.0]}]}
 
-    monkeypatch.setattr(mod, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL", pool, raising=False)
     admitted = asyncio.create_task(
         mod._execute_embeddings_adapter_with_oauth_retry(
             Adapter(),
@@ -2643,8 +2640,7 @@ async def test_cancelled_oauth_retry_touches_only_valid_refreshed_snapshot(monke
         return refreshed
 
     monkeypatch.setattr(
-        mod,
-        "SYNC_ADAPTER_CALL_POOL",
+        "tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL",
         BoundedDaemonPool(capacity=1),
         raising=False,
     )
@@ -2706,7 +2702,7 @@ def test_orchestrator_adapter_path_preserves_adapter_vector_scale(client, monkey
     cache_get = AsyncMock(return_value=[0.6, 0.8])
     cache_set = AsyncMock()
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
     monkeypatch.setattr(mod, "create_embeddings_with_circuit_breaker", provider_call)
     monkeypatch.setattr(mod.embedding_cache, "get", cache_get)
     monkeypatch.setattr(mod.embedding_cache, "set", cache_set)
@@ -2777,7 +2773,7 @@ def test_public_adapter_failure_severs_raw_response_log_and_exception_chain(
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
     monkeypatch.setattr(mod, "_embedding_domain_error_to_http", capture_mapper)
     sink_id = logger.add(log_records.append, format="{message} {extra}")
     try:
@@ -2834,7 +2830,7 @@ def test_public_google_unsafe_model_is_bounded_before_dispatch_or_fallback(
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
     monkeypatch.setattr(
         google_module,
         "create_client",
@@ -2933,7 +2929,7 @@ def test_public_adapter_unavailable_falls_back_once_with_same_key_and_endpoint(
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
     monkeypatch.setattr(mod, "create_embeddings_with_circuit_breaker", fake_provider)
     monkeypatch.setattr(mod, "create_embeddings_batch_async", fake_legacy_batch)
     monkeypatch.setattr(mod.embedding_cache, "get", AsyncMock(return_value=None))
@@ -3027,9 +3023,9 @@ def test_public_key_only_native_unavailable_fallback_keeps_adapter_default_at_ht
     monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE", raising=False)
     monkeypatch.setenv(environment, f"https://late-{provider}-env.invalid")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
     monkeypatch.setattr(mod.connection_manager, "get_session", AsyncMock(return_value=object()))
-    monkeypatch.setattr(mod, "_http_afetch", fake_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", fake_afetch)
     monkeypatch.setattr(mod.embedding_cache, "get", AsyncMock(return_value=None))
     monkeypatch.setattr(mod.embedding_cache, "set", AsyncMock())
 
@@ -3132,7 +3128,7 @@ def test_concurrent_public_keyless_local_and_keyed_remote_hf_stay_isolated(
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.delenv("HUGGINGFACE_INFERENCE_BASE_URL", raising=False)
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
     monkeypatch.setattr(mod, "get_or_create_circuit_breaker", lambda _provider: FakeBreaker())
     monkeypatch.setattr(mod, "batching_create_embeddings_batch_async", fake_local_batcher)
     monkeypatch.setattr(hf_mod, "create_client", lambda **_kwargs: FakeClient())
@@ -3238,7 +3234,7 @@ def test_concurrent_public_endpoint_modes_keep_resolved_adapter_snapshots_paired
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setenv("OPENAI_API_BASE_URL", "https://ambient-attacker.example/v1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: _Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: _Registry())
 
     def _post(label: str):
         return client.post(
@@ -3655,7 +3651,7 @@ def test_public_openai_fallback_validates_and_reorders_explicit_wire_rows(
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: Registry())
     monkeypatch.setattr(
         mod,
         "batching_create_embeddings_batch_async",
@@ -3783,7 +3779,7 @@ def test_concurrent_public_openai_fallback_keeps_malformed_and_valid_calls_isola
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: Registry())
     monkeypatch.setattr(mod, "batching_create_embeddings_batch_async", fail_global_batcher)
     monkeypatch.setattr("tldw_Server_API.app.core.http_client.fetch", fake_fetch)
 
@@ -3904,7 +3900,7 @@ def test_public_local_api_fallback_binds_runtime_key_and_endpoint(
         monkeypatch.delenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", raising=False)
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: Registry())
     monkeypatch.setattr(mod, "batching_create_embeddings_batch_async", fail_global_batcher)
     monkeypatch.setattr("tldw_Server_API.app.core.http_client.fetch", fake_fetch)
 
@@ -4010,7 +4006,7 @@ def test_concurrent_public_local_api_fallback_keeps_key_endpoint_pairs_isolated(
         monkeypatch.delenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", raising=False)
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: Registry())
     monkeypatch.setattr(mod, "batching_create_embeddings_batch_async", fail_global_batcher)
     monkeypatch.setattr("tldw_Server_API.app.core.http_client.fetch", fake_fetch)
 
@@ -4124,7 +4120,7 @@ def test_concurrent_none_adapter_result_cannot_borrow_unavailable_fallback_permi
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
     monkeypatch.setattr(mod, "create_embeddings_with_circuit_breaker", fallback)
     monkeypatch.setattr(mod, "create_embeddings_batch_async", fallback)
 
@@ -4198,7 +4194,7 @@ def test_public_adapter_boundary_rejects_malformed_vector_shapes(
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
 
     response = client.post(
         "/api/v1/embeddings",
@@ -4266,7 +4262,7 @@ def test_public_adapter_boundary_rejects_invalid_vector_indices(
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
 
     response = client.post(
         "/api/v1/embeddings",
@@ -4312,7 +4308,7 @@ def test_public_adapter_boundary_reconstructs_vectors_by_index(
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
 
     response = client.post(
         "/api/v1/embeddings",
@@ -4369,7 +4365,7 @@ def test_concurrent_malformed_and_valid_adapter_vectors_remain_isolated(
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
 
     def post(text):
         return client.post(
@@ -4488,7 +4484,7 @@ def test_concurrent_public_endpoint_modes_isolate_real_legacy_oauth_refresh_poli
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
     adapter_registry = Mock(side_effect=AssertionError("Legacy-only call loaded adapters"))
-    monkeypatch.setattr(mod, "get_embeddings_registry", adapter_registry)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", adapter_registry)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.http_client.fetch",
         _legacy_fetch,
@@ -4604,7 +4600,7 @@ def test_public_openai_oauth_adapter_refresh_policy_is_identical_across_endpoint
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
     monkeypatch.setattr(mod, "create_embeddings_with_circuit_breaker", fail_fallback)
     monkeypatch.setattr(mod, "create_embeddings_batch_async", fail_fallback)
     sink_id = logger.add(log_records.append, format="{message} {extra}")
@@ -4650,7 +4646,7 @@ def test_orchestrator_adapter_miss_with_resolved_key_bypasses_shared_cache(clien
     cache_get = AsyncMock(return_value=[1.0, 0.0])
     cache_set = AsyncMock()
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: FakeRegistry())
     monkeypatch.setattr(mod, "create_embeddings_with_circuit_breaker", provider_call)
     monkeypatch.setattr(mod.embedding_cache, "get", cache_get)
     monkeypatch.setattr(mod.embedding_cache, "set", cache_set)

@@ -107,7 +107,7 @@ async def test_execute_tool_allowed_with_permission(monkeypatch):
 
     fake_executor = _FakeExecutor()
 
-    monkeypatch.setattr(tools_mod, "ToolExecutor", lambda: fake_executor)
+    monkeypatch.setattr("tldw_Server_API.app.core.Tools.tool_executor.ToolExecutor", lambda: fake_executor)
 
     with TestClient(app) as client:
         resp = client.post(

@@ -42,7 +42,7 @@ def test_persona_sessions_requires_auth():
 
 def test_persona_sessions_list_and_detail_roundtrip(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     with _client_for_user(1, persona_db) as client:
         created = client.post("/api/v1/persona/session", json={"persona_id": "research_assistant"})
@@ -76,7 +76,7 @@ def test_persona_sessions_list_and_detail_roundtrip(monkeypatch, persona_db: Cha
 
 def test_legacy_runtime_transcript_preserves_detail_and_export_limit(monkeypatch, persona_db):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
     try:
         with _client_for_user(1, persona_db) as client:
@@ -115,7 +115,7 @@ def test_materialized_session_reads_memory_top_k_from_settings_attributes(monkey
 
 def test_persona_session_export_returns_selected_session_transcript(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
 
     with _client_for_user(1, persona_db) as client:
@@ -216,7 +216,7 @@ def test_persona_session_response_helpers_normalize_invalid_runtime_mode():
 
 def test_persona_session_export_is_user_scoped(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
     persona_id = persona_db.create_persona_profile(
         {
@@ -249,7 +249,7 @@ def test_persona_session_export_is_user_scoped(monkeypatch, persona_db: Characte
 
 def test_persona_session_export_refuses_unrecoverable_legacy_snapshot(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
     persona_id = persona_db.create_persona_profile(
         {
@@ -286,7 +286,7 @@ def test_persona_sessions_list_and_detail_fall_back_to_persisted_preferences(
     persona_db: CharactersRAGDB,
 ):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     with _client_for_user(1, persona_db) as client:
         created = client.post("/api/v1/persona/session", json={"persona_id": "research_assistant"})
@@ -310,7 +310,7 @@ def test_persona_sessions_list_and_detail_fall_back_to_persisted_preferences(
     )
 
     restarted_manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: restarted_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: restarted_manager)
 
     with _client_for_user(1, persona_db) as client:
         listed = client.get("/api/v1/persona/sessions")
@@ -333,7 +333,7 @@ def test_persona_sessions_list_and_detail_fall_back_to_persisted_preferences(
 
 def test_persona_sessions_list_filters_by_surface(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     with _client_for_user(1, persona_db) as client:
         generic = client.post("/api/v1/persona/session", json={"persona_id": "research_assistant"})
@@ -367,7 +367,7 @@ def test_persona_sessions_created_with_surface_do_not_persist_surface_preference
     persona_db: CharactersRAGDB,
 ):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     with _client_for_user(1, persona_db) as client:
         created = client.post(
@@ -392,7 +392,7 @@ def test_persona_sessions_created_with_surface_do_not_persist_surface_preference
     assert "companion_activity_surface" not in row["preferences"]
 
     restarted_manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: restarted_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: restarted_manager)
     with _client_for_user(1, persona_db) as client:
         listed = client.get("/api/v1/persona/sessions?surface=companion.conversation")
 
@@ -408,7 +408,7 @@ def test_persona_sessions_redact_live_control_preferences(
     persona_db: CharactersRAGDB,
 ):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     with _client_for_user(1, persona_db) as client:
         created = client.post(
@@ -517,7 +517,7 @@ def test_materialized_session_policy_rules_are_normalized(persona_db: Characters
 def test_persona_session_resume_rejects_ownership_mismatch(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
     _ = manager.create(user_id="1", persona_id="research_assistant", resume_session_id="sess_owned_by_1")
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     with _client_for_user(2, persona_db) as client:
         resp = client.post(
@@ -534,7 +534,7 @@ def test_persona_session_resume_rejects_ownership_mismatch(monkeypatch, persona_
 
 def test_persona_session_resume_rejects_persona_mismatch(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     _ = persona_db.create_persona_profile(
         {
@@ -585,7 +585,7 @@ def test_persona_session_resume_rejects_persona_mismatch(monkeypatch, persona_db
 
 def test_persona_session_detail_is_user_scoped(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     persona_id = persona_db.create_persona_profile(
         {
             "id": "research_assistant",
@@ -617,8 +617,8 @@ def test_persona_session_detail_is_user_scoped(monkeypatch, persona_db: Characte
 
 def test_persona_sessions_return_404_when_disabled(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_persona_enabled", lambda: False)
 
     with _client_for_user(1, persona_db) as client:
         r_list = client.get("/api/v1/persona/sessions")
@@ -632,7 +632,7 @@ def test_persona_sessions_return_404_when_disabled(monkeypatch, persona_db: Char
 @pytest.fixture
 def pending_plan_session(monkeypatch, persona_db, request):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
     try:
         with _client_for_user(1, persona_db) as client:
@@ -722,7 +722,7 @@ def test_cold_foreign_resume_cannot_occupy_owner_session(monkeypatch, persona_db
     original = persona_db.get_persona_session(session_id, user_id="1", include_deleted=False)
     other_db = CharactersRAGDB(str(tmp_path / "other_user.db"), client_id="cold-resume-other")
     cold_manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: cold_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: cold_manager)
     try:
         with _client_for_user(2, other_db) as client:
             refused = client.post(

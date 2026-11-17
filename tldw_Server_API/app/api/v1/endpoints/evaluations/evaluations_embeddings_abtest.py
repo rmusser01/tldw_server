@@ -31,28 +31,22 @@ from tldw_Server_API.app.api.v1.schemas.embeddings_abtest_schemas import (
     EmbeddingsABTestStatusResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.Evaluations.audit_adapter import (
-    log_evaluation_created,
-    log_run_started,
-)
 from tldw_Server_API.app.core.Evaluations.embeddings_abtest_jobs import (
     ABTEST_JOBS_DOMAIN,
     ABTEST_JOBS_JOB_TYPE,
     abtest_jobs_idempotency_key,
-    abtest_jobs_manager,
     abtest_jobs_queue,
 )
 from tldw_Server_API.app.core.Evaluations.embeddings_abtest_service import (
     EmbeddingsABTestPolicyError,
     compute_significance,
-    run_abtest_full,
-    validate_abtest_policy,
 )
 from tldw_Server_API.app.core.Evaluations.run_state import normalize_run_status
-from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
-    get_unified_evaluation_service_for_user,
-)
 from tldw_Server_API.app.core.testing import env_flag_enabled
+import tldw_Server_API.app.core.Evaluations.audit_adapter as _audit_adapter
+import tldw_Server_API.app.core.Evaluations.embeddings_abtest_jobs as _embeddings_abtest_jobs
+import tldw_Server_API.app.core.Evaluations.embeddings_abtest_service as _embeddings_abtest_service
+import tldw_Server_API.app.core.Evaluations.unified_evaluation_service as _unified_evaluation_service
 
 abtest_router = APIRouter()
 
@@ -115,7 +109,7 @@ async def create_embeddings_abtest(
     response: Response = None,
 ):
     identity = get_evaluation_identity(current_user)
-    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
     db = svc.db
     if idempotency_key:
         try:
@@ -139,7 +133,7 @@ async def create_embeddings_abtest(
         except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS:
             pass
     try:
-        validate_abtest_policy(cfg, user=current_user)
+        _embeddings_abtest_service.validate_abtest_policy(cfg, user=current_user)
     except EmbeddingsABTestPolicyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     test_id = db.create_abtest(name=payload.name, config=cfg.model_dump(), created_by=identity.created_by)
@@ -154,7 +148,7 @@ async def create_embeddings_abtest(
         )
     db.insert_abtest_queries(test_id, [q.model_dump() for q in payload.config.queries])
     logger.info(f"A/B test created: {test_id} by {identity.created_by}")
-    log_evaluation_created(
+    _audit_adapter.log_evaluation_created(
         user_id=identity.user_scope,
         eval_id=test_id,
         name=payload.name,
@@ -186,7 +180,7 @@ async def run_embeddings_abtest(
 ):
     enforce_heavy_evaluations_admin(principal)
     identity = get_evaluation_identity(current_user)
-    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
     db = svc.db
     row = db.get_abtest(test_id, created_by=identity.created_by)
     if not row:
@@ -211,7 +205,7 @@ async def run_embeddings_abtest(
         with contextlib.suppress(_EMB_ABTEST_NONCRITICAL_EXCEPTIONS):
             cfg.chunking = ABTestChunking(method='sentences', size=200, overlap=20, language=None)
     try:
-        validate_abtest_policy(cfg, user=current_user)
+        _embeddings_abtest_service.validate_abtest_policy(cfg, user=current_user)
     except EmbeddingsABTestPolicyError as exc:
         with contextlib.suppress(_EMB_ABTEST_NONCRITICAL_EXCEPTIONS):
             db.set_abtest_status(
@@ -238,7 +232,7 @@ async def run_embeddings_abtest(
                 stats_json={"progress": {"phase": 0.01}},
                 created_by=identity.created_by,
             )
-        log_run_started(
+        _audit_adapter.log_run_started(
             user_id=identity.user_scope,
             run_id=str(test_id),
             eval_id=test_id,
@@ -246,7 +240,7 @@ async def run_embeddings_abtest(
         )
         run_error: Optional[Exception] = None
         try:
-            await run_abtest_full(db, cfg, test_id, identity.user_scope, media_db)
+            await _embeddings_abtest_service.run_abtest_full(db, cfg, test_id, identity.user_scope, media_db)
         except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS as _e:
             run_error = _e
             with contextlib.suppress(_EMB_ABTEST_NONCRITICAL_EXCEPTIONS):
@@ -268,7 +262,7 @@ async def run_embeddings_abtest(
         return EmbeddingsABTestStatusResponse(test_id=test_id, status='completed', progress={"phase": 1.0})
 
     try:
-        jm = abtest_jobs_manager()
+        jm = _embeddings_abtest_jobs.abtest_jobs_manager()
         job_payload = {
             "test_id": test_id,
             "config": cfg.model_dump(),
@@ -292,7 +286,7 @@ async def run_embeddings_abtest(
                 stats_json={"progress": {"phase": 0.01}, "job_id": job_ref},
                 created_by=identity.created_by,
             )
-        log_run_started(
+        _audit_adapter.log_run_started(
             user_id=identity.user_scope,
             run_id=str(job_ref or test_id),
             eval_id=test_id,
@@ -319,7 +313,7 @@ async def get_embeddings_abtest_status(
     current_user: User = Depends(get_eval_request_user),  # noqa: B008
 ):
     identity = get_evaluation_identity(current_user)
-    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
     row = svc.db.get_abtest(test_id, created_by=identity.created_by)
     if not row:
         raise HTTPException(status_code=404, detail="abtest not found")
@@ -395,7 +389,7 @@ async def get_embeddings_abtest_results(
         return out
 
     identity = get_evaluation_identity(current_user)
-    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
     rows, total = svc.db.list_abtest_results(
         test_id,
         limit=page_size,
@@ -476,7 +470,7 @@ async def get_embeddings_abtest_significance(
     current_user: User = Depends(get_eval_request_user),  # noqa: B008
 ):
     identity = get_evaluation_identity(current_user)
-    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
     abtest = svc.db.get_abtest(test_id, created_by=identity.created_by)
     if abtest is None:
         raise HTTPException(404, "abtest not found")

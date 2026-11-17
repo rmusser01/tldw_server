@@ -71,8 +71,7 @@ async def test_research_workspace_capabilities_endpoint_returns_user_scoped_payl
         )
 
     monkeypatch.setattr(
-        research_workspace,
-        "collect_research_workspace_capabilities",
+        "tldw_Server_API.app.core.Research_Workspace.capabilities.collect_research_workspace_capabilities",
         fake_collect_research_workspace_capabilities,
     )
 

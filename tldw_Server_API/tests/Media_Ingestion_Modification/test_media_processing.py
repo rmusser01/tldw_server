@@ -714,9 +714,11 @@ class TestProcessAudios:
 
     def test_process_audio_url_success_no_analysis_no_chunking(self, client, dummy_headers, controlled_transcription, monkeypatch):
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files
+        from tldw_Server_API.app.core.Utils.egress import URLPolicyResult
 
         audio_url = "https://example.com/controlled-audio.mp3"
         downloaded_paths = []
+        monkeypatch.setattr(Audio_Files, "evaluate_url_policy", lambda _url: URLPolicyResult(allowed=True))
 
         def fake_download(*, url, dest, **kwargs):
             assert url == audio_url

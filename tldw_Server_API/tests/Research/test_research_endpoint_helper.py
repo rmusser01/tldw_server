@@ -73,10 +73,9 @@ def test_process_and_ingest_arxiv_paper_uses_media_repository_api(
     fake_db = _FakeDb()
     fake_repo = _FakeRepo()
 
-    monkeypatch.setattr(research, "fetch_arxiv_xml", lambda paper_id: f"<xml>{paper_id}</xml>")
+    monkeypatch.setattr("tldw_Server_API.app.core.Third_Party.Arxiv.fetch_arxiv_xml", lambda paper_id: f"<xml>{paper_id}</xml>")
     monkeypatch.setattr(
-        research,
-        "convert_xml_to_markdown",
+        "tldw_Server_API.app.core.Third_Party.Arxiv.convert_xml_to_markdown",
         lambda xml: ("# Paper\n\nBody", "Paper Title", ["Ada Lovelace", "Alan Turing"], ["cs.AI", "cs.IR"]),
     )
     managed_calls = []
@@ -101,7 +100,7 @@ def test_process_and_ingest_arxiv_paper_uses_media_repository_api(
         _fake_managed_media_database,
         raising=False,
     )
-    monkeypatch.setattr(research, "get_media_repository", lambda db: fake_repo, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_media_repository", lambda db: fake_repo, raising=False)
 
     message = research.process_and_ingest_arxiv_paper("1234.5678", "ml,rag")
 
@@ -141,7 +140,7 @@ def test_process_and_ingest_arxiv_paper_sanitizes_fetch_failure(
         raise RuntimeError("arxiv fetch exploded at /private/research/cache.xml")
 
     monkeypatch.setattr(research, "logger", logger_stub, raising=True)
-    monkeypatch.setattr(research, "fetch_arxiv_xml", _fail_fetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Third_Party.Arxiv.fetch_arxiv_xml", _fail_fetch)
 
     message = research.process_and_ingest_arxiv_paper("1234.5678", "ml,rag")
 
@@ -162,7 +161,7 @@ async def test_arxiv_search_endpoint_sanitizes_unexpected_error_log(
     def _fail_search(*_args, **_kwargs):
         raise RuntimeError("search backend exploded /private/research/search-cache.db")
 
-    monkeypatch.setattr(research, "search_arxiv_custom_api", _fail_search)
+    monkeypatch.setattr("tldw_Server_API.app.core.Third_Party.Arxiv.search_arxiv_custom_api", _fail_search)
 
     with pytest.raises(HTTPException) as exc_info:
         await research.arxiv_search_endpoint(
@@ -190,7 +189,7 @@ async def test_semantic_scholar_search_endpoint_sanitizes_unexpected_error_log(
     def _fail_search(*_args, **_kwargs):
         raise RuntimeError("search backend exploded /private/research/search-cache.db")
 
-    monkeypatch.setattr(research, "search_papers_semantic_scholar", _fail_search)
+    monkeypatch.setattr("tldw_Server_API.app.core.Third_Party.Semantic_Scholar.search_papers_semantic_scholar", _fail_search)
 
     with pytest.raises(HTTPException) as exc_info:
         await research.semantic_scholar_search_endpoint(

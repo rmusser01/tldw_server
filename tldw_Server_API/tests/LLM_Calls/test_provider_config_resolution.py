@@ -699,12 +699,12 @@ def test_provider_catalog_includes_env_only_numbered_custom_openai_slot(
     monkeypatch.setenv("CUSTOM_OPENAI2_API_MODEL", "slot-2-model")
     monkeypatch.setenv("CUSTOM_OPENAI2_API_KEY", "slot-2-key")
     override_snapshot = Mock(return_value={})
-    monkeypatch.setattr(llm_providers, "get_llm_provider_overrides_snapshot", override_snapshot)
-    monkeypatch.setattr(llm_providers, "load_comprehensive_config", lambda: parser)
-    monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.get_llm_provider_overrides_snapshot", override_snapshot)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: parser)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
     monkeypatch.setattr(llm_providers, "get_provider_manager", lambda: None)
     monkeypatch.setattr(llm_providers, "_llm_registry_capability_envelopes", lambda: {})
-    monkeypatch.setattr(llm_providers, "_configured_endpoint_probe_enabled", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_readiness.configured_endpoint_probe_enabled", lambda: False)
     monkeypatch.setattr(
         llm_providers,
         "_resolve_model_tokenizer_support",
