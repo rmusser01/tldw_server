@@ -15,7 +15,7 @@ from tldw_Server_API.tests.helpers.offline_network import LIVE_NETWORK_BASELINE,
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 # The count recorded from the first CI run with the blocker on; lower it as the baseline shrinks.
-CEILING = 0
+CEILING = 387
 
 
 def _entries() -> list[str]:
