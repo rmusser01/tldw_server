@@ -2,7 +2,7 @@
 id: TASK-15488
 title: RAG stream quota check refuses for post-answer stages the stream no longer
   runs
-status: To Do
+status: In Progress
 labels:
 - rag
 - quotas
@@ -29,6 +29,7 @@ It fails closed (refuses more, never less), and no hosted deployment exists. Fou
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-11-17-rag-stream-quota-stages.md. Owner decisions 2026-11-16: (1) keep both skip-set and run-set in the test; (2) enable_evidence_accumulation stays run, guarded by the evidence-accumulation refuse case, nothing filed; (3) ADR-004 Change summary waiver covered, controller writes the PR body.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
