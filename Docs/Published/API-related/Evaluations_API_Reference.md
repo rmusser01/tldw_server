@@ -52,7 +52,7 @@ Creates a new evaluation definition.
   "eval_spec": {              // Required, evaluation configuration
     // For model_graded evaluations:
     "sub_type": "string",     // Required for model_graded: "summarization" | "rag" | "response_quality"
-    "evaluator_model": "string", // Model to use (default: "gpt-4")
+    "evaluator_model": "string", // A provider ("openai"), a model ("gpt-4") or "provider:model"; a model runs on api_name/provider, else OpenAI
     "metrics": ["string"],    // Metrics to evaluate (type-specific)
     "threshold": 0.7,         // Pass/fail threshold (0-1, default: 0.7)
     "scoring_prompt": "string", // Optional custom scoring prompt
@@ -352,9 +352,9 @@ Gets complete results for a finished run.
       "std_dev": 0.12,         // Standard deviation
       "min_score": 0.60,       // Minimum score
       "max_score": 0.98,       // Maximum score
-      "pass_rate": 0.75,       // Percentage passing threshold (0-1)
+      "pass_rate": 0.75,       // Share of scored samples passing threshold (0-1); the score fields are null when no sample was scored
       "total_samples": 100,
-      "failed_samples": 25
+      "failed_samples": 25   // Samples with no score, left out of every score field. A failed judge call is such a sample in label-choice and NLI runs; model-graded runs (RAG, summarization, response quality) still score a failed judge 0.0 (tracked in TASK-15562)
     },
     "by_metric": {             // Breakdown by metric (if applicable)
       "fluency": {

@@ -11,6 +11,7 @@ Handles:
 
 import asyncio
 import os
+import re
 import statistics
 import time
 from collections.abc import Mapping
@@ -44,6 +45,7 @@ from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
 from tldw_Server_API.app.core.Evaluations.rag_evaluator import _CANONICAL_METRIC_FOR_ALIAS, RAGEvaluator
 from tldw_Server_API.app.core.Evaluations.response_quality_evaluator import ResponseQualityEvaluator
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
     get_adapter_or_raise,
@@ -151,7 +153,9 @@ def _call_adapter_text(
     }
     request.update(extra_kwargs)
     response = get_adapter_or_raise(provider).chat(request, timeout=timeout)
-    return extract_response_content(response) or str(response)
+    content = extract_response_content(response)
+    # Empty content from a call that succeeded is a non-answer (""), not a label hiding in the response's repr (TASK-15491)
+    return content if isinstance(content, str) else ""
 
 
 _LLM_RUN_TYPES = frozenset({"model_graded", "label_choice", "nli_factcheck"})
@@ -171,6 +175,16 @@ def run_llm_provider(
         return None, None
     api_name, model, api_key = EvaluationRunner._resolve_eval_provider_model_api_key(spec, {"config": run_config})
     return (None, None) if api_key else (canonical_provider_name(api_name), model)
+
+
+def _is_known_provider(name: str) -> bool:
+    return bool(name) and canonical_provider_name(name) in ChatProviderRegistry.DEFAULT_ADAPTERS
+
+
+def _split_provider_prefix(api_name: str, value: str) -> tuple[str, str]:
+    """``("openai", "gpt-4")`` for ``"openai:gpt-4"`` or ``"openai/gpt-4"``; ``(api_name, value)`` when the prefix is no provider."""
+    match = re.fullmatch(r"([^:/]+)[:/](.+)", value, re.DOTALL)
+    return (normalize_provider(match[1]), match[2]) if match and _is_known_provider(match[1]) else (api_name, value)
 
 
 class EvaluationRunner:
@@ -210,40 +224,35 @@ class EvaluationRunner:
         if not isinstance(run_config, dict):
             run_config = {}
 
-        api_name = (
-            eval_spec.get("api_name")
-            or eval_spec.get("provider")
-            or run_config.get("api_name")
-            or run_config.get("provider")
-            or "openai"
+        provider_names = (
+            str(source.get(key) or "").strip()
+            for source in (eval_spec, run_config)
+            for key in ("api_name", "provider")
         )
-        api_name = str(api_name).strip() or "openai"
+        named = next((name for name in provider_names if name), "")
+        api_name = named or "openai"
         api_key = (
             eval_spec.get("api_key")
             or eval_spec.get("apiKey")
             or run_config.get("api_key")
         )
         model_override = eval_spec.get("model") or run_config.get("model")
+        model_from_spec = isinstance(model_override, str) and bool(model_override)
 
-        # Backward compatibility: evaluator_model may refer to provider OR model
-        evaluator_model = eval_spec.get("evaluator_model")
-        if evaluator_model:
-            normalized_provider = normalize_provider(str(evaluator_model))
-            if normalized_provider:
-                api_name = normalized_provider
-            elif not model_override:
-                model_override = str(evaluator_model)
+        # evaluator_model names a provider, a model, or "provider:model" / "provider/model". Only a
+        # registered provider counts as one, so a model name such as "gpt-4" stays a model (TASK-15492).
+        evaluator_model = str(eval_spec.get("evaluator_model") or "").strip()
+        if _is_known_provider(evaluator_model):
+            api_name = normalize_provider(evaluator_model)
+        elif evaluator_model:
+            if not named:  # a provider named in api_name/provider keeps "anthropic/claude-3.5-sonnet" a model id
+                api_name, evaluator_model = _split_provider_prefix(api_name, evaluator_model)
+            model_override = model_override or evaluator_model
 
-        # Allow model strings like "provider:model" or "provider/model" to override provider
-        if isinstance(model_override, str) and model_override:
-            for sep in (":", "/"):
-                if sep in model_override:
-                    prefix, rest = model_override.split(sep, 1)
-                    normalized_provider = normalize_provider(prefix)
-                    if normalized_provider and rest:
-                        api_name = normalized_provider
-                        model_override = rest
-                    break
+        # Allow model strings like "provider:model" or "provider/model" to override provider, unless one is named
+        # (a remainder taken from evaluator_model was already split once and is never split again)
+        if not named and model_from_spec:
+            api_name, model_override = _split_provider_prefix(api_name, model_override)
 
         return api_name, model_override, api_key
 
@@ -1589,7 +1598,7 @@ class EvaluationRunner:
                 try:
                     scores[metric_name] = float(score_val)
                 except (TypeError, ValueError):
-                    scores[metric_name] = 0.0
+                    continue
 
             # Calculate pass/fail. Alias keys (answer_relevance, ...) mirror their
             # canonical metric; averaging both would count that metric twice.
@@ -1598,7 +1607,9 @@ class EvaluationRunner:
                 for name, value in scores.items()
                 if _CANONICAL_METRIC_FOR_ALIAS.get(name) not in scores
             ]
-            avg_score = statistics.mean(scored) if scored else 0
+            if not scored:
+                return {"sample_id": sample_id, "error": "No RAG metric scores were returned."}
+            avg_score = statistics.mean(scored)
             passed = self._evaluate_passed(scores, avg_score, eval_spec, default_threshold=0.7)
 
             return {
@@ -1649,13 +1660,16 @@ class EvaluationRunner:
                 try:
                     scores[metric_name] = float(score_val)
                 except (TypeError, ValueError):
-                    scores[metric_name] = 0.0
+                    continue
 
-            # Add overall quality
-            scores["overall_quality"] = result.get("overall_quality", 0)
+            overall = result.get("overall_quality")
+            if isinstance(overall, (int, float)) and not isinstance(overall, bool):
+                scores["overall_quality"] = float(overall)
 
             # Calculate pass/fail
-            avg_score = scores.get("overall_quality", 0)
+            if not scores:
+                return {"sample_id": sample_id, "error": "No response quality scores were returned."}
+            avg_score = scores["overall_quality"] if "overall_quality" in scores else statistics.mean(scores.values())
             passed = self._evaluate_passed(scores, avg_score, eval_spec, default_threshold=0.7)
 
             return {
@@ -1951,22 +1965,19 @@ class EvaluationRunner:
                 messages = [{"role": "user", "content": user_prompt}]
                 response_format = {"type": "json_object"} if structured else None
 
-                try:
-                    resp = await asyncio.to_thread(
-                        _call_adapter_text,
-                        api_endpoint=api_name,
-                        messages_payload=messages,
-                        temperature=temperature,
-                        system_message=system_prompt,
-                        response_format=response_format,
-                        max_tokens=16,
-                        api_key=api_key,
-                        model=model_override,
-                        provider_credentials=config.get("provider_credentials"),
-                    )
-                except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as ce:
-                    logger.error(f"Chat call failed for label_choice {sample_id}: {ce}")
-                    resp = ""
+                # A failed judge call raises to the sample-error handler below: unscored, not accuracy 0.0 (TASK-15491)
+                resp = await asyncio.to_thread(
+                    _call_adapter_text,
+                    api_endpoint=api_name,
+                    messages_payload=messages,
+                    temperature=temperature,
+                    system_message=system_prompt,
+                    response_format=response_format,
+                    max_tokens=16,
+                    api_key=api_key,
+                    model=model_override,
+                    provider_credentials=config.get("provider_credentials"),
+                )
 
                 # Extract text content from provider response
                 def _extract_content(r: Any) -> str:
@@ -2007,14 +2018,14 @@ class EvaluationRunner:
                             parsed = obj["label"]
                     except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS:
                         parsed = None
-                if parsed is None:
+                else:
                     up = txt.upper()
                     for lab in allowed_up:
                         if lab in up or up.strip() == lab:
                             parsed = lab
                             break
 
-            pred_norm = norm_label(parsed) if parsed is not None else None
+            pred_norm = norm_label(parsed) if isinstance(parsed, str) else None
             gold_norm = norm_label(gold)
 
             if pred_norm is None:
@@ -2146,22 +2157,19 @@ class EvaluationRunner:
                 messages = [{"role": "user", "content": user_prompt}]
                 response_format = {"type": "json_object"} if structured else None
 
-                try:
-                    resp = await asyncio.to_thread(
-                        _call_adapter_text,
-                        api_endpoint=api_name,
-                        messages_payload=messages,
-                        temperature=temperature,
-                        system_message=system_prompt,
-                        response_format=response_format,
-                        max_tokens=16,
-                        api_key=api_key,
-                        model=model_override,
-                        provider_credentials=config.get("provider_credentials"),
-                    )
-                except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as ce:
-                    logger.error(f"Chat call failed for nli_factcheck {sample_id}: {ce}")
-                    resp = ""
+                # A failed judge call raises to the sample-error handler below: unscored, not accuracy 0.0 (TASK-15491)
+                resp = await asyncio.to_thread(
+                    _call_adapter_text,
+                    api_endpoint=api_name,
+                    messages_payload=messages,
+                    temperature=temperature,
+                    system_message=system_prompt,
+                    response_format=response_format,
+                    max_tokens=16,
+                    api_key=api_key,
+                    model=model_override,
+                    provider_credentials=config.get("provider_credentials"),
+                )
 
                 def _extract_content(r: Any) -> str:
                     if isinstance(r, str):
@@ -2201,14 +2209,14 @@ class EvaluationRunner:
                             parsed = obj["label"]
                     except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS:
                         parsed = None
-                if parsed is None:
+                else:
                     up = txt.upper()
                     for lab in allowed_up:
                         if lab in up or up.strip() == lab:
                             parsed = lab
                             break
 
-            pred_norm = norm_label(parsed) if parsed is not None else None
+            pred_norm = norm_label(parsed) if isinstance(parsed, str) else None
             gold_norm = norm_label(gold)
 
             if pred_norm is None:
@@ -2337,44 +2345,39 @@ class EvaluationRunner:
         """Calculate aggregate statistics"""
         _ = metrics
         _ = threshold
-        empty_pass_rate = 0.0
         if not results:
             return {
-                "mean_score": 0,
-                "std_dev": 0,
-                "min_score": 0,
-                "max_score": 0,
-                "pass_rate": empty_pass_rate,
+                "mean_score": None,  # nothing scored: no average, not a 0.0 that reads as "all wrong"
+                "std_dev": None,
+                "min_score": None,
+                "max_score": None,
+                "pass_rate": None,
                 "total_samples": 0,
                 "failed_samples": 0
             }
 
-        # Get all scores
+        # A sample with no score (an error, a failed judge call) is unscored: in no mean or pass rate
         all_scores = []
         passed_count = 0
         failed_samples = 0
 
         for result in results:
-            score_val = result.get("avg_score")
-            if score_val is None:
-                failed_samples += 1
-                score_val = 0.0
             try:
-                score_val = float(score_val)
+                score_val = float(result.get("avg_score"))
             except (TypeError, ValueError):
                 failed_samples += 1
-                score_val = 0.0
+                continue
             all_scores.append(score_val)
             if result.get("passed", False):
                 passed_count += 1
 
         if not all_scores:
             return {
-                "mean_score": 0,
-                "std_dev": 0,
-                "min_score": 0,
-                "max_score": 0,
-                "pass_rate": empty_pass_rate,
+                "mean_score": None,  # nothing scored: no average, not a 0.0 that reads as "all wrong"
+                "std_dev": None,
+                "min_score": None,
+                "max_score": None,
+                "pass_rate": None,
                 "total_samples": len(results),
                 "failed_samples": len(results)
             }
@@ -2384,7 +2387,7 @@ class EvaluationRunner:
             "std_dev": statistics.stdev(all_scores) if len(all_scores) > 1 else 0,
             "min_score": min(all_scores),
             "max_score": max(all_scores),
-            "pass_rate": passed_count / len(results),
+            "pass_rate": passed_count / len(all_scores),
             "total_samples": len(results),
             "failed_samples": failed_samples
         }
@@ -2430,9 +2433,6 @@ class EvaluationRunner:
                     "min": min(scores),
                     "max": max(scores)
                 }
-            else:
-                metric_stats[metric] = {"mean": 0, "std": 0, "min": 0, "max": 0}
-
         return metric_stats
 
     def _calculate_usage(self, results: list[dict[str, Any]]) -> dict[str, int]:

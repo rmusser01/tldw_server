@@ -554,6 +554,8 @@ class EvaluationManager:
         api_name: str = "openai",
         api_key: Optional[str] = None,
         provider_credentials: Any = None,
+        model_override: Optional[str] = None,
+        require_grade: bool = False,
     ) -> dict[str, Any]:
         """Evaluate using custom metric definition.
 
@@ -561,6 +563,7 @@ class EvaluationManager:
         run on the key of ``provider_credentials`` when it is given (the user's own key; TASK-15426), else on
         ``api_key`` or the server's. ``score`` is None when the item has no score (its model or judge call failed,
         or the reply held none): the callers count it unscored, in no average (TASK-15485).
+        SimpleQA declares require_grade to use categorical instead of numeric output.
         """
         runtime_input_data = dict(input_data)
         if self._contains_model_response_placeholder(runtime_input_data):
@@ -597,7 +600,9 @@ class EvaluationManager:
 
         # Add scoring criteria to prompt
         criteria_text = "\n".join([f"- {k}: {v}" for k, v in scoring_criteria.items()])
-        full_prompt = f"{formatted_prompt}\n\nScoring Criteria:\n{criteria_text}\n\nProvide a score from 1-10 and explanation."
+        full_prompt = f"{formatted_prompt}\n\nScoring Criteria:\n{criteria_text}"
+        if not require_grade:
+            full_prompt += "\n\nProvide a score from 1-10 and explanation."
 
         try:
             # Get evaluation from LLM
@@ -611,6 +616,7 @@ class EvaluationManager:
                 system_message="You are an expert evaluator. Provide scores and detailed explanations.",
                 input_is_literal_text=True,
                 provider_credentials=provider_credentials,
+                **({"model_override": model_override} if model_override else {}),
             )
 
             # A failed judge call (provider error, timeout, rate limit, truncated or empty reply)
@@ -623,32 +629,47 @@ class EvaluationManager:
             import json as json_module
             import re
 
-            # Try to parse as JSON first (most reliable)
+            # A JSON object is the most reliable; anything else (prose, a bare number) is read by the patterns below
             score = None
             explanation = response
 
             try:
-                # Attempt to parse JSON response
                 parsed = json_module.loads(response)
-                if isinstance(parsed, dict):
-                    if 'score' in parsed:
-                        raw_score = parsed['score']
-                        # The prompt asks for 1-10, so 1 is the worst rating (-> 0.0). A value
-                        # in [0, 1) is a judge that already normalized; it passes through
-                        # rather than being rescaled (0.8 must not become 0.08).
-                        if isinstance(raw_score, (int, float)) and 0 <= raw_score <= 10:
-                            score = normalize_judge_score(raw_score, scale_min=1.0, scale_max=10.0)
-                    if 'explanation' in parsed:
-                        explanation = str(parsed['explanation'])
             except (json_module.JSONDecodeError, ValueError):
+                parsed = None
+            if require_grade:
+                grade = re.search(
+                    r'\bGRADE[*_\t ]*:[*_\t \[]*(correct|incorrect|not[_ ]attempted)[\t *_\]]*(?=\r?$|EXPLANATION[ \t]*:)',
+                    response, re.MULTILINE | re.IGNORECASE
+                )
+                if grade:
+                    score = 1.0 if grade.group(1).lower() == "correct" else 0.0
+            elif isinstance(parsed, dict):
+                raw_score = parsed.get('score')
+                if isinstance(raw_score, str):  # {"score": "8"}: a numeric string is a score a human would read; "1_0" is not
+                    raw_score = float(raw_score) if re.fullmatch(r'\d+(?:\.\d+)?', raw_score.strip()) else None
+                # The prompt asks for 1-10, so 1 is the worst rating (-> 0.0). A value
+                # in [0, 1) is a judge that already normalized; it passes through
+                # rather than being rescaled (0.8 must not become 0.08).
+                if isinstance(raw_score, (int, float)) and not isinstance(raw_score, bool) and 0 <= raw_score <= 10:
+                    score = normalize_judge_score(raw_score, scale_min=1.0, scale_max=10.0)
+                if 'explanation' in parsed:
+                    explanation = str(parsed['explanation'])
+            else:
                 # Fallback to regex parsing with strict validation
-                # Only accept scores that are clearly delimited (e.g., "Score: 8")
+                # Only accept scores that are clearly delimited (e.g., "Score: 8"); a number in exponent
+                # form ("1e308", "15e3", "3.0e2") is not a 1-10 score, so no part of it is read as one: the
+                # digits are an atomic group, so the lookahead cannot be dodged by giving back a digit
+                number = r'((?>\d+(?:\.\d+)?))(?![eE][-+]?\d)'
+                score_end = r'[ \t*_]*(?=\r?$|EXPLANATION[ \t]*:)'
+                field_end = rf'(?:[ \t]*/[ \t]*10)?(?:[ \t]+points?)?{score_end}'
                 score_patterns = [
                     # the labelled "SCORE: 8" (also "**SCORE:** 8") wins over prose such as "Score 10 for a correct answer"
-                    r'score[*_\s]*:[*_\s]*(\d+(?:\.\d+)?)\s*(?:/\s*10)?',
-                    r'[Ss]core[:\s]+(\d+(?:\.\d+)?)\s*(?:/\s*10)?',  # Score: 8 or Score: 8/10
-                    r'(\d+(?:\.\d+)?)\s*(?:/\s*10)\s+points?',  # 8/10 points
-                    r'^(\d+(?:\.\d+)?)\s*$'  # Just a number on its own line
+                    rf'\b(?:score|rating)[*_\t ]*:[*_\t ]*{number}{field_end}',
+                    # a separator is required: a restated rubric ("Score 10 for a correct answer") is not the score
+                    rf'\bscore[ \t]*(?:=|is)[ \t]*{number}{field_end}',
+                    rf'^[ \t]*{number}[ \t]*/[ \t]*10[ \t]+points?{score_end}',
+                    rf'^{number}\s*$'  # Just a number on its own line
                 ]
 
                 for pattern in score_patterns:
@@ -662,12 +683,6 @@ class EvaluationManager:
                                 break
                         except (ValueError, IndexError):
                             continue
-
-                # SimpleQA's grader answers with a grade (simpleqa_eval.parse_grading_response); it decides.
-                # Only a prompt that asks for a GRADE reads one ("Grade: ..." elsewhere is prose).
-                grade = re.search(r'GRADE[*_\s]*:[*_\s\[]*(correct|incorrect|not_attempted)\b', response, re.IGNORECASE)
-                if grade and "GRADE:" in evaluation_prompt:
-                    score = 1.0 if grade.group(1).lower() == "correct" else 0.0
 
                 # Extract explanation (everything after first score mention or first newline)
                 if '\n' in response:
@@ -714,10 +729,15 @@ class EvaluationManager:
         if question:
             choices = visible.get("choices")
             if choices:
+                instruction = (
+                    "Choose the answer letter and briefly explain your reasoning."
+                    if visible.get("require_reasoning") is True
+                    else "Answer the question directly."
+                )
                 return (
                     f"Question:\n{question}\n\n"
                     f"Choices:\n{choices}\n\n"
-                    "Answer the question directly."
+                    f"{instruction}"
                 )
             return str(question)
 

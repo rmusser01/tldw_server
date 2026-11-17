@@ -4038,3 +4038,36 @@ tracking and ADR-063 for the merge queue.
   remote base has advanced beyond the rebase parent. Full staged-tree
   preflight, current-dev qualification, hosted checks and applicable
   acceptance are still required. No push or native action.
+
+## Stage 49: Qualify the Current Dev Union
+
+**Goal**: Preserve the completed rebase and resolve verified issues in the
+incoming benchmark, evaluation, RAG, and credential changes before publication.
+**Success Criteria**: Exact conflict-free dev union; targeted test, contract,
+security, build, and preflight evidence; final review of each correction.
+**Tests**: Mocked owning runtime and benchmark cases, official OpenAPI drift
+check, frontend typecheck, production build, token check, and unchanged budgets.
+**Status**: In Progress
+
+1. Done: Complete the original rebase at `028c8975` with both parents. Its
+   404-file preflight and selected frontend typecheck passed; the migration
+   verification did not run against live PostgreSQL.
+2. Done: Review the conflict-free preview with dev `b7d0b2dc`. The incoming
+   RAG/credential and unchanged eval selections passed 14 and 88 respectively.
+   Correct the verified judge selection, scoring and reporting, CLI, and
+   benchmark input/partition issues. Ordinary prompts cannot select the
+   SimpleQA judge protocol; valid numeric score lines remain supported.
+3. In progress: Final eval and connected benchmark selection passed 153.
+   The last fixture reproduced two rejected legacy points replies; the
+   parser restores those formats without scoring either rubric variant.
+   Final scoped review found no remaining issue. Official fingerprint and
+   path checks, frontend types, production host build, token sync and
+   unchanged bundle budgets passed. Preserve earlier failures, including
+   the sandboxed CSS worker port denial. Verify the final source-bound
+   preflight before publication.
+4. Pending: Advance only the owned branch, then require current-head hosted
+   evidence and applicable acceptance before entering the normal queue.
+
+ADR assessment: no new durable architecture rule. ADR-059 governs task
+tracking, and the existing API artifact package follows the design recorded
+in proposed ADR-069. No new provider selection rule or persistence format.

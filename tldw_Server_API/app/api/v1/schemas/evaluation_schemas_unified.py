@@ -173,6 +173,11 @@ class EvaluationSpec(BaseModel):
         default="gpt-3.5-turbo",
         description="Model to use for evaluation"
     )
+    api_name: Optional[str] = Field(default=None, description="Provider to use for evaluation")
+    provider: Optional[str] = Field(default=None, description="Alias for api_name")
+    evaluator_model: Optional[str] = Field(
+        default=None, description="Evaluator model, provider, or provider-qualified model"
+    )
     temperature: Optional[float] = Field(
         default=0.3,
         ge=0.0,
@@ -215,6 +220,14 @@ class EvaluationSpec(BaseModel):
         default=None,
         description="Optional NLI model identifier/provider name"
     )
+
+    @model_validator(mode="after")
+    def _preserve_explicit_judge(self) -> "EvaluationSpec":
+        if "model" not in self.model_fields_set and any(
+            value and value.strip() for value in (self.api_name, self.provider, self.evaluator_model)
+        ):
+            self.model = None
+        return self
 
     @model_validator(mode="after")
     def _validate_rag_pipeline(self) -> "EvaluationSpec":  # type: ignore[name-defined]

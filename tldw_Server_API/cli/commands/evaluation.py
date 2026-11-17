@@ -259,31 +259,33 @@ def batch_eval(ctx, input_file, output, provider, model, api_key, parallel, outp
 
         # Load batch input
         batch_data = _load_batch_input(input_file)
+        show_progress = output_format != 'json' and not cli_context.quiet
 
-        if not cli_context.quiet:
+        if show_progress:
             print_info(f"Processing {len(batch_data)} evaluations with {parallel} parallel workers...")
 
         # Run batch evaluation
         results = _run_batch_evaluation(
-            batch_data, provider, model, api_key, parallel, cli_context.config, not cli_context.quiet
+            batch_data, provider, model, api_key, parallel, cli_context.config, show_progress
         )
 
         # Save results if output file specified
         if output:
             _save_batch_results(results, output)
-            if not cli_context.quiet:
+            if show_progress:
                 print_success(f"Results saved to {output}")
 
         # Display summary
         if output_format == 'json':
-            print_json(results, "Batch Evaluation Results")
+            click.echo(json.dumps(results, indent=2, default=str))
         else:
             _display_batch_summary(results)
-
-        print_success(f"Batch evaluation completed: {len(results)} evaluations processed")
+            print_success(f"Batch evaluation completed: {len(results)} evaluations processed")
 
     except _EVAL_CLI_NONCRITICAL_EXCEPTIONS as e:
         logger.exception("Batch evaluation failed")
+        if output_format == 'json':
+            raise click.ClickException(f"Batch evaluation failed: {e}") from e
         print_error(f"Batch evaluation failed: {e}")
         sys.exit(1)
 
@@ -295,10 +297,9 @@ def batch_eval(ctx, input_file, output, provider, model, api_key, parallel, outp
 @click.option('--provider', default='openai', help='LLM provider to use')
 @click.option('--model', help='Specific model to use')
 @click.option('--api-key', help='API key (overrides config)')
-@click.option('--save/--no-save', default=True, help='Save evaluation results')
 @click.option('--format', 'output_format', type=click.Choice(['table', 'json']), default='table', help='Output format')
 @click.pass_context
-def custom_eval(ctx, metric_name, text, prompt, provider, model, api_key, save, output_format):
+def custom_eval(ctx, metric_name, text, prompt, provider, model, api_key, output_format):
     """
     Run custom metric evaluation.
 
@@ -321,24 +322,34 @@ def custom_eval(ctx, metric_name, text, prompt, provider, model, api_key, save, 
         # Load text content
         text_content = _load_text_content(text)
 
-        if not cli_context.quiet:
+        if output_format != 'json' and not cli_context.quiet:
             print_info(f"Running custom evaluation '{metric_name}' with {provider}...")
 
         # Run evaluation
         result = _run_custom_evaluation(
-            metric_name, text_content, prompt, provider, model, api_key, save, cli_context.config
+            metric_name, text_content, prompt, provider, model, api_key, cli_context.config
         )
 
         # Display results
         if output_format == 'json':
-            print_json(result, f"Custom Evaluation Results: {metric_name}")
+            click.echo(json.dumps(result, indent=2, default=str))
         else:
             print_evaluation_results(result)
 
-        print_success(f"Custom evaluation '{metric_name}' completed successfully")
+        if result['status'] == 'unscored':  # the judge call failed or its reply held no score: not a success
+            message = f"Custom evaluation '{metric_name}' produced no score: {result['details'].get('explanation')}"
+            if output_format == 'json':
+                click.echo(message, err=True)
+            else:
+                print_error(message)
+            sys.exit(1)
+        if output_format != 'json':
+            print_success(f"Custom evaluation '{metric_name}' completed successfully")
 
     except _EVAL_CLI_NONCRITICAL_EXCEPTIONS as e:
         logger.exception("Custom evaluation failed")
+        if output_format == 'json':
+            raise click.ClickException(f"Custom evaluation failed: {e}") from e
         print_error(f"Custom evaluation failed: {e}")
         sys.exit(1)
 
@@ -406,10 +417,10 @@ def label_choice(ctx, question, labels, context, expected, provider, model, api_
                     content = msg.get('content')
                     if isinstance(content, list):
                         return ''.join(part.get('text', '') if isinstance(part, dict) else str(part) for part in content)
-                    return content if isinstance(content, str) else str(content)
-                if 'text' in r:
-                    return str(r['text'])
-            return str(r)
+                    return content if isinstance(content, str) else ""
+                if isinstance(r.get('text'), str):
+                    return r['text']
+            return ""
 
         raw = _extract_content(resp)
         parsed = None
@@ -421,7 +432,7 @@ def label_choice(ctx, question, labels, context, expected, provider, model, api_
                     parsed = obj.get('label')
             except _EVAL_CLI_NONCRITICAL_EXCEPTIONS:
                 parsed = None
-        if parsed is None:
+        else:
             up = str(raw).strip().upper()
             for lab in allowed_up:
                 if lab in up or up.strip() == lab:
@@ -436,7 +447,7 @@ def label_choice(ctx, question, labels, context, expected, provider, model, api_
                 s = {k.upper(): v.upper() for k, v in mapping_dict.items()}[s]
             return s
 
-        pred_norm = norm_label(parsed)
+        pred_norm = norm_label(parsed) if isinstance(parsed, str) else None
         gold_norm = norm_label(expected) if expected else None
         accuracy = 1.0 if (gold_norm is not None and pred_norm == gold_norm) else 0.0 if gold_norm is not None else None
 
@@ -533,10 +544,10 @@ def nli_factcheck(ctx, claim, evidence, labels, expected, provider, model, api_k
                     content = msg.get('content')
                     if isinstance(content, list):
                         return ''.join(part.get('text', '') if isinstance(part, dict) else str(part) for part in content)
-                    return content if isinstance(content, str) else str(content)
-                if 'text' in r:
-                    return str(r['text'])
-            return str(r)
+                    return content if isinstance(content, str) else ""
+                if isinstance(r.get('text'), str):
+                    return r['text']
+            return ""
 
         raw = _extract_content(resp)
         parsed = None
@@ -548,7 +559,7 @@ def nli_factcheck(ctx, claim, evidence, labels, expected, provider, model, api_k
                     parsed = obj.get('label')
             except _EVAL_CLI_NONCRITICAL_EXCEPTIONS:
                 parsed = None
-        if parsed is None:
+        else:
             up = str(raw).strip().upper()
             for lab in allowed_up:
                 if lab in up or up.strip() == lab:
@@ -576,7 +587,7 @@ def nli_factcheck(ctx, claim, evidence, labels, expected, provider, model, api_k
                 s = {k.upper(): v.upper() for k, v in mapping_dict.items()}[s]
             return s
 
-        pred_norm = norm_label(parsed)
+        pred_norm = norm_label(parsed) if isinstance(parsed, str) else None
         gold_norm = norm_label(expected) if expected else None
         accuracy = 1.0 if (gold_norm is not None and pred_norm == gold_norm) else 0.0 if gold_norm is not None else None
 
@@ -728,8 +739,8 @@ def _run_quality_evaluation(text: str, response: str, provider: str, model: str,
         raise
 
 
-def _run_custom_evaluation(metric_name: str, text: str, prompt: str, provider: str,
-                          model: str, api_key: str, save: bool, config: dict[str, Any]) -> dict[str, Any]:
+def _run_custom_evaluation(metric_name: str, text: str, prompt: Optional[str], provider: str,
+                          model: str, api_key: str, config: dict[str, Any]) -> dict[str, Any]:
     """Run custom metric evaluation."""
     try:
         from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
@@ -741,22 +752,25 @@ def _run_custom_evaluation(metric_name: str, text: str, prompt: str, provider: s
         eval_manager = EvaluationManager()
 
         result = asyncio.run(eval_manager.evaluate_custom_metric(
-            text=text,
             metric_name=metric_name,
-            custom_prompt=prompt,
-            api_key=api_key,
+            description=metric_name,
+            evaluation_prompt=prompt or f"Evaluate the text below on the metric '{metric_name}'.\n\n{{text}}",
+            input_data={'text': text},
+            scoring_criteria={metric_name: prompt or 'Overall quality on this metric'},
             api_name=provider,
-            save_results=save
+            api_key=api_key,
+            model_override=model,
         ))
+        score = result.get('score')  # None: no score, kept apart from a 0.0 (TASK-15485)
 
         return {
             'evaluation_type': 'custom',
+            'status': 'unscored' if score is None else 'completed',
             'metric_name': metric_name,
-            'evaluation_id': result.get('evaluation_id'),
             'provider': provider,
             'model': model,
             'timestamp': format_timestamp(None),
-            'metrics': result.get('metrics', {}),
+            'metrics': {metric_name: {'score': score, 'explanation': result.get('explanation', '')}},
             'details': result
         }
 
@@ -881,7 +895,7 @@ def _run_single_evaluation(eval_spec: dict[str, Any], default_provider: str,
     elif eval_type == 'custom':
         return _run_custom_evaluation(
             eval_spec['metric_name'], eval_spec['text'],
-            eval_spec.get('prompt'), provider, model, api_key, save, config
+            eval_spec.get('prompt'), provider, model, api_key, config
         )
     else:
         raise ValueError(f"Unknown evaluation type: {eval_type}")
@@ -901,13 +915,15 @@ def _save_batch_results(results: list[dict[str, Any]], output_file: Path):
 
 def _display_batch_summary(results: list[dict[str, Any]]):
     """Display batch evaluation summary."""
-    successful = sum(1 for r in results if r.get('status') != 'failed')
-    failed = len(results) - successful
+    unscored = sum(1 for r in results if r.get('status') == 'unscored')
+    successful = sum(1 for r in results if r.get('status') not in ('failed', 'unscored'))
+    failed = len(results) - successful - unscored
 
     summary_data = [
         {'Metric': 'Total Evaluations', 'Count': len(results)},
         {'Metric': 'Successful', 'Count': successful},
         {'Metric': 'Failed', 'Count': failed},
+        {'Metric': 'Unscored', 'Count': unscored},
         {'Metric': 'Success Rate', 'Count': f"{successful/len(results)*100:.1f}%" if results else "0%"}
     ]
 
