@@ -3131,8 +3131,13 @@ async def add_media_orchestrate(
                 else:
                     logger.warning("Quota check failed (non-fatal): {}", quota_err)
 
+            upload_bytes_recorded = False
+
             async def record_upload_bytes() -> None:
-                await _enforce_and_record_media_bytes(getattr(current_user, "id", None), total_uploaded_bytes)
+                nonlocal upload_bytes_recorded
+                if not upload_bytes_recorded:
+                    await _enforce_and_record_media_bytes(getattr(current_user, "id", None), total_uploaded_bytes)
+                    upload_bytes_recorded = True
 
             if admit_after_duplicate_check is None:
                 await record_upload_bytes()
@@ -3291,12 +3296,6 @@ async def add_media_orchestrate(
                 db._resolve_email_tenant_id() if form_data.media_type == "email" else None
             )
 
-            logger.info(
-                "Processing {} items of type '{}'",
-                len(all_valid_input_sources),
-                form_data.media_type,
-            )
-
             admission = admit_after_duplicate_check
 
             async def prepare_new_items() -> PreparedMediaBatch:
@@ -3320,8 +3319,7 @@ async def add_media_orchestrate(
                     user_id=int(current_user.id) if str(getattr(current_user, "id", "")).isdigit() else None,
                     prepare_new_items=prepare_new_items if admit_after_duplicate_check is not None else None,
                 )
-                if admit_after_duplicate_check is not None and all(r["status"] == "Skipped" for r in batch_results):
-                    await record_upload_bytes()
+                await record_upload_bytes()
                 results.extend(batch_results)
             else:
                 # PDF / Document / Ebook / Email
