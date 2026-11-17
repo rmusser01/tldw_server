@@ -82,12 +82,15 @@ import {
   type QuickIngestSessionRunContext,
 } from "@/entries/shared/quick-ingest-session-runtime";
 import {
+  ACTIVE_INGEST_JOB_STATUSES,
+  TERMINAL_INGEST_JOB_STATUSES,
   createIngestJobsTracker,
   extractIngestJobSubmitError,
   getQuickIngestJobPollInterval,
   isTransientIngestStatusRead,
   type IngestJobStatusResponse,
   pollTrackedIngestJobs,
+  readIngestJobProgress,
   requireSubmittedIngestJobs,
 } from "@/services/tldw/ingest-jobs-orchestrator";
 import {
@@ -402,6 +405,12 @@ type QuickIngestRemoteResultMeta = {
   type: string;
   url?: string;
   fileName?: string;
+};
+
+type QuickIngestRemoteItemResult = QuickIngestRemoteResultMeta & {
+  status: "ok" | "error";
+  data?: unknown;
+  error?: string;
 };
 
 const warmModels = async (
@@ -2086,9 +2095,15 @@ export default defineBackground({
       >;
       isCancelled: () => boolean;
       onPendingJobIds?: (jobIds: number[]) => void;
+      onItemResult: (result: QuickIngestRemoteItemResult) => void;
     }) => {
       const startedAt = Date.now();
       const interruptedJobIds: number[] = [];
+      const invalidStatusResponse = { ok: false };
+      const hasJobStatus = (data: IngestJobStatusResponse["data"]) => {
+        const { status } = readIngestJobProgress(data);
+        return ACTIVE_INGEST_JOB_STATUSES.has(status) || TERMINAL_INGEST_JOB_STATUSES.has(status);
+      };
       const readStatus = async (path: string): Promise<IngestJobStatusResponse | undefined> => {
         try {
           return await opts.lease.request({ path, method: "GET", timeoutMs: 4200 });
@@ -2099,7 +2114,7 @@ export default defineBackground({
           return { ok: false, status: status ?? 0 };
         }
       };
-      const results = await pollTrackedIngestJobs({
+      const results = await pollTrackedIngestJobs<QuickIngestRemoteResultMeta, QuickIngestRemoteItemResult | null>({
         tracker: opts.tracker,
         timeoutMs: Infinity,
         pollIntervalMs: () => getQuickIngestJobPollInterval(startedAt, 1200),
@@ -2109,6 +2124,9 @@ export default defineBackground({
           await cancelRemoteIngestBatches(opts.lease, opts.tracker, "user_cancelled");
         },
         onPendingJobIds: opts.onPendingJobIds,
+        onResult: (result) => {
+          if (result) opts.onItemResult(result);
+        },
         fetchJobs: async (batchId, jobIds) => {
           // One batched status request per cycle instead of one request per
           // job. Follows the endpoint's offset pagination so every tracked
@@ -2126,14 +2144,9 @@ export default defineBackground({
               if (page === 0) return response;
               break;
             }
-            if (!Array.isArray(response.data?.jobs)) {
-              // Unexpected payload shape: surface it verbatim so each job is
-              // reconciled against the raw response, exactly like the old
-              // per-job GET path did.
-              return response;
-            }
-            const jobs = response.data.jobs;
-            collected.push(...jobs);
+            // Missing or malformed rows are checked with the individual status endpoint.
+            if (!Array.isArray(response.data?.jobs)) break;
+            collected.push(...response.data.jobs.filter(hasJobStatus));
             const hasMore =
               response.data?.has_more ??
               response.data?.pagination?.has_more;
@@ -2154,9 +2167,13 @@ export default defineBackground({
             data: { jobs: collected },
           } as { ok: boolean; status?: number; data?: any; error?: string };
         },
-        fetchJob: (jobId) => readStatus(`/api/v1/media/ingest/jobs/${jobId}`),
+        fetchJob: async (jobId) => {
+          const response = await readStatus(`/api/v1/media/ingest/jobs/${jobId}`);
+          return response?.ok && !hasJobStatus(response.data) ? invalidStatusResponse : response;
+        },
         mapRequestError: (item, response) => {
-          if (response?.status === undefined || isTransientIngestStatusRead(response.status)) {
+          if (response !== invalidStatusResponse &&
+            (response?.status === undefined || isTransientIngestStatusRead(response.status))) {
             return undefined;
           }
           interruptedJobIds.push(item.jobId);
@@ -2264,12 +2281,12 @@ export default defineBackground({
         }
 
         if (tracker.hasItems()) {
-          const terminal = await pollRemoteIngestJobs({ lease, tracker, isCancelled });
+          const terminal = await pollRemoteIngestJobs({
+            lease, tracker, isCancelled, onItemResult: emitProgress,
+          });
           const remoteResults = terminal.results;
           interruptedJobIds = terminal.interruptedJobIds;
-          // Terminal PATCHes are independent per item: fan them out together
-          // (WP-38), then emit the per-item progress events sequentially in
-          // result order so the wizard observes the same event stream.
+          // Terminal PATCHes are independent per item: fan them out together (WP-38).
           await Promise.all(
             remoteResults.map((result) =>
               patchConferenceCollectionItem(
@@ -2290,10 +2307,7 @@ export default defineBackground({
               ),
             ),
           );
-          for (const result of remoteResults) {
-            out.push(result);
-            emitProgress(result);
-          }
+          out.push(...remoteResults);
         }
 
         if (isCancelled()) {
@@ -3536,6 +3550,7 @@ export default defineBackground({
           lease,
           tracker: queuedRemoteJobs,
           isCancelled,
+          onItemResult: emitProgress,
           onPendingJobIds: (jobIds) => {
             runtimeContext?.setJobIds(jobIds);
           },
@@ -4187,8 +4202,7 @@ export default defineBackground({
           const remoteResults = terminal.results;
           interruptedJobIds = terminal.interruptedJobIds;
           // Order the per-item results by their input position so pooled
-          // submissions cannot permute the event stream: the wizard sees the
-          // results in the same order the sequential loop produced them.
+          // submissions cannot permute the final result summary.
           const orderedRemoteResults = remoteResults
             .map((result, position) => ({ result, position }))
             .sort((a, b) => {
@@ -4200,9 +4214,7 @@ export default defineBackground({
               return a.position - b.position;
             })
             .map((entry) => entry.result);
-          // Terminal PATCHes are independent per item: fan them out together
-          // (WP-38), then emit the per-item progress events sequentially in
-          // order.
+          // Terminal PATCHes are independent per item: fan them out together (WP-38).
           await Promise.all(
             orderedRemoteResults.map((result) =>
               patchPlannedConferenceItem(
@@ -4221,10 +4233,7 @@ export default defineBackground({
               ),
             ),
           );
-          for (const result of orderedRemoteResults) {
-            out.push(result);
-            emitProgress(result);
-          }
+          out.push(...orderedRemoteResults);
         } finally {
           // The live poll finished (or threw) in this worker; drop the durable
           // record so the alarm/startup path does not re-poll it.

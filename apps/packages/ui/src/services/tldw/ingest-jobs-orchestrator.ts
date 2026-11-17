@@ -262,6 +262,7 @@ type PollTrackedIngestJobsBase<TMeta, TResult> = {
   isCancelled: () => boolean
   onCancel: () => Promise<void> | void
   onPendingJobIds?: (jobIds: number[]) => void
+  onResult?: (result: TResult) => void
   mapCompleted: (
     item: IngestJobTrackerItem<TMeta>,
     data: any,
@@ -314,6 +315,10 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
     options.tracker.getItems().map((item) => [item.jobId, item])
   )
   const results: TResult[] = []
+  const recordResult = (result: TResult) => {
+    results.push(result)
+    options.onResult?.(result)
+  }
 
   const consumeJobResponse = (
     jobId: number,
@@ -325,13 +330,13 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
       if (typeof mapped !== "undefined") {
         unresolved.delete(jobId)
         options.tracker.clearJob(jobId)
-        results.push(mapped)
+        recordResult(mapped)
         return true
       }
       return false
     }
 
-    const status = String(response.data?.status || "").toLowerCase()
+    const { status } = readIngestJobProgress(response.data)
     if (!TERMINAL_INGEST_JOB_STATUSES.has(status)) {
       return false
     }
@@ -341,7 +346,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
 
     if (status === "completed") {
       if (completedIngestJobIndicatesFailure(response.data)) {
-        results.push(
+        recordResult(
           options.mapFailure(item, {
             status: "failed",
             data: extractCompletedIngestJobTerminalData(response.data),
@@ -352,7 +357,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
           })
         )
       } else {
-        results.push(
+        recordResult(
           options.mapCompleted(
             item,
             extractCompletedIngestJobTerminalData(response.data),
@@ -363,7 +368,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
       return true
     }
     if (status === "cancelled") {
-      results.push(options.mapCancelled(item, response.data, response))
+      recordResult(options.mapCancelled(item, response.data, response))
       return true
     }
 
@@ -371,7 +376,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
       String(response.data?.error_message || "").trim() ||
       String(response.data?.cancellation_reason || "").trim() ||
       `Ingest ${status || "failed"}`
-    results.push(
+    recordResult(
       options.mapFailure(item, {
         status,
         data: response.data,
@@ -447,7 +452,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
     if (options.isCancelled()) {
       await options.onCancel()
       for (const item of unresolved.values()) {
-        results.push(options.mapCancelled(item))
+        recordResult(options.mapCancelled(item))
         options.tracker.clearJob(item.jobId)
       }
       unresolved.clear()
@@ -473,7 +478,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
 
     if (Date.now() >= deadline) {
       for (const item of unresolved.values()) {
-        results.push(
+        recordResult(
           options.mapFailure(item, {
             status: "timeout",
             error: "Timed out while waiting for media ingest jobs."

@@ -201,7 +201,7 @@ describe("quick ingest submission batching (WP-36)", () => {
     ])
   })
 
-  it("keeps confirmed results when a queued extension job cannot be found", async () => {
+  it.each([false, true])("keeps confirmed results when an extension job is inaccessible or malformed=%s", async (malformed) => {
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url.endsWith("/api/v1/media/ingest/jobs") && init?.method === "POST") {
@@ -211,9 +211,14 @@ describe("quick ingest submission batching (WP-36)", () => {
         ] })
       }
       if (url.includes("/api/v1/media/ingest/jobs?batch_id=mixed-batch")) {
-        return json({ jobs: [{ id: 101, status: "completed", result: { media_id: 177 } }] })
+        return json({ jobs: [
+          ...(malformed ? [{ id: 100, status: "unexpected" }] : []),
+          { id: 101, status: " Completed ", result: { media_id: 177 } },
+        ] })
       }
-      if (url.endsWith("/api/v1/media/ingest/jobs/100")) return json({ detail: "Job unavailable" }, 410)
+      if (url.endsWith("/api/v1/media/ingest/jobs/100")) {
+        return malformed ? json({ id: 100, status: "unexpected" }) : json({ detail: "Job unavailable" }, 410)
+      }
       throw new Error(`Unexpected request: ${init?.method} ${url}`)
     })
     vi.stubGlobal("fetch", fetcher)
@@ -231,6 +236,46 @@ describe("quick ingest submission batching (WP-36)", () => {
       results: [expect.objectContaining({ id: "confirmed", status: "ok", data: { media_id: 177 } })],
       summary: { interruptedJobIds: [100] },
     })
+  })
+
+  it("publishes a completed extension item while its peer remains queued", async () => {
+    vi.useFakeTimers()
+    const firstPoll = deferred<void>()
+    let finishPeer = false
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith("/api/v1/media/ingest/jobs") && init?.method === "POST") {
+        return json({ batch_id: "peer-batch", jobs: [
+          { id: 100, source: urlA, source_kind: "url" },
+          { id: 101, source: urlB, source_kind: "url" },
+        ] })
+      }
+      if (url.includes("/api/v1/media/ingest/jobs?batch_id=peer-batch")) {
+        firstPoll.resolve()
+        return json({ jobs: [
+          { id: 100, status: "completed", result: { media_id: 177 } },
+          { id: 101, status: finishPeer ? "completed" : "queued", result: { media_id: 178 } },
+        ] })
+      }
+      throw new Error(`Unexpected request: ${init?.method} ${url}`)
+    })
+    vi.stubGlobal("fetch", fetcher)
+    await send({
+      type: "tldw:quick-ingest/start",
+      payload: { requestScope, entries: [
+        { id: "first", url: urlA, type: "video" },
+        { id: "peer", url: urlB, type: "video" },
+      ], files: [], storeRemote: true },
+    })
+    await firstPoll.promise
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sentOfType("tldw:quick-ingest/progress").map(({ payload }) => payload.result.id)).toEqual(["first"])
+    expect(sentOfType("tldw:quick-ingest/completed")).toHaveLength(0)
+
+    finishPeer = true
+    await vi.advanceTimersByTimeAsync(1_200)
+    expect(sentOfType("tldw:quick-ingest/progress").map(({ payload }) => payload.result.id)).toEqual(["first", "peer"])
+    expect(sentOfType("tldw:quick-ingest/completed")[0]?.payload.results.map(({ id }: { id: string }) => id)).toEqual(["first", "peer"])
   })
 
   it("submits same-config URL entries as one ingest-jobs request with k urls", async () => {
