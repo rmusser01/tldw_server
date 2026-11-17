@@ -2,6 +2,9 @@
 id: TASK-15559
 title: Analyze and save ingested media by reference
 status: In Progress
+references:
+- https://github.com/rmusser01/tldw_server/pull/3503
+- https://github.com/rmusser01/tldw-hosted/pull/296
 ---
 
 ## Description
