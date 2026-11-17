@@ -354,7 +354,7 @@ Gets complete results for a finished run.
       "max_score": 0.98,       // Maximum score
       "pass_rate": 0.75,       // Percentage passing threshold (0-1)
       "total_samples": 100,
-      "failed_samples": 25
+      "failed_samples": 25   // Unscored (no score; a failed judge call): in no mean_score or pass_rate
     },
     "by_metric": {             // Breakdown by metric (if applicable)
       "fluency": {

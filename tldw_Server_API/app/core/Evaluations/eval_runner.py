@@ -1951,22 +1951,19 @@ class EvaluationRunner:
                 messages = [{"role": "user", "content": user_prompt}]
                 response_format = {"type": "json_object"} if structured else None
 
-                try:
-                    resp = await asyncio.to_thread(
-                        _call_adapter_text,
-                        api_endpoint=api_name,
-                        messages_payload=messages,
-                        temperature=temperature,
-                        system_message=system_prompt,
-                        response_format=response_format,
-                        max_tokens=16,
-                        api_key=api_key,
-                        model=model_override,
-                        provider_credentials=config.get("provider_credentials"),
-                    )
-                except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as ce:
-                    logger.error(f"Chat call failed for label_choice {sample_id}: {ce}")
-                    resp = ""
+                # A failed judge call raises to the sample-error handler below: unscored, not accuracy 0.0 (TASK-15491)
+                resp = await asyncio.to_thread(
+                    _call_adapter_text,
+                    api_endpoint=api_name,
+                    messages_payload=messages,
+                    temperature=temperature,
+                    system_message=system_prompt,
+                    response_format=response_format,
+                    max_tokens=16,
+                    api_key=api_key,
+                    model=model_override,
+                    provider_credentials=config.get("provider_credentials"),
+                )
 
                 # Extract text content from provider response
                 def _extract_content(r: Any) -> str:
@@ -2146,22 +2143,19 @@ class EvaluationRunner:
                 messages = [{"role": "user", "content": user_prompt}]
                 response_format = {"type": "json_object"} if structured else None
 
-                try:
-                    resp = await asyncio.to_thread(
-                        _call_adapter_text,
-                        api_endpoint=api_name,
-                        messages_payload=messages,
-                        temperature=temperature,
-                        system_message=system_prompt,
-                        response_format=response_format,
-                        max_tokens=16,
-                        api_key=api_key,
-                        model=model_override,
-                        provider_credentials=config.get("provider_credentials"),
-                    )
-                except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as ce:
-                    logger.error(f"Chat call failed for nli_factcheck {sample_id}: {ce}")
-                    resp = ""
+                # A failed judge call raises to the sample-error handler below: unscored, not accuracy 0.0 (TASK-15491)
+                resp = await asyncio.to_thread(
+                    _call_adapter_text,
+                    api_endpoint=api_name,
+                    messages_payload=messages,
+                    temperature=temperature,
+                    system_message=system_prompt,
+                    response_format=response_format,
+                    max_tokens=16,
+                    api_key=api_key,
+                    model=model_override,
+                    provider_credentials=config.get("provider_credentials"),
+                )
 
                 def _extract_content(r: Any) -> str:
                     if isinstance(r, str):
@@ -2349,21 +2343,17 @@ class EvaluationRunner:
                 "failed_samples": 0
             }
 
-        # Get all scores
+        # A sample with no score (an error, a failed judge call) is unscored: in no mean or pass rate
         all_scores = []
         passed_count = 0
         failed_samples = 0
 
         for result in results:
-            score_val = result.get("avg_score")
-            if score_val is None:
-                failed_samples += 1
-                score_val = 0.0
             try:
-                score_val = float(score_val)
+                score_val = float(result.get("avg_score"))
             except (TypeError, ValueError):
                 failed_samples += 1
-                score_val = 0.0
+                continue
             all_scores.append(score_val)
             if result.get("passed", False):
                 passed_count += 1
@@ -2384,7 +2374,7 @@ class EvaluationRunner:
             "std_dev": statistics.stdev(all_scores) if len(all_scores) > 1 else 0,
             "min_score": min(all_scores),
             "max_score": max(all_scores),
-            "pass_rate": passed_count / len(results),
+            "pass_rate": passed_count / len(all_scores),
             "total_samples": len(results),
             "failed_samples": failed_samples
         }
