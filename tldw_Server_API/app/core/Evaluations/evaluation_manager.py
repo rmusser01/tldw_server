@@ -623,32 +623,37 @@ class EvaluationManager:
             import json as json_module
             import re
 
-            # Try to parse as JSON first (most reliable)
+            # A JSON object is the most reliable; anything else (prose, a bare number) is read by the patterns below
             score = None
             explanation = response
 
             try:
-                # Attempt to parse JSON response
                 parsed = json_module.loads(response)
-                if isinstance(parsed, dict):
-                    if 'score' in parsed:
-                        raw_score = parsed['score']
-                        # The prompt asks for 1-10, so 1 is the worst rating (-> 0.0). A value
-                        # in [0, 1) is a judge that already normalized; it passes through
-                        # rather than being rescaled (0.8 must not become 0.08).
-                        if isinstance(raw_score, (int, float)) and 0 <= raw_score <= 10:
-                            score = normalize_judge_score(raw_score, scale_min=1.0, scale_max=10.0)
-                    if 'explanation' in parsed:
-                        explanation = str(parsed['explanation'])
             except (json_module.JSONDecodeError, ValueError):
+                parsed = None
+            if isinstance(parsed, dict):
+                raw_score = parsed.get('score')
+                if isinstance(raw_score, str):  # {"score": "8"}: a numeric string is a score a human would read; "1_0" is not
+                    raw_score = float(raw_score) if re.fullmatch(r'\d+(?:\.\d+)?', raw_score.strip()) else None
+                # The prompt asks for 1-10, so 1 is the worst rating (-> 0.0). A value
+                # in [0, 1) is a judge that already normalized; it passes through
+                # rather than being rescaled (0.8 must not become 0.08).
+                if isinstance(raw_score, (int, float)) and 0 <= raw_score <= 10:
+                    score = normalize_judge_score(raw_score, scale_min=1.0, scale_max=10.0)
+                if 'explanation' in parsed:
+                    explanation = str(parsed['explanation'])
+            else:
                 # Fallback to regex parsing with strict validation
-                # Only accept scores that are clearly delimited (e.g., "Score: 8")
+                # Only accept scores that are clearly delimited (e.g., "Score: 8"); a number in exponent
+                # form ("1e308", "15e3", "3.0e2") is not a 1-10 score, so no part of it is read as one: the
+                # digits are an atomic group, so the lookahead cannot be dodged by giving back a digit
+                number = r'((?>\d+(?:\.\d+)?))(?![eE][-+]?\d)'
                 score_patterns = [
                     # the labelled "SCORE: 8" (also "**SCORE:** 8") wins over prose such as "Score 10 for a correct answer"
-                    r'score[*_\s]*:[*_\s]*(\d+(?:\.\d+)?)\s*(?:/\s*10)?',
-                    r'[Ss]core[:\s]+(\d+(?:\.\d+)?)\s*(?:/\s*10)?',  # Score: 8 or Score: 8/10
-                    r'(\d+(?:\.\d+)?)\s*(?:/\s*10)\s+points?',  # 8/10 points
-                    r'^(\d+(?:\.\d+)?)\s*$'  # Just a number on its own line
+                    rf'score[*_\s]*:[*_\s]*{number}\s*(?:/\s*10)?',
+                    rf'[Ss]core[:\s]+{number}\s*(?:/\s*10)?',  # Score: 8 or Score: 8/10
+                    rf'{number}\s*(?:/\s*10)\s+points?',  # 8/10 points
+                    rf'^{number}\s*$'  # Just a number on its own line
                 ]
 
                 for pattern in score_patterns:
@@ -664,8 +669,11 @@ class EvaluationManager:
                             continue
 
                 # SimpleQA's grader answers with a grade (simpleqa_eval.parse_grading_response); it decides.
-                # Only a prompt that asks for a GRADE reads one ("Grade: ..." elsewhere is prose).
-                grade = re.search(r'GRADE[*_\s]*:[*_\s\[]*(correct|incorrect|not_attempted)\b', response, re.IGNORECASE)
+                # Only a prompt that asks for a GRADE reads one ("Grade: ..." elsewhere is prose), and a restated
+                # format line "GRADE: [correct/incorrect/not_attempted]" is not a grade (no "/" may follow the word).
+                grade = re.search(
+                    r'GRADE[*_\s]*:[*_\s\[]*(correct|incorrect|not[_ ]attempted)\b(?!/)', response, re.IGNORECASE
+                )
                 if grade and "GRADE:" in evaluation_prompt:
                     score = 1.0 if grade.group(1).lower() == "correct" else 0.0
 

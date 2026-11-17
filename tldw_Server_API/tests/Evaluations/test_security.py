@@ -225,7 +225,7 @@ class TestScoreParsingSecurity:
             ('{"score": "\'; DROP TABLE evaluations; --"}', None),  # SQL injection in JSON
             ("Score: NaN", None),  # Not a number
             ("Score: Infinity", None),  # Infinity
-            ("Score: 1e308", 0.0),  # Very large number: the pattern reads its leading 1, the worst rating
+            ("Score: 1e308", None),  # Very large number in exponent form: not a 1-10 score, so unscored (TASK-15487)
         ]
 
         for response, expected in malicious_responses:
