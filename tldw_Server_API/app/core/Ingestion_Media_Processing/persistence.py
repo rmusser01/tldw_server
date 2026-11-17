@@ -24,6 +24,7 @@ from fastapi import BackgroundTasks, HTTPException, Request, UploadFile, status
 from loguru import logger
 from starlette.responses import JSONResponse
 
+from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_requested
 from tldw_Server_API.app.core.Claims_Extraction.claims_utils import (
     extract_claims_if_requested,
     persist_claims_if_applicable,
@@ -33,6 +34,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
+    get_media_by_url,
     get_media_repository,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
@@ -1305,6 +1307,54 @@ def _normalize_dedupe_url_for_db(value: str) -> str:
         return raw
     normalized = normalize_media_dedupe_url(raw)
     return str(normalized).strip() if normalized else raw
+
+
+DUPLICATE_ANALYSIS_WARNING = "Analysis skipped because this item is already in your library."
+
+
+async def find_duplicate_document_before_analysis(
+    *,
+    input_ref: str,
+    processing_source: str,
+    is_url: bool,
+    form_data: Any,
+    temp_dir: FilePath,
+    db: MediaDatabase,
+) -> dict[str, Any] | None:
+    """Reuse an active document under the same source identity as the writer."""
+    if (
+        str(form_data.media_type) in {"audio", "video", "email"}
+        or getattr(form_data, "overwrite_existing", False)
+        or not media_analysis_requested(form_data)
+    ):
+        return None
+
+    if not is_url:
+        local_path = resolve_safe_local_path(FilePath(processing_source), temp_dir)
+        if local_path is None or not local_path.is_file():
+            return None
+
+    source_key = input_ref.strip()
+    if not source_key:
+        return None
+    try:
+        existing = await asyncio.to_thread(get_media_by_url, db, source_key)
+    except (DatabaseError, sqlite3.Error) as exc:
+        logger.warning("Document duplicate lookup failed: {}", type(exc).__name__)
+        return None
+    if existing is None:
+        return None
+
+    return {
+        "status": "Skipped",
+        "input_ref": input_ref,
+        "processing_source": processing_source,
+        "media_type": str(form_data.media_type),
+        "db_id": existing["id"],
+        "media_uuid": existing["uuid"],
+        "db_message": "Media already exists. Overwrite not enabled.",
+        "warnings": [DUPLICATE_ANALYSIS_WARNING],
+    }
 
 
 def _merge_video_lite_summary_safe_metadata(
@@ -2787,6 +2837,7 @@ async def add_media_orchestrate(
     temp_dir_manager_cls: Any | None = None,
     template_classifier: Any | None = None,
     process_document_content: Callable[..., Any] | None = None,
+    admit_after_duplicate_check: Callable[[], Awaitable[None]] | None = None,
 ) -> Any:
     """
     Orchestration helper for the `/media/add` endpoint.
@@ -3198,14 +3249,33 @@ async def add_media_orchestrate(
                     client_id=client_id_for_workers,
                     temp_dir=temp_dir_path,
                     user_id=int(current_user.id) if str(getattr(current_user, "id", "")).isdigit() else None,
+                    admit_after_duplicate_check=admit_after_duplicate_check,
                 )
                 results.extend(batch_results)
             else:
                 # PDF / Document / Ebook / Email
+                duplicates: dict[str, dict[str, Any]] = {}
+                if admit_after_duplicate_check is not None:
+                    for source in all_valid_input_sources:
+                        duplicate = await find_duplicate_document_before_analysis(
+                            input_ref=source_to_ref_map.get(source, source),
+                            processing_source=source,
+                            is_url=(source in url_list),
+                            form_data=form_data,
+                            temp_dir=temp_dir_path,
+                            db=db,
+                        )
+                        if duplicate is not None:
+                            duplicates[source] = duplicate
+                    if any(source not in duplicates for source in all_valid_input_sources):
+                        await admit_after_duplicate_check()
+
                 doc_like_concurrency = _document_like_concurrency_limit()
                 semaphore = asyncio.Semaphore(doc_like_concurrency)
 
                 async def _run_doc_item(source: str) -> dict[str, Any]:
+                    if source in duplicates:
+                        return duplicates[source]
                     async with semaphore:
                         return await process_document_like_item(
                             item_input_ref=source_to_ref_map.get(source, source),
@@ -3599,6 +3669,8 @@ async def add_media_persist(
     max_download_bytes: int | None = None,
     allowed_download_content_types: set[str] | None = None,
     trusted_source_metadata_by_url: Mapping[str, dict[str, Any]] | None = None,
+    *,
+    admit_after_duplicate_check: Callable[[], Awaitable[None]] | None = None,
 ) -> Any:
     """
     Persistence entry point used by the modular `media/add` endpoint.
@@ -3619,6 +3691,7 @@ async def add_media_persist(
         max_download_bytes=max_download_bytes,
         allowed_download_content_types=allowed_download_content_types,
         trusted_source_metadata_by_url=trusted_source_metadata_by_url,
+        admit_after_duplicate_check=admit_after_duplicate_check,
     )
 
 
@@ -4105,6 +4178,7 @@ async def process_batch_media(
     user_id: int | None = None,
     cancel_check: Callable[[], bool] | None = None,
     analysis_refusal: LLMQuotaExceededError | None = None,
+    admit_after_duplicate_check: Callable[[], Awaitable[None]] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Core implementation of the audio/video batch processing helper used by `/media/add`.
@@ -4398,6 +4472,9 @@ async def process_batch_media(
             reason = "Overwrite requested or not applicable, proceeding regardless " "of existence."
 
         if should_process:
+            if admit_after_duplicate_check is not None:
+                await admit_after_duplicate_check()
+                admit_after_duplicate_check = None
             reused_process_result = await _maybe_build_reused_transcript_process_result(
                 media_type=str(media_type),
                 original_input_ref=str(input_ref),
@@ -4420,7 +4497,9 @@ async def process_batch_media(
 
         if not should_process:
             logger.info("Skipping processing for {}: {}", input_ref, reason)
-            skipped_warnings = [pre_check_warning] if pre_check_warning else None
+            skipped_warnings = [pre_check_warning] if pre_check_warning else []
+            if media_analysis_requested(form_data) or analysis_refusal is not None:
+                skipped_warnings.append(DUPLICATE_ANALYSIS_WARNING)
             skipped_result = {
                 "status": "Skipped",
                 "input_ref": input_ref,
@@ -4437,7 +4516,7 @@ async def process_batch_media(
                 "summary": None,
                 "analysis_details": None,
                 "error": None,
-                "warnings": skipped_warnings,
+                "warnings": skipped_warnings or None,
                 "db_message": "Skipped processing, no DB action.",
             }
             combined_results.append(skipped_result)

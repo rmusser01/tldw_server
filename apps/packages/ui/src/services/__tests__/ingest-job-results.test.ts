@@ -20,6 +20,23 @@ describe("ingest job result helpers", () => {
     expect(extractCompletedIngestJobMediaId(payload)).toBe(1)
   })
 
+  it("reads a skipped item and its warning from the persistent-add fallback", () => {
+    const warning = "Analysis skipped because this item is already in your library."
+    const payload = { results: [{ status: "Skipped", db_id: 42, warnings: [warning] }] }
+    expect(completedIngestJobIndicatesSkipped(payload)).toBe(true)
+    expect(extractCompletedIngestJobMediaId(payload)).toBe(42)
+    expect(extractCompletedIngestJobWarning(payload)).toBe(warning)
+  })
+
+  it("preserves process-only results with usable content and a noncritical warning", () => {
+    const payload = {
+      processed_count: 1,
+      errors: [],
+      results: [{ status: "Warning", content: "Extracted text", warnings: ["Image omitted"] }],
+    }
+    expect(completedIngestJobIndicatesFailure(payload)).toBe(false)
+  })
+
   it.each([undefined, null, "", " ", 0, -1, Number.NaN])("does not promote an unsaved Warning with media ID %s", (mediaId) => {
     const payload = { status: "Warning", media_id: mediaId, warnings: ["Analysis failed"] }
     expect(completedIngestJobIndicatesFailure(payload)).toBe(true)

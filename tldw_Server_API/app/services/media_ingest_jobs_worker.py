@@ -38,6 +38,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     _enforce_and_record_media_bytes,
+    find_duplicate_document_before_analysis,
     process_batch_media,
     process_document_like_item,
 )
@@ -616,10 +617,6 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
         progress.message = "prepare"
         jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
-        analysis_refusal = await _admit_or_refuse_analysis(form_data)
-        if analysis_refusal is not None:
-            form_data = form_data.model_copy(update={"perform_analysis": False})
-
         db = _create_db(user_id)
         db_path = getattr(db, "db_path_str", None) or getattr(db, "db_path", None) or ""
         client_id = getattr(db, "client_id", None) or str(user_id)
@@ -628,71 +625,88 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
         def cancel_check():
             return _should_cancel(jm, job_id)
 
-        chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
-            form_data,
-            media_type=str(form_data.media_type) if form_data.media_type else None,
-            source_name=str(input_ref or source),
+        result_item = await find_duplicate_document_before_analysis(
+            input_ref=str(input_ref),
+            processing_source=str(source),
+            is_url=(source_kind == "url"),
+            form_data=form_data,
+            temp_dir=Path(temp_dir),
+            db=db,
         )
-        if chunk_options is not None and chunking_plan is None:
-            try:
-                first_url = source if source_kind == "url" else None
-                first_filename = payload.get("original_filename")
-                chunk_options = apply_chunking_template_if_any(
+        analysis_refusal = None
+        chunking_plan = None
+        if result_item is None:
+            analysis_refusal = await _admit_or_refuse_analysis(form_data)
+            if analysis_refusal is not None:
+                form_data = form_data.model_copy(update={"perform_analysis": False})
+
+            chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
+                form_data,
+                media_type=str(form_data.media_type) if form_data.media_type else None,
+                source_name=str(input_ref or source),
+            )
+            if chunk_options is not None and chunking_plan is None:
+                try:
+                    first_url = source if source_kind == "url" else None
+                    first_filename = payload.get("original_filename")
+                    chunk_options = apply_chunking_template_if_any(
+                        form_data=form_data,
+                        db=db,
+                        chunking_options_dict=chunk_options,
+                        owner_user_id=str(user_id),
+                        TemplateClassifier=TemplateClassifier,
+                        first_url=first_url,
+                        first_filename=first_filename,
+                    )
+                except Exception as exc:
+                    logger.debug("Chunking template auto-apply failed: {}", exc)
+
+            if str(form_data.media_type) in {"video", "audio"}:
+                urls = [source] if source_kind == "url" else []
+                uploaded_paths = [source] if source_kind == "file" else []
+                source_to_ref_map = {str(source): input_ref}
+
+                progress.percent = 20.0
+                progress.message = "process"
+                jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
+                results = await process_batch_media(
+                    media_type=str(form_data.media_type),
+                    urls=urls,
+                    uploaded_file_paths=uploaded_paths,
+                    source_to_ref_map=source_to_ref_map,
                     form_data=form_data,
-                    db=db,
-                    chunking_options_dict=chunk_options,
-                    owner_user_id=str(user_id),
-                    TemplateClassifier=TemplateClassifier,
-                    first_url=first_url,
-                    first_filename=first_filename,
+                    chunk_options=chunk_options,
+                    loop=loop,
+                    db_path=str(db_path),
+                    client_id=str(client_id),
+                    temp_dir=temp_dir,
+                    user_id=int(user_id) if user_id.isdigit() else None,
+                    cancel_check=cancel_check,
+                    analysis_refusal=analysis_refusal,
                 )
-            except Exception as exc:
-                logger.debug("Chunking template auto-apply failed: {}", exc)
+            else:
+                progress.percent = 20.0
+                progress.message = "process"
+                jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
-        if str(form_data.media_type) in {"video", "audio"}:
-            urls = [source] if source_kind == "url" else []
-            uploaded_paths = [source] if source_kind == "file" else []
-            source_to_ref_map = {str(source): input_ref}
+                result = await process_document_like_item(
+                    item_input_ref=str(input_ref),
+                    processing_source=str(source),
+                    media_type=form_data.media_type,
+                    is_url=(source_kind == "url"),
+                    form_data=form_data,
+                    chunk_options=chunk_options,
+                    temp_dir=temp_dir,
+                    loop=loop,
+                    db_path=str(db_path),
+                    client_id=str(client_id),
+                    user_id=int(user_id) if user_id.isdigit() else None,
+                    cancel_check=cancel_check,
+                )
+                results = [result]
 
-            progress.percent = 20.0
-            progress.message = "process"
-            jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
-
-            results = await process_batch_media(
-                media_type=str(form_data.media_type),
-                urls=urls,
-                uploaded_file_paths=uploaded_paths,
-                source_to_ref_map=source_to_ref_map,
-                form_data=form_data,
-                chunk_options=chunk_options,
-                loop=loop,
-                db_path=str(db_path),
-                client_id=str(client_id),
-                temp_dir=temp_dir,
-                user_id=int(user_id) if user_id.isdigit() else None,
-                cancel_check=cancel_check,
-                analysis_refusal=analysis_refusal,
-            )
-        else:
-            progress.percent = 20.0
-            progress.message = "process"
-            jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
-
-            result = await process_document_like_item(
-                item_input_ref=str(input_ref),
-                processing_source=str(source),
-                media_type=form_data.media_type,
-                is_url=(source_kind == "url"),
-                form_data=form_data,
-                chunk_options=chunk_options,
-                temp_dir=temp_dir,
-                loop=loop,
-                db_path=str(db_path),
-                client_id=str(client_id),
-                user_id=int(user_id) if user_id.isdigit() else None,
-                cancel_check=cancel_check,
-            )
-            results = [result]
+            result_item = results[0] if results else {}
 
         if _should_cancel(jm, job_id):
             _mark_collection_item_status(
@@ -709,10 +723,9 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
         progress.message = "finalize"
         jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
-        result_item = results[0] if results else {}
         media_id = result_item.get("db_id") if isinstance(result_item, dict) else None
 
-        if media_id and getattr(form_data, "generate_embeddings", False):
+        if media_id and result_item.get("status") != "Skipped" and form_data.generate_embeddings:
             # The task outlives the job: it keeps the owner, not the job's admission or key.
             with llm_call_context(**FRESH_ROOT):
                 asyncio.create_task(
@@ -746,7 +759,7 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
             }
             if final_chunking_plan is not None:
                 job_result["chunking_plan"] = final_chunking_plan
-            if analysis_refusal is not None:
+            if analysis_refusal is not None and result_item.get("status") != "Skipped":
                 _record_analysis_refusal(job_result, analysis_refusal)
             _sync_collection_item_terminal_result(
                 user_id=user_id,

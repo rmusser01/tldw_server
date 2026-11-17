@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+from asyncio import to_thread
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
@@ -22,6 +23,8 @@ from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_f
 from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import WebScrapingRequest
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
+from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_url
+from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import DUPLICATE_ANALYSIS_WARNING
 from tldw_Server_API.app.core.Web_Scraping.summary_prompts import resolve_web_summary_overrides
 from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
 
@@ -73,11 +76,26 @@ async def process_web_scraping_endpoint(
     the legacy behavior while routing through a local resolver seam so tests
     can patch deterministic task resolution.
     """
-    if payload.summarize_checkbox:
-        # Usage quotas (LLM usage accounting spec §4a), before any page is fetched. Summaries
-        # default to a provider when api_name is empty, so the checkbox alone means LLM work.
-        await enforce_llm_quota(current_user.id)
     try:
+        if payload.summarize_checkbox:
+            url = payload.url_input.strip()
+            if (
+                payload.skip_existing_analysis
+                and payload.mode == "persist"
+                and payload.scrape_method == "Individual URLs"
+                and len(url.splitlines()) == 1
+            ):
+                existing = await to_thread(get_media_by_url, db, url)
+                if existing is not None:
+                    return {
+                        "status": "Skipped",
+                        "media_id": existing["id"],
+                        "db_message": "Media already exists. Overwrite not enabled.",
+                        "warnings": [DUPLICATE_ANALYSIS_WARNING],
+                    }
+            # Summaries may use a default provider. Admit analysis before any page is fetched.
+            await enforce_llm_quota(current_user.id)
+
         # Usage logging is best-effort; never fail the request.
         with contextlib.suppress(Exception):
             usage_log.log_event(

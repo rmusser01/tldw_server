@@ -607,7 +607,8 @@ describe("submitQuickIngestBatch", () => {
 
   it("marks duplicate direct HTML scrape responses as skipped", async () => {
     mocks.bgRequest.mockResolvedValue({
-      status: "duplicate",
+      status: "Skipped",
+      media_id: 37,
       media_ids: [],
       total_articles: 1,
       stored_articles: 0,
@@ -628,7 +629,7 @@ describe("submitQuickIngestBatch", () => {
       storeRemote: true,
       processOnly: false,
       common: {
-        perform_analysis: false,
+        perform_analysis: true,
         perform_chunking: false,
         overwrite_existing: false
       },
@@ -640,13 +641,15 @@ describe("submitQuickIngestBatch", () => {
     expect(mocks.bgRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         path: "/api/v1/media/process-web-scraping",
-        method: "POST"
+        method: "POST",
+        body: expect.objectContaining({ skip_existing_analysis: true })
       })
     )
     expect(result.results?.[0]).toMatchObject({
       id: "entry-duplicate-html",
       status: "ok",
       outcome: "skipped",
+      mediaId: 37,
       message: DUPLICATE_SKIP_MESSAGE
     })
   })
