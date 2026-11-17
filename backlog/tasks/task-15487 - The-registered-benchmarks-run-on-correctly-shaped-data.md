@@ -1,7 +1,7 @@
 ---
 id: TASK-15487
 title: The registered benchmarks run on correctly shaped data
-status: To Do
+status: In Progress
 labels:
 - evaluations
 - backend
