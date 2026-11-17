@@ -1,7 +1,7 @@
 ---
 id: TASK-15553
 title: Page notes by the API contract in QuickNotesSection and NotesDockPanel
-status: To Do
+status: Done
 labels:
 - bug
 - frontend
@@ -16,9 +16,9 @@ Dev-side bug found during W4 convergence (#3149 follow-up): QuickNotesSection.ts
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Both call sites send limit/offset (no page/results_per_page) on /api/v1/notes/
-- [ ] #2 Existing pagination behavior of the components is preserved or corrected where it was silently page-1
-- [ ] #3 Tests updated and passing; typecheck green
+- [x] #1 Both call sites send limit/offset (no page/results_per_page) on /api/v1/notes/
+- [x] #2 Existing pagination behavior of the components is preserved or corrected where it was silently page-1
+- [x] #3 Tests updated and passing; typecheck green
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -29,14 +29,15 @@ Dev-side bug found during W4 convergence (#3149 follow-up): QuickNotesSection.ts
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Merged via merge queue: PR #3486 -> dev (4ecfbe0816, 2026-11-17). Both call sites (QuickNotesSection.buildListPath, NotesDockPanel.fetchNotesList list branch) now send limit/offset — the notes API's only paging contract (#3149) — instead of the ignored page/results_per_page params. Queue eviction en route surfaced two suites the first verification missed (task-backed-todos, stage4.cache-sync mocks matched ?page=1); updated to ?limit= matching. Final verification: full NotesDock directory + QuickNotesSection suites 14 files 264/264.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
