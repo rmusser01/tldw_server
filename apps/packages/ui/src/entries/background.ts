@@ -2144,8 +2144,12 @@ export default defineBackground({
               if (page === 0) return response;
               break;
             }
+            if (!Array.isArray(response.data?.jobs)) {
+              // Preserve the single-job status response used by older servers.
+              if (page === 0 && jobIds.length === 1 && hasJobStatus(response.data)) return response;
+              break;
+            }
             // Missing or malformed rows are checked with the individual status endpoint.
-            if (!Array.isArray(response.data?.jobs)) break;
             collected.push(...response.data.jobs.filter(hasJobStatus));
             const hasMore =
               response.data?.has_more ??
