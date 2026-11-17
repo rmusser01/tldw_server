@@ -67,9 +67,9 @@ def client(client_user_only, monkeypatch):
 
 
 @pytest.fixture()
-def principal_override(client):
+def principal_override(client, back_principal):
     def _install(principal: AuthPrincipal) -> None:
-        _override_principal(client, principal)
+        _override_principal(client, back_principal(principal))
 
     yield _install
     client.app.dependency_overrides.pop(get_auth_principal, None)
