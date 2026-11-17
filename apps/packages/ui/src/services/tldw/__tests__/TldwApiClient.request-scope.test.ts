@@ -284,6 +284,28 @@ describe("TldwApiClient captured request scope", () => {
     expect(outbound.body ?? {}).not.toHaveProperty("requestScope")
   })
 
+  it("does not treat the DELETE request's expected version as evidence of a conflict", async () => {
+    const error = Object.assign(new Error("Network error (DELETE /api/v1/chats/owned?scope_type=global&expected_version=3)"), { status: 0 })
+    mocks.bgRequest.mockRejectedValueOnce(error)
+
+    await expect(new TldwApiClient().deleteChat("owned", { expectedVersion: 3, requestScope })).rejects.toBe(error)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("refreshes the version and retries a DELETE after a real version conflict", async () => {
+    mocks.bgRequest
+      .mockRejectedValueOnce(Object.assign(new Error("Version mismatch"), { status: 409 }))
+      .mockResolvedValueOnce({ id: "owned", version: 4 })
+      .mockResolvedValueOnce(undefined)
+
+    await new TldwApiClient().deleteChat("owned", { expectedVersion: 3, requestScope })
+    expect(mocks.bgRequest.mock.calls.map(([request]) => [request.method, request.path])).toEqual([
+      ["DELETE", "/api/v1/chats/owned?scope_type=global&expected_version=3"],
+      ["GET", "/api/v1/chats/owned?scope_type=global"],
+      ["DELETE", "/api/v1/chats/owned?scope_type=global&expected_version=4"]
+    ])
+  })
+
   it("binds captured Character streaming scope outside the inference body", async () => {
     mocks.bgStream.mockImplementation(async function* () { yield '{"choices":[{"delta":{"content":"Owned"}}]}' })
     const signal = new AbortController().signal
@@ -573,7 +595,7 @@ it.each([
       ...expectedScopeFields,
       abortSignal: signal,
       body: request,
-      path: "/api/v1/chat/conversations/chat%2Fone/history/selection?scope_type=workspace&workspace_id=7&include_native_completion=true"
+      path: "/api/v1/chat/conversations/chat%2Fone/history/selection?scope_type=workspace&workspace_id=7&include_native_completion=true&include_reasoning_history_support=true"
     })
     await capture("chat/one", request, {
       requestScope

@@ -4,6 +4,7 @@ from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionRequestMessageContentPartText,
 )
+from tldw_Server_API.app.core.Chat.persistence_service import prepare_native_history_message
 
 
 @pytest.mark.asyncio
@@ -14,6 +15,20 @@ async def test_process_content_handles_pydantic_parts():
 
     assert text_parts == ["hello"]
     assert images == []
+
+
+@pytest.mark.asyncio
+async def test_prepare_native_reply_keeps_answer_when_thinking_exceeds_limit():
+    reply = {"role": "assistant", "content": "<think>" + "Thinking " * 10 + "</think>Short answer."}
+
+    prepared = await prepare_native_history_message(
+        reply,
+        "conv-1",
+        chat_endpoint._process_content_for_db_sync,
+        max_assistant_text_length=64,
+    )
+
+    assert prepared["content"] == "Short answer."
 
 
 @pytest.mark.parametrize("extra", [None, {}, {"image_details": ["auto", "auto"]}])

@@ -189,6 +189,7 @@ from tldw_Server_API.app.core.Chat.knowledge_save import (
 )
 from tldw_Server_API.app.core.Chat.persistence_service import (
     assistant_generation_extra,
+    native_stream_persistence,
     save_workspace_chat_model_selection,
 )
 
@@ -4815,7 +4816,7 @@ async def create_chat_completion(
                             # Continue saves the original reply plus its continuation as one sibling reply.
                             from tldw_Server_API.app.core.Chat.history_continuation import merge_continued_reply
                             payload = merge_continued_reply(payload, continue_prefix)
-                        prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync)
+                        prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync, max_assistant_text_length=MAX_TEXT_LENGTH)
                         prepared["extra_metadata"].update(assistant_generation_extra(payload))
                         prepared["id"] = str(uuid.uuid4())
                         prepared["parent_message_id"] = (reference["input_message_id"] if reference is not None
@@ -5638,7 +5639,9 @@ async def create_chat_completion(
                             character_card_for_context=character_card_for_context,
                             chat_db=chat_db,
                             save_message_fn=completion_save_message,
-                            history_persistence_ack=history_admission is not None or existing_input_selection is not None,
+                            native_persistence=native_stream_persistence(
+                                request_data, history_admission is not None or existing_input_selection is not None
+                            ),
                             system_message_id=system_message_id,
                             user_message_id=continuation_runtime.get("user_message_id"),
                             audit_service=audit_service,
@@ -8525,6 +8528,7 @@ async def capture_conversation_history(
         "Opt in to selected_history_v1 persistence ownership eligibility on a captured send. "
         "Omitted or false preserves the legacy response; completion admission rechecks ownership."
     )),
+    include_reasoning_history_support: bool = Query(False),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
 ):
@@ -8578,6 +8582,7 @@ async def capture_conversation_history(
                     "policy": "selected_history_v1",
                     "supported": _active_message_sync_service(current_user, scope) is None,
                     "storage_context_digest": snap.storage_context_digest,
+                    **({"reasoning_history_supported": True} if include_reasoning_history_support else {}),
                 }})
             proof = {}
             if body.accepted_input_admission is not None:

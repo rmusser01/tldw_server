@@ -2,10 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.api.v1.endpoints import (
-    embeddings_v5_production_enhanced,
-    media_embeddings,
-)
+from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced
+from tldw_Server_API.app.core.Embeddings import media_embeddings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 

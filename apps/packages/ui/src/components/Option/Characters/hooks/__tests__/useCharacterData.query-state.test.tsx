@@ -24,7 +24,7 @@ beforeEach(() => {
 })
 afterEach(() => { clients.splice(0).forEach(query => query.clear()) })
 
-const mount = () => {
+const mount = (overrides: Partial<UseCharacterDataDeps> = {}) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   clients.push(qc)
   const notification = { error: vi.fn(), warning: vi.fn(), success: vi.fn(), info: vi.fn() }
@@ -37,7 +37,8 @@ const mount = () => {
     setCurrentPage: vi.fn(), previewCharacter: null, setPreviewCharacter: vi.fn(),
     editCharacterNumericId: null, editWorldBooksInitializedRef: { current: false },
     open: false, openEdit: false, editForm: {}, defaultCharacterSelection: null,
-    setDefaultCharacterSelection: vi.fn(), defaultCharacterId: undefined
+    setDefaultCharacterSelection: vi.fn(), defaultCharacterId: undefined,
+    ...overrides
   }
   const hook = renderHook(() => useCharacterData(deps), {
     wrapper: ({ children }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>
@@ -80,4 +81,13 @@ it("retains the supported legacy route fallback as a successful read", async () 
   await waitFor(() => expect(mounted.result.current.status).toBe("success"))
   expect(mounted.result.current.data).toMatchObject([{ id: 2, name: "Legacy Guide" }])
   expect(mounted.notification.error).not.toHaveBeenCalled()
+})
+
+it("routes search filtering through the server query route, never the fetch-all (WP-51)", async () => {
+  const mounted = mount({ searchTerm: "arc", debouncedSearchTerm: "arc" })
+  await waitFor(() => expect(mounted.result.current.status).toBe("success"))
+  expect(client.listCharactersPage).toHaveBeenCalledWith(
+    expect.objectContaining({ query: "arc", page: 1 })
+  )
+  expect(client.listAllCharacters).not.toHaveBeenCalled()
 })

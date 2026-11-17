@@ -2107,7 +2107,7 @@ async def test_start_vn_asset_jobs_workers_use_stable_defaults(
 
 
 @pytest.mark.asyncio
-async def test_start_media_ingest_jobs_workers_respects_heavy_default_stable_false(
+async def test_start_media_ingest_jobs_workers_defaults_heavy_on_alongside_ordinary_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     startup_pollers = _import_startup_content_jobs_pollers()
@@ -2163,7 +2163,7 @@ async def test_start_media_ingest_jobs_workers_respects_heavy_default_stable_fal
         (
             "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
             "media-ingest-heavy-jobs",
-            {"default_stable": False},
+            {"default_stable": True},
         ),
     ]
 

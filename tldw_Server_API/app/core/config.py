@@ -78,6 +78,8 @@ def _safe_json_dict(raw: Optional[str]) -> dict:
 CUSTOM_OPENAI_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(1)
 CUSTOM_OPENAI2_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(2)
 
+MAX_STANDARD_MEDIA_UPLOAD_MIB = 1024
+
 DEFAULT_PARAKEET_ONNX_TRANSCRIPTION_MODEL = "parakeet-tdt-0.6b-v3-onnx"
 DEFAULT_PARAKEET_MLX_TRANSCRIPTION_MODEL = "parakeet-mlx"
 
@@ -3782,6 +3784,19 @@ def route_enabled(route_key: str, *, default_stable: bool = True) -> bool:
     # Fallback default behavior: stable routes are enabled unless explicitly disabled
     return bool(default_stable)
 
+
+def _load_media_upload_limits(config: configparser.ConfigParser) -> dict[str, int]:
+    section = "Media-Processing"
+    defaults = dict.fromkeys(("audio", "pdf", "video", "epub", "document"), MAX_STANDARD_MEDIA_UPLOAD_MIB)
+    # Legacy custom configs can make these policies inherit the document limit.
+    legacy_document_limit = config.getint(section, "max_document_file_size_mb", fallback=50)
+    defaults.update(dict.fromkeys(("email", "code", "unknown"), legacy_document_limit))
+    return {
+        f"max_{kind}_file_size_mb": config.getint(section, f"max_{kind}_file_size_mb", fallback=default)
+        for kind, default in defaults.items()
+    }
+
+
 def load_and_log_configs(
     *,
     environment: Mapping[str, str] | None = None,
@@ -4384,13 +4399,7 @@ def load_and_log_configs(
         save_character_chats = config_parser_object.get('Auto-Save', 'save_character_chats', fallback='False')
         save_rag_chats = config_parser_object.get('Auto-Save', 'save_rag_chats', fallback='False')
 
-        # Media Processing Limits
-        max_audio_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_audio_file_size_mb', fallback='500'))
-        max_pdf_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_pdf_file_size_mb', fallback='50'))
-        max_video_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_video_file_size_mb', fallback='1000'))
-        max_epub_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_epub_file_size_mb', fallback='100'))
-        max_document_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_document_file_size_mb', fallback='50'))
-        max_code_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_code_file_size_mb', fallback=str(max_document_file_size_mb)))
+        media_upload_limits = _load_media_upload_limits(config_parser_object)
         # Processing timeouts
         pdf_conversion_timeout_seconds = int(config_parser_object.get('Media-Processing', 'pdf_conversion_timeout_seconds', fallback='300'))
         audio_processing_timeout_seconds = int(config_parser_object.get('Media-Processing', 'audio_processing_timeout_seconds', fallback='600'))
@@ -5321,12 +5330,7 @@ def load_and_log_configs(
             },
             'processing_choice': processing_choice,
             'media_processing': {
-                'max_audio_file_size_mb': max_audio_file_size_mb,
-                'max_pdf_file_size_mb': max_pdf_file_size_mb,
-                'max_video_file_size_mb': max_video_file_size_mb,
-                'max_epub_file_size_mb': max_epub_file_size_mb,
-                'max_document_file_size_mb': max_document_file_size_mb,
-                'max_code_file_size_mb': max_code_file_size_mb,
+                **media_upload_limits,
                 'pdf_conversion_timeout_seconds': pdf_conversion_timeout_seconds,
                 'audio_processing_timeout_seconds': audio_processing_timeout_seconds,
                 'video_processing_timeout_seconds': video_processing_timeout_seconds,

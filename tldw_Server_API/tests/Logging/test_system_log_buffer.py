@@ -614,6 +614,28 @@ def test_query_system_logs_keeps_entries_with_different_events(
 
 
 @pytest.mark.unit
+def test_fallback_log_lock_preserves_live_lock_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Creating a test lock must not reconfigure an existing module's held lock."""
+    import tldw_Server_API.app.core.Logging.system_log_buffer as live_log_buffer
+
+    monkeypatch.setattr(live_log_buffer, "_LOG_FILE_SETTINGS_INITIALIZED", True)
+    monkeypatch.setattr(live_log_buffer, "_LOG_FILE_ENABLED", False)
+    monkeypatch.setattr(live_log_buffer, "_LOG_FILE_PATH", tmp_path / "live.jsonl")
+    monkeypatch.setattr(live_log_buffer, "_LOG_FILE_LOCK_TIMEOUT", 0.0)
+    monkeypatch.setattr(live_log_buffer, "_HAS_FCNTL", False)
+
+    with live_log_buffer._log_file_lock():
+        request.getfixturevalue("fallback_log_lock")
+        with pytest.raises(RuntimeError, match="within 0.0s"):
+            with live_log_buffer._log_file_lock():
+                pytest.fail("The live module's held lock was bypassed")
+
+
+@pytest.mark.unit
 def test_log_file_lock_uses_runtime_timeout_from_env(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,

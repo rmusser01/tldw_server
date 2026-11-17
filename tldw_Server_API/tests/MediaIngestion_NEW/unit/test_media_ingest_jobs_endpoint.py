@@ -663,7 +663,7 @@ def test_submit_media_ingest_jobs_routes_heavy_request_to_default_queue_when_hea
     monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "default")
     monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "media-heavy")
     monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
-    monkeypatch.delenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", raising=False)
+    monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "false")
     monkeypatch.delenv("ROUTES_ENABLE", raising=False)
     monkeypatch.delenv("TLDW_WORKERS_SIDECAR_MODE", raising=False)
 
@@ -796,3 +796,59 @@ def test_submit_media_ingest_jobs_routes_heavy_request_to_heavy_queue_when_route
 
     assert resp.status_code == 200, resp.text
     assert captured == ["media-heavy"]
+
+
+@pytest.mark.parametrize(
+    ("media_type", "analysis", "provider", "settings", "expected_queue"),
+    [
+        ("pdf", "true", "deepseek", {}, "low"),
+        ("document", "true", "deepseek", {}, "low"),
+        ("ebook", "true", "deepseek", {}, "low"),
+        ("document", "false", "deepseek", {}, "default"),
+        ("document", "true", "none", {}, "default"),
+        ("pdf", "true", "deepseek", {"MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED": "false"}, "default"),
+        ("pdf", "true", "deepseek", {"MEDIA_INGEST_JOBS_ROUTE_HEAVY": "false"}, "default"),
+        ("pdf", "true", "deepseek", {"ROUTES_DISABLE": "media-ingest-heavy-jobs"}, "default"),
+        ("pdf", "true", "deepseek", {"TLDW_WORKERS_SIDECAR_MODE": "true"}, "default"),
+        ("pdf", "true", "deepseek", {"MEDIA_INGEST_JOBS_WORKER_ENABLED": "false"}, "default"),
+        (
+            "pdf", "true", "deepseek",
+            {
+                "TLDW_WORKERS_SIDECAR_MODE": "true",
+                "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED": "true",
+                "MEDIA_INGEST_JOBS_HEAVY_QUEUE": "media-heavy",
+            },
+            "media-heavy",
+        ),
+    ],
+)
+def test_submit_media_ingest_routes_provider_analysis(
+    media_ingest_jobs_client, monkeypatch, media_type, analysis, provider, settings, expected_queue,
+):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    for key in (
+        "ROUTES_ENABLE", "ROUTES_DISABLE", "TLDW_WORKERS_SIDECAR_MODE",
+        "MEDIA_INGEST_JOBS_ROUTE_HEAVY", "MEDIA_INGEST_JOBS_DEFAULT_QUEUE",
+        "MEDIA_INGEST_JOBS_HEAVY_QUEUE", "MEDIA_INGEST_JOBS_WORKER_ENABLED",
+        "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES", "default,low,media-heavy")
+    for key, value in settings.items():
+        monkeypatch.setenv(key, value)
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": media_type,
+            "urls": "https://example.com/document",
+            "perform_analysis": analysis,
+            "api_name": provider,
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 200, response.text
+    job_id = response.json()["jobs"][0]["id"]
+    assert JobManager().get_job(job_id)["queue"] == expected_queue

@@ -1,7 +1,8 @@
 import pytest
 from unittest.mock import MagicMock
 
-from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced, media_embeddings
+from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced
+from tldw_Server_API.app.core.Embeddings import media_embeddings
 
 
 @pytest.mark.asyncio

@@ -683,7 +683,11 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         historyTurn.currentView()!
       )
       if (historyTurn.persistence === "server") {
-        return Object.freeze({ ...prepared.payload as ChatCompletionRequest,
+        const payload = prepared.payload as ChatCompletionRequest
+        const retainReasoning = historyTurn.capture.status === "captured" &&
+          historyTurn.capture.native_completion_v1?.reasoning_history_supported === true
+        return Object.freeze({ ...payload,
+          ...(retainReasoning ? { metadata: { ...payload.metadata, tldw_retain_reasoning_history_v1: true } } : {}),
           tldw_history_selection_v1: selection,
           tldw_history_branch: historyTurn.historyBranch === true,
           ...(historyTurn.historyEdit ? { tldw_history_edit_v1: historyTurn.historyEdit } : {}) })

@@ -43,7 +43,9 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FrameTimeout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import anyio
 import pytest
@@ -266,9 +268,8 @@ def acp_runner(full_app: SimpleNamespace) -> Iterator[ACPRunnerClient]:
 
 
 @pytest.fixture()
-def env(
-    full_app: SimpleNamespace, acp_runner: ACPRunnerClient, monkeypatch: pytest.MonkeyPatch,
-) -> SimpleNamespace:
+def multiplex_runner(acp_runner: ACPRunnerClient, monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Observe requests for the real fixture-owned runner without replacing its transport."""
     from tldw_Server_API.app.api.v1.endpoints import acp_multiplex
 
     async def _get_matrix_runner() -> ACPRunnerClient:
@@ -276,13 +277,43 @@ def env(
             raise RuntimeError("WebSocket auth matrix ACP runner stopped")
         return acp_runner
 
-    monkeypatch.setattr(acp_multiplex, "get_runner_client", _get_matrix_runner)
+    loader = AsyncMock(wraps=_get_matrix_runner)
+    monkeypatch.setattr(acp_multiplex, "get_runner_client", loader)
+    return loader
+
+
+@pytest.fixture()
+def env(
+    full_app: SimpleNamespace, multiplex_runner: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+) -> SimpleNamespace:
     for key, value in full_app.environ.items():
         monkeypatch.setenv(key, value)
     _reset_auth_singletons()
     # The AuthNZ conftest clears overrides before every test; keep workflows off the shared DB.
     full_app.app.dependency_overrides[wf_mod._get_db] = lambda: full_app.workflows_db
     return full_app
+
+
+@pytest.mark.parametrize(
+    "credential_attr,admitted,runner_calls", [("valid", True, 1), ("revoked", False, 0)]
+)
+def test_multiplex_checks_credentials_before_requesting_runner(
+    env: SimpleNamespace,
+    multiplex_runner: AsyncMock,
+    credential_attr: str,
+    admitted: bool,
+    runner_calls: int,
+) -> None:
+    outcome = _outcome(
+        env.client,
+        "/api/v1/acp/multiplex",
+        headers={"Authorization": f"Bearer {getattr(env, credential_attr)}"},
+    )
+    if admitted:
+        assert outcome == "accepted"
+    else:
+        assert outcome in REFUSED
+    assert multiplex_runner.await_count == runner_calls
 
 
 def _receive(ws: object, timeout: float) -> dict[str, object] | None:
@@ -809,12 +840,14 @@ def test_first_frame_routes_refuse_with_their_policy_codes(env: SimpleNamespace,
     assert _outcome(env.client, url, headers=revoked_header, frame=DATA_FRAME) == expected
 
 
-@pytest.mark.parametrize("route", FIRST_FRAME_ROUTES)
-def test_a_data_frame_before_the_auth_frame_is_never_processed(
-    env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A valid auth frame right behind a data frame does not rescue it: the route closes 4400 at the
-    data frame and its work never starts. The control shows the spy sees a caller who gets through."""
+def _first_work_control(client: TestClient, url: str, frame: Mapping[str, object]) -> str:
+    """Keep the auth-frame socket open for its explicit first-work acknowledgement."""
+    return _outcome(client, url, frame=frame, timeout=FRAME_TIMEOUT_S)
+
+
+@pytest.fixture()
+def first_work_started(route: str, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Observe the first real work gate and acknowledge allowed audio work."""
     from tldw_Server_API.app.api.v1.endpoints import voice_assistant
     from tldw_Server_API.app.api.v1.endpoints.audio import audio_streaming
 
@@ -830,17 +863,74 @@ def test_a_data_frame_before_the_auth_frame_is_never_processed(
     else:  # the first thing an audio stream does for a known caller
         guard = audio_streaming._guard_audio_ws_work_start
 
-        async def first_work_async(*args: object, **kwargs: object) -> bool:
+        async def first_work_async(websocket: WebSocket, **kwargs: object) -> bool:
             started.append(route)
-            return await guard(*args, **kwargs)  # type: ignore[arg-type]
+            allowed = await guard(websocket, **kwargs)  # type: ignore[arg-type]
+            if allowed:
+                # Acknowledge the real work boundary before the control disconnects.
+                await websocket.send_json({"type": "matrix_work_started"})
+            return allowed
 
         monkeypatch.setattr(audio_streaming, "_guard_audio_ws_work_start", first_work_async)
+    return started
+
+
+@pytest.mark.parametrize("route", FIRST_FRAME_ROUTES)
+def test_a_data_frame_before_the_auth_frame_is_never_processed(
+    env: SimpleNamespace, route: str, first_work_started: list[str]
+) -> None:
+    """A valid auth frame right behind a data frame does not rescue it: the route closes 4400 at the
+    data frame and its work never starts. The control shows the spy sees a caller who gets through."""
     url, valid = ROUTES[route][0], {"type": "auth", "token": env.valid}
 
     assert _outcome(env.client, url, frame=DATA_FRAME, then=valid) == "closed 4400"
-    assert started == []
-    assert _past_auth(_outcome(env.client, url, frame=valid, timeout=ADMITTED_AFTER_S))
-    assert started == [route]
+    assert first_work_started == []
+    outcome = _first_work_control(env.client, url, valid)
+    assert _past_auth(outcome)
+    assert outcome == ("answered auth_ok" if route == VOICE else "answered matrix_work_started")
+    assert first_work_started == [route]
+
+
+@pytest.mark.parametrize(
+    "route",
+    [
+        pytest.param("/api/v1/audio/chat/stream", id="delayed-real-auth-chat"),
+        pytest.param("/api/v1/audio/stream/tts", id="delayed-real-auth-tts"),
+    ],
+)
+def test_first_work_control_waits_for_delayed_real_auth(
+    env: SimpleNamespace,
+    route: str,
+    monkeypatch: pytest.MonkeyPatch,
+    first_work_started: list[str],
+) -> None:
+    """A positive control must not disconnect while real frame authentication is pending."""
+    from tldw_Server_API.app.core.AuthNZ import websocket_principal
+
+    verify = websocket_principal.verify_ws_credential
+    auth_waiting, release_auth = Event(), asyncio.Event()
+
+    async def delayed_verify(*args: object, **kwargs: object) -> websocket_principal.AuthPrincipal:
+        auth_waiting.set()
+        await release_auth.wait()
+        return await verify(*args, **kwargs)  # type: ignore[arg-type]
+
+    receive = _receive
+
+    def receive_after_auth_waits(ws: object, timeout: float) -> dict[str, object] | None:
+        assert auth_waiting.wait(FRAME_TIMEOUT_S)
+        # Silence while the real verifier is pending is not evidence of admission.
+        if timeout == ADMITTED_AFTER_S:
+            return None
+        ws.portal.call(release_auth.set)  # type: ignore[attr-defined]
+        return receive(ws, timeout)
+
+    monkeypatch.setattr(websocket_principal, "verify_ws_credential", delayed_verify)
+    monkeypatch.setitem(globals(), "_receive", receive_after_auth_waits)
+    outcome = _first_work_control(env.client, ROUTES[route][0], {"type": "auth", "token": env.valid})
+    assert _past_auth(outcome)
+    assert outcome == "answered matrix_work_started"
+    assert first_work_started == [route]
 
 
 @pytest.mark.parametrize("opt_in", [False, True], ids=["query-auth-off", "AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH"])

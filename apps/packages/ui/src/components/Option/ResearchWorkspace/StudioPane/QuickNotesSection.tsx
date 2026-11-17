@@ -258,7 +258,8 @@ const buildSearchPath = ({
 }
 
 const buildListPath = (limit: number = DEFAULT_NOTES_LIMIT) =>
-  `/api/v1/notes/?page=1&results_per_page=${limit}&include_keywords=true` as AllowedPath
+  // The notes API pages by limit/offset and ignores page/results_per_page (#3149).
+  `/api/v1/notes/?limit=${limit}&offset=0&include_keywords=true` as AllowedPath
 
 const getCurrentKeywordFragment = (value: string): string => {
   const segments = value.split(",")

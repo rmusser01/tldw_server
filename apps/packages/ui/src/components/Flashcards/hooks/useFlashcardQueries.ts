@@ -1268,6 +1268,13 @@ export function useFlashcardsEnabled() {
 }
 
 /**
+ * Stale window for due-count reads (WP-46). Until the server ships an
+ * aggregate due-counts endpoint (tracked on TASK-13515), the per-deck N+1
+ * fan-out runs at most once per minute instead of per observer mount.
+ */
+const DUE_COUNTS_STALE_TIME_MS = 60_000
+
+/**
  * Hook for fetching due counts across statuses
  */
 export function useDueCountsQuery(deckId?: number | null, options?: UseFlashcardQueriesOptions) {
@@ -1277,7 +1284,8 @@ export function useDueCountsQuery(deckId?: number | null, options?: UseFlashcard
   return useQuery({
     queryKey: ["flashcards:due-counts", deckId, visibilityParams],
     queryFn: () => fetchDueCounts(deckId, options),
-    enabled: options?.enabled ?? flashcardsEnabled
+    enabled: options?.enabled ?? flashcardsEnabled,
+    staleTime: DUE_COUNTS_STALE_TIME_MS
   })
 }
 
@@ -1297,7 +1305,8 @@ export function useDeckDueCountsQuery(options?: UseFlashcardQueriesOptions) {
       )
       return Object.fromEntries(entries) as Record<number, DueCounts>
     },
-    enabled: options?.enabled ?? flashcardsEnabled
+    enabled: options?.enabled ?? flashcardsEnabled,
+    staleTime: DUE_COUNTS_STALE_TIME_MS
   })
 }
 

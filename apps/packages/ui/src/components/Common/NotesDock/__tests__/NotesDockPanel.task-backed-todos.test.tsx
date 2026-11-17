@@ -139,7 +139,7 @@ const setupTaskBackedDockMock = (options: {
     const path = String(request.path || "")
     const method = String(request.method || "GET").toUpperCase()
 
-    if (path.startsWith("/api/v1/notes/?page=1")) {
+    if (path.startsWith("/api/v1/notes/?limit=")) {
       return { items: [{ id: 101, title: "Dock task note", content: noteContent, keywords: ["planning"], version: noteVersion }], pagination: { total_items: 1, total_pages: 1 } }
     }
 

@@ -132,7 +132,9 @@ test.describe("Character Chat Phase 6 signoff", () => {
       await expect(page.getByTestId("chat-input")).toBeVisible({
         timeout: 30_000,
       })
-      await expectNoHorizontalOverflow(page, `${viewport.label} character chat`)
+      await expect(async () => {
+        await expectNoHorizontalOverflow(page, `${viewport.label} character chat`)
+      }).toPass({ timeout: 5_000 })
 
       await openRolePlaySetup(page)
       await waitForVisualSettle(page)

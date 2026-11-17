@@ -173,6 +173,22 @@ export interface ResearchRunStreamEvent {
   payload?: unknown;
 }
 
+// WP-40: the run list only needs periodic polling while a run is still
+// executing; the SSE stream carries the terminal payload for everyone else.
+export const RESEARCH_RUNS_ACTIVE_REFETCH_INTERVAL_MS = 5000;
+
+const RESEARCH_RUN_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
+export function hasActiveResearchRun(runs: ResearchRunListItem[] | undefined): boolean {
+  return Array.isArray(runs) && runs.some((run) => !RESEARCH_RUN_TERMINAL_STATUSES.has(run.status));
+}
+
+export function researchRunsRefetchInterval(
+  runs: ResearchRunListItem[] | undefined
+): number | false {
+  return hasActiveResearchRun(runs) ? RESEARCH_RUNS_ACTIVE_REFETCH_INTERVAL_MS : false;
+}
+
 export interface SubscribeResearchRunEventsOptions {
   sessionId: string;
   afterId?: number;

@@ -1,5 +1,4 @@
 import asyncio
-import importlib
 import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -82,9 +81,13 @@ def _reload_main_app(
 
     config_mod._route_toggle_policy.cache_clear()
 
-    from tldw_Server_API.app import main as app_main
+    from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
 
-    return importlib.reload(app_main).app
+    # A fresh module, not importlib.reload: reload rebinds app.main.app in place,
+    # which the autouse app-main guard cannot see, so the rebuilt app outlived the
+    # test and modules that pinned the old app overrode dependencies on an app no
+    # client used. The guard puts the original module back after the test.
+    return reload_app_main().app
 
 
 def _route_method_count(app: FastAPI, path: str, method: str) -> int:

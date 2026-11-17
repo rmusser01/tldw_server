@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PlaygroundMessage } from "../Message"
@@ -88,9 +88,15 @@ vi.mock("../ActionInfo", () => ({
   LoadingStatus: () => null
 }))
 
-vi.mock("../EditMessageForm", () => ({
-  EditMessageForm: ({ value }: { value: string }) => <textarea aria-label="Edit canonical message" defaultValue={value} />
-}))
+vi.mock("../EditMessageForm", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../EditMessageForm")>()
+  return {
+    EditMessageForm: (props: React.ComponentProps<typeof actual.EditMessageForm>) =>
+      reasoningPresentation.actual
+        ? <actual.EditMessageForm {...props} />
+        : <textarea aria-label="Edit canonical message" defaultValue={props.value} />
+  }
+})
 
 vi.mock("../PlaygroundUserMessage", () => ({
   PlaygroundUserMessageBubble: ({ message }: { message: string }) => (
@@ -184,12 +190,14 @@ vi.mock("@/store/ui-mode", () => ({
 }))
 
 vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (state: any) => unknown) =>
-    selector({
+  useStoreMessageOption: Object.assign(
+    (selector: (state: any) => unknown) => selector({
       setReplyTarget: vi.fn(),
       ragPinnedResults: [],
       setMessages: vi.fn()
-    })
+    }),
+    { getState: () => ({}) }
+  )
 }))
 
 vi.mock("@/store/model", () => ({
@@ -576,6 +584,7 @@ describe("TASK-13274 actual streaming reasoning disclosure", () => {
     const disclosure = await screen.findByRole("button", { name: /Thinking…$/ })
     fireEvent.click(disclosure)
     await screen.findByText("Original thought")
+    expect(screen.queryByRole("button", { name: "Edit thinking" })).toBeNull()
     expect(disclosure).toHaveAttribute("aria-expanded", "true")
     expect(markdownCalls.every(call => call.enableMermaidDiagrams !== true)).toBe(true)
     mounted.rerender(<PlaygroundMessage {...baseProps} message="<think>Original thought then more" isStreaming />)
@@ -600,6 +609,58 @@ describe("TASK-13274 actual streaming reasoning disclosure", () => {
     expect(disclosure).toHaveAttribute("aria-expanded", "false")
     mounted.rerender(<ReasoningBlock {...props} content="Original thought then more" />)
     expect(disclosure).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("edits one expanded block and renders the exact saved message on reload", async () => {
+    const original = "<THINK>  Same thought  </THINK>\n\nAnswer  \n<reason>  Same thought  </reason>"
+    let stored = original
+    const submit = vi.fn(async (value: string) => {
+      stored = value
+      return { status: "submitted" }
+    })
+    const mounted = render(<PlaygroundMessage {...baseProps} message={stored} onEditFormSubmit={submit} />)
+    const disclosures = screen.getAllByRole("button", { name: /Model's reasoning/ })
+    expect(disclosures).toHaveLength(2)
+    expect(screen.queryByRole("button", { name: "Edit thinking" })).toBeNull()
+    fireEvent.click(disclosures[1])
+    fireEvent.click(screen.getByRole("button", { name: "Edit thinking" }))
+    const editor = screen.getByRole("textbox", { name: "Edit thinking" })
+    expect(editor).toHaveValue("  Same thought  ")
+    fireEvent.change(editor, { target: { value: "Revised thought  " } })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(editor).not.toBeInTheDocument())
+    expect(stored).toBe("<THINK>  Same thought  </THINK>\n\nAnswer  \n<reason>Revised thought  </reason>")
+
+    mounted.unmount()
+    render(<PlaygroundMessage {...baseProps} message={stored} />)
+    for (const disclosure of screen.getAllByRole("button", { name: /Model's reasoning/ })) {
+      fireEvent.click(disclosure)
+    }
+    await waitFor(() => {
+      expect(screen.getByText("Same thought")).toBeVisible()
+      expect(screen.getByText("Revised thought")).toBeVisible()
+    })
+    expect(await screen.findByText("Answer")).toBeVisible()
+  })
+
+  it("keeps block edits in place after a failed save and discards them on Cancel", async () => {
+    const submit = vi.fn(async () => ({ status: "failed" }))
+    render(<PlaygroundMessage {...baseProps} message="<think>Original thought</think>Answer" onEditFormSubmit={submit} />)
+    fireEvent.click(screen.getByRole("button", { name: /Model's reasoning/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit thinking" }))
+    const editor = screen.getByRole("textbox", { name: "Edit thinking" })
+    const form = within(editor.closest("form")!)
+    fireEvent.change(editor, { target: { value: "</think>Broken edit" } })
+    fireEvent.click(form.getByRole("button", { name: /^save$/i }))
+    expect(await form.findByRole("alert")).toHaveTextContent("thinking tags")
+    expect(submit).not.toHaveBeenCalled()
+    fireEvent.change(editor, { target: { value: "New draft" } })
+    fireEvent.click(form.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(form.getByRole("alert")).toHaveTextContent("Your edited text is kept"))
+    expect(editor).toHaveValue("New draft")
+    fireEvent.click(form.getByRole("button", { name: /^cancel$/i }))
+    expect(await screen.findByText("Original thought")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Edit thinking" })).toHaveFocus()
   })
 
   it("keeps a plain answer's exact lightweight renderer without an empty disclosure", () => {

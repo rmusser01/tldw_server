@@ -143,7 +143,17 @@ export function NotificationLifecycleProvider({
   const connectionVerified = connection.isConnected &&
     connection.phase === ConnectionPhase.CONNECTED &&
     connection.mode !== "demo" && !connection.offlineBypass
-  const missingConfiguredAuth = hasMissingConfiguredAuth()
+  // WP-41: the stored-config read backing this projection runs on auth-scope
+  // changes, not on every render.
+  const [missingConfiguredAuth, setMissingConfiguredAuth] = React.useState(
+    hasMissingConfiguredAuth
+  )
+  const syncMissingConfiguredAuth = React.useCallback(() => {
+    setMissingConfiguredAuth((current) => {
+      const next = hasMissingConfiguredAuth()
+      return current === next ? current : next
+    })
+  }, [])
   const unverifiedState: ExposedNotificationState = connection.errorKind === "unreachable"
     ? "degraded"
     : "auth-required"
@@ -167,11 +177,20 @@ export function NotificationLifecycleProvider({
   const requestAbortRef = React.useRef<AbortController | null>(null)
   const effectSetupSeenRef = React.useRef(false)
   const documentRetiredRef = React.useRef(false)
-  const observedCredentialsRef = React.useRef({
-    bearer: getSessionAccessToken() || getApiBearer(),
-    apiKey: getApiKey(),
-    scope: buildWebNotificationScopeKey()
-  })
+  // WP-41: built once per mount (a plain useRef argument would re-evaluate
+  // the stored-config read on every render).
+  const observedCredentialsRef = React.useRef<{
+    bearer: string | null
+    apiKey: string | null
+    scope: string
+  } | null>(null)
+  if (observedCredentialsRef.current === null) {
+    observedCredentialsRef.current = {
+      bearer: getSessionAccessToken() || getApiBearer(),
+      apiKey: getApiKey(),
+      scope: buildWebNotificationScopeKey()
+    }
+  }
   const captureAuthority = React.useCallback(() => {
     const revision = authorityRevisionRef.current
     return () => authorityRevisionRef.current === revision
@@ -256,6 +275,20 @@ export function NotificationLifecycleProvider({
     const canBeActive = () =>
       streamOpenRef.current && unreadCurrentRef.current && cursorCurrentRef.current
 
+    // WP-41: the unread poll is a degraded fallback. While the stream is open
+    // and the bootstrap reads are in, the SSE events carry every change; the
+    // interval only runs while that is not true, and re-clears on reopen.
+    const startPolling = () => {
+      if (pollTimerRef.current !== null) return
+      if (terminalGenerationRef.current === generation) return
+      pollTimerRef.current = setInterval(() => void pollNotificationState(), pollIntervalMs)
+    }
+    const stopPolling = () => {
+      if (pollTimerRef.current === null) return
+      clearInterval(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+
     const openStream = (cursor: number) => {
       if (!isCurrent() || terminalGenerationRef.current === generation || unsubscribeRef.current) {
         return
@@ -274,11 +307,16 @@ export function NotificationLifecycleProvider({
               : current.state,
             updatedAt: Date.now()
           }))
+          // WP-41: once the stream delivers and the bootstrap reads are in,
+          // the unread poll is redundant; it only runs while degraded.
+          if (canBeActive()) stopPolling()
         },
         onError: (error) => {
           if (!isCurrent()) return
           streamOpenRef.current = false
-          applyFailure(error, generation)
+          const outcome = applyFailure(error, generation)
+          // WP-41: a degraded stream falls back to the poll cadence again.
+          if (outcome !== "terminal") startPolling()
         },
         onEvent: (event) => {
           if (!isCurrent()) return
@@ -359,6 +397,8 @@ export function NotificationLifecycleProvider({
             unreadCount: Math.max(0, Number(result?.unread_count) || 0),
             updatedAt: Date.now()
           }))
+          // WP-41: bootstrap data plus an open stream ends the degraded poll.
+          if (canBeActive()) stopPolling()
         } catch (error) {
           if (!isCurrent()) return
           unreadCurrentRef.current = false
@@ -390,8 +430,10 @@ export function NotificationLifecycleProvider({
       }
     }
 
-    if (terminalGenerationRef.current !== generation) {
-      pollTimerRef.current = setInterval(() => void pollNotificationState(), pollIntervalMs)
+    if (terminalGenerationRef.current !== generation && !canBeActive()) {
+      // WP-41: the poll only starts when the stream is not yet (or no longer)
+      // delivering; onOpen or the next successful read clears it.
+      startPolling()
     }
   }, [applyFailure, connectionVerified, enabled, pollIntervalMs, scopeKey, stopWork, unverifiedState, updateCurrent])
 
@@ -479,6 +521,7 @@ export function NotificationLifecycleProvider({
       return true
     }
     const onCredentialsChanged = (event: Event) => {
+      syncMissingConfiguredAuth()
       const detail = (event as CustomEvent<AuthCredentialsChangedDetail>).detail
       if (detail?.authenticated) {
         if (resetForChangedScope()) return
@@ -489,6 +532,7 @@ export function NotificationLifecycleProvider({
       }
     }
     const onStorage = (event: StorageEvent) => {
+      syncMissingConfiguredAuth()
       if (
         event.key === "tldwConfig" || event.key === REFRESH_ROTATION_KEY ||
         event.key?.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX)
@@ -508,6 +552,7 @@ export function NotificationLifecycleProvider({
       }
     }
     const onConfigUpdated = () => {
+      syncMissingConfiguredAuth()
       const next = {
         bearer: getSessionAccessToken() || getApiBearer(),
         apiKey: getApiKey(),
@@ -544,7 +589,7 @@ export function NotificationLifecycleProvider({
       window.removeEventListener("tldw:config-updated", onConfigUpdated)
       window.removeEventListener("storage", onStorage)
     }
-  }, [scopeKey, startWork, stopWork, suppliedScopeKey])
+  }, [scopeKey, startWork, stopWork, suppliedScopeKey, syncMissingConfiguredAuth])
 
   const reportRequestError = React.useCallback(
     (error: unknown) => {

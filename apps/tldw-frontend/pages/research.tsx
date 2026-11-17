@@ -16,6 +16,7 @@ import {
   listResearchRuns,
   pauseResearchRun,
   resumeResearchRun,
+  researchRunsRefetchInterval,
   subscribeResearchRunEvents,
   type ResearchArtifactManifestEntry,
   type ResearchBundle,
@@ -1031,7 +1032,10 @@ export default function ResearchRunsPage() {
   const runsQuery = useQuery({
     queryKey: ['research-runs'],
     queryFn: () => listResearchRuns(),
-    refetchInterval: 5000,
+    // WP-40: an all-terminal run list stops polling; the SSE terminal event
+    // invalidates the list so the final status still lands promptly.
+    refetchInterval: (query) => researchRunsRefetchInterval(query.state.data),
+    refetchIntervalInBackground: false,
   });
 
   const effectiveSelectedRunId = selectedRunId ?? runsQuery.data?.[0]?.id ?? null;
@@ -1126,6 +1130,11 @@ export default function ResearchRunsPage() {
       afterId: 0,
       onEvent: (event) => {
         dispatch({ type: 'apply-event', event });
+        // WP-40: the terminal event carries the finished run; refresh the
+        // list once so polling can stop on the all-terminal result.
+        if (event.event === 'terminal') {
+          void queryClient.invalidateQueries({ queryKey: ['research-runs'] });
+        }
       },
       onError: (error) => {
         const message = error instanceof Error ? error.message : 'Research stream disconnected';
@@ -1136,7 +1145,7 @@ export default function ResearchRunsPage() {
         });
       },
     });
-  }, [effectiveSelectedRunId, show]);
+  }, [effectiveSelectedRunId, queryClient, show]);
 
   const selectedSnapshot = state.snapshot;
   const selectedRun = selectedSnapshot?.run ?? selectedRunQuery.data ?? selectedListItem;

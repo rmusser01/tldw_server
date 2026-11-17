@@ -139,7 +139,9 @@ Circuit breaker observability and tuning
 Application
 - CPU workers: set `UVICORN_WORKERS` (default 4 in Dockerfile.prod). Monitor latency and CPU to tune.
 - Caching: ensure embeddings/model caches reside on fast disk; configure per module where available.
-- Background jobs: Chatbooks worker enabled by default (core backend). Control via `CHATBOOKS_CORE_WORKER_ENABLED`. Media ingest jobs worker follows the `media` route policy by default; control via `MEDIA_INGEST_JOBS_WORKER_ENABLED`, or use sidecar workers for multi-worker deployments. The long-form TTS jobs worker (`POST /api/v1/audio/speech/jobs`) follows the `audio` route policy the same way; control via `TTS_JOBS_WORKER_ENABLED`, and in sidecar mode run the `tts` sidecar worker.
+- The core Chatbooks worker is enabled by default. Control it with `CHATBOOKS_CORE_WORKER_ENABLED`. The long-form TTS jobs worker (`POST /api/v1/audio/speech/jobs`) follows the `audio` route policy. Control it with `TTS_JOBS_WORKER_ENABLED` and run the `tts` worker in sidecar mode.
+- Media ingest follows the `media` route policy and has its own `MEDIA_INGEST_JOBS_WORKER_ENABLED` switch. Built-in deployments run the ordinary queue and two heavy-queue workers per app process. Requests for provider analysis, OCR, audio, or video use the heavy queue, which defaults to `low`. Set `MEDIA_INGEST_HEAVY_JOBS_CONCURRENCY` to tune its pool within 1–4. Set `MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED=false` to disable the built-in pool or `MEDIA_INGEST_JOBS_ROUTE_HEAVY=false` to send new submissions to the ordinary queue while the heavy pool drains.
+- External worker deployments use the ordinary queue by default. To opt into isolation, launch `python -m tldw_Server_API.app.services.media_ingest_jobs_worker --heavy` beside the ordinary worker, then set `MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED=true` on the API. Use the same `MEDIA_INGEST_JOBS_HEAVY_QUEUE` on both processes when overriding `low`. Workers need access to the API's Jobs database and staged upload paths.
 - SQLite deployments: avoid multiple Uvicorn workers with in-process jobs. Use sidecar workers or Postgres for higher concurrency.
 
 Database

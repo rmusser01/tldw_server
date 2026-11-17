@@ -905,6 +905,7 @@ async def test_media_ingest_heavy_worker_uses_configured_queue(monkeypatch):
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
 
     monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "media-heavy-q")
+    monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_CONCURRENCY", "1")
     called = {}
 
     async def _fake_run_media_ingest_jobs_worker(
@@ -979,7 +980,7 @@ async def test_media_ingest_schedule_embeddings_marks_media_processed(monkeypatc
 
     monkeypatch.setattr(worker, "mark_media_as_processed", _fake_mark_media_as_processed, raising=True)
 
-    import tldw_Server_API.app.api.v1.endpoints.media_embeddings as media_embeddings
+    import tldw_Server_API.app.core.Embeddings.media_embeddings as media_embeddings
 
     monkeypatch.setattr(media_embeddings, "get_media_content", _fake_get_media_content, raising=True)
     monkeypatch.setattr(
@@ -1033,7 +1034,7 @@ async def test_media_ingest_schedule_embeddings_marks_error_on_failure(monkeypat
 
     monkeypatch.setattr(worker, "mark_media_as_processed", _fail_if_processed, raising=True)
 
-    import tldw_Server_API.app.api.v1.endpoints.media_embeddings as media_embeddings
+    import tldw_Server_API.app.core.Embeddings.media_embeddings as media_embeddings
 
     monkeypatch.setattr(media_embeddings, "get_media_content", _fake_get_media_content, raising=True)
     monkeypatch.setattr(
@@ -1093,7 +1094,7 @@ async def test_media_ingest_schedule_embeddings_retries_conflict_without_marking
 
     monkeypatch.setattr(worker, "mark_media_as_processed", _flaky_mark_media_as_processed, raising=True)
 
-    import tldw_Server_API.app.api.v1.endpoints.media_embeddings as media_embeddings
+    import tldw_Server_API.app.core.Embeddings.media_embeddings as media_embeddings
 
     monkeypatch.setattr(media_embeddings, "get_media_content", _fake_get_media_content, raising=True)
     monkeypatch.setattr(
@@ -1174,3 +1175,61 @@ async def test_media_worker_applies_staged_file_daily_quota(monkeypatch, tmp_pat
         assert len(processed) == (2 if case == "admitted" else 1)  # nosec B101 - Existing legitimate processing path.
     expected = [] if case == "url" else [("3", 5, "media-ingestion-job:3:" + job["uuid"])] * (2 if case == "admitted" else 1)
     assert calls == expected  # nosec B101 - Actual staged size, owner and stable retry receipt.
+
+
+@pytest.mark.asyncio
+async def test_heavy_ingest_runs_second_analysis_while_default_serves_ordinary_uploads(monkeypatch, tmp_path):
+    import asyncio
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "low")
+    monkeypatch.delenv("MEDIA_INGEST_HEAVY_JOBS_CONCURRENCY", raising=False)
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_BACKOFF_BASE_SECONDS", "1")
+
+    long_entered = asyncio.Event()
+    release_long = asyncio.Event()
+    stop = asyncio.Event()
+    workers = {}
+    jm = JobManager()
+
+    def enqueue(source, media_type, queue):
+        job = jm.create_job(
+            domain="media_ingest", queue=queue, job_type="media_ingest_item", owner_user_id="1",
+            payload={"source": source, "options": {"media_type": media_type, "perform_analysis": queue == "low"}},
+        )
+        return int(job["id"])
+
+    async def handle(job, _manager, _progress):
+        source = job["payload"]["source"]
+        workers[source] = job["worker_id"]
+        if source == "long.pdf":
+            long_entered.set()
+            await release_long.wait()
+        return {"source": source}
+
+    async def wait_for_completion(*jobs):
+        while any(jm.get_job(job_id)["status"] != "completed" for job_id in jobs):
+            await asyncio.sleep(0.01)
+
+    monkeypatch.setattr(worker, "_handle_job", handle)
+    long_id = enqueue("long.pdf", "pdf", "low")
+    heavy = asyncio.create_task(worker.run_media_ingest_heavy_jobs_worker(stop))
+    ordinary = asyncio.create_task(worker.run_media_ingest_jobs_worker(stop, queue="default"))
+    try:
+        await asyncio.wait_for(long_entered.wait(), timeout=5)
+        short_id = enqueue("short.txt", "document", "low")
+        ordinary_id = enqueue("ordinary.txt", "document", "default")
+        await asyncio.wait_for(wait_for_completion(short_id, ordinary_id), timeout=4)
+
+        assert jm.get_job(long_id)["status"] == "processing"
+        assert len(set(workers.values())) == 3
+    finally:
+        stop.set()
+        release_long.set()
+        await asyncio.wait_for(asyncio.gather(heavy, ordinary), timeout=5)
+
+    assert jm.get_job(long_id)["status"] == "completed"

@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from fnmatch import fnmatchcase
+from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -58,6 +59,8 @@ class LLMCallContext:
     records_itself: bool = False
     prechecked: bool = False
     credential_source: str | None = None
+    # A runtime-issued handle for the user's own key, for ``analyze`` calls that bring no key (TASK-15426).
+    provider_credentials: Any = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,9 @@ class LLMCallState:
 _DEFAULT_CONTEXT = LLMCallContext()
 _CTX: ContextVar[LLMCallContext] = ContextVar("llm_call_context", default=_DEFAULT_CONTEXT)
 _IN_ACCOUNTED_CALL: ContextVar[bool] = ContextVar("llm_in_accounted_call", default=False)
+# What a unit of background work never inherits from whatever started it: the request's admission and the
+# user's own-key handle (llm_call_root; the media ingest job's embeddings task, TASK-15500).
+FRESH_ROOT: Mapping[str, Any] = MappingProxyType({"prechecked": False, "provider_credentials": None})
 
 
 def current_llm_call_context() -> LLMCallContext:
@@ -230,3 +236,24 @@ def mark_llm_quota_prechecked() -> None:
     response body runs. Tasks and threads started after this inherit the mark.
     """
     _CTX.set(replace(_CTX.get(), prechecked=True))
+
+
+def bind_provider_credentials(handle: Any) -> None:
+    """Carry ``handle`` for the rest of the current task; None binds nothing (TASK-15426).
+
+    An ``analyze`` call for the handle's provider that brings no key of its own then runs on it.
+    A plain set, like ``mark_llm_quota_prechecked``; tasks, threads and queues that take the call
+    state take the handle with it.
+    """
+    if handle is not None:
+        _CTX.set(replace(_CTX.get(), provider_credentials=handle))
+
+
+def scoped_provider_credentials(provider: str) -> Any:
+    """The handle the call context carries (``bind_provider_credentials``) when it is for ``provider``, else None."""
+    from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+
+    handle = _CTX.get().provider_credentials
+    if handle is None or getattr(handle, "provider", None) != canonical_provider_name(provider):
+        return None
+    return handle

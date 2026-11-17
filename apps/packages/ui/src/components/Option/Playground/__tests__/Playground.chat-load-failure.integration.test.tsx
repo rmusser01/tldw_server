@@ -20,6 +20,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { useStoreMessageOption } from "@/store/option"
 
 const MESSAGES_PATH = /^\/api\/v1\/chats\/saved-chat\/messages$/
+const HISTORY_PATH = /^\/api\/v1\/chat\/conversations\/saved-chat\/history\/selection$/
 
 describe("Playground saved chat that fails to load (CS-06)", { timeout: 60_000 }, () => {
   beforeEach(async () => {
@@ -77,7 +78,10 @@ describe("Playground saved chat that fails to load (CS-06)", { timeout: 60_000 }
     )
   })
 
-  it("loads the chat when the user presses Retry after the server recovers", async () => {
+  it.each([
+    { operation: "message list", method: "GET", path: MESSAGES_PATH },
+    { operation: "history capture", method: "POST", path: HISTORY_PATH }
+  ])("loads the chat when the user presses Retry after $operation recovers", async (failure) => {
     const server = createFakeTldwServer()
     server.seedChat({
       id: "saved-chat",
@@ -96,7 +100,7 @@ describe("Playground saved chat that fails to load (CS-06)", { timeout: 60_000 }
           server.url
         )
         const method = String(init?.method ?? "GET").toUpperCase()
-        if (failing && method === "GET" && MESSAGES_PATH.test(url.pathname)) {
+        if (failing && method === failure.method && failure.path.test(url.pathname)) {
           return new Response(JSON.stringify({ detail: "Internal Server Error" }), {
             status: 500,
             headers: { "content-type": "application/json" }

@@ -307,46 +307,19 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
     expect(searchInput).toHaveFocus()
   })
 
-  it("persists tutorial state through shared storage on first visit", async () => {
+  it("leaves the Notes tour closed on an idle first visit", async () => {
     vi.useFakeTimers()
     renderPage()
 
     await act(async () => {
       await Promise.resolve()
-    })
-    expect(mockStorageGet).toHaveBeenCalledWith("notes-tutorial-shown")
-
-    await act(async () => {
-      vi.advanceTimersByTime(1000)
-      await Promise.resolve()
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(3500)
     })
 
-    expect(mockStorageSet).toHaveBeenCalledWith("notes-tutorial-shown", "1")
-    expect(mockStartTutorial).toHaveBeenCalledWith("notes-basics")
-  })
-
-  it("suppresses the first-visit tutorial when the user starts interacting before the timer fires", async () => {
-    vi.useFakeTimers()
-    renderPage()
-
-    await act(async () => {
-      await Promise.resolve()
-    })
-
-    fireEvent.pointerDown(window)
-
-    await act(async () => {
-      vi.advanceTimersByTime(1000)
-      await Promise.resolve()
-      await Promise.resolve()
-    })
-
-    expect(mockStorageSet).toHaveBeenCalledWith("notes-tutorial-shown", "1")
     expect(mockStartTutorial).not.toHaveBeenCalled()
   })
 
-  it("removes tutorial state from shared storage when restarting the tutorial", async () => {
+  it("starts the Notes tour from shortcuts help with a return-focus target", async () => {
     renderPage()
 
     const opener = screen.getByTestId("notes-shortcuts-help-button")
@@ -354,9 +327,6 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
     fireEvent.click(opener)
     fireEvent.click(await screen.findByTestId("notes-restart-tutorial"))
 
-    await waitFor(() => {
-      expect(mockStorageRemove).toHaveBeenCalledWith("notes-tutorial-shown")
-    })
     expect(mockStartTutorial).toHaveBeenCalledWith("notes-basics", opener)
   })
   // AX-09 (#3122): closing the shortcuts dialog must return focus to the
