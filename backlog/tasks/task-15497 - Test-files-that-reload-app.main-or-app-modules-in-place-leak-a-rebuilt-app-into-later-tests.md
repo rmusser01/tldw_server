@@ -24,6 +24,9 @@ Found by TASK-15426 PR D's test-isolation fix (2026-11-13). Under pytest-xdist -
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-11-17-inplace-app-main-reload.md. Corrected AC #2: the in-place reloads (38 files on the base, 37 plus the guard test's own polluter) are covered by the guard; a lint ratchet keeps new ones out.
+Owner decisions 2026-11-16: (1) lint ratchet baselines the existing reloading files (option a, 38-line baseline), the 62 calls are not converted; (2) other in-place module reloads (config_mod x27, audit, auth, collections services) and the Tools multi-user CSRF 403 (tests/Tools/test_tools_permissions.py::test_tools_execute_forbidden_without_permission_multi_user[sqlite|postgres], reproduces on dev after Security/Billing/Config/Meetings in one process) go to TASK-15563; (3) e2e disable_rate_limiting stays session scoped with a MonkeyPatch undo; (4) ADR-004 Change summary waiver covered.
+Ruling: the Task 3 env probe must sit outside tests/Jobs (the Jobs per-test _jobs_minimal_env would otherwise set env vars the probe sees); measured RED on dev conftests: ROUTES_STABLE_ONLY, ROUTES_ENABLE, PRIVILEGE_METADATA_VALIDATE_ON_STARTUP differ; GREEN 4 passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
