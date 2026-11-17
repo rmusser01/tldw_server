@@ -109,7 +109,6 @@ from tldw_Server_API.app.core.MCP_unified.mcp_hub_readiness import (
     is_available_for_discovery_refresh,
     sanitize_discovery_refresh_result_payload,
 )
-from tldw_Server_API.app.core.MCP_unified.server import get_mcp_server
 from tldw_Server_API.app.services.mcp_hub_external_legacy_inventory import (
     McpHubExternalLegacyInventoryService,
 )
@@ -140,10 +139,10 @@ from tldw_Server_API.app.services.mcp_hub_policy_resolver import McpHubPolicyRes
 from tldw_Server_API.app.services.mcp_hub_service import (
     McpHubConflictError,
     McpHubService,
-    get_mcp_hub_event_bus,
-    replay_mcp_hub_audit_events,
 )
 from tldw_Server_API.app.services.mcp_hub_tool_registry import McpHubToolRegistryService
+import tldw_Server_API.app.core.MCP_unified.server as _server
+import tldw_Server_API.app.services.mcp_hub_service as _mcp_hub_service
 
 router = APIRouter(prefix="/mcp/hub", tags=["mcp-hub"], dependencies=[Depends(check_rate_limit)])
 
@@ -248,7 +247,7 @@ async def get_mcp_hub_tool_registry_dep() -> McpHubToolRegistryService:
 
 async def _execute_external_refresh_tool(server_id: str | None) -> dict[str, Any]:
     """Execute the existing external federation discovery refresh tool."""
-    server = get_mcp_server()
+    server = _server.get_mcp_server()
     if not getattr(server, "initialized", False):
         await server.initialize()
     module = await server.module_registry.find_module_for_tool(_MCP_HUB_REFRESH_TOOL_NAME)
@@ -352,7 +351,7 @@ async def _resolve_external_federation_runtime() -> tuple[Any, Any, str]:
     """Resolve the live MCP external federation module and its registry."""
 
     try:
-        server = get_mcp_server()
+        server = _server.get_mcp_server()
         if not getattr(server, "initialized", False):
             await server.initialize()
     except Exception as exc:
@@ -2987,7 +2986,7 @@ async def stream_mcp_hub_events(
     records. Replay reads unified audit first and then falls back to the bounded
     in-process ring for process-local events that were not audit-backed.
     """
-    bus = await get_mcp_hub_event_bus()
+    bus = await _mcp_hub_service.get_mcp_hub_event_bus()
     event_types = _normalize_event_type_filter(event_type)
     visible_scopes = _resolve_visible_scope_filters(
         principal=principal,
@@ -3008,7 +3007,7 @@ async def stream_mcp_hub_events(
         try:
             queue = await bus.subscribe()
             if replay:
-                durable_replayed = await replay_mcp_hub_audit_events(
+                durable_replayed = await _mcp_hub_service.replay_mcp_hub_audit_events(
                     principal_user_id=principal.user_id,
                     user_id=replay_user_id,
                     after_event_id=after_event_id,

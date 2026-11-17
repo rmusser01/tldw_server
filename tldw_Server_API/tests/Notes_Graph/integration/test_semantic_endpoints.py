@@ -315,8 +315,7 @@ def test_every_semantic_command_emits_its_durable_audit_event(
         events.append(dict(kwargs))
 
     monkeypatch.setattr(
-        endpoint,
-        "emit_semantic_audit_event",
+        "tldw_Server_API.app.services.notes_semantic_audit.emit_semantic_audit_event",
         capture,
         raising=False,
     )
@@ -383,7 +382,7 @@ def test_committed_command_remains_accepted_when_audit_backend_fails(
     async def unavailable(**_kwargs: object) -> None:
         raise RuntimeError("audit unavailable")
 
-    monkeypatch.setattr(endpoint, "emit_semantic_audit_event", unavailable)
+    monkeypatch.setattr("tldw_Server_API.app.services.notes_semantic_audit.emit_semantic_audit_event", unavailable)
 
     response = test_client.put(
         "/api/v1/notes/graph/semantic-index",
@@ -597,7 +596,7 @@ async def test_dataset_authority_failure_is_typed_404_and_releases_database(
             raise authority_failure
         return None
 
-    monkeypatch.setattr(endpoint, "resolve_notes_link_dataset_authority", resolve)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_dataset_authority", resolve)
     dependency = endpoint.get_semantic_api(
         dataset_id="dataset-a",
         user=SimpleNamespace(id_str="owner-a"),
@@ -627,7 +626,7 @@ async def test_unexpected_dataset_and_release_failures_preserve_sanitized_503(
     def unavailable(**_kwargs):
         raise RuntimeError(secret)
 
-    monkeypatch.setattr(endpoint, "resolve_notes_link_dataset_authority", unavailable)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_dataset_authority", unavailable)
     monkeypatch.setattr(
         endpoint,
         "logger",
@@ -667,8 +666,7 @@ async def test_release_failure_does_not_override_successful_dependency_result(
             raise RuntimeError(secret)
 
     monkeypatch.setattr(
-        endpoint,
-        "resolve_notes_link_dataset_authority",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_dataset_authority",
         lambda **_kwargs: (object(), SimpleNamespace(dataset_id="dataset-a")),
     )
     monkeypatch.setattr(

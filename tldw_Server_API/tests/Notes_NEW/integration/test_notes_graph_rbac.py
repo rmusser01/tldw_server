@@ -204,8 +204,7 @@ def test_graph_authorizes_dataset_before_cache_lookup(
         raise notes_graph_module.NotesLinkDatasetConflictError()
 
     monkeypatch.setattr(
-        notes_graph_module,
-        "resolve_notes_link_dataset_authority",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_dataset_authority",
         reject_authority,
     )
     monkeypatch.setattr(
@@ -282,8 +281,7 @@ async def test_link_detail_uses_read_authority_without_requiring_write_readiness
         lambda **_kwargs: "dataset-1",
     )
     monkeypatch.setattr(
-        notes_graph_module,
-        "resolve_notes_link_coordinator",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_coordinator",
         lambda **_kwargs: pytest.fail("read-only link detail required write readiness"),
     )
 
@@ -325,8 +323,7 @@ async def test_legacy_create_without_edge_id_skips_canonical_follow_up(
             return {"from_note_id": source_id, "to_note_id": target_id}
 
     monkeypatch.setattr(
-        notes_graph_module,
-        "resolve_notes_link_coordinator",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_coordinator",
         lambda **_kwargs: None,
     )
     result = await notes_graph_module.create_manual_link(
@@ -377,8 +374,7 @@ def test_active_link_mutations_require_expected_version(
         pass
 
     monkeypatch.setattr(
-        notes_graph_module,
-        "resolve_notes_link_coordinator",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_coordinator",
         lambda **_kwargs: _ActiveCoordinator(),
     )
     token = _make_token(scope="notes")
@@ -464,8 +460,7 @@ def test_active_link_capture_failures_have_stable_http_mapping(
             raise failure
 
     monkeypatch.setattr(
-        notes_graph_module,
-        "resolve_notes_link_coordinator",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_coordinator",
         lambda **_kwargs: _FailingCoordinator(),
     )
     token = _make_token(scope="notes")

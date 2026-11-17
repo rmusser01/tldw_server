@@ -387,7 +387,7 @@ def test_mcp_get_client_ip_sanitizes_resolution_failure_log(monkeypatch):
     def _raise_resolution_failure(*_args: Any, **_kwargs: Any) -> str:
         raise RuntimeError("client IP parser leaked /private/mcp-client-ip.txt")
 
-    monkeypatch.setattr(mcp_ep, "resolve_client_ip", _raise_resolution_failure)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.ip_allowlist.resolve_client_ip", _raise_resolution_failure)
 
     result = mcp_ep._get_client_ip(Request({"type": "http", "headers": []}))
 
@@ -489,7 +489,7 @@ async def test_mcp_http_requests_use_single_api_key_validation(monkeypatch):
 
     # Force multi-user API key path so compat token resolution uses APIKeyManager instead of
     # the single-user shortcut.
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: False)
 
     calls: list[dict[str, Any]] = []
 
@@ -501,7 +501,7 @@ async def test_mcp_http_requests_use_single_api_key_validation(monkeypatch):
     async def _fake_get_api_key_manager():
         return _DummyApiManager()
 
-    monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fake_get_api_key_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.api_key_manager.get_api_key_manager", _fake_get_api_key_manager)
 
     server = _install_dummy_server(monkeypatch)
 
@@ -560,7 +560,7 @@ def test_http_api_key_scopes_enforced(monkeypatch):
     """
     # Force multi-user API key path (no single-user shim).
     monkeypatch.setenv("MCP_SINGLE_USER_COMPAT_SHIM", "0")
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: False)
 
     class _DummyApiManager:
         async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> dict[str, Any]:
@@ -570,7 +570,7 @@ def test_http_api_key_scopes_enforced(monkeypatch):
     async def _fake_get_api_key_manager():
         return _DummyApiManager()
 
-    monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fake_get_api_key_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.api_key_manager.get_api_key_manager", _fake_get_api_key_manager)
 
     server = _ScopeServer()
     monkeypatch.setattr(app_services(), "mcp_server", server)
@@ -595,7 +595,7 @@ def test_tools_list_attaches_api_key_metadata(monkeypatch):
     Ensure /mcp/tools attaches API key metadata (org/team/scopes) for convenience endpoints.
     """
     monkeypatch.setenv("MCP_SINGLE_USER_COMPAT_SHIM", "0")
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: False)
 
     class _DummyApiManager:
         async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> dict[str, Any]:
@@ -604,7 +604,7 @@ def test_tools_list_attaches_api_key_metadata(monkeypatch):
     async def _fake_get_api_key_manager():
         return _DummyApiManager()
 
-    monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fake_get_api_key_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.api_key_manager.get_api_key_manager", _fake_get_api_key_manager)
 
     server = _install_dummy_server(monkeypatch)
 
@@ -618,7 +618,7 @@ def test_tools_list_attaches_api_key_metadata(monkeypatch):
 
 
 def test_mcp_request_attaches_workspace_headers_to_metadata(monkeypatch):
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: True)
     server = _install_dummy_server(monkeypatch)
 
     headers = {
@@ -637,7 +637,7 @@ def test_mcp_request_attaches_workspace_headers_to_metadata(monkeypatch):
 
 
 def test_mcp_request_batch_attaches_workspace_headers_to_metadata(monkeypatch):
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: True)
     server = _install_dummy_server(monkeypatch)
 
     headers = {
@@ -659,7 +659,7 @@ def test_mcp_request_batch_attaches_workspace_headers_to_metadata(monkeypatch):
 
 
 def test_tools_execute_attaches_workspace_headers_to_metadata(monkeypatch):
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: True)
     server = _install_dummy_server(monkeypatch)
 
     headers = {
@@ -678,7 +678,7 @@ def test_tools_execute_attaches_workspace_headers_to_metadata(monkeypatch):
 
 
 def test_tools_execute_preserves_rag_json_content_wrapper(monkeypatch):
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: True)
 
     class _RagJsonServer(_DummyServer):
         async def handle_http_request(
@@ -736,7 +736,7 @@ def test_tools_execute_api_key_scopes_enforced(monkeypatch):
     Ensure /mcp/tools/execute respects API key scopes.
     """
     monkeypatch.setenv("MCP_SINGLE_USER_COMPAT_SHIM", "0")
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: False)
 
     class _DummyApiManager:
         async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> dict[str, Any]:
@@ -746,7 +746,7 @@ def test_tools_execute_api_key_scopes_enforced(monkeypatch):
     async def _fake_get_api_key_manager():
         return _DummyApiManager()
 
-    monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fake_get_api_key_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.api_key_manager.get_api_key_manager", _fake_get_api_key_manager)
 
     server = _ScopeServer()
     monkeypatch.setattr(app_services(), "mcp_server", server)
@@ -876,7 +876,7 @@ async def test_mcp_single_user_api_key_flag_enabled_uses_compat_shim(monkeypatch
     """
     # Enable shim and force single-user runtime.
     monkeypatch.setenv("MCP_SINGLE_USER_COMPAT_SHIM", "1")
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: True)
 
     # Provide minimal settings for the shim.
     class _Settings:
@@ -916,7 +916,7 @@ async def test_mcp_single_user_api_key_respects_ip_allowlist(monkeypatch):
     from starlette.requests import Request
 
     monkeypatch.setenv("MCP_SINGLE_USER_COMPAT_SHIM", "1")
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: True)
 
     class _Settings:
         SINGLE_USER_API_KEY = "single-user-admin-key"
@@ -950,7 +950,7 @@ async def test_mcp_single_user_api_key_grants_no_wildcard_permissions_in_test_mo
 
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("MCP_SINGLE_USER_COMPAT_SHIM", "1")
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: True)
 
     class _Settings:
         SINGLE_USER_API_KEY = "single-user-admin-key"
@@ -976,7 +976,7 @@ async def test_mcp_single_user_api_key_flag_disabled_uses_api_key_manager(monkey
     the API key should be validated via the multi-user API key manager path.
     """
     monkeypatch.setenv("MCP_SINGLE_USER_COMPAT_SHIM", "0")
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: True)
 
     calls: list[dict[str, Any]] = []
 
@@ -988,7 +988,7 @@ async def test_mcp_single_user_api_key_flag_disabled_uses_api_key_manager(monkey
     async def _fake_get_api_key_manager():
         return _DummyApiManager()
 
-    monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fake_get_api_key_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.api_key_manager.get_api_key_manager", _fake_get_api_key_manager)
 
     server = _install_dummy_server(monkeypatch)
 
@@ -1031,7 +1031,7 @@ async def test_get_current_user_authnz_jwt_failure_falls_back_to_mcp_jwt(monkeyp
         )
 
     # Simulate invalid AuthNZ JWT: verify_jwt_and_fetch_user raises.
-    monkeypatch.setattr(mcp_ep, "verify_jwt_and_fetch_user", _fail_verify_jwt)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.verify_jwt_and_fetch_user", _fail_verify_jwt)
 
     # Provide a successful MCP JWT verification path.
     expected = mcp_ep.TokenData(
@@ -1047,7 +1047,7 @@ async def test_get_current_user_authnz_jwt_failure_falls_back_to_mcp_jwt(monkeyp
             assert token == "mcp.jwt.token"
             return expected
 
-    monkeypatch.setattr(mcp_ep, "get_jwt_manager", lambda: _DummyJwtManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.auth.jwt_manager.get_jwt_manager", lambda: _DummyJwtManager())
 
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="mcp.jwt.token")
 
@@ -1078,9 +1078,9 @@ async def test_get_current_user_authnz_revoked_does_not_fallback(monkeypatch):
             raise AssertionError("MCP JWT fallback should not be attempted")
 
     revoked_token = ".".join(("revoked", "jwt", "token"))
-    monkeypatch.setattr(mcp_ep, "verify_jwt_and_fetch_user", _revoked_verify)
-    monkeypatch.setattr(mcp_ep, "_is_authnz_access_token", lambda token: token == revoked_token)
-    monkeypatch.setattr(mcp_ep, "get_jwt_manager", lambda: _FailingJwtManager())
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.verify_jwt_and_fetch_user", _revoked_verify)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.server._is_authnz_access_token", lambda token: token == revoked_token)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.auth.jwt_manager.get_jwt_manager", lambda: _FailingJwtManager())
 
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=revoked_token)
 
@@ -1107,18 +1107,18 @@ async def test_get_current_user_authnz_and_mcp_failure_use_api_key_and_set_state
         )
 
     # AuthNZ JWT validation always fails.
-    monkeypatch.setattr(mcp_ep, "verify_jwt_and_fetch_user", _fail_verify_jwt)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.verify_jwt_and_fetch_user", _fail_verify_jwt)
 
     # MCP JWT verify also fails to force API key fallback.
     class _FailingJwtManager:
         def verify_token(self, token: str):
             raise RuntimeError("invalid MCP token")
 
-    monkeypatch.setattr(mcp_ep, "get_jwt_manager", lambda: _FailingJwtManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.auth.jwt_manager.get_jwt_manager", lambda: _FailingJwtManager())
 
     # Force multi-user API key path (no single-user compat shim).
     monkeypatch.setenv("MCP_SINGLE_USER_COMPAT_SHIM", "0")
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: False)
 
     # Dummy API key manager that returns metadata for the key.
     calls: list[dict[str, Any]] = []
@@ -1131,7 +1131,7 @@ async def test_get_current_user_authnz_and_mcp_failure_use_api_key_and_set_state
     async def _fake_get_api_key_manager():
         return _DummyApiManager()
 
-    monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fake_get_api_key_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.api_key_manager.get_api_key_manager", _fake_get_api_key_manager)
 
     scope = {"type": "http", "client": ("203.0.113.1", 12345)}
     request = Request(scope)
@@ -1172,7 +1172,7 @@ async def test_single_user_test_api_key_uses_api_key_manager_outside_dev_context
 
     # Enable compat shim and single-user profile.
     monkeypatch.delenv("MCP_SINGLE_USER_COMPAT_SHIM", raising=False)
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: True)
 
     # TEST_MODE enabled but environment marked as production-like.
     monkeypatch.setenv("TEST_MODE", "1")
@@ -1188,7 +1188,6 @@ async def test_single_user_test_api_key_uses_api_key_manager_outside_dev_context
     class _Cfg:
         debug_mode = False
 
-    monkeypatch.setattr(mcp_ep, "get_config", lambda: _Cfg())
 
     # Single-user settings (real admin API key is different from test key).
     class _Settings:
@@ -1208,7 +1207,7 @@ async def test_single_user_test_api_key_uses_api_key_manager_outside_dev_context
     async def _fake_get_api_key_manager():
         return _DummyApiManager()
 
-    monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fake_get_api_key_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.api_key_manager.get_api_key_manager", _fake_get_api_key_manager)
 
     scope = {"type": "http", "client": ("198.51.100.5", 9000)}
     request = Request(scope)

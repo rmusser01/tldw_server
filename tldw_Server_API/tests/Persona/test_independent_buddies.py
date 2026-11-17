@@ -569,7 +569,7 @@ def test_starter_preview_route_requires_auth_and_never_creates_a_profile(db, mon
     app.include_router(persona.router, prefix="/api/v1/persona")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     app.dependency_overrides[check_rate_limit] = lambda: None
-    monkeypatch.setattr(persona, "is_persona_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_persona_enabled", lambda: True)
 
     def denied():
         raise HTTPException(status_code=401, detail="Authentication required")

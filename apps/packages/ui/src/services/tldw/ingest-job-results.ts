@@ -44,8 +44,13 @@ export const extractCompletedIngestJobPayload = (
   value: unknown
 ): RecordLike | undefined => {
   const record = asRecord(value)
-  const nested = asRecord(record?.result)
-  return nested ?? record
+  const payload = asRecord(record?.result) ?? record
+  const results = payload?.results
+  if (!payload?.status && Array.isArray(results) && results.length === 1) {
+    const item = asRecord(results[0])
+    if (item && SKIPPED_STATUS_TOKENS.has(String(item.status || "").trim().toLowerCase())) return item
+  }
+  return payload
 }
 
 export const extractCompletedIngestJobTerminalData = (value: unknown): unknown => {
@@ -128,8 +133,9 @@ const hasSavedMedia = (value: unknown): boolean => {
 export const extractCompletedIngestJobWarning = (
   value: unknown
 ): string | undefined => {
+  const status = extractCompletedIngestJobStatusToken(value)
   if (
-    extractCompletedIngestJobStatusToken(value) !== "warning" ||
+    (status !== "warning" && status !== "skipped") ||
     !hasSavedMedia(value) ||
     extractCompletedIngestJobError(value)
   ) return undefined
@@ -138,7 +144,8 @@ export const extractCompletedIngestJobWarning = (
   const details = Array.isArray(warnings)
     ? [...new Set(warnings.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))]
     : []
-  return details.join("\n") || "Source saved, but processing completed with warnings."
+  return details.join("\n") ||
+    (status === "warning" ? "Source saved, but processing completed with warnings." : undefined)
 }
 
 export const completedIngestJobIndicatesFailure = (

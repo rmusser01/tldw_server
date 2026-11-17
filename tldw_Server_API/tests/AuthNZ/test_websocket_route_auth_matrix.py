@@ -859,7 +859,7 @@ def first_work_started(route: str, monkeypatch: pytest.MonkeyPatch) -> list[str]
             started.append(route)
             return sessions()
 
-        monkeypatch.setattr(voice_assistant, "get_voice_session_manager", first_work)
+        monkeypatch.setattr("tldw_Server_API.app.core.VoiceAssistant.get_voice_session_manager", first_work)
     else:  # the first thing an audio stream does for a known caller
         guard = audio_streaming._guard_audio_ws_work_start
 

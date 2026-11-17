@@ -278,7 +278,7 @@ def _setup_rag_too_large(monkeypatch, fake_notes, fake_media):
         return SimpleNamespace(documents=[doc], generated_answer=None)
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.unified_rag_pipeline",
+        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline",
         stub_rag_pipeline,
     )
 
@@ -369,7 +369,7 @@ def test_resolve_template_sanitizes_invalid_template_error(monkeypatch):
         _ = template_id
         raise SlidesTemplateInvalidError("template parse exploded")
 
-    monkeypatch.setattr(slides_ep, "get_slide_template", _raise_invalid)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_templates.get_slide_template", _raise_invalid)
 
     with pytest.raises(HTTPException) as exc_info:
         slides_ep._resolve_template("broken-template")
@@ -385,8 +385,8 @@ def test_generate_presentation_sanitizes_generation_error(monkeypatch):
             raise SlidesGenerationError("llm backend exploded")
 
     monkeypatch.setattr(slides_ep, "_resolve_provider", lambda provider: "stub-provider")
-    monkeypatch.setattr(slides_ep, "SlidesGenerator", _RaisingGenerator)
-    monkeypatch.setattr(slides_ep, "get_metrics_registry", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", _RaisingGenerator)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: None)
 
     request = SimpleNamespace(
         visual_style_id=None,
@@ -593,7 +593,7 @@ def test_slides_create_rejects_invalid_image(slides_client):
 
 def test_slides_create_and_export_markdown_with_image_asset_ref(slides_client, monkeypatch):
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.resolve_slide_asset",
+        "tldw_Server_API.app.core.Slides.slides_assets.resolve_slide_asset",
         lambda asset_ref, **kwargs: {
             "asset_ref": asset_ref,
             "mime": "image/png",
@@ -639,7 +639,7 @@ def test_slides_export_offloads_blocking_markdown_and_reveal_generation(
 
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.slides.asyncio.to_thread", _fake_to_thread)
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.resolve_slide_asset",
+        "tldw_Server_API.app.core.Slides.slides_assets.resolve_slide_asset",
         lambda asset_ref, **kwargs: {
             "asset_ref": asset_ref,
             "mime": "image/png",
@@ -730,7 +730,7 @@ def test_slides_export_reveal_passes_visual_style_snapshot(slides_client, monkey
         return b"PK\x03\x04stub"
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_bundle",
+        "tldw_Server_API.app.core.Slides.slides_export.export_presentation_bundle",
         _stub_export,
     )
     payload = {
@@ -784,7 +784,7 @@ def test_slides_export_pdf(slides_client, monkeypatch):
         captured["options"] = kwargs.get("pdf_options")
         return b"%PDF-1.4\n%stub"
 
-    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_pdf", _stub_export)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_export.export_presentation_pdf", _stub_export)
     payload = {
         "title": "Deck",
         "description": None,
@@ -816,7 +816,7 @@ def test_slides_export_pdf_passes_visual_style_snapshot(slides_client, monkeypat
         captured["visual_style_snapshot"] = kwargs.get("visual_style_snapshot")
         return b"%PDF-1.4\n%stub"
 
-    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_pdf", _stub_export)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_export.export_presentation_pdf", _stub_export)
     payload = {
         "title": "Styled Deck",
         "description": None,
@@ -845,7 +845,7 @@ def test_slides_export_pdf_input_error(slides_client, monkeypatch):
     def _stub_export(**kwargs):
         raise SlidesExportInputError("pdf_format_invalid")
 
-    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_pdf", _stub_export)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_export.export_presentation_pdf", _stub_export)
     payload = {
         "title": "Deck",
         "description": None,
@@ -867,7 +867,7 @@ def test_slides_export_pdf_failure(slides_client, monkeypatch):
     def _stub_export(**kwargs):
         raise SlidesExportError("pdf_render_failed")
 
-    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_pdf", _stub_export)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_export.export_presentation_pdf", _stub_export)
     payload = {
         "title": "Deck",
         "description": None,
@@ -890,7 +890,7 @@ def test_slides_export_markdown_failure(slides_client, monkeypatch):
         raise SlidesExportError("markdown_render_failed")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_markdown",
+        "tldw_Server_API.app.core.Slides.slides_export.export_presentation_markdown",
         _stub_export,
     )
     payload = {
@@ -915,7 +915,7 @@ def test_slides_export_reveal_failure(slides_client, monkeypatch):
         raise SlidesExportError("reveal_bundle_failed")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_bundle",
+        "tldw_Server_API.app.core.Slides.slides_export.export_presentation_bundle",
         _stub_export,
     )
     payload = {
@@ -1015,7 +1015,7 @@ def test_slides_builtin_style_list_skips_custom_css_rendering(slides_client, mon
         return real_resolve_builtin_visual_style(style_id, include_custom_css=include_custom_css)
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.resolve_builtin_visual_style",
+        "tldw_Server_API.app.core.Slides.visual_style_resolver.resolve_builtin_visual_style",
         _recorded_resolve,
     )
 
@@ -1038,7 +1038,7 @@ def test_slides_builtin_style_detail_skips_custom_css_rendering(slides_client, m
         return real_resolve_builtin_visual_style(style_id, include_custom_css=include_custom_css)
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.resolve_builtin_visual_style",
+        "tldw_Server_API.app.core.Slides.visual_style_resolver.resolve_builtin_visual_style",
         _recorded_resolve,
     )
 
@@ -2136,7 +2136,7 @@ def test_slides_generate_from_rag_explicit_sources(slides_client, monkeypatch):
         return SimpleNamespace(documents=[doc], generated_answer=None)
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.unified_rag_pipeline",
+        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline",
         stub_rag_pipeline,
     )
     monkeypatch.setattr(
@@ -2394,7 +2394,7 @@ def test_slides_generate_from_document_media_uses_document_content(
         lambda _db, _media_id: None,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.slides.get_document_version",
+        "tldw_Server_API.app.core.DB_Management.media_db.api.get_document_version",
         lambda db_instance, media_id, version_number=None, include_content=True: {
             "content": "Document body content for slide generation."
         },
@@ -2578,8 +2578,8 @@ def test_slide_generation_keeps_event_loop_responsive(monkeypatch):
                 observed.append(release.wait(timeout=1))
                 raise SlidesGenerationError("controlled provider completion")
 
-        monkeypatch.setattr(slides_ep, "SlidesGenerator", WaitingGenerator)
-        monkeypatch.setattr(slides_ep, "get_metrics_registry", lambda: None)
+        monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", WaitingGenerator)
+        monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: None)
         request = slides_ep.GenerateFromPromptRequest(
             prompt="Rowan Observatory opened in 2019.",
             provider="llamacpp",
@@ -2634,8 +2634,8 @@ def test_cancelled_slide_generation_does_not_persist(monkeypatch):
             writes.append(kwargs)
             raise AssertionError("Cancelled generation reached presentation persistence")
 
-        monkeypatch.setattr(slides_ep, "SlidesGenerator", CancellingGenerator)
-        monkeypatch.setattr(slides_ep, "get_metrics_registry", lambda: None)
+        monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", CancellingGenerator)
+        monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: None)
         monkeypatch.setattr(slides_ep, "_verify_slides_against_source", verified)
         request = slides_ep.GenerateFromPromptRequest(prompt="Opened in 2019.", provider="llamacpp", theme="black")
         task = asyncio.create_task(
@@ -2702,7 +2702,7 @@ def test_disconnected_slide_generation_does_not_persist(
         async def send(message):
             sent.append(message)
 
-        monkeypatch.setattr(slides_ep, "SlidesGenerator", ReturningGenerator)
+        monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", ReturningGenerator)
         monkeypatch.setattr(slides_ep, "_verify_slides_against_source", verify)
         from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -2762,7 +2762,7 @@ def test_cancelled_slide_generation_waits_for_owned_verification_exit(monkeypatc
             finally:
                 exited.set()
 
-        monkeypatch.setattr(slides_ep, "SlidesGenerator", ReturningGenerator)
+        monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", ReturningGenerator)
         monkeypatch.setattr(slides_ep, "_verify_slides_against_source", verify)
         request = slides_ep.GenerateFromPromptRequest(prompt="Rowan", provider="llamacpp", theme="black")
         task = asyncio.create_task(
@@ -2810,7 +2810,7 @@ def test_cancelled_slide_generation_waits_for_owned_provider_exit(monkeypatch):
                 exited.set()
 
     async def exercise():
-        monkeypatch.setattr(slides_ep, "SlidesGenerator", HeldGenerator)
+        monkeypatch.setattr("tldw_Server_API.app.core.Slides.slides_generator.SlidesGenerator", HeldGenerator)
         request = slides_ep.GenerateFromPromptRequest(prompt="Rowan", provider="llamacpp", theme="black")
         task = asyncio.create_task(
             slides_ep._generate_presentation(

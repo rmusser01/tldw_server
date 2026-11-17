@@ -117,8 +117,7 @@ def canonical_api(
     app.dependency_overrides[notes_endpoint.get_request_user] = _user_override
     app.dependency_overrides[notes_endpoint.get_rate_limiter_dep] = lambda: _NoopRateLimiter()
     monkeypatch.setattr(
-        notes_endpoint,
-        "get_active_server_origin_sync_service_for_user",
+        "tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user",
         lambda user_id: service,
     )
     yield TestClient(app), note_db, service
@@ -1005,8 +1004,7 @@ def test_rollout_inactive_preserves_legacy_filesystem_routes_and_rejects_canonic
     client, _, _ = canonical_api
     legacy_root = tmp_path / "inactive-legacy-files"
     monkeypatch.setattr(
-        notes_endpoint,
-        "get_active_server_origin_sync_service_for_user",
+        "tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user",
         lambda user_id: None,
     )
     monkeypatch.setattr(

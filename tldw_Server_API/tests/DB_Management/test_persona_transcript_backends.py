@@ -413,7 +413,7 @@ def test_saved_plan_cannot_become_legacy_after_parent_hard_deletion(tmp_path, mo
     session = "saved-parent-disappearance"
     _seed_persona_session(tmp_path, monkeypatch, user_id="1", session_id=session, mode="session_scoped")
     manager = SessionManager()
-    monkeypatch.setattr(endpoint, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     db = CharactersRAGDB(str(DatabasePaths.get_chacha_db_path(1)), client_id="parent-disappearance")
     try:
         with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
@@ -468,8 +468,8 @@ def approval_runtime(tmp_path, monkeypatch):
     manager = SessionManager(max_sessions_per_user=1)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
     monkeypatch.setattr(endpoint, "_resolve_authenticated_user_id", authenticated)
-    monkeypatch.setattr(endpoint, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(endpoint, "get_mcp_server", forbidden_dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", forbidden_dispatch)
     return manager
 
 

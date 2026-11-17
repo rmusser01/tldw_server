@@ -236,8 +236,7 @@ def _patch_failing_service(monkeypatch: pytest.MonkeyPatch) -> _LoggerStub:
     logger_stub = _LoggerStub()
     monkeypatch.setattr(evaluations_crud, "logger", logger_stub)
     monkeypatch.setattr(
-        evaluations_crud,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _ExplodingEvaluationService(),
     )
     return logger_stub
@@ -290,8 +289,7 @@ def _patch_service(monkeypatch: pytest.MonkeyPatch, service: object) -> _LoggerS
     logger_stub = _LoggerStub()
     monkeypatch.setattr(evaluations_crud, "logger", logger_stub)
     monkeypatch.setattr(
-        evaluations_crud,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: service,
     )
     return logger_stub

@@ -104,7 +104,7 @@ async def runtime(tmp_path, monkeypatch, fresh_services):
         service = McpHubService(repo=repo)
         registry = ModuleRegistry()
         server = SimpleNamespace(initialized=True, module_registry=registry)
-        patch.setattr(routes, "get_mcp_server", lambda: server)
+        patch.setattr("tldw_Server_API.app.core.MCP_unified.server.get_mcp_server", lambda: server)
         config = ModuleConfig(name="external_federation", timeout_seconds=2, max_concurrent=1,
                               settings={"external_server_loader": McpHubExternalRegistryService(repo).list_runtime_servers,
                                         "external_credential_broker": lambda **_kwargs: None})

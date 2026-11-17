@@ -50,9 +50,9 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkDatasetConflictError,
     NotesLinkSyncInactiveDatasetError,
-    resolve_notes_link_dataset_authority,
 )
-from tldw_Server_API.app.services.notes_semantic_audit import emit_semantic_audit_event
+import tldw_Server_API.app.core.Sync.v2.notes_link_coordinator as _notes_link_coordinator
+import tldw_Server_API.app.services.notes_semantic_audit as _notes_semantic_audit
 
 SEMANTIC_ERROR_MESSAGES = {
     "notes_semantic_active_generation_required": "An active semantic generation is required.",
@@ -132,7 +132,7 @@ _T = TypeVar("_T")
 
 def _dataset_key(*, owner_user_id: str, dataset_id: str | None) -> str:
     try:
-        authority = resolve_notes_link_dataset_authority(
+        authority = _notes_link_coordinator.resolve_notes_link_dataset_authority(
             user_id=owner_user_id,
             dataset_id=dataset_id,
         )
@@ -226,7 +226,7 @@ async def _audit_command(
     """Durably audit an accepted command without changing its HTTP semantics."""
 
     try:
-        await emit_semantic_audit_event(
+        await _notes_semantic_audit.emit_semantic_audit_event(
             owner_user_id=str(api.owner_user_id),
             dataset_id=str(getattr(api, "_dataset_id", "notes")),
             event=event,

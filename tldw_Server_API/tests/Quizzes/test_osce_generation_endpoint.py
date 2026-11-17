@@ -519,7 +519,7 @@ async def test_endpoint_maps_osce_failures_to_bounded_public_codes(
     async def fail_generation(**_: Any) -> Any:
         raise error
 
-    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fail_generation)
+    monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fail_generation)
 
     with pytest.raises(HTTPException) as exc_info:
         await quizzes_endpoint.generate_quiz(

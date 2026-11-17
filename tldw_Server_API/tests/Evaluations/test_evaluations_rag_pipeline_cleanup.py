@@ -30,13 +30,11 @@ async def test_cleanup_ephemeral_collections_sanitizes_item_failure(monkeypatch)
             deleted_collections.append(name)
 
     monkeypatch.setattr(
-        evaluations_rag_pipeline,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _FakeService(),
     )
     monkeypatch.setattr(
-        evaluations_rag_pipeline,
-        "create_from_settings_for_user",
+        "tldw_Server_API.app.core.RAG.rag_service.vector_stores.create_from_settings_for_user",
         lambda _settings, _user_id: _FakeAdapter(),
     )
 

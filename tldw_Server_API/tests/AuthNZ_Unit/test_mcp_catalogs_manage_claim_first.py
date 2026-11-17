@@ -55,7 +55,7 @@ async def test_require_org_manager_allows_admin_role_claim_without_membership_lo
     async def _fail_if_called(*args, **kwargs):  # pragma: no cover - should not run
         raise AssertionError("admin principal should bypass org membership lookup")
 
-    monkeypatch.setattr(mcp_catalogs_manage, "list_org_members", _fail_if_called)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.orgs_teams.list_org_members", _fail_if_called)
 
     await mcp_catalogs_manage._require_org_manager(
         _principal(user_id=None, roles=["admin"], is_admin=False),
@@ -95,7 +95,7 @@ async def test_require_org_manager_membership_backend_failure_log_is_sanitized(
         raise RuntimeError("org membership backend exploded at /private/mcp-catalogs.db")
 
     monkeypatch.setattr(mcp_catalogs_manage, "logger", logger_stub)
-    monkeypatch.setattr(mcp_catalogs_manage, "list_org_members", _raise_membership_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.orgs_teams.list_org_members", _raise_membership_error)
 
     with pytest.raises(HTTPException) as exc:
         await mcp_catalogs_manage._require_org_manager(
@@ -119,7 +119,7 @@ async def test_require_team_manager_allows_lead_member(
             {"user_id": 42, "role": "lead"},
         ]
 
-    monkeypatch.setattr(mcp_catalogs_manage, "list_team_members", _fake_team_members)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.orgs_teams.list_team_members", _fake_team_members)
 
     await mcp_catalogs_manage._require_team_manager(
         _principal(user_id=42, roles=["user"], is_admin=False),
@@ -135,7 +135,7 @@ async def test_require_team_manager_denies_non_manager_member(
         assert team_id == 3
         return [{"user_id": 42, "role": "member"}]
 
-    monkeypatch.setattr(mcp_catalogs_manage, "list_team_members", _fake_team_members)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.orgs_teams.list_team_members", _fake_team_members)
 
     with pytest.raises(HTTPException) as exc:
         await mcp_catalogs_manage._require_team_manager(
@@ -156,7 +156,7 @@ async def test_require_team_manager_membership_backend_failure_log_is_sanitized(
         raise RuntimeError("team membership backend exploded at /private/mcp-catalogs.db")
 
     monkeypatch.setattr(mcp_catalogs_manage, "logger", logger_stub)
-    monkeypatch.setattr(mcp_catalogs_manage, "list_team_members", _raise_membership_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.orgs_teams.list_team_members", _raise_membership_error)
 
     with pytest.raises(HTTPException) as exc:
         await mcp_catalogs_manage._require_team_manager(

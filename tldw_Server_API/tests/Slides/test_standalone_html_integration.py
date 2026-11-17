@@ -365,7 +365,7 @@ async def test_owner_generation_jobs_and_presentation_http_contract(
             provenance=provenance,
         )
 
-    monkeypatch.setattr(slides_standalone_html, "resolve_standalone_html_source", resolve_source)
+    monkeypatch.setattr("tldw_Server_API.app.core.Slides.standalone_html_sources.resolve_standalone_html_source", resolve_source)
 
     provider_calls: list[str] = []
 

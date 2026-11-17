@@ -480,6 +480,9 @@ class WebScrapingRequest(BaseModel):
     )
     max_depth: int = 3
     summarize_checkbox: bool = False
+    skip_existing_analysis: bool = Field(
+        False, description="Reuse an existing single-URL library item before running its analysis."
+    )
     custom_prompt: Optional[str] = None
     api_name: Optional[str] = None
     # api_key intentionally omitted for security

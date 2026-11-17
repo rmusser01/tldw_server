@@ -66,8 +66,7 @@ async def test_public_embeddings_store_outage_is_503_before_static_or_provider_d
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
     monkeypatch.setattr(
-        embeddings_endpoint,
-        "load_server_config_snapshot",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot",
         static_snapshot,
     )
     monkeypatch.setattr(embeddings_endpoint, "_create_embedding_with_orchestrator", engine_boundary)
@@ -201,12 +200,11 @@ async def test_concurrent_oauth_401_refresh_store_outage_is_503_without_retry(
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
     monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
     monkeypatch.setattr(
-        embeddings_endpoint,
-        "load_server_config_snapshot",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot",
         static_snapshot,
     )
     monkeypatch.setattr(embeddings_endpoint, "_resolve_embeddings_byok", resolve_credentials)
-    monkeypatch.setattr(embeddings_endpoint, "get_embeddings_registry", lambda: AdapterRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: AdapterRegistry())
     monkeypatch.setattr(embeddings_endpoint, "_create_embedding_with_orchestrator", engine_boundary)
     monkeypatch.setattr(embeddings_endpoint, "_create_embedding_legacy", engine_boundary)
     overrides_module.set_llm_provider_overrides_cache_for_tests(
@@ -324,11 +322,10 @@ async def test_late_override_after_structured_absence_cannot_mix_embedding_adapt
         capture_snapshot,
     )
     monkeypatch.setattr(
-        embeddings_endpoint,
-        "load_server_config_snapshot",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot",
         gated_static_lookup,
     )
-    monkeypatch.setattr(embeddings_endpoint, "get_embeddings_registry", lambda: AdapterRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: AdapterRegistry())
     monkeypatch.setattr(
         embeddings_endpoint,
         "_create_embedding_with_orchestrator",
@@ -507,12 +504,11 @@ async def test_embeddings_static_fallback_freezes_one_config_generation_at_adapt
     monkeypatch.setattr(byok_runtime, "load_server_config_snapshot", load_static_snapshot)
     monkeypatch.setattr(byok_helpers, "load_server_config_snapshot", load_static_snapshot)
     monkeypatch.setattr(
-        embeddings_endpoint,
-        "load_server_config_snapshot",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot",
         load_static_snapshot,
     )
     monkeypatch.setattr(byok_runtime, "loaded_config_data", initial_config)
-    monkeypatch.setattr(embeddings_endpoint, "get_embeddings_registry", lambda: AdapterRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: AdapterRegistry())
     monkeypatch.setattr(
         embeddings_endpoint,
         "_create_embedding_with_orchestrator",
@@ -639,13 +635,11 @@ async def test_embedding_override_merges_one_frozen_static_config_at_adapter_bou
         lambda _provider: GatedSnapshot(),
     )
     monkeypatch.setattr(
-        embeddings_endpoint,
-        "load_server_config_snapshot",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot",
         load_static_snapshot,
     )
     monkeypatch.setattr(
-        embeddings_endpoint,
-        "get_embeddings_registry",
+        "tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry",
         lambda: AdapterRegistry(),
     )
     request = Request(
@@ -866,7 +860,7 @@ async def test_embeddings_adapter_uses_captured_environment_or_immutable_default
         "_resolve_embeddings_byok",
         resolve_then_rotate_environment,
     )
-    monkeypatch.setattr(embeddings_endpoint, "get_embeddings_registry", lambda: AdapterRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry", lambda: AdapterRegistry())
     monkeypatch.setattr(
         embeddings_endpoint,
         "_create_embedding_with_orchestrator",
@@ -1041,8 +1035,7 @@ async def test_sequential_embedding_executors_coalesce_oauth_refresh_generation(
         )
 
     monkeypatch.setattr(
-        embeddings_endpoint,
-        "resolve_byok_credentials",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_runtime.resolve_byok_credentials",
         resolve_credentials,
     )
     overrides_module.set_llm_provider_overrides_cache_for_tests({})
@@ -1166,8 +1159,7 @@ async def test_embedding_executor_rechecks_policy_for_each_adapter_model(
         resolve_credentials,
     )
     monkeypatch.setattr(
-        embeddings_endpoint,
-        "get_embeddings_registry",
+        "tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry.get_embeddings_registry",
         lambda: AdapterRegistry(),
     )
     executor = embeddings_endpoint._EndpointEmbeddingExecutor(

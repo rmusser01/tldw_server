@@ -29,10 +29,10 @@ def test_abtest_audit_hooks_emitted(monkeypatch, tmp_path):
             calls[key] += 1
         return _inner
 
-    monkeypatch.setattr(abtest_endpoints, "log_evaluation_created", _bump("create"))
-    monkeypatch.setattr(abtest_endpoints, "log_run_started", _bump("run"))
-    monkeypatch.setattr(evals_endpoints, "log_evaluation_deleted", _bump("delete"))
-    monkeypatch.setattr(evals_endpoints, "log_evaluation_exported", _bump("export"))
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.audit_adapter.log_evaluation_created", _bump("create"))
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.audit_adapter.log_run_started", _bump("run"))
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.audit_adapter.log_evaluation_deleted", _bump("delete"))
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.audit_adapter.log_evaluation_exported", _bump("export"))
     monkeypatch.setattr(abtest_service, "cleanup_abtest_resources", lambda *args, **kwargs: {"abtests_deleted": 0})
 
     app = FastAPI()

@@ -83,7 +83,7 @@ async def test_streaming_endpoint_frames_core_events_as_ndjson(monkeypatch: pyte
 
     monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
     monkeypatch.setattr(rag_ep, "_log_rag_queries_for_org", fake_log_rag_queries_for_org)
-    monkeypatch.setattr(rag_ep, "stream_rag_events", fake_stream_rag_events)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.streaming_executor.stream_rag_events", fake_stream_rag_events)
 
     response = await rag_ep.unified_search_stream_endpoint(
         request_raw=object(),
@@ -269,9 +269,9 @@ async def test_unified_search_standard_path_maps_core_result_directly(
         return None
 
     monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", fake_unified_rag_pipeline)
-    monkeypatch.setattr(rag_ep, "rag_result_from_unified_search_result", fake_rag_result_from_unified_search_result)
-    monkeypatch.setattr(rag_ep, "rag_result_to_response", fake_rag_result_to_response)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", fake_unified_rag_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.response_mapping.rag_result_from_unified_search_result", fake_rag_result_from_unified_search_result)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.response_mapping.rag_result_to_response", fake_rag_result_to_response)
     monkeypatch.setattr(rag_ep, "_log_rag_queries_for_org", fake_log_rag_queries_for_org)
 
     response = await rag_ep.unified_search_endpoint(

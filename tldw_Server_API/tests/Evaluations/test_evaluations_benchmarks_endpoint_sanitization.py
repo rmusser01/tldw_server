@@ -46,7 +46,7 @@ async def test_run_benchmark_sanitizes_backend_fallback_log(monkeypatch: pytest.
         raise RuntimeError("benchmark backend leaked /private/evals-benchmark.db")
 
     monkeypatch.setattr(evaluations_benchmarks, "logger", logger_stub)
-    monkeypatch.setattr(evaluations_benchmarks, "get_registry", _raise_registry_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_registry.get_registry", _raise_registry_error)
     monkeypatch.setattr(
         evaluations_benchmarks,
         "_get_evaluation_manager_for_user",
@@ -95,8 +95,8 @@ async def test_run_benchmark_sanitizes_per_item_failure_log(monkeypatch: pytest.
             raise RuntimeError("benchmark item backend leaked /private/evals-benchmark.db")
 
     monkeypatch.setattr(evaluations_benchmarks, "logger", logger_stub)
-    monkeypatch.setattr(evaluations_benchmarks, "get_registry", lambda: _Registry())
-    monkeypatch.setattr(evaluations_benchmarks, "load_benchmark_dataset", lambda *_args, **_kwargs: [{"id": "item-1"}])
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_registry.get_registry", lambda: _Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_loaders.load_benchmark_dataset", lambda *_args, **_kwargs: [{"id": "item-1"}])
     monkeypatch.setattr(
         evaluations_benchmarks,
         "_get_evaluation_manager_for_user",

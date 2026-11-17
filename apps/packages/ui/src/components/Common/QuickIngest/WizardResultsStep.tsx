@@ -224,6 +224,9 @@ const SkippedRow: React.FC<SkippedRowProps> = React.memo(
           <p className="mt-0.5 text-xs text-text-subtle">
             {skippedMessage}
           </p>
+          {item.warning && (
+            <p className="mt-0.5 whitespace-pre-line break-words text-xs text-text-subtle">{item.warning}</p>
+          )}
         </div>
         <div className="flex flex-shrink-0 items-center gap-1">
           {showOpenMedia && (

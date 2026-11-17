@@ -72,7 +72,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
-from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.exceptions import TokenizerUnavailable
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import get_allowed_fields
 from tldw_Server_API.app.core.LLM_Calls.extra_body_compat_catalog import (
@@ -88,6 +87,7 @@ from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     strict_token_counting_enabled as _strict_token_counting_enabled_shared,
 )
 from tldw_Server_API.app.core.testing import is_test_context
+import tldw_Server_API.app.core.config as _config
 
 router = APIRouter()
 
@@ -194,7 +194,7 @@ def _resolve_provider_native_tokenizer(
         provider,
         model,
         strict_mode_effective=_strict_token_counting_enabled(),
-        config_loader=load_comprehensive_config,
+        config_loader=_config.load_comprehensive_config,
         adapter_cls=_ProviderNativeTokenizerHTTPAdapter,
         runtime_probe_exact=True,
         runtime_probe_timeout_seconds=2.0,
@@ -248,7 +248,7 @@ def _resolve_tokenizer(provider: str, model: str) -> tuple[Any, str, str, str, b
         provider,
         model,
         strict_mode_effective=strict_mode_effective,
-        config_loader=load_comprehensive_config,
+        config_loader=_config.load_comprehensive_config,
         adapter_cls=_ProviderNativeTokenizerHTTPAdapter,
         runtime_probe_exact=True,
         runtime_probe_timeout_seconds=2.0,
@@ -418,7 +418,7 @@ def _truthy(value: Any) -> bool:
 def _runtime_context() -> dict[str, Any]:
     strict_openai_compat = False
     try:
-        config_parser = load_comprehensive_config()
+        config_parser = _config.load_comprehensive_config()
         if config_parser.has_section("Local-API") and config_parser.has_option("Local-API", "strict_openai_compat"):
             strict_openai_compat = _truthy(
                 config_parser.get("Local-API", "strict_openai_compat", fallback="false")

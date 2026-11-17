@@ -23,7 +23,7 @@ def test_health_public_and_metrics_private(monkeypatch):
         async def get_metrics_summary(self):
             return {"total_requests": 7}
 
-    monkeypatch.setattr(eval_unified, "get_unified_evaluation_service_for_user", lambda _uid: _Service())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _uid: _Service())
 
     with TestClient(app) as client:
         health_response = client.get("/api/v1/evaluations/health")
@@ -134,7 +134,7 @@ def test_dataset_routes_require_read_vs_manage_permissions(monkeypatch):
             _ = (deleted_by, created_by)
             return stored_datasets.pop(dataset_id, None) is not None
 
-    monkeypatch.setattr(eval_datasets, "get_unified_evaluation_service_for_user", lambda _uid: _Service())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _uid: _Service())
 
     current_permissions: list[str] = []
 

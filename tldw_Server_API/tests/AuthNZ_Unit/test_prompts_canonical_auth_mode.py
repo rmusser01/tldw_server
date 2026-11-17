@@ -23,7 +23,7 @@ async def route(monkeypatch, tmp_path):
     monkeypatch.delenv("PROMPTS_REQUIRE_ADMIN", raising=False)
     canonical = Settings(_env_file=None, AUTH_MODE="multi_user",
                          JWT_SECRET_KEY="synthetic-jwt-signing-key-for-prompts-00000")
-    monkeypatch.setattr(prompts, "get_auth_settings", lambda: canonical)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.get_settings", lambda: canonical)
     monkeypatch.setitem(prompts.settings, "SINGLE_USER_MODE", True)
     monkeypatch.setitem(prompts.settings, "SINGLE_USER_API_KEY", SINGLE_KEY)
     monkeypatch.setattr(db_deps, "_get_prompts_db_path_for_user",
@@ -46,7 +46,7 @@ async def route(monkeypatch, tmp_path):
     app = FastAPI()
     app.include_router(prompts.router, prefix="/api/v1/prompts")
     app.dependency_overrides[db_deps.get_request_user] = resolve
-    monkeypatch.setattr(prompts, "get_request_user", resolve)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_request_user", resolve)
     async with AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False),
                            base_url="http://test") as client:
         yield client, canonical, calls
@@ -93,7 +93,7 @@ async def test_multi_admin_policy_stays_claim_based(route, monkeypatch):
 
 @pytest.mark.parametrize("credential,expected", [(SINGLE_KEY, 200), ("wrong", 401), (None, 401)])
 async def test_canonical_single_ignores_legacy_false(route, monkeypatch, credential, expected):
-    monkeypatch.setattr(prompts, "get_auth_settings", lambda: SimpleNamespace(AUTH_MODE="single_user"))
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.get_settings", lambda: SimpleNamespace(AUTH_MODE="single_user"))
     monkeypatch.setitem(prompts.settings, "SINGLE_USER_MODE", False)
     # Database identity is separately resolved by the existing shared dependency.
     headers = {"Authorization": "Bearer alice"}
@@ -109,7 +109,7 @@ async def test_canonical_settings_failure_cannot_authorize_legacy_single_admin(r
     def fail_settings():
         raise ValueError("Invalid canonical settings")
 
-    monkeypatch.setattr(prompts, "get_auth_settings", fail_settings)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.get_settings", fail_settings)
     response = await route[0].get("/api/v1/prompts/collections", headers={
         "Token": SINGLE_KEY, "Authorization": "Bearer alice"})
     assert response.status_code == 500

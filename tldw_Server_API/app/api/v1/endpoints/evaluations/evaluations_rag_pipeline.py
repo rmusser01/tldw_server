@@ -20,12 +20,8 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     PipelinePresetResponse,
 )
 from tldw_Server_API.app.core.DB_Management.Evaluations_DB import to_unix_timestamp
-from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
-    get_unified_evaluation_service_for_user,
-)
-from tldw_Server_API.app.core.RAG.rag_service.vector_stores import (
-    create_from_settings_for_user,
-)
+import tldw_Server_API.app.core.Evaluations.unified_evaluation_service as _unified_evaluation_service
+import tldw_Server_API.app.core.RAG.rag_service.vector_stores as _vector_stores
 
 pipeline_router = APIRouter()
 
@@ -59,7 +55,7 @@ async def create_or_update_pipeline_preset(
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         db = svc.db
         if db is None:
             raise ValueError("Database not available")
@@ -93,7 +89,7 @@ async def list_pipeline_presets(
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         db = svc.db
         if db is None:
             raise ValueError("Database not available")
@@ -135,7 +131,7 @@ async def get_pipeline_preset(
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         db = svc.db
         if db is None:
             raise ValueError("Database not available")
@@ -176,7 +172,7 @@ async def delete_pipeline_preset(
     current_user: User = Depends(get_eval_request_user),
 ) -> Response:
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         db = svc.db
         if db is None:
             raise ValueError("Database not available")
@@ -210,7 +206,7 @@ async def cleanup_ephemeral_collections(
 ):
     """Delete expired ephemeral collections according to TTL registry."""
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(current_user.id)
         db = svc.db
         if db is None:
             raise ValueError("Database not available")
@@ -218,7 +214,7 @@ async def cleanup_ephemeral_collections(
         if not expired:
             return PipelineCleanupResponse(expired_count=0, deleted_count=0)
         from tldw_Server_API.app.core.config import settings as app_settings
-        adapter = create_from_settings_for_user(app_settings, current_user.id_str)
+        adapter = _vector_stores.create_from_settings_for_user(app_settings, current_user.id_str)
         await adapter.initialize()
         deleted = 0
         errors: list[str] = []

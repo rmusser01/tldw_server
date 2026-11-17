@@ -34,10 +34,10 @@ from tldw_Server_API.app.core.Chunking.templates import (
     ChunkingTemplate,
     TemplateClassifier,
     TemplateLearner,
-    TemplateProcessor,
     TemplateStage,
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
+import tldw_Server_API.app.core.Chunking.templates as _templates
 
 router = APIRouter(prefix="/chunking/templates", tags=["chunking-templates"])
 
@@ -800,7 +800,7 @@ async def apply_template(
         )
 
         # Apply template using TemplateProcessor
-        processor = TemplateProcessor()
+        processor = _templates.TemplateProcessor()
 
         # Override options if provided
         options = {}

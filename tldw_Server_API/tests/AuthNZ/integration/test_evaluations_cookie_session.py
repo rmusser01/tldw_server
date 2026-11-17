@@ -229,7 +229,7 @@ async def test_evaluation_cookie_canonical_failure_stays_closed(monkeypatch):
     async def unavailable(*args, **kwargs):
         raise HTTPException(status_code=503, detail="Canonical authentication unavailable")
 
-    monkeypatch.setattr(evaluations_auth, "get_request_user", unavailable)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_request_user", unavailable)
     monkeypatch.setenv("TESTING", "false")
     settings = get_settings()
     request = Request({"type": "http", "client": ("127.0.0.1", 1234),

@@ -168,14 +168,13 @@ def test_a_run_saved_by_default_is_stored_for_its_user(monkeypatch, tmp_path) ->
     }
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
     monkeypatch.setattr(
-        benchmark_module,
-        "get_registry",
+        "tldw_Server_API.app.core.Evaluations.benchmark_registry.get_registry",
         lambda: SimpleNamespace(
             get=lambda _name: SimpleNamespace(evaluation_type="demo"),
             create_evaluator=lambda _name: SimpleNamespace(format_for_custom_metric=lambda _item: item),
         ),
     )
-    monkeypatch.setattr(benchmark_module, "load_benchmark_dataset", lambda *_a, **_k: [{"q": "q"}])
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_loaders.load_benchmark_dataset", lambda *_a, **_k: [{"q": "q"}])
     monkeypatch.setattr(EvaluationManager, "evaluate_custom_metric", _evaluate)
     app = _make_app()
     _override_user(app, [EVALS_MANAGE], user_id=7)

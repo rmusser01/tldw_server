@@ -27,35 +27,22 @@ from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
-    get_auth_principal,
     get_db_transaction,
-    verify_jwt_and_fetch_user,
 )
 from tldw_Server_API.app.api.v1.API_Deps.mcp_deps import get_mcp_server_dep
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import ToolCatalogResponse
-from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
-from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
-    is_single_user_ip_allowed,
-    resolve_client_ip,
-)
-from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
-    list_active_team_memberships_for_user,
-    list_org_memberships_for_user,
-)
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE, SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import (
     get_settings,
-    is_single_user_profile_mode,
 )
 from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
 )
 from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement_enabled
-from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse, MCPServer, get_config, get_mcp_server
+from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse, MCPServer, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
-from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import TokenData, get_jwt_manager
+from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import TokenData
 from tldw_Server_API.app.core.MCP_unified.auth_scope import project_authenticated_execution_scope
 from tldw_Server_API.app.core.MCP_unified.jsonrpc_transport import (
     invalid_request_response,
@@ -70,18 +57,26 @@ from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_
 from tldw_Server_API.app.core.MCP_unified.protocol import _trusted_compat_claims_metadata
 from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
 from tldw_Server_API.app.core.MCP_unified.security.request_guards import enforce_http_security
-from tldw_Server_API.app.core.MCP_unified.server import _is_authnz_access_token
 from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
     match_standalone_request_route,
     standalone_request_validation_response,
 )
-from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
 from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
     STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY,
     get_app_standalone_html_validation_pool,
 )
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from tldw_Server_API.app.services import admin_tool_catalog_service
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
+import tldw_Server_API.app.core.AuthNZ.api_key_manager as _api_key_manager
+import tldw_Server_API.app.core.AuthNZ.ip_allowlist as _ip_allowlist
+import tldw_Server_API.app.core.AuthNZ.orgs_teams as _orgs_teams
+import tldw_Server_API.app.core.AuthNZ.settings as _settings
+import tldw_Server_API.app.core.AuthNZ.websocket_session_auth as _websocket_session_auth
+import tldw_Server_API.app.core.MCP_unified as _MCP_unified
+import tldw_Server_API.app.core.MCP_unified.auth.jwt_manager as _jwt_manager
+import tldw_Server_API.app.core.MCP_unified.server as _server
+import tldw_Server_API.app.core.Security.url_validation as _url_validation
+import tldw_Server_API.app.core.testing as _testing
 
 _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -275,7 +270,7 @@ def _should_use_single_user_api_key_compat() -> bool:
     if flag in {"0", "false", "off"}:
         return False
     try:
-        return bool(is_single_user_profile_mode())
+        return bool(_settings.is_single_user_profile_mode())
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
         logger.debug(
             "MCP unified: single-user profile detection failed; defaulting compat shim to False",
@@ -287,14 +282,14 @@ def _should_use_single_user_api_key_compat() -> bool:
 
 def _require_demo_auth_enabled(request: Request) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
     """Require the direct MCP demo-auth surface to be explicitly enabled."""
-    if not env_flag_enabled("MCP_ENABLE_DEMO_AUTH"):
+    if not _testing.env_flag_enabled("MCP_ENABLE_DEMO_AUTH"):
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="Direct MCP auth is disabled. Use AuthNZ bearer tokens.",
         )
 
-    cfg = get_config()
-    test_mode = is_test_mode()
+    cfg = _MCP_unified.get_config()
+    test_mode = _testing.is_test_mode()
     if not cfg.debug_mode and not test_mode:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -328,7 +323,7 @@ def _get_client_ip(request: Optional[Request]) -> Optional[str]:
     if request is None:
         return None
     try:
-        return resolve_client_ip(request, get_settings())
+        return _ip_allowlist.resolve_client_ip(request, get_settings())
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
         logger.debug("Failed to extract client IP")
     return None
@@ -428,7 +423,7 @@ async def _resolve_token_data_compat(
                 from starlette.requests import Request as _Request
 
                 request = _Request({"type": "http", "headers": []})
-            user = await verify_jwt_and_fetch_user(request, token)
+            user = await _auth_deps.verify_jwt_and_fetch_user(request, token)
             uid = str(getattr(user, "id", None))
             if uid:
                 return TokenData(
@@ -444,7 +439,7 @@ async def _resolve_token_data_compat(
             extra={"auth_method": "authnz_jwt"},
             exc_info=True,
         )
-        if token and _is_authnz_access_token(token):
+        if token and _server._is_authnz_access_token(token):
             logger.debug(
                 "AuthNZ JWT rejected; not falling back to MCP JWT",
                 extra={"auth_method": "authnz_jwt"},
@@ -464,7 +459,7 @@ async def _resolve_token_data_compat(
             extra={"auth_method": "authnz_jwt"},
             exc_info=True,
         )
-        if token and _is_authnz_access_token(token):
+        if token and _server._is_authnz_access_token(token):
             logger.debug(
                 "AuthNZ JWT rejected; not falling back to MCP JWT",
                 extra={"auth_method": "authnz_jwt"},
@@ -482,7 +477,7 @@ async def _resolve_token_data_compat(
     # MCP JWT fallback
     try:
         if not authnz_token_failed and credentials and credentials.credentials:
-            jwt_manager = get_jwt_manager()
+            jwt_manager = _jwt_manager.get_jwt_manager()
             return jwt_manager.verify_token(credentials.credentials)
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
         logger.debug(
@@ -504,7 +499,7 @@ async def _resolve_token_data_compat(
                         allowed.add(settings.SINGLE_USER_API_KEY)
                     if x_api_key in {a for a in allowed if a}:
                         client_ip = _get_client_ip(request)
-                        if not is_single_user_ip_allowed(client_ip, settings):
+                        if not _ip_allowlist.is_single_user_ip_allowed(client_ip, settings):
                             return None
                         auth_via = "single_user_api_key"
                         if request is not None:
@@ -528,7 +523,7 @@ async def _resolve_token_data_compat(
                     extra={"auth_method": "single_user_api_key"},
                     exc_info=True,
                 )
-            api_mgr = await get_api_key_manager()
+            api_mgr = await _api_key_manager.get_api_key_manager()
             client_ip = _get_client_ip(request)
             info = await api_mgr.validate_api_key(x_api_key, ip_address=client_ip)
             if info and info.get("user_id"):
@@ -575,7 +570,7 @@ async def _get_optional_auth_principal(request: Request) -> Optional[AuthPrincip
         )
 
     try:
-        return await get_auth_principal(request)
+        return await _auth_deps.get_auth_principal(request)
     except HTTPException:
         return None
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
@@ -662,7 +657,7 @@ async def _attach_api_key_metadata(
 
     if auth.raw_api_key and api_key_info is None:
         try:
-            api_mgr = await get_api_key_manager()
+            api_mgr = await _api_key_manager.get_api_key_manager()
             client_ip = _get_client_ip(http_request)
             api_key_info = await api_mgr.validate_api_key(auth.raw_api_key, ip_address=client_ip)
         except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
@@ -921,7 +916,7 @@ async def websocket_endpoint(
     };
     ```
     """
-    await resolve_single_user_cookie_websocket(websocket)
+    await _websocket_session_auth.resolve_single_user_cookie_websocket(websocket)
     cookie_close_code = cookie_websocket_rejection_code(websocket)
     if cookie_close_code is not None:
         await websocket.close(code=cookie_close_code)
@@ -1394,7 +1389,7 @@ async def list_tool_catalogs(
             uid = None
         if uid is not None:
             try:
-                memberships = await list_org_memberships_for_user(uid)
+                memberships = await _orgs_teams.list_org_memberships_for_user(uid)
                 for m in memberships:
                     try:
                         org_id = int(m.get("org_id"))
@@ -1405,7 +1400,7 @@ async def list_tool_catalogs(
                 logger.debug("MCP tool catalogs: org membership lookup failed")
 
             try:
-                memberships = await list_active_team_memberships_for_user(uid)
+                memberships = await _orgs_teams.list_active_team_memberships_for_user(uid)
                 for membership in memberships:
                     try:
                         team_id_val = membership.get("team_id") if isinstance(membership, dict) else None
@@ -1810,7 +1805,7 @@ async def create_token(
         )
 
     subject = os.getenv("MCP_DEMO_AUTH_SUBJECT", "admin_user")
-    jwt_manager = get_jwt_manager()
+    jwt_manager = _jwt_manager.get_jwt_manager()
     access_token = jwt_manager.create_access_token(
         subject=subject,
         username=username,
@@ -1847,7 +1842,7 @@ async def refresh_token(
     """
     _require_demo_auth_enabled(request)
 
-    jwt_manager = get_jwt_manager()
+    jwt_manager = _jwt_manager.get_jwt_manager()
     refresh_token_value = auth_request.refresh_token
     token_id = auth_request.token_id
     # Attempt to find token_id if not provided
@@ -2054,7 +2049,7 @@ async def check_mcp_connection(
     hostname = parsed.hostname or ""
     if not hostname or _is_private_ip(hostname):
         return MCPConnectionTestResponse(reachable=False, error="Cannot connect to private or reserved addresses")
-    assert_url_safe(catalog_probe_url)
+    _url_validation.assert_url_safe(catalog_probe_url)
 
     headers: dict[str, str] = {}
     if req.auth_type == "bearer" and req.secret:

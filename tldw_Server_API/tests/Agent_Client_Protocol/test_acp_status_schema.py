@@ -200,7 +200,7 @@ def stub_acp_store(monkeypatch):
 
     monkeypatch.setattr(acp_endpoints, "get_acp_session_store", _get_store)
     monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner)
-    monkeypatch.setattr(acp_endpoints, "get_existing_runner_client", lambda: runner)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_existing_runner_client", lambda: runner)
     return store
 
 

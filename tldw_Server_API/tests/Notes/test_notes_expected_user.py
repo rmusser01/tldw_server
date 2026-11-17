@@ -28,7 +28,7 @@ def notes_client(tmp_path, monkeypatch):
     app.dependency_overrides[notes.get_request_user] = lambda: SimpleNamespace(id=84, is_admin=True)
     app.dependency_overrides[get_auth_principal] = lambda: SimpleNamespace(user_id=84)
     app.dependency_overrides[notes.get_rate_limiter_dep] = lambda: _RateLimiter()
-    monkeypatch.setattr(notes, "get_active_server_origin_sync_service_for_user", lambda _user_id: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user", lambda _user_id: None)
     try:
         with TestClient(app) as client:
             yield client, db, note_id

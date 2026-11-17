@@ -149,10 +149,9 @@ async def test_list_tool_catalogs_uses_membership_repo_for_team_scope(
         ]
 
     monkeypatch.setattr(mcp_mod, "_attach_api_key_metadata", _fake_attach_api_key_metadata)
-    monkeypatch.setattr(mcp_mod, "list_org_memberships_for_user", _fake_list_org_memberships_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.orgs_teams.list_org_memberships_for_user", _fake_list_org_memberships_for_user)
     monkeypatch.setattr(
-        mcp_mod,
-        "list_active_team_memberships_for_user",
+        "tldw_Server_API.app.core.AuthNZ.orgs_teams.list_active_team_memberships_for_user",
         _fake_list_active_team_memberships_for_user,
     )
     monkeypatch.setattr(
@@ -220,10 +219,9 @@ async def test_list_tool_catalogs_membership_lookup_logs_are_sanitized(
     logger_stub = _LoggerStub()
     monkeypatch.setattr(mcp_mod, "logger", logger_stub)
     monkeypatch.setattr(mcp_mod, "_attach_api_key_metadata", _fake_attach_api_key_metadata)
-    monkeypatch.setattr(mcp_mod, "list_org_memberships_for_user", _raise_org_lookup)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.orgs_teams.list_org_memberships_for_user", _raise_org_lookup)
     monkeypatch.setattr(
-        mcp_mod,
-        "list_active_team_memberships_for_user",
+        "tldw_Server_API.app.core.AuthNZ.orgs_teams.list_active_team_memberships_for_user",
         _raise_team_lookup,
     )
     monkeypatch.setattr(

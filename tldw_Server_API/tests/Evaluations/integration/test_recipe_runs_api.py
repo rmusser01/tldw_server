@@ -472,7 +472,7 @@ async def test_embeddings_recipe_candidates_endpoint_returns_current_model(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_recipes.build_embedding_recipe_candidate_hints",
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.build_embedding_recipe_candidate_hints",
         lambda *, user: {
             "recipe_id": "embeddings_model_selection",
             "current": {

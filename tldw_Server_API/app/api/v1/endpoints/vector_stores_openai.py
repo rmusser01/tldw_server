@@ -18,14 +18,20 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, RequireRole, resolve_user_id_for_request, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    get_auth_principal,
+    get_request_user,
+    rbac_rate_limit,
+    RequirePermission,
+    RequireRole,
+    User,
+)
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Chunking.base import ChunkerConfig, ChunkingMethod
-from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
@@ -36,34 +42,7 @@ from tldw_Server_API.app.core.Embeddings.vector_store_batches_db import (
     count_batches,
 )
 from tldw_Server_API.app.core.Embeddings.vector_store_batches_db import (
-    create_batch as db_create_batch,
-)
-from tldw_Server_API.app.core.Embeddings.vector_store_batches_db import (
-    get_batch as db_get_batch,
-)
-from tldw_Server_API.app.core.Embeddings.vector_store_batches_db import (
     init_db as init_batches_db,
-)
-from tldw_Server_API.app.core.Embeddings.vector_store_batches_db import (
-    list_batches as db_list_batches,
-)
-from tldw_Server_API.app.core.Embeddings.vector_store_batches_db import (
-    update_batch as db_update_batch,
-)
-from tldw_Server_API.app.core.Embeddings.vector_store_meta_db import (
-    delete_store as meta_delete_store,
-)
-from tldw_Server_API.app.core.Embeddings.vector_store_meta_db import (
-    find_store_by_name as meta_find_store_by_name,
-)
-from tldw_Server_API.app.core.Embeddings.vector_store_meta_db import (
-    init_meta_db,
-)
-from tldw_Server_API.app.core.Embeddings.vector_store_meta_db import (
-    list_stores as meta_list_stores,
-)
-from tldw_Server_API.app.core.Embeddings.vector_store_meta_db import (
-    register_store as meta_register_store,
 )
 from tldw_Server_API.app.core.Embeddings.vector_store_meta_db import (
     rename_store as meta_rename_store,
@@ -81,6 +60,10 @@ from tldw_Server_API.app.core.RAG.rag_service.vector_stores.factory import (
 from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
+import tldw_Server_API.app.core.Chunking.chunker as _chunker
+import tldw_Server_API.app.core.Embeddings.vector_store_batches_db as _vector_store_batches_db
+import tldw_Server_API.app.core.Embeddings.vector_store_meta_db as _vector_store_meta_db
 
 RBAC_VECTOR_ADMIN = rbac_rate_limit("vector.admin")
 _ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
@@ -357,15 +340,15 @@ async def create_vector_store(
     await adapter.initialize()
 
     # Enforce unique names per-user using meta DB, but ignore stale entries (no backing collection)
-    uid = resolve_user_id_for_request(
+    uid = _auth_deps.resolve_user_id_for_request(
         current_user,
         error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
     name_lower = (payload.name or "").strip().lower()
     if payload.name and payload.name.strip():
         try:
-            init_meta_db(uid)
-            existing = meta_find_store_by_name(uid, payload.name)
+            _vector_store_meta_db.init_meta_db(uid)
+            existing = _vector_store_meta_db.find_store_by_name(uid, payload.name)
             if existing:
                 raise HTTPException(status_code=409, detail=f"A vector store named '{payload.name}' already exists for this user")
         except HTTPException:
@@ -420,7 +403,7 @@ async def create_vector_store(
 
     # Register in meta DB
     try:
-        meta_register_store(uid, store_id, name)
+        _vector_store_meta_db.register_store(uid, store_id, name)
     except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
         logger.warning("Failed to register vector store in meta DB")
 
@@ -449,15 +432,15 @@ async def list_vector_stores(
 ):
     """List vector stores for the current user."""
     # Prefer meta DB for performance and trusted names
-    uid = resolve_user_id_for_request(
+    uid = _auth_deps.resolve_user_id_for_request(
         current_user,
         error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
     stores = []
     used_ids = set()
     try:
-        init_meta_db(uid)
-        meta_rows = meta_list_stores(uid)
+        _vector_store_meta_db.init_meta_db(uid)
+        meta_rows = _vector_store_meta_db.list_stores(uid)
         adapter = None
         for row in meta_rows:
             if adapter is None:
@@ -532,8 +515,8 @@ async def list_vector_store_users(current_user: User = Depends(get_request_user)
             if has_vec_dir:
                 # Count stores via meta DB
                 try:
-                    init_meta_db(uid)
-                    store_count = len(meta_list_stores(uid))
+                    _vector_store_meta_db.init_meta_db(uid)
+                    store_count = len(_vector_store_meta_db.list_stores(uid))
                 except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
                     store_count = 0
                 # Count batches
@@ -577,12 +560,12 @@ async def update_vector_store(
     # Enforce unique name per-user using meta DB first
     if payload.name and payload.name.strip():
         try:
-            uid = resolve_user_id_for_request(
+            uid = _auth_deps.resolve_user_id_for_request(
                 current_user,
                 error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-            init_meta_db(uid)
-            existing = meta_find_store_by_name(uid, payload.name)
+            _vector_store_meta_db.init_meta_db(uid)
+            existing = _vector_store_meta_db.find_store_by_name(uid, payload.name)
             if existing and existing.get('id') != store_id:
                 raise HTTPException(status_code=409, detail=f"A vector store named '{payload.name}' already exists for this user")
         except HTTPException:
@@ -621,17 +604,17 @@ async def update_vector_store(
     # Update meta DB on rename: if not present, register; else rename
     try:
         if payload.name and payload.name.strip():
-            uid_str = resolve_user_id_for_request(
+            uid_str = _auth_deps.resolve_user_id_for_request(
                 current_user,
                 error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-            init_meta_db(uid_str)
-            rows = meta_list_stores(uid_str)
+            _vector_store_meta_db.init_meta_db(uid_str)
+            rows = _vector_store_meta_db.list_stores(uid_str)
             if any(r.get('id') == store_id for r in rows):
                 meta_rename_store(uid_str, store_id, payload.name)
             else:
                 # Not present: register with the new name
-                meta_register_store(uid_str, store_id, payload.name)
+                _vector_store_meta_db.register_store(uid_str, store_id, payload.name)
     except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
         logger.warning("Failed to persist vector store meta name update")
 
@@ -653,8 +636,8 @@ async def delete_vector_store(
     await adapter.initialize()
     await adapter.delete_collection(store_id)
     try:
-        meta_delete_store(
-            resolve_user_id_for_request(
+        _vector_store_meta_db.delete_store(
+            _auth_deps.resolve_user_id_for_request(
                 current_user,
                 error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             ),
@@ -860,7 +843,7 @@ async def duplicate_vector_store(
     payload: DuplicateStoreRequest = Body(...),
     current_user: User = Depends(get_request_user)
 ):
-    uid = resolve_user_id_for_request(
+    uid = _auth_deps.resolve_user_id_for_request(
         current_user,
         error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
@@ -868,8 +851,8 @@ async def duplicate_vector_store(
         raise HTTPException(400, detail="new_name is required")
     # Uniqueness via meta DB
     try:
-        init_meta_db(uid)
-        if meta_find_store_by_name(uid, payload.new_name):
+        _vector_store_meta_db.init_meta_db(uid)
+        if _vector_store_meta_db.find_store_by_name(uid, payload.new_name):
             raise HTTPException(409, detail=f"A vector store named '{payload.new_name}' already exists for this user")
     except HTTPException:
         raise
@@ -1273,13 +1256,13 @@ async def delete_vector(
     current_user: User = Depends(get_request_user)
 ):
     # Validate store via meta DB
-    uid = resolve_user_id_for_request(
+    uid = _auth_deps.resolve_user_id_for_request(
         current_user,
         error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
     try:
-        init_meta_db(uid)
-        rows = meta_list_stores(uid)
+        _vector_store_meta_db.init_meta_db(uid)
+        rows = _vector_store_meta_db.list_stores(uid)
         if not any(r.get('id') == store_id for r in rows):
             raise HTTPException(status_code=404, detail="Vector store not found")
     except HTTPException:
@@ -1444,7 +1427,7 @@ async def upsert_vectors_batch(
     # Stamp the owner: _BATCH_STATUS is a process-global dict keyed by batch id
     # alone, and the status endpoint reads it before falling back to the
     # owner-scoped database record.
-    _batch_owner = resolve_user_id_for_request(
+    _batch_owner = _auth_deps.resolve_user_id_for_request(
         current_user,
         allow_none=True,
         error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1459,8 +1442,8 @@ async def upsert_vectors_batch(
     # Persist creation
     try:
         uid = _batch_owner
-        init_batches_db(uid)
-        db_create_batch(
+        _vector_store_batches_db.init_db(uid)
+        _vector_store_batches_db.create_batch(
             batch_id=batch_id,
             store_id=store_id,
             user_id=uid,
@@ -1474,13 +1457,13 @@ async def upsert_vectors_batch(
         upserted = res.get("upserted", 0)
         _BATCH_STATUS[batch_id].update({"status": "completed", "upserted": upserted})
         try:
-            db_update_batch(batch_id, user_id=uid, status='completed', upserted=upserted)
+            _vector_store_batches_db.update_batch(batch_id, user_id=uid, status='completed', upserted=upserted)
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
             logger.warning(f"Failed to persist batch completion: {_e}")
     except HTTPException as e:
         _BATCH_STATUS[batch_id].update({"status": "failed", "error": e.detail})
         try:
-            db_update_batch(batch_id, user_id=uid, status='failed', error=str(e.detail))
+            _vector_store_batches_db.update_batch(batch_id, user_id=uid, status='failed', error=str(e.detail))
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
             logger.warning(f"Failed to persist batch failure: {_e}")
         raise
@@ -1489,7 +1472,7 @@ async def upsert_vectors_batch(
         safe_error = "Vector batch upsert failed"
         _BATCH_STATUS[batch_id].update({"status": "failed", "error": safe_error})
         try:
-            db_update_batch(batch_id, user_id=uid, status='failed', error=safe_error)
+            _vector_store_batches_db.update_batch(batch_id, user_id=uid, status='failed', error=safe_error)
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
             logger.warning(f"Failed to persist batch failure: {_e}")
         raise
@@ -1502,7 +1485,7 @@ async def get_batch_status(
     batch_id: str = Path(...),
     current_user: User = Depends(get_request_user)
 ):
-    caller = resolve_user_id_for_request(
+    caller = _auth_deps.resolve_user_id_for_request(
         current_user,
         error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
@@ -1513,7 +1496,7 @@ async def get_batch_status(
         # database lookup immediately below it.
         return cached
     # Fallback to persisted status
-    rec = db_get_batch(batch_id, user_id=caller)
+    rec = _vector_store_batches_db.get_batch(batch_id, user_id=caller)
     if not rec:
         raise HTTPException(404, detail="Batch not found")
     return {
@@ -1540,7 +1523,7 @@ async def list_vector_batches(
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
 ):
-    requested_user_id = resolve_user_id_for_request(
+    requested_user_id = _auth_deps.resolve_user_id_for_request(
         current_user,
         error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
@@ -1551,7 +1534,7 @@ async def list_vector_batches(
                 detail="Admin privileges required",
             )
         requested_user_id = str(user_id)
-    fetched = db_list_batches(user_id=requested_user_id, status=status, limit=limit + 1, offset=offset)
+    fetched = _vector_store_batches_db.list_batches(user_id=requested_user_id, status=status, limit=limit + 1, offset=offset)
     rows = fetched[:limit]
     has_more = len(fetched) > limit
     pagination = build_offset_pagination_meta(
@@ -1679,14 +1662,14 @@ async def create_store_from_media(
         created_store_id = vs.id
 
     # Create a batch record (for both paths) and initialize adapter
-    uid = resolve_user_id_for_request(
+    uid = _auth_deps.resolve_user_id_for_request(
         current_user,
         error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
     batch_id = f"vsb_{uuid.uuid4().hex[:20]}"
     try:
-        init_batches_db(uid)
-        db_create_batch(batch_id, store_id=created_store_id, user_id=uid, status='processing', upserted=0, meta={"source": "create_from_media", "items": len(items)})
+        _vector_store_batches_db.init_db(uid)
+        _vector_store_batches_db.create_batch(batch_id, store_id=created_store_id, user_id=uid, status='processing', upserted=0, meta={"source": "create_from_media", "items": len(items)})
     except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
         pass
 
@@ -1734,7 +1717,7 @@ async def create_store_from_media(
 
         # Persist batch status
         with contextlib.suppress(_VECTORSTORE_NONCRITICAL_EXCEPTIONS):
-            db_update_batch(batch_id, user_id=uid, status='completed', upserted=upserted_total)
+            _vector_store_batches_db.update_batch(batch_id, user_id=uid, status='completed', upserted=upserted_total)
         return {"store_id": created_store_id, "batch_id": batch_id, "upserted": upserted_total}
 
     # Chunk and embed texts in batches (use full Chunker)
@@ -1756,7 +1739,7 @@ async def create_store_from_media(
         default_overlap=payload.chunk_overlap,
         language=(payload.language or 'en')
     )
-    ck = Chunker(config=ck_cfg)
+    ck = _chunker.Chunker(config=ck_cfg)
 
     def add_chunks_for_item(item: dict[str, Any]):
         content = item.get('content') or item.get('analysis') or ''
@@ -1822,7 +1805,7 @@ async def create_store_from_media(
             embed_fn = _get_embeddings_fn()
             vecs = await loop.run_in_executor(None, embed_fn, subtexts, app_config, model_id)
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
-            db_update_batch(
+            _vector_store_batches_db.update_batch(
                 batch_id,
                 user_id=uid,
                 status='failed',
@@ -1843,9 +1826,9 @@ async def create_store_from_media(
         await adapter.upsert_vectors(created_store_id, ids=slice_ids, vectors=vecs, documents=slice_docs, metadatas=slice_meta)
         upserted_total += len(vecs)
         with contextlib.suppress(_VECTORSTORE_NONCRITICAL_EXCEPTIONS):
-            db_update_batch(batch_id, user_id=uid, upserted=upserted_total)
+            _vector_store_batches_db.update_batch(batch_id, user_id=uid, upserted=upserted_total)
 
-    db_update_batch(batch_id, user_id=uid, status='completed', upserted=upserted_total)
+    _vector_store_batches_db.update_batch(batch_id, user_id=uid, status='completed', upserted=upserted_total)
     return {"store_id": created_store_id, "batch_id": batch_id, "upserted": upserted_total}
 
 
@@ -1868,12 +1851,12 @@ async def get_vector_store(
     md = stats.get("metadata", {}) or {}
     # Prefer meta DB name if available (do not gate existence on meta DB)
     try:
-        uid = resolve_user_id_for_request(
+        uid = _auth_deps.resolve_user_id_for_request(
             current_user,
             error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-        init_meta_db(uid)
-        rows = meta_list_stores(uid)
+        _vector_store_meta_db.init_meta_db(uid)
+        rows = _vector_store_meta_db.list_stores(uid)
         for r in rows:
             if r.get('id') == store_id:
                 md['name'] = r.get('name', md.get('name', store_id))

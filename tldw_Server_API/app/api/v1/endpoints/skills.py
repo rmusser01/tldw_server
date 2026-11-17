@@ -66,6 +66,7 @@ from tldw_Server_API.app.core.Skills.exceptions import (
 from tldw_Server_API.app.core.Skills.runtime_metadata import build_skill_runtime_metadata
 from tldw_Server_API.app.core.Skills.skill_executor import RequestContext, SkillExecutor
 from tldw_Server_API.app.core.Skills.skills_service import SkillsService
+import tldw_Server_API.app.core.Skills.skills_service as _skills_service
 
 router = APIRouter(dependencies=[Depends(check_rate_limit)])
 
@@ -128,12 +129,12 @@ def _get_cached_skills_service(
     """Reuse service state without extending the owning database's lifetime."""
     cached = getattr(db, _SKILLS_SERVICE_ATTRIBUTE, None)
     if (
-        isinstance(cached, SkillsService)
+        isinstance(cached, _skills_service.SkillsService)
         and cached.user_id == user_id
         and cached.base_path == Path(base_path)
     ):
         return cached
-    service = SkillsService(user_id=user_id, base_path=base_path, db=db)
+    service = _skills_service.SkillsService(user_id=user_id, base_path=base_path, db=db)
     setattr(db, _SKILLS_SERVICE_ATTRIBUTE, service)
     return service
 
