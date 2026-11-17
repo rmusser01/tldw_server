@@ -57,9 +57,12 @@ describe("section reader checkpoint updates", () => {
     expect(screen.queryByText(/Missing overview citations/)).not.toBeInTheDocument()
   })
 
-  it("opens remapped chapter evidence while keeping historical report IDs noninteractive", () => {
+  it.each(["research_pack_import", "workspace_snapshot_import"])("shows original identity and remapped evidence with noninteractive historical IDs after %s", origin => {
     const bundle = portableFixture()
     const original = bundle.workspace.snapshot.generatedArtifacts[0]
+    original.producerMetadata = { ...original.producerMetadata, settings: {
+      ...original.producerMetadata?.settings as Record<string, unknown>, model: "saved-model", provider: "openai"
+    } }
     const section = (original.data!.sectionAnalysis as { sections: Array<Record<string, unknown>> }).sections[0]
     section.status = "completed"
     section.content = "Historical chapter [E1]"
@@ -69,12 +72,16 @@ describe("section reader checkpoint updates", () => {
       evidence: { E1: { text_sha256: "a".repeat(64), source_id: "source-old", media_id: 1, page_spans: [{ page_number: 352 }] } }, context: {}, limits: {} }
     const imported = remapPortableWorkspace(bundle, { media: { "1": 2 }, notes: { "note-old": "note-new" } }, { id: "destination", name: "Imported", tag: "workspace:destination" })
     const artifact = imported.workspace.snapshot.generatedArtifacts[0]
+    if (origin === "workspace_snapshot_import") artifact.producerMetadata = { origin, importedProducer: artifact.producerMetadata }
     const before = JSON.stringify(artifact)
     render(<MemoryRouter><SectionAnalysisArtifactViewer artifact={artifact} analysis={getSectionAnalysis(artifact)!} sources={imported.workspace.snapshot.sources} /></MemoryRouter>)
+    expect(screen.getByText("Imported output")).toBeInTheDocument()
+    expect(screen.getByText(/Recorded model: saved-model/)).toHaveTextContent("Provider: openai")
     fireEvent.change(screen.getByRole("combobox", { name: "Chapter or section" }), { target: { value: "0" } })
     fireEvent.click(screen.getByText(/Findings and cited evidence/))
     expect(screen.getByRole("link", { name: "Printed 319 · PDF 352" })).toHaveAttribute("href", "/document-workspace?open=2&page=352")
     expect(screen.queryByRole("link", { name: "[E1]" })).not.toBeInTheDocument()
+    expect(screen.getByText(/Imported historical check; sources have not been checked again/)).toBeInTheDocument()
     expect(screen.getAllByRole("link").some(link => link.getAttribute("href")?.includes("open=1&"))).toBe(false)
     expect(JSON.stringify(artifact)).toBe(before)
   })

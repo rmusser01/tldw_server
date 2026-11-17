@@ -17,9 +17,10 @@ export function ArtifactRunIdentity({ artifact }: { artifact: GeneratedArtifact 
         : t("studio.outputIdentity.providerMissing", "Provider not recorded")}
     </p>
     <p>{identity.createdAt ? <>
-      {t("studio.outputIdentity.created", "Created")}{" "}
+      {identity.imported ? t("studio.outputIdentity.importedAt", "Imported") : t("studio.outputIdentity.created", "Created")}{" "}
       <time dateTime={identity.createdAt.toISOString()}>{identity.createdAt.toLocaleString()}</time>
-    </> : t("studio.outputIdentity.createdMissing", "Creation time not recorded")}</p>
+    </> : identity.imported ? t("studio.outputIdentity.importedAtMissing", "Import time not recorded")
+      : t("studio.outputIdentity.createdMissing", "Creation time not recorded")}</p>
     <p>{identity.sectionCount === undefined
       ? t("studio.outputIdentity.scopeMissing", "Section scope not recorded")
       : <>{t("studio.outputIdentity.sections", {

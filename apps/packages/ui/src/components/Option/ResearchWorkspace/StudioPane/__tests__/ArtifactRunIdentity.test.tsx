@@ -57,13 +57,48 @@ describe("saved output identity", () => {
     expect(getArtifactRunIdentity(imported)).toMatchObject({ imported: true, model: "gpt-6-luna", provider: "openai", sectionCount: 2 })
   })
 
-  it("fails closed for cyclic or missing imported producer metadata", () => {
-    const cyclic: Record<string, unknown> = { origin: "workspace_snapshot_import" }
+  it("reads complete-pack generation settings without changing the saved artifact or date", () => {
+    const saved = artifact({ producerMetadata: { origin: "research_pack_import", importedProducer: artifact().producerMetadata } })
+    const before = structuredClone(saved)
+    const identity = getArtifactRunIdentity(saved)
+    expect(identity).toMatchObject({ imported: true, model: "gpt-6-luna", provider: "openai", sectionCount: 2 })
+    identity.createdAt?.setUTCFullYear(2000)
+    expect(saved).toEqual(before)
+  })
+
+  it("retains generation settings through mixed complete-pack and snapshot imports", () => {
+    const saved = artifact({ producerMetadata: { origin: "research_pack_import", importedProducer: {
+      origin: "workspace_snapshot_import", importedProducer: {
+        origin: "research_pack_import", importedProducer: artifact().producerMetadata
+      }
+    } } })
+    expect(getArtifactRunIdentity(saved)).toMatchObject({ imported: true, model: "gpt-6-luna", provider: "openai", sectionCount: 2 })
+  })
+
+  it.each(["workspace_snapshot_import", "research_pack_import"])("fails closed for cyclic or missing %s metadata", origin => {
+    const cyclic: Record<string, unknown> = { origin }
     cyclic.importedProducer = cyclic
-    for (const producerMetadata of [cyclic, { origin: "workspace_snapshot_import" }]) {
+    for (const producerMetadata of [cyclic, { origin }]) {
       expect(getArtifactRunIdentity(artifact({ producerMetadata, data: undefined })))
         .toMatchObject({ imported: true, model: undefined, provider: undefined, sectionCount: undefined })
     }
+  })
+
+  it("bounds mixed import traversal at five wrappers", () => {
+    let producerMetadata = artifact().producerMetadata
+    for (let index = 0; index < 5; index++) producerMetadata = {
+      origin: index % 2 ? "workspace_snapshot_import" : "research_pack_import", importedProducer: producerMetadata
+    }
+    expect(getArtifactRunIdentity(artifact({ producerMetadata }))).toMatchObject({ imported: true, model: "gpt-6-luna" })
+    expect(getArtifactRunIdentity(artifact({ producerMetadata: {
+      origin: "research_pack_import", importedProducer: producerMetadata
+    }, data: undefined }))).toMatchObject({ imported: true, model: undefined, provider: undefined, sectionCount: undefined })
+  })
+
+  it("does not treat an unknown wrapper as verified imported generation metadata", () => {
+    expect(getArtifactRunIdentity(artifact({ producerMetadata: {
+      origin: "unknown_import", importedProducer: artifact().producerMetadata
+    }, data: undefined }))).toMatchObject({ imported: false, model: undefined, provider: undefined, sectionCount: undefined })
   })
 
   it("reads canonical saved section rows when producer settings are unavailable", () => {
@@ -106,6 +141,25 @@ describe("saved output identity", () => {
     expect(screen.getByText("Imported output")).toBeInTheDocument()
     expect(screen.getByText(/2 selected sections/)).toHaveTextContent("First chapter")
     expect(container.querySelector("time")).toHaveAttribute("datetime", "2026-11-16T10:15:00.000Z")
+    expect(container.querySelector("time")?.parentElement).toHaveTextContent(/^Imported /)
+    expect(container.querySelector("time")?.parentElement).not.toHaveTextContent("Created")
+  })
+
+  it("labels the complete-pack timestamp as import time while retaining its recorded model", () => {
+    const { container } = show(<ArtifactRunIdentity artifact={artifact({ producerMetadata: {
+      origin: "research_pack_import", importedProducer: artifact().producerMetadata
+    } })} />)
+    expect(screen.getByText(/gpt-6-luna/)).toHaveTextContent("openai")
+    expect(screen.getByText("Imported output")).toBeInTheDocument()
+    expect(container.querySelector("time")?.parentElement).toHaveTextContent(/^Imported /)
+  })
+
+  it("does not invent an import time when the canonical timestamp is unavailable", () => {
+    show(<ArtifactRunIdentity artifact={artifact({ producerMetadata: {
+      origin: "research_pack_import", importedProducer: artifact().producerMetadata
+    }, createdAt: undefined as unknown as Date })} />)
+    expect(screen.getByText("Import time not recorded")).toBeInTheDocument()
+    expect(screen.queryByText("Creation time not recorded")).not.toBeInTheDocument()
   })
 
   it("renders honest missing metadata and escapes saved text", () => {

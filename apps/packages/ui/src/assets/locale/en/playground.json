@@ -1171,6 +1171,8 @@
       "providerMissing": "Provider not recorded",
       "created": "Created",
       "createdMissing": "Creation time not recorded",
+      "importedAt": "Imported",
+      "importedAtMissing": "Import time not recorded",
       "scopeMissing": "Section scope not recorded",
       "sections_one": "{{count}} selected section",
       "sections_other": "{{count}} selected sections"

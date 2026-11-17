@@ -19,7 +19,7 @@ export function getArtifactRunIdentity(artifact: GeneratedArtifact): {
   let producer: Record<string, unknown> | undefined = record(artifact.producerMetadata) ? artifact.producerMetadata : undefined
   let imported = false
   const seen = new Set<Record<string, unknown>>()
-  while (producer?.origin === "workspace_snapshot_import") {
+  while (producer?.origin === "workspace_snapshot_import" || producer?.origin === "research_pack_import") {
     imported = true
     if (seen.has(producer) || seen.size >= 5) { producer = undefined; break }
     seen.add(producer)

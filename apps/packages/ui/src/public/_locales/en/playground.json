@@ -5111,5 +5111,11 @@
   },
   "studio_sectionReader_overviewSupport": {
     "message": "Citation support is assessed separately below."
+  },
+  "studio_outputIdentity_importedAt": {
+    "message": "Imported"
+  },
+  "studio_outputIdentity_importedAtMissing": {
+    "message": "Import time not recorded"
   }
 }
