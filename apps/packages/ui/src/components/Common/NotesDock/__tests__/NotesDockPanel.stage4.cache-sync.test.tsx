@@ -101,7 +101,7 @@ describe("NotesDockPanel stage 4 cross-surface cache sync", () => {
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request.path || "")
       const method = String(request.method || "GET").toUpperCase()
-      if (path.startsWith("/api/v1/notes/?page=1")) {
+      if (path.startsWith("/api/v1/notes/?limit=")) {
         return { items: [], pagination: { total_items: 0, total_pages: 1 } }
       }
       if (path === "/api/v1/notes/101?expected_version=2" && method === "PUT") {
