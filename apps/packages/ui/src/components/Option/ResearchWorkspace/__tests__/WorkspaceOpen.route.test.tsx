@@ -9,6 +9,8 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { Message } from "@/store/option";
+import type { ServerChatMessage } from "@/services/tldw/TldwApiClient";
 
 // Replace only IndexedDB storage; production linking, reconciliation and restore stay connected.
 const mirror = vi.hoisted(() => ({
@@ -764,7 +766,7 @@ const prepareOwnedMirror = async (legacyParent = false, cited = false, nullLocal
   prepare(true);
   useWorkspaceStore.getState().switchWorkspace(TARGET);
   const { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } = await import("@/db/dexie/server-chat-mirror");
-  const serverMessages = [
+  const serverMessages: ServerChatMessage[] = [
     { id: "server-user", role: "user" as const, content: "Saved question", parent_message_id: null,
       created_at: "2026-10-31T00:00:00Z", version: 1 },
     { id: "server-answer", role: "assistant" as const, sender: "assistant", content: "Saved cited answer", parent_message_id: "server-user",
@@ -1070,7 +1072,7 @@ const prepareMissingAssistantAcknowledgment = async (duplicate = false) => {
   const { reconcileServerChatMirror } = await import("@/db/dexie/server-chat-mirror");
   await reconcileServerChatMirror({ historyId, chatId: "verified-chat",
     ownerKey: String(mirror.histories.get(historyId)!.server_scope_key), messages, localMessages: messages });
-  const cached = messages.map(row => row.id === "local-answer-2" ? { ...row, serverMessageId: undefined } : row);
+  const cached: Message[] = messages.map(row => row.id === "local-answer-2" ? { ...row, serverMessageId: undefined } : row);
   if (duplicate) cached.splice(2, 0, canonical[3]);
   const { deriveHistoryFromMessages } = await import("@/store/workspace");
   save(TARGET, { messages: cached, history: deriveHistoryFromMessages(cached), historyId, serverChatId: "verified-chat" });
@@ -1079,6 +1081,160 @@ const prepareMissingAssistantAcknowledgment = async (duplicate = false) => {
     ? Promise.resolve({ messages: serverMessages, total: serverMessages.length }) : request(args));
   return { historyId, messages, cached, serverMessages };
 };
+
+const prepareInterruptedMirrorSave = async () => {
+  const prepared = await prepareMissingAssistantAcknowledgment(true);
+  const { messages, serverMessages } = prepared;
+  // The server accepted the turn before the view retired, but the owned mirror
+  // still contains only the preceding turn. Hydration retained the optimistic
+  // answer and added its canonical copy around the acknowledged local user.
+  mirror.messages.delete("local-user-2");
+  mirror.messages.delete("local-answer-2");
+  Object.assign(serverMessages[3], { metadata_extra: messages[1].metadataExtra });
+  Object.assign(messages[3], { metadataExtra: messages[1].metadataExtra, sources: messages[1].sources });
+  const canonical = mapServerChatMessagesToPlaygroundMessages({ serverMessages, assistantName: "AI", characterId: null });
+  // Match the captured producer's sparse optimistic shape, including absent
+  // server receipt/presentation defaults rather than a full canonical clone.
+  for (const key of ["role", "serverMessageVersion", "images", "pinned", "speakerCharacterId", "moodConfidence", "moodTopic",
+    "visualActorKind", "visualActorId", "visualPackId", "visualPackVersionId", "visualExpressionKey", "visualAssetId",
+    "visualAssetUrl", "visualPreviewUrl", "visualFallbackReason", "visualIsAnimated"] as const) delete messages[3][key];
+  delete messages[2].role;
+  const cached = [...messages.slice(0, 2), { ...messages[3], serverMessageId: undefined }, messages[2], canonical[3]];
+  const { deriveHistoryFromMessages } = await import("@/store/workspace");
+  useWorkspaceStore.getState().saveWorkspaceChatSession(TARGET, {
+    messages: cached, history: deriveHistoryFromMessages(cached), historyId: prepared.historyId, serverChatId: "verified-chat",
+  });
+  return prepared;
+};
+
+it.each([false, true])("recovers an interrupted mirror save through a unique acknowledged parent after cold reopen %s", async cold => {
+  const { historyId, messages } = await prepareInterruptedMirrorSave();
+  const rows = structuredClone([...mirror.messages]);
+  if (cold) {
+    await flushWorkspacePersistence();
+    await useWorkspaceStore.persist.rehydrate();
+  }
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByTestId("opened-sources");
+  const restored = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!;
+  const identities = new Map(messages.map(row => [row.id, row.serverMessageId]));
+  expect(restored.messages).toEqual(messages.map(row => ({ ...row,
+    parentMessageId: identities.get(row.parentMessageId!) || row.parentMessageId })));
+  expect(restored.history).toEqual(messages.map(row => ({ role: row.isBot ? "assistant" : "user", content: row.message })));
+  expect(restored.historyId).toBe(historyId);
+  expect([...mirror.messages]).toEqual(rows);
+  expect(boundary.request.mock.calls.every(([row]) => !row.method || row.method === "GET")).toBe(true);
+});
+
+it.each([
+  "edited-answer", "edited-duplicate", "changed-citation", "changed-metadata", "missing-answer", "missing-citation", "missing-metadata",
+  "duplicate-citation", "duplicate-metadata", "unacknowledged-parent", "unknown-parent",
+  "parent-metadata", "parent-images", "assistant-images", "prefix-metadata",
+  "parent-ancestor-link", "duplicate-parent-link",
+  "aliased-parent-children",
+  "visual-projection", "mood-projection", "system-role", "changed-role", "local-only-context",
+  "future-null", "future-false", "future-zero", "future-empty-string", "future-empty-array", "future-empty-object", "future-content",
+  "missing-duplicate", "unacknowledged-duplicate", "second-local-child", "second-canonical-child",
+  "divergent-prefix", "missing-prefix-ack", "empty-prefix", "non-prefix", "cache-race", "account-race",
+])("preserves interrupted local work when parent proof cannot establish %s", async kind => {
+  const { serverMessages } = await prepareInterruptedMirrorSave();
+  const session = structuredClone(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!);
+  const orphan = session.messages[2];
+  if (kind === "edited-answer") orphan.message = "Keep edited answer";
+  if (kind === "edited-duplicate") session.messages[4].message = "Keep edited duplicate";
+  if (kind === "changed-citation") orphan.sources![0].pageContent = "Keep changed evidence";
+  if (kind === "changed-metadata") orphan.metadataExtra = { ...orphan.metadataExtra, local_context: "Keep private context" };
+  if (kind === "missing-answer") delete orphan.message;
+  if (kind === "missing-citation") delete orphan.sources;
+  if (kind === "missing-metadata") delete orphan.metadataExtra;
+  if (kind === "duplicate-citation") delete session.messages[4].sources;
+  if (kind === "duplicate-metadata") delete session.messages[4].metadataExtra;
+  if (kind === "parent-metadata") {
+    Object.assign(serverMessages[2], { metadata_extra: { local_context: "Saved parent context" } });
+    delete session.messages[3].metadataExtra;
+  }
+  if (kind === "parent-images") {
+    Object.assign(serverMessages[2], { images: ["data:image/png;base64,AAAA"] });
+    delete session.messages[3].images;
+  }
+  if (kind === "assistant-images") {
+    Object.assign(serverMessages[3], { images: ["data:image/png;base64,AAAA"] });
+    delete orphan.images;
+    delete session.messages[4].images;
+  }
+  if (kind === "prefix-metadata") delete mirror.messages.get("local-answer")!.metadataExtra;
+  if (kind === "parent-ancestor-link") {
+    serverMessages[2].parent_message_id = "server-answer";
+    delete session.messages[3].parentMessageId;
+  }
+  if (kind === "duplicate-parent-link") delete session.messages[4].parentMessageId;
+  if (kind === "visual-projection" || kind === "mood-projection") {
+    const field = kind === "visual-projection" ? "visualActorId" : "moodConfidence";
+    const metadata = { ...orphan.metadataExtra, ...(kind === "visual-projection"
+      ? { visual_actor_id: "saved-actor" } : { mood_confidence: 0.75 }) };
+    Object.assign(serverMessages[3], { metadata_extra: metadata });
+    orphan.metadataExtra = metadata;
+    session.messages[4].metadataExtra = metadata;
+    delete orphan[field];
+    delete session.messages[4][field];
+  }
+  if (kind === "system-role") {
+    serverMessages.push({ ...serverMessages[2], id: "server-system", role: "system", content: "Saved system instruction" });
+    session.messages.push({ ...session.messages[3], id: "server-system", serverMessageId: "server-system",
+      message: "Saved system instruction", role: undefined });
+  }
+  if (kind === "changed-role") orphan.role = "user";
+  if (kind === "local-only-context") Object.assign(orphan, { futurePayload: "Keep local context" });
+  if (kind.startsWith("future-")) {
+    const value = ({ "future-null": null, "future-false": false, "future-zero": 0, "future-empty-string": "",
+      "future-empty-array": [], "future-empty-object": {}, "future-content": { saved: "context" } })[kind];
+    // A future mapper projection must not become silently discardable just
+    // because this recovery implementation predates that new canonical key.
+    const mapper = await import("@/hooks/chat/useServerChatLoader");
+    const original = mapper.mapServerChatMessagesToPlaygroundMessages;
+    vi.spyOn(mapper, "mapServerChatMessagesToPlaygroundMessages").mockImplementation(args => original(args)
+      .map(row => row.serverMessageId === "server-answer-2" ? { ...row, futurePayload: value } : row));
+  }
+  if (kind === "aliased-parent-children") session.messages.push(
+    { ...session.messages[3], id: "another-local-user" },
+    { ...orphan, id: "another-local-answer", parentMessageId: "another-local-user" },
+  );
+  if (kind === "unacknowledged-parent") session.messages[3].serverMessageId = undefined;
+  if (kind === "unknown-parent") orphan.parentMessageId = "another-local-user";
+  if (kind === "missing-duplicate") session.messages.pop();
+  if (kind === "unacknowledged-duplicate") session.messages[4].serverMessageId = undefined;
+  if (kind === "second-local-child") session.messages.push({ ...orphan, id: "another-local-answer" });
+  if (kind === "second-canonical-child") {
+    serverMessages.push({ ...serverMessages[3], id: "another-server-answer" });
+    session.messages.push({ ...session.messages[4], id: "another-server-answer", serverMessageId: "another-server-answer" });
+  }
+  if (kind === "divergent-prefix") mirror.messages.get("local-answer")!.content = "Keep changed mirror";
+  if (kind === "missing-prefix-ack") delete mirror.messages.get("local-answer")!.serverMessageId;
+  if (kind === "empty-prefix") mirror.messages.clear();
+  if (kind === "non-prefix") mirror.messages.delete("local-user");
+  const { deriveHistoryFromMessages } = await import("@/store/workspace");
+  session.history = deriveHistoryFromMessages(session.messages);
+  useWorkspaceStore.getState().saveWorkspaceChatSession(TARGET, session);
+  let before = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+  const rows = structuredClone([...mirror.messages]);
+  const request = boundary.request.getMockImplementation()!;
+  boundary.request.mockImplementation(args => {
+    if (args.path.startsWith("/api/v1/chats/verified-chat/messages")) {
+      if (kind === "account-race") boundary.controller.abort();
+      if (kind === "cache-race") {
+        useWorkspaceStore.getState().saveWorkspaceChatSession(TARGET, { ...session,
+          messages: session.messages.map(row => row === orphan ? { ...row, message: "Keep newer edit" } : row) });
+        before = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+      }
+    }
+    return request(args);
+  });
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByRole("alert");
+  expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(before);
+  expect([...mirror.messages]).toEqual(rows);
+});
 
 it("discovers the sole owned workspace chat in a fresh browser without a local hint", async () => {
   prepare(false);
