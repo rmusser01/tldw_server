@@ -290,6 +290,9 @@ type GenerationResult = {
   sourceLineage?: GeneratedArtifact["sourceLineage"]
   exportRefs?: GeneratedArtifact["exportRefs"]
   version?: number
+  rootArtifactId?: string
+  artifactVersionId?: string
+  previousVersionId?: string
   completedAt?: Date
   totalTokens?: number
   totalCostUsd?: number
@@ -3963,6 +3966,14 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             versionMetadata: result.versionMetadata,
             reviewMetadata: result.reviewMetadata,
             reviewStatus: result.reviewStatus,
+            ...(result.producerMetadata?.origin === "research_workspace_output_job" ? {
+              rootArtifactId: artifact.rootArtifactId && artifact.rootArtifactId !== result.workspaceArtifactId
+                ? artifact.rootArtifactId : result.rootArtifactId,
+              artifactVersionId: result.artifactVersionId,
+              previousVersionId: artifact.previousVersionId &&
+                artifact.previousVersionId.match(/^(.*):v[1-9]\d*$/)?.[1] !== result.workspaceArtifactId
+                ? artifact.previousVersionId : result.previousVersionId,
+            } : {}),
           } : {}),
           sourceLineage: result.sourceLineage,
           exportRefs: result.exportRefs,

@@ -210,6 +210,56 @@ describe('canonical Workspace draft persistence', () => {
     expect(local.artifacts[0].version).toBe(3);
     expect(local.artifacts[0].serverId).toBe(82);
   });
+  it.each([
+    { version: 311, root: 'native-output', current: 'native-output:v311', previous: 'native-output:v310' },
+    { version: 1, root: 'native-output', current: 'native-output:v1', previous: null },
+    { version: 1, root: undefined, current: undefined, previous: undefined },
+  ])('uses native job revision $version instead of stale client lineage', ({ version, root, current, previous }) => {
+    const draft = artifact();
+    const original = row({ ...draft, rootArtifactId: 'native-output', artifactVersionId: 'native-output:v285',
+      previousVersionId: 'native-output:v284' }, version);
+    original.id = 'native-output';
+    original.producer_metadata = { origin: 'research_workspace_output_job', job_id: 61 };
+    original.root_artifact_id = root;
+    original.artifact_version_id = current;
+    original.previous_version_id = previous;
+    const before = structuredClone(original);
+
+    const restored = mapServerArtifactToLocal(original);
+
+    expect(restored).toMatchObject({ version, workspaceArtifactVersion: version,
+      rootArtifactId: root, artifactVersionId: current, previousVersionId: previous ?? undefined,
+      id: draft.id, serverId: 82, content: draft.content, data: draft.data });
+    expect(restored.versionMetadata?.workspaceClient).toEqual(original.version_metadata?.workspaceClient);
+    expect(original).toEqual(before);
+  });
+  it.each(['research_pack_import', 'workspace_snapshot_import'])(
+    'retains logical versions under the outer %s provenance wrapper', origin => {
+      const original = row(artifact(), 12);
+      original.root_artifact_id = 'destination-artifact';
+      original.artifact_version_id = 'destination-artifact:v12';
+      original.previous_version_id = 'destination-artifact:v11';
+      original.producer_metadata = { origin,
+        importedProducer: { origin: 'research_workspace_output_job', job_id: 61 } };
+      const restored = mapServerArtifactToLocal(original);
+      expect(restored).toMatchObject({ version: 3, rootArtifactId: 'acp-run-7',
+        artifactVersionId: 'acp-run-7-v3', previousVersionId: 'acp-run-7-v2',
+        workspaceArtifactVersion: 12, serverId: 82, producerMetadata: original.producer_metadata });
+      expect(restored.versionMetadata?.workspaceClient).toEqual(original.version_metadata?.workspaceClient);
+    }
+  );
+  it.each(['native-parent:v7', 'native-child:variant'])(
+    'retains logical native parent %s while refreshing the current artifact revision', previousVersionId => {
+    const original = row({ ...artifact(), rootArtifactId: 'native-parent',
+      previousVersionId }, 4);
+    original.id = 'native-child';
+    original.producer_metadata = { origin: 'research_workspace_output_job', job_id: 62 };
+    original.root_artifact_id = 'native-child';
+    original.artifact_version_id = 'native-child:v4';
+    original.previous_version_id = 'native-child:v3';
+    expect(mapServerArtifactToLocal(original)).toMatchObject({ version: 4, workspaceArtifactVersion: 4,
+      rootArtifactId: 'native-parent', previousVersionId, artifactVersionId: 'native-child:v4' });
+  });
   it('reconciles an unknown acknowledgement once, with no duplicate submission', async () => {
     let stored: ReturnType<typeof row> | undefined;
     io.request.mockImplementation(async ({ method }) => {

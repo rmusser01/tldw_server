@@ -5,7 +5,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GeneratedArtifact, WorkspaceSource } from '@/types/workspace';
 import { persistWorkspaceArtifactReview, rememberCanonicalArtifactWorkspace } from '@/services/workspace-artifact-persistence';
-import { bindWorkspaceArtifactOrigin } from '@/store/workspace-artifact-codec';
+import { bindWorkspaceArtifactOrigin, readWorkspaceArtifactClientPayload, workspaceArtifactDraftPayload } from '@/store/workspace-artifact-codec';
 import { mapServerArtifactToLocal } from '@/store/workspace-api';
 import { useArtifactGeneration, type UseArtifactGenerationDeps } from '../useArtifactGeneration';
 
@@ -875,6 +875,71 @@ it.each(['completed', 'failed', 'cancelled'])('checks a terminal %s saved job wi
   expect(io.state.generatedArtifacts[0]).toMatchObject({ status: 'failed', content: row.content, workspaceArtifactId: row.id });
 });
 
+it('carries native job lineage from checkpoint v285 through reconnect v308 and review v311', async () => {
+  const analysis = { schemaVersion: 1, synthesis: 'Saved overview [E1.1.1]', sections: [{
+    status: 'completed', title: 'Chapter', content: 'Saved chapter [E1.1.1]', batches: [],
+    claim_verification: { verdict: 'needs_revision', text_sha256: 'frozen-chapter',
+      findings: [{ id: 'claim-1', status: 'unsupported', evidence_ids: ['E1.1.1'] }] },
+  }], synthesis_verification: { verdict: 'needs_revision', text_sha256: 'frozen-overview' } };
+  const originalReview = { sectionReview: { schemaVersion: 1,
+    entries: [{ targetId: 'chapter-1', decision: 'needs_revision', reason: 'Original agent note' }] } };
+  const checkpoint: WorkspaceArtifactApiResponse = { id: 'saved-native', workspace_id: 'owned', artifact_type: 'summary', title: 'Saved chapters',
+    status: 'generating', content: 'Exact generated text [E1.1.1]', version: 285,
+    root_artifact_id: 'saved-native', artifact_version_id: 'saved-native:v285', previous_version_id: 'saved-native:v284',
+    created_at: new Date().toISOString(), completed_at: null, total_tokens: null, total_cost_usd: null,
+    review_state: 'needs_revision', review_metadata: originalReview,
+    producer_metadata: { origin: 'research_workspace_output_job', job_id: 61, source_ids: ['source-1'],
+      settings: { sections: [{ source_id: 'source-1', node_id: 'n1', navigation_version: 'v1' }] } },
+    version_metadata: { workspaceClient: { schemaVersion: 1, data: { sectionAnalysis: analysis } } },
+  };
+  const original = bindWorkspaceArtifactOrigin(mapServerArtifactToLocal(checkpoint), 'server:alice', 'owned');
+  io.state.generatedArtifacts = [original];
+  const terminal = { ...checkpoint, status: 'complete', version: 308,
+    artifact_version_id: 'saved-native:v308', previous_version_id: 'saved-native:v307' };
+  stored.push(terminal);
+  const writes: Array<Record<string, unknown>> = [];
+  io.request.mockImplementation(async request => {
+    if (request.method === 'GET') return stored;
+    if (request.method !== 'PUT') throw new Error('Reconnect must only update the existing draft');
+    expect(request.body.version).toBe(stored[0].version);
+    writes.push(structuredClone(request.body));
+    const version = stored[0].version + 1;
+    stored[0] = { ...stored[0], ...request.body, version,
+      artifact_version_id: `saved-native:v${version}`, previous_version_id: `saved-native:v${version - 1}` };
+    return stored[0];
+  });
+  io.output.mockResolvedValue({ job_id: 61, status: 'completed', artifact: terminal });
+  const hook = renderHook(() => useArtifactGeneration({ ...deps(), hasSelectedSources: false,
+    selectedSources: [], selectedMediaIds: [], selectedMediaCount: 0 }));
+  await act(async () => { await hook.result.current.handleGenerateOutput('summary', {
+    mode: 'replace', targetArtifactId: original.id, reconnectOnly: true,
+  }); });
+  expect(io.submit).not.toHaveBeenCalled();
+  expect(io.state.generatedArtifacts[0]).toMatchObject({ version: 309, workspaceArtifactVersion: 309,
+    rootArtifactId: 'saved-native', artifactVersionId: 'saved-native:v309', previousVersionId: 'saved-native:v308' });
+  expect((writes[0].version_metadata as { workspaceClient: Record<string, unknown> }).workspaceClient).toMatchObject({
+    version: 308, rootArtifactId: 'saved-native', artifactVersionId: 'saved-native:v308', previousVersionId: 'saved-native:v307',
+  });
+  let reviewed = io.state.generatedArtifacts[0];
+  const scope = await io.snapshot();
+  for (const reason of ['Original agent note; completion clarification', 'Original agent note; final overview review']) {
+    reviewed = await persistWorkspaceArtifactReview(reviewed, { reviewStatus: 'needs_revision',
+      reviewMetadata: { sectionReview: { schemaVersion: 1, entries: [{ targetId: 'chapter-1', decision: 'needs_revision', reason }] } },
+    }, { workspaceId: 'owned', scope, isCurrent: () => true });
+  }
+  const restored = mapServerArtifactToLocal(stored[0]);
+  expect(restored).toMatchObject({ version: 311, workspaceArtifactVersion: 311,
+    artifactVersionId: 'saved-native:v311', previousVersionId: 'saved-native:v310',
+    content: checkpoint.content, data: { sectionAnalysis: analysis }, reviewMetadata: reviewed.reviewMetadata });
+  expect(readWorkspaceArtifactClientPayload(stored[0].version_metadata).data).toEqual({ sectionAnalysis: analysis });
+  expect(workspaceArtifactDraftPayload(restored).version_metadata?.workspaceClient).toMatchObject({
+    version: 311, artifactVersionId: 'saved-native:v311', previousVersionId: 'saved-native:v310',
+  });
+  expect(writes.slice(1).map(body => Object.keys(body).sort())).toEqual([
+    ['review_metadata', 'review_state', 'version'], ['review_metadata', 'review_state', 'version'],
+  ]);
+});
+
 it.each(['valid', 'edit', 'delete', 'foreign-origin'])('reloads cold new-version authority safely with %s target', async (change) => {
   const oldSettings = { sections: [{ source_id: 'source-1', node_id: 'old', navigation_version: 'v1' }], provider: 'deepseek', model: 'old-model' };
   const sections = ['new-a', 'new-b'].map(node_id => ({ source_id: 'source-1', node_id, navigation_version: 'v2' }));
@@ -888,8 +953,13 @@ it.each(['valid', 'edit', 'delete', 'foreign-origin'])('reloads cold new-version
   io.state.generatedArtifacts = [original];
   let release!: (rows: unknown[]) => void;
   if (change === 'edit' || change === 'delete') io.sources.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
-  io.submit.mockResolvedValue({ job_id: 42, artifact_id: 'new-canonical', status: 'queued' });
-  io.output.mockResolvedValue({ job_id: 42, status: 'completed', artifact: { ...row, id: 'new-canonical', version: 1, content: 'New comparison' } });
+  const created = { ...row, id: 'new-canonical', version: 1, content: 'New comparison',
+    root_artifact_id: 'new-canonical', artifact_version_id: 'new-canonical:v1', previous_version_id: null };
+  io.submit.mockImplementation(async () => {
+    stored.push(created);
+    return { job_id: 42, artifact_id: created.id, status: 'queued' };
+  });
+  io.output.mockResolvedValue({ job_id: 42, status: 'completed', artifact: created });
   const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSections: sections }));
   let pending!: Promise<void>;
   act(() => { pending = hook.result.current.handleGenerateOutput('compare_sources', { mode: 'new_version', targetArtifactId: original.id }); });
@@ -904,6 +974,12 @@ it.each(['valid', 'edit', 'delete', 'foreign-origin'])('reloads cold new-version
     expect(io.submit.mock.calls[0][1]).not.toHaveProperty('resume_artifact_id');
     expect(io.state.generatedArtifacts.find(item => item.id === original.id)).toEqual(original);
     expect(io.state.generatedArtifacts.some(item => item.content === 'New comparison')).toBe(true);
+    const restored = mapServerArtifactToLocal(stored.find(item => item.id === 'new-canonical')!);
+    expect(restored).toMatchObject({ content: 'New comparison', previousVersionId: original.id,
+      workspaceArtifactId: 'new-canonical', workspaceArtifactVersion: 2 });
+    expect(workspaceArtifactDraftPayload(restored).version_metadata?.workspaceClient).toMatchObject({
+      previousVersionId: original.id,
+    });
   } else {
     expect(io.submit).not.toHaveBeenCalled();
     expect(io.state.generatedArtifacts).toEqual(change === 'delete' ? [] : change === 'edit' ? [{ ...original, content: 'New user edit' }] : [original]);
