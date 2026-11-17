@@ -595,6 +595,9 @@ const processWebScrape = async (input: QuickIngestRequestContext, {
     summarize_checkbox: Boolean(common?.perform_analysis),
     ...normalizedBody,
   };
+  if (persist && body.summarize_checkbox) {
+    body.skip_existing_analysis = !common?.overwrite_existing;
+  }
   applyQuickIngestChunkingFields(body, {
     common,
     chunkingTemplateName,
@@ -1321,7 +1324,7 @@ const runDirectQuickIngestBatch = async (
               if (pollResult.terminalStatus !== "completed") {
                 throw new Error(String(pollResult.error || "Upload failed"));
               }
-              const isDuplicate = isDbMessageDuplicate(pollResult.data);
+              const isDuplicate = completedIngestJobIndicatesSkipped(pollResult.data);
               recordResult({
                 id,
                 status: "ok",
@@ -1344,7 +1347,7 @@ const runDirectQuickIngestBatch = async (
               fields,
               ...upload,
             });
-            const fallbackDuplicate = isDbMessageDuplicate(data);
+            const fallbackDuplicate = completedIngestJobIndicatesSkipped(data);
             recordResult({
               id,
               status: "ok",

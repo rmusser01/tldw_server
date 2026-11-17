@@ -10,6 +10,16 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.attachment_policy
     normalize_attachment_mime_patterns,
 )
 
+def media_analysis_requested(form_data: Any) -> bool:
+    """True when a media request asks for LLM analysis.
+
+    The same condition the audio and video libraries use before they call the
+    LLM: analysis on, and a provider named that is not "none".
+    """
+    api_name = getattr(form_data, "api_name", None)
+    return bool(getattr(form_data, "perform_analysis", False) and api_name and str(api_name).lower() != "none")
+
+
 # Define allowed media types using Literal for validation
 MediaType = Literal["video", "audio", "document", "pdf", "ebook", "email", "code"]
 
