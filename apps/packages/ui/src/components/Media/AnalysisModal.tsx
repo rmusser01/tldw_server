@@ -57,6 +57,9 @@ const normalizePersistedModelSelection = (value: unknown): string => {
   }
 }
 
+const isUsageLimitError = (error: unknown) =>
+  (error as { status?: number } | null)?.status === 402
+
 const extractStreamDelta = (chunk: string): string | null => {
   if (!chunk) return null
   let payload = chunk.trim()
@@ -511,6 +514,7 @@ function OwnedAnalysisModal({
         if (cancelledByUserRef.current || signal.aborted || isAbortError(err)) {
           return
         }
+        if (isUsageLimitError(err)) throw err
         streamError = err
       }
 
@@ -547,6 +551,10 @@ function OwnedAnalysisModal({
       }
     } catch (err) {
       if (cancelledByUserRef.current || signal.aborted || isAbortError(err)) {
+        return
+      }
+      if (isUsageLimitError(err)) {
+        messageApi.error(t('mediaPage.analysisUsageLimit', 'This analysis exceeds a usage limit. Check your usage limits or contact support.'))
         return
       }
       if (isTimeoutError(err)) {

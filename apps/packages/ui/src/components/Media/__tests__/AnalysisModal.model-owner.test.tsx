@@ -221,6 +221,23 @@ describe("AnalysisModal explicit model with the mounted shared owner", () => {
     ));
   });
 
+  it("explains a 402 usage-limit refusal without retrying generation", async () => {
+    const failure = Object.assign(new Error("Monthly LLM token limit reached"), {
+      status: 402,
+      details: { detail: { error: "limit_exceeded", category: "llm_tokens_month" } },
+    });
+    mocks.bgStream.mockImplementation(() => (async function* () { throw failure; })());
+    mocks.bgRequest.mockRejectedValue(failure);
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" />);
+    const generate = screen.getByRole("button", { name: "Generate Analysis" });
+    await waitFor(() => expect(generate).toBeEnabled());
+    fireEvent.click(generate);
+    await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith(
+      expect.stringMatching(/usage limit.*check your usage/i),
+    ));
+    expect(mocks.bgRequest).not.toHaveBeenCalled();
+  });
+
   it("keeps the explicit choice in store and storage and sends its model and provider", async () => {
     function ExistingOwner() {
       useSelectedModel();

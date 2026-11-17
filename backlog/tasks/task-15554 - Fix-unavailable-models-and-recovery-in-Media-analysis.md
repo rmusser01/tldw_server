@@ -5,6 +5,7 @@ status: In Progress
 created_date: 2026-11-17 05:03
 references:
 - https://github.com/rmusser01/tldw_server/pull/3491
+updated_date: 2026-11-17 05:35
 ---
 
 ## Description
@@ -29,7 +30,7 @@ Reuse provider discovery, readiness, and chat error formatting. ADR-025 governs 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-87 scoped backend tests and 132 scoped frontend tests passed on the original dev baseline. Bandit reported zero findings in the two edited backend source files. Latest dev changed Playwright dependencies and claimed the previous task ID. The code files in this change did not change upstream.
+87 scoped backend and 132 scoped frontend tests passed for the initial change. Bandit found no issues in the edited backend sources. Added a regression for HTTP 402 usage-limit refusals in analysis: report the limit and skip the non-streaming retry.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
