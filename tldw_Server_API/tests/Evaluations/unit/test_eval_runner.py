@@ -747,3 +747,25 @@ async def test_an_unparseable_reply_from_a_successful_call_is_a_wrong_answer(mon
     result = await fn(_SAMPLE, _SPEC, {"config": {"api_name": "openai", "model": "m"}}, "s1")
 
     assert (result["scores"], result["passed"], result["avg_score"]) == ({"accuracy": 0.0}, False, 0.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eval_type", ["label_choice", "nli_factcheck"])
+async def test_an_empty_reply_from_a_successful_call_is_a_wrong_answer_not_a_label_in_its_repr(
+    monkeypatch, tmp_path, eval_type
+):
+    """A reasoning model that spends max_tokens thinking returns empty content; the repr of that response is not read."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+
+    empty = {"choices": [{"message": {"role": "assistant", "content": ""}, "finish_reason": "length"}]}
+    monkeypatch.setattr(
+        eval_runner, "get_adapter_or_raise", lambda _provider: SimpleNamespace(chat=lambda _r, timeout=None: empty)
+    )
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    fn = {"label_choice": runner._eval_label_choice, "nli_factcheck": runner._eval_nli_factcheck}[eval_type]
+
+    result = await fn(_SAMPLE, _SPEC, {"config": {"api_name": "openai", "model": "m"}}, "s1")
+
+    assert (result["scores"], result["passed"], result["avg_score"]) == ({"accuracy": 0.0}, False, 0.0), result

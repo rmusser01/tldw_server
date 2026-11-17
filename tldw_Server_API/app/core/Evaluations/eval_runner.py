@@ -153,7 +153,9 @@ def _call_adapter_text(
     }
     request.update(extra_kwargs)
     response = get_adapter_or_raise(provider).chat(request, timeout=timeout)
-    return extract_response_content(response) or str(response)
+    content = extract_response_content(response)
+    # Empty content from a call that succeeded is a non-answer (""), not a label hiding in the response's repr (TASK-15491)
+    return content if content is not None else str(response)
 
 
 _LLM_RUN_TYPES = frozenset({"model_graded", "label_choice", "nli_factcheck"})
