@@ -18,7 +18,6 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
     get_claim_cluster_rebuild_context,
     get_media_db_for_user,
 )
-from tldw_Server_API.app.api.v1.API_Deps.jobs_admin_deps import authorize_jobs_admin_domain_read
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
     ClaimNotificationResponse,
@@ -54,9 +53,10 @@ from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Claims_Extraction import claims_service
-from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import get_claims_rebuild_service
 from tldw_Server_API.app.core.Jobs.operations.contracts import AdmissionRejectionReason
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+import tldw_Server_API.app.api.v1.API_Deps.jobs_admin_deps as _jobs_admin_deps
+import tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service as _claims_rebuild_service
 
 router = APIRouter(prefix="/claims", tags=["claims"])
 
@@ -75,7 +75,7 @@ async def _enforce_claims_export_rate_limit(request: Request) -> None:
 def claims_rebuild_status(_principal: AdminPrincipal) -> dict[str, Any]:
     """Return statistics about the claims rebuild worker. Admin only."""
     return claims_service.claims_rebuild_status(
-        rebuild_service=get_claims_rebuild_service(),
+        rebuild_service=_claims_rebuild_service.get_claims_rebuild_service(),
     )
 
 
@@ -776,7 +776,7 @@ async def rebuild_claim_clusters(
     )
     foreign = owner != str(current_user.id)
     if foreign:
-        await authorize_jobs_admin_domain_read(principal, domain="claims")
+        await _jobs_admin_deps.authorize_jobs_admin_domain_read(principal, domain="claims")
     request_key = request.headers.get("Idempotency-Key")
     if request_key is not None and (
         not 1 <= len(request_key) <= 128
@@ -1069,7 +1069,7 @@ def rebuild_claims(
         user_id=user_id,
         current_user=current_user,
         db=db,
-        rebuild_service=get_claims_rebuild_service(),
+        rebuild_service=_claims_rebuild_service.get_claims_rebuild_service(),
     )
 
 
@@ -1086,7 +1086,7 @@ def rebuild_all_media(
         user_id=user_id,
         current_user=current_user,
         db=db,
-        rebuild_service=get_claims_rebuild_service(),
+        rebuild_service=_claims_rebuild_service.get_claims_rebuild_service(),
     )
 
 

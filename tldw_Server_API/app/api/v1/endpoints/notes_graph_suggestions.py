@@ -39,8 +39,9 @@ from tldw_Server_API.app.core.Notes_Graph.suggestion_api import (
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkDatasetConflictError,
     NotesLinkSyncInactiveDatasetError,
-    resolve_notes_link_dataset_authority,
 )
+import tldw_Server_API.app.core.Notes_Graph.suggestion_api as _suggestion_api
+import tldw_Server_API.app.core.Sync.v2.notes_link_coordinator as _notes_link_coordinator
 
 _SUGGESTION_ERROR_RESPONSES = {code: {"model": SuggestionHTTPErrorResponse} for code in (404, 409, 412, 422, 429, 503)}
 router = APIRouter(
@@ -102,7 +103,7 @@ def _http_error(exc: SuggestionAPIError) -> HTTPException:
 
 def _dataset_key(*, owner_user_id: str, dataset_id: str | None) -> str:
     try:
-        authority = resolve_notes_link_dataset_authority(
+        authority = _notes_link_coordinator.resolve_notes_link_dataset_authority(
             user_id=owner_user_id,
             dataset_id=dataset_id,
         )
@@ -113,7 +114,7 @@ def _dataset_key(*, owner_user_id: str, dataset_id: str | None) -> str:
 
 def _api(*, user: User, db: Any, jobs: Any, dataset_id: str | None) -> Any:
     owner = str(user.id_str)
-    return build_notes_graph_suggestions_api(
+    return _suggestion_api.build_notes_graph_suggestions_api(
         note_db=db,
         owner_user_id=owner,
         dataset_id=_dataset_key(owner_user_id=owner, dataset_id=dataset_id),

@@ -328,7 +328,7 @@ async def test_refresh_token_sanitizes_rotation_failure_log(monkeypatch: pytest.
     monkeypatch.setenv("MCP_ENABLE_DEMO_AUTH", "1")
     monkeypatch.setenv("MCP_DEMO_AUTH_SECRET", "supersecretvalue12345")
     monkeypatch.setattr(mcp, "logger", logger)
-    monkeypatch.setattr(mcp, "get_jwt_manager", lambda: _FailingJwtManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.auth.jwt_manager.get_jwt_manager", lambda: _FailingJwtManager())
 
     with pytest.raises(HTTPException) as excinfo:
         await mcp.refresh_token(

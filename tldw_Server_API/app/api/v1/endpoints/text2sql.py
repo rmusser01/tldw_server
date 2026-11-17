@@ -22,9 +22,9 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.RAG.rag_service import transport as rag_transport
 from tldw_Server_API.app.core.Text2SQL.executor import SqliteReadOnlyExecutor
-from tldw_Server_API.app.core.Text2SQL.service import Text2SQLCoreService
 from tldw_Server_API.app.core.Text2SQL.source_registry import normalize_source
 from tldw_Server_API.app.core.Text2SQL.sql_guard import SqlPolicyViolation
+import tldw_Server_API.app.core.Text2SQL.service as _service
 
 router = APIRouter(prefix="/text2sql", tags=["text2sql"])
 
@@ -115,7 +115,7 @@ async def query_text2sql(
             },
         )
 
-    service = Text2SQLCoreService(
+    service = _service.Text2SQLCoreService(
         generator=_PassThroughSqlGenerator(),
         executor=SqliteReadOnlyExecutor(db_path),
     )

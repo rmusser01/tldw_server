@@ -68,7 +68,7 @@ def _override_rag(app, monkeypatch):
     async def _fake_pipeline(**kwargs):
         return rag_mod.UnifiedRAGResponse(documents=[], query=kwargs.get("query"), expanded_queries=[], metadata={})
 
-    monkeypatch.setattr(rag_mod, "unified_rag_pipeline", _fake_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_pipeline)
 
 
 @pytest.mark.asyncio

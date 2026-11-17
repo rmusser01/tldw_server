@@ -63,10 +63,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.exceptions import OsceGenerationError, OsceProviderError
-from tldw_Server_API.app.core.Flashcards.study_assistant import (
-    build_quiz_attempt_question_context,
-    generate_study_assistant_reply,
-)
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.StudySuggestions.jobs import (
     STUDY_SUGGESTIONS_DOMAIN,
@@ -78,7 +74,6 @@ from tldw_Server_API.app.services.quiz_generator import (
     QuizClaimVerificationError,
     QuizGenerationRequestError,
     QuizProvenanceValidationError,
-    generate_quiz_from_sources,
     get_quiz_generation_profiles,
 )
 
@@ -764,7 +759,7 @@ def get_quiz_attempt_question_assistant(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ):
     try:
-        context = build_quiz_attempt_question_context(db, attempt_id, question_id)
+        context = _study_assistant.build_quiz_attempt_question_context(db, attempt_id, question_id)
         return {
             "thread": context["thread"],
             "messages": context["history"],
@@ -793,13 +788,13 @@ async def respond_quiz_attempt_question_assistant(
     guidance: str | None = Depends(get_study_assistant_guidance),
 ):
     try:
-        context = build_quiz_attempt_question_context(db, attempt_id, question_id)
+        context = _study_assistant.build_quiz_attempt_question_context(db, attempt_id, question_id)
         thread = context["thread"]
         if payload.expected_thread_version is not None and int(thread["version"]) != int(payload.expected_thread_version):
             raise HTTPException(status_code=409, detail="Study assistant thread version mismatch")
 
         user_content = str(payload.message or "").strip() or _default_study_assistant_message(payload.action, context)
-        reply = await generate_study_assistant_reply(
+        reply = await _study_assistant.generate_study_assistant_reply(
             action=payload.action,
             context=context,
             message=user_content,
@@ -897,7 +892,7 @@ async def generate_quiz(
         else:
             raise ValueError("Either media_id or sources must be provided")
 
-        result = await generate_quiz_from_sources(
+        result = await _quiz_generator.generate_quiz_from_sources(
             db=db,
             media_db=media_db,
             sources=sources,
@@ -967,5 +962,7 @@ async def generate_quiz(
 # Keep the OSCE API slice beneath the established quizzes router so router
 # registry ownership and the public /api/v1/quizzes prefix remain unchanged.
 from tldw_Server_API.app.api.v1.endpoints import quizzes_osce  # noqa: E402
+import tldw_Server_API.app.core.Flashcards.study_assistant as _study_assistant
+import tldw_Server_API.app.services.quiz_generator as _quiz_generator
 
 router.include_router(quizzes_osce.router)

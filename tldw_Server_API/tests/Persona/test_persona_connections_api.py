@@ -224,7 +224,7 @@ def test_persona_connection_test_executes_request_with_redacted_preview(
             captured.update(kwargs)
             return _MockHTTPResponse()
 
-        monkeypatch.setattr(persona_ep, "afetch", fake_afetch, raising=False)
+        monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", fake_afetch, raising=False)
         monkeypatch.setattr(
             persona_connections,
             "evaluate_url_policy",
@@ -308,7 +308,7 @@ def test_persona_connection_test_derives_allowlist_from_base_url_when_missing(
             captured_policy["allowlist"] = kwargs.get("allowlist")
             return SimpleNamespace(allowed=True, reason=None)
 
-        monkeypatch.setattr(persona_ep, "afetch", fake_afetch, raising=False)
+        monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", fake_afetch, raising=False)
         monkeypatch.setattr(
             persona_connections,
             "evaluate_url_policy",
@@ -360,7 +360,7 @@ def test_persona_connection_test_returns_error_for_invalid_stored_secret(
         async def fail_if_called(**kwargs):
             raise AssertionError("Outbound HTTP should not run when the stored secret is invalid")
 
-        monkeypatch.setattr(persona_ep, "afetch", fail_if_called, raising=False)
+        monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", fail_if_called, raising=False)
         monkeypatch.setattr(
             persona_connections,
             "evaluate_url_policy",

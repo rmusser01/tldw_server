@@ -382,8 +382,8 @@ def test_outputs_normalize_storage_path_update_failure_log_is_sanitized(monkeypa
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "normalize_output_storage_path", lambda *_args: "normalized/output.md")
-    monkeypatch.setattr(outputs_endpoint, "update_output_artifact_db", _raise_update_failure)
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.normalize_output_storage_path", lambda *_args: "normalized/output.md")
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.update_output_artifact_db", _raise_update_failure)
 
     with pytest.raises(HTTPException) as exc_info:
         outputs_endpoint._normalize_output_storage_path_for_user(
@@ -420,7 +420,7 @@ async def test_outputs_create_render_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "render_output_template", _raise_render_failure)
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.render_output_template", _raise_render_failure)
 
     with pytest.raises(HTTPException) as exc_info:
         await outputs_endpoint.create_output(
@@ -461,7 +461,7 @@ async def test_outputs_create_directory_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.render_output_template", lambda *_args: "rendered")
     monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
 
     with pytest.raises(HTTPException) as exc_info:
@@ -506,9 +506,9 @@ async def test_outputs_create_tts_generation_failure_log_is_sanitized(monkeypatc
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.render_output_template", lambda *_args: "rendered")
     monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
-    monkeypatch.setattr(outputs_endpoint, "_write_tts_audio_file", _raise_tts_failure)
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._write_tts_audio_file", _raise_tts_failure)
 
     with pytest.raises(HTTPException) as exc_info:
         await outputs_endpoint.create_output(
@@ -553,9 +553,9 @@ async def test_outputs_create_write_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.render_output_template", lambda *_args: "rendered")
     monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
-    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._resolve_output_path_for_user", lambda *_args: _OutputPath())
 
     with pytest.raises(HTTPException) as exc_info:
         await outputs_endpoint.create_output(
@@ -606,9 +606,9 @@ async def test_outputs_create_db_insert_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.render_output_template", lambda *_args: "rendered")
     monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
-    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._resolve_output_path_for_user", lambda *_args: _OutputPath())
 
     with pytest.raises(HTTPException) as exc_info:
         await outputs_endpoint.create_output(
@@ -659,9 +659,9 @@ async def test_outputs_create_insert_cleanup_failure_log_is_sanitized(monkeypatc
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.render_output_template", lambda *_args: "rendered")
     monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
-    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._resolve_output_path_for_user", lambda *_args: _OutputPath())
 
     with pytest.raises(HTTPException) as exc_info:
         await outputs_endpoint.create_output(
@@ -732,9 +732,9 @@ async def test_outputs_create_variant_cleanup_failure_logs_are_sanitized(monkeyp
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.render_output_template", lambda *_args: "rendered")
     monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
-    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._resolve_output_path_for_user", lambda *_args: _OutputPath())
 
     with pytest.raises(HTTPException) as exc_info:
         await outputs_endpoint.create_output(
@@ -883,9 +883,9 @@ async def test_outputs_create_generic_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.render_output_template", lambda *_args: "rendered")
     monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
-    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._resolve_output_path_for_user", lambda *_args: _OutputPath())
 
     with pytest.raises(HTTPException) as exc_info:
         await outputs_endpoint.create_output(
@@ -950,7 +950,7 @@ async def test_outputs_purge_enumerate_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "find_outputs_to_purge", _raise_enumerate_failure)
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.find_outputs_to_purge", _raise_enumerate_failure)
 
     result = await outputs_endpoint.purge_outputs(
         payload=outputs_endpoint.OutputsPurgeRequest(delete_files=False),
@@ -975,8 +975,8 @@ async def test_outputs_purge_db_delete_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "find_outputs_to_purge", lambda **_kwargs: {777: "output.md"})
-    monkeypatch.setattr(outputs_endpoint, "delete_outputs_by_ids", _raise_delete_failure)
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.find_outputs_to_purge", lambda **_kwargs: {777: "output.md"})
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.delete_outputs_by_ids", _raise_delete_failure)
 
     result = await outputs_endpoint.purge_outputs(
         payload=outputs_endpoint.OutputsPurgeRequest(delete_files=False),
@@ -1006,10 +1006,10 @@ async def test_outputs_purge_file_delete_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "find_outputs_to_purge", lambda **_kwargs: {777: "output.md"})
-    monkeypatch.setattr(outputs_endpoint, "delete_outputs_by_ids", lambda **_kwargs: 1)
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.find_outputs_to_purge", lambda **_kwargs: {777: "output.md"})
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.delete_outputs_by_ids", lambda **_kwargs: 1)
     monkeypatch.setattr(outputs_endpoint, "_normalize_output_storage_path_for_user", lambda **_kwargs: "output.md")
-    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._resolve_output_path_for_user", lambda *_args: _OutputPath())
 
     result = await outputs_endpoint.purge_outputs(
         payload=outputs_endpoint.OutputsPurgeRequest(delete_files=True),
@@ -1077,8 +1077,8 @@ async def test_outputs_update_old_file_cleanup_failure_log_is_sanitized(monkeypa
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
-    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", _resolve_path)
-    monkeypatch.setattr(outputs_endpoint, "update_output_artifact_db", _update_output_artifact_db)
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._resolve_output_path_for_user", _resolve_path)
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.update_output_artifact_db", _update_output_artifact_db)
 
     result = await outputs_endpoint.update_output(
         output_id=777,

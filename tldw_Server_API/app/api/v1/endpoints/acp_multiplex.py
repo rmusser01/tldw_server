@@ -26,8 +26,8 @@ from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import (
     get_runner_client,
     get_session_event_bus,
 )
-from tldw_Server_API.app.core.Agent_Client_Protocol.multiplex.manager import MultiplexManager
 from tldw_Server_API.app.core.Agent_Client_Protocol.multiplex.protocol import MultiplexMessage
+import tldw_Server_API.app.core.Agent_Client_Protocol.multiplex.manager as _manager
 
 router = APIRouter(prefix="/acp", tags=["acp-multiplex"])
 
@@ -88,7 +88,7 @@ async def acp_multiplex_ws(websocket: WebSocket) -> None:
         del stream_id
         _acp_ws_release_quota(quota_token)
 
-    manager = MultiplexManager(
+    manager = _manager.MultiplexManager(
         connection_id=connection_id,
         send_fn=websocket.send_text,
         get_bus_fn=get_session_event_bus,

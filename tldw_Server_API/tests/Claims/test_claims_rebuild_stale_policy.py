@@ -269,7 +269,7 @@ def test_rebuild_all_stale_policy_enqueues_expected_media(monkeypatch):
 
     # Patch the endpoints module import
     import tldw_Server_API.app.api.v1.endpoints.claims as claims_ep
-    monkeypatch.setattr(claims_ep, "get_claims_rebuild_service", lambda: _FakeSvc())
+    monkeypatch.setattr("tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service.get_claims_rebuild_service", lambda: _FakeSvc())
 
     with TestClient(fastapi_app) as client:
         r = client.post("/api/v1/claims/rebuild/all", params={"policy": "stale"})

@@ -157,7 +157,7 @@ def test_mlx_management_uses_standard_role_factory_alias(path: str) -> None:
 @pytest.mark.unit
 def test_mlx_load_uses_default_model_path_and_adds_backend(monkeypatch):
     registry = _RegistryStub(load_result={"active": True, "model": "stub-model"})
-    monkeypatch.setattr(mlx_ep, "_default_settings", lambda: {"model_path": "stub-model"})
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.providers.mlx_provider._default_settings", lambda: {"model_path": "stub-model"})
     app = _make_app_with_registry(registry)
 
     with TestClient(app) as client:
@@ -173,7 +173,7 @@ def test_mlx_load_uses_default_model_path_and_adds_backend(monkeypatch):
 @pytest.mark.unit
 def test_mlx_load_preserves_explicit_model_path_and_overrides(monkeypatch):
     registry = _RegistryStub()
-    monkeypatch.setattr(mlx_ep, "_default_settings", lambda: {"model_path": "default-model"})
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.providers.mlx_provider._default_settings", lambda: {"model_path": "default-model"})
     app = _make_app_with_registry(registry)
 
     with TestClient(app) as client:
@@ -192,7 +192,7 @@ def test_mlx_load_preserves_explicit_model_path_and_overrides(monkeypatch):
 @pytest.mark.unit
 def test_mlx_load_trims_explicit_model_path(monkeypatch):
     registry = _RegistryStub()
-    monkeypatch.setattr(mlx_ep, "_default_settings", lambda: {"model_path": "default-model"})
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.providers.mlx_provider._default_settings", lambda: {"model_path": "default-model"})
     app = _make_app_with_registry(registry)
 
     with TestClient(app) as client:
@@ -210,7 +210,7 @@ def test_mlx_load_trims_explicit_model_path(monkeypatch):
 @pytest.mark.unit
 def test_mlx_load_blank_explicit_model_path_falls_back_to_default(monkeypatch):
     registry = _RegistryStub()
-    monkeypatch.setattr(mlx_ep, "_default_settings", lambda: {"model_path": "default-model"})
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.providers.mlx_provider._default_settings", lambda: {"model_path": "default-model"})
     app = _make_app_with_registry(registry)
 
     with TestClient(app) as client:
@@ -228,7 +228,7 @@ def test_mlx_load_blank_explicit_model_path_falls_back_to_default(monkeypatch):
 @pytest.mark.unit
 def test_mlx_load_accepts_empty_post_body(monkeypatch):
     registry = _RegistryStub(load_result={"active": True, "model": "stub-model"})
-    monkeypatch.setattr(mlx_ep, "_default_settings", lambda: {"model_path": "stub-model"})
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.providers.mlx_provider._default_settings", lambda: {"model_path": "stub-model"})
     app = _make_app_with_registry(registry)
 
     with TestClient(app) as client:
@@ -286,7 +286,7 @@ def test_mlx_status_adds_backend():
 @pytest.mark.unit
 def test_mlx_load_maps_bad_request_error_to_400(monkeypatch):
     registry = _RegistryStub(load_error=ChatBadRequestError(provider="mlx", message="model_path is required"))
-    monkeypatch.setattr(mlx_ep, "_default_settings", lambda: {"model_path": "stub-model"})
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.providers.mlx_provider._default_settings", lambda: {"model_path": "stub-model"})
     app = _make_app_with_registry(registry)
 
     with TestClient(app) as client:
@@ -299,7 +299,7 @@ def test_mlx_load_maps_bad_request_error_to_400(monkeypatch):
 @pytest.mark.unit
 def test_mlx_load_maps_provider_error_to_500(monkeypatch):
     registry = _RegistryStub(load_error=ChatProviderError(provider="mlx", message="mlx-lm is not installed"))
-    monkeypatch.setattr(mlx_ep, "_default_settings", lambda: {"model_path": "stub-model"})
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.providers.mlx_provider._default_settings", lambda: {"model_path": "stub-model"})
     app = _make_app_with_registry(registry)
 
     with TestClient(app) as client:
@@ -346,7 +346,7 @@ def test_mlx_generic_failure_logs_are_sanitized(
 ):
     logger = _LoggerStub()
     monkeypatch.setattr(mlx_ep, "logger", logger)
-    monkeypatch.setattr(mlx_ep, "_default_settings", lambda: {"model_path": "stub-model"})
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.providers.mlx_provider._default_settings", lambda: {"model_path": "stub-model"})
     app = _make_app_with_registry(_RegistryStub(**registry_kwargs))
 
     with TestClient(app) as client:

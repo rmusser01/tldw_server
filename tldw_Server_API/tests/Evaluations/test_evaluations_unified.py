@@ -103,7 +103,7 @@ async def test_eval_credential_resolution_uses_structured_static_snapshot(
     async def forbidden_low_level_resolver(*_args, **_kwargs):
         raise AssertionError("evaluation bypassed ProviderCredentialRuntime")
 
-    monkeypatch.setattr(eval_endpoint, "ProviderCredentialRuntime", FakeRuntime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", FakeRuntime)
     monkeypatch.setattr(
         eval_endpoint,
         "resolve_byok_credentials",
@@ -111,8 +111,7 @@ async def test_eval_credential_resolution_uses_structured_static_snapshot(
         raising=False,
     )
     monkeypatch.setattr(
-        eval_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [7], [9], True),
     )
 
@@ -159,8 +158,8 @@ async def test_eval_credential_scope_revocation_is_bounded_and_never_constructs_
         def __init__(self, **_kwargs):
             raise AssertionError("runtime constructed after scope revocation")
 
-    monkeypatch.setattr(eval_endpoint, "derive_trusted_credential_scope", revoked_scope)
-    monkeypatch.setattr(eval_endpoint, "ProviderCredentialRuntime", ForbiddenRuntime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope", revoked_scope)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", ForbiddenRuntime)
 
     with pytest.raises(eval_endpoint.HTTPException) as exc_info:
         await eval_endpoint._resolve_and_validate_eval_provider(
@@ -242,7 +241,6 @@ async def test_eval_bedrock_auth_contract_distinguishes_default_chain_from_absen
             assert (provider, model) == ("bedrock", "model-a")
             return handle
 
-    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
     if expected_status is None:
         provider, model, resolved, runtime = await eval_endpoint._resolve_and_validate_eval_provider(
             eval_request,
@@ -290,8 +288,7 @@ async def test_eval_real_runtime_enforces_allowed_model_before_dispatch(
 
     monkeypatch.setattr(runtime_module, "resolve_byok_credentials", resolve_credentials)
     monkeypatch.setattr(
-        eval_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [], [], False),
     )
     set_llm_provider_overrides_cache_for_tests(
@@ -666,8 +663,7 @@ class TestTldwSpecificEndpoints:
             async def close(self):
                 return None
 
-        monkeypatch.setattr(eval_ep, "is_test_context", lambda: False)
-        monkeypatch.setattr(eval_ep, "ProviderCredentialRuntime", _MissingRuntime)
+        monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", _MissingRuntime)
 
         response = client.post(
             "/api/v1/evaluations/geval",
@@ -1157,7 +1153,7 @@ class TestRateLimiting:
             return_value=(False, {"retry_after": 60, "error": "Rate limit exceeded"})
         )
         with patch(
-            'tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified.get_user_rate_limiter_for_user',
+            "tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user",
             return_value=mock_limiter,
         ):
 

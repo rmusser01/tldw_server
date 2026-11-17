@@ -70,10 +70,9 @@ def test_benchmark_run_endpoint_exists(monkeypatch):
 
             return _Eval()
 
-    monkeypatch.setattr(benchmarks_ep, "get_registry", lambda: _Reg())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_registry.get_registry", lambda: _Reg())
     monkeypatch.setattr(
-        benchmarks_ep,
-        "load_benchmark_dataset",
+        "tldw_Server_API.app.core.Evaluations.benchmark_loaders.load_benchmark_dataset",
         lambda *args, **kwargs: [
             {
                 "id": "q1",
@@ -140,10 +139,9 @@ def test_benchmark_run_counts_an_unscored_item_apart(monkeypatch):
         evaluate_custom_metric = staticmethod(_evaluate)
         store_evaluation = AsyncMock(return_value="eval_1")
 
-    monkeypatch.setattr(benchmarks_ep, "get_registry", lambda: _Reg())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_registry.get_registry", lambda: _Reg())
     monkeypatch.setattr(
-        benchmarks_ep,
-        "load_benchmark_dataset",
+        "tldw_Server_API.app.core.Evaluations.benchmark_loaders.load_benchmark_dataset",
         lambda *args, **kwargs: [{"question": question, "domain": "d"} for question in replies],
     )
     monkeypatch.setattr(benchmarks_ep, "_get_evaluation_manager_for_user", lambda _user: _Manager())
@@ -169,7 +167,7 @@ def test_benchmark_manager_preserves_string_user_scope(monkeypatch):
         def __init__(self, user_id=None):
             captured["user_id"] = user_id
 
-    monkeypatch.setattr(benchmarks_ep, "EvaluationManager", _Manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.evaluation_manager.EvaluationManager", _Manager)
 
     identity = EvaluationIdentity(
         user_scope="tenant-user",
@@ -195,14 +193,13 @@ def test_benchmark_run_names_its_provider_to_the_llm_quota(monkeypatch, own_key)
     loaded, seen = [], []
     item = {"name": "m", "description": "d", "evaluation_prompt": "{q}", "input_data": {"q": "q"}, "scoring_criteria": {}}
     monkeypatch.setattr(
-        benchmarks_ep,
-        "get_registry",
+        "tldw_Server_API.app.core.Evaluations.benchmark_registry.get_registry",
         lambda: SimpleNamespace(
             get=lambda _name: SimpleNamespace(evaluation_type="demo"),
             create_evaluator=lambda _name: SimpleNamespace(format_for_custom_metric=lambda _item: item),
         ),
     )
-    monkeypatch.setattr(benchmarks_ep, "load_benchmark_dataset", lambda *_a, **_k: loaded.append(True) or [{"q": "q"}])
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_loaders.load_benchmark_dataset", lambda *_a, **_k: loaded.append(True) or [{"q": "q"}])
 
     async def _evaluate(**kwargs):
         seen.append((kwargs["provider_credentials"].api_key, current_llm_call_context().prechecked))

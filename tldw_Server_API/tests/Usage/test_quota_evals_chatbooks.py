@@ -158,7 +158,7 @@ def test_evaluations_endpoint_daily_cap_fires_for_the_authenticated_user(tmp_pat
     monkeypatch.setenv("RG_ENABLED", "0")
 
     fresh_limiter = UserRateLimiter(db_path=str(tmp_path / "endpoint_evals.db"))
-    monkeypatch.setattr(evaluations_unified, "get_user_rate_limiter_for_user", lambda _uid: fresh_limiter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user", lambda _uid: fresh_limiter)
 
     class _FakeEvalService:
         """Records calls instead of running a real proposition evaluation."""
@@ -177,7 +177,7 @@ def test_evaluations_endpoint_daily_cap_fires_for_the_authenticated_user(tmp_pat
             }
 
     fake_service = _FakeEvalService()
-    monkeypatch.setattr(evaluations_unified, "get_unified_evaluation_service_for_user", lambda _uid: fake_service)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _uid: fake_service)
 
     seen_uids: list[object] = []
 

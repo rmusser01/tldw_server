@@ -449,8 +449,7 @@ async def test_export_prompts_api_maps_database_error(monkeypatch):
         raise DatabaseError("driver failed")
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "db_export_prompts_formatted",
+        "tldw_Server_API.app.core.Prompt_Management.Prompts_Interop.db_export_prompts_formatted",
         _raise_db_error,
         raising=True,
     )
@@ -475,8 +474,7 @@ async def test_export_prompts_api_maps_database_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_export_prompts_api_sanitizes_failed_status_message(monkeypatch):
     monkeypatch.setattr(
-        prompts_endpoint,
-        "db_export_prompts_formatted",
+        "tldw_Server_API.app.core.Prompt_Management.Prompts_Interop.db_export_prompts_formatted",
         lambda **_kwargs: ("export backend exploded", "/tmp/missing-prompts-export.csv"),
         raising=True,
     )
@@ -504,8 +502,7 @@ async def test_export_prompts_api_sanitizes_unexpected_error(monkeypatch):
         raise OSError("export backend exploded")
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "db_export_prompts_formatted",
+        "tldw_Server_API.app.core.Prompt_Management.Prompts_Interop.db_export_prompts_formatted",
         _raise_unexpected_error,
         raising=True,
     )
@@ -533,8 +530,7 @@ async def test_export_keywords_api_sanitizes_unexpected_error(monkeypatch):
         raise OSError("keyword export backend exploded")
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "db_export_prompt_keywords_to_csv",
+        "tldw_Server_API.app.core.Prompt_Management.Prompts_Interop.db_export_prompt_keywords_to_csv",
         _raise_unexpected_error,
         raising=True,
     )
@@ -549,8 +545,7 @@ async def test_export_keywords_api_sanitizes_unexpected_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_export_keywords_api_sanitizes_failed_status_message(monkeypatch):
     monkeypatch.setattr(
-        prompts_endpoint,
-        "db_export_prompt_keywords_to_csv",
+        "tldw_Server_API.app.core.Prompt_Management.Prompts_Interop.db_export_prompt_keywords_to_csv",
         lambda **_kwargs: ("keyword export backend exploded", "/tmp/missing-keyword-export.csv"),
         raising=True,
     )
@@ -1004,8 +999,7 @@ async def test_restore_prompt_version_maps_database_error():
 @pytest.mark.asyncio
 async def test_preview_prompt_api_maps_input_error(monkeypatch):
     monkeypatch.setattr(
-        prompts_endpoint,
-        "assemble_prompt_definition",
+        "tldw_Server_API.app.core.Prompt_Management.structured_prompts.assemble_prompt_definition",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(InputError("invalid preview")),
         raising=True,
     )

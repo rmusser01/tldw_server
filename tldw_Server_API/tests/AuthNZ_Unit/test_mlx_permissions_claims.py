@@ -159,7 +159,7 @@ def test_mlx_lifecycle_200_for_admin_principal(monkeypatch, method: str, path: s
     )
     if path.endswith("/load"):
         # Ensure a valid default model_path so internal helpers do not raise.
-        monkeypatch.setattr(mlx_mod, "_default_settings", lambda: {"model_path": "stub-model-path"})
+        monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.providers.mlx_provider._default_settings", lambda: {"model_path": "stub-model-path"})
     app = _build_app_with_overrides(principal=principal)
 
     with TestClient(app) as client:

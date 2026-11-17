@@ -45,7 +45,7 @@ async def test_quiz_question_assistant_unexpected_failure_log_is_sanitized(monke
         raise RuntimeError("study assistant exploded at /private/study-assistant.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(quizzes, "build_quiz_attempt_question_context", fail_build_quiz_attempt_question_context)
+    monkeypatch.setattr("tldw_Server_API.app.core.Flashcards.study_assistant.build_quiz_attempt_question_context", fail_build_quiz_attempt_question_context)
     monkeypatch.setattr(quizzes, "logger", logger_stub)
 
     with pytest.raises(HTTPException) as exc_info:

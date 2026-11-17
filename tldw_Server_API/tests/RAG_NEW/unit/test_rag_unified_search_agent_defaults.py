@@ -48,8 +48,7 @@ def test_search_agent_defaults_apply_when_request_fields_omitted(monkeypatch):
         monkeypatch.delenv(env_key, raising=False)
 
     monkeypatch.setattr(
-        rag_ep,
-        "get_config_value",
+        "tldw_Server_API.app.core.config.get_config_value",
         _config_value_factory(
             {
                 "search_query_classification": "true",
@@ -102,8 +101,7 @@ def test_search_agent_defaults_apply_when_request_fields_omitted(monkeypatch):
 
 def test_search_agent_defaults_do_not_override_explicit_request_values(monkeypatch):
     monkeypatch.setattr(
-        rag_ep,
-        "get_config_value",
+        "tldw_Server_API.app.core.config.get_config_value",
         _config_value_factory(
             {
                 "search_query_classification": "true",
@@ -172,8 +170,7 @@ def test_search_agent_defaults_do_not_override_explicit_request_values(monkeypat
 
 def test_search_agent_env_overrides_config_defaults(monkeypatch):
     monkeypatch.setattr(
-        rag_ep,
-        "get_config_value",
+        "tldw_Server_API.app.core.config.get_config_value",
         _config_value_factory(
             {
                 "search_query_classification": "false",
@@ -257,8 +254,7 @@ def test_batch_round2_defaults_apply_when_fields_omitted(monkeypatch):
         monkeypatch.delenv(env_key, raising=False)
 
     monkeypatch.setattr(
-        rag_ep,
-        "get_config_value",
+        "tldw_Server_API.app.core.config.get_config_value",
         _config_value_factory(
             {
                 "search_suggestions": "true",

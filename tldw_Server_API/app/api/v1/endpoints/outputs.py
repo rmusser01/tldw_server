@@ -34,14 +34,9 @@ from tldw_Server_API.app.services.outputs_service import (
     _resolve_output_path_for_user,
     _sanitize_title_for_filename,
     _strip_html_for_tts,
-    _write_tts_audio_file,
     build_items_context_from_content_items,
-    delete_outputs_by_ids,
-    find_outputs_to_purge,
-    normalize_output_storage_path,
-    render_output_template,
-    update_output_artifact_db,
 )
+import tldw_Server_API.app.services.outputs_service as _outputs_service
 
 router = APIRouter(prefix="/outputs", tags=["outputs"])
 
@@ -74,12 +69,12 @@ def _normalize_output_storage_path_for_user(
     update_db: bool = True,
 ) -> str:
     try:
-        normalized = normalize_output_storage_path(user_id, storage_path)
+        normalized = _outputs_service.normalize_output_storage_path(user_id, storage_path)
     except InvalidStoragePathError as exc:
         raise HTTPException(status_code=400, detail="invalid_path") from exc
     if update_db and normalized != storage_path:
         try:
-            update_output_artifact_db(
+            _outputs_service.update_output_artifact_db(
                 cdb=cdb,
                 output_id=output_id,
                 new_title=None,
@@ -276,7 +271,7 @@ async def create_output(
 
     # Render base template
     try:
-        rendered = render_output_template(tpl.body, context)
+        rendered = _outputs_service.render_output_template(tpl.body, context)
     except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
         logger.error("outputs render failed")
         raise HTTPException(status_code=422, detail="render_failed") from e
@@ -319,11 +314,11 @@ async def create_output(
         variant_of: int | None,
     ):
         filename = _build_output_filename(output_title, filename_suffix, ts, output_format)
-        path = _resolve_output_path_for_user(user_id, filename)
+        path = _outputs_service._resolve_output_path_for_user(user_id, filename)
 
         if output_format == "mp3":
             try:
-                await _write_tts_audio_file(
+                await _outputs_service._write_tts_audio_file(
                     rendered=rendered_text,
                     path=path,
                     tts_model=payload.tts_model,
@@ -435,7 +430,7 @@ async def create_output(
                 "mece_template_not_found",
             )
             try:
-                mece_rendered = render_output_template(mece_tpl.body, context)
+                mece_rendered = _outputs_service.render_output_template(mece_tpl.body, context)
             except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
                 raise HTTPException(status_code=422, detail="mece_render_failed") from exc
             await _persist_output(
@@ -463,7 +458,7 @@ async def create_output(
 
             if tts_tpl:
                 try:
-                    tts_rendered = render_output_template(tts_tpl.body, context)
+                    tts_rendered = _outputs_service.render_output_template(tts_tpl.body, context)
                 except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
                     raise HTTPException(status_code=422, detail="tts_render_failed") from exc
                 tts_template_row = tts_tpl
@@ -560,7 +555,7 @@ async def download_output(
         output_id=row.id,
         storage_path=row.storage_path,
     )
-    path = _resolve_output_path_for_user(user_id, storage_name)
+    path = _outputs_service._resolve_output_path_for_user(user_id, storage_name)
     if not path.exists():
         raise HTTPException(status_code=404, detail="file_missing")
 
@@ -616,7 +611,7 @@ async def download_output_by_name(
         output_id=row.id,
         storage_path=row.storage_path,
     )
-    path = _resolve_output_path_for_user(user_id, storage_name)
+    path = _outputs_service._resolve_output_path_for_user(user_id, storage_name)
     if not path.exists():
         raise HTTPException(status_code=404, detail="file_missing")
     media_types = {
@@ -664,7 +659,7 @@ async def head_download_output(
         output_id=row.id,
         storage_path=row.storage_path,
     )
-    path = _resolve_output_path_for_user(user_id, storage_name)
+    path = _outputs_service._resolve_output_path_for_user(user_id, storage_name)
     if not path.exists():
         raise HTTPException(status_code=404, detail="file_missing")
     # Return headers; FastAPI will send no body
@@ -706,7 +701,7 @@ async def delete_output(
                     storage_path=row.storage_path,
                     update_db=False,
                 )
-                p = _resolve_output_path_for_user(user_id, storage_name)
+                p = _outputs_service._resolve_output_path_for_user(user_id, storage_name)
             except HTTPException as e:
                 logger.warning(f"outputs.delete: invalid output path for {output_id}: {e.detail}")
             else:
@@ -755,7 +750,7 @@ async def update_output(
         output_id=row.id,
         storage_path=row.storage_path,
     )
-    source_path = _resolve_output_path_for_user(user_id, storage_name)
+    source_path = _outputs_service._resolve_output_path_for_user(user_id, storage_name)
     new_path: str | None = None
     new_title: str | None = None
     new_format: str | None = None
@@ -768,7 +763,7 @@ async def update_output(
         ts = m.group(1) if m else None
         base = _sanitize_title_for_filename(payload.title)
         new_name = f"{base}_{ts}{ext}" if ts else f"{base}{ext}"
-        new_full = _resolve_output_path_for_user(user_id, new_name)
+        new_full = _outputs_service._resolve_output_path_for_user(user_id, new_name)
         try:
             if p.exists():
                 p.rename(new_full)
@@ -784,7 +779,7 @@ async def update_output(
         if row.format not in ("md", "html") or payload.format not in ("md", "html"):
             raise HTTPException(status_code=422, detail="unsupported_format_change")
         if new_path is not None:
-            source_path = _resolve_output_path_for_user(user_id, new_path)
+            source_path = _outputs_service._resolve_output_path_for_user(user_id, new_path)
         try:
             src_text = source_path.read_text(encoding="utf-8")
         except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
@@ -807,7 +802,7 @@ async def update_output(
         m = re.search(r"_(\d{8}_\d{6})$", stem)
         ts = m.group(1) if m else None
         new_filename = f"{base_title}_{ts}{ext}" if ts else f"{base_title}{ext}"
-        target_path = _resolve_output_path_for_user(user_id, new_filename)
+        target_path = _outputs_service._resolve_output_path_for_user(user_id, new_filename)
         try:
             # lgtm[py/path-injection] target_path is resolved by _resolve_output_path_for_user.
             target_path.write_text(converted, encoding="utf-8")
@@ -824,7 +819,7 @@ async def update_output(
 
     # Apply DB updates via service
     try:
-        final = update_output_artifact_db(
+        final = _outputs_service.update_output_artifact_db(
             cdb=cdb,
             output_id=output_id,
             new_title=new_title,
@@ -870,7 +865,7 @@ async def purge_outputs(
     paths: dict[int, str] = {}
 
     try:
-        candidate_paths = find_outputs_to_purge(
+        candidate_paths = _outputs_service.find_outputs_to_purge(
             cdb=cdb,
             now_iso=now,
             soft_deleted_grace_days=payload.soft_deleted_grace_days,
@@ -893,7 +888,7 @@ async def purge_outputs(
                     storage_path=pth,
                     update_db=False,
                 )
-                p = _resolve_output_path_for_user(user_id, storage_name)
+                p = _outputs_service._resolve_output_path_for_user(user_id, storage_name)
                 if p.exists():
                     p.unlink()
                     files_deleted += 1
@@ -906,7 +901,7 @@ async def purge_outputs(
     removed = 0
     if ids:
         try:
-            removed = delete_outputs_by_ids(cdb=cdb, user_id=cdb.user_id, ids=list(ids))
+            removed = _outputs_service.delete_outputs_by_ids(cdb=cdb, user_id=cdb.user_id, ids=list(ids))
         except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
             logger.error("outputs.purge: DB delete failed")
             removed = 0

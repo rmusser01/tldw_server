@@ -114,10 +114,10 @@ async def test_embeddings_orchestrator_events_unified_normal_close_cancels_produ
             created_tasks.append(task)
             return task
 
-        monkeypatch.setattr(endpoint, "SSEStream", _FakeSSEStream)
+        monkeypatch.setattr("tldw_Server_API.app.core.Streaming.streams.SSEStream", _FakeSSEStream)
         monkeypatch.setattr(endpoint, "_get_redis_client", _fake_get_redis_client)
         monkeypatch.setattr(endpoint, "_build_orchestrator_snapshot", _fake_build_snapshot)
-        monkeypatch.setattr(endpoint, "ensure_async_client_closed", _fake_close)
+        monkeypatch.setattr("tldw_Server_API.app.core.Infrastructure.redis_factory.ensure_async_client_closed", _fake_close)
         monkeypatch.setattr(endpoint.asyncio, "create_task", _tracked_create_task)
 
         admin = User(id=1, username="admin", email="a@x", is_active=True, is_admin=True)

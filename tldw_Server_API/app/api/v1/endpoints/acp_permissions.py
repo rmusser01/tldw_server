@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
 from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
+import tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB as _ACP_Sessions_DB
 
 router = APIRouter(prefix="/acp/permissions", tags=["acp-permissions"])
 
@@ -36,10 +37,10 @@ def _get_acp_db() -> ACPSessionsDB:
         try:
             return _module_store.get_db()
         except Exception:
-            return ACPSessionsDB()
+            return _ACP_Sessions_DB.ACPSessionsDB()
 
     # Fallback: instantiate a fresh one (default path)
-    return ACPSessionsDB()
+    return _ACP_Sessions_DB.ACPSessionsDB()
 
 
 # ---------------------------------------------------------------------------

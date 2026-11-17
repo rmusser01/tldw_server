@@ -33,7 +33,6 @@ from starlette.websockets import WebSocketState
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
-    get_chacha_db_for_user_id,
 )
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
@@ -92,13 +91,10 @@ from tldw_Server_API.app.core.VoiceAssistant import (
     get_user_voice_sessions,
     get_voice_analytics_summary_stats,
     get_voice_command_counts,
-    get_voice_command_registry,
-    get_voice_command_router,
     get_voice_command_usage_stats,
     get_voice_session_manager,
     get_voice_top_commands,
     get_voice_usage_by_day,
-    get_voice_workflow_handler,
     save_voice_command,
     save_voice_session,
 )
@@ -114,6 +110,8 @@ from tldw_Server_API.app.core.VoiceAssistant import (
 from tldw_Server_API.app.core.VoiceAssistant import (
     get_voice_session as get_voice_session_db,
 )
+import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
+import tldw_Server_API.app.core.VoiceAssistant as _VoiceAssistant
 
 # REST router
 router = APIRouter(
@@ -261,7 +259,7 @@ async def process_voice_command(
     """Process a voice command from text input."""
     start_time = time.time()
 
-    router_instance = get_voice_command_router()
+    router_instance = _VoiceAssistant.get_voice_command_router()
 
     # Process command
     result, session_id = await router_instance.process_command(
@@ -333,7 +331,7 @@ async def list_voice_commands(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> VoiceCommandListResponse:
     """List available voice commands."""
-    registry = get_voice_command_registry()
+    registry = _VoiceAssistant.get_voice_command_registry()
     registry.load_defaults()
     # Refresh user commands from DB to ensure persistence
     registry.refresh_user_commands(
@@ -388,7 +386,7 @@ async def create_voice_command(
 
     save_voice_command(db, command)
 
-    registry = get_voice_command_registry()
+    registry = _VoiceAssistant.get_voice_command_registry()
     registry.load_defaults()
     registry.register_command(command)
 
@@ -417,7 +415,7 @@ async def get_voice_command_endpoint(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> VoiceCommandInfo:
     """Get a specific voice command."""
-    registry = get_voice_command_registry()
+    registry = _VoiceAssistant.get_voice_command_registry()
     registry.load_defaults()
 
     command = get_voice_command_db(db, command_id, current_user.id, persona_id=persona_id)
@@ -493,7 +491,7 @@ async def update_voice_command(
 
     save_voice_command(db, updated)
 
-    registry = get_voice_command_registry()
+    registry = _VoiceAssistant.get_voice_command_registry()
     registry.load_defaults()
     registry.register_command(updated)
 
@@ -552,7 +550,7 @@ async def toggle_voice_command(
 
     save_voice_command(db, updated)
 
-    registry = get_voice_command_registry()
+    registry = _VoiceAssistant.get_voice_command_registry()
     registry.load_defaults()
     registry.register_command(updated)
 
@@ -583,7 +581,7 @@ async def validate_voice_command(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> VoiceCommandValidationResponse:
     """Dry-run validation: check config without executing the command."""
-    registry = get_voice_command_registry()
+    registry = _VoiceAssistant.get_voice_command_registry()
     registry.load_defaults()
 
     command = get_voice_command_db(db, command_id, current_user.id, persona_id=persona_id)
@@ -602,7 +600,7 @@ async def validate_voice_command(
             detail="Not authorized to validate this command",
         )
 
-    router_instance = get_voice_command_router()
+    router_instance = _VoiceAssistant.get_voice_command_router()
     raw_steps = await router_instance.validate_command_config(
         command,
         db=db,
@@ -671,7 +669,7 @@ async def delete_voice_command(
             detail="Command not found or not authorized",
         )
 
-    registry = get_voice_command_registry()
+    registry = _VoiceAssistant.get_voice_command_registry()
     registry.unregister_command(command_id, current_user.id, persona_id=scoped_persona_id)
 
 
@@ -761,7 +759,7 @@ async def end_voice_session(
     delete_voice_session_db(db, session_id)
 
     # Best-effort cleanup in memory
-    session_manager = get_voice_session_manager()
+    session_manager = _VoiceAssistant.get_voice_session_manager()
     await session_manager.end_session(session_id)
 
 
@@ -829,7 +827,7 @@ async def get_voice_analytics(
         days=days,
     )
 
-    registry = get_voice_command_registry()
+    registry = _VoiceAssistant.get_voice_command_registry()
     registry.load_defaults()
     system_commands = registry.get_all_commands(
         user_id=0,
@@ -896,7 +894,7 @@ async def list_workflow_templates(
     current_user: User = Depends(get_request_user),
 ) -> VoiceWorkflowTemplateListResponse:
     """List available voice workflow templates."""
-    workflow_handler = get_voice_workflow_handler()
+    workflow_handler = _VoiceAssistant.get_voice_workflow_handler()
     templates = workflow_handler.get_voice_workflow_templates()
 
     template_infos = []
@@ -926,7 +924,7 @@ async def get_workflow_status(
     current_user: User = Depends(get_request_user),
 ) -> WorkflowStatusResponse:
     """Get workflow run status."""
-    router_instance = get_voice_command_router()
+    router_instance = _VoiceAssistant.get_voice_command_router()
     status_data = await router_instance.get_workflow_status(run_id, current_user.id)
 
     if not status_data:
@@ -958,7 +956,7 @@ async def cancel_workflow(
     current_user: User = Depends(get_request_user),
 ) -> WorkflowCancelResponse:
     """Cancel a running workflow."""
-    router_instance = get_voice_command_router()
+    router_instance = _VoiceAssistant.get_voice_command_router()
     cancelled = await router_instance.cancel_workflow(run_id, current_user.id)
 
     if cancelled:
@@ -1018,7 +1016,7 @@ async def websocket_voice_assistant(websocket: WebSocket):
             return
 
         # Create session
-        session_manager = get_voice_session_manager()
+        session_manager = _VoiceAssistant.get_voice_session_manager()
         await session_manager.start()
         session, _ = await session_manager.get_or_create_session(
             session_id=None,
@@ -1028,8 +1026,8 @@ async def websocket_voice_assistant(websocket: WebSocket):
 
         # Initialize DB + load user commands for persistence
         try:
-            db = await get_chacha_db_for_user_id(user_id, client_id="voice_assistant")
-            registry = get_voice_command_registry()
+            db = await _ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id(user_id, client_id="voice_assistant")
+            registry = _VoiceAssistant.get_voice_command_registry()
             registry.load_defaults()
             # A WebSocket runs outside the HTTP operation middleware: this step owns its
             # checkout, off the event loop, so a full pool cannot stall the server.
@@ -1054,7 +1052,7 @@ async def websocket_voice_assistant(websocket: WebSocket):
         logger.info(f"Voice assistant WebSocket authenticated: user={user_id}, session={session_id}")
 
         # Main message loop
-        router_instance = get_voice_command_router()
+        router_instance = _VoiceAssistant.get_voice_command_router()
         audio_buffer: list[bytes] = []
 
         while True:
@@ -1558,7 +1556,7 @@ async def voice_command_dry_run(
     try:
         from tldw_Server_API.app.core.VoiceAssistant.intent_parser import IntentParser
 
-        registry = get_voice_command_registry()
+        registry = _VoiceAssistant.get_voice_command_registry()
         registry.load_defaults()
         registry.refresh_user_commands(
             db,

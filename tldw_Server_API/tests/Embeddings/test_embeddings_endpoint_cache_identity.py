@@ -81,7 +81,7 @@ def test_embedding_cache_key_secret_uses_test_fallback_when_hmac_key_missing(mon
     def _raise_value_error() -> bytes:
         raise ValueError("missing hmac secret")
 
-    monkeypatch.setattr(mod, "derive_hmac_key", _raise_value_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.crypto_utils.derive_hmac_key", _raise_value_error)
 
     assert mod._embedding_cache_key_secret() == b"tldw_embeddings_cache_hmac_fallback"
 
@@ -96,8 +96,8 @@ def test_embedding_cache_key_secret_raises_outside_tests(monkeypatch):
     def _raise_value_error() -> bytes:
         raise ValueError("missing hmac secret")
 
-    monkeypatch.setattr(mod, "derive_hmac_key", _raise_value_error)
-    monkeypatch.setattr(mod, "is_test_context", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.crypto_utils.derive_hmac_key", _raise_value_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_context", lambda: False)
 
     with pytest.raises(ValueError, match="missing hmac secret"):
         mod._embedding_cache_key_secret()
@@ -109,13 +109,13 @@ def test_embedding_cache_key_changes_when_secret_changes(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as mod
 
     mod._embedding_cache_key_secret.cache_clear()
-    monkeypatch.setattr(mod, "is_test_context", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_context", lambda: False)
 
-    monkeypatch.setattr(mod, "derive_hmac_key", lambda: b"cache-secret-one")
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.crypto_utils.derive_hmac_key", lambda: b"cache-secret-one")
     first = mod.get_cache_key("cache me", "local_api", "test-model", backend_identity="http://backend/v1")
 
     mod._embedding_cache_key_secret.cache_clear()
-    monkeypatch.setattr(mod, "derive_hmac_key", lambda: b"cache-secret-two")
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.crypto_utils.derive_hmac_key", lambda: b"cache-secret-two")
     second = mod.get_cache_key("cache me", "local_api", "test-model", backend_identity="http://backend/v1")
 
     assert first != second

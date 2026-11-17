@@ -95,8 +95,6 @@ from tldw_Server_API.app.core.Writing.manuscript_annotations import (
     create_selected_text_review_annotation,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provider
-from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -107,6 +105,8 @@ from tldw_Server_API.app.core.DB_Management.ManuscriptDB import ManuscriptDBHelp
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import PROVIDER_CAPABILITIES
 from tldw_Server_API.app.core.exceptions import WritingAnnotationReviewEnqueueError
+import tldw_Server_API.app.core.Chat.chat_service as _chat_service
+import tldw_Server_API.app.core.Chat.provider_manager as _provider_manager
 
 router = APIRouter()
 ManuscriptVersionEntityType = Literal["manuscript", "part", "chapter", "scene"]
@@ -2590,7 +2590,7 @@ def _validate_analysis_overrides(
     normalized_provider = _normalize_analysis_override(provider)
     normalized_model = _normalize_analysis_override(model)
 
-    provider_manager = get_provider_manager()
+    provider_manager = _provider_manager.get_provider_manager()
     configured_providers = {
         str(entry).strip().lower()
         for entry in getattr(provider_manager, "providers", [])
@@ -2617,7 +2617,7 @@ def _validate_analysis_overrides(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Model override requires a configured analysis provider",
             )
-        model_known = is_model_known_for_provider(provider_key, normalized_model)
+        model_known = _chat_service.is_model_known_for_provider(provider_key, normalized_model)
         if model_known is False:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

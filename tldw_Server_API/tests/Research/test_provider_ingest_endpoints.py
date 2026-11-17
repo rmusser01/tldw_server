@@ -25,7 +25,7 @@ def _override_media_repo(paper_search_app, monkeypatch, media_uuid: str):
     media_db = _MediaDb()
     fake_repo = _FakeRepo(media_uuid)
     paper_search_app.dependency_overrides[get_media_db_for_user] = lambda: media_db
-    monkeypatch.setattr(paper_search, "get_media_repository", lambda db: fake_repo, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_media_repository", lambda db: fake_repo, raising=False)
     return fake_repo, get_media_db_for_user, paper_search
 
 

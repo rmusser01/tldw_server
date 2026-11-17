@@ -723,7 +723,7 @@ def test_create_note_auto_title_clamped_to_255(client: TestClient, monkeypatch):
         max_len = captured["max_len"] or 0
         return "x" * max_len
 
-    monkeypatch.setattr(notes_router_module, "generate_note_title", _fake_generate_note_title)
+    monkeypatch.setattr("tldw_Server_API.app.core.Writing.note_title.generate_note_title", _fake_generate_note_title)
 
     mock_chacha_db_instance.add_note.return_value = note_id_val
     mock_chacha_db_instance.get_note_by_id.return_value = create_timestamped_data(

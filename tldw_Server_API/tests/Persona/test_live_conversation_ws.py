@@ -24,7 +24,7 @@ def fresh_persona_runtime(monkeypatch):
     from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 
     manager = SessionManager()
-    monkeypatch.setattr(ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     return manager
 
 
@@ -269,7 +269,7 @@ def test_live_turns_survive_manager_restart_without_regeneration(monkeypatch, ow
             old_ids = [row["turn_id"] for row in before["turns"]]
             assert len(set(old_ids)) == 2  # nosec B101 -- Pytest behavior assertion.
             restarted = SessionManager()
-            monkeypatch.setattr(ep, "get_session_manager", lambda: restarted)
+            monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: restarted)
             after = client.get("/api/v1/persona/sessions/" + owned_session)
             assert after.status_code == 200  # nosec B101 -- Pytest behavior assertion.
             assert after.json()["turns"] == before["turns"]  # nosec B101 -- Exact persisted identity and content.
@@ -298,7 +298,7 @@ def test_failed_assistant_storage_never_emits_completed_reply(monkeypatch, owned
     from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 
     manager = SessionManager()
-    monkeypatch.setattr(ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     original = PersonaTranscriptStore.append_persona_transcript_turn
 
     def append(self, **kwargs):
@@ -328,7 +328,7 @@ def test_held_provider_cannot_resurrect_expired_question(monkeypatch, owned_sess
     from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 
     manager = SessionManager()
-    monkeypatch.setattr(ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     now = [datetime.now(timezone.utc)]
     monkeypatch.setattr(PersonaTranscriptStore, "_now", staticmethod(lambda: now[0]))
     started = threading.Event()
@@ -366,7 +366,7 @@ def test_cancellation_joins_owned_storage_and_does_not_emit_late_completion(monk
     from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 
     manager = SessionManager()
-    monkeypatch.setattr(ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     original = PersonaTranscriptStore.append_persona_transcript_turn
     entered, release, finished = threading.Event(), threading.Event(), threading.Event()
 

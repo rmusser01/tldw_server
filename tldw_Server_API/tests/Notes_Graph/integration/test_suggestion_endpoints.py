@@ -177,7 +177,7 @@ def _app(
     @asynccontextmanager
     async def lifespan(_application: FastAPI):
         with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(endpoint, "build_notes_graph_suggestions_api", lambda **_kwargs: fake)
+            patch.setattr("tldw_Server_API.app.core.Notes_Graph.suggestion_api.build_notes_graph_suggestions_api", lambda **_kwargs: fake)
             yield
 
     app = FastAPI(lifespan=lifespan)
@@ -259,8 +259,7 @@ async def test_sync_facade_releases_database_connection_on_its_worker_thread(
             return "ok"
 
     monkeypatch.setattr(
-        endpoint,
-        "build_notes_graph_suggestions_api",
+        "tldw_Server_API.app.core.Notes_Graph.suggestion_api.build_notes_graph_suggestions_api",
         lambda **_kwargs: API(),
     )
 
@@ -351,8 +350,7 @@ async def test_run_admission_yields_the_event_loop_during_sync_facade_work(
 
     fake = BlockingAPI()
     monkeypatch.setattr(
-        endpoint,
-        "build_notes_graph_suggestions_api",
+        "tldw_Server_API.app.core.Notes_Graph.suggestion_api.build_notes_graph_suggestions_api",
         lambda **_kwargs: fake,
     )
     task = asyncio.create_task(
@@ -394,8 +392,7 @@ async def test_run_listing_yields_the_event_loop_during_sync_facade_work(
 
     fake = BlockingAPI()
     monkeypatch.setattr(
-        endpoint,
-        "build_notes_graph_suggestions_api",
+        "tldw_Server_API.app.core.Notes_Graph.suggestion_api.build_notes_graph_suggestions_api",
         lambda **_kwargs: fake,
     )
     task = asyncio.create_task(
@@ -437,8 +434,7 @@ async def test_suggestion_acceptance_yields_the_event_loop_during_sync_facade_wo
 
     fake = BlockingAPI()
     monkeypatch.setattr(
-        endpoint,
-        "build_notes_graph_suggestions_api",
+        "tldw_Server_API.app.core.Notes_Graph.suggestion_api.build_notes_graph_suggestions_api",
         lambda **_kwargs: fake,
     )
     principal = _principal((*_base_permissions(), NOTES_GRAPH_WRITE))
@@ -754,7 +750,7 @@ def test_invalid_or_cross_owner_dataset_is_sanitized_404_on_every_route(
     def reject_dataset(**_kwargs):
         raise NotesLinkDatasetConflictError()
 
-    monkeypatch.setattr(endpoint, "resolve_notes_link_dataset_authority", reject_dataset)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_dataset_authority", reject_dataset)
     with TestClient(
         _app(FakeAPI(), _base_permissions()),
         raise_server_exceptions=False,

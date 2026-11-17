@@ -302,7 +302,7 @@ def test_get_configured_providers_sanitizes_generic_failure_log(monkeypatch):
         raise RuntimeError("llm config backend exploded at /private/llm-providers.db")
 
     monkeypatch.setattr(llm_endpoints, "logger", logger_stub)
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", boom)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", boom)
 
     result = llm_endpoints.get_configured_providers()
 
@@ -365,7 +365,7 @@ async def test_get_models_metadata_sanitizes_image_model_warning(monkeypatch):
 
     monkeypatch.setattr(llm_endpoints, "logger", logger_stub)
     monkeypatch.setattr(llm_endpoints, "get_configured_providers_async", configured)
-    monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", boom)
+    monkeypatch.setattr("tldw_Server_API.app.core.Image_Generation.listing.list_image_models_for_catalog", boom)
 
     result = await llm_endpoints.get_models_metadata(
         request=None,
@@ -431,7 +431,7 @@ async def test_get_all_models_sanitizes_image_model_warning(monkeypatch):
 
     monkeypatch.setattr(llm_endpoints, "logger", logger_stub)
     monkeypatch.setattr(llm_endpoints, "get_configured_providers_async", configured)
-    monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", boom)
+    monkeypatch.setattr("tldw_Server_API.app.core.Image_Generation.listing.list_image_models_for_catalog", boom)
 
     result = await llm_endpoints.get_all_models(
         model_type=None,

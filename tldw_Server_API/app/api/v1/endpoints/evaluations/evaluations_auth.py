@@ -14,7 +14,7 @@ from typing import Any, Optional
 from fastapi import Depends, Header, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, User, verify_jwt_and_fetch_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, User
 
 from tldw_Server_API.app.api.v1.API_Deps.v1_endpoint_deps import oauth2_scheme
 from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
@@ -22,15 +22,16 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     is_single_user_ip_allowed,
     resolve_client_ip,
 )
-from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.exceptions import InactiveUserError
 from tldw_Server_API.app.core.Evaluations.identity import (
     EvaluationIdentity,
     evaluations_identity_from_user,
 )
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
+import tldw_Server_API.app.core.AuthNZ.jwt_service as _jwt_service
+import tldw_Server_API.app.core.AuthNZ.settings as _settings
 
 security = HTTPBearer(auto_error=False)
 _EVALS_LEGACY_RATE_LIMIT_SHIM_LOGGED = False
@@ -94,7 +95,7 @@ async def verify_api_key(
     request: Request,
 ) -> str:
     """Verify API key or JWT token based on auth mode (single_user|multi_user)."""
-    settings = get_settings()
+    settings = _settings.get_settings()
 
     token = None
     if settings.AUTH_MODE == "single_user" and x_api_key and isinstance(x_api_key, str):
@@ -134,7 +135,7 @@ async def verify_api_key(
         )
 
     if cookie_candidate:
-        user = await get_request_user(
+        user = await _auth_deps.get_request_user(
             request=request,
             api_key=None,
             token=None,
@@ -162,7 +163,7 @@ async def verify_api_key(
             return token
     elif settings.AUTH_MODE == "multi_user":
         try:
-            jwt_service = get_jwt_service()
+            jwt_service = _jwt_service.get_jwt_service()
             # Decode early to surface token-specific errors before user lookup.
             jwt_service.decode_access_token(token)
         except TokenExpiredError:
@@ -194,7 +195,7 @@ async def verify_api_key(
                 }},
             ) from exc
         try:
-            user = await verify_jwt_and_fetch_user(request, token)
+            user = await _auth_deps.verify_jwt_and_fetch_user(request, token)
             user_id = getattr(user, "id_str", None) or str(getattr(user, "id", ""))
             return f"user_{user_id}"
         except InactiveUserError as exc:
@@ -244,7 +245,7 @@ async def get_eval_request_user(
     legacy_token_header: Optional[str] = Header(None, alias="Token"),
 ) -> User:
     """Resolve the authenticated User after evaluations auth validation."""
-    return await get_request_user(
+    return await _auth_deps.get_request_user(
         request=request,
         api_key=api_key,
         token=token,

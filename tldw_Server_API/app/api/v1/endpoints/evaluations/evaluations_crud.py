@@ -33,10 +33,8 @@ from tldw_Server_API.app.api.v1.utils.pagination import build_cursor_pagination_
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.audit_adapter import MandatoryAuditWriteError
 from tldw_Server_API.app.core.Evaluations.eval_runner import run_llm_provider
-from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
-    get_unified_evaluation_service_for_user,
-)
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
+import tldw_Server_API.app.core.Evaluations.unified_evaluation_service as _unified_evaluation_service
 
 _EVALS_CRUD_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -69,7 +67,7 @@ RBAC_EVALS_CREATE = rbac_rate_limit("evals.create")
 
 def _get_crud_identity_and_service(current_user: User):
     identity = get_evaluation_identity(current_user)
-    return identity, get_unified_evaluation_service_for_user(identity.user_scope)
+    return identity, _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
 
 
 @crud_router.post(

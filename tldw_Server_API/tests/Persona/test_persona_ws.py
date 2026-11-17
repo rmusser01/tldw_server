@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExe
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import PersonaExemplarPromptAssembly
 from tldw_Server_API.app.core.Persona.exemplar_runtime import PersonaExemplarRuntimeContext
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
+import tldw_Server_API.app.core.Persona.session_manager as _persona_session_manager
 
 pytestmark = pytest.mark.unit
 
@@ -130,7 +131,7 @@ def _mock_persona_auth(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     async def _fake_resolve(*args, **kwargs):
         return "1", True, True
@@ -279,7 +280,7 @@ def test_persona_websocket_plan_and_confirm(monkeypatch):
         async def handle_http_request(self, request, user_id=None, metadata=None):
             return SimpleNamespace(error=None, result={"ok": True, "tool": request.params.get("name")})
 
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -380,7 +381,7 @@ def test_persona_mcp_tool_receives_authenticated_execution_scope(monkeypatch):
         return "1", True, True
 
     fake_server = _FakeServer()
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: fake_server)
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
 
     with TestClient(fastapi_app) as c:
@@ -421,7 +422,7 @@ def test_persona_tool_result_handles_empty_mcp_response(monkeypatch):
         async def handle_http_request(self, request, user_id=None, metadata=None):
             return None
 
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -478,10 +479,10 @@ def test_persona_ws_persistence_offloads_to_thread(monkeypatch):
     def _fake_persist_tool_outcome(**kwargs):
         return True
 
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
-    monkeypatch.setattr(persona_ep, "persist_persona_turn", _fake_persist_persona_turn)
-    monkeypatch.setattr(persona_ep, "persist_tool_outcome", _fake_persist_tool_outcome)
-    monkeypatch.setattr(persona_ep, "retrieve_top_memories", lambda **kwargs: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.memory_integration.persist_persona_turn", _fake_persist_persona_turn)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.memory_integration.persist_tool_outcome", _fake_persist_tool_outcome)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.memory_integration.retrieve_top_memories", lambda **kwargs: [])
     monkeypatch.setattr(persona_ep.asyncio, "to_thread", _fake_to_thread)
 
     with TestClient(fastapi_app) as c:
@@ -620,9 +621,9 @@ def test_persona_ws_user_message_applies_exemplar_guidance_and_persists_compact_
             },
         )
 
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
-    monkeypatch.setattr(persona_ep, "persist_persona_turn", _fake_persist_persona_turn)
-    monkeypatch.setattr(persona_ep, "retrieve_top_memories", lambda **kwargs: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.memory_integration.persist_persona_turn", _fake_persist_persona_turn)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.memory_integration.retrieve_top_memories", lambda **kwargs: [])
     monkeypatch.setattr(
         persona_ep,
         "resolve_persona_exemplar_runtime_context",
@@ -715,9 +716,9 @@ def test_persona_ws_user_message_without_enabled_exemplars_keeps_compact_metadat
         persisted_turns.append(kwargs)
         return True
 
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
-    monkeypatch.setattr(persona_ep, "persist_persona_turn", _fake_persist_persona_turn)
-    monkeypatch.setattr(persona_ep, "retrieve_top_memories", lambda **kwargs: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.memory_integration.persist_persona_turn", _fake_persist_persona_turn)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.memory_integration.retrieve_top_memories", lambda **kwargs: [])
     monkeypatch.setattr(persona_ep.asyncio, "to_thread", _fake_to_thread)
 
     conversation_calls = _stub_persona_conversation(monkeypatch)
@@ -785,9 +786,9 @@ def test_persona_ws_user_message_exemplar_lookup_failure_degrades_gracefully(
         persisted_turns.append(kwargs)
         return True
 
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
-    monkeypatch.setattr(persona_ep, "persist_persona_turn", _fake_persist_persona_turn)
-    monkeypatch.setattr(persona_ep, "retrieve_top_memories", lambda **kwargs: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.memory_integration.persist_persona_turn", _fake_persist_persona_turn)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.memory_integration.retrieve_top_memories", lambda **kwargs: [])
     monkeypatch.setattr(persona_ep.asyncio, "to_thread", _fake_to_thread)
 
     conversation_calls = _stub_persona_conversation(monkeypatch)
@@ -859,7 +860,7 @@ def test_persona_confirm_plan_rejects_session_mismatch():
         with c.websocket_connect("/api/v1/persona/stream") as ws:
             offered = json.loads(ws.receive_text())
             session_id = offered["session_id"]
-            persona_ep.get_session_manager().create(
+            _persona_session_manager.get_session_manager().create(
                 user_id="1", persona_id="research_assistant", resume_session_id="sess_b",
             )
 
@@ -960,7 +961,7 @@ async def test_persona_verified_principal_projects_scope(monkeypatch, token_type
         assert required_scope == "read"
         return SimpleNamespace(user_id=7, token_type=token_type, active_org_id=9, active_team_id=11)
 
-    monkeypatch.setattr(persona_ep, "resolve_ws_principal_or_deprecated_query", _resolve)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.websocket_principal.resolve_ws_principal_or_deprecated_query", _resolve)
     result = await _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID(ws)
 
     assert result == ("7", True, True)
@@ -978,7 +979,7 @@ async def test_persona_invalid_verified_scope_clears_previous_scope(monkeypatch,
         calls.append(required_scope)
         return SimpleNamespace(user_id=user_id, token_type="access", active_org_id=org_id, active_team_id=None)
 
-    monkeypatch.setattr(persona_ep, "resolve_ws_principal_or_deprecated_query", _resolve)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.websocket_principal.resolve_ws_principal_or_deprecated_query", _resolve)
     result = await _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID(ws)
 
     assert result == (None, True, False)
@@ -1008,7 +1009,7 @@ def test_persona_tool_execution_denied_when_api_key_scope_missing(monkeypatch):
         return "1", True, True
 
     fake_server = _FakeServer()
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: fake_server)
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
 
     with TestClient(fastapi_app) as c:
@@ -1086,7 +1087,7 @@ def test_a_read_only_key_stays_denied_write_tools_while_revalidation_is_in_fligh
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID)
     monkeypatch.setattr(websocket_principal, "get_auth_principal", _http_verifier)
     monkeypatch.setattr(persona_ep.WebSocketStream, "send_json", _send_json)
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: fake_server)
     monkeypatch.setattr(persona_ep, "_get_persona_ws_auth_revalidate_interval_s", lambda: 0.01)
 
     try:
@@ -1139,7 +1140,7 @@ def test_persona_stream_closes_on_auth_revocation_before_confirm_plan(monkeypatc
         return None, True, False
 
     fake_server = _FakeServer()
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: fake_server)
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _stateful_resolve)
     monkeypatch.setattr(persona_ep, "_get_persona_ws_auth_revalidate_interval_s", lambda: 0.0)
 
@@ -1208,7 +1209,7 @@ async def test_persona_stream_start_failure_executes_stream_stop(monkeypatch):
         return "1", True, True
 
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
-    monkeypatch.setattr(persona_ep, "WebSocketStream", _FailingStream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Streaming.streams.WebSocketStream", _FailingStream)
 
     await persona_ep.persona_stream(_FakeWebSocket())
 
@@ -1255,7 +1256,7 @@ async def test_persona_stream_disconnect_executes_stream_stop(monkeypatch):
         return "1", True, True
 
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
-    monkeypatch.setattr(persona_ep, "WebSocketStream", _DisconnectingStream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Streaming.streams.WebSocketStream", _DisconnectingStream)
     monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda *args, **kwargs: None)
     monkeypatch.setattr(persona_ep, "_get_persona_ws_auth_revalidate_interval_s", lambda: 0.0)
 
@@ -1333,7 +1334,7 @@ def test_persona_policy_denial_emits_reason_code_and_result(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     session_id = "sess_policy_denied"
     plan_id = "plan_policy_denied"
@@ -1445,8 +1446,8 @@ def test_persona_policy_allows_mcp_tool_when_rules_intersect(tmp_path, monkeypat
             return SimpleNamespace(error=None, result={"ok": True})
 
     fake_server = _FakeServer()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: fake_server)
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -1558,8 +1559,8 @@ def test_persona_tool_result_surfaces_runtime_approval_payload(tmp_path, monkeyp
                 result=None,
             )
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -1668,8 +1669,8 @@ def test_persona_tool_result_surfaces_external_access_hard_deny(tmp_path, monkey
                 result=None,
             )
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -1782,8 +1783,8 @@ def test_persona_tool_result_surfaces_workspace_runtime_approval_payload(tmp_pat
                 result=None,
             )
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -1890,8 +1891,8 @@ def test_persona_tool_result_surfaces_workspace_trust_source_hard_deny(tmp_path,
                 result=None,
             )
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -1987,8 +1988,8 @@ def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch, pare
             return SimpleNamespace(error=None, result={"ok": True, "retry": True})
 
     fake_server = _FakeServer()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: fake_server)
 
     if parent_deleted:
         db = CharactersRAGDB(str(db_path), client_id="persona-ws-retry-deletion")
@@ -2082,7 +2083,7 @@ def test_persona_policy_blocks_skill_without_persona_allow(tmp_path, monkeypatch
         plan_id="plan_skill_block",
         steps=[{"idx": 0, "step_type": "skill", "tool": "daily-brief", "args": {"args": "headlines"}}],
     )
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -2167,7 +2168,7 @@ def test_persona_policy_allows_skill_when_rule_present(tmp_path, monkeypatch):
         plan_id="plan_skill_allow",
         steps=[{"idx": 0, "step_type": "skill", "tool": "daily-brief", "args": {"args": "headlines"}}],
     )
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "handle_skill_tool_call", _fake_handle_skill)
 
     with TestClient(fastapi_app) as c:
@@ -2213,7 +2214,7 @@ def test_persona_tool_call_attaches_audit_metadata(monkeypatch):
         return "1", True, True
 
     fake_server = _FakeServer()
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: fake_server)
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
 
     with TestClient(fastapi_app) as c:
@@ -2309,7 +2310,7 @@ def test_persona_tool_call_attaches_scope_metadata_from_persisted_session(tmp_pa
             return SimpleNamespace(error=None, result={"ok": True})
 
     fake_server = _FakeServer()
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: fake_server)
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -3363,7 +3364,7 @@ def test_persona_audio_chunk_records_live_voice_commit_telemetry(
         mode="persistent_scoped",
     )
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(
         persona_ep,
         "_create_persona_live_stt_transcriber",
@@ -3887,7 +3888,7 @@ def test_persona_voice_config_stores_runtime_preferences(monkeypatch):
 
     manager = SessionManager()
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -3955,7 +3956,7 @@ def test_persona_voice_commit_reuses_persona_tool_plan_flow(monkeypatch):
 
     manager = SessionManager()
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -4005,7 +4006,7 @@ def test_persona_voice_commit_emits_processing_notice_after_quiet_delay(monkeypa
             selection_metadata={},
         )
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(
         persona_ep,
         "resolve_persona_exemplar_runtime_context",
@@ -4058,7 +4059,7 @@ def test_persona_voice_processing_notice_is_suppressed_by_tool_plan_progress(mon
 
     manager = SessionManager()
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(
         persona_ep,
         "_PERSONA_LIVE_PROCESSING_NOTICE_DELAY_S",
@@ -4165,8 +4166,8 @@ def test_persona_tool_call_emits_tool_processing_notice_after_quiet_delay(tmp_pa
             await asyncio.sleep(0.25)
             return SimpleNamespace(error=None, result={"ok": True, "slow": True})
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
     monkeypatch.setattr(
         persona_ep,
         "_PERSONA_LIVE_PROCESSING_NOTICE_DELAY_S",
@@ -4272,8 +4273,8 @@ def test_persona_tool_processing_notice_is_suppressed_by_tool_result(tmp_path, m
         async def handle_http_request(self, request, user_id=None, metadata=None):
             return SimpleNamespace(error=None, result={"ok": True, "fast": True})
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
     monkeypatch.setattr(
         persona_ep,
         "_PERSONA_LIVE_PROCESSING_NOTICE_DELAY_S",
@@ -4336,7 +4337,7 @@ def test_persona_voice_conversation_tts_failure_degrades_to_text_only(
     async def _raise_tts_failure(*args: object, **kwargs: object) -> tuple[bytes, str]:
         raise RuntimeError("tts provider unavailable")
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "_generate_persona_live_tts_audio", _raise_tts_failure)
 
     conversation_calls = _stub_persona_conversation(monkeypatch, "I am the research assistant persona.")
@@ -4605,7 +4606,7 @@ def test_persona_persists_session_turns_and_tool_outcomes(monkeypatch):
     async def _fake_resolve(*args, **kwargs):
         return "777", True, True
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
 
     with TestClient(fastapi_app) as c:
@@ -4659,9 +4660,9 @@ def test_persona_tool_result_turn_retention_uses_summary_not_raw_output(monkeypa
     async def _fake_resolve(*args, **kwargs):
         return "1", True, True
 
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -4991,7 +4992,7 @@ def test_persona_companion_context_disable_persists_across_restart(tmp_path, mon
 
     first_manager = SessionManager()
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: first_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: first_manager)
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -5039,7 +5040,7 @@ def test_persona_companion_context_disable_persists_across_restart(tmp_path, mon
     assert session_row["preferences"]["use_companion_context"] is False
 
     restarted_manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: restarted_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: restarted_manager)
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -5100,7 +5101,7 @@ def test_persona_memory_top_k_override_used(monkeypatch):
         return [_Memory("memory-a"), _Memory("memory-b")]
 
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
-    monkeypatch.setattr(persona_ep, "retrieve_top_memories", _fake_retrieve)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.memory_integration.retrieve_top_memories", _fake_retrieve)
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -5145,7 +5146,7 @@ def test_persona_ws_required_fields_and_event_ordering(monkeypatch):
         async def handle_http_request(self, request, user_id=None, metadata=None):
             return SimpleNamespace(error=None, result={"ok": True, "tool": request.params.get("name")})
 
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
 
     session_id = "sess_contract_order"
     with TestClient(fastapi_app) as c:
@@ -5237,7 +5238,7 @@ def test_persona_ws_ignores_forged_security_fields(monkeypatch):
             return SimpleNamespace(error=None, result={"ok": True})
 
     fake_server = _FakeServer()
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: fake_server)
 
     session_id = "sess_forged_fields"
     with TestClient(fastapi_app) as c:
@@ -5317,7 +5318,7 @@ def test_persona_ws_rejects_cross_user_scope_injection(tmp_path, monkeypatch):
             return SimpleNamespace(error=None, result={"ok": True})
 
     fake_server = _FakeServer()
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: fake_server)
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
@@ -5335,7 +5336,7 @@ def test_persona_ws_rejects_cross_user_scope_injection(tmp_path, monkeypatch):
             assert refusal["level"] == "error"  # nosec B101 -- Foreign IDs are refused before plan/tool creation.
 
     assert fake_server.calls == []  # nosec B101 -- No foreign-session action may execute with a fallback scope.
-    assert persona_ep.get_session_manager().get(injected_session_id) is None  # nosec B101
+    assert _persona_session_manager.get_session_manager().get(injected_session_id) is None  # nosec B101
     owner = CharactersRAGDB(str(DatabasePaths.get_chacha_db_path(2)), client_id="scope-injection-owner-check")
     try:
         row = owner.get_persona_session(injected_session_id, user_id="2", include_deleted=False)
@@ -5727,8 +5728,8 @@ def test_persona_summary_memory_persisted_before_assistant_delta(tmp_path, monke
         return True
 
     monkeypatch.setattr(persona_ep.WebSocketStream, "send_json", _recording_send_json)
-    monkeypatch.setattr(persona_ep, "persist_persona_turn", _fake_persist_persona_turn)
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.memory_integration.persist_persona_turn", _fake_persist_persona_turn)
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
     _seed_persona_session(
         tmp_path,
         monkeypatch,
@@ -5796,7 +5797,7 @@ def test_persona_summary_memory_write_only_for_persistent_mode(
         async def handle_http_request(self, request, user_id=None, metadata=None):
             return SimpleNamespace(error=None, result={"ok": True, "tool": request.params.get("name")})
 
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
 
     db = _seed_personalization_db(tmp_path, monkeypatch, user_id="1", enabled=True)
     _seed_persona_session(
@@ -5861,7 +5862,7 @@ def test_confirm_plan_rechecks_persisted_lifecycle_after_review(tmp_path, monkey
         )
     _seed_persona_session(tmp_path, monkeypatch, user_id="1", session_id=sid, mode="session_scoped")
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     with TestClient(fastapi_app) as client:
         with client.websocket_connect("/api/v1/persona/stream") as ws:
             json.loads(ws.receive_text())
@@ -5910,7 +5911,7 @@ def test_confirm_plan_rechecks_persisted_lifecycle_after_review(tmp_path, monkey
 
 def test_queued_same_session_turns_keep_client_message_ids_and_confirmation_resets_them(monkeypatch):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     sid = "sess_queued_correlation"
     with TestClient(fastapi_app) as client:
         with client.websocket_connect("/api/v1/persona/stream") as ws:
@@ -5994,7 +5995,7 @@ def test_stop_cancels_queued_turn_without_starting_it_and_allows_fresh_send(monk
     old_release_timed_out = threading.Event()
     entered = []
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     sid = "sess_fifo_stop"
     registry = persona_ep.live_conversation.persona_live_turn_registry
     original_register = registry.register
@@ -6130,7 +6131,7 @@ def test_a_confirm_plan_rule_save_survives_a_turn_saving_preferences_meanwhile(m
     seed.create_persona_session({"id": "sess_prefs", "persona_id": "research_assistant", "user_id": "1",
                                  "mode": "session_scoped", "status": "active"})
     seed.close_connection()
-    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr("tldw_Server_API.app.core.MCP_unified.get_mcp_server", lambda: _FakeServer())
     monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: CharactersRAGDB(str(db_path), client_id="1"))
 
     real_persist = persona_ep._persist_persona_session_preferences
@@ -6186,7 +6187,7 @@ def test_cold_ws_alias_cannot_occupy_another_users_session(tmp_path, monkeypatch
     session_id = "cold-owned-session"
     _seed_persona_session(tmp_path, monkeypatch, user_id="1", session_id=session_id, mode="session_scoped")
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     calls = _stub_persona_conversation(monkeypatch)
 
     async def other_user(*args, **kwargs):
@@ -6241,7 +6242,7 @@ def test_server_offered_temporary_ws_session_still_works(tmp_path, monkeypatch, 
     """A scaffold uses the unguessable ID issued by its own connection."""
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_db"))
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
         offered = _recv_until(ws, lambda row: row.get("reason_code") == "WS_CONNECTED")["session_id"]
         message = {"type": "unknown_probe"}
@@ -6302,10 +6303,10 @@ async def test_ws_admission_cancellation_joins_owned_lookup_before_retirement(tm
         async def error(self, *args, **kwargs):
             return None
 
-    monkeypatch.setattr(persona_ep, "WebSocketStream", Stream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Streaming.streams.WebSocketStream", Stream)
     monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda user_id: db)
     monkeypatch.setattr(persona_ep, "_get_persona_ws_auth_revalidate_interval_s", lambda: 0.0)
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "_admit_persona_stream_session_id", held_read)
     task = asyncio.create_task(persona_ep.persona_stream(Socket()))
     try:
@@ -6333,7 +6334,7 @@ async def test_ws_admission_cancellation_joins_owned_lookup_before_retirement(tm
 def test_ws_admission_storage_failure_is_not_temporary_session_permission(tmp_path, monkeypatch, lookup_error):
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_db"))
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
     calls = _stub_persona_conversation(monkeypatch)
 
     def unavailable(*args, **kwargs):

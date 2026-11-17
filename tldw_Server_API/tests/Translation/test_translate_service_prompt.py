@@ -72,7 +72,7 @@ async def test_translation_without_override_is_byte_identical_and_keeps_provider
         analyze_calls.append(kwargs)
         return " Bonjour "
 
-    monkeypatch.setattr(translate_module, "analyze", capture_analyze)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze", capture_analyze)
 
     response = await translate_module.translate_text(
         _request(),
@@ -110,8 +110,7 @@ async def test_translation_uses_saved_system_and_template_together_on_next_call(
     db = _PromptDatabase()
     analyze_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
-        translate_module,
-        "analyze",
+        "tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze",
         lambda **kwargs: analyze_calls.append(kwargs) or "traduit",
     )
 
@@ -239,7 +238,7 @@ async def test_translation_corrupt_override_never_falls_back_or_calls_provider(
         provider_called = True
         return "unexpected"
 
-    monkeypatch.setattr(translate_module, "analyze", unexpected_provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze", unexpected_provider)
 
     with pytest.raises(ServicePromptCorruptOverride):
         await translate_module.translate_text(
@@ -262,8 +261,7 @@ async def test_translation_prompt_store_failure_is_outside_provider_error_mappin
             raise failure
 
     monkeypatch.setattr(
-        translate_module,
-        "analyze",
+        "tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze",
         lambda **_kwargs: pytest.fail("provider must not be called"),
     )
 
@@ -289,7 +287,7 @@ async def test_translation_analyze_runs_off_the_event_loop_thread(monkeypatch: p
         seen.append(threading.get_ident())
         return "Bonjour"
 
-    monkeypatch.setattr(translate_module, "analyze", capture_analyze)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze", capture_analyze)
 
     await translate_module.translate_text(_request(), current_user=SimpleNamespace(id=1), db=_PromptDatabase())
 

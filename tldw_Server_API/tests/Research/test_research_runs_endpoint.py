@@ -92,8 +92,7 @@ def test_patch_and_approve_research_run_triggers_research_checkpoint_workflow_re
             }
 
     monkeypatch.setattr(
-        research_runs,
-        "resume_workflows_waiting_on_research_checkpoint",
+        "tldw_Server_API.app.core.Workflows.research_wait_bridge.resume_workflows_waiting_on_research_checkpoint",
         _fake_bridge,
         raising=False,
     )

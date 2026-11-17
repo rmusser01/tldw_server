@@ -109,8 +109,7 @@ async def test_get_webhook_manager_sanitizes_test_mode_detection_debug(
     monkeypatch.setattr(evaluations_webhooks, "logger", logger_stub)
     monkeypatch.setattr(testing_module, "is_test_mode", _raise_test_mode_error)
     monkeypatch.setattr(
-        evaluations_webhooks,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _WebhookService(manager),
     )
 

@@ -505,11 +505,10 @@ def test_analyze_scene_rejects_unknown_provider_override(client: TestClient, mon
     import tldw_Server_API.app.api.v1.endpoints.writing_manuscripts as writing_endpoint
 
     monkeypatch.setattr(
-        writing_endpoint,
-        "get_provider_manager",
+        "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
         lambda: SimpleNamespace(providers=["openai"], primary_provider="openai"),
     )
-    monkeypatch.setattr(writing_endpoint, "is_model_known_for_provider", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider", lambda *_args, **_kwargs: True)
 
     resp = client.post(
         f"{PREFIX}/scenes/{scene_id}/analyze",
@@ -526,13 +525,11 @@ def test_analyze_scene_rejects_unknown_model_override(client: TestClient, monkey
     import tldw_Server_API.app.api.v1.endpoints.writing_manuscripts as writing_endpoint
 
     monkeypatch.setattr(
-        writing_endpoint,
-        "get_provider_manager",
+        "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
         lambda: SimpleNamespace(providers=["openai"], primary_provider="openai"),
     )
     monkeypatch.setattr(
-        writing_endpoint,
-        "is_model_known_for_provider",
+        "tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider",
         lambda provider, model: False if provider == "openai" and model == "bad-model" else True,
     )
 
@@ -575,11 +572,10 @@ def test_project_analysis_rejects_unknown_provider_override(
     import tldw_Server_API.app.api.v1.endpoints.writing_manuscripts as writing_endpoint
 
     monkeypatch.setattr(
-        writing_endpoint,
-        "get_provider_manager",
+        "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
         lambda: SimpleNamespace(providers=["openai"], primary_provider="openai"),
     )
-    monkeypatch.setattr(writing_endpoint, "is_model_known_for_provider", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider", lambda *_args, **_kwargs: True)
 
     resp = client.post(
         f"{PREFIX}/projects/{project_id}/analyze/{analysis_route}",
@@ -601,13 +597,11 @@ def test_project_analysis_rejects_unknown_model_override(
     import tldw_Server_API.app.api.v1.endpoints.writing_manuscripts as writing_endpoint
 
     monkeypatch.setattr(
-        writing_endpoint,
-        "get_provider_manager",
+        "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
         lambda: SimpleNamespace(providers=["openai"], primary_provider="openai"),
     )
     monkeypatch.setattr(
-        writing_endpoint,
-        "is_model_known_for_provider",
+        "tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider",
         lambda provider, model: False if provider == "openai" and model == "bad-model" else True,
     )
 
