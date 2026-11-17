@@ -2339,14 +2339,13 @@ class EvaluationRunner:
         """Calculate aggregate statistics"""
         _ = metrics
         _ = threshold
-        empty_pass_rate = 0.0
         if not results:
             return {
-                "mean_score": 0,
-                "std_dev": 0,
-                "min_score": 0,
-                "max_score": 0,
-                "pass_rate": empty_pass_rate,
+                "mean_score": None,  # nothing scored: no average, not a 0.0 that reads as "all wrong"
+                "std_dev": None,
+                "min_score": None,
+                "max_score": None,
+                "pass_rate": None,
                 "total_samples": 0,
                 "failed_samples": 0
             }
@@ -2368,11 +2367,11 @@ class EvaluationRunner:
 
         if not all_scores:
             return {
-                "mean_score": 0,
-                "std_dev": 0,
-                "min_score": 0,
-                "max_score": 0,
-                "pass_rate": empty_pass_rate,
+                "mean_score": None,  # nothing scored: no average, not a 0.0 that reads as "all wrong"
+                "std_dev": None,
+                "min_score": None,
+                "max_score": None,
+                "pass_rate": None,
                 "total_samples": len(results),
                 "failed_samples": len(results)
             }

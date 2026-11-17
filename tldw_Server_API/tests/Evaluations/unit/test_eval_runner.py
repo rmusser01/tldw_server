@@ -691,7 +691,11 @@ def test_an_all_unscored_run_reports_every_sample_failed(tmp_path):
 
     aggregate = runner._calculate_aggregate_results([{"error": "a"}, {"error": "b"}], None, 0.7)
 
-    assert (aggregate["mean_score"], aggregate["pass_rate"], aggregate["failed_samples"]) == (0, 0.0, 2)
+    # No scored sample, so no mean or pass rate: None, never a 0.0 that reads as "every answer wrong"
+    assert {k: aggregate[k] for k in ("mean_score", "std_dev", "min_score", "max_score", "pass_rate")} == dict.fromkeys(
+        ("mean_score", "std_dev", "min_score", "max_score", "pass_rate")
+    )
+    assert (aggregate["total_samples"], aggregate["failed_samples"]) == (2, 2)
 
 
 @pytest.mark.parametrize("spec,want", [

@@ -352,9 +352,9 @@ Gets complete results for a finished run.
       "std_dev": 0.12,         // Standard deviation
       "min_score": 0.60,       // Minimum score
       "max_score": 0.98,       // Maximum score
-      "pass_rate": 0.75,       // Percentage passing threshold (0-1)
+      "pass_rate": 0.75,       // Share of scored samples passing threshold (0-1); the score fields are null when no sample was scored
       "total_samples": 100,
-      "failed_samples": 25   // Unscored (no score; a failed judge call): in no mean_score or pass_rate
+      "failed_samples": 25   // Samples with no score, left out of every score field. A failed judge call is such a sample in label-choice and NLI runs; model-graded runs (RAG, summarization, response quality) still score a failed judge 0.0 (tracked in TASK-15562)
     },
     "by_metric": {             // Breakdown by metric (if applicable)
       "fluency": {
