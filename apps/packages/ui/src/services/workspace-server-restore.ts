@@ -5,6 +5,7 @@ import { canonicalHistoryJson } from "@/db/dexie/history-selection";
 import { fetchAllServerChatMessages, mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import type { Message } from "@/store/option";
+import { readWorkspaceArtifactCatalog } from "./workspace-artifact-catalog";
 import { rememberCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
 import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import { recoverWebCapturePin, WebCaptureNotCurrentError } from "@/utils/research-web-capture";
@@ -19,7 +20,7 @@ import { bgRequest } from "@/services/background-proxy";
 import { loadServicePromptSnapshot } from "@/services/service-prompts";
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts";
 import type {
-  WorkspaceArtifactApiResponse,
+
   WorkspaceContextResponse,
   WorkspaceListApiResponse,
   WorkspaceNoteApiResponse,
@@ -335,12 +336,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
       throw new Error("The server workspace could not be restored completely");
     }
     const [artifacts, notes] = await Promise.all([
-      bgRequest<WorkspaceArtifactApiResponse[]>({
-        ...request,
-        path: `${path}/artifacts`,
-        // Full evidence reports can be large; match the pack read budget per headers/body phase.
-        timeoutMs: 120_000,
-      }),
+      readWorkspaceArtifactCatalog(workspaceId, scope.scopeKey, request),
       bgRequest<WorkspaceNoteApiResponse[]>({
         ...request,
         path: `${path}/notes`,
@@ -348,7 +344,6 @@ export const restoreMigratedResearchWorkspace = async (options: {
     ]);
     assertCurrent();
     if (
-      artifacts.some((artifact) => artifact.workspace_id !== workspaceId) ||
       notes.some((note) => note.workspace_id !== workspaceId)
     ) {
       throw new Error("Workspace restoration returned a different workspace");
@@ -357,7 +352,6 @@ export const restoreMigratedResearchWorkspace = async (options: {
       fetch: async () => ({
         ...context.workspace,
         sources: context.sources.items,
-        artifacts,
         notes,
       }),
     });
@@ -471,7 +465,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
             ),
         ),
     );
-    snapshot.generatedArtifacts = local.artifacts.map(artifact => bindWorkspaceArtifactOrigin(artifact, scope.scopeKey, workspaceId));
+    snapshot.generatedArtifacts = artifacts.filter(artifact => !(artifact.reviewStatus === "archived" && artifact.removedFromStudio)).map(artifact => bindWorkspaceArtifactOrigin(artifact, scope.scopeKey, workspaceId));
     snapshot.workspaceBanner = {
       ...snapshot.workspaceBanner,
       title: workspace.banner_title || "",

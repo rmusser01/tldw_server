@@ -73,6 +73,21 @@ bun run e2e:research-workspace:uat -- \
   --grep "opens and closes workspace search"
 ```
 
+## Measure Studio loading with saved outputs
+
+Use an authenticated local WebUI and a workspace whose saved outputs all come from section-generation jobs. The quickstart WebUI can bootstrap its own single-user session. The check opens that existing workspace in a fresh Chromium context and reloads the same tab. It reads the saved outputs list without starting a generation job.
+
+From `apps/tldw-frontend`, set the WebUI origin and the prepared workspace ID.
+
+```bash
+TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:8080 \
+TLDW_RESEARCH_WORKSPACE_ID="<workspace-id>" \
+bunx playwright test e2e/workflows/research-workspace-artifact-loading.manual.spec.ts \
+  --project=chromium --workers=1 --reporter=line
+```
+
+Each navigation prints the time from navigation start to the first visible saved output card, plus the artifact requests' durations and encoded, decoded and transfer bytes. The Playwright test attaches both samples as JSON. It requires a successful metadata read and fails if Studio requests the full artifact list or any individual artifact during entry. Compare timings on the same workspace and machine across builds.
+
 ## Shared Recipient CI Coverage
 
 The deterministic recipient spec uses stubbed canonical API responses to cover

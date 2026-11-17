@@ -1,3 +1,4 @@
+import { materializeWorkspaceOutputs } from "@/services/workspace-artifact-catalog"
 import { bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts";
 import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
@@ -3425,8 +3426,15 @@ const ResearchWorkspaceBody: React.FC = () => {
     setCrossTabChangedFields([])
   }
 
-  const handleForkWorkspaceFromSyncWarning = () => {
-    duplicateWorkspace(workspaceId)
+  const handleForkWorkspaceFromSyncWarning = async () => {
+    if (!workspaceId) return
+    try {
+      if (useWorkspaceStore.getState().generatedArtifacts.some(a => a.detailDeferred)) await materializeWorkspaceOutputs(workspaceId)
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "Unable to load saved outputs.")
+      return
+    }
+    if (useWorkspaceStore.getState().workspaceId !== workspaceId || !duplicateWorkspace(workspaceId)) return
     handleDismissCrossTabSyncWarning()
   }
 

@@ -735,7 +735,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       sourceWorkspaceId === state.workspaceId
         ? currentSnapshot
         : state.workspaceSnapshots[sourceWorkspaceId]
-    if (!sourceSnapshot) return null
+    if (!sourceSnapshot || sourceSnapshot.generatedArtifacts.some(artifact => artifact.detailDeferred)) return null
 
     const duplicatedSnapshot = duplicateWorkspaceSnapshot(sourceSnapshot)
     const now = new Date()

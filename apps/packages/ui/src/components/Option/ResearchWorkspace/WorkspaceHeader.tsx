@@ -1,3 +1,4 @@
+import { materializeWorkspaceOutputs } from "@/services/workspace-artifact-catalog"
 import { useStartTutorial } from "@/hooks/useStartTutorial"
 import React from "react"
 import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
@@ -1615,12 +1616,23 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     }
   }
 
-  const handleDuplicateCurrentWorkspace = () => {
+  const prepareWorkspaceOutputs = async (id: string) => {
+    try {
+      await materializeWorkspaceOutputs(id)
+      return useWorkspaceStore.getState().workspaceId === id
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "Unable to load all saved outputs.")
+      return false
+    }
+  }
+
+  const handleDuplicateCurrentWorkspace = async () => {
     if (!workspaceId) return
     const originalWorkspaceId = workspaceId
     const originalWorkspaceName =
       workspaceName?.trim() ||
       t("playground:workspace.currentWorkspace", "current workspace")
+    if (useWorkspaceStore.getState().generatedArtifacts?.some(a => a.detailDeferred) && !await prepareWorkspaceOutputs(originalWorkspaceId)) return
     const duplicatedWorkspaceId = duplicateWorkspace(originalWorkspaceId)
     if (!duplicatedWorkspaceId) {
       messageApi.warning(
@@ -1824,9 +1836,14 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
   const handleExportCompleteResearchPack = async () => {
     if (!workspaceId) return
-    const bundle = exportWorkspaceBundle(workspaceId)
-    if (!bundle) { messageApi.error("Unable to export this workspace."); return }
     await runPackTransfer(async (scope, isCurrent, onProgress) => {
+      if (useWorkspaceStore.getState().generatedArtifacts?.some(a => a.detailDeferred)) {
+        onProgress("Loading saved outputs for export…")
+        await materializeWorkspaceOutputs(workspaceId, undefined, scope.scopeSignal)
+      }
+      if (!isCurrent() || scope.scopeInvalidatedSignal.aborted) return
+      const bundle = exportWorkspaceBundle(workspaceId)
+      if (!bundle) throw new Error("Unable to export the complete workspace.")
       const blob = await exportWorkspaceResearchPack(bundle, workspaceId, { scope, isCurrent, onProgress })
       if (!isCurrent()) return
       triggerFileDownload(blob, createWorkspaceExportZipFilename(bundle.workspace.name, bundle.exportedAt).replace(/\.zip$/, ".complete.zip"))
@@ -1836,6 +1853,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
   const handleExportCurrentWorkspace = async () => {
     if (!workspaceId) return
+    if (useWorkspaceStore.getState().generatedArtifacts?.some(a => a.detailDeferred) && !await prepareWorkspaceOutputs(workspaceId)) return
     const bundle = exportWorkspaceBundle(workspaceId)
     if (!bundle) {
       messageApi.error(

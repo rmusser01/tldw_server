@@ -16,6 +16,10 @@ export function getArtifactRunIdentity(artifact: GeneratedArtifact): {
   model?: string; provider?: string; createdAt?: Date; imported: boolean;
   sectionCount?: number; sectionTitles: string[]
 } {
+  if (artifact.detailDeferred) {
+    const { model, provider, imported } = artifact.detailDeferred
+    return { model, provider, imported, createdAt: artifact.createdAt, sectionTitles: [] }
+  }
   let producer: Record<string, unknown> | undefined = record(artifact.producerMetadata) ? artifact.producerMetadata : undefined
   let imported = false
   const seen = new Set<Record<string, unknown>>()

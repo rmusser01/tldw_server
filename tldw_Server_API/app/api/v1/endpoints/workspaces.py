@@ -18,11 +18,6 @@ from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import try_get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import try_get_watchlists_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Workflows_DB_Deps import try_get_workflows_db_for_user
-from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
-    WORKSPACES_DELETE_RATE_LIMIT,
-    WORKSPACES_READ_RATE_LIMIT,
-    WORKSPACES_WRITE_RATE_LIMIT,
-)
 from tldw_Server_API.app.api.v1.schemas.research_workspace_outputs import (
     ResearchWorkspaceOutputStatusResponse,
     ResearchWorkspaceOutputSubmitRequest,
@@ -34,6 +29,7 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceArtifactExportRequest,
     WorkspaceArtifactExportResponse,
     WorkspaceArtifactResponse,
+    WorkspaceArtifactRevisionResponse,
     WorkspaceArtifactUpdateRequest,
     WorkspaceAssistantDefaults,
     WorkspaceCapabilitiesResponse,
@@ -80,6 +76,12 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceUpsertRequest,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
+    WORKSPACES_DELETE_RATE_LIMIT,
+    WORKSPACES_READ_RATE_LIMIT,
+    WORKSPACES_WRITE_RATE_LIMIT,
+)
+from tldw_Server_API.app.core.DB_Management.chacha.workspace_artifact_catalog import list_workspace_artifact_revisions
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -2543,6 +2545,49 @@ async def cancel_workspace_output(workspace_id: str, job_id: int,
 
 
 # ── Artifacts ───────────────────────────────────────────────────
+
+@router.get(
+    "/{workspace_id}/artifact-revisions",
+    response_model=list[WorkspaceArtifactRevisionResponse],
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="List workspace artifact revisions",
+)
+def list_artifact_revisions(
+    workspace_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> list[WorkspaceArtifactRevisionResponse]:
+    """Read the workspace card inventory without transferring artifact bodies or evidence."""
+    _require_workspace(db, workspace_id)
+    try:
+        rows = list_workspace_artifact_revisions(db, workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace artifact revisions") from exc
+    return [WorkspaceArtifactRevisionResponse.model_validate(row) for row in rows]
+
+
+@router.get(
+    "/{workspace_id}/artifacts/{artifact_id}",
+    response_model=WorkspaceArtifactResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get workspace artifact",
+)
+def get_artifact(
+    workspace_id: str,
+    artifact_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceArtifactResponse:
+    """Read the current complete artifact and its provenance."""
+    _require_workspace(db, workspace_id)
+    try:
+        art = db.get_workspace_artifact(workspace_id, artifact_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace artifact") from exc
+    if art is None:
+        raise HTTPException(status_code=404, detail="Workspace artifact not found")
+    return _art_to_response(art)
+
 
 @router.get(
     "/{workspace_id}/artifacts",

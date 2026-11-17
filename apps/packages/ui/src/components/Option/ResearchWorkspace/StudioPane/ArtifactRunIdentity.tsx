@@ -21,13 +21,13 @@ export function ArtifactRunIdentity({ artifact }: { artifact: GeneratedArtifact 
       <time dateTime={identity.createdAt.toISOString()}>{identity.createdAt.toLocaleString()}</time>
     </> : identity.imported ? t("studio.outputIdentity.importedAtMissing", "Import time not recorded")
       : t("studio.outputIdentity.createdMissing", "Creation time not recorded")}</p>
-    <p>{identity.sectionCount === undefined
+    {!artifact.detailDeferred && <p>{identity.sectionCount === undefined
       ? t("studio.outputIdentity.scopeMissing", "Section scope not recorded")
       : <>{t("studio.outputIdentity.sections", {
         defaultValue_one: "{{count}} selected section", defaultValue_other: "{{count}} selected sections", count: identity.sectionCount
       })}{identity.sectionTitles.length > 0 && <>: {identity.sectionTitles.join("; ")}
         {identity.sectionCount > identity.sectionTitles.length && "…"}</>}</>}
-    </p>
+    </p>}
   </div>
 }
 

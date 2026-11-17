@@ -1,3 +1,4 @@
+import { materializeWorkspaceOutputs } from "@/services/workspace-artifact-catalog"
 import { SectionScopePicker } from "./SectionScopePicker"
 import { ArtifactRunIdentity, LongDocumentWaitingGuidance } from "./ArtifactRunIdentity"
 import { getSectionAnalysis, CurrentSectionAnalysisArtifactViewer } from "./SectionAnalysisArtifactViewer"
@@ -567,6 +568,43 @@ const STATUS_ICONS: Record<
   generating: { icon: Loader2, className: "text-primary animate-spin" },
   completed: { icon: CheckCircle, className: "text-success" },
   failed: { icon: XCircle, className: "text-error" }
+}
+
+function SavedOutputCard({ artifact, onOpen }: { artifact: GeneratedArtifact; onOpen: (detail: GeneratedArtifact) => void }) {
+  const { t } = useTranslation("playground")
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState("")
+  const pending = React.useRef<AbortController | null>(null)
+  React.useEffect(() => () => pending.current?.abort(), [])
+  const open = async () => {
+    if (pending.current || !artifact.detailDeferred) return
+    const controller = new AbortController()
+    pending.current = controller
+    setLoading(true)
+    setError("")
+    try {
+      const detail = await materializeWorkspaceOutputs(artifact.detailDeferred.workspaceId, artifact, controller.signal)
+      if (detail) onOpen(detail)
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not open the saved output.")
+    } finally {
+      pending.current = null
+      setLoading(false)
+    }
+  }
+  return <div data-testid={`studio-artifact-card-${artifact.id}`} className="rounded border border-border p-3">
+    <div className="font-medium">{artifact.title}</div>
+    <ArtifactRunIdentity artifact={artifact} />
+    <div className="text-xs text-text-muted">
+      v{artifact.version}
+      {artifact.reviewStatus && ` · ${artifact.reviewStatus.replace(/_/g, " ")}`}
+      {artifact.status === "failed" && " · Incomplete"}
+    </div>
+    <button type="button" className="mt-2 text-sm text-primary" disabled={loading} onClick={open}>
+      {loading ? t("studio.loadingOutputViewer", "Loading output viewer...") : t("common:view", "View")}
+    </button>
+    {error && <p role="alert" className="text-sm text-error">{error}</p>}
+  </div>
 }
 
 const MindMapArtifactViewer = React.lazy(() =>
@@ -3018,6 +3056,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
               }
             >
               {visibleArtifacts.map((artifact) => {
+                if (artifact.detailDeferred) return <SavedOutputCard key={artifact.id} artifact={artifact} onOpen={handleViewArtifact} />
                 const Icon = ARTIFACT_TYPE_ICONS[artifact.type] || FileText
                 const sectionJob = ["summary", "report", "compare_sources"].includes(artifact.type) &&
                   artifact.producerMetadata?.origin === "research_workspace_output_job"

@@ -2049,6 +2049,7 @@ export type ApiPath =
   | "/api/v1/workspaces/migrations/{migration_id}/client-delete-ack"
   | "/api/v1/workspaces/migrations/{migration_id}/finalize"
   | "/api/v1/workspaces/{workspace_id}"
+  | "/api/v1/workspaces/{workspace_id}/artifact-revisions"
   | "/api/v1/workspaces/{workspace_id}/artifacts"
   | "/api/v1/workspaces/{workspace_id}/artifacts/{artifact_id}"
   | "/api/v1/workspaces/{workspace_id}/artifacts/{artifact_id}/exports"

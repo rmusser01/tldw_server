@@ -803,6 +803,7 @@ it.each(['transient', 'offline', 'already-completed'])(
 it('excludes unmeasured section jobs from aggregate usage while retaining actual and labeled estimates', () => {
   const base = { type: 'summary' as const, title: 'Summary', status: 'completed' as const, createdAt: new Date() };
   io.state.generatedArtifacts = [
+    { ...base, id: 'unopened', detailDeferred: {workspaceId: 'owned', scopeKey: 'alice', imported: true} },
     { ...base, id: 'unmeasured', estimatedTokens: 1200, estimatedCostUsd: 0.004,
       producerMetadata: { origin: 'research_workspace_output_job', job_id: 41 } },
     { ...base, id: 'ordinary', estimatedTokens: 100, estimatedCostUsd: 0.001 },
@@ -810,7 +811,7 @@ it('excludes unmeasured section jobs from aggregate usage while retaining actual
       producerMetadata: { origin: 'research_workspace_output_job', job_id: 42 } }
   ];
   const hook = renderHook(() => useArtifactGeneration(deps()));
-  expect(hook.result.current.cumulativeUsage).toMatchObject({ tokens: 150, costUsd: 0.011, includedArtifacts: 2, unmeasuredArtifacts: 1 });
+  expect(hook.result.current.cumulativeUsage).toMatchObject({ tokens: 150, costUsd: 0.011, includedArtifacts: 2, unmeasuredArtifacts: 2 });
 });
 
 

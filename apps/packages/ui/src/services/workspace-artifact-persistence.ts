@@ -1,3 +1,4 @@
+import { findSavedWorkspaceArtifact } from "./workspace-artifact-catalog";
 import { mapServerArtifactToLocal } from '@/store/workspace-api';
 import { bgRequest, type BgRequestInit } from '@/services/background-proxy';
 import type { ServicePromptSnapshot } from '@/services/service-prompts';
@@ -47,6 +48,7 @@ export const persistWorkspaceArtifact = async (
   artifact: GeneratedArtifact,
   options: WorkspaceArtifactSaveScope
 ): Promise<GeneratedArtifact> => {
+  if (artifact.detailDeferred) throw new Error("Open the saved output before changing it.");
   const { workspaceId, scope, isCurrent } = options;
   const deadline = options.deadline ?? performance.now() + WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS;
   const signal = AbortSignal.any([
@@ -96,17 +98,9 @@ export const persistWorkspaceArtifact = async (
       };
     };
     const read = async () => {
-      const rows = await bgRequest<WorkspaceArtifactApiResponse[]>({
-        ...request(),
-        path,
-        method: 'GET',
-      });
+      const found = await findSavedWorkspaceArtifact(workspaceId, payload.id, scope.scopeKey, request());
       assertCurrent();
-      if (!Array.isArray(rows) || rows.some((row) => row.workspace_id !== workspaceId))
-        throw new Error('Saved artifacts belong to another workspace.');
-      const found = rows.filter((row) => row.id === payload.id);
-      if (found.length > 1) throw new Error('Saved artifact identity is ambiguous.');
-      return found[0];
+      return found;
     };
     const matches = (row: WorkspaceArtifactApiResponse) =>
       Object.entries(payload).every(([field, value]) =>
@@ -244,17 +238,14 @@ export const persistWorkspaceArtifactReview = async (
   if (!artifact.workspaceArtifactId) throw new Error("Save this output before recording a review.");
   if (hasWorkspaceArtifactOriginEvidence(artifact) && !hasWorkspaceArtifactOrigin(artifact, scope.scopeKey, workspaceId))
     throw new Error("This output belongs to another account or workspace.");
-  const rows = await loadWorkspaceArtifacts(workspaceId, {
+  const row = await findSavedWorkspaceArtifact(workspaceId, artifact.workspaceArtifactId, scope.scopeKey, {
     ...requestScopeFields(scope.requestScope),
     abortSignal: AbortSignal.any([scope.scopeSignal, scope.scopeInvalidatedSignal, AbortSignal.timeout(Math.max(1, Math.ceil(deadline - performance.now())))]),
     timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())),
   });
   assertCurrent();
-  if (!Array.isArray(rows) || rows.some(row => row.workspace_id !== workspaceId))
-    throw new Error("Saved outputs belong to another workspace.");
-  const matches = rows.filter(row => row.id === artifact.workspaceArtifactId);
-  if (matches.length !== 1) throw new Error("The original output is no longer available.");
-  const canonical = mapServerArtifactToLocal(matches[0]);
+  if (!row) throw new Error("The original output is no longer available.");
+  const canonical = mapServerArtifactToLocal(row);
   if (canonical.workspaceArtifactVersion !== artifact.workspaceArtifactVersion || canonical.type !== artifact.type ||
       !sameWorkspaceArtifactPayload([canonical.content, canonical.data, canonical.versionMetadata, canonical.reviewMetadata],
         [artifact.content, artifact.data, artifact.versionMetadata, artifact.reviewMetadata]))

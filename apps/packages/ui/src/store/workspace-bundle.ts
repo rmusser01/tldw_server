@@ -99,6 +99,8 @@ export const isWorkspaceExportBundle = (
   if (typeof value.exportedAt !== "string") return false
   if (!isRecord(value.workspace)) return false
   if (!isRecord(value.workspace.snapshot)) return false
+  const artifacts = value.workspace.snapshot.generatedArtifacts
+  if (Array.isArray(artifacts) && artifacts.some(a => isRecord(a) && a.detailDeferred)) return false
   return true
 }
 

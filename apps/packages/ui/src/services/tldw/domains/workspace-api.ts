@@ -553,6 +553,23 @@ export interface WorkspaceMigrationResponse {
   chunks: WorkspaceMigrationChunkReceiptResponse[]
 }
 
+export interface WorkspaceArtifactRevision {
+  display_id: string
+  display_version: number
+  imported: boolean
+  model: string | null
+  provider: string | null
+  id: string
+  workspace_id: string
+  version: number
+  title: string
+  artifact_type: string
+  status: string
+  review_state?: import("@/types/workspace").ArtifactReviewStatus
+  created_at: string
+  defer_detail: boolean
+}
+
 export interface WorkspaceArtifactApiResponse {
   id: string
   workspace_id: string

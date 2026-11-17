@@ -111,6 +111,7 @@ export const readWorkspaceArtifactClientPayload = (
 export const workspaceArtifactDraftPayload = (
   artifact: GeneratedArtifact
 ): WorkspaceArtifactCreateRequest => {
+  if (artifact.detailDeferred) throw new Error("Open the saved output before changing it.");
   const client: Record<string, unknown> = { schemaVersion: 1, id: artifact.id };
   for (const key of CLIENT_FIELDS) if (artifact[key] !== undefined) client[key] = artifact[key];
   const payload: WorkspaceArtifactCreateRequest = {
@@ -172,6 +173,7 @@ export const sameWorkspaceArtifactPayload = (left: unknown, right: unknown): boo
 
 /** Export one copy of identical structured data; persistence rebuilds the client projection. */
 export const compactWorkspaceArtifactForExport = (artifact: GeneratedArtifact): GeneratedArtifact => {
+  if (artifact.detailDeferred) throw new Error("Load the saved output before exporting it.");
   const client = artifact.versionMetadata?.workspaceClient;
   if (!record(client) || client.schemaVersion !== 1 || !record(client.data) ||
       !record(artifact.data)) return artifact;

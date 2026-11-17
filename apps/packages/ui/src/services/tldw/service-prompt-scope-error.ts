@@ -196,7 +196,7 @@ export const isServicePromptRequestPath = (
     return ["PATCH", "DELETE"].includes(requestMethod)
   if (/^\/api\/v1\/workspaces\/[^/]+\/sources$/.test(pathname) && requestMethod === "POST") return true
   if (/^\/api\/v1\/workspaces\/[^/]+\/artifacts$/.test(pathname)) return ["GET", "POST"].includes(requestMethod)
-  if (/^\/api\/v1\/workspaces\/[^/]+\/artifacts\/[^/]+$/.test(pathname)) return requestMethod === "PUT"
+  if (/^\/api\/v1\/workspaces\/[^/]+\/artifacts\/[^/]+$/.test(pathname)) return ["GET", "PUT"].includes(requestMethod)
   if (/^\/api\/v1\/research\/runs\/[^/]+\/bundle$/.test(pathname)) return requestMethod === "GET"
   if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
@@ -223,7 +223,7 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/persona\/profiles\/[^/]+\/(?:voice-commands|connections)$/.test(pathname) && requestMethod === "GET") return true
   if (requestMethod === "GET" && (
     /^\/api\/v1\/workspaces\/?$/.test(pathname) ||
-    /^\/api\/v1\/workspaces\/[^/]+\/(?:context|artifacts|notes)$/.test(pathname) ||
+    /^\/api\/v1\/workspaces\/[^/]+\/(?:context|artifact-revisions|artifacts|notes)$/.test(pathname) ||
     /^\/api\/v1\/characters\/[^/]+\/?$/.test(pathname) ||
     /^\/api\/v1\/persona\/profiles\/[^/]+$/.test(pathname) ||
     /^\/api\/v1\/characters(?:\/search)?\/?$/.test(pathname) ||

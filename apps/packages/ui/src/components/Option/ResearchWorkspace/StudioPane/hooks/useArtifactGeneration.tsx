@@ -1,9 +1,10 @@
+import { findSavedWorkspaceArtifact } from "@/services/workspace-artifact-catalog"
 import React, { useState, useEffect, useRef } from "react"
 import { hasResearchWorkspaceMigrationTombstone, useWorkspaceStore } from "@/store/workspace"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { readWorkspaceArtifactClientPayload, getStoredWorkspaceAudioRef, bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin, hasWorkspaceArtifactOriginEvidence, sameWorkspaceArtifactPayload, workspaceArtifactDraftPayload } from "@/store/workspace-artifact-codec"
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
-import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace, loadWorkspaceArtifacts } from "@/services/workspace-artifact-persistence"
+import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
 import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { mapServerArtifactToLocal } from "@/store/workspace-api"
 import type { MessageInstance } from "antd/es/message/interface"
@@ -3322,7 +3323,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       (acc, artifact) => {
         const sectionJob = ["summary", "report", "compare_sources"].includes(artifact.type) &&
           artifact.producerMetadata?.origin === "research_workspace_output_job"
-        if (sectionJob && (artifact.totalTokens === undefined || artifact.totalCostUsd === undefined))
+        if ((sectionJob || artifact.detailDeferred) && (artifact.totalTokens === undefined || artifact.totalCostUsd === undefined))
           return { ...acc, unmeasuredArtifacts: acc.unmeasuredArtifacts + 1 }
         const tokens = artifact.totalTokens ?? artifact.estimatedTokens ?? 0
         const cost = artifact.totalCostUsd ?? artifact.estimatedCostUsd ?? 0
@@ -3461,7 +3462,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
                 throw new Error("Reload this saved output before replacing it.")
               // JSON hydration drops runtime authority; re-read it from the current authenticated workspace.
               const cachedPayload = workspaceArtifactDraftPayload(previous)
-              const rows = await loadWorkspaceArtifacts(workspaceId, {
+              const row = previous.workspaceArtifactId && await findSavedWorkspaceArtifact(workspaceId, previous.workspaceArtifactId, scope.scopeKey, {
                 ...requestScopeFields(requestScope), abortSignal: operationSignal,
               })
               assertCurrent()
@@ -3470,10 +3471,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
                 if (!current || !sameWorkspaceArtifactPayload(workspaceArtifactDraftPayload(current), cachedPayload))
                   throw new Error("This output changed while reloading. Retry from the current saved output.")
               }
-              const matches = Array.isArray(rows) ? rows.filter(row => row.id === previous.workspaceArtifactId) : []
-              const row = matches[0]
-              if (!Array.isArray(rows) || rows.some(entry => entry.workspace_id !== workspaceId) ||
-                  matches.length !== 1 || row.artifact_type !== type ||
+              if (!row || row.artifact_type !== type ||
                   !Number.isSafeInteger(row.version) || row.version < 1 ||
                   row.producer_metadata?.origin !== "research_workspace_output_job" ||
                   typeof row.producer_metadata.job_id !== "number")

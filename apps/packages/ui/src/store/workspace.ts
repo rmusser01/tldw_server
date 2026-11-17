@@ -4465,6 +4465,7 @@ export const buildWorkspaceSnapshot = (state: WorkspaceState): WorkspaceSnapshot
 export const buildWorkspaceBundleSnapshot = (
   snapshot: WorkspaceSnapshot
 ): WorkspaceBundleSnapshot | null => {
+  if (snapshot.generatedArtifacts.some(artifact => artifact.detailDeferred)) return null
   const sourceAnnotations = readSourceAnnotationsForExport(snapshot.workspaceId, snapshot.sources.map(source => source.id))
   if (sourceAnnotations === null) return null
   return {
