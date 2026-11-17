@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "source_sha256": "7f2e97507370bbadb109034ecda0085c5a2e5f3837cfb843da272c3a41523c4c",
+  "purpose": "Paired Job 61 overview regressions for exact passage boundaries, adjacent citation swaps, policy modality, and evidence for both sides of a disagreement. Expectations come from agent review.",
+  "cases": [
+    {
+      "id": "justice-boundary-missing",
+      "text": "The chapter proposes an immediate, comprehensive review of major active FBI investigations and activities. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "landscape of America.” [25] It best serves the American people when it dedicates its resources and energies to attacking violent crime, [26] criminal organizations, [27] child predators, [28] cyber-crime, and other uniquely federal interests. [29]\n\nRevelations regarding the FBI’s role in the Russia hoax of 2016, Big Tech collu­ sion, and suppression of Hunter Biden’s laptop in 2020 strongly suggest that the FBI is completely out of control. To protect the Constitution, fight crime effectively, and protect the nation from foreign adversaries, the next conservative Adminis­ tration should begin to restore the FBI’s domestic reputation and integrity and enhance its effectiveness in meeting actual foreign threats. To do so, the next con­ servative Administration should:\n\n"
+        }
+      ],
+      "expected_statuses": [
+        "unsupported",
+        "contradicted"
+      ],
+      "reason": "The excerpt ends at the introduction to a list, before the review proposal.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "justice-boundary-attached",
+      "text": "The chapter proposes an immediate, comprehensive review of major active FBI investigations and activities. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "l **Conduct an immediate, comprehensive review of all major active FBI** **investigations and activities and terminate any that are unlawful** **or contrary to the national interest.** [30] This is an enormous task, but it is necessary to re-earn the American people’s trust in the FBI and its work. To conduct this review, the department should detail attorney appointees with criminal, national security, or homeland security backgrounds to catalogue any questionable activities and elevate them to appropriate DOJ leadership consistent with the new chain of command (discussed below). The department should also consider issuing a public report of the findings\n\nfrom this review as appropriate.\n\nl **Align the FBI’s placement within the department and the federal**\n\n"
+        }
+      ],
+      "expected_statuses": [
+        "supported"
+      ],
+      "reason": "The next exact passage states the proposal.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "financial-estimate-misbound",
+      "text": "Burton estimates that the proposed SEC climate reporting rule would quadruple the costs of being a public company. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "It should use this authority significantly more often to reduce the regulatory burden on issuers, particularly smaller entrepreneurs.\n\n**ENTREPRENEURIAL CAPITAL FORMATION**\n\nFinancial regulators should remove regulatory impediments to entrepreneur­ ial capital formation. [11] In the absence of the fundamental reform outlined above,\n\nthe SEC should:\n\nl Simplify and streamline Regulation A (the small issues exemption) [12] and Regulation CF (crowdfunding) [13] and preempt blue sky registration and quali­ fication requirements for all primary and secondary Regulation A offerings. [14]\n\n— 830 —\n\nFinancial Regulatory Agencies\n\nl Either democratize access to private offerings by broadening the definition of accredited investor for purposes of Regulation D or eliminate the accredited investor restriction altogether. [15]\n\nl Allow traditional self-certification of accredited investor status for all\n\nRegulation D Rule 506 offerings.\n\n"
+        }
+      ],
+      "expected_statuses": [
+        "unsupported",
+        "contradicted"
+      ],
+      "reason": "The small-offerings excerpt gives no estimate of climate reporting costs.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "financial-estimate-attached",
+      "text": "Burton estimates that the proposed SEC climate reporting rule would quadruple the costs of being a public company. [P1]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "#### **27**\n\n###### **FINANCIAL** **REGULATORY** **AGENCIES**\n\n**SECURITIES AND EXCHANGE COMMISSION**\n\n**AND RELATED AGENCIES**\n\n**David R. Burton**\n### T he primary purposes of the laws and regulations governing capital markets and of capital market regulators are to deter and punish fraud and other material\n\nmisstatements to investors; foster reasonable, scaled disclosure of information that is material to investors’ financial outcomes and proxy voting decisions; and maintain fair, orderly, and efficient secondary capital markets.\n\nThe Securities Act of 1933 [1] and the Securities Exchange Act of 1934 [2] reflect nearly nine decades of rushed and haphazard amendments. The securities laws are now extremely complex and do not constitute a coherent, rational regulatory regime. For example, the current SEC has proposed a climate change reporting rule that would _quadruple_ the costs of being a public company. [3] This would have a substantial adverse impact on existing companies. "
+        }
+      ],
+      "expected_statuses": [
+        "supported"
+      ],
+      "reason": "The SEC chapter opening gives the estimate and limits it to being a public company.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "sabbath-work-mandate",
+      "text": "The proposal would require workers to work on the Sabbath; an alternative objects to that requirement. [P1] [P2]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "Moreover, a shared day off makes it possible for families and communities to enjoy time off together, rather than as atomized individuals, and provides a healthier cadence of life for everyone. Unfortunately, that communal day of rest has eroded under the pressures of consumerism and secularism, especially for low-income workers.\n\nl **Congress should encourage communal rest by amending the Fair** **Labor Standards Act (FLSA)** [9] **to require that workers be paid time and** **a half for hours worked on the Sabbath.** That day would default to Sunday, except for employers with a sincere religious observance of a Sabbath at a different time (e.g., Friday sundown to Saturday sundown); the obligation would transfer to that period instead. Houses of worship (to the limited extent they may have FLSA-covered employees) and employers legally required to operate around the clock (such as hospitals and first responders) would be exempt, as would workers otherwise exempt from overtime.\n\n"
+        },
+        {
+          "id": "P2",
+          "quote": "_Alternative View._ While some conservatives believe that the government should encourage certain religious observance by making it more expensive for employers and consumers to not partake in those observances, other conservatives believe that the government’s role is to protect the free exercise of religion by eliminating barriers as opposed to erecting them. Whereas imposing overtime rules on the Sab­ bath would lead to higher costs and limited access to goods and services and reduce work available on the Sabbath (while also incentivizing some people—through higher wages—to desire to work on the Sabbath), the proper role of government in helping to enable individuals to practice their religion is to reduce barriers to work options and to fruitful employer and employee relations. "
+        }
+      ],
+      "expected_statuses": [
+        "unsupported",
+        "contradicted"
+      ],
+      "reason": "The proposal concerns premium pay for covered work, not compulsory work.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "sabbath-premium-pay",
+      "text": "The proposal would require time-and-a-half pay for covered Sabbath work, subject to exceptions; the alternative objects to imposing Sabbath overtime rules. [P1] [P2]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "Moreover, a shared day off makes it possible for families and communities to enjoy time off together, rather than as atomized individuals, and provides a healthier cadence of life for everyone. Unfortunately, that communal day of rest has eroded under the pressures of consumerism and secularism, especially for low-income workers.\n\nl **Congress should encourage communal rest by amending the Fair** **Labor Standards Act (FLSA)** [9] **to require that workers be paid time and** **a half for hours worked on the Sabbath.** That day would default to Sunday, except for employers with a sincere religious observance of a Sabbath at a different time (e.g., Friday sundown to Saturday sundown); the obligation would transfer to that period instead. Houses of worship (to the limited extent they may have FLSA-covered employees) and employers legally required to operate around the clock (such as hospitals and first responders) would be exempt, as would workers otherwise exempt from overtime.\n\n"
+        },
+        {
+          "id": "P2",
+          "quote": "_Alternative View._ While some conservatives believe that the government should encourage certain religious observance by making it more expensive for employers and consumers to not partake in those observances, other conservatives believe that the government’s role is to protect the free exercise of religion by eliminating barriers as opposed to erecting them. Whereas imposing overtime rules on the Sab­ bath would lead to higher costs and limited access to goods and services and reduce work available on the Sabbath (while also incentivizing some people—through higher wages—to desire to work on the Sabbath), the proper role of government in helping to enable individuals to practice their religion is to reduce barriers to work options and to fruitful employer and employee relations. "
+        }
+      ],
+      "expected_statuses": [
+        "supported"
+      ],
+      "reason": "The two passages explicitly describe the competing views on premium pay.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "exim-rationale-missing",
+      "text": "One contribution calls for abolishing EXIM; the other argues that EXIM lets firms bid on projects requiring a sovereign guarantee. [P1] [P2]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "bestow about two thirds of its subsidies on a handful of giant manufacturers,\n\nincluding Boeing aircraft, General Electric, and Westinghouse. [1]\n\nSince then, very little has changed. EXIM operates in effect as a protectionist agency that picks winners and losers in the market by providing political privi­ leges to firms that are already well-financed. By doing so, it risks taxpayer funds as it stymies economic growth. This reality is not altered by the argument that the Bank could be a weapon to fight China—an argument that rests on a misguided\n\n— 717 —\n\nMandate for Leadership: The Conservative Promise\n\nunderstanding of what competitiveness is and how it is achieved and maintained.\n\nThe Bank should be abolished.\n\n**BACKGROUND**\n\nThe Export–Import Bank was created in 1934 as an export credit agency (ECA) to finance trade with the Soviet Union. It was reorganized as an independent gov­ ernment agency in 1945. "
+        },
+        {
+          "id": "P2",
+          "quote": "Mandate for Leadership: The Conservative Promise\n\neffectively. Furthermore, any attempts to reorient the agency and make it a weapon with which to fight against China are going to fail. Economic fights and national security fights are not won with subsidies.\n\n**THE CASE FOR THE EXPORT–IMPORT BANK**\n\n**Jennifer Hazelton**\n### I Export–Import Bank (EXIM) by an additional six years. In a signing statement n 1986, President Ronald Reagan signed a bill extending the charter of the\n\nattached to the bill, the President declared that “[t]his sends an important signal to both our exporting community and foreign suppliers that American exporters will continue to be able to compete vigorously for business throughout the world.” [34]\n\nAs a candidate for President, Ronald Reagan was opposed to EXIM, but as Pres­ ident, he learned the challenges America’s businesses face when competing for opportunities overseas, and his position on EXIM evolved. "
+        }
+      ],
+      "expected_statuses": [
+        "unsupported",
+        "contradicted"
+      ],
+      "reason": "The pro-EXIM heading and account of Reagan do not supply the specific financing rationale.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    },
+    {
+      "id": "exim-rationale-attached",
+      "text": "One contribution calls for abolishing EXIM; the other argues that EXIM lets firms bid on projects requiring a sovereign guarantee. [P1] [P2] [P3]",
+      "evidence": [
+        {
+          "id": "P1",
+          "quote": "bestow about two thirds of its subsidies on a handful of giant manufacturers,\n\nincluding Boeing aircraft, General Electric, and Westinghouse. [1]\n\nSince then, very little has changed. EXIM operates in effect as a protectionist agency that picks winners and losers in the market by providing political privi­ leges to firms that are already well-financed. By doing so, it risks taxpayer funds as it stymies economic growth. This reality is not altered by the argument that the Bank could be a weapon to fight China—an argument that rests on a misguided\n\n— 717 —\n\nMandate for Leadership: The Conservative Promise\n\nunderstanding of what competitiveness is and how it is achieved and maintained.\n\nThe Bank should be abolished.\n\n**BACKGROUND**\n\nThe Export–Import Bank was created in 1934 as an export credit agency (ECA) to finance trade with the Soviet Union. It was reorganized as an independent gov­ ernment agency in 1945. "
+        },
+        {
+          "id": "P2",
+          "quote": "Mandate for Leadership: The Conservative Promise\n\neffectively. Furthermore, any attempts to reorient the agency and make it a weapon with which to fight against China are going to fail. Economic fights and national security fights are not won with subsidies.\n\n**THE CASE FOR THE EXPORT–IMPORT BANK**\n\n**Jennifer Hazelton**\n### I Export–Import Bank (EXIM) by an additional six years. In a signing statement n 1986, President Ronald Reagan signed a bill extending the charter of the\n\nattached to the bill, the President declared that “[t]his sends an important signal to both our exporting community and foreign suppliers that American exporters will continue to be able to compete vigorously for business throughout the world.” [34]\n\nAs a candidate for President, Ronald Reagan was opposed to EXIM, but as Pres­ ident, he learned the challenges America’s businesses face when competing for opportunities overseas, and his position on EXIM evolved. "
+        },
+        {
+          "id": "P3",
+          "quote": "As President Reagan once famously remarked, “Why would I want our businesses competing with two hands tied behind their backs?” On January 30, 1984, the President said, “Exports create and sustain jobs for millions of American workers and contribute to the growth and strength of the United States economy. The Export–Import Bank con­ tributes in a significant way to our nation’s export sales.”\n\nPresident Reagan was exactly right. EXIM provides a mechanism that American companies can use to vie for projects that would otherwise be out of reach, notably deals that the banking industry won’t finance because of the risk associated with the host country or because the host nation itself requires a sovereign guarantee in order to submit a bid. EXIM is the only American vehicle that can provide that sovereign guarantee.\n\nSince Reagan’s presidency, the global economic order has shifted dramatically, and a rising China has completely disrupted the export credit sector.\n\n"
+        }
+      ],
+      "expected_statuses": [
+        "supported"
+      ],
+      "reason": "The third passage contains the sovereign-guarantee rationale.",
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null
+      }
+    }
+  ]
+}

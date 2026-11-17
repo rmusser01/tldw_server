@@ -115,13 +115,19 @@ def load_plan(config_path: Path) -> dict:
         if not all(isinstance(model.get(key), str) and model[key].strip() for key in ("key", "provider", "model")) or not re.fullmatch(r"[A-Za-z0-9_.-]+", model["key"]) or model["key"] in keys or not 1 <= model["max_tokens"] <= 32768:
             raise ValueError("Models require unique keys, exact provider/model IDs and bounded token budgets")
         keys.add(model["key"])
-    fields(config.get("summary", {}), "sections artifact_type max_tokens temperature top_p summary_instruction job_ids wait_seconds")
+    fields(config.get("summary", {}), "sections artifact_type max_tokens temperature top_p summary_instruction job_ids resume_artifact_ids wait_seconds")
     wait = config.get("summary", {}).get("wait_seconds", 3600)
     if type(wait) is not int or not 1 <= wait <= 86400:
         raise ValueError("Summary wait_seconds must be an integer between 1 and 86400")
     for key, job_id in config.get("summary", {}).get("job_ids", {}).items():
         if key not in keys or type(job_id) is not int or job_id < 1:
             raise ValueError("Adopted summary jobs require a configured model key and positive job ID")
+    resumes = config.get("summary", {}).get("resume_artifact_ids", {})
+    if (not isinstance(resumes, dict) or any(key not in keys or not isinstance(value, str) or not 0 < len(value) <= 128
+                                            for key, value in resumes.items())
+            or set(resumes) & config.get("summary", {}).get("job_ids", {}).keys()
+            or len(resumes) != len(set(resumes.values()))):
+        raise ValueError("Each resumed artifact requires a distinct model entry without an adopted job ID")
     for section in config.get("summary", {}).get("sections", []):
         fields(section, "source_id node_id navigation_version")
         if not all(isinstance(section.get(key), str) and section[key] for key in ("source_id", "node_id", "navigation_version")):
@@ -652,14 +658,16 @@ class Runner:
         prior = [row for row in self.events if row["operation_id"] == final_id and row["event"] == "finished"]
         if prior:
             return prior[-1]
-        settings = {**{key: value for key, value in summary.items() if key not in {"artifact_type", "job_ids", "wait_seconds"}},
+        settings = {**{key: value for key, value in summary.items() if key not in {"artifact_type", "job_ids", "resume_artifact_ids", "wait_seconds"}},
                     **{key: model[key] for key in ("provider", "model", "max_tokens", "temperature", "top_p") if key in model}}
         job_id = summary.get("job_ids", {}).get(model["key"])
         adopted = job_id is not None
         submitted = None
         if not adopted:
+            resume_id = summary.get("resume_artifact_ids", {}).get(model["key"])
             submitted = self.request(f"summary:{model['key']}:submit", "summary_submit", "POST", f"/api/v1/workspaces/{workspace}/outputs",
-                body={"artifact_type": summary.get("artifact_type", "summary"), "source_ids": list(dict.fromkeys(row["source_id"] for row in summary["sections"])), "settings": settings}, metadata={"model_key": model["key"]})
+                body={"artifact_type": summary.get("artifact_type", "summary"), "source_ids": list(dict.fromkeys(row["source_id"] for row in summary["sections"])), "settings": settings,
+                      **({"resume_artifact_id": resume_id} if resume_id else {})}, metadata={"model_key": model["key"]})
             if submitted["outcome"] != "completed":
                 return submitted
             job_id = self.body(submitted)["job_id"]
@@ -699,15 +707,17 @@ class Runner:
         selected_scope_valid = len(sections) == len(summary["sections"]) and {(row.get("source_id"), row.get("node_id"), row.get("navigation_version")) for row in sections} == {(row["source_id"], row["node_id"], row["navigation_version"]) for row in summary["sections"]}
         # The rendered artifact also contains individual chapter summaries and evidence lists.
         coverage = overview_coverage(analysis.get("synthesis", ""), sections)
+        synthesis_failed = bool(analysis.get("synthesis_error_code") or analysis.get("synthesis_error"))
         structural_passed = (result["status"] == "completed" and artifact.get("status") in {"complete", "completed"}
-            and artifact in rows and spans_valid and selected_scope_valid and coverage["complete"])
+            and artifact in rows and spans_valid and selected_scope_valid and coverage["complete"] and not synthesis_failed)
         checks = {"job_status": result["status"], "total_sections": len(sections), "completed_sections": sum(row.get("status") == "completed" for row in sections),
                   "failed_sections": sum(row.get("status") == "failed" for row in sections), "completed_portions": sum(row.get("status") == "completed" for row in batches),
                   "failed_portions": sum(row.get("status") == "failed" for row in batches), "artifact_readback_matches": artifact in rows, "usage_available": False,
                   "adopted_job": adopted, "job_elapsed_seconds": (datetime.now(timezone.utc) - datetime.fromisoformat(submitted["utc_time"])).total_seconds() if submitted else None,
                   "job_latency_basis": "submission-to-observed-terminal wall clock, including resume downtime" if submitted else "unavailable for adopted job",
                   "evidence_spans_valid": spans_valid, "selected_scope_valid": selected_scope_valid,
-                  "overview_coverage": coverage, "structural_passed": structural_passed, "passed": structural_passed}
+                  "overview_coverage": coverage, "overview_synthesis_failed": synthesis_failed,
+                  "structural_passed": structural_passed, "passed": structural_passed}
         if self.config.get("verification", {}).get("required"):
             from Helper_Scripts.Evals.political_pdf_eval_report import summary_verification_metrics
             checks["strict_verification"] = summary_verification_metrics(analysis, expected_identity=(model["provider"], model["model"]))

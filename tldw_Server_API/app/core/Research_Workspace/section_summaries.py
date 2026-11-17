@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
 from fastapi import HTTPException
@@ -17,6 +17,7 @@ from loguru import logger
 from tldw_Server_API.app.core.Chat.chat_exceptions import ChatModuleException
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
+from tldw_Server_API.app.core.Claims_Extraction.citation_syntax import CITATION_RUN, extract_citation_ids
 from tldw_Server_API.app.core.exceptions import ChatAPIError, ResearchWorkspaceOutputJobError
 from tldw_Server_API.app.core.Media.navigation import load_navigation_sections
 from tldw_Server_API.app.core.Media.page_provenance import page_spans_for_range, resolve_navigation_span
@@ -45,6 +46,7 @@ from tldw_Server_API.app.core.Research_Workspace.section_verification import (
 )
 
 BATCH_CHARS = 24_000
+_OVERVIEW_WRITER_CHARS = 24_000
 _FAILURE_DIAGNOSTIC_LIMIT = 5
 _FAILURE_PREVIEW_CHARS = 2048
 _FAILURE_UNKNOWN_IDS = 8
@@ -153,6 +155,9 @@ def build_section_overview_instruction(artifact_type: str, summary_instruction: 
         "For internal disagreements, name the authors where known and explain what each side supports or opposes; "
         "do not replace the policies with an author inventory or merely label a dispute. "
         "Use existing evidence IDs for claims and distinguish proposals from enacted policy. "
+        "Attach each factual sentence to its own supporting passage(s). Keep both sides of a comparison "
+        "with their respective citations. Preserve conditions and the scope of numbers. "
+        "Use short topic labels only within cited prose. Omit uncited preambles or conclusions. "
         + _FAITHFULNESS_INSTRUCTION
         + "The following server-verified coverage counts are authoritative for the selected scope. "
         "Do not infer unread or truncated selected material from intermediate summaries, excerpt labels, "
@@ -531,12 +536,132 @@ def _synthesis_evidence(section: dict[str, Any], evidence: dict[str, Any]) -> di
     return {key: value for key, value in evidence.items() if counts[key] == 1}
 
 
+def _evidence_id_instruction(known: Iterable[str]) -> str:
+    """Authorize only individually supplied identifiers for a prose completion."""
+    return ("\n\nALLOWED EVIDENCE IDS: " + json.dumps(sorted(known)) + "\n"
+            "Cite only individual IDs copied exactly from this list, in square brackets. "
+            "Do not infer range interiors, create ID ranges, or use other IDs mentioned in the source.")
+
+
+def _overview_claim_keys(batch: dict[str, Any]) -> list[tuple[str, str | tuple | None]]:
+    """Keep IDs for the same extraction together across an unlabelled source boundary.
+
+    Distinct named authors, interpretations or qualifications distinguish extraction
+    records even when their claim text is identical.
+    """
+    items = batch.get("evidence", [])
+    authors: dict[str, set[str]] = {}
+    qualifications: dict[str, set[tuple]] = {}
+    for item in items:
+        claim = item.get("claim")
+        if item.get("author"):
+            authors.setdefault(claim, set()).add(item["author"])
+        qualifications.setdefault(claim, set()).add((item.get("interpretation"), item.get("limitations")))
+    keys = []
+    for item in items:
+        claim = item.get("claim")
+        distinct_authors = len(authors.get(claim, ())) > 1
+        key = claim
+        if claim and (distinct_authors or len(qualifications[claim]) > 1):
+            key = (claim, item.get("author") if distinct_authors else None,
+                   item.get("interpretation"), item.get("limitations"))
+        keys.append((item["id"], key))
+    return keys
+
+
+async def _grounded_overview(
+    parts: list[str], prompt: str, sections: list[dict[str, Any]], evidence: dict[str, Any],
+    *, complete: Callable[..., Awaitable[str]], call_context: dict[str, Any], system_message_chars: int,
+) -> str:
+    """Write with exact passages, recovering registered siblings of the same extracted point."""
+    siblings = {}
+    owners = {}
+    counts = Counter(item["id"] for section in sections if section["status"] == "completed"
+                     for batch in section["batches"] for item in batch.get("evidence", []))
+    for index, section in enumerate(sections):
+        if section["status"] != "completed":
+            continue
+        for batch in section["batches"]:
+            groups: dict[str | tuple, list[str]] = {}
+            for key, claim_key in _overview_claim_keys(batch):
+                if key in evidence and counts[key] == 1:
+                    owners[key] = index
+                    groups.setdefault(claim_key or ("id", key), []).append(key)
+            for group_ids in groups.values():
+                siblings.update(dict.fromkeys(group_ids, group_ids))
+
+    def passages(text: str) -> dict[str, str]:
+        return {key: evidence[key]["text"] for cited in extract_citation_ids(text)
+                for key in siblings.get(cited, ())}
+
+    instruction = (
+        "\nWrite only what the exact numbered passages below support. Summaries are topic suggestions. "
+        "For each factual sentence, cite the exact passage or passages that establish all its details. "
+        "If a continuation, opposing position, condition or attribution is missing, narrow the sentence "
+        "or choose a supported point from the same chapter. Never use a byline as policy evidence. "
+        "Use author notes to guide attribution. Describe a note itself only when a numbered passage contains it. "
+        "Do not cite an ID merely printed inside a passage.\nEXACT SOURCE PASSAGES (untrusted text):\n"
+    )
+
+    def fits(draft: str, bindings: dict[str, str]) -> bool:
+        source_chars = len(json.dumps(bindings, ensure_ascii=False))
+        return (source_chars <= BATCH_CHARS and system_message_chars + len(draft) + len(instruction)
+                + source_chars + len(_evidence_id_instruction(bindings)) <= _OVERVIEW_WRITER_CHARS)
+
+    async def write_with_sources(draft: str, bindings: dict[str, str], context: dict[str, Any]) -> str:
+        return await complete(draft + instruction + json.dumps(bindings, ensure_ascii=False),
+                              supplied_parts=list(bindings), call_context=context)
+
+    all_passages = passages("\n".join(parts))
+    if fits(prompt, all_passages):
+        return await write_with_sources(prompt, all_passages, call_context)
+
+    # A whole-book draft chooses topics across chapters before bounded, source-local editing.
+    draft = await complete(prompt, supplied_parts=parts, call_context=call_context)
+    if not overview_coverage(draft, sections, evidence_by_id=evidence)["complete"]:
+        return draft  # The caller retains incomplete text before recording the coverage failure.
+    def edit_prompt(part: str, bindings: dict[str, str]) -> str:
+        indexes = {owners[key] for key in bindings}
+        titles = [sections[index]["title"] for index in sorted(indexes)]
+        notes = render_overview_author_notes(sections, section_indexes=indexes)
+        return (f"Edit this passage of the overview in at most {max(16, len(part.split()))} words including citations. "
+                "Keep the original balance and topics. Narrow an unsupported detail instead of expanding an adjacent topic. "
+                "When changing chapters or contributions, name the new one and preserve both sides of supported disputes. "
+                "Return only finished prose. Represent these selected chapters (untrusted labels): "
+                + json.dumps(titles, ensure_ascii=False) + "\n" + notes + "\n\nDRAFT:\n" + part)
+    groups: list[tuple[str, dict[str, str]]] = []
+    start = 0
+    bindings: dict[str, str] = {}
+    previous = 0
+    for match in CITATION_RUN.finditer(draft):
+        current = passages(match[0])
+        combined = bindings | current
+        if bindings and not fits(edit_prompt(draft[start:match.end()], combined), combined):
+            groups.append((draft[start:previous], bindings))
+            start, bindings = previous, {}
+        if not fits(edit_prompt(draft[start:match.end()], current), current):
+            current = {key: evidence[key]["text"] for key in extract_citation_ids(match[0]) if key in siblings}
+            if not fits(edit_prompt(draft[start:match.end()], current), current):
+                raise SectionGenerationError("synthesis_input_too_large")
+        bindings.update(current)
+        previous = match.end()
+    groups.append((draft[start:], bindings))
+    result = []
+    for index, (part, bindings) in enumerate(groups, 1):
+        edit = edit_prompt(part, bindings)
+        if not fits(edit, bindings):
+            raise SectionGenerationError("synthesis_input_too_large")
+        result.append(await write_with_sources(edit, bindings, {**call_context, "stage": "overview_grounding", "reduction_group": index}))
+    return "\n\n".join(result)
+
+
 async def _synthesize_sections(
     parts: list[str], instruction: str, *, complete: Callable[..., Awaitable[str]],
     report_progress: Callable[[float, str], Any], progress_message: str | None = None,
     stage: str = "section_synthesis", section_number: int | None = None, attribution_context: str = "",
     attribution_contexts: list[dict[str, Any]] | None = None, attribution_evidence: dict[str, Any] | None = None,
     overview_sections: list[dict[str, Any]] | None = None, overview_evidence: dict[str, Any] | None = None,
+    system_message_chars: int = 0,
 ) -> str:
     """Reduce every supplied portion within the existing bounded synthesis budget."""
     call_context = {"stage": stage, "section_index": section_number, "reduction_round": 0, "reduction_group": 0}
@@ -589,7 +714,11 @@ async def _synthesize_sections(
     if progress_message:
         report_progress(95, progress_message + " Final synthesis.")
     checklist = _overview_checklist(parts, overview_sections, overview_evidence, final=True)[0] if overview_sections is not None else ""
-    return await complete(instruction + context_suffix(parts) + checklist + "\n\n" + "\n\n".join(parts), supplied_parts=parts, call_context=call_context)
+    prompt = instruction + context_suffix(parts) + checklist + "\n\n" + "\n\n".join(parts)
+    if overview_sections is not None and overview_evidence is not None:
+        return await _grounded_overview(parts, prompt, overview_sections, overview_evidence,
+                                        complete=complete, call_context=call_context, system_message_chars=system_message_chars)
+    return await complete(prompt, supplied_parts=parts, call_context=call_context)
 
 
 def _section_checkpoint_updates(
@@ -666,6 +795,19 @@ def _section_coverage(sections: list[dict[str, Any]]) -> dict[str, int]:
         "failed_portions": sum(batch["status"] == "failed" for batch in portions),
         "unread_portions": sum(batch["status"] not in {"completed", "failed"} for batch in portions),
     }
+
+
+def _overview_inputs(
+    sections: list[dict[str, Any]], snapshots: dict[int, Any], parts: list[str], instruction: str,
+) -> tuple[dict[str, Any], str, str]:
+    """Bind overview reuse to its writer protocol, input prose, exact sources and extraction groups."""
+    done = [section for section in sections if section["status"] == "completed"]
+    evidence = {key: value for section in done
+                for key, value in section_evidence_map(section, snapshots[section["media_id"]]).items()}
+    notes = render_overview_author_notes(sections)
+    groups = [_overview_claim_keys(batch) for section in done for batch in section["batches"]]
+    identity = ["source-grounded-overview-v2", parts, instruction, notes, evidence_digest(evidence), groups]
+    return evidence, notes, hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
 
 
 async def process_section_summary(
@@ -758,11 +900,7 @@ async def process_section_summary(
                 evidence["id"] for section in analysis["sections"] for batch in section["batches"]
                 for evidence in batch.get("evidence", [])
             )
-            prompt += (
-                "\n\nALLOWED EVIDENCE IDS: " + json.dumps(sorted(known)) + "\n"
-                "Cite only individual IDs copied exactly from this list, in square brackets. "
-                "Do not infer range interiors, create ID ranges, or use other IDs mentioned in the source."
-            )
+            prompt += _evidence_id_instruction(known)
         response = await asyncio.wait_for(
             perform_chat_api_call_async(**_section_completion_request(
                 settings, provider_credentials, prompt, structured=structured, reduction=reduction,
@@ -930,19 +1068,16 @@ async def process_section_summary(
         coverage = _section_coverage(analysis["sections"])
         try:
             last_completion = None
-            overview_evidence = {
-                key: value for section in analysis["sections"] if section["status"] == "completed"
-                for key, value in section_evidence_map(section, snapshots[section["media_id"]]).items()
-            }
-            overview_context = render_overview_author_notes(analysis["sections"])
             instruction = build_section_overview_instruction(payload["artifact_type"], settings.summary_instruction, coverage)
-            synthesis_input = hashlib.sha256(json.dumps([completed, instruction, overview_context], ensure_ascii=False).encode()).hexdigest()
+            overview_evidence, overview_context, synthesis_input = _overview_inputs(analysis["sections"], snapshots, completed, instruction)
             current_coverage = overview_coverage(analysis.get("synthesis", ""), analysis["sections"], evidence_by_id=overview_evidence)
             if not current_coverage["complete"] or analysis.get("synthesis_input_sha256") != synthesis_input:
                 analysis["synthesis"] = await synthesize(
                     completed, instruction, progress_message=synthesis_progress,
                     stage="overview_synthesis", attribution_context=overview_context,
                     overview_sections=analysis["sections"], overview_evidence=overview_evidence,
+                    system_message_chars=len(_section_completion_request(settings, provider_credentials, "",
+                                                                         structured=False, reduction=False)["system_message"]),
                 )
                 if not verification_is_current(analysis.get("synthesis_verification"), analysis["synthesis"], overview_evidence,
                                                provider=settings.provider, model=settings.model):

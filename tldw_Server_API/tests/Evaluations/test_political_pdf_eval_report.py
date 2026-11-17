@@ -200,7 +200,8 @@ def test_summary_report_recomputes_overview_coverage_from_frozen_evidence(run_di
 def test_summary_report_rejects_stale_acceptance_without_readable_overview(run_dir: Path, response: dict) -> None:
     _json(run_dir / "responses/job.json", response)
     _event(run_dir, event="started", stage="summary")
-    checks = {"passed": True, "structural_passed": True, "overview_coverage": {"complete": True}}
+    checks = {"passed": True, "structural_passed": True, "overview_coverage": {"complete": True},
+              "strict_verification": {"all_claims_supported": True}}
     _event(run_dir, stage="summary", outcome="completed", response_path="responses/job.json", checks=checks)
 
     attempt = _report(run_dir)["operations"][0]["attempts"][0]
@@ -208,6 +209,7 @@ def test_summary_report_rejects_stale_acceptance_without_readable_overview(run_d
     assert attempt["metrics"]["passed"] is False
     assert attempt["metrics"]["structural_passed"] is False
     assert "overview_coverage" not in attempt["metrics"]
+    assert "strict_verification" not in attempt["metrics"]
     assert attempt["checks"] == checks
     assert attempt["outcome"] == "completed"
     item = json.loads((run_dir / "semantic-review.json").read_text())["items"][0]
@@ -430,6 +432,36 @@ def _strict_report(text: str, status: str = "supported") -> dict:
         "coverage": {"total": 1, "evaluated": int(evaluated), "supported": int(status == "supported"), "uncovered": int(not evaluated), "complete": evaluated},
         "findings": [{"id": "C1", "text": text, "start": 0, "end": len(text), "evidence_ids": ["P1"], "status": status, "reason": "Recorded cited-source verdict"}],
         "evidence": {"P1": {"text_sha256": hashlib.sha256(b"Exact source.").hexdigest(), "media_id": 42}}}
+
+
+@pytest.mark.parametrize(("status", "expected"), [
+    ("supported", "1/1"), ("unsupported", "0/1"), ("stale", "unavailable"), ("missing", "unavailable"),
+    ("retained", "unscored (synthesis failed)"),
+])
+def test_summary_markdown_shows_verified_overview_counts_separately_from_chapters(run_dir, status, expected):
+    text = "Claim [P1]"
+    section = {"status": "completed", "content": text,
+               "batches": [{"evidence": [{"id": "P1", "quote": "Exact source."}]}]}
+    analysis = {"sections": [section], "synthesis": text}
+    if status != "missing":
+        receipt = _strict_report(text, "supported" if status in ("stale", "retained") else status)
+        receipt["model"] = "other-model" if status == "stale" else "gpt-6-luna"
+        analysis["synthesis_verification"] = receipt
+    if status == "retained":
+        analysis["synthesis_error_code"] = "unknown_evidence_reference"
+    _json(run_dir / "response.json", {"body": {"artifact": {
+        "version_metadata": {"workspaceClient": {"data": {"sectionAnalysis": analysis}}}}}})
+    _event(run_dir, event="started", stage="summary", operation_id="summary-luna")
+    _event(run_dir, stage="summary", operation_id="summary-luna", outcome="partial", response_path="response.json")
+
+    _report(run_dir)
+    markdown = (run_dir / "report.md").read_text()
+    table = markdown.split("## Saved summary verification coverage")[1]
+    assert "Overview units supported by verifier / total" in table
+    assert next(line for line in table.splitlines() if line.startswith("| summary-luna ")).endswith(f"| {expected} |")
+    assert "## Strict verification" not in markdown
+    if status == "retained":
+        assert "Saved draft cites" in markdown
 
 
 @pytest.mark.parametrize("failure,status", [

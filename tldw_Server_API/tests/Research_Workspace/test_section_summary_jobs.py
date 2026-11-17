@@ -1726,9 +1726,10 @@ async def test_synthesis_vocabulary_contains_only_literal_registered_ids_for_tha
         prompts.append(prompt)
         if "SOURCE:" in prompt:
             content = json.dumps({"summary": "Source summary includes an invented reference E99.1.1.", "evidence": [
-                {"claim": "A combined claim", "source_span_ids": ["P1", "P2", "P3"]}]})
+                {"claim": f"Separate point {index}", "source_span_ids": [f"P{index}"]}
+                for index in (1, 2, 3)]})
         elif len(prompts) == 2:
-            content = "A supported endpoint [E1.1.1]. A supported range [E1.1.1–E1.1.3]."
+            content = "Two known endpoints [E1.1.1] [E1.1.3]. A suggested range [E1.1.1–E1.1.3]."
         else:
             content = "An inferred range interior [E1.1.2]."
         return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
@@ -2290,3 +2291,124 @@ async def test_oversized_overview_author_notes_fail_actionably_and_keep_complete
     assert "fewer sections" in analysis["synthesis_error"] and "saved chapters remain" in analysis["synthesis_error"]
     assert not any(c["messages_payload"][0]["content"].startswith("Synthesize the completed") for c in calls)
     assert not analysis.get("generation_failures")
+
+
+@pytest.mark.asyncio
+async def test_overview_reads_complete_registered_passages_but_source_text_cannot_authorize_ids():
+    """A multi-passage recommendation may finish outside the chapter's retained ID."""
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    parts = ["The proposal transfers a service [E1.1.1]."]
+    entries = [
+        {"id": "E1.1.1", "claim": "Transfer the service to Health."},
+        {"id": "E1.1.4", "claim": "Transfer the service to Health."},
+        {"id": "E1.1.2", "claim": "Unrelated statement."},
+    ]
+    sections = [{"status": "completed", "title": "Nutrition", "content": parts[0],
+                 "batches": [{"evidence": entries}]}]
+    evidence = {"E1.1.1": {"text": "The source mentions E1.1.2. Move the service"},
+                "E1.1.4": {"text": "to the Department of Health."},
+                "E1.1.2": {"text": "Different proposal."}}
+    calls = []
+
+    async def complete(prompt, **kwargs):
+        calls.append((prompt, kwargs["supplied_parts"]))
+        return "Transfer the service to Health [E1.1.1] [E1.1.4]."
+
+    await mod._synthesize_sections(parts, "Overview.", complete=complete, report_progress=lambda *args: None,
+                                   overview_sections=sections, overview_evidence=evidence)
+    prompt, authority = calls[0]
+    assert all(evidence[key]["text"] in prompt for key in ("E1.1.1", "E1.1.4"))
+    assert evidence["E1.1.2"]["text"] not in prompt
+    assert set(re.findall(r"\bE\d+\.\d+\.\d+\b", "\n".join(authority))) == {"E1.1.1", "E1.1.4"}
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_large_overview_grounds_each_draft_group_with_its_own_exact_passages(monkeypatch):
+    """Two source-backed paragraphs can exceed the source budget together."""
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    monkeypatch.setattr(mod, "BATCH_CHARS", 480)
+    parts = ["Agency one proposes oversight [E1.1.1].", "Agency two proposes devolution [E2.1.1]."]
+    sections = [{"title": f"Agency {index}", "status": "completed", "content": part,
+                 "batches": [{"evidence": [{"id": f"E{index}.1.1", "claim": part}]}],
+                 "attribution_contexts": [{"type": "heading", "title": f"Agency {index}",
+                                           "author_notes": [{"quote": f"Author caveat {index}."}]}]}
+                for index, part in enumerate(parts, 1)]
+    evidence = {f"E{index}.1.1": {"text": (f"Exact source {index}. " * 25).strip()} for index in (1, 2)}
+    prompts = []
+
+    async def complete(prompt, **kwargs):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return "\n\n".join(parts)
+        return next(part for index, part in enumerate(parts, 1) if evidence[f"E{index}.1.1"]["text"] in prompt)
+
+    result = await mod._synthesize_sections(parts, "Overview.", complete=complete, report_progress=lambda *args: None,
+                                            overview_sections=sections, overview_evidence=evidence)
+    assert len(prompts) == 3
+    assert all(sum(item["text"] in prompt for item in evidence.values()) == 1 for prompt in prompts[1:])
+    for index, prompt in enumerate(prompts[1:], 1):
+        assert f"Author caveat {index}." in prompt
+        assert f"Author caveat {3 - index}." not in prompt
+        assert f"Agency {index}" in prompt
+        assert "at most" in prompt and "words" in prompt
+    assert result == "\n\n".join(parts)
+
+
+@pytest.mark.asyncio
+async def test_overview_writer_rejects_one_oversized_claim_including_context_before_grounding(monkeypatch):
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    sections = [{"title": "Finance", "status": "completed", "content": "Finance proposes reform [E1.1.1].",
+                 "batches": [{"evidence": [{"id": "E1.1.1", "claim": "Reform"}]}],
+                 "attribution_contexts": [{"type": "heading", "title": "Finance",
+                                           "author_notes": [{"quote": "n" * 15000}]}]}]
+    calls = []
+    async def complete(prompt, **kwargs):
+        calls.append(prompt)
+        return sections[0]["content"]
+
+    with pytest.raises(mod.SectionGenerationError, match="exceeds the synthesis input limit"):
+        await mod._synthesize_sections([sections[0]["content"]], "Overview.", complete=complete,
+            report_progress=lambda *args: None, overview_sections=sections,
+            overview_evidence={"E1.1.1": {"text": "x" * 9000}}, attribution_context="n" * 15000,
+            system_message_chars=1700)
+    assert len(calls) == 1
+    assert "EXACT SOURCE PASSAGES" not in calls[0]
+
+
+def test_overview_cache_identity_tracks_changed_sibling_claim_with_unchanged_chapter():
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    section = {"status": "completed", "title": "Food", "source_id": "book", "media_id": 1,
+               "navigation_version": "v1", "batches": [{"evidence": [
+                   {"id": "E1.1.1", "claim": "Transfer", "quote": "Move ", "start_char": 0, "end_char": 5},
+                   {"id": "E1.1.2", "claim": "Transfer", "quote": "to Health", "start_char": 5, "end_char": 14},
+               ]}]}
+    args = [[section], {1: {"content": "Move to Health"}}, ["Transfer [E1.1.1]."], "Summarize"]
+    original = mod._overview_inputs(*args)
+    section["batches"][0]["evidence"][1]["claim"] = "Other point"
+    changed = mod._overview_inputs(*args)
+    assert changed[:2] == original[:2]
+    assert changed[2] != original[2]
+
+
+@pytest.mark.parametrize("field", ["author", "interpretation", "limitations"])
+@pytest.mark.asyncio
+async def test_overview_does_not_join_distinct_authors_or_qualifications_on_shared_claim_text(field):
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    entries = [{"id": f"E1.1.{i}", "claim": "Reform", field: name} for i, name in enumerate(("First", "Other"), 1)]
+    section = {"title": "Competing contributions", "status": "completed", "content": "A proposes reform [E1.1.1].",
+               "batches": [{"evidence": entries}]}
+    seen = []
+
+    async def complete(prompt, **kwargs):
+        seen.extend(kwargs["supplied_parts"])
+        return section["content"]
+
+    await mod._synthesize_sections([section["content"]], "Overview", complete=complete, report_progress=lambda *args: None,
+        overview_sections=[section], overview_evidence={e["id"]: {"text": e[field]} for e in entries})
+    assert seen == ["E1.1.1"]

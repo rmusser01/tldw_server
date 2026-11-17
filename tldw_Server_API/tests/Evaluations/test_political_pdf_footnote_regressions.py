@@ -382,3 +382,26 @@ async def test_v5_pair_recovers_bowes_link_from_source_not_supplied_context(
     assert content[marker["start_char"]:marker["end_char"]] == "[53]"
     headings = [context for context in contexts if context["type"] == "heading"]
     assert len(headings) == 1 and "Robert Bowes" in headings[0]["heading_quote"]
+
+
+def test_overview_controls_bind_each_repaired_proposition_to_its_local_passages(runner_module):
+    from tldw_Server_API.app.core.Claims_Extraction.citation_support import _units
+
+    path = CONFIGS / "political_pdf_overview_regressions.v1.json"
+    fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
+    cases, _ = runner_module.load_verification_regressions({
+        "source": {"sha256": SOURCE_SHA256},
+        "verification_regressions": {"path": str(path), "sha256": fingerprint},
+    })
+    assert len(cases) == 8
+    for negative, repaired in zip(cases[::2], cases[1::2], strict=True):
+        assert negative["expected_statuses"] == ["unsupported", "contradicted"]
+        assert repaired["expected_statuses"] == ["supported"]
+        for case in (negative, repaired):
+            assert [unit["evidence_ids"] for unit in _units(case["text"])] == [
+                [item["id"] for item in case["evidence"]]
+            ]
+    assert cases[0]["text"] == cases[1]["text"]
+    assert cases[2]["text"] == cases[3]["text"]
+    assert cases[4]["evidence"] == cases[5]["evidence"]
+    assert cases[6]["evidence"] == cases[7]["evidence"][:2]

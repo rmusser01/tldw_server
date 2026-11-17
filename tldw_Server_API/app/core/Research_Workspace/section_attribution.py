@@ -370,7 +370,7 @@ class AuthorNoteContextTooLarge(ValueError):
     """Source notes cannot fit without dropping attribution qualifications."""
 
 
-def render_overview_author_notes(sections: list[dict[str, Any]]) -> str:
+def render_overview_author_notes(sections: list[dict[str, Any]], *, section_indexes: set[int] | None = None) -> str:
     """Keep completed sections' literal notes outside overview compression.
 
     Saved provenance retains coordinates and identities. The prompt uses original
@@ -378,7 +378,7 @@ def render_overview_author_notes(sections: list[dict[str, Any]]) -> str:
     """
     parts = []
     for ordinal, section in enumerate(sections, 1):
-        if section.get("status") != "completed":
+        if section.get("status") != "completed" or (section_indexes is not None and ordinal - 1 not in section_indexes):
             continue
         contexts = section.get("attribution_contexts", [])
         if any(context.get("omitted") for context in contexts):

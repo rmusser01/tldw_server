@@ -381,8 +381,8 @@ def test_http_client_call_matches_actual_response_adapter(runner_module, config_
         assert result["outcome"] == "completed"
 
 
-@pytest.mark.parametrize("cite_second", [False, True])
-def test_complete_summary_checks_overview_scope_and_exact_evidence(runner_module, config_file, tmp_path, cite_second):
+@pytest.mark.parametrize(("cite_second", "synthesis_failed"), [(False, False), (True, False), (True, True)])
+def test_complete_summary_checks_overview_scope_and_exact_evidence(runner_module, config_file, tmp_path, cite_second, synthesis_failed):
     config = json.loads(config_file.read_text())
     config["summary"]["sections"].append({"source_id": "source-7", "node_id": "financial", "navigation_version": "v1"})
     config_file.write_text(json.dumps(config))
@@ -403,6 +403,8 @@ def test_complete_summary_checks_overview_scope_and_exact_evidence(runner_module
     second = " Agencies propose new rules [E2.1.1]."
     analysis = {"sections": sections, "synthesis": first + (second if cite_second else ""),
         "overview_coverage": {"complete": True, "cited_sections": 2}}
+    if synthesis_failed:
+        analysis["synthesis_error"] = "The new draft used an unknown evidence reference."
     artifact = {"id": "summary-1", "artifact_type": "summary", "status": "complete",
         "content": f"{analysis['synthesis']}\n\n## Financial agencies\n{second.strip()}",
         "version_metadata": {"workspaceClient": {"data": {"sectionAnalysis": analysis}}}}
@@ -418,11 +420,12 @@ def test_complete_summary_checks_overview_scope_and_exact_evidence(runner_module
                 return httpx.Response(200, json=source)
         return httpx.Response(200, json=[artifact])
 
-    outcome = "completed" if cite_second else "failed"
+    passed = cite_second and not synthesis_failed
+    outcome = "completed" if passed else "failed"
     with runner_module.Runner(runner_module.load_plan(config_file), tmp_path / "run", fetch=server) as run:
         result = run.summarize(run.config["models"][0])
         assert result["outcome"] == outcome
-        assert result["checks"]["structural_passed"] is cite_second
+        assert result["checks"]["structural_passed"] is passed
         assert result["checks"]["overview_coverage"]["complete"] is cite_second
         assert result["checks"]["completed_sections"] == 2
         assert result["checks"]["artifact_readback_matches"] is True
@@ -748,3 +751,23 @@ def test_canonical_source_mismatch_stops_before_any_paid_request(runner_module, 
         with pytest.raises(ValueError):
             run.answer(run.plan["cases"][0], run.config["models"][0], "retrieved")
         assert not any(row["stage"] in {"qa", "qa_verification"} for row in run.events)
+
+
+def test_summary_can_explicitly_resume_saved_sections_through_public_job(runner_module, config_file, tmp_path):
+    config = json.loads(config_file.read_text())
+    config["summary"]["resume_artifact_ids"] = {"test": "saved-summary"}
+    config_file.write_text(json.dumps(config))
+    submitted = []
+
+    def server(**kwargs):
+        if kwargs["method"] == "POST":
+            submitted.append(kwargs["json"])
+            return httpx.Response(202, json={"job_id": 73, "artifact_id": "saved-summary"})
+        return httpx.Response(200, json={"job_id": 73, "artifact_id": "saved-summary", "status": "failed",
+                                         "artifact": {"id": "saved-summary", "status": "failed"}})
+
+    with runner_module.Runner(runner_module.load_plan(config_file), tmp_path / "run", fetch=server) as run:
+        run.summarize(run.config["models"][0])
+    assert len(submitted) == 1
+    assert submitted[0]["resume_artifact_id"] == "saved-summary"
+    assert "resume_artifact_ids" not in submitted[0]["settings"]

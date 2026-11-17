@@ -263,11 +263,13 @@ def summary_verification_metrics(analysis: Any, *, expected_identity: tuple | No
         rows.append({"kind": "chapters", "section": section_index, "title": section.get("title"), "generation_status": section.get("status"),
             **verification_metrics(section.get("claim_verification"), section.get("content", ""), evidence, expected_identity=expected_identity)})
     rows.append({"kind": "overview", **verification_metrics(analysis.get("synthesis_verification"), analysis.get("synthesis", ""), all_evidence, expected_identity=expected_identity)})
+    synthesis_failed = bool(analysis.get("synthesis_error_code") or analysis.get("synthesis_error"))
     kinds = ("batches", "chapters", "overview")
     return {"expected_reports": {kind: sum(row["kind"] == kind for row in rows) for kind in kinds},
         "valid_reports": {kind: sum(row["kind"] == kind and row["integrity_valid"] for row in rows) for kind in kinds},
-        "all_claims_supported": bool(sections) and all(row["all_claims_supported"] for row in rows),
-        "all_claims_evaluated": bool(sections) and all(row["all_claims_evaluated"] for row in rows),
+        "overview_synthesis_failed": synthesis_failed,
+        "all_claims_supported": bool(sections) and not synthesis_failed and all(row["all_claims_supported"] for row in rows),
+        "all_claims_evaluated": bool(sections) and not synthesis_failed and all(row["all_claims_evaluated"] for row in rows),
         "human_review": "pending", "reports": rows}
 
 def _attempt(root: Path, record: dict, case: dict, config: dict) -> dict:
@@ -297,13 +299,16 @@ def _attempt(root: Path, record: dict, case: dict, config: dict) -> dict:
     elif stage == "summary":
         metrics = row["metrics"]
         metrics.pop("overview_coverage", None)
+        metrics.pop("strict_verification", None)
+        metrics.pop("overview_synthesis_failed", None)
         if isinstance(body, dict):
             analysis = (body.get("artifact") or {}).get("version_metadata", {}).get("workspaceClient", {}).get("data", {}).get("sectionAnalysis", {})
             analysis = analysis if isinstance(analysis, dict) else {}
             metrics["overview_coverage"] = overview_coverage(analysis.get("synthesis", ""), analysis.get("sections", []))
             configured = next((model for model in config.get("models", []) if model.get("key") == record.get("model_key")), {})
             metrics["strict_verification"] = summary_verification_metrics(analysis, expected_identity=(configured.get("provider"), configured.get("model")))
-        if not metrics.get("overview_coverage", {}).get("complete"):
+            metrics["overview_synthesis_failed"] = metrics["strict_verification"]["overview_synthesis_failed"]
+        if metrics.get("overview_synthesis_failed") or not metrics.get("overview_coverage", {}).get("complete"):
             for key in ("structural_passed", "passed"):
                 if key in metrics:
                     metrics[key] = False
@@ -373,17 +378,18 @@ def _markdown(report: dict) -> str:
                     f"job seconds={cell(metrics.get('job_elapsed_seconds'))} "
                     f"({metrics.get('job_latency_basis', 'unavailable')})")
                 if coverage := metrics.get("overview_coverage"):
-                    detail += f". Overview cites {coverage['cited_sections']}/{coverage['completed_sections']} completed chapters"
+                    subject = "Saved draft" if metrics.get("overview_synthesis_failed") else "Overview"
+                    detail += f". {subject} cites {coverage['cited_sections']}/{coverage['completed_sections']} completed chapters"
                     if missing := coverage["missing_sections"]:
                         detail += ". Missing chapters are " + ", ".join(section["title"] for section in missing)
             lines.append("| " + " | ".join(cell(value) for value in (op["operation_id"], row["attempt"],
                 row["outcome"], row.get("elapsed_seconds"), row["usage_status"], row.get("returned_model"), detail)) + " |")
     strict_rows = [(op, row, row["metrics"].get("strict_verification")) for op in report["operations"] for row in op["attempts"]]
-    if any(isinstance(checks, dict) for _, _, checks in strict_rows):
+    claim_rows = [(op, row, checks) for op, row, checks in strict_rows
+                  if isinstance(checks, dict) and "expected_reports" not in checks]
+    if claim_rows:
         lines.extend(["", "## Strict verification", "", "| Operation | Attempt | Receipt valid | Automated verdict | Evaluated / total | Supported | Uncovered |", "| --- | ---: | --- | --- | --- | ---: | ---: |"])
-        for op, row, checks in strict_rows:
-            if not isinstance(checks, dict):
-                continue
+        for op, row, checks in claim_rows:
             coverage = checks.get("coverage", {})
             lines.append("| " + " | ".join(cell(value) for value in (op["operation_id"], row["attempt"],
                 checks.get("integrity_valid"), checks.get("verdict"), f"{coverage.get('evaluated', '?')} / {coverage.get('total', '?')}",
@@ -396,9 +402,18 @@ def _markdown(report: dict) -> str:
             lines.append("| " + " | ".join(cell(value) for value in (op["operation_id"], metrics.get("expected_statuses"), metrics.get("strict_verification", {}).get("finding_status_counts"), metrics.get("regression_expectation_met"))) + " |")
     summary_rows = [(op, row, checks) for op, row, checks in strict_rows if isinstance(checks, dict) and "expected_reports" in checks]
     if summary_rows:
-        lines.extend(["", "## Saved summary verification coverage", "", "| Operation | Valid batch / chapter / overview receipts | Expected receipts | All text units evaluated | All supported |", "| --- | --- | --- | --- | --- |"])
-        for op, _row, checks in summary_rows:
-            lines.append("| " + " | ".join(cell(value) for value in (op["operation_id"], checks["valid_reports"], checks["expected_reports"], checks["all_claims_evaluated"], checks["all_claims_supported"])) + " |")
+        lines.extend(["", "## Saved summary verification coverage", "",
+            "| Operation | Attempt | Valid batch / chapter / overview receipts | Expected receipts | All text units evaluated | All supported | Overview units supported by verifier / total |",
+            "| --- | ---: | --- | --- | --- | --- | ---: |"])
+        for op, row, checks in summary_rows:
+            coverage = next((receipt["coverage"] for receipt in checks["reports"]
+                             if receipt["kind"] == "overview" and receipt["integrity_valid"]), None)
+            support = f"{coverage['supported']}/{coverage['total']}" if coverage else None
+            if checks.get("overview_synthesis_failed"):
+                support = "unscored (synthesis failed)"
+            lines.append("| " + " | ".join(cell(value) for value in (op["operation_id"], row["attempt"],
+                checks["valid_reports"], checks["expected_reports"], checks["all_claims_evaluated"],
+                checks["all_claims_supported"], support)) + " |")
     lines.extend(["", "Detailed structural metrics and original check results: report.json.",
         "Human labels and frozen expected facts: semantic-review.json.", ""])
     return "\n".join(lines)

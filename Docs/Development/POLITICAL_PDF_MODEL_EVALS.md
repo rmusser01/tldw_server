@@ -121,6 +121,40 @@ Set summary configuration **before** creating `run-a`, even if the first invocat
 
 Without adoption, each configured model submits a distinct output job. To inspect an existing job instead, set `summary.job_ids` to a mapping from a configured model key to its positive existing job ID before planning. The runner verifies the artifact type and configured provider/model/settings/section scope, then polls and reads back the artifact without a new submission. An incompatible job is rejected.
 
+### Re-evaluate an overview from its saved chapters
+
+A new intentional generation can resume the existing artifact through the public output Job endpoint. Run against an isolated copy when retaining the original server artifact matters. The worker reuses matching saved chapters and terminal checks and recomputes the overview when its inputs change. Changing the section selection, source content or generation settings can invalidate the checkpoint. Repeating the same inputs can reuse the overview too.
+
+Start with the config from the original single-model run's `manifest.json`. Supply the isolated API origin, the owned workspace ID and the saved artifact ID from the original terminal response. Keep the model key, generation settings, instruction, PDF and ordered section selections from that manifest. In the example, replace the two quoted placeholders with those IDs and edit the loopback origin if needed. If the PDF or case fixture moved, also update their paths to the same files.
+
+```bash
+source .venv/bin/activate
+mkdir -p .tmp/political-evals
+jq --arg origin 'http://127.0.0.1:8000' \
+   --arg workspace 'OWNED-WORKSPACE-ID' --arg artifact 'SAVED-ARTIFACT-ID' \
+   '.config | .api.base_url = $origin | .workspace_id = $workspace |
+    del(.summary.job_ids) | .summary.resume_artifact_ids = {(.models[0].key): $artifact} |
+    .verification.required = true' \
+   /path/to/original-run/manifest.json > .tmp/political-evals/overview.json
+python -m Helper_Scripts.Evals.run_political_pdf_eval run \
+  --config .tmp/political-evals/overview.json --run-dir .tmp/political-evals/overview-run \
+  --stages summary --execute
+```
+
+Each key in `summary.resume_artifact_ids` names a configured model and maps to a distinct artifact ID. The same key cannot also appear in `summary.job_ids`. The first POST, polls, terminal result, source evidence and strict report stay in the run directory.
+
+For the eight Job 61 overview regression controls, use the same PDF, owned workspace and verifier. This command derives the fixture fingerprint from the checked-out bytes. Each negative has a paired correction for passage boundaries, a citation swap, policy modality or an omitted opposing rationale. [Overview control fixture](../../Helper_Scripts/Evals/configs/political_pdf_overview_regressions.v1.json)
+
+```bash
+fixture=Helper_Scripts/Evals/configs/political_pdf_overview_regressions.v1.json
+jq --arg fixture "$fixture" --arg sha "$(shasum -a 256 "$fixture" | cut -d' ' -f1)" \
+   'del(.summary) | .verification_regressions = {path: $fixture, sha256: $sha}' \
+   .tmp/political-evals/overview.json > .tmp/political-evals/overview-controls.json
+python -m Helper_Scripts.Evals.run_political_pdf_eval run \
+  --config .tmp/political-evals/overview-controls.json --run-dir .tmp/political-evals/overview-control-run \
+  --stages verification_regressions --execute
+```
+
 `summary.wait_seconds` defaults to `3600` and accepts integers from `1` to `86400`. Polls wait up to 15 seconds, bounded by the remaining wait time. Reaching the wait deadline records `pending` and returns a nonzero exit; it does not cancel the server job. Resume with the same config to continue polling its saved ID without another POST.
 
 Every poll retains its full response, so large artifacts and long jobs can consume substantial disk space even at this interval. Allow room for the evidence; interrupting CLI polling does not cancel the server job.
@@ -170,7 +204,7 @@ Validation checks bounded ZIP inventory, required entries, manifest byte counts 
 | `attempts.jsonl` | Append-only started/finished records, operation IDs, all attempts, outcomes, timings and checks. |
 | `evidence/` | Immutable requests, response envelopes and retained binary artifacts. |
 | `report.json` | Every attempt plus first/latest outcomes, per-model operation counts, structural metrics, strict receipt integrity/coverage/verdicts, regression expectations and available usage/identity. |
-| `report.md` | Compact comparison with failures, pending outcomes, citation/page checks, summary verification coverage and fixed-regression outcomes. |
+| `report.md` | Compact comparison with failures, pending outcomes, citation/page checks, summary verification coverage and fixed-regression outcomes. Each summary attempt shows how many overview units the verifier supported out of all units. A missing, stale or invalid receipt displays “unavailable.” If synthesis failed, the saved draft remains inspectable and the overview displays “unscored (synthesis failed).” |
 | `semantic-review.json` | Frozen expected facts, physical pages, evidence paths and operation-level labels, plus exact per-finding review records with separate nullable agent and human decisions. |
 
 Retrieval coverage uses the frozen expected physical-page set as its denominator. Source scope, pipeline errors and overbroad returned ranges are separate diagnostics. QA checks output shape, supplied passage IDs, finish reason/truncation and returned model identity; token counts are reported only when present and valid. Missing usage is **unavailable**, not zero.
