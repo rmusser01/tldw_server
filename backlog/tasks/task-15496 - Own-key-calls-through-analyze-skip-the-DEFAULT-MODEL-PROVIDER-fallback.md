@@ -1,7 +1,7 @@
 ---
 id: TASK-15496
 title: Own-key calls through analyze skip the DEFAULT_MODEL_<PROVIDER> fallback
-status: To Do
+status: In Progress
 labels:
 - byok
 - llm
@@ -23,6 +23,7 @@ Found by TASK-15426 PR B's plan review (B-6); measured by PR D's plan refresh (V
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-11-17-own-key-default-model.md. Owner decisions 2026-11-16: (1) a denied fallback model reuses the configuration code, no model_not_allowed code; (2) an allowlisted provider with no configured model and no env default still fails missing_model; (3) ADR-004 Change summary waiver covers this PR, the controller writes the final PR body.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
