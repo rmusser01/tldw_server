@@ -445,7 +445,7 @@ export async function launchWithBuiltExtension(
 
   // Seed storage before any extension pages load to bypass connection checks
   await context.addInitScript(
-    (cfg, allowOfflineFlag) => {
+    ({ cfg, allowOfflineFlag }) => {
       try {
         if (typeof chrome === 'undefined' || !chrome.storage?.local) return
         const setLocal = (data: Record<string, any>, done?: () => void) => {
@@ -497,8 +497,7 @@ export async function launchWithBuiltExtension(
         // ignore storage write failures in isolated contexts
       }
     },
-    seedStoragePayload,
-    allowOffline || false
+    { cfg: seedStoragePayload, allowOfflineFlag: allowOffline || false }
   )
 
   // Wait for SW/background
