@@ -895,14 +895,6 @@ async def _finish_stream(user_id: int):
     return await _audio_quota.finish_stream(user_id)
 
 
-async def _check_daily_minutes_allow(user_id: int, minutes: float):
-    return await _audio_quota.check_daily_minutes_allow(user_id, minutes)
-
-
-async def _add_daily_minutes(user_id: int, minutes: float):
-    return await _audio_quota.add_daily_minutes(user_id, minutes)
-
-
 async def _consume_daily_minutes(
     user_id: int,
     minutes: float,
@@ -1760,10 +1752,9 @@ async def websocket_audio_chat_stream(
     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
         _idle_timeout = None
 
-    aio = asyncio
-    wait_for = getattr(aio, "wait_for", asyncio.wait_for)
-    iscoroutine = getattr(aio, "iscoroutine", asyncio.iscoroutine)
-    create_task = getattr(aio, "create_task", asyncio.create_task)
+    wait_for = asyncio.wait_for
+    iscoroutine = asyncio.iscoroutine
+    create_task = asyncio.create_task
 
     # Wrap websocket for consistent metrics/heartbeats; keep connection open across turns
     _outer_stream = None
@@ -2832,7 +2823,7 @@ async def websocket_audio_chat_stream(
                         component_label="audio_chat_ws",
                         voice_to_voice_start=voice_to_voice_start,
                         error_handler=_error_handler,
-                        asyncio_module=aio,
+                        asyncio_module=asyncio,
                     )
             except asyncio.CancelledError:
                 raise
@@ -3519,8 +3510,7 @@ async def websocket_tts(
     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
         _idle_timeout = None
 
-    aio = asyncio
-    wait_for = getattr(aio, "wait_for", asyncio.wait_for)
+    wait_for = asyncio.wait_for
 
     # Wrap websocket for consistent metrics/heartbeats
     _outer_stream = None
@@ -3711,7 +3701,7 @@ async def websocket_tts(
                     route="audio.stream.tts",
                     component_label="audio_tts_ws",
                     error_handler=_ws_tts_error_handler if _outer_stream else None,
-                    asyncio_module=aio,
+                    asyncio_module=asyncio,
                 )
         except asyncio.CancelledError:
             raise
@@ -3777,10 +3767,9 @@ async def websocket_tts_realtime(
     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
         _idle_timeout = None
 
-    aio = asyncio
-    wait_for = getattr(aio, "wait_for", asyncio.wait_for)
-    TimeoutError = getattr(aio, "TimeoutError", asyncio.TimeoutError)
-    create_task = getattr(aio, "create_task", asyncio.create_task)
+    wait_for = asyncio.wait_for
+    TimeoutError = asyncio.TimeoutError
+    create_task = asyncio.create_task
 
     _outer_stream = None
     try:

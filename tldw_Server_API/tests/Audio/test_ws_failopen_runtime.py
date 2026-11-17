@@ -38,7 +38,7 @@ async def test_ws_failopen_cap_exhausted_sends_error_and_closes(monkeypatch):
     """
     Exercise the bounded fail-open path in the WS streaming handler:
 
-    - Force DB exceptions from both `check_daily_minutes_allow` and `add_daily_minutes`.
+    - Force DB exceptions from `consume_daily_minutes`.
     - Set a tiny per-connection fail-open cap via AUDIO_FAILOPEN_CAP_MINUTES.
     - Send small audio chunks until the cap should be exceeded.
     - Assert the server emits a structured quota error and closes the socket.

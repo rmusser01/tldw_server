@@ -203,14 +203,6 @@ def _max_upload_bytes(limits: dict[str, Any]) -> int:
     return int(audio_files.MAX_FILE_SIZE)
 
 
-async def _check_daily_minutes_allow(user_id: int, minutes: float):
-    return await _audio_quota.check_daily_minutes_allow(user_id, minutes)
-
-
-async def _add_daily_minutes(user_id: int, minutes: float):
-    return await _audio_quota.add_daily_minutes(user_id, minutes)
-
-
 async def _consume_daily_minutes(
     user_id: int,
     minutes: float,
