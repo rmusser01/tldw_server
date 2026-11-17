@@ -426,7 +426,7 @@ def test_validated_base_url_is_honored_without_scope_widening(inventory, provide
     call = fetcher.calls[0]
     assert urlsplit(call["url"])._replace(query="").geturl() == endpoint
     assert call["allow_redirects"] is False
-    assert call["retry"].attempts == 1
+    assert call["retry"].attempts == 2
     assert call.get("configured_endpoint") is None
     assert call["sensitive_observability"] is True
     assert 0 < call["timeout"] <= 5.0
@@ -578,7 +578,13 @@ def test_model_limit_never_exposes_a_truncated_authoritative_inventory(inventory
     )
 
 
-def test_pagination_shares_one_five_second_budget(inventory, monkeypatch):
+@pytest.mark.parametrize("attempts, budget, timeouts", [
+    (1, 5.0, [5.0, 3.5, 2.0, 0.5]),
+    (2, 10.0, [5.0, 5.0, 5.0, 5.0, 4.0, 2.5, 1.0]),
+])
+def test_pagination_shares_one_bounded_budget(inventory, monkeypatch, attempts, budget, timeouts):
+    from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
+
     now = [0.0]
     calls = []
     monkeypatch.setattr(inventory.time, "monotonic", lambda: now[0])
@@ -588,11 +594,14 @@ def test_pagination_shares_one_five_second_budget(inventory, monkeypatch):
         now[0] += 1.5
         return Response({"data": [{"id": str(len(calls))}], "has_more": True, "last_id": str(len(calls))})
 
-    assert inventory.discover_provider_models("anthropic", "synthetic-key", fetch_fn=fetcher) == ModelDiscoveryResult(
+    assert inventory.discover_provider_models(
+        "anthropic", "synthetic-key", fetch_fn=fetcher,
+        call_policy=ProviderCallPolicy(max_transport_attempts=attempts),
+    ) == ModelDiscoveryResult(
         "unreachable"
     )
-    assert [call["timeout"] for call in calls] == [5.0, 3.5, 2.0, 0.5]
-    assert [call["deadline"] for call in calls] == [5.0] * 4
+    assert [call["timeout"] for call in calls] == timeouts
+    assert [call["deadline"] for call in calls] == [budget] * len(timeouts)
     assert inventory._CACHE == {}
 
 

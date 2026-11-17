@@ -74,6 +74,8 @@
 - [ ] After the frozen full run is terminal, apply the bounded comma/semicolon page-annotation repair exposed by browser R04. Qualify shared parsing, historical unchecked receipts and rejection of evaluated promotions; recheck the saved failed answer and fresh browser flow with separate receipts.
 - [ ] Repair the independently confirmed multi-passage citation handoff (TASK-15505.19) using the existing grouped, qualified claim renderer at chapter synthesis/reduction. Preserve the frozen full run; qualify fresh and saved-partial paths, then run a separate White House/EXIM/Financial targeted Luna check and identify its later revision explicitly.
 - [ ] Correct the observed backward progress updates (TASK-15505.20) within the same attempt, retaining stage messages and true completion/failure status; qualify uneven chapter sizes, retry behavior and the targeted run's ledger.
+- [x] Bind all 180 reviewed control/QA/White House decisions to Job 57's final partial packet; verify offline regeneration preserves them and all 664 raw evidence files remain unchanged.
+- [ ] Recover the reproduced model-list transport timeout under TASK-15505.21, without retries of paid generation or weakened inventory/citation validation; resume saved work explicitly into fresh ledgers after runtime qualification.
 - [ ] Source-review the agreed sample as agent review, keeping known regressions separate from untouched samples. Do not report human calibration scores while labels are absent.
 - [ ] Exercise review/save/reload/export of new findings and record NN/g issues and verification limits. Publish tested changes/results to the existing draft PR; follow CI to terminal.
 
@@ -85,7 +87,7 @@
 **Success Criteria:** Owned Media2 indexing is terminal and scoped retrieval works without research changes; participant observations are recorded only when supplied by a real person.
 **Status:** In Progress
 
-The ordered repair and control checkpoints are complete, and the full evaluation has finished QA and submitted Job 57. Independent destination checks proceed during its chapter-generation wait using separate services/databases; source generation and verification code remain frozen. The source run, review and export still require their own completion checks.
+The ordered repair and control checkpoints are complete. Job 57 finishes QA but stops during chapter generation after a provider-inventory outage. Independent destination checks use separate services/databases and qualify the earlier restored pack. The source recovery, latest complete-pack export/restore and actual participant session still require their own completion checks.
 
 - [x] Start destination API, Redis/embedding worker and frontend using new run logs, existing private configuration and preserved databases. Verify the original PDF SHA and saved workspace identity first.
 - [x] Submit `POST /api/v1/media/2/embeddings` with the existing MiniLM model and `force_regenerate:false`; retain the returned job ID and poll the existing job/status APIs.
