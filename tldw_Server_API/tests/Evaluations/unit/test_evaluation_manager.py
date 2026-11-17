@@ -680,9 +680,11 @@ async def test_a_benchmark_item_is_scored_from_the_judges_reply(
         ("Per the rubric: Score 10 for a correct answer, 1 for an incorrect one. The model chose A, which is wrong.\n"
          "Rating: 1/10", False, 0.0),
         ("I should score 10 for a correct answer. The model picked A; the answer is B.", False, None),
+        ('{"score": true}', False, None),  # a boolean is an int in Python, but not a readable score
+        ('{"score": false}', False, None),
     ],
     ids=["bare-number", "numeric-string", "exponent", "exponent-15e3", "exponent-1.5e3", "exponent-10e5",
-         "exponent-3.0e2", "underscore-string", "grade-format-echo", "grade-not-attempted", "rubric-echo-rating", "rubric-echo-only"],
+         "exponent-3.0e2", "underscore-string", "grade-format-echo", "grade-not-attempted", "rubric-echo-rating", "rubric-echo-only", "bool-true", "bool-false"],
 )
 async def test_a_judge_reply_a_human_would_read_as_a_score_is_read(evaluation_manager, reply, asks_grade, expected):
     """Replies a human reads as a score (or a grade) are read as one; one that only looks like a score is not

@@ -638,7 +638,7 @@ class EvaluationManager:
                 # The prompt asks for 1-10, so 1 is the worst rating (-> 0.0). A value
                 # in [0, 1) is a judge that already normalized; it passes through
                 # rather than being rescaled (0.8 must not become 0.08).
-                if isinstance(raw_score, (int, float)) and 0 <= raw_score <= 10:
+                if isinstance(raw_score, (int, float)) and not isinstance(raw_score, bool) and 0 <= raw_score <= 10:
                     score = normalize_judge_score(raw_score, scale_min=1.0, scale_max=10.0)
                 if 'explanation' in parsed:
                     explanation = str(parsed['explanation'])
