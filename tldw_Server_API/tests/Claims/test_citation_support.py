@@ -527,6 +527,7 @@ async def test_punctuated_citations_alone_still_do_not_form_a_claim():
 @pytest.mark.parametrize("citation", [
     "[1, PDF p. 872; printed p. 839]", "[Source 1, PDF p. 872]",
     "[1, PDF pp. 871–872; printed pp. 838-839]", "[1, PDF pp. 871 - 872]",
+    "[1, PDF p. 692, printed p. 659]", "[Source 1, PDF pp. 846–847, printed pp. 813–814]",
 ])
 async def test_numeric_pdf_location_annotation_is_not_an_extra_evidence_id(citation):
     seen = []
@@ -546,6 +547,8 @@ async def test_numeric_pdf_location_annotation_is_not_an_extra_evidence_id(citat
 @pytest.mark.parametrize("citation", [
     "[1, PDF p. unknown]", "[1, PDF p. 0]", "[1, PDF p. 872; another source]",
     "[1, PDF p. 872, P2]", "[P1, PDF p. 872]", "[1, arbitrary locator]",
+    "[1, PDF p. 692, printed p. unknown]", "[1, PDF p. 692, printed p. 659, P2]",
+    "[1-2, PDF p. 692, printed p. 659]", "[1, PDF p. 692, printed p. 659; another source]",
 ])
 async def test_unknown_annotation_or_identifier_never_silently_authorizes_support(citation):
     report = await verify_cited_text("Claim " + citation, {"1": {"text": "Source"}, "P1": {"text": "Source"}},

@@ -1062,7 +1062,8 @@ async def test_rejected_evidence_logs_only_shape_metadata(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("unknown", [False, True])
-async def test_multi_passage_claim_keeps_every_exact_known_source_span(monkeypatch, unknown):
+@pytest.mark.parametrize("retry_chapter", [False, True])
+async def test_multi_passage_claim_keeps_every_exact_known_source_span(monkeypatch, unknown, retry_chapter):
     from unittest.mock import AsyncMock
 
     from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
@@ -1074,17 +1075,20 @@ async def test_multi_passage_claim_keeps_every_exact_known_source_span(monkeypat
         AsyncMock(return_value={"content": source, "navigation_version": "v1", "nodes": [], "page_map": []}),
     )
     response = {
-        "summary": "Combined proposal",
+        "summary": "An unbound summary-only statement",
         "evidence": [
             {
                 "claim": "A supported multi-passage claim",
                 "source_span_ids": ["P1", "P2", "P3", "P999" if unknown else "P4"],
+                "interpretation": "A proposed coordination role",
+                "limitations": "Responsibilities vary by administration",
             }
         ],
     }
     chat = AsyncMock(
         side_effect=[
             {"choices": [{"message": {"content": json.dumps(response)}}]},
+            *([RuntimeError("Chapter synthesis failed")] if retry_chapter else []),
             {"choices": [{"message": {"content": "Section [E1.1.1] [E1.1.2] [E1.1.3] [E1.1.4]"}}]},
             {"choices": [{"message": {"content": "Synthesis [E1.1.4]"}}]},
         ]
@@ -1092,6 +1096,10 @@ async def test_multi_passage_claim_keeps_every_exact_known_source_span(monkeypat
     monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
     options = args(request().settings.model_copy(update={"sections": []}))
     await mod.process_section_summary(**options)
+    saved_batches = copy.deepcopy(options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]["batches"])
+    if retry_chapter and not unknown:
+        assert options["workspace_db"].row["status"] == "failed"
+        await mod.process_section_summary(**options)
     row = options["workspace_db"].row
     batch = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]["batches"][0]
     if unknown:
@@ -1102,6 +1110,58 @@ async def test_multi_passage_claim_keeps_every_exact_known_source_span(monkeypat
         assert row["status"] == "complete"
         assert [entry["source_span_id"] for entry in batch["evidence"]] == ["P1", "P2", "P3", "P4"]
         assert all(entry["quote"] == source[entry["start_char"] : entry["end_char"]] for entry in batch["evidence"])
+        assert batch == saved_batches[0]
+        prompts = [call.kwargs["messages_payload"][0]["content"] for call in chat.await_args_list]
+        assert sum("SOURCE:" in prompt for prompt in prompts) == 1
+        for prompt in (value for value in prompts if value.startswith("Summarize all portions")):
+            assert prompt.count("A supported multi-passage claim") == 1
+            assert "[E1.1.1] [E1.1.2] [E1.1.3] [E1.1.4]" in prompt
+            assert "Interpretation: A proposed coordination role" in prompt
+            assert "Limitations: Responsibilities vary by administration" in prompt
+            assert "An unbound summary-only statement" not in prompt
+        before = chat.await_count
+        await mod.process_section_summary(**options)
+        assert chat.await_count == before  # Completed historical chapters are not regenerated.
+
+
+@pytest.mark.asyncio
+async def test_chapter_synthesis_keeps_distinct_attribution_and_qualification_groups(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    source = "Author A and Author B discuss the proposal. " * 120
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": source, "navigation_version": "v1", "nodes": [], "page_map": [],
+    }))
+    response = {"summary": "Proposal summary", "evidence": [
+        {"claim": "The same proposal", "source_span_ids": ["P1", "P2"],
+         "author": author, "interpretation": interpretation, "limitations": limitation}
+        for author, interpretation, limitation in (
+            ("Author A", "An interpretation", "A qualification"),
+            ("Author B", "An interpretation", "A qualification"),
+            ("Author A", "Another interpretation", "A qualification"),
+            ("Author A", "An interpretation", "Another qualification"),
+        )
+    ]}
+    chat = AsyncMock(side_effect=[
+        {"choices": [{"message": {"content": json.dumps(response)}}]},
+        {"choices": [{"message": {"content": "A chapter proposal [E1.1.1]."}}]},
+        {"choices": [{"message": {"content": "An overview proposal [E1.1.1]."}}]},
+    ])
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings.model_copy(update={"sections": []}))
+    await mod.process_section_summary(**options)
+    prompt = chat.await_args_list[1].kwargs["messages_payload"][0]["content"]
+    assert prompt.count("The same proposal") == 4
+    for line in (
+        "The same proposal Attributed to: Author A. Interpretation: An interpretation. Limitations: A qualification. [E1.1.1] [E1.1.2]",
+        "The same proposal Attributed to: Author B. Interpretation: An interpretation. Limitations: A qualification. [E1.1.3] [E1.1.4]",
+        "The same proposal Attributed to: Author A. Interpretation: Another interpretation. Limitations: A qualification. [E1.1.5] [E1.1.6]",
+        "The same proposal Attributed to: Author A. Interpretation: An interpretation. Limitations: Another qualification. [E1.1.7] [E1.1.8]",
+    ):
+        assert line in prompt
+    assert options["workspace_db"].row["status"] == "complete"
 
 
 @pytest.mark.asyncio
@@ -1124,10 +1184,12 @@ async def test_hierarchical_reduction_honors_output_budget_and_preserves_complet
         calls.append(kwargs)
         if "SOURCE:" in kwargs["messages_payload"][0]["content"]:
             content = json.dumps(
-                {"summary": "Main point. " * 1500, "evidence": [{"claim": "Source claim", "source_span_ids": ["P1"]}]}
+                {"summary": "Main point.", "evidence": [{"claim": "Source claim. " * 1400,
+                 "source_span_ids": ["P1", "P2"], "limitations": "The coordination role is proposed"}]}
             )
         else:
-            content = "Opposing positions remain distinct [" + re.search(r"\bE\d+\.\d+\.\d+\b", kwargs["messages_payload"][0]["content"]).group(0) + "]."
+            allowed = json.loads(kwargs["messages_payload"][0]["content"].split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+            content = "The coordination role is proposed. " + " ".join(f"[{value}]" for value in allowed)
         return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
 
     monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
@@ -1142,6 +1204,9 @@ async def test_hierarchical_reduction_honors_output_budget_and_preserves_complet
         output_budget,
     ]
     reduction_prompt = calls[2]["messages_payload"][0]["content"]
+    assert "[E1.1.1] [E1.1.2]" in reduction_prompt
+    assert "Limitations: The coordination role is proposed" in reduction_prompt
+    assert "The coordination role is proposed" in calls[4]["messages_payload"][0]["content"]
     assert "Final-only detailed report request" not in reduction_prompt
     assert "AUTHORITATIVE COVERAGE" not in reduction_prompt
     assert "600–1200" not in reduction_prompt
@@ -1238,7 +1303,7 @@ async def test_nonreducing_synthesis_stops_without_accepting_or_discarding_saved
         calls.append(kwargs)
         content = (
             json.dumps(
-                {"summary": "Main point. " * 1500, "evidence": [{"claim": "Source claim", "source_span_ids": ["P1"]}]}
+                {"summary": "Main point.", "evidence": [{"claim": "Source claim. " * 1400, "source_span_ids": ["P1"]}]}
             )
             if "SOURCE:" in kwargs["messages_payload"][0]["content"]
             else "Verbose expansion. " * 2000
@@ -1257,6 +1322,81 @@ async def test_nonreducing_synthesis_stops_without_accepting_or_discarding_saved
     assert analysis["sections"][0]["error_code"] == "synthesis_not_reduced"
     assert all(batch["status"] == "completed" and batch["evidence"] for batch in analysis["sections"][0]["batches"])
     assert "Verbose expansion" not in options["workspace_db"].row["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry_failed_portion", [False, True])
+@pytest.mark.parametrize("with_progress_object", [False, True])
+async def test_uneven_chapter_progress_never_moves_backward_and_preserves_retry(
+    monkeypatch, retry_failed_portion, with_progress_object,
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    first, second = "Alpha proposal.\n", "Bravo proposal. " * 3500
+    source = first + second
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": source, "navigation_version": "v1", "page_map": [], "nodes": [
+            {"id": "dsi:1", "title": "A", "level": 1, "target_type": "char_range",
+             "target_start": 0, "target_end": len(first)},
+            {"id": "dsi:2", "title": "B", "level": 1, "target_type": "char_range",
+             "target_start": len(first), "target_end": len(source)},
+        ],
+    }))
+    fail_next = retry_failed_portion
+    extraction_calls = []
+
+    async def chat(**kwargs):
+        nonlocal fail_next
+        prompt = kwargs["messages_payload"][0]["content"]
+        if "SOURCE:" in prompt:
+            extraction_calls.append(prompt)
+            if fail_next and "Bravo" in prompt:
+                fail_next = False
+                raise RuntimeError("One portion failed")
+            content = json.dumps({"summary": "A proposal", "evidence": [{"claim": "A proposal", "source_span_ids": ["P1"]}]})
+        else:
+            allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+            content = "A proposal " + " ".join(f"[{value}]" for value in allowed)
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    settings = request().settings
+    settings.sections.append(settings.sections[0].model_copy(update={"node_id": "dsi:2"}))
+    options = args(settings)
+    progress = SimpleNamespace(percent=0, message="") if with_progress_object else None
+    persisted, visible = [], []
+
+    def record_progress(job_id, *, progress_percent, progress_message):
+        persisted.append((progress_percent, progress_message))
+        if progress is not None:
+            visible.append((progress.percent, progress.message))
+
+    monkeypatch.setattr(options["job_manager"], "update_job_progress", record_progress)
+    for attempt in range(2 if retry_failed_portion else 1):
+        persisted.clear()
+        visible.clear()
+        result = await mod.process_section_summary(**options, progress=progress)
+        values = [percent for percent, _ in persisted]
+        assert values and values == sorted(values)
+        assert 0 < values[0] < values[-1] < 100  # Terminal completion belongs to the Jobs handler.
+        assert any(message.startswith("Checking citation support:") for _, message in persisted)
+        assert any(message.startswith("Reviewed ") for _, message in persisted)
+        if progress is not None:
+            assert visible == persisted
+        expected_partial = retry_failed_portion and attempt == 0
+        assert result["partial"] is expected_partial
+        assert options["workspace_db"].row["status"] == ("failed" if expected_partial else "complete")
+        sections = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"]
+        if expected_partial:
+            completed = copy.deepcopy(sections[0])
+            extracted_before = len(extraction_calls)
+            options["job_id"] += 1
+        elif attempt:
+            assert sections[0] == completed
+            assert len(extraction_calls) == extracted_before + 1
 
 
 @pytest.mark.asyncio
@@ -1668,8 +1808,8 @@ async def test_rejected_reduction_diagnostic_identifies_round_group_and_preserve
     }))
 
     async def chat(**kwargs):
-        content = (json.dumps({"summary": "Main point. " * 1500, "evidence": [
-            {"claim": "Source claim", "source_span_ids": ["P1"]}]})
+        content = (json.dumps({"summary": "Main point.", "evidence": [
+            {"claim": "Source claim. " * 1400, "source_span_ids": ["P1"]}]})
             if "SOURCE:" in kwargs["messages_payload"][0]["content"] else "Rejected [E99.1.1].")
         return {"choices": [{"message": {"content": content}}]}
 
@@ -1868,8 +2008,8 @@ async def test_synthesis_does_not_turn_unassigned_endnotes_into_another_contribu
         calls.append(kwargs)
         prompt = kwargs["messages_payload"][0]["content"]
         if "SOURCE:" in prompt:
-            content = json.dumps({"summary": "Main point. " * (1500 if needs_reduction else 1), "evidence": [
-                {"claim": "Source commentary", "author": "Avery Example", "source_span_ids": ["P1"]},
+            content = json.dumps({"summary": "Main point.", "evidence": [
+                {"claim": "Source commentary. " * (900 if needs_reduction else 1), "author": "Avery Example", "source_span_ids": ["P1"]},
             ]})
         else:
             allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
@@ -1916,7 +2056,7 @@ async def test_collective_authorship_caveat_reaches_reduction_and_final_synthesi
         prompt = kwargs["messages_payload"][0]["content"]
         if "SOURCE:" in prompt:
             claim = caveat if caveat in prompt.split("SOURCE:", 1)[1] else "The chapter proposes a policy."
-            content = json.dumps({"summary": "Main point. " * 1500, "evidence": [{"claim": claim, "source_span_ids": ["P1"]}]})
+            content = json.dumps({"summary": "Main point.", "evidence": [{"claim": claim + " Policy detail. " * 1100, "source_span_ids": ["P1"]}]})
         else:
             allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
             content = (caveat if caveat in prompt else "Chapter policy.") + f" [{allowed[0]}]"
@@ -1968,8 +2108,8 @@ async def test_verified_attribution_context_survives_name_dropping_reductions(mo
         calls.append(kwargs)
         prompt = kwargs["messages_payload"][0]["content"]
         if "SOURCE:" in prompt:
-            content = json.dumps({"summary": "A policy point. " * 1000, "evidence": [
-                {"claim": "A source-backed policy", "source_span_ids": ["P1"]},
+            content = json.dumps({"summary": "A policy point.", "evidence": [
+                {"claim": "A source-backed policy. " * 650, "source_span_ids": ["P1"]},
             ]})
         else:
             allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
@@ -2032,8 +2172,8 @@ async def test_late_literal_author_note_reaches_early_extraction_and_name_droppi
         calls.append(kwargs)
         prompt = kwargs["messages_payload"][0]["content"]
         if "SOURCE:" in prompt:
-            content = json.dumps({"summary": "A policy point. " * 1000, "evidence": [
-                {"claim": "A source-backed policy", "source_span_ids": ["P1"]},
+            content = json.dumps({"summary": "A policy point.", "evidence": [
+                {"claim": "A source-backed policy. " * 650, "source_span_ids": ["P1"]},
             ]})
         else:
             allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])

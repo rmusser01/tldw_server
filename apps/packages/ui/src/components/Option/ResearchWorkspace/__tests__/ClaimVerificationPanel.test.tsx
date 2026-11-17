@@ -50,6 +50,19 @@ describe("citation-support review", () => {
     expect(screen.getByRole("link", { name: "[E1.1.1]" })).toHaveAttribute("href", "/document-workspace?open=7&page=352")
     expect(screen.getByText(/do not establish real-world truth/)).toBeInTheDocument()
   })
+  it("keeps numeric citation links and source page locations with comma annotations", () => {
+    const draft = "The passage belongs to another contributor [2, PDF pp. 846–847, printed pp. 813–814]."
+    const receipt = { ...report, text_sha256: claimTextHash(draft),
+      findings: [{ ...report.findings[0], text: draft, end: draft.length, evidence_ids: ["2"] }],
+      evidence: { "2": { text_sha256: "a".repeat(64), media_id: 1,
+        page_spans: [{ page_number: 846, printed_page_label: "813" }, { page_number: 847, printed_page_label: "814" }] } } }
+    render(<MemoryRouter><ClaimVerificationPanel report={receipt} text={draft} /></MemoryRouter>)
+    fireEvent.click(screen.getByText(/Findings and cited evidence/))
+    expect(screen.getByText("Needs review")).toBeVisible()
+    expect(screen.getByRole("link", { name: "[2]" })).toHaveAttribute("href", "/document-workspace?open=1&page=846")
+    expect(screen.getByText(draft)).toBeVisible()
+    expect(screen.getAllByRole("link")).toHaveLength(1)
+  })
   it.each(["snapshot", "complete pack"])("retains %s report evidence without navigating to historical server IDs", mode => {
     const before = JSON.stringify(report)
     const bundle = portableFixture()

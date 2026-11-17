@@ -10,7 +10,7 @@ CITATION_RUN = re.compile(
 _PAGE = r"[1-9][0-9]*(?:[ \t]*[-–][ \t]*[1-9][0-9]*)?"
 _ANNOTATED_NUMERIC = re.compile(
     r"(?:Source )?([1-9][0-9]*)[ \t]*,[ \t]*PDF pp?\.[ \t]*" + _PAGE
-    + r"(?:[ \t]*;[ \t]*printed pp?\.[ \t]*" + _PAGE + r")?\Z"
+    + r"(?:[ \t]*[,;][ \t]*printed pp?\.[ \t]*" + _PAGE + r")?\Z"
 )
 
 

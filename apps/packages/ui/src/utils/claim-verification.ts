@@ -15,7 +15,8 @@ export type ClaimVerification = {
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value)
 const statuses = new Set(["supported", "unsupported", "contradicted", "uncited", "not_checked", "error"])
 // Match the server's bounded numeric location annotation; unknown suffixes remain citation IDs.
-const PDF_LOCATION_CITATION = /^(?:Source )?([1-9][0-9]*)[ \t]*,[ \t]*PDF pp?\.[ \t]*[1-9][0-9]*(?:[ \t]*[-–][ \t]*[1-9][0-9]*)?(?:[ \t]*;[ \t]*printed pp?\.[ \t]*[1-9][0-9]*(?:[ \t]*[-–][ \t]*[1-9][0-9]*)?)?$/
+const PDF_LOCATION_CITATION = /^(?:Source )?([1-9][0-9]*)[ \t]*,[ \t]*PDF pp?\.[ \t]*[1-9][0-9]*(?:[ \t]*[-–][ \t]*[1-9][0-9]*)?(?:[ \t]*[,;][ \t]*printed pp?\.[ \t]*[1-9][0-9]*(?:[ \t]*[-–][ \t]*[1-9][0-9]*)?)?$/
+const LEGACY_PDF_LOCATION_CITATION = /^(?:Source )?([1-9][0-9]*)[ \t]*,[ \t]*PDF pp?\.[ \t]*[1-9][0-9]*(?:[ \t]*[-–][ \t]*[1-9][0-9]*)?(?:[ \t]*;[ \t]*printed pp?\.[ \t]*[1-9][0-9]*(?:[ \t]*[-–][ \t]*[1-9][0-9]*)?)?$/
 const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 export const claimTextHash = (text: string) => bytesToHex(sha256(utf8ToBytes(text)))
 
@@ -53,7 +54,16 @@ export function readClaimVerification(value: unknown, text?: string): ClaimVerif
         return located ? [located[1]] : group.split(",").map(id => id.trim().replace(/^Source /, ""))
       }).flat())]
       const unavailable = ["not_checked", "error"].includes(item.status) && item.evidence_ids.length === 0
-      if (!unavailable && JSON.stringify(cited) !== JSON.stringify(item.evidence_ids)) return null
+      if (!unavailable && JSON.stringify(cited) !== JSON.stringify(item.evidence_ids)) {
+        // Retain historical parser failures without granting them evaluated status.
+        const legacyIds = [...new Set(Array.from(item.text.matchAll(/\[([^\]\n]+)\]/g), (match: RegExpMatchArray) => {
+          const group = match[1].trim()
+          const located = LEGACY_PDF_LOCATION_CITATION.exec(group)
+          return located ? [located[1]] : group.split(",").map(id => id.trim().replace(/^Source /, ""))
+        }).flat())]
+        if (item.status !== "not_checked" || item.reason !== "citation_not_resolved" ||
+            JSON.stringify(legacyIds) !== JSON.stringify(item.evidence_ids)) return null
+      }
     }
     const unavailable = value.findings.length === 0 && value.verdict === "unverified" && typeof value.context.unavailable_reason === "string"
     if (!unavailable && /[\p{L}\p{N}]/u.test(characters.slice(cursor).join(""))) return null

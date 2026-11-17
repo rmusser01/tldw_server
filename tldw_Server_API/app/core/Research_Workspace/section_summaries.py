@@ -9,7 +9,6 @@ import json
 import re
 from collections import Counter
 from collections.abc import Awaitable, Callable
-from functools import partial
 from typing import Any
 
 from fastapi import HTTPException
@@ -35,6 +34,7 @@ from tldw_Server_API.app.core.Research_Workspace.section_attribution import (
 )
 from tldw_Server_API.app.core.Research_Workspace.section_overview_coverage import overview_coverage
 from tldw_Server_API.app.core.Research_Workspace.section_verification import (
+    batch_claim_text,
     evidence_digest,
     render_claim_verification,
     section_evidence_map,
@@ -687,7 +687,14 @@ async def process_section_summary(
     )
 
     workspace_id, artifact_id = payload["workspace_id"], payload["artifact_id"]
-    report_progress = partial(_update_output_job_progress, job_manager, job_id, progress)
+    last_progress = 0.0
+
+    def report_progress(percent: float, message: str) -> None:
+        """Update stage messages without decreasing progress within this attempt."""
+        nonlocal last_progress
+        last_progress = max(last_progress, percent)
+        _update_output_job_progress(job_manager, job_id, progress, last_progress, message)
+
     snapshots, sections, fingerprint = await _load_selected_sections(payload, workspace_db, media_db, settings)
     artifact = workspace_db.get_workspace_artifact(workspace_id, artifact_id)
     metadata = copy.deepcopy((artifact or {}).get("version_metadata") or {})
@@ -882,7 +889,7 @@ async def process_section_summary(
                 section["content"] = await synthesize(
                     [f"Processing portion {index + 1} of {len(section['batches'])}; "
                      f"source characters {batch['start_char']}–{batch['end_char']}.\n"
-                     + batch["content"] for index, batch in enumerate(section["batches"])],
+                     + batch_claim_text(batch) for index, batch in enumerate(section["batches"])],
                     f"Summarize all portions of {section['title']}. Preserve named authors, disagreements, qualifications and evidence IDs. "
                     + _FAITHFULNESS_INSTRUCTION,
                     section_number=section_index + 1,

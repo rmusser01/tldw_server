@@ -71,6 +71,9 @@
 - [x] Repair the Job 55 evidence-ID/source-range handoff exposed by the targeted run. Bind only validated note-overlapping evidence allowed in each chapter reduction/final call, preserve context budgets and retry work, add RED→GREEN controls and independent review, then freeze a new runtime for explicit retesting.
 - [x] Preserve Job 56's first results; repair the separately reproduced Claims aggregation gap with explicit citation/context bindings and context-sensitive cache invalidation. Retain old fixtures and add v4 mixed-contributor controls; qualify with connected tests and independent review before restarting the runtime.
 - [ ] Run one full Luna evaluation on the original PDF. Retain first failures, ledger entries and any explicit recovery; audit chapter representation, source spans, Claims verdicts and attribution separately.
+- [ ] After the frozen full run is terminal, apply the bounded comma/semicolon page-annotation repair exposed by browser R04. Qualify shared parsing, historical unchecked receipts and rejection of evaluated promotions; recheck the saved failed answer and fresh browser flow with separate receipts.
+- [ ] Repair the independently confirmed multi-passage citation handoff (TASK-15505.19) using the existing grouped, qualified claim renderer at chapter synthesis/reduction. Preserve the frozen full run; qualify fresh and saved-partial paths, then run a separate White House/EXIM/Financial targeted Luna check and identify its later revision explicitly.
+- [ ] Correct the observed backward progress updates (TASK-15505.20) within the same attempt, retaining stage messages and true completion/failure status; qualify uneven chapter sizes, retry behavior and the targeted run's ledger.
 - [ ] Source-review the agreed sample as agent review, keeping known regressions separate from untouched samples. Do not report human calibration scores while labels are absent.
 - [ ] Exercise review/save/reload/export of new findings and record NN/g issues and verification limits. Publish tested changes/results to the existing draft PR; follow CI to terminal.
 
@@ -80,10 +83,19 @@
 
 **Goal:** Verify restored vector retrieval and hand the existing uncoached script to the actual VIP.
 **Success Criteria:** Owned Media2 indexing is terminal and scoped retrieval works without research changes; participant observations are recorded only when supplied by a real person.
-**Status:** Not Started
+**Status:** In Progress
 
-- [ ] Start destination API, Redis/embedding worker and frontend using new run logs, existing private configuration and preserved databases. Verify the original PDF SHA and saved workspace identity first.
-- [ ] Submit `POST /api/v1/media/2/embeddings` with the existing MiniLM model and `force_regenerate:false`; retain the returned job ID and poll the existing job/status APIs.
-- [ ] Verify source-scoped vector/hybrid results and unchanged PDF, reports, review overlays and restored citations.
-- [ ] Prepare the existing seven-task VIP script and a results sheet containing outcome, time, assistance, errors, confidence and NN/g heuristic/severity. Request actual observations and incorporate them; never simulate human acceptance.
+The ordered repair and control checkpoints are complete, and the full evaluation has finished QA and submitted Job 57. Independent destination checks proceed during its chapter-generation wait using separate services/databases; source generation and verification code remain frozen. The source run, review and export still require their own completion checks.
+
+- [x] Start destination API, Redis/embedding worker and frontend using new run logs, existing private configuration and preserved databases. Verify the original PDF SHA and saved workspace identity first.
+- [x] Submit `POST /api/v1/media/2/embeddings` with the existing MiniLM model and `force_regenerate:false`; retain the returned job ID and poll the existing job/status APIs.
+- [x] Verify source-scoped vector/hybrid results and unchanged PDF, reports, review overlays and restored citations.
+- [x] Prepare the existing seven-task VIP script and a blank results sheet containing outcome, time, assistance, errors, confidence and NN/g heuristic/severity: `Docs/Reviews/POLITICAL_PDF_VIP_WALKTHROUGH_2026_11_17.md`.
+- [ ] Obtain and incorporate actual VIP observations; never simulate human acceptance. Human claim labels and calibration also remain pending.
 - [ ] Record completed versus pending acceptance honestly, update Backlog/PR and remove only this plan after all stages are actually complete. Keep human-written Change summary/merge requirements intact.
+
+**Technical verification:** Destination runtime `441bffcf46` completes one MiniLM job, `ee8f18a9-2f02-4d6c-9107-3cc47cc6ee09`, with 2,261 chunks/vectors and no error. The restored source is queryable with vector readiness true; Redis has no pending messages. Six vector/hybrid probes return 72 results, all scoped to Media 2 with exact canonical excerpts and physical-page bindings. Five probes cover all expected pages; EXIM vector retrieval misses physical 753/759 while hybrid retrieves both. This retained retrieval limitation is not an answer-quality pass.
+
+All nine artifacts, 148 artifact reports, the latest analysis's nine review overlays, twelve messages, two QA reports, forty conversation citations, the Note and original PDF remain unchanged. Navigation nodes, text and page map remain exact, while index completion advances navigation identity from `media_2:v7:50cc51b121` to `media_2:v8:0d889a2613`. Queued/stale ingestion Job 14 remains untouched; it is separate from the completed embedding job.
+
+The actual browser walkthrough opens saved assistant message 12 citation `[6]` through **Open PDF page 872**, reaching `document-workspace?open=2&page=872`. The viewer shows 872/922; visual inspection confirms printed page 839, the Financial Regulatory Agencies heading and CFPB proposal. Media 2 reads and the expected reading-progress write return 200. Only two existing AntD deprecation warnings appear in the captured console log. A subsequent API comparison confirms saved research, navigation and original PDF remain exact after browsing. Private runtime proof and hashed browser receipt: `/tmp/tldw-political-pdf-semantic-20261117/destination-runtime-441bffcf46/{destination-verification,browser-citation-receipt}.json`. This is agent technical verification; actual VIP observations remain blank.

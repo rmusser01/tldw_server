@@ -5096,5 +5096,20 @@
   },
   "workspace_openRestoredWorkspace": {
     "message": "Open restored workspace"
+  },
+  "studio_sectionReader_retainedOverview": {
+    "message": "This overview is retained for review. Completed chapters and evidence remain available."
+  },
+  "studio_sectionReader_overviewCoverage_one": {
+    "message": "Chapters cited in overview: {{cited}} of {{count}} completed chapter."
+  },
+  "studio_sectionReader_overviewCoverage_other": {
+    "message": "Chapters cited in overview: {{cited}} of {{count}} completed chapters."
+  },
+  "studio_sectionReader_overviewMissing": {
+    "message": "Missing overview citations: {{titles}}."
+  },
+  "studio_sectionReader_overviewSupport": {
+    "message": "Citation support is assessed separately below."
   }
 }

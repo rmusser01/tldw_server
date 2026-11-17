@@ -576,7 +576,11 @@ def test_offline_strict_receipt_binds_the_requested_verifier_identity(run_dir, f
 
 @pytest.mark.parametrize("annotation,accepted", [
     ("1, PDF p. 872; printed p. 839", True),
+    ("1, PDF p. 692, printed p. 659", True),
+    ("1, PDF pp. 846–847, printed pp. 813–814", True),
     ("1, unrelated-source-id", False),
+    ("1, PDF p. 692, printed p. 659, P2", False),
+    ("1-2, PDF p. 692, printed p. 659", False),
     ("1, PDF p. unknown; printed p. 839", False),
     ("1, PDF p. 0; printed p. 839", False),
 ])
