@@ -20,9 +20,6 @@ from tldw_Server_API.app.core.Evaluations.benchmark_utils import (
     HonestyEvaluation,
     InstructionFollowingEvaluation,
     MultipleChoiceEvaluation,
-    load_dataset_from_json,
-    load_dataset_from_jsonl,
-    load_dataset_from_url,
 )
 
 logger = logger
@@ -86,23 +83,22 @@ class BenchmarkRegistry:
         self._load_default_benchmarks()
 
     def _load_default_benchmarks(self):
-        """Load default benchmark configurations."""
-        # SimpleQA
+        """Load default benchmark configurations. Every registered benchmark builds an evaluator and loads
+        rows in its evaluator's fields (TASK-15487); a benchmark with no evaluator is not registered."""
+        # SimpleQA: OpenAI's test set (simple-evals), a CSV with "problem" and "answer" columns
         self.register(BenchmarkConfig(
             name="simpleqa",
             description="OpenAI SimpleQA - Measuring short-form factuality",
+            dataset_source="https://openaipublic.blob.core.windows.net/simple-evals/simple_qa_test_set.csv",
             evaluation_type="simpleqa",
-            dataset_source="https://github.com/openai/simple-evals",
-            dataset_format="jsonl",
+            dataset_format="csv",
             field_mappings={
-                "question": "question",
+                "question": "problem",
                 "answer": "answer",
-                "topic": "topic"
             },
             evaluation_params={
                 "grading_model": "openai",
                 "strict_grading": True,
-                "max_tokens": 50
             },
             metadata={
                 "paper": "https://openai.com/index/introducing-simpleqa/",
@@ -111,19 +107,18 @@ class BenchmarkRegistry:
             }
         ))
 
-        # SimpleQA Verified (local dataset support)
+        # SimpleQA Verified: the curated set ships in the repo as a zip holding one CSV ("problem", "answer", "topic")
         try:
             repo_root = Path(__file__).resolve().parents[4]
-            local_dir = repo_root / "Helper_Scripts" / "Evals" / "SimpleQA_verified"
-            dataset_source = str(local_dir)
+            dataset_source = str(repo_root / "Helper_Scripts" / "Evals" / "simpleqa-verified.zip")
             self.register(BenchmarkConfig(
                 name="simpleqa_verified",
                 description="SimpleQA Verified - curated factuality set (local)",
                 evaluation_type="simpleqa",
                 dataset_source=dataset_source,
-                dataset_format="jsonl",  # loader will auto-detect file inside dir
+                dataset_format="csv",
                 field_mappings={
-                    "question": "question",
+                    "question": "problem",
                     "answer": "answer",
                     "topic": "topic"
                 },
@@ -156,7 +151,8 @@ class BenchmarkRegistry:
             },
         ))
 
-        # MMLU Pro
+        # MMLU Pro (needs the datasets package: the data-tools extra). Its rows: question, options, answer (a letter),
+        # answer_index, category.
         self.register(BenchmarkConfig(
             name="mmlu_pro",
             description="MMLU Pro - Enhanced multiple choice with 10 options and reasoning",
@@ -166,7 +162,7 @@ class BenchmarkRegistry:
             field_mappings={
                 "question": "question",
                 "choices": "options",
-                "correct_answer": "answer_idx",
+                "correct_answer": "answer",
                 "category": "category"
             },
             evaluation_params={
@@ -180,7 +176,8 @@ class BenchmarkRegistry:
             }
         ))
 
-        # GPQA Diamond
+        # GPQA Diamond (needs the datasets package; the dataset is gated: accept its terms on HuggingFace and set
+        # HF_TOKEN). The loader shapes its columns into question, choices, correct_answer and category.
         self.register(BenchmarkConfig(
             name="gpqa_diamond",
             description="Graduate-level science questions (physics, chemistry, biology)",
@@ -191,7 +188,7 @@ class BenchmarkRegistry:
                 "question": "question",
                 "choices": "choices",
                 "correct_answer": "correct_answer",
-                "category": "subject"
+                "category": "category"
             },
             evaluation_params={
                 "num_choices": 4,
@@ -217,95 +214,6 @@ class BenchmarkRegistry:
             evaluation_params={
                 "num_choices": 6,
                 "require_reasoning": False
-            }
-        ))
-
-        # Aider Polyglot
-        self.register(BenchmarkConfig(
-            name="aider_polyglot",
-            description="Multi-language code generation from Exercism",
-            evaluation_type="code_generation",
-            dataset_source="https://github.com/Aider-AI/polyglot-benchmark",
-            dataset_format="custom",
-            field_mappings={
-                "problem": "description",
-                "test_cases": "tests",
-                "language": "language"
-            },
-            evaluation_params={
-                "languages": ["python", "javascript", "rust", "go", "java", "cpp"],
-                "run_tests": True
-            }
-        ))
-
-        # BFCL (Berkeley Function Calling Leaderboard)
-        self.register(BenchmarkConfig(
-            name="bfcl",
-            description="Function calling benchmark",
-            evaluation_type="function_calling",
-            dataset_source="https://huggingface.co/datasets/gorilla-llm/berkeley-function-calling-leaderboard",
-            dataset_format="huggingface",
-            field_mappings={
-                "query": "question",
-                "functions": "functions",
-                "expected_call": "answers"
-            },
-            evaluation_params={
-                "strict_params": True
-            }
-        ))
-
-        # MASK Benchmark
-        self.register(BenchmarkConfig(
-            name="mask",
-            description="Honesty evaluation benchmark",
-            evaluation_type="honesty",
-            dataset_source="https://huggingface.co/datasets/mask-benchmark/MASK",
-            dataset_format="huggingface",
-            field_mappings={
-                "question": "question",
-                "variations": "variations",
-                "expected_consistency": "expected_consistency"
-            },
-            evaluation_params={
-                "check_consistency": True
-            }
-        ))
-
-        # Vending Bench
-        self.register(BenchmarkConfig(
-            name="vending_bench",
-            description="Long-term business simulation",
-            evaluation_type="multi_turn",
-            dataset_source="https://andonlabs.com/evals/vending-bench",
-            dataset_format="custom",
-            field_mappings={
-                "scenario": "scenario",
-                "initial_state": "initial_state",
-                "objectives": "objectives"
-            },
-            evaluation_params={
-                "max_turns": 100,
-                "track_metrics": ["net_worth", "units_sold", "days_operational"]
-            }
-        ))
-
-        # SWE-bench
-        self.register(BenchmarkConfig(
-            name="swe_bench",
-            description="Software engineering tasks from GitHub issues",
-            evaluation_type="code_generation",
-            dataset_source="https://huggingface.co/datasets/princeton-nlp/SWE-bench",
-            dataset_format="huggingface",
-            field_mappings={
-                "problem": "problem_statement",
-                "test_cases": "test_patch",
-                "repo": "repo"
-            },
-            evaluation_params={
-                "language": "python",
-                "run_tests": True,
-                "use_repo_context": True
             }
         ))
 
@@ -377,62 +285,6 @@ class BenchmarkRegistry:
         except Exception as e:
             logger.exception(f"Failed to create evaluator for {benchmark_name}: {e}")
             return None
-
-    def load_dataset(self, benchmark_name: str, limit: Optional[int] = None) -> list[dict[str, Any]]:
-        """Load dataset for a benchmark."""
-        config = self.get(benchmark_name)
-        if not config:
-            logger.error(f"Benchmark not found: {benchmark_name}")
-            return []
-
-        try:
-            # Load based on format
-            if config.dataset_format == "json":
-                if config.dataset_source.startswith("http"):
-                    data = load_dataset_from_url(config.dataset_source, format="json")
-                else:
-                    data = load_dataset_from_json(config.dataset_source)
-
-            elif config.dataset_format == "jsonl":
-                if config.dataset_source.startswith("http"):
-                    data = load_dataset_from_url(config.dataset_source, format="jsonl")
-                else:
-                    data = load_dataset_from_jsonl(config.dataset_source)
-
-            elif config.dataset_format == "huggingface":
-                # Would need to implement HuggingFace dataset loading
-                logger.warning(f"HuggingFace datasets not yet implemented for {benchmark_name}")
-                return []
-
-            elif config.dataset_format == "custom":
-                # Custom loaders for specific benchmarks
-                logger.warning(f"Custom loader not yet implemented for {benchmark_name}")
-                return []
-
-            else:
-                logger.error(f"Unknown dataset format: {config.dataset_format}")
-                return []
-
-            # Apply field mappings to normalize data
-            normalized_data = []
-            for item in data:
-                normalized = {}
-                for target_field, source_field in config.field_mappings.items():
-                    if source_field in item:
-                        normalized[target_field] = item[source_field]
-                normalized["_original"] = item  # Keep original for reference
-                normalized_data.append(normalized)
-
-            # Apply limit if specified
-            if limit and limit > 0:
-                normalized_data = normalized_data[:limit]
-
-            logger.info(f"Loaded {len(normalized_data)} items for {benchmark_name}")
-            return normalized_data
-
-        except Exception as e:
-            logger.exception(f"Failed to load dataset for {benchmark_name}: {e}")
-            return []
 
     def save_config(self, config: BenchmarkConfig, path: str) -> None:
         """Save benchmark configuration to file."""

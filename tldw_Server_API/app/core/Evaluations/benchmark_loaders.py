@@ -10,8 +10,11 @@ Supports loading from:
 
 import contextlib
 import csv
+import io
 import json
 import os
+import random
+import zipfile
 from collections.abc import Generator
 from importlib import resources
 from pathlib import Path
@@ -75,30 +78,24 @@ class DatasetLoader:
     @staticmethod
     def load_csv(source: str, delimiter: str = ',') -> list[dict[str, Any]]:
         """Load CSV dataset from file or URL."""
-        data = []
-
         if source.startswith(('http://', 'https://')):
             r = fetch(method="GET", url=source, timeout=15)
             try:
                 lines = r.text.strip().split('\n')
-                reader = csv.DictReader(lines, delimiter=delimiter)
             finally:
                 with contextlib.suppress(Exception):
                     r.close()
-        else:
-            with open(source, encoding='utf-8') as f:
-                reader = csv.DictReader(f, delimiter=delimiter)
+            return [dict(row) for row in csv.DictReader(lines, delimiter=delimiter)]
 
-        for row in reader:
-            data.append(dict(row))
-
-        return data
+        with open(source, encoding='utf-8') as f:  # the reader is lazy: read the rows while the file is open
+            return [dict(row) for row in csv.DictReader(f, delimiter=delimiter)]
 
     @staticmethod
     def load_huggingface(dataset_id: str, split: str = 'test',
                         limit: Optional[int] = None,
-                        revision: Optional[str] = None) -> list[dict[str, Any]]:
-        """Load dataset from HuggingFace.
+                        revision: Optional[str] = None,
+                        name: Optional[str] = None) -> list[dict[str, Any]]:
+        """Load dataset from HuggingFace; ``name`` is the dataset's config (GPQA has one per subset).
 
         Note: This requires the 'datasets' library to be installed.
         """
@@ -112,7 +109,7 @@ class DatasetLoader:
         try:
             # Load dataset
             resolved_revision = revision or os.getenv("HF_DATASETS_DEFAULT_REVISION")
-            dataset = load_dataset(dataset_id, split=split, revision=resolved_revision)  # nosec B615
+            dataset = load_dataset(dataset_id, name=name, split=split, revision=resolved_revision)  # nosec B615
 
             # Convert to list of dicts
             data = []
@@ -224,95 +221,49 @@ class BenchmarkDatasetLoader:
         return processed
 
     @staticmethod
-    def load_aider_polyglot(source: Optional[str] = None,
-                           language: str = "python") -> list[dict[str, Any]]:
-        """Load Aider Polyglot benchmark for a specific language."""
-        if not source:
-            source = f"https://raw.githubusercontent.com/Aider-AI/polyglot-benchmark/main/{language}"
-
-        # This would need custom parsing based on Aider's format
-        # For now, return empty list as placeholder
-        logger.warning("Aider Polyglot loader not fully implemented")
-        return []
-
-    @staticmethod
-    def load_swe_bench(source: Optional[str] = None,
-                      subset: str = "lite") -> list[dict[str, Any]]:
-        """Load SWE-bench dataset."""
-        if not source:
-            dataset_id = f"princeton-nlp/SWE-bench_{subset}" if subset else "princeton-nlp/SWE-bench"
-            return DatasetLoader.load_huggingface(dataset_id, split="test")
-
-        if source.startswith("huggingface://"):
-            dataset_id = source.replace("huggingface://", "")
-            return DatasetLoader.load_huggingface(dataset_id, split="test")
-        else:
-            # Load from file/URL
-            if source.endswith('.jsonl'):
-                return DatasetLoader.load_jsonl(source)
-            else:
-                return DatasetLoader.load_json(source)
-
-    @staticmethod
     def load_gpqa(source: Optional[str] = None,
                  subset: str = "diamond") -> list[dict[str, Any]]:
-        """Load GPQA dataset."""
+        """Load a GPQA subset: one config of the gated HuggingFace dataset (split ``train``), or a file in its columns."""
         if not source:
-            # Default to HuggingFace
-            dataset_id = "Idavidrein/gpqa"
-            data = DatasetLoader.load_huggingface(dataset_id, split="train")
-
-            # Filter by subset if specified
-            if subset and subset != "all":
-                data = [item for item in data if item.get("subset") == subset]
-
-            return data
-
-        if source.startswith("huggingface://"):
-            dataset_id = source.replace("huggingface://", "")
-            return DatasetLoader.load_huggingface(dataset_id)
+            data = DatasetLoader.load_huggingface("Idavidrein/gpqa", split="train", name=f"gpqa_{subset}")
+        elif source.startswith("huggingface://"):
+            data = DatasetLoader.load_huggingface(source.replace("huggingface://", ""), split="train", name=f"gpqa_{subset}")
+        elif source.endswith('.csv'):
+            data = DatasetLoader.load_csv(source)
+        elif source.endswith('.jsonl'):
+            data = DatasetLoader.load_jsonl(source)
         else:
-            # Load from file/URL
-            if source.endswith('.jsonl'):
-                return DatasetLoader.load_jsonl(source)
-            else:
-                return DatasetLoader.load_json(source)
+            data = DatasetLoader.load_json(source)
+        return [BenchmarkDatasetLoader._shape_gpqa_row(row, i) for i, row in enumerate(data)]
 
     @staticmethod
-    def load_bfcl(source: Optional[str] = None) -> list[dict[str, Any]]:
-        """Load Berkeley Function Calling Leaderboard dataset."""
-        if not source:
-            return DatasetLoader.load_huggingface(
-                "gorilla-llm/berkeley-function-calling-leaderboard",
-                split="test"
-            )
-
-        if source.startswith("huggingface://"):
-            dataset_id = source.replace("huggingface://", "")
-            return DatasetLoader.load_huggingface(dataset_id)
-        else:
-            # Load from file/URL
-            if source.endswith('.jsonl'):
-                return DatasetLoader.load_jsonl(source)
-            else:
-                return DatasetLoader.load_json(source)
+    def _shape_gpqa_row(row: dict[str, Any], index: int) -> dict[str, Any]:
+        """A GPQA row holds the correct answer and three incorrect ones in named columns. The choices are
+        shuffled once per item, seeded by its Record ID, so a run is reproducible and A is not always right."""
+        if "Correct Answer" not in row:
+            return row  # already in the benchmark's fields (a local file)
+        correct = str(row["Correct Answer"]).strip()
+        choices = [correct] + [str(row[f"Incorrect Answer {n}"]).strip() for n in (1, 2, 3)]
+        random.Random(str(row.get("Record ID") or index)).shuffle(choices)  # nosec B311 - reproducible order, not security
+        return {
+            "question": row.get("Question", ""),
+            "choices": choices,
+            "correct_answer": chr(65 + choices.index(correct)),
+            "category": row.get("Subdomain") or row.get("High-level domain") or "general",
+            "_original": row,
+        }
 
     @staticmethod
     def load_simpleqa(source: Optional[str] = None) -> list[dict[str, Any]]:
-        """Load SimpleQA dataset."""
+        """Load a SimpleQA dataset: OpenAI's CSV (the default), a URL, a local file, a zip holding a CSV, or a directory."""
         if not source:
-            # Try to load from HuggingFace if available
-            try:
-                return DatasetLoader.load_huggingface("openai/simple-qa", split="test")
-            except Exception as e:
-                # Fallback to sample data
-                logger.warning(f"SimpleQA dataset not found, using sample data. error={e}")
-                from tldw_Server_API.app.core.Evaluations.simpleqa_eval import SimpleQADataset
-                return SimpleQADataset.create_sample_dataset()
+            source = "https://openaipublic.blob.core.windows.net/simple-evals/simple_qa_test_set.csv"
 
         if source.startswith("huggingface://"):
             dataset_id = source.replace("huggingface://", "")
             return DatasetLoader.load_huggingface(dataset_id)
+        elif source.endswith('.csv'):
+            return DatasetLoader.load_csv(source)
         elif source.startswith("http"):
             # Load from URL
             if source.endswith('.jsonl'):
@@ -320,9 +271,14 @@ class BenchmarkDatasetLoader:
             else:
                 return DatasetLoader.load_json(source)
         else:
-            # Load from local path (file or directory)
+            # Load from local path (zip, file or directory)
             from tldw_Server_API.app.core.Evaluations.simpleqa_eval import SimpleQADataset
             p = Path(source)
+            if p.suffix == ".zip":  # the shipped simpleqa-verified.zip: one CSV inside
+                with zipfile.ZipFile(p) as archive:
+                    member = next(n for n in archive.namelist() if n.endswith(".csv"))
+                    with archive.open(member) as raw:
+                        return list(csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8")))
             if p.is_dir():
                 # Prefer a *_verified.jsonl or first jsonl/json
                 candidates = list(p.glob("*.jsonl")) + list(p.glob("*.json"))
@@ -414,19 +370,23 @@ def load_benchmark_dataset(benchmark_name: str,
         **kwargs: Additional benchmark-specific parameters
 
     Returns:
-        List of dataset items
+        List of dataset items, in the benchmark's own fields: the registry's field_mappings are applied here,
+        so every caller (both run routes and the CLIs) gets the shape its evaluator formats (TASK-15487).
     """
+    from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
+
+    config = get_registry().get(benchmark_name)
+    registered_source = config.dataset_source if config else None
+
     # Map benchmark names to loaders
     loaders = {
         "mmlu_pro": BenchmarkDatasetLoader.load_mmlu_pro,
         "simple_bench": BenchmarkDatasetLoader.load_simple_bench,
-        "simpleqa": BenchmarkDatasetLoader.load_simpleqa,
+        "simpleqa": lambda s: BenchmarkDatasetLoader.load_simpleqa(s or registered_source),
+        "simpleqa_verified": lambda s: BenchmarkDatasetLoader.load_simpleqa(s or registered_source),
         "bullshit_benchmark": BenchmarkDatasetLoader.load_bullshit_benchmark,
-        "aider_polyglot": BenchmarkDatasetLoader.load_aider_polyglot,
-        "swe_bench": BenchmarkDatasetLoader.load_swe_bench,
         "gpqa": BenchmarkDatasetLoader.load_gpqa,
         "gpqa_diamond": lambda s: BenchmarkDatasetLoader.load_gpqa(s, subset="diamond"),
-        "bfcl": BenchmarkDatasetLoader.load_bfcl,
     }
 
     if benchmark_name in loaders:
@@ -449,6 +409,13 @@ def load_benchmark_dataset(benchmark_name: str,
         else:
             logger.error(f"Cannot determine format for source: {source}")
             return []
+
+    if config and config.field_mappings:
+        # Merge, not replace: a loader that already shaped its rows (simple_bench) keeps them
+        data = [
+            {**item, **{target: item[field] for target, field in config.field_mappings.items() if field in item}}
+            for item in data
+        ]
 
     # Apply limit if specified
     if limit and limit > 0:
