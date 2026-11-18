@@ -79,7 +79,7 @@ QUEUE_TICK_GATES = {
 DIRECT_TRIGGER_DIGESTS = {
     "actionlint.yml": "d31daa2c3e010b3a70dcbd640ef24f573bea18619228e7548c50992c54df0e99",
     "backend-required.yml": "88237a699f2e036ba116cd127e6a560a98ee417ef637db0163e6f90475bb6feb",
-    "ci.yml": "a2ef246f468b2b946f6fa5f9805497d9c8a1c4ca7f3ef395172a290a17a3b3a6",
+    "ci.yml": "ea6e388f5851cd2dea4664a145425ec84107d8a9406f56ff5f01a51d4b5b3bec",
     "codeql.yml": "8592a8565d97d233d6b27fb13d9a563f673550f3d8220d0b262487346a70e25f",
     "container-build-check.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
     "coverage-required.yml": "88237a699f2e036ba116cd127e6a560a98ee417ef637db0163e6f90475bb6feb",
@@ -93,7 +93,7 @@ DIRECT_TRIGGER_DIGESTS = {
     "notes-remediation-targeted.yml": "090c7ff3c4b668cd6c76fc3b9fc9a1b3be128b21b3b2b236cdfe33dd6f5edb5a",
     "onboarding-docs-gate.yml": "38fc27642d68b7b198e20a9e910ddfa2e1f626b32be5911df63d64c89cb60afa",
     "pre-commit.yml": "d3d381eead20326078cb0268da7340f8217d95336af86c8d9701419c5e67d3be",
-    "pypi-package.yml": "1faf356cfe858d94100ea61d578f0b9d132c73533277c552fd03f1e3ac141823",
+    "pypi-package.yml": "e90b731a35e91072df7737c033cc81208b6dd491e91ef1497fb47ce2a183768a",
     "sbom.yml": "6ba4774ab2129a605bb160c5ee6f48ebc51544881592ad60ad5268b910fcfbde",
     "security-required.yml": "17a6ff1c75afa8c8826e8378c3f73c1099375730bdd06067a2921ecaf38f58ab",
     "ui-characters-harness-tests.yml": "8977899d9903b59c454c686e1fda272a7b919f63782d84ec8c24973449f2eee6",
@@ -175,8 +175,8 @@ ORIGINAL_DEPENDENCIES = {
     ("ci.yml", "full-suite-macos-312-summary"): ("full-suite-macos-312-shards", "changes"),
     ("ci.yml", "full-suite-windows-312-shards"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-windows-312-summary"): ("full-suite-windows-312-shards", "changes"),
-    ("ci.yml", "full-suite-os-313-release-shards"): ("lint", "syntax-check"),
-    ("ci.yml", "full-suite-windows-313-release-shards"): ("lint", "syntax-check"),
+    ("ci.yml", "full-suite-os-313-release-shards"): ("lint", "syntax-check", "changes"),
+    ("ci.yml", "full-suite-windows-313-release-shards"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "character-chat-rate-limits"): (
         "full-suite-linux-312-summary",
         "changes",
@@ -635,11 +635,10 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
         "always() && !cancelled() && (github.event_name == 'workflow_dispatch' || "
         "(github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true'))"
     )
-    non_pr = "github.event_name != 'pull_request' && github.event_name != 'workflow_run'"
+    release = "needs.changes.outputs.tier == 'release'"
     backend_changed = (
-        "(github.event_name != 'pull_request' && "
-        "github.event_name != 'workflow_run') || "
-        "needs.changes.outputs.backend_changed == 'true'"
+        "needs.changes.outputs.tier == 'full' || needs.changes.outputs.tier == 'nightly' || "
+        "needs.changes.outputs.tier == 'release'"
     )
     frontend_conditions = {
         "critical": (
@@ -677,9 +676,12 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
     for name, (data, _) in _load_ordinary_workflows().items():
         jobs = data["jobs"]
         backend_direct = name == "backend-required.yml"
-        assert tuple(
-            job_name for job_name in jobs if job_name not in {"admission", "await_license"}
-        ) == ORIGINAL_JOB_NAMES[name]
+        additional = {
+            "light-backend", "server-ci-verdict", "release-package", "release-qualified",
+        } if name == "ci.yml" else set()
+        assert set(jobs) == set(ORIGINAL_JOB_NAMES[name]) | additional | (
+            {"await_license"} if backend_direct else {"admission", "await_license"}
+        ), name
         for job_name in ORIGINAL_JOB_NAMES[name]:
             job = jobs[job_name]
             needs = _needs(job)
@@ -718,7 +720,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 if name == "frontend-e2e-tiers.yml":
                     extra_condition = frontend_conditions[job_name]
                 elif name == "ci.yml" and job_name in NON_PR_FULL_SUITE_JOBS:
-                    extra_condition = non_pr
+                    extra_condition = release
                 elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
                     extra_condition = backend_changed
                 elif (name, job_name) == ("backend-required.yml", "non-utc-tests"):
@@ -805,7 +807,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 ):
                     assert _normalized(job.get("if")) == _normalized(
-                        f"{dependencies_succeeded} && {non_pr}"
+                        f"{dependencies_succeeded} && {release}"
                     ), (name, job_name)
                 elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
                     assert _normalized(job.get("if")) == _normalized(
@@ -844,6 +846,14 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     expected_ref = classifier_ref
                 else:
                     expected_ref = admission_ref if "admission" in needs else event_ref
+                if name == "ci.yml" and expected_ref != classifier_ref:
+                    expected_ref = expected_ref.replace(
+                        "github.event.pull_request.head.sha",
+                        "(github.event.pull_request.base.ref == 'main' && github.sha) || "
+                        "github.event.pull_request.head.sha",
+                    )
+                if name == "pypi-package.yml":
+                    expected_ref = expected_ref.replace("${{ ", "${{ (inputs.qualification && github.sha) || ")
                 assert checkout_inputs.get("ref") == expected_ref, (name, job_name)
                 other_inputs = {
                     key: value
@@ -885,7 +895,12 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
             assert "concurrency" not in data
         else:
             prefix = "${{ github.workflow }}" if name == "jobs-suite.yml" else name.removesuffix(".yml")
-            assert data["concurrency"]["group"] == f"{prefix}-{concurrency_suffix}", name
+            expected_group = f"{prefix}-{concurrency_suffix}"
+            if name == "ci.yml":
+                expected_group = "${{ github.workflow }}-" + expected_group + "${{ inputs.nightly && '-nightly' || '' }}"
+            if name == "pypi-package.yml":
+                expected_group += "${{ inputs.qualification && format('-qualification-{0}', github.workflow) || '' }}"
+            assert data["concurrency"]["group"] == expected_group, name
             expected_cancel: object = True
             if name == "jobs-suite.yml":
                 expected_cancel = (
@@ -909,12 +924,15 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 57
     assert combined_text.count("github.event.pull_request.head.sha") == 56
     # The backlog task ratchet still gets the PR base (TASK-13440).
-    assert combined_text.count("github.event.pull_request.base.sha") == 6
+    assert combined_text.count("github.event.pull_request.base.sha") == 7
     assert combined_text.count("needs.admission.outputs.base_sha") == 11
 
     for name, output_names in CHANGE_CLASSIFIER_OUTPUTS.items():
         changes_job = workflows[name][0]["jobs"]["changes"]
-        assert set(changes_job["outputs"]) == output_names
+        outputs = dict(changes_job["outputs"])
+        if name == "ci.yml":
+            assert outputs.pop("tier") == "${{ steps.tier.outputs.tier }}"
+        assert set(outputs) == output_names
         direct_step = next(step for step in changes_job["steps"] if step.get("id") == "detect")
         assert direct_step["uses"] == "./.github/actions/detect-required-gate-changes"
         if name == "backend-required.yml":
@@ -1200,7 +1218,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 27
+    assert setup_helper_count == 28
     assert setup_python_cache_count == 1
     assert cache_save_count == 7
     assert cache_restore_count == 7

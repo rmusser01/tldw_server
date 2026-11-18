@@ -1,0 +1,37 @@
+name: Server Nightly Dispatcher
+
+on:
+  schedule:
+    - cron: '43 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: server-nightly-dispatcher
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Dispatch regression for dev unless already qualified or active
+        shell: bash
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/$GH_REPO/git/ref/heads/dev" --jq '.object.sha')
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]]
+          qualifying=$(gh api --paginate "repos/$GH_REPO/actions/workflows/ci.yml/runs?branch=dev&event=workflow_dispatch&head_sha=$head&per_page=100" \
+            --jq '.workflow_runs[] | select(.display_title == "Server nightly regression") | select(.status != "completed" or .conclusion == "success") | .id')
+          if [[ -n "$qualifying" ]]; then
+            echo "Nightly at $head already succeeded or is active."
+            exit 0
+          fi
+          gh workflow run ci.yml --ref dev --field nightly=true
+          echo "Requested nightly after observing dev at $head. Verify the regression run's actual head SHA."

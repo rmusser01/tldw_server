@@ -21,8 +21,8 @@ Three GitHub Actions workflows manage the lifecycle:
 | Workflow | Trigger | Registry | Purpose |
 |----------|---------|----------|---------|
 | `container-build-check` | PR to `main`/`dev`, manual dispatch | None (build-only) | Validate Dockerfiles build |
-| `publish-ghcr-main` | Push to `main` | GHCR | Publish the rolling GPL backend snapshot |
-| `publish-docker` | Release (published), manual dispatch | GHCR | Publish versioned releases |
+| `publish-ghcr-main` | Called from a qualified push to `main` | GHCR | Publish the rolling GPL backend snapshot |
+| `publish-docker` | Release (published), manual dispatch | GHCR | Qualify the event commit and publish versioned releases |
 
 ## Coverage Matrix
 
@@ -60,7 +60,7 @@ Three GitHub Actions workflows manage the lifecycle:
 
 **File:** `.github/workflows/publish-ghcr-main.yml`
 
-**Trigger:** Push to `main` (fires on every merge).
+**Trigger:** The publication workflow calls this workflow after full qualification passes on a push to `main`.
 
 **What it does:** Builds and pushes only the GPL backend `app` snapshot to
 GHCR. WebUI and Admin UI remain build-checked on pull requests but are not
@@ -75,7 +75,7 @@ published by this workflow during the frontend licensing freeze.
 - Uses GHA build cache (`cache-from: type=gha`, `cache-to: type=gha,mode=max`) for faster rebuilds.
 - Generates SLSA provenance attestations for each image via `actions/attest-build-provenance` and pushes them to the registry.
 - Timeout: 30 minutes.
-- Concurrency: grouped by ref with `cancel-in-progress: true`.
+- Concurrency: rolling image builds are grouped by ref. The parent publication workflow serializes runs for the same ref.
 
 Protected image publishing resumes only through a release-specific licensing
 workflow after artifact notices and image separation pass their later gate.
