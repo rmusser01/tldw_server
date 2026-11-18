@@ -26,6 +26,18 @@ def owners(pg_restricted_backend, tmp_path):
         bob.close_all_connections()
 
 
+def test_foreign_workspace_artifact_reads_return_404(owners):
+    alice, bob = owners
+    alice.upsert_workspace("private-workspace", "Owned workspace")
+    alice.add_workspace_artifact("private-workspace", {"id": "report", "title": "Private", "artifact_type": "report"})
+    request = {"db": bob, "current_user": SimpleNamespace(id=2)}
+    with pytest.raises(HTTPException) as inventory:
+        workspaces.list_artifact_revisions("private-workspace", **request)
+    with pytest.raises(HTTPException) as detail:
+        workspaces.get_artifact("private-workspace", "report", **request)
+    assert inventory.value.status_code == detail.value.status_code == 404
+
+
 def test_foreign_workspace_put_returns_404_and_preserves_owner(owners):
     alice, bob = owners
     before = alice.upsert_workspace("private-workspace", "Alice private workspace")

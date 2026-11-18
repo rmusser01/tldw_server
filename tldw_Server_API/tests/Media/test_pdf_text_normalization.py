@@ -4,8 +4,108 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib 
     normalize_pdf_text_for_storage,
 )
 
-
 pytestmark = pytest.mark.unit
+
+
+def test_native_pdf_page_map_matches_normalized_text_and_blank_pages(tmp_path):
+    import hashlib
+
+    import pymupdf
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib import process_pdf
+
+    path = tmp_path / "pages.pdf"
+    with pymupdf.open() as doc:
+        doc.new_page().insert_text((72, 72), "First page has a short paragraph.")
+        doc.new_page()
+        doc.new_page().insert_text((72, 72), "Final page has a different paragraph.")
+        doc.set_page_labels([{"startpage": 0, "prefix": "", "style": "r", "firstpagenum": 1}])
+        doc.save(path)
+    result = process_pdf(path, path.name, perform_chunking=False)
+    page_map = result["metadata"].get("page_map", [])
+    assert len(page_map) == 3
+    assert [entry["page_number"] for entry in page_map] == [1, 2, 3]
+    assert page_map[1]["start_char"] == page_map[1]["end_char"]
+    assert page_map[2]["printed_page_label"] == "iii"
+    assert "Final page" in result["content"][page_map[2]["start_char"] : page_map[2]["end_char"]]
+    assert page_map[-1]["end_char"] == len(result["content"])
+    assert result["metadata"]["page_map_content_hash"] == hashlib.sha256(result["content"].encode()).hexdigest()
+
+
+@pytest.mark.parametrize("page_keys", [("page",), ("page_number",), ("page", "page_number")])
+def test_pdf_page_map_uses_normalized_unicode_offsets_without_inventing_labels(tmp_path, monkeypatch, page_keys):
+    import pymupdf
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF import PDF_Processing_Lib as pdf
+
+    path = tmp_path / "unicode.pdf"
+    with pymupdf.open() as doc:
+        doc.new_page()
+        doc.new_page()
+        doc.save(path)
+    monkeypatch.setattr(
+        pdf.pymupdf4llm,
+        "to_markdown",
+        lambda *args, **kwargs: [
+            {"metadata": dict.fromkeys(page_keys, 1), "text": "Café 😀\ncontinues here."},
+            {"metadata": dict.fromkeys(page_keys, 2), "text": "東京\n文章。"},
+        ],
+    )
+    result = pdf.process_pdf(path, path.name, perform_chunking=False)
+    page_map = result["metadata"]["page_map"]
+    assert result["content"][: page_map[0]["end_char"]] == "Café 😀 continues here."
+    assert result["content"][page_map[1]["start_char"] :] == "東京文章。"
+    assert all("printed_page_label" not in entry for entry in page_map)
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {}, None, {"page_number": None}, {"page_number": True}, {"page_number": 0},
+        {"page_number": "1"}, {"page_number": 2}, {"page": 0},
+        {"page": 1, "page_number": 2}, {"page": 1, "page_number": None},
+        {"page": True, "page_number": 1},
+    ],
+)
+def test_invalid_parser_page_identity_preserves_text_without_provenance(tmp_path, monkeypatch, metadata):
+    import pymupdf
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF import PDF_Processing_Lib as pdf
+
+    path = tmp_path / "invalid-page.pdf"
+    with pymupdf.open() as doc:
+        doc.new_page()
+        doc.set_page_labels([{"startpage": 0, "prefix": "", "style": "r", "firstpagenum": 1}])
+        doc.save(path)
+    monkeypatch.setattr(
+        pdf.pymupdf4llm, "to_markdown",
+        lambda *args, **kwargs: [{"metadata": metadata, "text": "Café 😀\ncontinues here."}],
+    )
+
+    result = pdf.process_pdf(path, path.name, perform_chunking=False)
+
+    assert result["content"] == "Café 😀 continues here."
+    assert result["metadata"]["page_count"] == 1
+    assert "page_map" not in result["metadata"]
+    assert "page_map_content_hash" not in result["metadata"]
+
+
+def test_ocr_replacement_does_not_keep_native_page_map(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import pymupdf
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF import PDF_Processing_Lib as pdf
+
+    path = tmp_path / "ocr.pdf"
+    with pymupdf.open() as doc:
+        doc.new_page().insert_text((72, 72), "Native text before replacement.")
+        doc.save(path)
+    monkeypatch.setattr(pdf, "_get_ocr_backend", lambda *args: SimpleNamespace(name="test"))
+    monkeypatch.setattr(pdf, "_ocr_pdf_pages", lambda **kwargs: ("Replacement OCR content", 1, 1, None))
+    result = pdf.process_pdf(path, path.name, perform_chunking=False, enable_ocr=True, ocr_mode="always")
+    assert result["content"] == "Replacement OCR content"
+    assert "page_map" not in result["metadata"]
 
 
 def test_reflows_soft_wrapped_paragraph_lines():
@@ -56,26 +156,14 @@ def test_idempotent_normalization():
 
 
 def test_preserves_fenced_code_blocks():
-    src = (
-        "```python\n"
-        "foo = 1\n"
-        "bar = 2\n"
-        "```\n\n"
-        "Paragraph line one\n"
-        "line two"
-    )
+    src = "```python\n" "foo = 1\n" "bar = 2\n" "```\n\n" "Paragraph line one\n" "line two"
     out = normalize_pdf_text_for_storage(src)
     assert "```python\nfoo = 1\nbar = 2\n```" in out
     assert "Paragraph line one line two" in out
 
 
 def test_preserves_blockquote_lines():
-    src = (
-        "> quoted line one\n"
-        "> quoted line two\n\n"
-        "Paragraph starts\n"
-        "and continues."
-    )
+    src = "> quoted line one\n" "> quoted line two\n\n" "Paragraph starts\n" "and continues."
     out = normalize_pdf_text_for_storage(src)
     assert "> quoted line one" in out
     assert "> quoted line two" in out
@@ -89,12 +177,7 @@ def test_reflows_with_crlf_input():
 
 
 def test_preserves_indented_code_style_blocks():
-    src = (
-        "    def foo():\n"
-        "        return 1\n\n"
-        "Paragraph starts\n"
-        "and continues"
-    )
+    src = "    def foo():\n" "        return 1\n\n" "Paragraph starts\n" "and continues"
     out = normalize_pdf_text_for_storage(src)
     assert "    def foo():" in out
     assert "        return 1" in out
@@ -102,12 +185,7 @@ def test_preserves_indented_code_style_blocks():
 
 
 def test_preserves_ordered_list_blocks():
-    src = (
-        "1. first item\n"
-        "2. second item\n\n"
-        "Paragraph starts\n"
-        "and continues."
-    )
+    src = "1. first item\n" "2. second item\n\n" "Paragraph starts\n" "and continues."
     out = normalize_pdf_text_for_storage(src)
     assert "1. first item" in out
     assert "2. second item" in out
@@ -139,13 +217,7 @@ def test_preserves_page_markers_and_hrules():
 
 
 def test_table_separator_block_is_preserved():
-    src = (
-        "| col a | col b |\n"
-        "| :--- | ---: |\n"
-        "| 1 | 2 |\n\n"
-        "Paragraph starts\n"
-        "and continues."
-    )
+    src = "| col a | col b |\n" "| :--- | ---: |\n" "| 1 | 2 |\n\n" "Paragraph starts\n" "and continues."
     out = normalize_pdf_text_for_storage(src)
     assert "| col a | col b |" in out
     assert "| :--- | ---: |" in out
@@ -154,13 +226,7 @@ def test_table_separator_block_is_preserved():
 
 
 def test_mixed_list_and_paragraph_boundaries_are_preserved():
-    src = (
-        "- item one\n"
-        "- item two\n\n"
-        "Paragraph starts here\n"
-        "and continues here.\n\n"
-        "- item three\n"
-    )
+    src = "- item one\n" "- item two\n\n" "Paragraph starts here\n" "and continues here.\n\n" "- item three\n"
     out = normalize_pdf_text_for_storage(src)
     assert "- item one" in out
     assert "- item two" in out
@@ -169,13 +235,7 @@ def test_mixed_list_and_paragraph_boundaries_are_preserved():
 
 
 def test_list_continuation_line_stays_attached_to_list_context():
-    src = (
-        "1. first item\n"
-        "  continuation detail\n"
-        "2. second item\n\n"
-        "Paragraph starts\n"
-        "and ends."
-    )
+    src = "1. first item\n" "  continuation detail\n" "2. second item\n\n" "Paragraph starts\n" "and ends."
     out = normalize_pdf_text_for_storage(src)
     assert "1. first item" in out
     assert "  continuation detail" in out
@@ -203,16 +263,9 @@ def test_math_like_wrapped_lines_reflow_cleanly():
 
 
 def test_unindented_bullet_continuation_stays_in_list_context():
-    src = (
-        "- First bullet starts here\n"
-        "continues on wrapped line\n"
-        "- Second bullet remains separate"
-    )
+    src = "- First bullet starts here\n" "continues on wrapped line\n" "- Second bullet remains separate"
     out = normalize_pdf_text_for_storage(src)
-    assert out == (
-        "- First bullet starts here continues on wrapped line\n"
-        "- Second bullet remains separate"
-    )
+    assert out == ("- First bullet starts here continues on wrapped line\n" "- Second bullet remains separate")
 
 
 def test_mixed_script_wrap_keeps_expected_spacing():

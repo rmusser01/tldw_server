@@ -7,15 +7,20 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
     media_owner_identity,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, InputError
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_repository import (
+    append_sqlite_media_visibility,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
     MediaDbLike,
     require_media_database_like,
 )
+from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
 
 
 class MediaLookupRepository:
@@ -50,11 +55,16 @@ class MediaLookupRepository:
         *,
         include_deleted: bool = False,
         include_trash: bool = False,
+        respect_scope: bool = False,
     ) -> dict[str, Any] | None:
         if not isinstance(media_id, int):
             raise InputError("media_id must be an integer.")  # noqa: TRY003
+        if respect_scope and get_scope() is None:
+            return None
 
         query = "SELECT * FROM Media WHERE id = ? AND system_operation_id IS NULL"
+        if respect_scope:
+            query = "SELECT m.* FROM Media m WHERE m.id = ? AND m.system_operation_id IS NULL"
         params = [media_id]
         if not include_deleted:
             query += " AND deleted = 0"
@@ -62,6 +72,11 @@ class MediaLookupRepository:
             query += " AND is_trash = 0"
 
         db = self.session
+        if respect_scope and db.backend_type == BackendType.SQLITE:
+            conditions: list[str] = []
+            append_sqlite_media_visibility(conditions, params)
+            for condition in conditions:
+                query += " AND " + condition
         try:
             cursor = db.execute_query(query, tuple(params))
             result = cursor.fetchone()

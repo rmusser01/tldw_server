@@ -23,6 +23,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { test as base } from "./fixtures"
 import { TEST_CONFIG } from "./helpers"
+import { isMenuPointerReady } from "./menu-pointer-readiness"
 
 export const EXTENSION_DIR_ENV = "TLDW_UXR_EXTENSION_DIR"
 
@@ -264,7 +265,11 @@ export class SidePanelChat {
   /** Right-click a tab row and pick an item from its context menu. */
   async chooseTabMenuItem(label: string, item: string) {
     await this.tabRow(label).click({ button: "right" })
-    await this.page.getByRole("menuitem", { name: item }).click()
+    const menuItem = this.page.getByRole("menuitem", { name: item, exact: true })
+    await expect.poll(() => menuItem.evaluate(isMenuPointerReady), {
+      message: `${item} menu item receives pointer input after popup motion settles`,
+    }).toBe(true)
+    await menuItem.click()
   }
 
   /** The side panel's saved tabs, as persisted in chrome.storage.local. */

@@ -131,21 +131,31 @@ def test_import_is_readable_and_continuable_in_the_full_app(import_api) -> None:
     assert replay.json()["message_count"] == 5
 
 
-def test_import_for_an_account_the_client_no_longer_holds_is_412(import_api) -> None:
+@pytest.mark.parametrize("workspace", [False, True])
+def test_import_for_an_account_the_client_no_longer_holds_is_412(import_api, workspace) -> None:
     """The chat is saved to the account the user saw, or not at all."""
     client, db, headers = import_api
-    stale = client.post(PATH, headers={**headers, "X-TLDW-Expected-User-ID": "999"}, json=_body())
+    body = _body()
+    if workspace:
+        db.upsert_workspace("import-destination", "Imported research")
+        body.update(scope_type="workspace", workspace_id="import-destination")
+    stale = client.post(PATH, headers={**headers, "X-TLDW-Expected-User-ID": "999"}, json=body)
     assert stale.status_code == 412, stale.text
     assert stale.json()["detail"]["code"] == "request_config_scope_changed"
     assert db.get_conversation_by_id(CHAT_ID, include_deleted=True) is None
     assert _message_count(db) == 0
-    current = client.post(PATH, headers={**headers, "X-TLDW-Expected-User-ID": "1"}, json=_body())
+    current = client.post(PATH, headers={**headers, "X-TLDW-Expected-User-ID": "1"}, json=body)
     assert current.status_code == 201, current.text
 
 
-def test_import_without_credentials_is_refused_and_writes_nothing(import_api) -> None:
+@pytest.mark.parametrize("workspace", [False, True])
+def test_import_without_credentials_is_refused_and_writes_nothing(import_api, workspace) -> None:
     client, db, _headers = import_api
-    response = client.post(PATH, json=_body())
+    body = _body()
+    if workspace:
+        db.upsert_workspace("import-destination", "Imported research")
+        body.update(scope_type="workspace", workspace_id="import-destination")
+    response = client.post(PATH, json=body)
     assert response.status_code in {401, 403}, response.text
     assert db.get_conversation_by_id(CHAT_ID, include_deleted=True) is None
     assert _message_count(db) == 0

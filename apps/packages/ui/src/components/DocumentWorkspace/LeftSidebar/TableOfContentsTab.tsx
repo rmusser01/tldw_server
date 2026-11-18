@@ -10,7 +10,8 @@ interface TocEntryProps {
   item: TocItem
   currentPage: number
   documentType: DocumentType | null
-  onNavigate: (page: number, href?: string) => void
+  onNavigate: (page: number, href?: string, navigationNodeId?: string) => void
+  resolvingNodeId: string | null
   itemId: string
   focusedItemId: string | null
   onFocusItem: (id: string) => void
@@ -22,6 +23,7 @@ const TocEntry: React.FC<TocEntryProps> = ({
   currentPage,
   documentType,
   onNavigate,
+  resolvingNodeId,
   itemId,
   focusedItemId,
   onFocusItem,
@@ -32,11 +34,13 @@ const TocEntry: React.FC<TocEntryProps> = ({
   const hasChildren = item.children && item.children.length > 0
   const treeItemRef = React.useRef<HTMLDivElement | null>(null)
   const isFocusable = focusedItemId === itemId
+  const resolving = Boolean(item.navigationNodeId && item.navigationNodeId === resolvingNodeId)
+  const unavailable = Boolean(item.unavailable)
 
   // Determine if this item or any of its children contains the current page
   const containsCurrentPage = React.useMemo(() => {
     const checkContains = (entry: TocItem): boolean => {
-      if (entry.page === currentPage) return true
+      if (entry.page > 0 && entry.page === currentPage) return true
       if (entry.children) {
         return entry.children.some(checkContains)
       }
@@ -45,11 +49,11 @@ const TocEntry: React.FC<TocEntryProps> = ({
     return checkContains(item)
   }, [item, currentPage])
 
-  const isActive = item.page === currentPage
+  const isActive = item.page > 0 && item.page === currentPage
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    onNavigate(item.page, item.href)
+    if (!unavailable && !resolving) onNavigate(item.page, item.href, item.navigationNodeId)
     treeItemRef.current?.focus()
   }
 
@@ -63,7 +67,7 @@ const TocEntry: React.FC<TocEntryProps> = ({
   const paddingLeft = Math.min(depth, 4) * 12 + 8
 
   // For EPUB, don't show page numbers (they're meaningless)
-  const showPageNumber = documentType === "pdf"
+  const showPageNumber = documentType === "pdf" && item.page > 0
 
   const focusTreeItem = React.useCallback(
     (target: HTMLElement | null) => {
@@ -112,11 +116,13 @@ const TocEntry: React.FC<TocEntryProps> = ({
       aria-current={isActive ? "page" : undefined}
       data-toc-id={itemId}
       tabIndex={isFocusable ? 0 : -1}
-      onFocus={() => onFocusItem(itemId)}
+      onFocus={(e) => { if (e.target === e.currentTarget) onFocusItem(itemId) }}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return
+        e.stopPropagation()
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault()
-          onNavigate(item.page, item.href)
+          if (!unavailable && !resolving) onNavigate(item.page, item.href, item.navigationNodeId)
         }
         if (e.key === "ArrowRight" && hasChildren && !expanded) {
           e.preventDefault()
@@ -201,6 +207,7 @@ const TocEntry: React.FC<TocEntryProps> = ({
           type="button"
           onMouseDown={(e) => e.preventDefault()}
           onClick={handleClick}
+          aria-disabled={unavailable || resolving || undefined}
           tabIndex={-1}
           className="flex min-w-0 flex-1 items-center gap-1 text-left"
         >
@@ -208,6 +215,13 @@ const TocEntry: React.FC<TocEntryProps> = ({
             {item.title}
           </span>
 
+          {(resolving || unavailable) && (
+            <span className="shrink-0 text-xs text-text-muted" role="status">
+              {resolving
+                ? t("option:documentWorkspace.resolvingNavigation", "Finding PDF page…")
+                : t("option:documentWorkspace.navigationPageUnavailable", "Page unavailable")}
+            </span>
+          )}
           {showPageNumber && (
             <span
               className={`
@@ -233,6 +247,7 @@ const TocEntry: React.FC<TocEntryProps> = ({
               currentPage={currentPage}
               documentType={documentType}
               onNavigate={onNavigate}
+              resolvingNodeId={resolvingNodeId}
               itemId={`${itemId}-${idx}`}
               focusedItemId={focusedItemId}
               onFocusItem={onFocusItem}
@@ -245,7 +260,7 @@ const TocEntry: React.FC<TocEntryProps> = ({
   )
 }
 
-export const TableOfContentsTab: React.FC = () => {
+export const TableOfContentsTab: React.FC<{ onHide?: () => void }> = ({ onHide }) => {
   const { t } = useTranslation(["option", "common"])
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
   const activeDocumentType = useDocumentWorkspaceStore((s) => s.activeDocumentType)
@@ -259,7 +274,9 @@ export const TableOfContentsTab: React.FC = () => {
   const {
     data: pdfOutline,
     isLoading: pdfLoading,
-    error: pdfError
+    error: pdfError,
+    resolvePage,
+    isCurrent
   } = usePdfOutline(activeDocumentType === "pdf" ? activeDocumentId : null)
 
   // EPUB outline state - populated by EpubViewer via custom event
@@ -301,25 +318,62 @@ export const TableOfContentsTab: React.FC = () => {
     }
   }, [activeDocumentId, activeDocumentType])
 
+  const navigationRequest = React.useRef<AbortController | null>(null)
+  const currentOutline = React.useRef(pdfOutline)
+  currentOutline.current = pdfOutline
+  const [resolvingNodeId, setResolvingNodeId] = React.useState<string | null>(null)
+  const [destinations, setDestinations] = React.useState<Record<string, number | null>>({})
+  React.useEffect(() => {
+    navigationRequest.current?.abort()
+    setResolvingNodeId(null)
+    setDestinations({})
+    return () => navigationRequest.current?.abort()
+  }, [activeDocumentId, activeDocumentType, pdfOutline])
+
   const handleNavigate = React.useCallback(
-    (page: number, href?: string) => {
+    async (page: number, href?: string, navigationNodeId?: string) => {
+      const sameDocument = () => {
+        const current = useDocumentWorkspaceStore.getState()
+        return current.activeDocumentId === activeDocumentId && current.activeDocumentType === activeDocumentType
+      }
+      if (!sameDocument()) return
       if (activeDocumentType === "epub" && href) {
-        // For EPUB, dispatch event to navigate to href
-        window.dispatchEvent(
-          new CustomEvent("epub-navigate", {
-            detail: { href, documentId: activeDocumentId }
-          })
-        )
-      } else {
-        // For PDF, use page navigation
-        setCurrentPage(page)
+        window.dispatchEvent(new CustomEvent("epub-navigate", { detail: { href, documentId: activeDocumentId } }))
+        return
+      }
+      if (!isCurrent() || currentOutline.current !== pdfOutline) return
+      if (!navigationNodeId) {
+        if (page > 0) setCurrentPage(page)
+        return
+      }
+      navigationRequest.current?.abort()
+      const request = new AbortController()
+      navigationRequest.current = request
+      setResolvingNodeId(navigationNodeId)
+      const current = () => !request.signal.aborted && sameDocument() && isCurrent() && currentOutline.current === pdfOutline
+      try {
+        const physicalPage = await resolvePage(navigationNodeId, request.signal)
+        if (!current()) return
+        setDestinations(previous => ({ ...previous, [navigationNodeId]: physicalPage }))
+        setCurrentPage(physicalPage)
+      } catch {
+        if (current()) setDestinations(previous => ({ ...previous, [navigationNodeId]: null }))
+      } finally {
+        if (navigationRequest.current === request && !request.signal.aborted) setResolvingNodeId(null)
       }
     },
-    [activeDocumentType, activeDocumentId, setCurrentPage]
+    [activeDocumentType, activeDocumentId, setCurrentPage, pdfOutline, resolvePage, isCurrent]
   )
 
-  // Determine which outline to use
-  const outline = activeDocumentType === "epub" ? epubOutline : pdfOutline?.items
+  const outline = React.useMemo(() => {
+    if (activeDocumentType === "epub") return epubOutline
+    const project = (item: TocItem): TocItem => {
+      const destination = item.navigationNodeId ? destinations[item.navigationNodeId] : undefined
+      return { ...item, page: destination ?? item.page,
+        unavailable: item.unavailable || destination === null, children: item.children?.map(project) }
+    }
+    return pdfOutline?.items.map(project)
+  }, [activeDocumentType, epubOutline, pdfOutline, destinations])
   const isLoading = activeDocumentType === "epub" ? epubLoading : pdfLoading
   const error = activeDocumentType === "epub" ? null : pdfError
   const hasOutline = !!outline && outline.length > 0
@@ -405,18 +459,25 @@ export const TableOfContentsTab: React.FC = () => {
           image={<FileText className="mx-auto h-12 w-12 text-muted" />}
           description={
             <div className="text-center">
-              <p className="mb-1 text-sm text-text-secondary">
+              <p className="mb-1 text-sm text-text">
                 {t(
                   "option:documentWorkspace.noToc",
                   "No table of contents"
                 )}
               </p>
-              <p className="text-xs text-muted">
+              <p className="text-xs text-text-muted">
                 {t(
-                  "option:documentWorkspace.noTocHint",
-                  "This document doesn't have an embedded outline"
+                  pdfOutline?.source === "generated" || pdfOutline?.partial
+                    ? "option:documentWorkspace.noGeneratedNavigation" : "option:documentWorkspace.noTocHint",
+                  pdfOutline?.source === "generated" || pdfOutline?.partial
+                    ? "No verified page navigation is available." : "This document doesn't have an embedded outline"
                 )}
               </p>
+              {onHide && (
+                <button type="button" onClick={onHide} className="mt-3 min-h-11 rounded border border-border px-3 text-sm text-text hover:bg-surface2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus">
+                  {t("option:documentWorkspace.hideContents", "Hide contents")}
+                </button>
+              )}
             </div>
           }
         />
@@ -429,6 +490,17 @@ export const TableOfContentsTab: React.FC = () => {
       className="h-full overflow-y-auto"
       aria-label={t("option:documentWorkspace.tableOfContents", "Table of contents")}
     >
+      {activeDocumentType === "pdf" && pdfOutline?.source === "generated" && (
+        <div className="px-3 pt-3 text-text-muted">
+          <p className="text-sm font-medium text-text">{t("option:documentWorkspace.generatedNavigation", "Generated navigation")}</p>
+          <p className="text-xs">{t("option:documentWorkspace.generatedNavigationHint", "Sections from this document’s navigation map.")}</p>
+        </div>
+      )}
+      {activeDocumentType === "pdf" && pdfOutline?.partial && (
+        <p className="px-3 pt-2 text-xs text-text-muted" role="status">
+          {t("option:documentWorkspace.partialNavigation", "Some navigation entries are unavailable.")}
+        </p>
+      )}
       <div className="py-2" role="tree">
         {outline.map((item, idx) => (
           <TocEntry
@@ -437,6 +509,7 @@ export const TableOfContentsTab: React.FC = () => {
             currentPage={currentPage}
             documentType={activeDocumentType}
             onNavigate={handleNavigate}
+            resolvingNodeId={resolvingNodeId}
             itemId={`${idx}`}
             focusedItemId={focusedItemId}
             onFocusItem={setFocusedItemId}

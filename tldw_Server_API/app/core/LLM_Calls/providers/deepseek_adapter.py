@@ -163,6 +163,9 @@ class DeepSeekAdapter(ChatProvider):
             merged["tool_choice"] = cfg.get("tool_choice")
         if merged.get("logit_bias") is None and cfg.get("logit_bias") is not None:
             merged["logit_bias"] = cfg.get("logit_bias")
+        for key in ("thinking", "reasoning_effort"):
+            if merged.get(key) is None and cfg.get(key) is not None:
+                merged[key] = cfg[key]
         return merged
 
     def _base_url(self, cfg: dict[str, Any] | None, request: dict[str, Any] | None = None) -> str:
@@ -219,6 +222,8 @@ class DeepSeekAdapter(ChatProvider):
             "presence_penalty",
             "frequency_penalty",
             "response_format",
+            "thinking",
+            "reasoning_effort",
             "n",
             "user",
         ):

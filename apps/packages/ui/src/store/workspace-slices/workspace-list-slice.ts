@@ -1,4 +1,5 @@
 import type { WorkspaceSlice } from './types'
+import { persistSourceAnnotations, validateSourceAnnotations } from '@/utils/source-annotations'
 import type {
   WorkspaceState,
   WorkspaceChatSession,
@@ -27,6 +28,9 @@ import {
 } from '@/store/workspace-chat-session-key'
 import { applyWorkspaceSourceTransfer } from '../workspace-source-transfer'
 import { saveResearchWorkspaceChatReference } from '../workspace-migration'
+import { hasWorkspaceArtifactOrigin } from '../workspace-artifact-codec'
+import { prepareLegacyWorkspaceImport } from '../workspace-import-authority'
+import { hasImportedWorkspaceChat } from '@/utils/workspace-chat-import'
 
 // TODO: These helpers need to be exported from workspace.ts
 import {
@@ -447,6 +451,9 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       state.workspaceChatSessions[activeChatSessionKey] ||
       state.workspaceChatSessions[targetWorkspaceId]
 
+    const bundleSnapshot = buildWorkspaceBundleSnapshot(snapshot)
+    if (!bundleSnapshot) return null
+
     return {
       format: WORKSPACE_EXPORT_BUNDLE_FORMAT,
       schemaVersion: WORKSPACE_EXPORT_BUNDLE_SCHEMA_VERSION,
@@ -459,7 +466,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
           savedWorkspace?.createdAt ||
           null,
         studyMaterialsPolicy: snapshot.studyMaterialsPolicy ?? null,
-        snapshot: buildWorkspaceBundleSnapshot(snapshot),
+        snapshot: bundleSnapshot,
         ...(chatSession
           ? {
               chatSession: cloneWorkspaceBundleChatSession({
@@ -474,7 +481,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
     }
   },
 
-  importWorkspaceBundle: (bundle) => {
+  importWorkspaceBundle: (bundle, options) => {
     if (
       !bundle ||
       (bundle.format !== WORKSPACE_EXPORT_BUNDLE_FORMAT &&
@@ -484,8 +491,10 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       return null
     }
 
-    const snapshotPayload = bundle.workspace?.snapshot
+    let snapshotPayload = bundle.workspace?.snapshot
     if (!snapshotPayload) return null
+
+    if (snapshotPayload.sourceAnnotations !== undefined && !Array.isArray(snapshotPayload.sources)) return null
 
     const state = get()
     const now = new Date()
@@ -500,10 +509,25 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
         : typeof bundle.workspace?.name === "string"
           ? bundle.workspace.name.trim()
           : "") || "Imported Workspace"
-    const importedName = `${baseName} (Imported)`
-    const importedId = generateWorkspaceId()
+    const importedName = options?.identity.name ?? `${baseName} (Imported)`
+    const importedId = options?.identity.id ?? generateWorkspaceId()
     const importedSlug = createSlug(importedName) || importedId.slice(0, 8)
-    const importedTag = `workspace:${importedSlug}`
+    const importedTag = options?.identity.tag ?? `workspace:${importedSlug}`
+    if (options) {
+      if (!importedId.trim() || importedId !== importedId.trim() || importedId.length > 128 ||
+        !importedName.trim() || !importedTag.trim() || !options.verifiedCanonicalScopeKey ||
+        importedId === state.workspaceId || state.workspaceSnapshots[importedId] ||
+        [...state.savedWorkspaces, ...state.archivedWorkspaces].some(workspace => workspace.id === importedId) ||
+        !snapshotPayload.generatedArtifacts.every(artifact => artifact.workspaceArtifactId &&
+          hasWorkspaceArtifactOrigin(artifact, options.verifiedCanonicalScopeKey, importedId))) return null
+      if (bundle.workspace.chatSession?.serverChatId &&
+        !hasImportedWorkspaceChat(bundle.workspace.chatSession, options.verifiedCanonicalScopeKey, importedId)) return null
+    } else {
+      try {
+        bundle = prepareLegacyWorkspaceImport(bundle, { id: importedId, name: importedName, tag: importedTag })
+        snapshotPayload = bundle.workspace.snapshot
+      } catch { return null }
+    }
 
     const importedSnapshot = hydrateWorkspaceBundleSnapshot(
       snapshotPayload,
@@ -511,6 +535,9 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       importedName,
       importedTag
     )
+    const annotations = snapshotPayload.sourceAnnotations === undefined ? undefined :
+      validateSourceAnnotations(snapshotPayload.sourceAnnotations, importedSnapshot.sources.map(source => source.id))
+    if (annotations === null) return null
 
     const nextSnapshots: Record<string, unknown> = {
       ...state.workspaceSnapshots,
@@ -541,9 +568,9 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
 
     const importedChatSession =
       bundle.workspace?.chatSession &&
-      sanitizeImportedChatSession(
+      (options && bundle.workspace.chatSession.serverChatId ? cloneWorkspaceBundleChatSession(bundle.workspace.chatSession) : sanitizeImportedChatSession(
         cloneWorkspaceBundleChatSession(bundle.workspace.chatSession)
-      )
+      ))
     const importedChatSessionKey = buildWorkspaceChatSessionKey(
       importedSnapshot.workspaceId,
       importedSnapshot.workspaceChatReferenceId
@@ -559,6 +586,8 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
           }
         }
       : state.workspaceChatSessions
+
+    if (annotations && !persistSourceAnnotations(importedSnapshot.workspaceId, annotations)) return null
 
     set({
       ...applyWorkspaceSnapshot(importedSnapshot),
@@ -706,7 +735,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       sourceWorkspaceId === state.workspaceId
         ? currentSnapshot
         : state.workspaceSnapshots[sourceWorkspaceId]
-    if (!sourceSnapshot) return null
+    if (!sourceSnapshot || sourceSnapshot.generatedArtifacts.some(artifact => artifact.detailDeferred)) return null
 
     const duplicatedSnapshot = duplicateWorkspaceSnapshot(sourceSnapshot)
     const now = new Date()

@@ -4916,5 +4916,206 @@
   },
   "regions_artifactsShort": {
     "message": "Artifacts"
+  },
+  "studio_viewCompletedChapters": {
+    "message": "View completed chapters"
+  },
+  "studio_outputIdentity_imported": {
+    "message": "Imported output"
+  },
+  "studio_outputIdentity_model": {
+    "message": "Recorded model: {{model}}"
+  },
+  "studio_outputIdentity_modelMissing": {
+    "message": "Model not recorded"
+  },
+  "studio_outputIdentity_provider": {
+    "message": "Provider: {{provider}}"
+  },
+  "studio_outputIdentity_providerMissing": {
+    "message": "Provider not recorded"
+  },
+  "studio_outputIdentity_created": {
+    "message": "Created"
+  },
+  "studio_outputIdentity_createdMissing": {
+    "message": "Creation time not recorded"
+  },
+  "studio_outputIdentity_scopeMissing": {
+    "message": "Section scope not recorded"
+  },
+  "studio_outputIdentity_sections_one": {
+    "message": "{{count}} selected section"
+  },
+  "studio_outputIdentity_sections_other": {
+    "message": "{{count}} selected sections"
+  },
+  "studio_longDocumentWaiting_example": {
+    "message": "In observed 922-page, 30-chapter runs before citation checks were added, generation took 52–62 minutes."
+  },
+  "studio_longDocumentWaiting_variation": {
+    "message": "This is not an estimate for this run. Duration varies with document length, selected sections, model and settings. Progress is saved after each portion."
+  },
+  "studio_longDocumentWaiting_readCompleted": {
+    "message": "Read completed chapters while the remaining sections are being generated."
+  },
+  "studio_longDocumentWaiting_usage": {
+    "message": "Token usage and cost are unavailable for these saved jobs."
+  },
+  "studio_sectionReader_generating": {
+    "message": "Generation continues. Completed chapters update here. Review changes can be saved after generation finishes."
+  },
+  "studio_sectionReader_pendingOverview": {
+    "message": "The overview is pending while generation continues. Choose a completed chapter to read now."
+  },
+  "studio_sectionReader_runningOverview": {
+    "message": "This saved overview may change while generation continues."
+  },
+  "studio_sectionReader_unreadSection": {
+    "message": "This section has not been processed yet."
+  },
+  "studio_sectionReader_generatingSection": {
+    "message": "This section is still being processed. Saved evidence remains available below."
+  },
+  "studio_sectionReader_unavailable": {
+    "message": "This output is no longer available in the current workspace."
+  },
+  "claims_checking": {
+    "message": "Checking citation support… The answer is retained while checks finish."
+  },
+  "claims_heading": {
+    "message": "Citation support"
+  },
+  "claims_status_supported_recorded": {
+    "message": "Supported by cited evidence"
+  },
+  "claims_status_needs_revision_recorded": {
+    "message": "Needs review"
+  },
+  "claims_status_unverified_recorded": {
+    "message": "Not fully checked"
+  },
+  "claims_status_unverified_missing": {
+    "message": "Not checked"
+  },
+  "claims_imported": {
+    "message": "Imported historical check; sources have not been checked again in this workspace. Use the restored source citations to open evidence."
+  },
+  "claims_limitation": {
+    "message": "These checks compare the draft with its cited evidence. They do not establish real-world truth or replace your review."
+  },
+  "claims_coverage": {
+    "message": "{{evaluated}} of {{total}} claims checked; {{supported}} supported; {{uncovered}} uncovered."
+  },
+  "claims_coverageUnavailable": {
+    "message": "Check coverage is unavailable."
+  },
+  "claims_findings": {
+    "message": "Findings and cited evidence"
+  },
+  "claims_finding_supported": {
+    "message": "supported"
+  },
+  "claims_finding_unsupported": {
+    "message": "unsupported"
+  },
+  "claims_finding_contradicted": {
+    "message": "contradicted"
+  },
+  "claims_finding_uncited": {
+    "message": "uncited"
+  },
+  "claims_finding_not_checked": {
+    "message": "not checked"
+  },
+  "claims_finding_error": {
+    "message": "error"
+  },
+  "claims_uncited": {
+    "message": "No cited evidence"
+  },
+  "claims_extraction": {
+    "message": "Saved evidence checks"
+  },
+  "claims_retry": {
+    "message": "Retry citation checks"
+  },
+  "claims_moreFindings": {
+    "message": "Showing the first 256 findings. All findings are retained in the complete research pack."
+  },
+  "claims_reason_missing_citation": {
+    "message": "This claim has no citation. Review it and add supporting evidence."
+  },
+  "claims_reason_citation_not_resolved": {
+    "message": "The cited evidence could not be resolved."
+  },
+  "claims_reason_citation_source_unavailable": {
+    "message": "The cited source is unavailable in this workspace."
+  },
+  "claims_reason_citation_source_changed_or_unresolved": {
+    "message": "The citation could not be matched exactly to the saved source."
+  },
+  "claims_reason_text_or_unit_limit": {
+    "message": "This claim exceeded the check's text or claim limit and was not checked."
+  },
+  "claims_reason_cited_evidence_limit": {
+    "message": "The cited evidence exceeds the check's context limit."
+  },
+  "claims_reason_citation_without_claim": {
+    "message": "This citation has no accompanying claim to check."
+  },
+  "claims_reason_judge_unavailable": {
+    "message": "The citation checker is unavailable."
+  },
+  "claims_reason_judge_timeout": {
+    "message": "The citation check timed out."
+  },
+  "claims_reason_verification_deadline": {
+    "message": "The check's total time limit was reached before this claim was checked."
+  },
+  "claims_reason_judge_failed": {
+    "message": "The citation check could not finish."
+  },
+  "claims_reason_judge_provider_failed": {
+    "message": "The citation checking provider could not complete the request."
+  },
+  "claims_reason_judge_response_invalid": {
+    "message": "The checker returned an unusable response; this claim is not verified."
+  },
+  "claims_reason_judge_completion_unconfirmed": {
+    "message": "The checker's response was incomplete; this claim is not verified."
+  },
+  "claims_reason_semantic_judgment_unavailable": {
+    "message": "No usable citation-support judgment was returned."
+  },
+  "claims_reason_report_size_limit": {
+    "message": "The citation report exceeded its size limit. The draft is retained, but its citation support has not been verified."
+  },
+  "workspace_importAlreadyRestored": {
+    "message": "This pack is already restored as {{name}}. Your current drafts and the restored workspace are unchanged."
+  },
+  "workspace_openRestoredWorkspace": {
+    "message": "Open restored workspace"
+  },
+  "studio_sectionReader_retainedOverview": {
+    "message": "This overview is retained for review. Completed chapters and evidence remain available."
+  },
+  "studio_sectionReader_overviewCoverage_one": {
+    "message": "Chapters cited in overview: {{cited}} of {{count}} completed chapter."
+  },
+  "studio_sectionReader_overviewCoverage_other": {
+    "message": "Chapters cited in overview: {{cited}} of {{count}} completed chapters."
+  },
+  "studio_sectionReader_overviewMissing": {
+    "message": "Missing overview citations: {{titles}}."
+  },
+  "studio_sectionReader_overviewSupport": {
+    "message": "Citation support is assessed separately below."
+  },
+  "studio_outputIdentity_importedAt": {
+    "message": "Imported"
+  },
+  "studio_outputIdentity_importedAtMissing": {
+    "message": "Import time not recorded"
   }
 }

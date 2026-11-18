@@ -1019,7 +1019,7 @@ class UnifiedRAGRequest(BaseModel):
     )
     enable_pre_retrieval_clarification: Optional[bool] = Field(
         default=None,
-        description="When None, defaults to true if enable_generation=true. Enables pre-retrieval clarification gating.",
+        description="When None, enables pre-retrieval clarification for generation without selected media or notes. Explicit values override this default.",
         example=None,
     )
     clarification_timeout_sec: Optional[float] = Field(
@@ -1031,11 +1031,11 @@ class UnifiedRAGRequest(BaseModel):
     )
 
     max_generation_tokens: int = Field(
-        default=500,
+        default=4096,
         ge=50,
-        le=4000,
+        le=8192,
         description="Maximum tokens for generated answer",
-        example=500
+        example=4096
     )
     # Abstention & multi-turn synthesis
     enable_abstention: bool = Field(

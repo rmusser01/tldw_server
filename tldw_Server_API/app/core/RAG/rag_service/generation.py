@@ -95,7 +95,7 @@ class GenerationConfig:
     provider: str = "openai"
     model: str | None = "gpt-4"
     temperature: float = 0.7
-    max_tokens: int = 1024
+    max_tokens: int = 4096
     streaming: bool = False
     fallback_enabled: bool = True
     prompt_template: str = "default"
@@ -372,6 +372,7 @@ class BaseGenerator(ABC):
 
     def format_context(self, documents: list[Document]) -> str:
         """Format documents into context string."""
+        from .response_writer import format_page_content, format_page_location
         if not documents:
             return "No relevant context found."
 
@@ -383,7 +384,8 @@ class BaseGenerator(ABC):
 
             label = f"[{i}] {title} ({source})" if self.config.enable_citations else f"[Source {i}: {title} ({source})]"
             context_parts.append(label)
-            context_parts.append(doc.content)
+            context_parts.append(format_page_location(doc.metadata))
+            context_parts.append(format_page_content(doc.content, doc.metadata))
             context_parts.append("")  # Empty line between documents
 
         return "\n".join(context_parts)
@@ -796,7 +798,7 @@ class AnswerGenerator:
         gcfg = GenerationConfig(
             provider=self.provider,
             model=self.model,
-            max_tokens=int(max_tokens or 500),
+            max_tokens=int(max_tokens or 4096),
             prompt_template=(prompt_template or "default"),
             system_prompt=self.system_prompt,
         )

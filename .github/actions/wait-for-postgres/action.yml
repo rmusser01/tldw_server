@@ -58,6 +58,7 @@ runs:
           source /etc/os-release
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl --fail --show-error --connect-timeout 20 --max-time 60 \
+            --retry 2 --retry-all-errors --retry-max-time 120 \
             https://www.postgresql.org/media/keys/ACCC4CF8.asc \
             -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null

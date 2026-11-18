@@ -107,19 +107,7 @@ export interface Reference {
   isOpenAccess?: boolean
 }
 
-export interface TocItem {
-  title: string
-  page: number
-  level: number
-  children?: TocItem[]
-  /** For EPUB: the href to navigate to */
-  href?: string
-}
-
-export interface DocumentOutline {
-  documentId: number
-  items: TocItem[]
-}
+export type { TocItem, DocumentOutline } from "@/types/document-outline"
 
 export interface Figure {
   id: string

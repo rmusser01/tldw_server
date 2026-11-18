@@ -232,3 +232,15 @@ describe('MediaSectionNavigator', () => {
     expect(screen.getByText('Root > Long Child > Leaf 12')).toBeInTheDocument()
   })
 })
+
+it('allows independent section selection without changing the active reading node', () => {
+  const toggle = vi.fn();
+  const read = vi.fn();
+  render(<MediaSectionNavigator nodes={sampleNodes} selectedNodeId={null} onSelectNode={read}
+    selection={{ nodeIds: ['section-12-5'], onToggle: toggle }} />);
+  const chosen = screen.getByRole('checkbox', { name: 'Include Section 5' });
+  expect(chosen).toBeChecked();
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Include Section 6' }));
+  expect(toggle).toHaveBeenCalledWith(expect.objectContaining({ id: 'section-12-6' }));
+  expect(read).not.toHaveBeenCalled();
+});

@@ -121,13 +121,14 @@ def test_data_tables_jobs_worker_imports_latest_transcription_from_media_db_api(
     assert reloaded.get_latest_transcription is media_db_api.get_latest_transcription
 
 
-def test_navigation_endpoint_imports_read_helpers_from_media_db_api(
+def test_navigation_core_imports_read_helpers_from_media_db_api(
     monkeypatch,
 ) -> None:
     media_db_v2 = install_legacy_media_db_stub(monkeypatch)
     navigation_endpoint = importlib.import_module(
         "tldw_Server_API.app.api.v1.endpoints.media.navigation"
     )
+    navigation_core = importlib.import_module("tldw_Server_API.app.core.Media.navigation")
 
     def _shim_should_not_be_bound(*args, **kwargs):
         raise AssertionError(
@@ -145,9 +146,12 @@ def test_navigation_endpoint_imports_read_helpers_from_media_db_api(
         _shim_should_not_be_bound,
     )
 
-    reloaded = importlib.reload(navigation_endpoint)
+    reloaded = importlib.reload(navigation_core)
     assert reloaded.get_latest_transcription is media_db_api.get_latest_transcription
     assert reloaded.get_media_transcripts is media_db_api.get_media_transcripts
+    endpoint = importlib.reload(navigation_endpoint)
+    assert endpoint.load_navigation_document is reloaded.load_navigation_document
+    assert endpoint._select_source_nodes is reloaded._select_source_nodes
 
 
 def test_media_module_imports_read_helpers_from_media_db_api(

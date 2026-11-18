@@ -587,7 +587,9 @@ def discover_provider_models(
     policy's own scope replaces it, as it does for generation. A policy without a scope (capability limits
     only) keeps it: generation treats that policy as non-strict and calls the configured base.
 
-    All pages share a five-second monotonic budget and one-attempt HTTP timeouts.
+    All pages share a ten-second monotonic budget, with at most two attempts per
+    GET and five-second HTTP inactivity timeouts. Caller attempt/deadline limits
+    can tighten these bounds; a one-attempt policy retains a five-second budget.
     Limits abort discovery rather than publishing a partial catalog. Only ready
     results (including empty inventories) are cached, scoped by provider, endpoint
     and SHA-256 credential digest. A failed refresh evicts prior cached success.
@@ -600,17 +602,20 @@ def discover_provider_models(
     if not isinstance(api_key, str) or not api_key.strip() or any(ord(char) < 32 for char in api_key):
         return ModelDiscoveryResult("auth_failed")
     key = api_key.strip()
-    budget = _TIMEOUT_SECONDS
+    attempts = 2
     scope = configured_endpoint
     if call_policy is not None:
         from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 
         if not isinstance(call_policy, ProviderCallPolicy):
             return ModelDiscoveryResult("unsupported")
-        if call_policy.maximum_timeout_seconds is not None:
-            budget = min(budget, float(call_policy.maximum_timeout_seconds))
+        if call_policy.max_transport_attempts is not None:
+            attempts = min(attempts, int(call_policy.max_transport_attempts))
         if call_policy.required_endpoint_scope is not None:
             scope = call_policy.required_endpoint_scope
+    budget = _TIMEOUT_SECONDS * attempts
+    if call_policy is not None and call_policy.maximum_timeout_seconds is not None:
+        budget = min(budget, float(call_policy.maximum_timeout_seconds))
     deadline = time.monotonic() + budget
     base = _safe_base_url(base_url) if base_url is not None else resolve_provider_models_base_url(provider)
     if base is None:
@@ -696,9 +701,9 @@ def discover_provider_models(
                 method="GET",
                 url=url,
                 headers=headers,
-                timeout=remaining,
+                timeout=min(_TIMEOUT_SECONDS, remaining),
                 deadline=deadline,
-                retry=RetryPolicy(attempts=1),
+                retry=RetryPolicy(attempts=attempts, retry_on_status=(429, 500, 502, 503, 504)),
                 allow_redirects=False,
                 sensitive_observability=True,
                 configured_endpoint=scope,

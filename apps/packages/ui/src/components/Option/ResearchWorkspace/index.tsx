@@ -1,3 +1,4 @@
+import { materializeWorkspaceOutputs } from "@/services/workspace-artifact-catalog"
 import { bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts";
 import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
@@ -19,6 +20,7 @@ import {
   Sparkles,
   Search,
   Command,
+  ChevronDown,
   Loader2
 } from "lucide-react"
 import {
@@ -140,6 +142,7 @@ import {
 import type { WorkspaceAgentTaskPrefill } from "./WorkspaceAgentTaskHandoffModal"
 import { isEditableTarget } from "@/utils/editable-target"
 import { restoreMigratedResearchWorkspace } from "@/services/workspace-server-restore"
+import { isTransientSourceStatusError, isWorkspaceSourceActivelyProcessing, isWorkspaceSourceAvailabilityUnknown } from "@/store/workspace-source-status"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))
@@ -809,25 +812,6 @@ const isMediaLikelyReadyForRag = (detail: unknown): boolean => {
   }
 
   return false
-}
-
-const isTransientSourceStatusError = (
-  error: unknown
-): { transient: boolean; message: string } => {
-  const status = (error as { status?: number } | null)?.status
-  const message =
-    error instanceof Error ? error.message : String(error ?? "Unknown error")
-  const transient =
-    status === 0 ||
-    status === 404 ||
-    status === 408 ||
-    status === 429 ||
-    status === 502 ||
-    status === 503 ||
-    status === 504 ||
-    /network|timeout|abort/i.test(message)
-
-  return { transient, message }
 }
 
 const mapWorkspaceLifecycleToLocalSourceStatus = (
@@ -1622,15 +1606,17 @@ const ResearchWorkspaceBody: React.FC = () => {
         .map((source) => source.mediaId),
     [sources]
   )
-  // WP-42: the consolidated poller reads the latest ticks and processing set
+  // WP-42: the consolidated poller reads the latest ticks and recovery state
   // through refs so neither restarting itself nor re-rendering the workspace
   // disturbs the polling effect.
   const workspaceStatusTickRef = React.useRef<(() => void) | null>(null)
   const processingSourceTickRef = React.useRef<(() => void) | null>(null)
-  const processingMediaIdsRef = React.useRef(processingMediaIds)
+  const sourceStatusNeedsPoll = processingMediaIds.length > 0 ||
+    sources.some((source) => isWorkspaceSourceAvailabilityUnknown(source.statusDetails))
+  const sourceStatusNeedsPollRef = React.useRef(sourceStatusNeedsPoll)
   React.useEffect(() => {
-    processingMediaIdsRef.current = processingMediaIds
-  }, [processingMediaIds])
+    sourceStatusNeedsPollRef.current = sourceStatusNeedsPoll
+  }, [sourceStatusNeedsPoll])
   // WP-42 follow-up: an in-flight migration is workspace activity too — the
   // status projection should keep refreshing while the migration promise is
   // pending (stage3 pins this; idle workspaces with the migration already
@@ -1641,13 +1627,14 @@ const ResearchWorkspaceBody: React.FC = () => {
   }, [workspaceMigrationLoading])
   const activeWorkspaceOperations = React.useMemo(() => {
     const operations: string[] = []
+    const activeSourceCount = sources.filter(isWorkspaceSourceActivelyProcessing).length
 
-    if (processingMediaIds.length > 0) {
+    if (activeSourceCount > 0) {
       operations.push(
         `${t("playground:workspace.activityProcessing", "Processing")} ${
-          processingMediaIds.length
+          activeSourceCount
         } ${t("playground:workspace.activitySource", "source")}${
-          processingMediaIds.length === 1 ? "" : "s"
+          activeSourceCount === 1 ? "" : "s"
         }`
       )
     }
@@ -1665,7 +1652,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
 
     return operations
-  }, [generatingOutputType, isGeneratingOutput, processingMediaIds.length, t])
+  }, [generatingOutputType, isGeneratingOutput, sources, t])
 
   const workspaceContextStatus = React.useMemo(() => {
     if (!workspaceStatusProjectionError) return null
@@ -2715,6 +2702,11 @@ const ResearchWorkspaceBody: React.FC = () => {
     }, 0)
   }, [focusWorkspaceNote, focusWorkspacePane])
 
+  const openCurrentNoteDraft = React.useCallback(() => {
+    focusWorkspacePane("studio")
+    window.setTimeout(() => focusWorkspaceNote("content"), 0)
+  }, [focusWorkspaceNote, focusWorkspacePane])
+
   const startNewNoteWithUndo = React.useCallback(() => {
     const previousNote = {
       ...currentNote,
@@ -3350,12 +3342,12 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   useEffect(() => {
     // WP-42: one poller replaces the two independent 5 s intervals. It only
-    // ticks while sources are processing (both tick refs are null otherwise)
+    // ticks while sources are processing or their availability needs recovery
     // and skips hidden pages, catching up once when shown again.
     const poll = startWorkspaceStatusPoll({
       intervalMs: WORKSPACE_SOURCE_STATUS_POLL_INTERVAL_MS,
       shouldPoll: () =>
-        processingMediaIdsRef.current.length > 0 ||
+        sourceStatusNeedsPollRef.current ||
         workspaceMigrationLoadingRef.current,
       poll: () => {
         workspaceStatusTickRef.current?.()
@@ -3434,8 +3426,15 @@ const ResearchWorkspaceBody: React.FC = () => {
     setCrossTabChangedFields([])
   }
 
-  const handleForkWorkspaceFromSyncWarning = () => {
-    duplicateWorkspace(workspaceId)
+  const handleForkWorkspaceFromSyncWarning = async () => {
+    if (!workspaceId) return
+    try {
+      if (useWorkspaceStore.getState().generatedArtifacts.some(a => a.detailDeferred)) await materializeWorkspaceOutputs(workspaceId)
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "Unable to load saved outputs.")
+      return
+    }
+    if (useWorkspaceStore.getState().workspaceId !== workspaceId || !duplicateWorkspace(workspaceId)) return
     handleDismissCrossTabSyncWarning()
   }
 
@@ -3492,6 +3491,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             refreshResearchWorkspaceCapabilitiesIfStale
           }
           onStartWorkspaceTask={openWorkspaceAgentTask}
+          onOpenNoteDraft={openCurrentNoteDraft}
         />
       )
     },
@@ -3947,26 +3947,37 @@ const ResearchWorkspaceBody: React.FC = () => {
       {/* Mobile vs desktop layout */}
       {isMobile ? (
         <>
-          <WorkspaceHeader
-            leftPaneOpen={false}
-            rightPaneOpen={false}
-            onToggleLeftPane={handleToggleLeftPane}
-            onToggleRightPane={handleToggleRightPane}
-            onOpenSearch={openGlobalSearch}
-            onOpenSplitWorkspace={handleOpenSplitWorkspace}
-            hideToggles
-            storageUsedBytes={workspaceStorageUsage.usedBytes}
-            storageQuotaBytes={workspaceStorageUsage.quotaBytes}
-            storageOriginUsedBytes={workspaceStorageUsage.originUsedBytes ?? undefined}
-            storageOriginQuotaBytes={workspaceStorageUsage.originQuotaBytes ?? undefined}
-            storageAccountUsedBytes={workspaceStorageUsage.accountUsedBytes ?? undefined}
-            storageAccountQuotaBytes={workspaceStorageUsage.accountQuotaBytes ?? undefined}
-            provenanceEnabled={provenanceEnabled}
-            statusGuardrailsEnabled={statusGuardrailsEnabled}
-            serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
-            agentTaskHandoffOpenSignal={agentTaskHandoffOpenSignal}
-            agentTaskPrefill={agentTaskPrefill}
-          />
+          <details className="group shrink-0 border-b border-border bg-surface text-text">
+            <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 px-4 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus">
+              <span className="min-w-0 truncate font-semibold">{workspaceName || t("playground:workspace.title", "Research Workspace")}</span>
+              <span className="shrink-0 text-xs text-text-muted">{t("playground:workspace.mobileControls", "Workspace controls")}</span>
+              <ChevronDown aria-hidden="true" className="h-4 w-4 shrink-0 group-open:rotate-180" />
+            </summary>
+            <div className="max-h-[45dvh] overflow-y-auto">
+                <WorkspaceHeader
+                  leftPaneOpen={false}
+                  rightPaneOpen={false}
+                  onToggleLeftPane={handleToggleLeftPane}
+                  onToggleRightPane={handleToggleRightPane}
+                  onOpenSearch={openGlobalSearch}
+                  onOpenSplitWorkspace={handleOpenSplitWorkspace}
+                  hideToggles
+                  storageUsedBytes={workspaceStorageUsage.usedBytes}
+                  storageQuotaBytes={workspaceStorageUsage.quotaBytes}
+                  storageOriginUsedBytes={workspaceStorageUsage.originUsedBytes ?? undefined}
+                  storageOriginQuotaBytes={workspaceStorageUsage.originQuotaBytes ?? undefined}
+                  storageAccountUsedBytes={workspaceStorageUsage.accountUsedBytes ?? undefined}
+                  storageAccountQuotaBytes={workspaceStorageUsage.accountQuotaBytes ?? undefined}
+                  provenanceEnabled={provenanceEnabled}
+                  statusGuardrailsEnabled={statusGuardrailsEnabled}
+                  serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
+                  agentTaskHandoffOpenSignal={agentTaskHandoffOpenSignal}
+                  agentTaskPrefill={agentTaskPrefill}
+                />
+
+                {tutorialPromptBanner}
+            </div>
+          </details>
 
           <WorkspaceBanner
             banner={workspaceBanner}
@@ -3974,8 +3985,6 @@ const ResearchWorkspaceBody: React.FC = () => {
             isMobile
           />
           {deepResearchReturnBanner}
-
-          {tutorialPromptBanner}
 
           <WorkspaceStatusBar
             storageUsedBytes={workspaceStorageUsage.usedBytes}
@@ -3999,7 +4008,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             items={mobileTabItems}
             centered
             destroyOnHidden
-            className="flex-1 [&_.ant-tabs-content]:h-full [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-tabpane]:h-full"
+            className="min-h-0 flex-1 overflow-hidden [&_.ant-tabs-content]:h-full [&_.ant-tabs-content-holder]:min-h-0 [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-content-holder]:overflow-hidden [&_.ant-tabs-tabpane]:h-full"
             tabBarStyle={{ marginBottom: 0, borderBottom: "1px solid var(--border)" }}
           />
         </>
@@ -4103,6 +4112,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                   refreshResearchWorkspaceCapabilitiesIfStale
                 }
                 onStartWorkspaceTask={openWorkspaceAgentTask}
+                onOpenNoteDraft={openCurrentNoteDraft}
               />
             </main>
 

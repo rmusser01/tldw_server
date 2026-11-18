@@ -455,6 +455,17 @@ export const mapServerArtifactToLocal = (
       ? new Date(artifact.completed_at)
       : undefined,
     ...client,
+    // Native Jobs use server revisions; ACP/resource and imported versions remain logical history.
+    ...(artifact.producer_metadata?.origin === "research_workspace_output_job" ? {
+      version: artifact.version,
+      rootArtifactId: client.rootArtifactId && client.rootArtifactId !== artifact.id
+        ? client.rootArtifactId : artifact.root_artifact_id || undefined,
+      artifactVersionId: artifact.artifact_version_id || undefined,
+      // A different artifact is a logical parent, not a stale revision of this row.
+      previousVersionId: client.previousVersionId &&
+        client.previousVersionId.match(/^(.*):v[1-9]\d*$/)?.[1] !== artifact.id
+        ? client.previousVersionId : artifact.previous_version_id || undefined,
+    } : {}),
     totalTokens: artifact.total_tokens ?? client.totalTokens,
     totalCostUsd: artifact.total_cost_usd ?? client.totalCostUsd,
     workspaceArtifactId: artifact.id,

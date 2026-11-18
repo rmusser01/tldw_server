@@ -12,6 +12,7 @@ import {
   createWorkspaceStorage,
   estimateWorkspacePersistenceMetrics,
   generateWorkspaceId,
+  reviveArtifacts,
   WORKSPACE_STORAGE_INDEXEDDB_FLAG_STORAGE_KEY,
   WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY,
   useWorkspaceStore,
@@ -2124,6 +2125,24 @@ describe("workspace store snapshot persistence", () => {
     expect(persistedArtifact?.data).toBeUndefined()
   })
 
+  it("preserves full server-backed payloads for IndexedDB persistence", () => {
+    const artifact = {
+      id: "canonical-chapter-summary", type: "summary" as const, title: "Chapter summary",
+      status: "completed" as const, serverId: "server-output-42", createdAt: new Date(),
+      content: "Exact chapter evidence. ".repeat(3000),
+      data: { sectionAnalysis: { evidence: "Exact evidence. ".repeat(3000) } }
+    }
+    vi.stubGlobal("indexedDB", {})
+    try {
+      const partialize = useWorkspaceStore.persist.getOptions().partialize!
+      const persisted = partialize({ ...useWorkspaceStore.getState(),
+        workspaceId: "full-artifact", generatedArtifacts: [artifact] })
+      expect(persisted.workspaceSnapshots["full-artifact"].generatedArtifacts[0]).toEqual(artifact)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("focuses sources by media id and source id for cross-pane navigation", () => {
     useWorkspaceStore.getState().initializeWorkspace("Citation Workspace")
     const addedSource = useWorkspaceStore
@@ -2331,6 +2350,26 @@ describe("workspace store snapshot persistence", () => {
     state = useWorkspaceStore.getState()
     expect(state.selectedSourceIds).toEqual([])
     expect(state.getSelectedMediaIds()).toEqual([])
+  })
+
+  it.each(["unknown", "missing_media"])("retains selected intent while source availability is %s", async lifecycleState => {
+    useWorkspaceStore.getState().initializeWorkspace("Recovering Source Workspace")
+    const source = useWorkspaceStore.getState().addSource({
+      mediaId: 334, title: "Recovering PDF", type: "pdf", status: "ready"
+    })
+    useWorkspaceStore.getState().setSelectedSourceIds([source.id])
+    useWorkspaceStore.getState().setSourceStatusByMediaId(334, "error", "Temporarily unavailable", undefined, { lifecycleState })
+    expect(useWorkspaceStore.getState().selectedSourceIds).toEqual([source.id])
+    expect(useWorkspaceStore.getState().getEffectiveSelectedMediaIds()).toEqual([])
+    workspacePersistWriterInternals.flush()
+    const persisted = localStorage.getItem(STORAGE_KEY)!
+    resetWorkspaceStore()
+    localStorage.setItem(STORAGE_KEY, persisted)
+    await useWorkspaceStore.persist.rehydrate()
+    expect(useWorkspaceStore.getState().selectedSourceIds).toEqual([source.id])
+    expect(useWorkspaceStore.getState().getEffectiveSelectedMediaIds()).toEqual([])
+    useWorkspaceStore.getState().setSourceStatusByMediaId(334, "ready")
+    expect(useWorkspaceStore.getState().getEffectiveSelectedMediaIds()).toEqual([334])
   })
 
   it("stores source status drilldown details from workspace status projection", () => {
@@ -2576,6 +2615,46 @@ describe("workspace store snapshot persistence", () => {
     ])
   })
 
+  it("exports browser source annotations in a ZIP and restores them under the imported workspace", async () => {
+    useWorkspaceStore.getState().initializeWorkspace("Annotated research")
+    const workspaceId = useWorkspaceStore.getState().workspaceId
+    const source = useWorkspaceStore.getState().addSource({mediaId: 42, title: "Book", type: "pdf"})
+    const annotations = {[source.id]: [{id: "annotation-1", quote: "Evidence", note: "Verify this claim", createdAt: 1, updatedAt: 2}]}
+    const key = (id: string) => `tldw:research-workspace:source-annotations:v1:${id}`
+    localStorage.setItem(key(workspaceId), JSON.stringify(annotations))
+    const bundle = useWorkspaceStore.getState().exportWorkspaceBundle()!
+    expect(bundle.workspace.snapshot.sourceAnnotations).toEqual(annotations)
+    const {createWorkspaceExportZipBlob, parseWorkspaceImportFile} = await import("../workspace-bundle")
+    const blob = await createWorkspaceExportZipBlob(bundle)
+    const parsed = await parseWorkspaceImportFile(new File([blob], "research.workspace.zip", {type: "application/zip"}))
+    const importedId = useWorkspaceStore.getState().importWorkspaceBundle(parsed)!
+    expect(importedId).not.toBe(workspaceId)
+    expect(JSON.parse(localStorage.getItem(key(importedId))!)).toEqual({
+      [useWorkspaceStore.getState().sources[0].id]: annotations[source.id]
+    })
+  })
+
+  it.each(["oversized", "malformed"])("refuses export when saved annotations are %s instead of omitting them", (kind) => {
+    useWorkspaceStore.getState().initializeWorkspace("Annotated research")
+    const workspaceId = useWorkspaceStore.getState().workspaceId
+    const source = useWorkspaceStore.getState().addSource({mediaId: 42, title: "Book", type: "pdf"})
+    const annotations = {[source.id]: [{id: "a", quote: "Evidence", note: kind === "oversized" ? "x".repeat(100001) : 123, createdAt: 1, updatedAt: 2}]}
+    const key = `tldw:research-workspace:source-annotations:v1:${workspaceId}`
+    const stored = JSON.stringify(annotations)
+    localStorage.setItem(key, stored)
+    expect(useWorkspaceStore.getState().exportWorkspaceBundle()).toBeNull()
+    expect(localStorage.getItem(key)).toBe(stored)
+  })
+
+  it("rejects imported annotations for sources outside the bundle without replacing current research", () => {
+    useWorkspaceStore.getState().initializeWorkspace("Current research")
+    const workspaceId = useWorkspaceStore.getState().workspaceId
+    const bundle = useWorkspaceStore.getState().exportWorkspaceBundle()!
+    bundle.workspace.snapshot.sourceAnnotations = {foreign: [{id: "annotation-1", quote: "Evidence", note: "Foreign note", createdAt: 1, updatedAt: 2}]}
+    expect(useWorkspaceStore.getState().importWorkspaceBundle(bundle)).toBeNull()
+    expect(useWorkspaceStore.getState().workspaceId).toBe(workspaceId)
+  })
+
   it("exports and imports workspace bundles with full snapshot fidelity", () => {
     useWorkspaceStore.getState().initializeWorkspace("Exportable Workspace")
     const originalWorkspaceId = useWorkspaceStore.getState().workspaceId
@@ -2698,24 +2777,29 @@ describe("workspace store snapshot persistence", () => {
     )
     expect(importedState.sources).toHaveLength(1)
     expect(importedState.sources[0]?.title).toBe("Export source")
-    expect(importedState.selectedSourceIds).toEqual([source.id])
+    expect(importedState.selectedSourceIds).toEqual([importedState.sources[0].id])
+    expect(importedState.sources[0].id).not.toBe(source.id)
     expect(importedState.sourceFolders).toHaveLength(1)
     expect(importedState.sourceFolders[0]?.name).toBe("Evidence")
     expect(importedState.sourceFolders[0]?.workspaceId).toBe(importedWorkspaceId)
     expect(importedState.sourceFolderMemberships).toEqual([
       {
         folderId: folder.id,
-        sourceId: source.id
+        sourceId: importedState.sources[0].id
       }
     ])
     expect(importedState.selectedSourceFolderIds).toEqual([folder.id])
     expect(importedState.activeFolderId).toBe(folder.id)
     expect(importedState.generatedArtifacts).toHaveLength(2)
     expect(importedState.generatedArtifacts[0]?.previousVersionId).toBe(
-      baseArtifact.id
+      importedState.generatedArtifacts[1]?.id
     )
+    expect(importedState.generatedArtifacts[1]?.id).not.toBe(baseArtifact.id)
     expect(importedState.notes).toBe("Workspace export notes")
     expect(importedState.currentNote.title).toBe("Workspace note")
+    expect(importedState.currentNote.id).toBeUndefined()
+    expect(importedState.currentNote.version).toBeUndefined()
+    expect(importedState.currentNote.isDirty).toBe(true)
     expect(importedState.workspaceBanner.title).toBe("Export Banner")
     expect(importedState.workspaceBanner.subtitle).toBe("Export subtitle")
     expect(importedState.workspaceBanner.image?.dataUrl).toBe(
@@ -2730,7 +2814,7 @@ describe("workspace store snapshot persistence", () => {
     const importedSession = useWorkspaceStore
       .getState()
       .getWorkspaceChatSession(importedWorkspaceId as string)
-    expect(importedSession?.historyId).toBe("history-export")
+    expect(importedSession?.historyId).toBeNull()
     expect(importedSession?.messages[0]?.message).toBe("Export this workspace")
     expect(importedSession?.serverChatId).toBeNull()
   })
@@ -2896,3 +2980,23 @@ describe("workspace store snapshot persistence", () => {
     expect(state.leftPaneCollapsed).toBe(true)
   })
 })
+
+
+it.each([41, 0, -1, '41'])('revives only a valid saved output job receipt as reconnectable (%s)', jobId => {
+  const [artifact] = reviveArtifacts([{
+    id: 'local-card', workspaceArtifactId: 'canonical-summary', type: 'summary', title: 'Summary',
+    status: 'generating', createdAt: new Date(),
+    producerMetadata: { origin: 'research_workspace_output_job', job_id: jobId }
+  }]);
+  expect(artifact.status).toBe(jobId === 41 ? 'generating' : 'failed');
+  if (jobId === 41) expect(artifact.errorMessage).toBeUndefined();
+});
+
+
+it.each(['infographic', 'video_overview'] as const)('keeps %s reload recovery on its existing regeneration path', type => {
+  const [artifact] = reviveArtifacts([{
+    id: 'local-card', workspaceArtifactId: 'canonical-media', type, title: 'Media', status: 'generating', createdAt: new Date(),
+    producerMetadata: { origin: 'research_workspace_output_job', job_id: 41 }
+  }]);
+  expect(artifact.status).toBe('failed');
+});

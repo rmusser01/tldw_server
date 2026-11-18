@@ -165,13 +165,27 @@ describe("launchWithExtension", () => {
 
       const result = await launchWithExtension(extensionDir)
 
+      const [userDataDir, launchOptions] = launchPersistentContext.mock.calls[0]
+      const launchArg = launchOptions.args.find((arg: string) =>
+        arg.startsWith("--load-extension="),
+      )
+      expect(launchArg).toBeDefined()
+      const stagedPath = launchArg.slice("--load-extension=".length)
+      expect(stagedPath).not.toBe(extensionDir)
+      expect(path.dirname(stagedPath)).toBe(
+        path.join(userDataDir, "extension-launch"),
+      )
+      const stagedManifest = JSON.parse(
+        fs.readFileSync(path.join(stagedPath, "manifest.json"), "utf8"),
+      )
+      expect(stagedManifest.key).toMatch(/^[A-Za-z0-9+/]+={0,2}$/)
+      expect(userDataDir).toEqual(
+        expect.stringContaining("tmp-playwright-profile/user-data-"),
+      )
       expect(resolveExtensionId).toHaveBeenCalledTimes(1)
       expect(resolveExtensionId).toHaveBeenCalledWith(
         context,
-        expect.objectContaining({
-          extensionPath: extensionDir,
-          userDataDir: expect.stringContaining("tmp-playwright-profile/user-data-"),
-        }),
+        { extensionPath: stagedPath, userDataDir },
       )
       expect(result.extensionId).toBe(extensionId)
       expect(result.optionsUrl).toBe(`chrome-extension://${extensionId}/options.html`)

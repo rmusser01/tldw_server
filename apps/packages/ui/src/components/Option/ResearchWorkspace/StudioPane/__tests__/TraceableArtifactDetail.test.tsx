@@ -127,8 +127,8 @@ describe("TraceableArtifactDetail", () => {
     expect(screen.getByText("src-1")).toBeInTheDocument()
     expect(screen.getByText("1 citation")).toBeInTheDocument()
 
-    expect(screen.getAllByText("Support safe").length).toBeGreaterThan(0)
-    expect(screen.getByText("Not redacted")).toBeInTheDocument()
+    expect(screen.getByText("Support view unrestricted")).toBeInTheDocument()
+    expect(screen.getAllByText("Not redacted").length).toBeGreaterThan(0)
     expect(screen.getByText("standard")).toBeInTheDocument()
 
     expect(screen.getByText("Markdown")).toBeInTheDocument()
@@ -155,6 +155,31 @@ describe("TraceableArtifactDetail", () => {
     ).toBeInTheDocument()
   })
 
+  it("keeps redaction metadata distinct from an unsuccessful claim review", () => {
+    renderDetail(baseArtifact({ reviewStatus: "needs_revision" }))
+
+    expect(screen.getByTestId("traceable-artifact-review-state")).toHaveTextContent("Needs Revision")
+    const summary = screen.getByTestId("traceable-artifact-summary")
+    expect(within(summary).getByText("Not redacted")).toBeInTheDocument()
+    expect(screen.queryByText("Support safe")).not.toBeInTheDocument()
+    expect(screen.getByText("Support view unrestricted")).toHaveAttribute("data-ds-variant", "secondary")
+    expect(within(summary).getByText("Not redacted")).toHaveAttribute("title", expect.stringContaining("Citation checks and reviewer decisions are separate"))
+  })
+
+  it.each<[NonNullable<GeneratedArtifact["redaction"]>, string, string, string]>([
+    [{ supportSafe: true }, "Redaction unknown", "Support view unrestricted", "Redaction unknown"],
+    [{ redacted: false }, "Not redacted", "Support view unknown", "Not redacted"],
+    [{}, "Redaction unknown", "Support view unknown", "Redaction unknown"],
+    [{ supportSafe: false, redacted: true }, "Support view restricted", "Support view restricted", "Redacted"]
+  ])("does not turn partial redaction metadata %j into a clearance", (redaction, summaryLabel, supportLabel, detailLabel) => {
+    renderDetail(baseArtifact({ redaction }))
+
+    expect(within(screen.getByTestId("traceable-artifact-summary")).getByText(summaryLabel)).toBeInTheDocument()
+    expect(screen.getAllByText(supportLabel).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(detailLabel).length).toBeGreaterThan(0)
+    expect(screen.queryByText("Support safe")).not.toBeInTheDocument()
+  })
+
   it("renders unavailable metadata states without leaking raw support payloads", () => {
     renderDetail(
       baseArtifact({
@@ -169,9 +194,17 @@ describe("TraceableArtifactDetail", () => {
     expect(screen.getByText("No ACP provenance recorded")).toBeInTheDocument()
     expect(screen.getByText("No source lineage recorded")).toBeInTheDocument()
     expect(screen.getByText("No exports recorded")).toBeInTheDocument()
-    expect(screen.getAllByText("Support safe").length).toBeGreaterThan(0)
-    expect(screen.getByText("Not redacted")).toBeInTheDocument()
+    expect(screen.getByText("Support view unrestricted")).toBeInTheDocument()
+    expect(screen.getAllByText("Not redacted").length).toBeGreaterThan(0)
     expect(screen.queryByText("{")).not.toBeInTheDocument()
+  })
+
+  it("does not infer a sharing or redaction status when metadata is absent", () => {
+    renderDetail(baseArtifact({ redaction: undefined }))
+
+    expect(screen.getByText("No redaction posture recorded")).toBeInTheDocument()
+    expect(screen.queryByText("Support view unrestricted")).not.toBeInTheDocument()
+    expect(screen.queryByText("Not redacted")).not.toBeInTheDocument()
   })
 
   it("labels non-default claims verification metadata as an override", () => {

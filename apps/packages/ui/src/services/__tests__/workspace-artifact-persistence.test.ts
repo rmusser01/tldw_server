@@ -9,11 +9,12 @@ import {
 } from '@/store/workspace-artifact-codec';
 import { mapServerArtifactToLocal, hydrateWorkspaceFromServer } from '@/store/workspace-api';
 import { isServicePromptRequestPath } from '@/services/tldw/service-prompt-scope-error';
+import { tldwRequest } from '@/services/tldw/request-core';
 
 const io = vi.hoisted(() => ({ request: vi.fn(), migrated: true }));
 vi.mock('@/services/background-proxy', () => ({ bgRequest: io.request }));
 vi.mock('@/store/workspace', () => ({ hasResearchWorkspaceMigrationTombstone: () => io.migrated }));
-import { persistWorkspaceArtifact } from '../workspace-artifact-persistence';
+import { persistWorkspaceArtifact, persistWorkspaceArtifactReview } from '../workspace-artifact-persistence';
 
 const artifact = (): GeneratedArtifact =>
   bindWorkspaceArtifactOrigin(
@@ -209,6 +210,56 @@ describe('canonical Workspace draft persistence', () => {
     expect(local.artifacts[0].version).toBe(3);
     expect(local.artifacts[0].serverId).toBe(82);
   });
+  it.each([
+    { version: 311, root: 'native-output', current: 'native-output:v311', previous: 'native-output:v310' },
+    { version: 1, root: 'native-output', current: 'native-output:v1', previous: null },
+    { version: 1, root: undefined, current: undefined, previous: undefined },
+  ])('uses native job revision $version instead of stale client lineage', ({ version, root, current, previous }) => {
+    const draft = artifact();
+    const original = row({ ...draft, rootArtifactId: 'native-output', artifactVersionId: 'native-output:v285',
+      previousVersionId: 'native-output:v284' }, version);
+    original.id = 'native-output';
+    original.producer_metadata = { origin: 'research_workspace_output_job', job_id: 61 };
+    original.root_artifact_id = root;
+    original.artifact_version_id = current;
+    original.previous_version_id = previous;
+    const before = structuredClone(original);
+
+    const restored = mapServerArtifactToLocal(original);
+
+    expect(restored).toMatchObject({ version, workspaceArtifactVersion: version,
+      rootArtifactId: root, artifactVersionId: current, previousVersionId: previous ?? undefined,
+      id: draft.id, serverId: 82, content: draft.content, data: draft.data });
+    expect(restored.versionMetadata?.workspaceClient).toEqual(original.version_metadata?.workspaceClient);
+    expect(original).toEqual(before);
+  });
+  it.each(['research_pack_import', 'workspace_snapshot_import'])(
+    'retains logical versions under the outer %s provenance wrapper', origin => {
+      const original = row(artifact(), 12);
+      original.root_artifact_id = 'destination-artifact';
+      original.artifact_version_id = 'destination-artifact:v12';
+      original.previous_version_id = 'destination-artifact:v11';
+      original.producer_metadata = { origin,
+        importedProducer: { origin: 'research_workspace_output_job', job_id: 61 } };
+      const restored = mapServerArtifactToLocal(original);
+      expect(restored).toMatchObject({ version: 3, rootArtifactId: 'acp-run-7',
+        artifactVersionId: 'acp-run-7-v3', previousVersionId: 'acp-run-7-v2',
+        workspaceArtifactVersion: 12, serverId: 82, producerMetadata: original.producer_metadata });
+      expect(restored.versionMetadata?.workspaceClient).toEqual(original.version_metadata?.workspaceClient);
+    }
+  );
+  it.each(['native-parent:v7', 'native-child:variant'])(
+    'retains logical native parent %s while refreshing the current artifact revision', previousVersionId => {
+    const original = row({ ...artifact(), rootArtifactId: 'native-parent',
+      previousVersionId }, 4);
+    original.id = 'native-child';
+    original.producer_metadata = { origin: 'research_workspace_output_job', job_id: 62 };
+    original.root_artifact_id = 'native-child';
+    original.artifact_version_id = 'native-child:v4';
+    original.previous_version_id = 'native-child:v3';
+    expect(mapServerArtifactToLocal(original)).toMatchObject({ version: 4, workspaceArtifactVersion: 4,
+      rootArtifactId: 'native-parent', previousVersionId, artifactVersionId: 'native-child:v4' });
+  });
   it('reconciles an unknown acknowledgement once, with no duplicate submission', async () => {
     let stored: ReturnType<typeof row> | undefined;
     io.request.mockImplementation(async ({ method }) => {
@@ -335,4 +386,130 @@ describe('canonical Workspace draft persistence', () => {
     expect(saved.workspaceArtifactVersion).toBe(2);
   });
 
+});
+
+
+describe("section reviewer metadata saves", () => {
+  it("updates only review fields with an optimistic version while preserving the raw draft and evidence", async () => {
+    const first = { ...artifact(), workspaceArtifactId: "draft-owned", workspaceArtifactVersion: 1 };
+    let stored = row(first);
+    io.request.mockImplementation(async ({ method, body }) => {
+      if (method === "GET") return [stored];
+      expect(Object.keys(body).sort()).toEqual(["review_metadata", "review_state", "version"]);
+      stored = { ...stored, ...body, version: 2 };
+      return stored;
+    });
+    const saved = await persistWorkspaceArtifact({ ...first, reviewStatus: "needs_revision", reviewMetadata: { reason: "Attribution correction" } }, { ...lease().options, updateOnly: "review" });
+    expect(saved.reviewMetadata).toMatchObject({ reason: "Attribution correction" });
+    expect(stored.content).toBe(first.content);
+    expect(stored.version_metadata).toEqual(row(first).version_metadata);
+  });
+});
+
+
+describe("cold artifact review authority", () => {
+  it.each(["slow reads", "slow write headers", "slow write body", "deadline", "account cancellation", "workspace change"])(
+    "retains the exact review save boundary with %s", async outcome => {
+      vi.useFakeTimers();
+      const { controller, options } = lease();
+      let current = true;
+      options.isCurrent = () => current;
+      let stored = row();
+      const original = structuredClone(stored);
+      const cold = mapServerArtifactToLocal(stored);
+      const wait = (ms: number, signal?: AbortSignal | null) => new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, ms);
+        signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
+      });
+      io.request.mockImplementation(async input => {
+        const response = await tldwRequest(input, {
+          getConfig: async () => ({ serverUrl: "https://owned.test", authMode: "single-user", apiKey: "test-key" }),
+          fetchFn: async (_url, init) => {
+            if (input.method === "PUT" && outcome === "slow write headers") await wait(20_000, init?.signal);
+            if (input.method === "PUT") stored = { ...stored, ...JSON.parse(String(init?.body)), version: stored.version + 1 };
+            const data = input.method === "GET" ? [stored] : stored;
+            const response = Response.json(data);
+            vi.spyOn(response, "json").mockImplementation(async () => {
+              if (outcome === "deadline") await wait(180_000, init?.signal);
+              else if (outcome === "slow reads" || outcome === "account cancellation" || outcome === "workspace change" ||
+                (outcome === "slow write body" && input.method === "PUT")) await wait(20_000, init?.signal);
+              return data;
+            });
+            return response;
+          },
+        });
+        if (!response.ok) throw Object.assign(new Error(response.error), { code: response.code });
+        return response.data;
+      });
+      const pending = persistWorkspaceArtifactReview(cold, { reviewStatus: "needs_revision", reviewMetadata: { reason: "Exact retained review" } }, options)
+        .then(value => ({ value }), error => ({ error }));
+      let settled = false;
+      void pending.then(() => { settled = true; });
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        if (outcome.startsWith("slow")) {
+          await vi.advanceTimersByTimeAsync(60_000);
+          expect(await pending).toMatchObject({ value: { reviewStatus: "needs_revision", reviewMetadata: { reason: "Exact retained review" }, workspaceArtifactVersion: 2 } });
+          const writes = io.request.mock.calls.map(([input]) => input).filter(input => input.method === "PUT");
+          expect(writes).toHaveLength(1);
+          expect(writes[0].body).toEqual({ review_state: "needs_revision", review_metadata: { reason: "Exact retained review" }, version: 1 });
+        } else {
+          await vi.advanceTimersByTimeAsync(outcome === "deadline" ? 119_999 : 12_000);
+          expect(settled).toBe(false);
+          if (outcome === "account cancellation") controller.abort();
+          if (outcome === "workspace change") current = false;
+          await vi.advanceTimersByTimeAsync(outcome === "workspace change" ? 8000 : 2);
+          const result = await pending;
+          expect(result).toHaveProperty("error");
+          if ("error" in result) expect(result.error).toMatchObject(outcome === "deadline" ? { code: "REQUEST_TIMEOUT" } : outcome === "account cancellation" ? { code: "REQUEST_ABORTED" } : { status: 412, details: { detail: { code: "request_config_scope_changed" } } });
+          expect(io.request.mock.calls.some(([input]) => input.method === "PUT")).toBe(false);
+        }
+        expect(stored.content).toBe(original.content);
+        expect(stored.version_metadata).toEqual(original.version_metadata);
+        expect(cold.reviewMetadata).toEqual(mapServerArtifactToLocal(original).reviewMetadata);
+      } finally {
+        controller.abort();
+        await pending;
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("revalidates a cold canonical artifact before saving review metadata", async () => {
+    const first = { ...artifact(), workspaceArtifactId: "draft-owned", workspaceArtifactVersion: 1 };
+    const cold = JSON.parse(JSON.stringify(mapServerArtifactToLocal(row(first))));
+    let stored = row(first);
+    io.request.mockImplementation(async ({ method, body }) => {
+      if (method === "GET") return [stored];
+      stored = { ...stored, ...body, version: 2 }; return stored;
+    });
+    const saved = await persistWorkspaceArtifactReview(cold, { reviewStatus: "needs_revision", reviewMetadata: { reason: "Source checked" } }, lease().options);
+    expect(saved.reviewStatus).toBe("needs_revision");
+    expect(saved.content).toBe(first.content);
+    expect(io.request.mock.calls.filter(([request]) => request.method === "PUT")).toHaveLength(1);
+  });
+  it.each(["foreign", "changed", "retired"])("refuses %s review authority without writing", async kind => {
+    const first = { ...artifact(), workspaceArtifactId: "draft-owned", workspaceArtifactVersion: 1 };
+    const options = lease().options;
+    if (kind === "foreign") options.scope = { ...options.scope, scopeKey: "server:bob" };
+    if (kind === "retired") { let calls = 0; options.isCurrent = () => ++calls < 2; }
+    io.request.mockResolvedValue([row(first, kind === "changed" ? 2 : 1)]);
+    await expect(persistWorkspaceArtifactReview(first, { reviewStatus: "accepted" }, options)).rejects.toThrow();
+    expect(io.request.mock.calls.some(([request]) => request.method === "PUT")).toBe(false);
+  });
+  it.each(["content", "data", "versionMetadata", "reviewMetadata"])("refuses same-version %s drift without writing", async kind => {
+    const stored = row();
+    const cold = JSON.parse(JSON.stringify(mapServerArtifactToLocal(stored))) as GeneratedArtifact;
+    if (kind === "content") stored.content = "Changed source claim";
+    else if (kind === "data") stored.version_metadata = {
+      ...stored.version_metadata, workspaceClient: { schemaVersion: 1, data: { changedEvidence: true } }
+    };
+    else if (kind === "versionMetadata") stored.version_metadata = { ...stored.version_metadata, revision_reason: "Changed revision" };
+    else stored.review_metadata = { reason: "A different reviewer changed the assessment" };
+    io.request.mockResolvedValue([stored]);
+
+    await expect(persistWorkspaceArtifactReview(cold, { reviewStatus: "accepted" }, lease().options)).rejects.toThrow("output changed");
+
+    expect(io.request.mock.calls.some(([request]) => request.method === "PUT")).toBe(false);
+  });
 });

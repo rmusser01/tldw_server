@@ -8,6 +8,91 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("processing_status,has_quota", [("Success", True), ("Warning", True), ("Success", False)])
+async def test_worker_retains_original_after_staging_cleanup_and_reopen(
+    monkeypatch, tmp_path, processing_status, has_quota,
+):
+    from tldw_Server_API.app.core import Storage
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Storage.filesystem_storage import FileSystemStorage
+    from tldw_Server_API.app.services import storage_quota_service
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+    monkeypatch.setattr(worker.DatabasePaths, "get_media_db_path", lambda _: tmp_path / "media.db")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    upload = staging / "book.pdf"
+    original = b"%PDF-1.7 retained original"
+    upload.write_bytes(original)
+    storage = FileSystemStorage(base_path=tmp_path / "originals")
+    monkeypatch.setattr(Storage, "get_storage_backend", lambda: storage)
+
+    class Quota:
+        async def initialize(self):
+            pass
+
+        async def check_quota(self, **kwargs):
+            return has_quota, {}
+
+    monkeypatch.setattr(storage_quota_service, "StorageQuotaService", Quota)
+
+    async def no_usage(*args, **kwargs):
+        pass
+
+    async def no_chunking(*args, **kwargs):
+        return None, None
+
+    async def process(**kwargs):
+        db = worker._create_db("1")
+        try:
+            media_id, media_uuid, message = db.add_media_with_keywords(
+                url="book.pdf", title="Book", media_type="pdf", content="Original text", keywords=[],
+            )
+        finally:
+            db.close_connection()
+        return {
+            "status": processing_status, "db_id": media_id, "media_uuid": media_uuid,
+            "db_message": message, "input_ref": "book.pdf", "processing_source": str(upload),
+            "warnings": ["Partial metadata"] if processing_status == "Warning" else [],
+        }
+
+    monkeypatch.setattr(worker, "_enforce_and_record_media_bytes", no_usage)
+    monkeypatch.setattr(worker, "async_resolve_chunking_options_and_plan", no_chunking)
+    monkeypatch.setattr(worker, "process_document_like_item", process)
+    jm = JobManager()
+    row = jm.create_job(
+        domain="media_ingest", queue="default", job_type="media_ingest_item", owner_user_id="1",
+        payload={
+            "source": str(upload), "source_kind": "file", "input_ref": "book.pdf",
+            "temp_dir": str(staging), "cleanup_temp_dir": True,
+            "options": {"media_type": "pdf", "keep_original_file": True, "perform_analysis": False},
+        },
+    )
+    result = await worker._handle_job(jm.get_job(int(row["id"])), jm, worker._ProgressState())
+    assert not staging.exists()
+    reopened = worker._create_db("1")
+    try:
+        record = reopened.get_media_file(result["media_id"], "original")
+        if has_quota:
+            assert record is not None
+            stream = await storage.retrieve(record["storage_path"])
+            try:
+                assert stream.read() == original
+            finally:
+                stream.close()
+            assert result["original_file_stored"] is True
+        else:
+            assert record is None
+            assert result["original_file_stored"] is False
+            assert result["status"] == "Warning"
+            assert any("quota" in warning for warning in result["warnings"])
+    finally:
+        reopened.close_connection()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("request_user_id", [2, 3])
 async def test_worker_media_is_searchable_only_by_its_owner(monkeypatch, tmp_path, request_user_id):
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker

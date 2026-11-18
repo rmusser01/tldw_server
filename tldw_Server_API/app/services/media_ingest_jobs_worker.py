@@ -32,9 +32,11 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
-    async_resolve_chunking_options_and_plan,
     apply_chunking_template_if_any,
-    prepare_chunking_options_dict,
+    async_resolve_chunking_options_and_plan,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    prepare_chunking_options_dict as prepare_chunking_options_dict,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     PreparedMediaBatch,
@@ -42,6 +44,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     find_duplicate_document_before_analysis,
     process_batch_media,
     process_document_like_item,
+    store_original_files,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
@@ -711,6 +714,11 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
 
             result_item = results[0] if results else {}
 
+            await store_original_files(
+                results=results, form_data=form_data, db=db, user_id=user_id,
+                temp_dir=temp_dir, url_list=[str(input_ref)] if source_kind == "url" else [],
+            )
+
         if _should_cancel(jm, job_id):
             _mark_collection_item_status(
                 user_id=user_id,
@@ -760,6 +768,15 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
                 "warnings": result_item.get("warnings"),
                 "db_message": result_item.get("db_message"),
             }
+            if "original_file_stored" in result_item:
+                job_result["original_file_stored"] = result_item["original_file_stored"]
+            if isinstance(result_metadata, dict):
+                page_metadata = {
+                    key: result_metadata[key] for key in ("page_count", "page_map", "page_map_content_hash")
+                    if key in result_metadata
+                }
+                if page_metadata:
+                    job_result["metadata"] = page_metadata
             if final_chunking_plan is not None:
                 job_result["chunking_plan"] = final_chunking_plan
             if analysis_refusal is not None and result_item.get("status") != "Skipped":

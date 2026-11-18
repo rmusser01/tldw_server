@@ -543,5 +543,15 @@ async def test_counter_evidence_from_a_real_hybrid_retriever_is_kept(tmp_path, m
         db.close_connection()
 
     found = {d.id for r in results for d in r.documents}
-    assert found == ({str(fts_hit), str(vector_hit)} if with_vector_store else {str(fts_hit)})
+    assert found == ({str(fts_hit), f"{vector_hit}_0"} if with_vector_store else {str(fts_hit)})
+    vector_documents = [
+        (doc.id, doc.metadata.get("media_id"), doc.content)
+        for result in results
+        for doc in result.documents
+        if doc.id == f"{vector_hit}_0"
+    ]
+    assert vector_documents == (
+        [(f"{vector_hit}_0", str(vector_hit), "Rayleigh scattering colours daylight blue.")]
+        if with_vector_store else []
+    )
     assert store.collections == (["user_7_media_embeddings"] * 3 if with_vector_store else [])

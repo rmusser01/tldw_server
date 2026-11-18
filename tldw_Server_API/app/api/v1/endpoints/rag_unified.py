@@ -1632,6 +1632,16 @@ async def unified_search_endpoint(
 
     except _RAG_PROVIDER_FAILURES as exc:
         raise_detached_error(_rag_provider_http_exception(exc))
+    except TimeoutError:
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail={
+                    "error_code": "request_timeout",
+                    "message": "Search exceeded its time limit. Try a narrower question or retry.",
+                },
+            )
+        )
     except HTTPException:
         raise
     except Exception:  # noqa: BLE001 - expose only a detached, bounded failure

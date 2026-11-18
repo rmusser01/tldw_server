@@ -1,7 +1,7 @@
 import { hasWorkspaceArtifactOriginEvidence } from "@/store/workspace-artifact-codec"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
-import { persistWorkspaceArtifact } from "@/services/workspace-artifact-persistence"
+import { persistWorkspaceArtifact, WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS } from "@/services/workspace-artifact-persistence"
 import { useWorkspaceStore } from "@/store/workspace"
 import React from "react"
 import { Button, Modal } from "antd"
@@ -173,8 +173,8 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
     artifact: GeneratedArtifact, removed: boolean, allowAbsent = false,
   ) => {
     if (!workspaceId) throw new Error("Select the original workspace before changing this output.")
-    const deadline = performance.now() + 15000
-    const scope = await loadServicePromptSnapshot([], { signal: AbortSignal.timeout(15000) })
+    const deadline = performance.now() + WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS
+    const scope = await loadServicePromptSnapshot([], { signal: AbortSignal.timeout(WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS) })
     const isCurrent = () => mounted.current && useWorkspaceStore.getState().workspaceId === workspaceId &&
       (allowAbsent ? !useWorkspaceStore.getState().generatedArtifacts.some(item => item.id === artifact.id)
         : useWorkspaceStore.getState().generatedArtifacts.find(item => item.id === artifact.id) === artifact)
@@ -505,6 +505,25 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
           })
           downloadBlobFile(flashcardsTextBlob, `${artifact.title}.txt`)
         }
+        return
+      }
+
+      // Workspace artifact IDs belong to a different resource than legacy Outputs.
+      // Export the hydrated text itself; a preview is not a complete download.
+      if (artifact.workspaceArtifactId && [
+        "summary", "report", "compare_sources", "timeline", "mindmap", "slides", "data_table"
+      ].includes(artifact.type)) {
+        if (typeof artifact.content !== "string" || !artifact.content.trim()) {
+          messageApi.error(t(
+            "playground:studio.downloadTextNotLoaded",
+            "Saved output text is not loaded. Reopen the output and retry the download."
+          ))
+          return
+        }
+        downloadBlobFile(
+          new Blob([artifact.content], { type: "text/plain;charset=utf-8" }),
+          `${artifact.title}.${getFileExtension(artifact.type)}`
+        )
         return
       }
 

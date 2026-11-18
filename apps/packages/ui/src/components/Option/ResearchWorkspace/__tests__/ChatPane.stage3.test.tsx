@@ -1,10 +1,13 @@
 import { Modal } from "antd"
+import { parseReasoning } from "@/libs/reasoning"
 import * as workspaceUndo from "../undo-manager"
 import { webcrypto } from "node:crypto"
 import { sha256Text } from "@/store/workspace-migration"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { SourceFeedback } from "@/components/Sidepanel/Chat/SourceFeedback"
 import type { ReactNode } from "react"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, useLocation } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
 import { ChatPane } from "../ChatPane"
@@ -17,6 +20,7 @@ import { isWorkspaceSourceSelectable } from "@/store/workspace-source-status"
 
 // Component-only ownership boundary; connected SDK tests exercise the genuine account/Scene hooks.
 const chatOwner = vi.hoisted(() => ({ generation: 0 }))
+const viewport = vi.hoisted(() => ({ mobile: false }))
 vi.mock("../ChatPane/useResearchActorScene", async () => {
   const React = await vi.importActual<typeof import("react")>("react")
   return {
@@ -43,6 +47,8 @@ const mockSaveWorkspaceChatSession = vi.fn()
 const mockGetWorkspaceChatSession = vi.fn()
 const mockFocusSourceById = vi.fn()
 const mockFocusSourceByMediaId = vi.fn()
+const mockTrackSourceClick = vi.fn()
+const mockTrackCitation = vi.fn()
 const mockSetMessages = vi.fn()
 const mockSetHistory = vi.fn()
 const mockSetHistoryId = vi.fn()
@@ -194,7 +200,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => false
+  useMobile: () => viewport.mobile
 }))
 
 vi.mock("@/hooks/useSmartScroll", () => ({
@@ -250,21 +256,27 @@ vi.mock("@/components/Common/Playground/Message", () => ({
     message,
     onSaveToWorkspaceNotes,
     onRegenerate,
-    onEditFormSubmit
+    onEditFormSubmit,
+    sources,
+    onSourceClick
   }: {
     message: string
-    onSaveToWorkspaceNotes?: () => void
+    onSaveToWorkspaceNotes?: (payload: { message: string }) => void
     onRegenerate?: () => void
     onEditFormSubmit?: (value: string, isSend: boolean) => void
+    sources?: unknown[]
+    onSourceClick?: (source: unknown) => void
   }) => (
     <div>
       <div data-testid="playground-message">{message}</div>
+      {sources?.[0] && <SourceFeedback source={sources[0]} sourceKey="citation" sourceIndex={0}
+        onSourceClick={onSourceClick} onTrackClick={mockTrackSourceClick} onTrackCitation={mockTrackCitation} />}
       <button onClick={onRegenerate}>Regenerate capture test</button>
       <button onClick={() => onEditFormSubmit?.("edited question", true)}>
         Edit and send capture test
       </button>
       {onSaveToWorkspaceNotes && (
-        <button type="button" onClick={onSaveToWorkspaceNotes}>
+        <button type="button" onClick={() => onSaveToWorkspaceNotes({ message: parseReasoning(message).filter(part => part.type === "text").map(part => part.content).join("\n\n").trim() })}>
           Save to Notes
         </button>
       )}
@@ -372,10 +384,10 @@ vi.mock("antd", async () => {
   }
 })
 
-function renderChatPane() {
+function renderChatPane(props: React.ComponentProps<typeof ChatPane> = {}) {
   return render(
     <MemoryRouter>
-      <ChatPane />
+      <ChatPane {...props} />
     </MemoryRouter>
   )
 }
@@ -383,6 +395,7 @@ function renderChatPane() {
 describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    viewport.mobile = false
     chatOwner.generation++
     realSourcesStore = null
     Object.defineProperty(globalThis, "crypto", {
@@ -395,6 +408,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     connectionStoreState.state.lastError = null
 
     workspaceStoreState.workspaceId = "workspace-a"
+    workspaceStoreState.currentNote = { title: "", content: "", keywords: [], isDirty: true }
     workspaceStoreState.workspaceChatReferenceId = "workspace-a"
     workspaceStoreState.sources = []
     workspaceStoreState.selectedSourceFolderIds = []
@@ -466,6 +480,37 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       modal.mockRestore()
       workspaceUndo.clearWorkspaceUndoActionsForTests()
     }
+  })
+
+  it("expands a PDF citation in the workspace and lets explicit page links own navigation", async () => {
+    workspaceStoreState.sources = [{id: "pdf-source", mediaId: 42, title: "Book", type: "pdf"}]
+    messageOptionState.messages = [{id: "answer", isBot: true, name: "Assistant", message: "Cited answer", sources: [
+      {name: "Cited PDF passage", type: "pdf", metadata: {media_id: 42, page_number: 871, page_spans: [
+        {page_number: 871, start_char: 100, end_char: 120, printed_page_label: "838"},
+        {page_number: 872, start_char: 122, end_char: 140, printed_page_label: "839"}
+      ]}, pageContent: "Evidence"}
+    ]}]
+    const Location = () => {
+      const location = useLocation()
+      return <output data-testid="citation-route">{location.pathname}{location.search}</output>
+    }
+    render(<MemoryRouter initialEntries={["/research-workspace?workspace=workspace-a"]}><Location /><ChatPane /></MemoryRouter>)
+    const user = userEvent.setup()
+    const summary = await screen.findByText("Cited PDF passage", {selector: "summary span"})
+    await user.click(summary)
+    expect(summary.closest("details")).toHaveAttribute("open")
+    expect(screen.getByTestId("citation-route").textContent).toBe("/research-workspace?workspace=workspace-a")
+    expect(mockFocusSourceByMediaId).not.toHaveBeenCalled()
+    expect(mockFocusSourceById).not.toHaveBeenCalled()
+    expect(mockTrackSourceClick).toHaveBeenCalledTimes(1)
+    expect(mockTrackCitation).not.toHaveBeenCalled()
+    const secondPage = within(summary.closest("details")!).getByRole("link", {name: "Open PDF page 872"})
+    expect(secondPage).toHaveAttribute("href", "/document-workspace?open=42&page=872")
+    expect(secondPage).toHaveAttribute("target", "_blank")
+    await user.click(secondPage)
+    expect(screen.getByTestId("citation-route").textContent).toBe("/research-workspace?workspace=workspace-a")
+    expect(mockTrackSourceClick).toHaveBeenCalledTimes(2)
+    expect(mockTrackCitation).toHaveBeenCalledTimes(1)
   })
 
   it("does not Undo into a replacement account after Clear", () => {
@@ -1404,6 +1449,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     await waitFor(() => {
       expect(mockOnSubmit).toHaveBeenCalledWith({
         message: prompt,
+        ragQuery: prompt,
         image: ""
       })
     })
@@ -1610,6 +1656,22 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     )
   })
 
+  it("uses focused retrieval for oversized full-source text and keeps the original question", async () => {
+    workspaceStoreState.selectedSourceIds = ["source-doc-1"]
+    workspaceStoreState.getSelectedSources = () => [{ id: "source-doc-1", mediaId: 101, title: "Long book", type: "pdf", status: "ready" }]
+    workspaceStoreState.getSelectedMediaIds = () => [101]
+    mockGetMediaDetails.mockResolvedValue({ content: { text: "Full book text. ".repeat(10000) } })
+    renderChatPane()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include full source contents" }))
+    fireEvent.change(screen.getByLabelText("Chat message"), { target: { value: "What does Education propose?" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+    const submitted = mockOnSubmit.mock.calls.at(-1)?.[0]
+    expect(submitted.ragQuery).toBe("What does Education propose?")
+    expect(submitted.message).not.toContain("Full book text.")
+    expect(submitted.message).toContain("What does Education propose?")
+  })
+
   it("does not duplicate question framing when full source contents and response presets are enabled", async () => {
     workspaceStoreState.selectedSourceIds = ["source-doc-1"]
     workspaceStoreState.getSelectedSources = () => [
@@ -1805,6 +1867,15 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     expect(mockCaptureToCurrentNote).not.toHaveBeenCalled();
   });
 
+  it("saves the visible answer without optional model reasoning", () => {
+    messageOptionState.messages = [{ id: "reasoned", isBot: true, name: "Assistant",
+      message: "<think>Private draft reasoning.</think>Visible cited answer.", sources: [] }];
+    renderChatPane();
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
+    expect(mockCaptureToCurrentNote).toHaveBeenCalledWith(expect.objectContaining({content: "Visible cited answer."}));
+    expect(mockCaptureToCurrentNote.mock.calls[0][0].title).not.toContain("reasoning");
+  });
+
   it("saves chat message content into workspace note draft", () => {
     messageOptionState.messages = [
       {
@@ -1827,5 +1898,40 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         title: expect.stringContaining("Assistant:")
       })
     )
+  })
+
+  it("keeps mobile chat settings closed with the answer and composer available", () => {
+    viewport.mobile = true
+    messageOptionState.messages = [{ id: "answer", isBot: true, name: "Assistant", message: "Readable answer", sources: [] }]
+    renderChatPane()
+    const settings = screen.getByText("Chat settings").closest("details")
+    expect(settings).not.toHaveAttribute("open")
+    expect(settings).toContainElement(screen.getByLabelText("Response style"))
+    expect(settings).not.toContainElement(screen.getByText("Readable answer"))
+    expect(settings).not.toContainElement(screen.getByRole("textbox"))
+    fireEvent.click(screen.getByText("Chat settings"))
+    expect(settings).toHaveAttribute("open")
+  })
+
+  it("reports an unsaved capture and opens the existing draft only on request", () => {
+    const onOpenNoteDraft = vi.fn()
+    messageOptionState.messages = [{ id: "answer", isBot: true, name: "Assistant", message: "Visible answer", sources: [] }]
+    renderChatPane({ onOpenNoteDraft })
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+    expect(screen.getByRole("status")).toHaveTextContent("Added to the current note draft. Not saved yet.")
+    expect(onOpenNoteDraft).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Open draft" }))
+    expect(onOpenNoteDraft).toHaveBeenCalledOnce()
+    expect(mockCaptureToCurrentNote).toHaveBeenCalledOnce()
+  })
+
+  it("clears the unsaved capture notice once the Note has been saved", () => {
+    messageOptionState.messages = [{ id: "answer", isBot: true, name: "Assistant", message: "Visible answer", sources: [] }]
+    const view = renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+    expect(screen.getByText("Added to the current note draft. Not saved yet.")).toBeInTheDocument()
+    workspaceStoreState.currentNote.isDirty = false
+    view.rerender(<MemoryRouter><ChatPane /></MemoryRouter>)
+    expect(screen.queryByText("Added to the current note draft. Not saved yet.")).not.toBeInTheDocument()
   })
 })

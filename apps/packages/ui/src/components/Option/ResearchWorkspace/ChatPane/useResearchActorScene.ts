@@ -15,6 +15,15 @@ import { buildWorkspaceChatSessionKey } from "@/store/workspace-chat-session-key
 import { useWorkspaceStore } from "@/store/workspace";
 import { useStoreMessageOption } from "@/store/option";
 import { usePlaygroundSessionStore } from "@/store/playground-session";
+import { isWorkspaceSourceSelectable } from "@/store/workspace-source-status";
+import type { WorkspaceSource } from "@/types/workspace";
+
+// Status polling replaces source rows even when the selected evidence is unchanged.
+const sourceEvidenceIdentity = (sources: WorkspaceSource[]) => JSON.stringify(
+  sources.map(source => [source.id, source.mediaId, source.type,
+    source.webCapture, source.captureOwnerScope, source.knowledgeQaEvidence,
+    isWorkspaceSourceSelectable(source)]),
+);
 
 /** Research retains a private Scene; its SDK chat IDs grant no native history authority. */
 export const useResearchActorScene = (
@@ -64,6 +73,8 @@ export const useResearchActorScene = (
       if (history) return captureActorSceneSend(history, commandIsCurrent);
       const draft = useStoreMessageOption.getState();
       const workspace = useWorkspaceStore.getState();
+      const evidenceIdentity = sourceEvidenceIdentity(workspace.getEffectiveSelectedSources());
+      const selectedIds = JSON.stringify([workspace.selectedSourceIds, workspace.selectedSourceFolderIds]);
       const session = usePlaygroundSessionStore.getState();
       if (
         draft.chatDraftRevision !== draftRevision ||
@@ -87,10 +98,8 @@ export const useResearchActorScene = (
           commandIsCurrent() &&
           now.workspaceId === workspaceId &&
           now.workspaceChatReferenceId === referenceId &&
-          now.selectedSourceIds === workspace.selectedSourceIds &&
-          now.selectedSourceFolderIds === workspace.selectedSourceFolderIds &&
-          now.sourceFolderMemberships === workspace.sourceFolderMemberships &&
-          now.sources === workspace.sources &&
+          JSON.stringify([now.selectedSourceIds, now.selectedSourceFolderIds]) === selectedIds &&
+          sourceEvidenceIdentity(now.getEffectiveSelectedSources()) === evidenceIdentity &&
           active.chatDraftAddress === draft.chatDraftAddress &&
           active.chatDraftRevision === draft.chatDraftRevision &&
           latest.restoreRevision === session.restoreRevision &&

@@ -395,6 +395,7 @@ export interface WorkspaceStudyArtifactData {
 }
 
 export interface GeneratedArtifact {
+  detailDeferred?: { workspaceId: string; scopeKey: string; imported: boolean; model?: string; provider?: string }
   workspaceArtifactId?: string
   workspaceArtifactVersion?: number
   removedFromStudio?: boolean

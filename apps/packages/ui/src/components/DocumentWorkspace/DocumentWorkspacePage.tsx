@@ -127,7 +127,7 @@ const isErrorWithStatus = (err: unknown): err is ErrorWithStatus => {
 /**
  * Left sidebar tab content for the document workspace layout.
  */
-const LeftSidebarContent: React.FC = () => {
+const LeftSidebarContent: React.FC<{ onHide?: () => void }> = ({ onHide }) => {
   const { t } = useTranslation(["option", "common"])
   const activeSidebarTab = useDocumentWorkspaceStore((s) => s.activeSidebarTab)
   const setActiveSidebarTab = useDocumentWorkspaceStore(
@@ -149,7 +149,7 @@ const LeftSidebarContent: React.FC = () => {
       case "pages":
         return <PagesTab />
       case "toc":
-        return <TableOfContentsTab />
+        return <TableOfContentsTab onHide={onHide} />
       case "info":
         return <DocumentInfoTab />
       case "references":
@@ -555,6 +555,8 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
 
   // Get active document for hooks
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
+  const activeDocumentType = useDocumentWorkspaceStore((s) => s.activeDocumentType)
+  const totalPages = useDocumentWorkspaceStore((s) => s.totalPages)
   const openDocuments = useDocumentWorkspaceStore((s) => s.openDocuments)
   const openDocument = useDocumentWorkspaceStore((s) => s.openDocument)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -599,6 +601,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
   const [loadingDocumentId, setLoadingDocumentId] = useState<number | null>(null)
   const blobUrlMapRef = useRef(new Map(openDocuments.filter(doc => doc.url?.startsWith("blob:")).map(doc => [doc.id, doc.url])))
   const openDocumentRequestRef = useRef(0)
+  const autoOpenHandledRef = useRef<string | null>(null)
   const openingMediaIdRef = useRef<number | null>(null)
   const ownedCloseNotices = useRef(new Set<string>())
   const ownedCloseDialogs = useRef(new Set<ReturnType<typeof Modal.confirm>>())
@@ -794,10 +797,19 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
     cleanupRemovedBlobUrls()
   }, [cleanupRemovedBlobUrls])
 
-  useEffect(() => () => {
-    openDocumentRequestRef.current += 1
-    openAbortRef.current?.abort()
-    // Same-owner route returns reuse the store's still-owned Blob URLs.
+  useEffect(() => {
+    // Strict Mode replays setup after cleanup while retaining refs and state.
+    // Let the URL effect restart the open that the previous lifetime aborted.
+    if (openAbortRef.current?.signal.aborted) {
+      autoOpenHandledRef.current = null
+      openingMediaIdRef.current = null
+      setLoadingDocumentId(null)
+    }
+    return () => {
+      openDocumentRequestRef.current += 1
+      openAbortRef.current?.abort()
+      // Same-owner route returns reuse the store's still-owned Blob URLs.
+    }
   }, [])
 
   const openDocumentById = useCallback(
@@ -966,7 +978,6 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
 
   // Handle ?open={mediaId} URL parameter for auto-opening documents
   const autoOpenId = searchParams.get("open")
-  const autoOpenHandledRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!autoOpenId) {
@@ -982,11 +993,32 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
     autoOpenHandledRef.current = autoOpenId
     if (openDocuments.some(doc => doc.id === mediaId)) {
       openingMediaIdRef.current = mediaId
-      useDocumentWorkspaceStore.getState().setActiveDocument(mediaId)
+      if (activeDocumentId !== mediaId) useDocumentWorkspaceStore.getState().setActiveDocument(mediaId)
       return
     }
     void openDocumentById(mediaId)
-  }, [autoOpenId, loadingDocumentId, openDocuments, openDocumentById, searchParams, setSearchParams])
+  }, [autoOpenId, activeDocumentId, loadingDocumentId, openDocuments, openDocumentById, searchParams, setSearchParams])
+
+  const citationPage = searchParams.get("page")
+  const appliedCitationPage = useRef<string | null>(null)
+  useEffect(() => {
+    if (!citationPage) {
+      appliedCitationPage.current = null
+      return
+    }
+    if (!owner?.isCurrent() || activeDocumentType !== "pdf" ||
+      String(activeDocumentId) !== autoOpenId || loadingDocumentId !== null ||
+      readingProgress.isPending || totalPages <= 0 || !/^[1-9]\d*$/.test(citationPage)) return
+    const key = `${owner.authorityKey}:${owner.authorityRevision}:${autoOpenId}:${citationPage}`
+    if (appliedCitationPage.current === key) return
+    appliedCitationPage.current = key
+    const page = Number(citationPage)
+    if (!Number.isSafeInteger(page) || page > totalPages) {
+      message.error(t("option:documentWorkspace.citationPageUnavailable", "The cited PDF page is outside this document. Check the source reference."))
+      return
+    }
+    useDocumentWorkspaceStore.getState().setCurrentPage(page)
+  }, [owner, activeDocumentId, activeDocumentType, autoOpenId, citationPage, loadingDocumentId, readingProgress.isPending, totalPages, message, t])
 
   useEffect(() => {
     if (openingMediaIdRef.current !== null) {
@@ -997,6 +1029,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
     if (autoOpenId === String(activeDocumentId)) return
     const next = new URLSearchParams(searchParams)
     next.set("open", String(activeDocumentId))
+    next.delete("page")
     setSearchParams(next, {replace: true})
   }, [activeDocumentId, loadingDocumentId, autoOpenId, searchParams, setSearchParams])
 
@@ -1072,7 +1105,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
     ]
 
     const mobileContent = {
-      sidebar: <LeftSidebarContent />,
+      sidebar: <LeftSidebarContent onHide={() => setActiveTab("viewer")} />,
        viewer: (
         <Suspense fallback={viewerPanelFallback}>
           <DocumentViewer
@@ -1198,7 +1231,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
           {/* Left pane - Sidebar (desktop) */}
           {leftPaneOpen && (
             <aside className="hidden h-full min-h-0 shrink-0 border-r border-border bg-surface lg:flex lg:flex-col" style={{ width: leftPanel.width }}>
-              <LeftSidebarContent />
+              <LeftSidebarContent onHide={() => setLeftPaneOpen(false)} />
             </aside>
           )}
           {leftPaneOpen && (
@@ -1226,7 +1259,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
             className="lg:hidden"
             styles={{ body: { padding: 0, height: "100%", display: "flex", flexDirection: "column" } }}
           >
-            <LeftSidebarContent />
+            <LeftSidebarContent onHide={() => setLeftDrawerOpen(false)} />
           </Drawer>
 
           {/* Center pane - Document Viewer */}

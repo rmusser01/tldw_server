@@ -22,7 +22,7 @@ async def test_process_pdf_uses_mineru_document_adapter_for_always(monkeypatch):
     except Exception as exc:
         pytest.skip(f"Dependencies not available: {exc}")
 
-    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path: "parser text")
+    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path, **kwargs: "parser text")
     monkeypatch.setattr(
         pdf_lib,
         "_run_mineru_document_ocr",
@@ -67,7 +67,7 @@ async def test_process_pdf_mineru_fallback_preserves_parser_text_on_failure(monk
     except Exception as exc:
         pytest.skip(f"Dependencies not available: {exc}")
 
-    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path: "parser text")
+    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path, **kwargs: "parser text")
 
     def _raise_mineru(**kwargs):
         raise RuntimeError("boom")
@@ -109,7 +109,7 @@ async def test_process_pdf_mineru_fallback_skips_ocr_when_parser_text_is_suffici
         mineru_calls["count"] += 1
         return {"text": "unexpected mineru text", "structured": {}, "details": {}, "warnings": []}
 
-    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path: "parser text is already long enough")
+    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path, **kwargs: "parser text is already long enough")
     monkeypatch.setattr(
         pdf_lib,
         "_run_mineru_document_ocr",

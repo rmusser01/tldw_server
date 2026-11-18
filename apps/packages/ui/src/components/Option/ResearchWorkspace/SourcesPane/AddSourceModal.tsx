@@ -27,6 +27,9 @@ import { useWorkspaceStore } from "@/store/workspace"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { inferUploadMediaTypeFromFile } from "@/services/tldw/media-routing"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { hasWorkspacePdfUploads, ingestWorkspacePdf, listWorkspacePdfUploads, markWorkspacePdfAttached, type WorkspacePdfUpload } from "@/services/tldw/workspace-pdf-ingest"
 import type {
   AddSourceTab,
   WorkspaceSourceStatus,
@@ -90,10 +93,12 @@ type AddSourceHandler = (
   sources: AddSourceCandidate[],
   options?: {
     closeModal?: boolean
+    assertCurrent?: () => void
+    requestScope?: ServicePromptRequestScope
   }
 ) => Promise<void>
 
-type UploadProgressStatus = "uploading" | "processing" | "error"
+type UploadProgressStatus = "uploading" | "queued" | "processing" | "saved" | "ready" | "completed" | "error"
 
 type UploadProgressEntry = {
   id: string
@@ -102,6 +107,8 @@ type UploadProgressEntry = {
   totalBytes: number
   status: UploadProgressStatus
   message?: string
+  progressPercent?: number
+  receipt?: WorkspacePdfUpload
 }
 
 type AddSourceTabUsage = Record<AddSourceTab, number>
@@ -489,6 +496,8 @@ const UploadTab: React.FC<{
     UploadProgressEntry[]
   >([])
   const activeUploadCountRef = React.useRef(0)
+  const workspaceId = useWorkspaceStore(state => state.workspaceId)
+  const pdfControllers = React.useRef(new Map<string, AbortController>())
   const uploadSizeLimitBytes = React.useMemo(
     () => getConfiguredSourceUploadMaxSizeBytes(),
     []
@@ -535,7 +544,7 @@ const UploadTab: React.FC<{
         const existing = index >= 0 ? previous[index] : null
         const nextEntry = updater(existing)
         if (index < 0) {
-          return [nextEntry, ...previous].slice(0, 8)
+          return [nextEntry, ...previous].slice(0, 20)
         }
         return previous.map((entry, currentIndex) =>
           currentIndex === index ? nextEntry : entry
@@ -552,8 +561,86 @@ const UploadTab: React.FC<{
     fileInput?.click()
   }, [])
 
+  const showPdfProgress = React.useCallback((entryId: string, receipt: WorkspacePdfUpload) => {
+    upsertUploadEntry(entryId, () => ({ id: entryId, fileName: receipt.fileName,
+      totalBytes: receipt.fileSize, bytesUploaded: null, receipt,
+      message: receipt.status === "interrupted" ? "Check saved upload to view current progress." : receipt.message,
+      progressPercent: receipt.progressPercent,
+      status: receipt.status === "submitting" ? "uploading" : receipt.status === "queued" ? "queued" : receipt.status === "processing" ? "processing" : receipt.status === "interrupted" ? "saved" : receipt.status === "completed" ? "ready" : receipt.status === "attached" ? "completed" : "error" }))
+  }, [upsertUploadEntry])
+
+  React.useEffect(() => {
+    const controller = new AbortController()
+    const uploads = pdfControllers.current
+    if (workspaceId && hasWorkspacePdfUploads(workspaceId)) {
+      void loadServicePromptSnapshot([], { signal: controller.signal }).then(snapshot => {
+        try {
+          if (controller.signal.aborted || snapshot.scopeInvalidatedSignal.aborted || useWorkspaceStore.getState().workspaceId !== workspaceId) return
+          for (const receipt of listWorkspacePdfUploads({ workspaceId, requestScope: snapshot.requestScope })) {
+            if (receipt.status !== "attached") showPdfProgress(receipt.id, receipt)
+          }
+        } finally { snapshot.release() }
+      }).catch(() => { /* Recovery remains available after connection/sign-in is restored. */ })
+    }
+    return () => { controller.abort(); uploads.forEach(item => item.abort()); uploads.clear() }
+  }, [workspaceId, showPdfProgress])
+
+  const handlePdfUpload = React.useCallback(async (file?: File, receipt?: WorkspacePdfUpload) => {
+    const entryId = receipt?.id || `${file!.name}-${file!.size}-${file!.lastModified}`
+    if (pdfControllers.current.has(entryId)) return
+    const controller = new AbortController()
+    pdfControllers.current.set(entryId, controller)
+    beginProcessing()
+    setError(null)
+    let snapshot: ServicePromptSnapshot | undefined
+    let latestReceipt = receipt
+    const assertCurrent = () => {
+      controller.signal.throwIfAborted()
+      snapshot?.scopeSignal.throwIfAborted()
+      snapshot?.scopeInvalidatedSignal.throwIfAborted()
+      if (!workspaceId || useWorkspaceStore.getState().workspaceId !== workspaceId) throw new DOMException("Workspace changed", "AbortError")
+    }
+    try {
+      assertCurrent()
+      snapshot = await loadServicePromptSnapshot([], { signal: controller.signal })
+      assertCurrent()
+      const context = { workspaceId: workspaceId!, requestScope: snapshot.requestScope, assertCurrent,
+        signal: AbortSignal.any([controller.signal, snapshot.scopeSignal, snapshot.scopeInvalidatedSignal]) }
+      const result = await ingestWorkspacePdf({ ...context, file, receipt,
+        onProgress: value => { assertCurrent(); latestReceipt = value; showPdfProgress(entryId, value) } })
+      assertCurrent()
+      const added = extractMediaFromAddResponse(result.data)
+      await onAddSources([{ mediaId: result.mediaId, title: added.title || file?.name || receipt?.fileName || "PDF",
+        type: "pdf", status: "processing", statusMessage: result.warning, pageCount: added.pageCount,
+        fileSize: file?.size || receipt?.fileSize, sourceCreatedAt: added.sourceCreatedAt }],
+      { closeModal: false, assertCurrent, requestScope: snapshot.requestScope })
+      assertCurrent()
+      markWorkspacePdfAttached(context, result.receipt)
+      showPdfProgress(entryId, { ...result.receipt, status: "attached" })
+    } catch (error) {
+      if (controller.signal.aborted || snapshot?.scopeInvalidatedSignal.aborted || useWorkspaceStore.getState().workspaceId !== workspaceId) return
+      const friendlyError = latestReceipt?.status === "unknown"
+        ? latestReceipt.message || "Upload acceptance is unknown. Check My Media before uploading again."
+        : latestReceipt?.tracking?.jobIds?.length && latestReceipt.status !== "failed"
+          ? "The PDF job is saved. Use Check saved upload to reconnect; do not upload it again."
+          : mapSourceIngestionError(error)
+      setError(friendlyError)
+      upsertUploadEntry(entryId, previous => ({ ...previous, id: entryId, fileName: file?.name || receipt?.fileName || "PDF",
+        totalBytes: file?.size || receipt?.fileSize || 0, bytesUploaded: null,
+        status: latestReceipt?.tracking?.jobIds?.length && latestReceipt.status !== "failed" ? "saved" : "error", message: friendlyError }))
+    } finally {
+      snapshot?.release()
+      pdfControllers.current.delete(entryId)
+      if (useWorkspaceStore.getState().workspaceId === workspaceId) endProcessing()
+    }
+  }, [workspaceId, beginProcessing, endProcessing, onAddSources, setError, showPdfProgress, upsertUploadEntry])
+
   const handleUpload = React.useCallback(
     async (file: File) => {
+      if (inferUploadMediaTypeFromFile(file.name, file.type) === "pdf") {
+        await handlePdfUpload(file)
+        return
+      }
       const entryId = `${file.name}-${file.size}-${file.lastModified}`
       beginProcessing()
       setError(null)
@@ -632,7 +719,7 @@ const UploadTab: React.FC<{
         endProcessing()
       }
     },
-    [beginProcessing, endProcessing, onAddSources, setError, t, upsertUploadEntry]
+    [beginProcessing, endProcessing, handlePdfUpload, onAddSources, setError, t, upsertUploadEntry]
   )
 
   const uploadProps: UploadProps = {
@@ -727,12 +814,12 @@ const UploadTab: React.FC<{
           data-testid="upload-progress-list"
         >
           {uploadProgressEntries.map((entry) => {
-            const hasNumericProgress =
+            const hasNumericProgress = entry.progressPercent != null ||
               entry.bytesUploaded != null && entry.totalBytes > 0
             const percent = hasNumericProgress
               ? Math.min(
                   100,
-                  Math.max(0, Math.round((entry.bytesUploaded! / entry.totalBytes) * 100))
+                  Math.max(0, entry.progressPercent ?? Math.round((entry.bytesUploaded! / entry.totalBytes) * 100))
                 )
               : undefined
             return (
@@ -757,10 +844,14 @@ const UploadTab: React.FC<{
                       {t("playground:sources.processing", "Processing")}
                     </span>
                   )}
+                  {entry.status === "queued" && <span className="text-[11px] text-primary">Queued</span>}
+                  {entry.status === "saved" && <span className="text-[11px] text-text-muted">Saved upload</span>}
+                  {entry.status === "ready" && <span className="text-[11px] text-primary">Ready to add</span>}
+                  {entry.status === "completed" && <span className="text-[11px] text-success">Added</span>}
                   {entry.status === "error" && (
                     <span className="inline-flex items-center gap-1 text-[11px] text-error">
                       <X className="h-3 w-3" />
-                      {t("common:error", "Error")}
+                      {t("common:error.label", "Error")}
                     </span>
                   )}
                 </div>
@@ -768,13 +859,13 @@ const UploadTab: React.FC<{
                   <Progress
                     percent={percent}
                     size="small"
-                    status={entry.status === "error" ? "exception" : "active"}
+                    status={entry.status === "error" ? "exception" : entry.status === "completed" ? "success" : "active"}
                     className="mt-1"
                     showInfo={false}
                   />
                 ) : (
                   <p className="mt-1 text-[11px] text-text-muted">
-                    {entry.status === "uploading"
+                    {entry.message || (entry.status === "uploading"
                       ? t(
                           "playground:sources.uploadProgressFallback",
                           "Uploading…"
@@ -788,12 +879,14 @@ const UploadTab: React.FC<{
                           t(
                             "playground:sources.uploadProgressErrorFallback",
                             "Upload failed."
-                          )}
+                          ))}
                   </p>
                 )}
-                {entry.status === "error" && entry.message && (
-                  <p className="mt-1 text-[11px] text-error">{entry.message}</p>
+                {hasNumericProgress && entry.message && (
+                  <p className="mt-1 text-[11px] text-text-muted">{entry.message}</p>
                 )}
+                {Boolean(entry.receipt?.tracking?.jobIds?.length) && entry.status !== "completed" && !pdfControllers.current.has(entry.id) && <Button size="small"
+                  onClick={() => void handlePdfUpload(undefined, entry.receipt)}>Check saved upload</Button>}
               </div>
             )
           })}
@@ -2142,6 +2235,7 @@ export const AddSourceModal: React.FC<AddSourceModalProps> = ({
     sourceCandidates,
     options
   ) => {
+    options?.assertCurrent?.()
     // Check for duplicates before adding
     const existingMediaIds = new Set((sources || []).map((s) => s.mediaId))
     const duplicates = sourceCandidates.filter((s) =>
@@ -2174,6 +2268,7 @@ export const AddSourceModal: React.FC<AddSourceModalProps> = ({
 
     // Add only new sources to workspace
     for (const source of newSources) {
+      options?.assertCurrent?.()
       addSource(
         addToNeedsReview
           ? { ...source, reviewState: "needs_review" as const }
@@ -2190,7 +2285,8 @@ export const AddSourceModal: React.FC<AddSourceModalProps> = ({
               mode: "add"
             },
             {
-              suppressBackendUnavailableEvent: true
+              suppressBackendUnavailableEvent: true,
+              ...(options?.requestScope ? { requestScope: options.requestScope } : {})
             }
           )
           .catch(() => {

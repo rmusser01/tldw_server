@@ -25,6 +25,7 @@ import io
 import json
 import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -116,6 +117,27 @@ def _body(messages: list[dict[str, Any]] | None = None, **extra: Any) -> dict[st
 
 def _simple(**extra: Any) -> dict[str, Any]:
     return _body([_message("pa_q1", None, "user", 0), _message("pa_a1", "pa_q1", "assistant", 1)], **extra)
+
+
+def _workspace_import(**extra: Any) -> dict[str, Any]:
+    """A migrated chat with destination Media references and original dates."""
+    body = _simple(scope_type="workspace", workspace_id="destination-workspace", **extra)
+    body["messages"][1]["metadata"] = dict(COMPLETE)
+    body["messages"][1]["metadata_extra"] = {
+        "workspace_rag_sources_v1": {
+            "origin": "knowledge_qa",
+            "sources": [{
+                "originalId": "historical-passage", "mediaId": 2, "title": "Imported PDF",
+                "type": "pdf", "sourceType": "media", "excerpt": "The exact source passage.",
+                "pageNumber": 352, "printedPageLabel": "319", "citationIndex": 1,
+                "pageSpans": [
+                    {"pageNumber": 352, "startChar": 100, "endChar": 120, "printedPageLabel": "319"},
+                    {"pageNumber": 353, "startChar": 122, "endChar": 140, "printedPageLabel": "320"},
+                ],
+            }],
+        }
+    }
+    return body
 
 
 def _counts(db: CharactersRAGDB) -> dict[str, int]:
@@ -1226,3 +1248,164 @@ def test_fork_source_must_be_a_message_of_the_parent(client: TestClient, db: Cha
     assert response.status_code == 422, response.text
     assert _error(response) == "invalid_fork_source"
     assert _counts(db) == before
+
+
+def test_workspace_import_preserves_citations_dates_and_continuable_parent_graph(client, db):
+    db.upsert_workspace("destination-workspace", "Imported research")
+    body = _workspace_import()
+    imported = client.post(PATH, json=body)
+    assert imported.status_code == 201, imported.text
+    assert (imported.json()["scope_type"], imported.json()["workspace_id"]) == ("workspace", "destination-workspace")
+    scope = {"scope_type": "workspace", "workspace_id": "destination-workspace"}
+    listed = client.get(f"{CHATS}{CHAT_ID}/messages", params={**scope, "include_metadata": True, "render_placeholders": False})
+    assert listed.status_code == 200, listed.text
+    rows = listed.json()["messages"]
+    assert [(row["id"], row["parent_message_id"], row["content"]) for row in rows] == [
+        ("pa_q1", None, "text of pa_q1"), ("pa_a1", "pa_q1", "text of pa_a1")]
+    assert datetime.fromisoformat(rows[1]["timestamp"].replace("Z", "+00:00")) == datetime.fromisoformat(_ts(1).replace("Z", "+00:00"))
+    assert rows[1]["metadata_extra"] == {"sender_role": "assistant", **COMPLETE, **body["messages"][1]["metadata_extra"]}
+    assert client.get(f"{CHATS}{CHAT_ID}/messages").status_code == 404
+    captured = client.post(f"/api/v1/chat/conversations/{CHAT_ID}/history/selection", params=scope, json={
+        "purpose": "send", "view": {"view_session_id": "workspace-import-view", "conversation_id": CHAT_ID,
+        "interpretation": {"kind": "parent_graph_v1"}, "cursor": {"kind": "after_message", "message_id": "pa_a1"}, "selection_revision": 1}})
+    assert captured.status_code == 200, captured.text
+    capture = captured.json()
+    selection = resolve_history_selection(capture["snapshot"], capture["view"], "send", "client-only")["selection"]
+    sent = client.post(f"{CHATS}{CHAT_ID}/messages", params=scope, json={
+        "id": "pa_followup", "role": "user", "content": "Continue the imported research.", "tldw_history_selection_v1": selection})
+    assert sent.status_code == 201, sent.text
+    assert db.get_message_by_id("pa_followup")["parent_message_id"] == "pa_a1"
+    replay = client.post(PATH, json=body)
+    assert replay.status_code == 200, replay.text
+    assert replay.headers["Idempotency-Replayed"] == "true"
+    assert replay.json()["message_count"] == 3
+
+
+@pytest.mark.parametrize("mutation", ["workspace", "global", "citation"])
+def test_workspace_import_retry_is_bound_to_scope_and_citations(client, db, mutation):
+    db.upsert_workspace("destination-workspace", "Imported research")
+    db.upsert_workspace("other-workspace", "Another project")
+    body = _workspace_import()
+    assert client.post(PATH, json=body).status_code == 201
+    if mutation == "workspace":
+        body["workspace_id"] = "other-workspace"
+    elif mutation == "global":
+        del body["scope_type"], body["workspace_id"], body["messages"][1]["metadata_extra"]
+    else:
+        body["messages"][1]["metadata_extra"]["workspace_rag_sources_v1"]["sources"][0]["excerpt"] = "Different evidence."
+    response = client.post(PATH, json=body)
+    assert (response.status_code, _error(response)) == (409, "chat_id_conflict")
+    assert _counts(db)["messages"] == 2
+
+
+def test_workspace_import_preserves_historical_claim_checks_and_binds_replay(client, db):
+    db.upsert_workspace("destination-workspace", "Imported research")
+    body = _workspace_import()
+    extra = body["messages"][1]["metadata_extra"]
+    extra["claim_verification"] = {
+        "version": 1, "text_sha256": "a" * 64, "verdict": "unverified",
+        "provider": None, "model": None,
+        "coverage": {"total": 0, "evaluated": 0, "supported": 0, "uncovered": 0, "complete": False},
+        "findings": [], "evidence": {}, "limits": {},
+        "context": {"unavailable_reason": "Checker unavailable for the historical draft."},
+    }
+    extra["claim_verification_imported"] = True
+    response = client.post(PATH, json=body)
+    assert response.status_code == 201, response.text
+    saved = client.get(f"{CHATS}{CHAT_ID}/messages", params={"scope_type": "workspace", "workspace_id": "destination-workspace", "include_metadata": True})
+    stored = saved.json()["messages"][1]["metadata_extra"]
+    assert {key: stored[key] for key in extra} == extra
+    assert client.post(PATH, json=body).status_code == 200
+    extra["claim_verification"]["context"]["unavailable_reason"] = "Changed historical report."
+    assert client.post(PATH, json=body).status_code == 409
+
+
+@pytest.mark.parametrize("unavailable", ["missing", "deleted", "foreign"])
+def test_workspace_import_refuses_unavailable_or_foreign_workspace(client, db, unavailable):
+    if unavailable != "missing":
+        owner = db.client_id
+        if unavailable == "foreign":
+            db.client_id = "2"
+        db.upsert_workspace("destination-workspace", "Private project")
+        db.client_id = owner
+        if unavailable == "deleted":
+            db.delete_workspace("destination-workspace", expected_version=1)
+    response = client.post(PATH, json=_workspace_import())
+    assert response.status_code == 404, response.text
+    assert _counts(db) == dict.fromkeys(TABLES, 0)
+    assert "Private project" not in response.text
+
+
+def test_workspace_import_rechecks_workspace_inside_transaction(client, db, monkeypatch):
+    db.upsert_workspace("destination-workspace", "Imported research")
+    original = db.chat_imports.import_conversation
+    def delete_before_write(*args, **kwargs):
+        # A competing request needs its own checkout, not this request's PostgreSQL read transaction.
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(db.delete_workspace, "destination-workspace", expected_version=1).result(timeout=10)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(db.chat_imports, "import_conversation", delete_before_write)
+    response = client.post(PATH, json=_workspace_import())
+    assert response.status_code == 404, response.text
+    assert _counts(db) == dict.fromkeys(TABLES, 0)
+
+
+def test_workspace_import_replay_refuses_deleted_workspace(client, db):
+    db.upsert_workspace("destination-workspace", "Imported research")
+    body = _workspace_import()
+    assert client.post(PATH, json=body).status_code == 201
+    db.delete_workspace("destination-workspace", expected_version=1)
+    response = client.post(PATH, json=body)
+    assert response.status_code == 404, response.text
+
+
+@pytest.mark.parametrize("replay", [False, True])
+def test_workspace_import_refuses_closed_chat_admission_before_replay(client, db, replay):
+    db.upsert_workspace("destination-workspace", "Imported research")
+    body = _workspace_import()
+    if replay:
+        assert client.post(PATH, json=body).status_code == 201
+    before = _counts(db)
+    db._begin_native_workspace_delete("destination-workspace", expected_version=1, hard=False)
+    assert db.get_workspace("destination-workspace")["native_chat_admission_closed"]
+    response = client.post(PATH, json=body)
+    assert response.status_code == 404, response.text
+    assert _counts(db) == before
+
+
+@pytest.mark.parametrize("mutation", ["unknown", "bool_media", "url", "role", "global", "duplicate_channel", "missing_scope", "blank_workspace"])
+def test_workspace_import_rejects_unsupported_metadata_or_scope_atomically(client, db, mutation):
+    db.upsert_workspace("destination-workspace", "Imported research")
+    body = _workspace_import()
+    message = body["messages"][1]
+    extra = message["metadata_extra"]
+    if mutation == "unknown":
+        extra["other"] = {"secret": "must not be stored"}
+    elif mutation == "bool_media":
+        extra["workspace_rag_sources_v1"]["sources"][0]["mediaId"] = True
+    elif mutation == "url":
+        extra["workspace_rag_sources_v1"]["sources"][0]["url"] = "file:///private/data"
+    elif mutation == "role":
+        message["role"] = "user"
+    elif mutation == "global":
+        del body["scope_type"], body["workspace_id"]
+    elif mutation == "duplicate_channel":
+        message["metadata"].update(extra)
+    elif mutation == "missing_scope":
+        del body["scope_type"]
+    else:
+        body["workspace_id"] = "   "
+    response = client.post(PATH, json=body)
+    assert response.status_code == 422, response.text
+    assert _counts(db) == dict.fromkeys(TABLES, 0)
+
+
+def test_workspace_import_message_collision_rolls_back_chat_and_references(client, db):
+    db.upsert_workspace("destination-workspace", "Imported research")
+    existing = db.add_conversation({"title": "Existing"})
+    db.add_message({"id": "pa_a1", "conversation_id": existing, "sender": "assistant", "content": "Existing reply"})
+    before = _counts(db)
+    response = client.post(PATH, json=_workspace_import())
+    assert (response.status_code, _error(response)) == (409, "message_id_conflict")
+    assert _counts(db) == before
+    assert db.get_message_by_id("pa_q1") is None

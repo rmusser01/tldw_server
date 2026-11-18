@@ -1,3 +1,4 @@
+import { materializeWorkspaceOutputs } from "@/services/workspace-artifact-catalog";
 import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import { createElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -47,6 +48,7 @@ import {
 import { isServicePromptRequestPath } from "@/services/tldw/service-prompt-scope-error";
 import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
 import { loadServicePromptSnapshot } from "@/services/service-prompts";
+import { tldwRequest } from "@/services/tldw/request-core";
 
 const receiptKey = "tldw:research-workspace:migration:tombstone:original";
 const context = () => ({
@@ -129,11 +131,153 @@ beforeEach(() => {
 });
 
 describe("migrated Research Workspace restoration", () => {
+  it("opens a history of terminal section outputs using only catalog records", async () => {
+    const original = boundary.request.getMockImplementation()!;
+    const rows = Array.from({length: 13}, (_, i) => ({
+      id: `report-${i}`, display_id: `report-${i}`, display_version: 4, workspace_id: "original", version: 4, artifact_type: "summary",
+      title: `Chapter report ${i}`, created_at: "2026-11-17T00:00:00Z",
+      status: "complete", review_state: "needs_revision", defer_detail: true,
+    }));
+    boundary.request.mockImplementation(async input => {
+      if (input.path.endsWith("/artifact-revisions")) return rows;
+      if (input.path.includes("/artifacts")) throw new Error("unexpected full history download");
+      return original(input);
+    });
+    await expect(restore()).resolves.toBe(true);
+    const state = useWorkspaceStore.getState();
+    expect(state.generatedArtifacts).toHaveLength(13);
+    expect(state.generatedArtifacts[12]).toMatchObject({ id: "report-12", detailDeferred: {workspaceId: "original", scopeKey: "original-alice"} });
+    expect(state.exportWorkspaceBundle("original")).toBeNull();
+    expect(state.duplicateWorkspace("original")).toBeNull();
+  });
+
+
+  it("retains legacy output IDs that cannot be addressed by the scoped detail route", async () => {
+    const original = boundary.request.getMockImplementation()!;
+    const rows = ["section", "old/id"].map(id => ({id, display_id: id, title: id, version: 1,
+      workspace_id: "original", artifact_type: "summary", defer_detail: id === "section", content: "Saved evidence"}));
+    boundary.request.mockImplementation(async input => {
+      if (input.path.endsWith("/artifact-revisions") || input.path.endsWith("/artifacts")) return rows;
+      if (input.path.includes("/artifacts/")) throw new Error("Unaddressable legacy detail");
+      return original(input);
+    });
+    await restore();
+    expect(useWorkspaceStore.getState().generatedArtifacts.map(a => a.content)).toEqual(["Saved evidence", "Saved evidence"]);
+  });
+
+  it.each(["restore", "stale version", "different workspace", "account switch", "partial export", "imported history"])(
+    "loads selected evidence and preserves unopened outputs during export (%s)", async outcome => {
+      const original = boundary.request.getMockImplementation()!;
+      const rows = [1, 2].map(n => ({
+        id: `row-${n}`, display_id: `card-${n}`, display_version: outcome === "imported history" ? 311 : 4, imported: outcome === "imported history", workspace_id: "original", version: 4,
+        artifact_type: "summary", title: `Chapter ${n}`, created_at: "2026-11-17T00:00:00Z",
+        status: "complete", review_state: "needs_revision", defer_detail: true,
+      }));
+      const getDetail = vi.fn((id: string) => {
+        const row = rows.find(r => r.id === id)!;
+        if (outcome === "partial export" && id === "row-2") throw new Error("Second output unavailable");
+        return { ...row, content: `Draft ${id}`, review_metadata: {reason: `Review ${id}`},
+          workspace_id: outcome === "different workspace" ? "foreign" : row.workspace_id,
+          version: outcome === "stale version" ? row.version + 1 : row.version,
+          version_metadata: {workspaceClient: {schemaVersion: 1, id: row.display_id, version: row.display_version, data: {evidence: [id]}}} };
+      });
+      boundary.request.mockImplementation(async input => {
+        if (input.path.endsWith("/artifact-revisions")) return rows;
+        if (input.path.includes("/artifacts/")) return getDetail(input.path.split("/").at(-1)!);
+        return original(input);
+      });
+      await restore();
+      const state = () => useWorkspaceStore.getState();
+      const card = state().generatedArtifacts[1];
+      if (outcome === "partial export") {
+        const before = state().generatedArtifacts;
+        await expect(materializeWorkspaceOutputs("original")).rejects.toThrow("Second output unavailable");
+        expect(state().generatedArtifacts).toBe(before);
+        expect(state().exportWorkspaceBundle("original")).toBeNull();
+        return;
+      }
+      if (outcome !== "restore" && outcome !== "imported history") {
+        if (outcome === "account switch") boundary.scopeKey = "other-user";
+        await expect(materializeWorkspaceOutputs("original", card)).rejects.toThrow();
+        expect(state().generatedArtifacts[1]).toBe(card);
+        expect(state().exportWorkspaceBundle("original")).toBeNull();
+        if (outcome === "account switch") expect(getDetail).not.toHaveBeenCalled();
+        return;
+      }
+      expect(await materializeWorkspaceOutputs("original", card)).toMatchObject({id: "card-2", content: "Draft row-2"});
+      expect(getDetail.mock.calls).toEqual([["row-2"]]);
+      if (outcome === "imported history") expect(state().generatedArtifacts[1]).toMatchObject({version: 311, workspaceArtifactVersion: 4});
+      expect(state().exportWorkspaceBundle("original")).toBeNull();
+      await materializeWorkspaceOutputs("original");
+      expect(getDetail.mock.calls).toEqual([["row-2"], ["row-1"]]);
+      const bundle = state().exportWorkspaceBundle("original");
+      expect(bundle?.workspace.snapshot.generatedArtifacts.map(a => [a.content, a.data?.evidence, a.reviewMetadata?.reason]))
+        .toEqual([["Draft row-1", ["row-1"], "Review row-1"], ["Draft row-2", ["row-2"], "Review row-2"]]);
+    },
+  );
+
+  it.each(["slow body", "deadline", "account cancellation"])(
+    "bounds a full artifact response while preserving %s behavior", async outcome => {
+      vi.useFakeTimers();
+      const originalRequest = boundary.request.getMockImplementation()!;
+      const apply = vi.fn();
+      const artifacts = [{ id: "saved-report", workspace_id: "original", artifact_type: "summary",
+        title: "Saved report", status: "completed", content: "Exact saved evidence", version: 1 }];
+      let bodyStarted = false;
+      boundary.request.mockImplementation(async input => {
+        if (input.path.endsWith("/artifact-revisions")) throw Object.assign(new Error("Older server"), {status: 404});
+        if (!input.path.endsWith("/artifacts")) return originalRequest(input);
+        const response = await tldwRequest(input, {
+          getConfig: async () => ({ ...boundary.config, authMode: "single-user", apiKey: "test-key" }),
+          fetchFn: async (_url, init) => {
+            const response = Response.json(artifacts);
+            vi.spyOn(response, "json").mockImplementation(() => new Promise((resolve, reject) => {
+              bodyStarted = true;
+              const timer = setTimeout(() => resolve(artifacts), outcome === "slow body" ? 15_000 : 180_000);
+              init?.signal?.addEventListener("abort", () => {
+                clearTimeout(timer);
+                reject(new DOMException("Body read aborted", "AbortError"));
+              }, { once: true });
+            }));
+            return response;
+          },
+        });
+        if (!response.ok) throw Object.assign(new Error(response.error), { code: response.code });
+        return response.data;
+      });
+      const pending = restore(apply).then(value => ({ value }), error => ({ error }));
+      let settled = false;
+      void pending.then(() => { settled = true; });
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(bodyStarted).toBe(true);
+        if (outcome === "slow body") {
+          await vi.advanceTimersByTimeAsync(15_000);
+          expect(await pending).toEqual({ value: true });
+          expect(apply).toHaveBeenCalledWith(expect.objectContaining({ generatedArtifacts: [expect.objectContaining({
+            id: "saved-report", content: "Exact saved evidence", workspaceArtifactVersion: 1,
+          })] }), undefined, undefined);
+        } else {
+          await vi.advanceTimersByTimeAsync(outcome === "deadline" ? 119_999 : 12_000);
+          expect(settled).toBe(false);
+          if (outcome === "account cancellation") boundary.controller.abort();
+          else await vi.advanceTimersByTimeAsync(2);
+          expect(await pending).toMatchObject({ error: { code: outcome === "deadline" ? "REQUEST_TIMEOUT" : "REQUEST_ABORTED" } });
+          expect(apply).not.toHaveBeenCalled();
+        }
+      } finally {
+        boundary.controller.abort();
+        await pending;
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("retains a newly imported report through a tombstoned cold restore", async () => {
     const originalRequest = boundary.request.getMockImplementation()!;
     let saved: Record<string, unknown> | undefined;
     boundary.request.mockImplementation(async (input) => {
+      if (input.path.endsWith("/artifact-revisions")) throw Object.assign(new Error("Older server"), {status: 404});
       if (input.method === "POST" && input.path === "/api/v1/workspaces/original/artifacts") {
         saved = { ...input.body, workspace_id: "original", version: 1,
           created_at: "2026-10-30T00:00:00Z", completed_at: null, total_tokens: null, total_cost_usd: null };
@@ -371,7 +515,7 @@ describe("migrated Research Workspace restoration", () => {
     expect(readMigratedResearchWorkspaceId(localStorage)).toBeNull();
   });
 
-  it.each(["context", "artifacts", "notes"])(
+  it.each(["context", "artifacts", "artifact-revisions", "notes"])(
     "permits scoped restoration GET for %s with only the explicit artifact-create mutation",
     (resource) => {
       const path = `/api/v1/workspaces/original/${resource}`;
@@ -1189,7 +1333,7 @@ describe("post-migration saved chat identity", () => {
       workspaceChatReferenceId: "original"
     });
     const setItem = vi
-      .spyOn(Storage.prototype, "setItem")
+      .spyOn(Object.getPrototypeOf(localStorage), "setItem")
       .mockImplementation(() => {
         throw new Error("Quota exceeded");
       });

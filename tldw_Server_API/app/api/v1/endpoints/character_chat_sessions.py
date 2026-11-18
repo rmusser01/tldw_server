@@ -5131,6 +5131,11 @@ def _find_chat_import_replay(
 ) -> dict[str, Any] | None:
     """Return the caller's matching imported chat, None if the id is free, or raise 409/410."""
     existing, stored_fingerprint = db.chat_imports.get_import_state(prepared.conversation_id)
+    if existing is not None and (
+        (existing.get("scope_type") or "global") != prepared.conversation.get("scope_type", "global")
+        or existing.get("workspace_id") != prepared.conversation.get("workspace_id")
+    ):
+        raise conversation_import.chat_id_conflict()
     replay = conversation_import.resolve_import_replay(
         existing, owner_id=owner_id, stored_fingerprint=stored_fingerprint, fingerprint=prepared.fingerprint
     )
@@ -5164,7 +5169,8 @@ def _resolve_chat_import_lineage(
     if (
         not parent
         or str(parent.get("client_id") or "").strip() != owner_id
-        or (parent.get("scope_type") or "global") != "global"
+        or (parent.get("scope_type") or "global") != conversation.get("scope_type", "global")
+        or parent.get("workspace_id") != conversation.get("workspace_id")
     ):
         raise ChatImportError(
             "parent_conversation_not_found",
@@ -5212,9 +5218,9 @@ async def import_chat_session(
     Timestamps are never replaced with the time of the import. The result is an
     ordinary server chat that can be read, branched and continued.
 
-    Ownership: the chat always goes to the authenticated account, in the global
-    chat scope. The body has no owner, scope, version or deleted field, and any
-    unknown field is refused.
+    Ownership: the chat always goes to the authenticated account. Explicit
+    workspace scope requires its available, same-owner destination; omitted scope
+    remains global. The body has no owner, version or deleted field.
 
     Idempotency: the same owner repeating the same import gets the existing
     chat back with 200 and ``Idempotency-Replayed: true``, even after the chat
@@ -5236,7 +5242,8 @@ async def import_chat_session(
     * No greeting is seeded, no auto-tagging is scheduled and no character
       behavior snapshot is taken: the import is exactly the messages sent.
     * Generation metadata is accepted only for assistant messages and only the
-      allow-listed keys; an empty message is refused.
+      allow-listed keys; workspace assistants may retain validated recorded RAG
+      references. An empty message is refused.
 
     Sync v2: refused with 409 ``sync_chat_import_unsupported`` while a Sync v2
     profile is active. Sync envelopes are written one mutation at a time and
@@ -5262,7 +5269,10 @@ async def import_chat_session(
     rate_limiter = get_character_rate_limiter()
     await rate_limiter.check_rate_limit(current_user.id, "chat_create")
     try:
-        if _active_chat_sync_service(current_user, ConversationScopeParams()) is not None:
+        scope = _resolve_chat_scope(import_data.scope_type, import_data.workspace_id)
+        if scope.scope_type == "workspace":
+            await run_in_threadpool(db.chat_imports.require_owned_workspace, scope.workspace_id, owner_id)
+        if _active_chat_sync_service(current_user, scope) is not None:
             raise ChatImportError(
                 "sync_chat_import_unsupported",
                 409,
@@ -5295,7 +5305,7 @@ async def import_chat_session(
 
         try:
             chat_count = await run_in_threadpool(
-                db.count_conversations_for_user, owner_id, scope_type="global", workspace_id=None
+                db.count_conversations_for_user, owner_id, scope_type=scope.scope_type, workspace_id=scope.workspace_id
             )
         except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as error:
             # Fail closed: quota enforcement must work to prevent resource exhaustion.
@@ -5319,6 +5329,8 @@ async def import_chat_session(
                 prepared.messages,
                 owner_client_id=owner_id,
                 request_fingerprint=prepared.fingerprint,
+                scope_type=scope.scope_type,
+                workspace_id=scope.workspace_id,
             )
         except ConflictError as error:
             if getattr(error, "entity", None) == "messages":

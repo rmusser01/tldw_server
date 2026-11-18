@@ -1,4 +1,5 @@
 import { tldwClient, type ScopedRequestOptions } from "@/services/tldw/TldwApiClient"
+import { servicePromptAuthorityKey } from "@/services/tldw/domains/service-prompts"
 import { useWorkspaceStore } from "@/store/workspace"
 
 /**
@@ -7,9 +8,9 @@ import { useWorkspaceStore } from "@/store/workspace"
  * ChatPane ("ask with sources") and StudioPane artifact generation both need
  * the full text of already-ingested workspace sources. Both now go through
  * this resolver, which reuses the in-memory workspace-store cache keyed by
- * (mediaId, version) and only fetches misses. The cache is intentionally NOT
- * part of the persisted store shape (partialize drops it): reuse is
- * in-memory only and never adds persistence coupling.
+ * (mediaId, version, authority) and only fetches misses. The cache is
+ * intentionally NOT part of the persisted store shape (partialize drops it):
+ * reuse is in-memory only and never adds persistence coupling.
  *
  * Eventual server-side replacement: batch `POST /media/details/batch {ids}`
  * (tracked as a note on TASK-15186).
@@ -79,13 +80,15 @@ type SourceContentCacheStore = {
   getState?: () => {
     getSourceContentText?: (
       mediaId: number,
-      version?: number | null
+      version?: number | null,
+      authorityKey?: string | null
     ) => string | null
     setSourceContentText?: (
       mediaId: number,
       version: number | null,
       text: string,
-      title?: string | null
+      title?: string | null,
+      authorityKey?: string | null
     ) => void
     sourceContentCache?: Map<number, { title?: string | null }>
   }
@@ -94,10 +97,11 @@ type SourceContentCacheStore = {
 const storeWithCache = () => useWorkspaceStore as unknown as SourceContentCacheStore
 
 const readCachedSourceContent = (
-  mediaId: number
+  mediaId: number,
+  authorityKey: string
 ): SourceContentResolution | null => {
   const state = storeWithCache().getState?.()
-  const cached = state?.getSourceContentText?.(mediaId, null)
+  const cached = state?.getSourceContentText?.(mediaId, null, authorityKey)
   if (typeof cached !== "string" || cached.length === 0) return null
   return {
     text: cached,
@@ -108,7 +112,7 @@ const readCachedSourceContent = (
 
 /**
  * Resolves the full source text for a media item, reusing the workspace
- * store's in-memory cache for repeated asks of the same (mediaId, version).
+ * store's in-memory cache for repeated asks of the same scoped media/version.
  * `version` is the content identity the caller holds (null when unpinned);
  * web-capture sources must NOT use this path — their freshness protocol
  * (version uuid + content digest) is stricter and stays on its own route.
@@ -117,7 +121,17 @@ export const resolveSourceContentText = async (
   mediaId: number,
   options?: ScopedRequestOptions
 ): Promise<SourceContentResolution> => {
-  const cached = readCachedSourceContent(mediaId)
+  options?.signal?.throwIfAborted()
+  const scope = options?.requestScope
+  // Legacy unscoped callers still fetch, but cannot borrow another account's cache.
+  const knownAuthority =
+    scope?.config.serverUrl.trim() &&
+    (scope.config.authMode === "single-user"
+      ? scope.config.expectedSingleUserApiKeyScope?.trim()
+      : scope.config.authMode === "multi-user" &&
+        scope.userId != null && String(scope.userId).trim().length > 0)
+  const authorityKey = scope && knownAuthority ? servicePromptAuthorityKey(scope) : null
+  const cached = authorityKey ? readCachedSourceContent(mediaId, authorityKey) : null
   if (cached !== null) {
     return cached
   }
@@ -129,12 +143,13 @@ export const resolveSourceContentText = async (
     signal: options?.signal,
     requestScope: options?.requestScope
   })
+  options?.signal?.throwIfAborted()
 
   const text = extractSourceContentText(detail)
-  if (text) {
+  if (text && authorityKey) {
     storeWithCache()
       .getState?.()
-      ?.setSourceContentText?.(mediaId, null, text, extractSourceTitle(detail))
+      ?.setSourceContentText?.(mediaId, null, text, extractSourceTitle(detail), authorityKey)
   }
 
   return { text, title: extractSourceTitle(detail), fromCache: false }

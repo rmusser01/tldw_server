@@ -3,20 +3,41 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import re
 import uuid
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 from loguru import logger
 from pydantic import ValidationError
 
-from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
+from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
+    list_active_team_memberships_for_user,
+    list_org_memberships_for_user,
+)
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError as MediaDatabaseError
+from tldw_Server_API.app.core.exceptions import (
+    FileArtifactsError,
+    FileArtifactsValidationError,
+    ResearchWorkspaceOutputJobError,
+    file_artifacts_http_status,
+)
+from tldw_Server_API.app.core.File_Artifacts.adapters.image_adapter import ImageAdapter
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import capture_provider_override_call_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+    mark_provider_credential_used,
+)
 from tldw_Server_API.app.core.Research_Workspace.research_workspace_outputs import (
     ResearchWorkspaceOutputArtifactType,
     ResearchWorkspaceOutputSettings,
@@ -25,20 +46,6 @@ from tldw_Server_API.app.core.Research_Workspace.research_workspace_outputs impo
     ResearchWorkspaceOutputSubmitRequest,
     ResearchWorkspaceOutputSubmitResponse,
 )
-from tldw_Server_API.app.core.Workspaces.workspace_schemas import WorkspaceArtifactResponse
-from tldw_Server_API.app.core.exceptions import (
-    FileArtifactsError,
-    FileArtifactsValidationError,
-    ResearchWorkspaceOutputJobError,
-    file_artifacts_http_status,
-)
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
-from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError as MediaDatabaseError
-from tldw_Server_API.app.core.File_Artifacts.adapters.image_adapter import ImageAdapter
-from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Slides.presentation_rendering import PresentationRenderError, render_presentation_video
 from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase
 from tldw_Server_API.app.core.Slides.slides_generator import (
@@ -49,17 +56,19 @@ from tldw_Server_API.app.core.Slides.slides_generator import (
     SlidesSourceTooLargeError,
 )
 from tldw_Server_API.app.core.Slides.visual_style_resolver import resolve_builtin_visual_style
+from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, is_retryable_error
 from tldw_Server_API.app.core.TTS.tts_request_resolution import resolve_tts_request_defaults
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 from tldw_Server_API.app.core.Utils.iso_datetime import utc_now_iso as _utc_now_iso
+from tldw_Server_API.app.core.Workspaces.workspace_schemas import WorkspaceArtifactResponse
 
 RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN = "research_workspace"
 RESEARCH_WORKSPACE_OUTPUT_JOB_QUEUE = "default"
 RESEARCH_WORKSPACE_OUTPUT_JOBS_QUEUE_ENV = "RESEARCH_WORKSPACE_OUTPUT_JOBS_QUEUE"
 RESEARCH_WORKSPACE_OUTPUT_JOB_TYPE = "research_workspace_output"
 
-_OUTPUT_ARTIFACT_TYPES = {"video_overview", "infographic"}
+_OUTPUT_ARTIFACT_TYPES = {"video_overview", "infographic", "summary", "compare_sources", "report"}
 _PUBLIC_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
 _SOURCE_CONTEXT_TOTAL_CHAR_LIMIT = 18_000
 _SOURCE_CONTEXT_PER_SOURCE_CHAR_LIMIT = 6_000
@@ -426,6 +435,46 @@ async def process_research_workspace_output_payload(
         raise ResearchWorkspaceOutputJobError("output_settings_invalid", status_code=400) from exc
 
     job_id = _validated_research_workspace_output_job_id(job)
+    if artifact_type in {"summary", "compare_sources", "report"}:
+        from tldw_Server_API.app.core.Research_Workspace.section_summaries import (
+            SectionSummaryCancelled,
+            process_section_summary,
+        )
+        team_rows, org_rows = await asyncio.gather(
+            list_active_team_memberships_for_user(user_id), list_org_memberships_for_user(user_id))
+        runtime = ProviderCredentialRuntime(
+            user_id=user_id,
+            team_ids=sorted({int(row["team_id"]) for row in team_rows if isinstance(row, dict) and row.get("team_id") is not None}),
+            org_ids=sorted({int(row["org_id"]) for row in org_rows if isinstance(row, dict) and row.get("org_id") is not None and str(row.get("status", "")).lower() == "active"}),
+            trusted_base_url_override=False,
+            override_snapshot_resolver=capture_provider_override_call_snapshot,
+        )
+        try:
+            provider = settings.provider or get_default_provider()
+            credentials = await runtime.resolve(provider, model=settings.model)
+            settings = settings.model_copy(update={"provider": provider})
+            return await process_section_summary(payload=normalized_payload, workspace_db=workspace_db,
+                media_db=media_db, settings=settings, job_id=job_id, job_manager=job_manager, progress=progress,
+                provider_credentials=credentials,
+                on_provider_success=lambda: mark_provider_credential_used(runtime, credentials))
+        except SectionSummaryCancelled:
+            # Use the generic Jobs cancellation path with the acquired identity.
+            # WorkerTerminalOutcome currently resolves Slides-specific identities.
+            if not job_manager.finalize_cancelled(
+                job_id, expected_uuid=str(job.get("uuid") or ""),
+                worker_id=job.get("worker_id"), lease_id=job.get("lease_id"),
+                reason="Section output cancelled; completed sections retained",
+            ):
+                raise ResearchWorkspaceOutputJobError("section_cancel_finalization_failed", retryable=False) from None
+            return {"artifact_id": artifact_id, "cancelled": True}
+        except ResearchWorkspaceOutputJobError as exc:
+            _try_mark_workspace_output_artifact_failed(
+                workspace_db=workspace_db, workspace_id=workspace_id, artifact_id=artifact_id,
+                artifact_type=artifact_type, job_id=job_id, error_code=exc.public_code,
+            )
+            raise
+        finally:
+            await runtime.close()
     if artifact_type == "video_overview":
         return await _process_video_overview_output_payload(
             job=job,
@@ -999,8 +1048,19 @@ def submit_research_workspace_output_job(
 ) -> ResearchWorkspaceOutputSubmitResponse:
     """Create a pending workspace artifact and enqueue its generation job."""
     _validate_workspace_sources(workspace_db, workspace_id, request.source_ids)
-    artifact_id = f"{request.artifact_type}-{uuid.uuid4().hex}"
-    workspace_db.add_workspace_artifact(
+    artifact_id = request.resume_artifact_id or f"{request.artifact_type}-{uuid.uuid4().hex}"
+    if request.resume_artifact_id:
+        existing = workspace_db.get_workspace_artifact(workspace_id, artifact_id)
+        if not existing or existing.get("artifact_type") != request.artifact_type:
+            raise ResearchWorkspaceOutputJobError("workspace_artifact_not_found", status_code=404, retryable=False)
+        producer = existing.get("producer_metadata") or {}
+        if producer.get("origin") != "research_workspace_output_job" or producer.get("source_ids") != request.source_ids:
+            raise ResearchWorkspaceOutputJobError("section_checkpoint_changed", status_code=409, retryable=False)
+        old_job = job_manager.get_job(producer.get("job_id"))
+        if old_job and old_job.get("status") in {"queued", "processing"}:
+            raise ResearchWorkspaceOutputJobError("output_job_already_running", status_code=409, retryable=False)
+    else:
+        workspace_db.add_workspace_artifact(
         workspace_id,
         _pending_artifact_payload(
             artifact_id=artifact_id,
@@ -1025,10 +1085,12 @@ def submit_research_workspace_output_job(
                 "user_id": str(user_id),
             },
             max_retries=1,
+            **({"idempotency_key": f"section-resume:{artifact_id}:{producer.get('job_id')}"} if request.resume_artifact_id else {}),
         )
     except Exception as exc:
         try:
-            workspace_db.delete_workspace_artifact(workspace_id, artifact_id)
+            if not request.resume_artifact_id:
+                workspace_db.delete_workspace_artifact(workspace_id, artifact_id)
         except Exception as cleanup_exc:
             logger.warning(
                 "Failed to delete pending Research Workspace output artifact {} for workspace {} "
@@ -1041,6 +1103,12 @@ def submit_research_workspace_output_job(
             "output_job_enqueue_failed",
             status_code=503,
         ) from exc
+    if request.artifact_type in {"summary", "compare_sources", "report"}:
+        _update_workspace_output_artifact(workspace_db=workspace_db, workspace_id=workspace_id, artifact_id=artifact_id,
+            updates={"status": "generating", "producer_metadata": {
+                "origin": "research_workspace_output_job", "job_id": int(job["id"]), "artifact_type": request.artifact_type,
+                "source_ids": request.source_ids, "settings": request.settings.model_dump(exclude_none=True),
+            }})
     return ResearchWorkspaceOutputSubmitResponse(
         job_id=int(job["id"]),
         status=_public_job_status(job.get("status")),
@@ -1093,6 +1161,28 @@ def get_research_workspace_output_job_status(
         error=artifact_error if artifact_error and job_error in {None, "worker_exception"} else job_error,
         result=result,
     )
+
+
+def cancel_research_workspace_output_job(*, workspace_id: str, job_id: int, job_manager: JobManager,
+    user_id: int | str, workspace_db: CharactersRAGDB) -> bool:
+    """Cancel the owned job and persist queued cancellation without discarding evidence."""
+    job = job_manager.get_job(job_id)
+    if job is None:
+        raise ResearchWorkspaceOutputJobError("job_not_found", status_code=404)
+    _validate_job_scope(job, workspace_id=workspace_id, user_id=str(user_id))
+    cancelled = job_manager.cancel_job(job_id, reason="User cancelled workspace output",
+        expected_uuid=job.get("uuid"), expected_domain=job.get("domain"), expected_job_type=job.get("job_type"))
+    current = job_manager.get_job(job_id) if cancelled else None
+    if current and current.get("status") == "cancelled":
+        payload = _normalize_job_mapping(job.get("payload"))
+        artifact_id = str(payload.get("artifact_id") or "")
+        artifact = workspace_db.get_workspace_artifact(workspace_id, artifact_id)
+        producer = _normalize_job_mapping((artifact or {}).get("producer_metadata"))
+        if artifact and producer.get("job_id") == job_id:
+            _update_workspace_output_artifact(workspace_db=workspace_db, workspace_id=workspace_id, artifact_id=artifact_id,
+                updates={"status": "failed", "producer_metadata": {**producer, "job_status": "cancelled",
+                    "error": "section_output_cancelled"}})
+    return cancelled
 
 
 def _validate_workspace_sources(
@@ -1400,14 +1490,18 @@ def _mark_workspace_output_artifact_failed(
 ) -> None:
     """Persist the failed status and public error code on a workspace artifact."""
     public_code = _safe_public_error_code(error_code)
+    section_output = artifact_type in {"summary", "report", "compare_sources"}
+    existing = workspace_db.get_workspace_artifact(workspace_id, artifact_id) if section_output else None
+    producer = dict((existing or {}).get("producer_metadata") or {}) if section_output else {}
     _update_workspace_output_artifact(
         workspace_db=workspace_db,
         workspace_id=workspace_id,
         artifact_id=artifact_id,
         updates={
             "status": "failed",
-            "content_type": "image/png" if artifact_type == "infographic" else "video/mp4",
+            "content_type": "text/markdown" if section_output else "image/png" if artifact_type == "infographic" else "video/mp4",
             "producer_metadata": {
+                **producer,
                 "origin": "research_workspace_output_job",
                 "job_id": job_id,
                 "artifact_type": artifact_type,
@@ -1427,7 +1521,7 @@ def _pending_artifact_payload(
 ) -> dict[str, Any]:
     """Build the pending workspace artifact row for a queued output job."""
     title = settings.title_hint or artifact_type.replace("_", " ").title()
-    content_type = "video/mp4" if artifact_type == "video_overview" else "image/png"
+    content_type = "text/markdown" if artifact_type in {"summary", "compare_sources", "report"} else "video/mp4" if artifact_type == "video_overview" else "image/png"
     return {
         "id": artifact_id,
         "artifact_type": artifact_type,

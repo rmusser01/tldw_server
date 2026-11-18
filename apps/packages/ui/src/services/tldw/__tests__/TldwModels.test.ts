@@ -841,6 +841,34 @@ describe("TldwModelsService caching", () => {
     }
   })
 
+  it("keeps a cookie profile timeout out of the model lookup error overlay without granting cached authority", async () => {
+    vi.stubEnv("DEV", false)
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" })
+    mocks.getModels.mockResolvedValue([{ id: "current-model", name: "Current Model", provider: "openai", type: "chat" }])
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+      await expect(service.getModel("current-model")).resolves.toMatchObject({ id: "current-model" })
+      const timeout = Object.assign(new Error("Request timed out. (GET /api/v1/users/me/profile)"), { code: "REQUEST_TIMEOUT", status: 0 })
+      mocks.getCurrentUserProfile.mockRejectedValueOnce(timeout)
+      await expect(service.getModel("current-model")).resolves.toBeNull()
+      expect(consoleError).not.toHaveBeenCalled()
+      expect(mocks.getModels).toHaveBeenCalledOnce()
+      await expect(service.getCachedChatModels()).resolves.toEqual([])
+      mocks.getCurrentUserProfile.mockRejectedValueOnce(timeout)
+      await expect(service.getModels(true, { throwOnError: true })).rejects.toBe(timeout)
+      expect(mocks.getModels).toHaveBeenCalledOnce()
+      await expect(service.getModel("current-model")).resolves.toMatchObject({ id: "current-model" })
+      expect(mocks.getCurrentUserProfile).toHaveBeenCalledTimes(4)
+      expect(mocks.storageSet).not.toHaveBeenCalled()
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   it("reuses cached models during the forced refresh cooldown", async () => {
     mocks.getModels.mockResolvedValue([
       { id: "openrouter/model-a", name: "Model A", provider: "openrouter", type: "chat" }
@@ -981,16 +1009,19 @@ describe("TldwModelsService caching", () => {
     expect(mocks.getModels).toHaveBeenCalledTimes(2)
   })
 
-  it.each([false, true])(
-    "keeps the catalog when a read is aborted, since an abort is not a server failure (requireFresh: %s)",
-    async (requireFresh) => {
+  it.each([
+    [false, "REQUEST_ABORTED"], [true, "REQUEST_ABORTED"],
+    [false, "REQUEST_TIMEOUT"], [true, "REQUEST_TIMEOUT"]
+  ] as const)(
+    "keeps the catalog when a read is interrupted, since interruption is not a server failure (requireFresh: %s, code: %s)",
+    async (requireFresh, code) => {
       mocks.getModels.mockResolvedValueOnce([
         { id: "current-model", name: "Current Model", provider: "openai", type: "chat" }
       ])
       const { TldwModelsService } = await importService()
       const service = new TldwModelsService()
       await service.getModels()
-      mocks.getModels.mockRejectedValue(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }))
+      mocks.getModels.mockRejectedValue(Object.assign(new Error("Request interrupted"), { code }))
 
       await expect(service.getModels(true, { requireFresh })).resolves.toEqual([])
       expect((await service.getCachedChatModels()).map((model) => model.id)).toEqual(["current-model"])

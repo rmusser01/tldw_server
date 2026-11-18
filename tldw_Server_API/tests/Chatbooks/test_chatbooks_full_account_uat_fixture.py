@@ -171,7 +171,10 @@ async def test_prepare_and_reset_create_separate_source_and_empty_destination(tm
 @pytest.mark.asyncio
 async def test_fixture_round_trip_verifies_full_inventory_and_exact_embeddings(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    storage_root = tmp_path / "configured-blob-storage"
+    monkeypatch.setenv("FILE_STORAGE_PATH", str(storage_root))
     fixture = _load_fixture_module()
     prepared = await fixture.prepare(tmp_path)
     expected = json.loads(Path(prepared["expected_path"]).read_text(encoding="utf-8"))
@@ -187,6 +190,21 @@ async def test_fixture_round_trip_verifies_full_inventory_and_exact_embeddings(
         {"name": character["name"]} for character in expected["characters"]
     ]
     assert verified["account_inventory_counts"] == expected["account_inventory"]["source_counts"]
+    artifact_path = Path(verified["media"]["artifact_path"])
+    assert artifact_path.is_relative_to(storage_root / str(expected["destination_user_id"]))
+    original_bytes = artifact_path.read_bytes()
+    artifact_path.write_bytes(b"tampered stored media")
+    try:
+        with pytest.raises(fixture.FixtureVerificationError, match="artifact SHA-256 does not match"):
+            await fixture.verify(tmp_path)
+    finally:
+        artifact_path.write_bytes(original_bytes)
+    artifact_path.unlink()
+    try:
+        with pytest.raises(fixture.FixtureVerificationError, match="artifact path is invalid"):
+            await fixture.verify(tmp_path)
+    finally:
+        artifact_path.write_bytes(original_bytes)
     destination_db = fixture.create_media_database(
         str(expected["destination_user_id"]),
         db_path=str(fixture.DatabasePaths.get_media_db_path(expected["destination_user_id"])),

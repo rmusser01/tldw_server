@@ -10,8 +10,8 @@ import {
   History,
   ListChecks,
   Send,
+  Shield,
   ShieldAlert,
-  ShieldCheck,
   XCircle
 } from "lucide-react"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives/Badge"
@@ -208,10 +208,12 @@ export const TraceableArtifactSummary: React.FC<
     artifact.version !== undefined ? `v${artifact.version}` : artifact.artifactVersionId
   const redactionLabel =
     artifact.redaction?.supportSafe === false
-      ? t("playground:studio.traceableArtifact.restricted", "Restricted")
-      : artifact.redaction?.redacted
+      ? t("playground:studio.traceableArtifact.supportViewRestricted", "Support view restricted")
+      : artifact.redaction?.redacted === true
         ? t("playground:studio.traceableArtifact.redacted", "Redacted")
-        : t("playground:studio.traceableArtifact.supportSafe", "Support safe")
+        : artifact.redaction?.redacted === false
+          ? t("playground:studio.traceableArtifact.notRedacted", "Not redacted")
+          : t("playground:studio.traceableArtifact.redactionUnknown", "Redaction unknown")
 
   return (
     <div
@@ -243,6 +245,10 @@ export const TraceableArtifactSummary: React.FC<
           size="sm"
           variant={artifact.redaction.supportSafe === false ? "warning" : "secondary"}
           outline
+          title={t(
+            "playground:studio.traceableArtifact.redactionExplanation",
+            "Recorded redaction metadata for support views. Citation checks and reviewer decisions are separate."
+          )}
         >
           {redactionLabel}
         </Badge>
@@ -532,34 +538,44 @@ export const TraceableArtifactDetail: React.FC<
         icon={
           redaction?.supportSafe === false || redaction?.redacted
             ? ShieldAlert
-            : ShieldCheck
+            : Shield
         }
       >
         {redaction ? (
           <div className="flex flex-wrap gap-1.5">
             <Badge
               size="sm"
-              variant={redaction.supportSafe === false ? "warning" : "success"}
+              variant={redaction.supportSafe === false ? "warning" : "secondary"}
               outline
             >
               {redaction.supportSafe === false
-                ? t("playground:studio.traceableArtifact.restricted", "Restricted")
-                : t("playground:studio.traceableArtifact.supportSafe", "Support safe")}
+                ? t("playground:studio.traceableArtifact.supportViewRestricted", "Support view restricted")
+                : redaction.supportSafe === true
+                  ? t("playground:studio.traceableArtifact.supportViewUnrestricted", "Support view unrestricted")
+                  : t("playground:studio.traceableArtifact.supportViewUnknown", "Support view unknown")}
             </Badge>
             <Badge
               size="sm"
               variant={redaction.redacted ? "warning" : "secondary"}
               outline
             >
-              {redaction.redacted
+              {redaction.redacted === true
                 ? t("playground:studio.traceableArtifact.redacted", "Redacted")
-                : t("playground:studio.traceableArtifact.notRedacted", "Not redacted")}
+                : redaction.redacted === false
+                  ? t("playground:studio.traceableArtifact.notRedacted", "Not redacted")
+                  : t("playground:studio.traceableArtifact.redactionUnknown", "Redaction unknown")}
             </Badge>
             {redaction.retentionClass && (
               <Badge size="sm" variant="secondary" outline>
                 {redaction.retentionClass}
               </Badge>
             )}
+            <p className="w-full text-xs text-text-muted">
+              {t(
+                "playground:studio.traceableArtifact.redactionExplanation",
+                "Recorded redaction metadata for support views. Citation checks and reviewer decisions are separate."
+              )}
+            </p>
           </div>
         ) : (
           <p className="text-xs text-text-muted">

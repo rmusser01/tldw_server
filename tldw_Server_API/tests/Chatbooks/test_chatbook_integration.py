@@ -200,6 +200,8 @@ class TestChatbookIntegration:
         success, message, details = result
         assert success is True
         assert message == "Successfully imported 1/1 items"
+        imported_notes = service.db.list_notes(limit=10, offset=0)
+        [imported_note] = [note for note in imported_notes if note["title"] == "Imported Note"]
         assert details == {
             "imported_items": {"note": 1},
             "warnings": [],
@@ -208,9 +210,9 @@ class TestChatbookIntegration:
             "successful_items": 1,
             "failed_items": 0,
             "skipped_items": 0,
+            "id_maps": {"media": {}, "notes": {"note2": str(imported_note["id"])}},
         }
-        imported_notes = service.db.list_notes(limit=10, offset=0)
-        assert any(note["title"] == "Imported Note" for note in imported_notes)
+        assert imported_note["content"] == "Imported content"
 
     def test_preview_export(self, service):
         """Test preview export with real database data."""
@@ -357,6 +359,10 @@ class TestChatbookIntegration:
         import_success, import_message, details = import_result
         assert import_success is True
         assert import_message == "Successfully imported 1/1 items"
+        [imported_note] = [
+            note for note in service.db.list_notes(limit=10, offset=0)
+            if str(note["id"]) != str(note_id)
+        ]
         assert details == {
             "imported_items": {"note": 1},
             "warnings": [],
@@ -365,7 +371,9 @@ class TestChatbookIntegration:
             "successful_items": 1,
             "failed_items": 0,
             "skipped_items": 0,
+            "id_maps": {"media": {}, "notes": {str(note_id): str(imported_note["id"])}},
         }
+        assert imported_note["content"] == "Roundtrip content"
 
     @pytest.mark.asyncio
     async def test_async_export_job(self, service):
@@ -400,6 +408,8 @@ class TestChatbookIntegration:
         )
         assert result1[0] is True
         assert result1[1] == "Successfully imported 1/1 items"
+        imported_notes = service.db.list_notes(limit=10, offset=0)
+        [imported_note] = imported_notes
         assert result1[2] == {
             "imported_items": {"note": 1},
             "warnings": [],
@@ -408,6 +418,7 @@ class TestChatbookIntegration:
             "successful_items": 1,
             "failed_items": 0,
             "skipped_items": 0,
+            "id_maps": {"media": {}, "notes": {"note2": str(imported_note["id"])}},
         }
 
         result2 = await service.import_chatbook(
@@ -425,7 +436,10 @@ class TestChatbookIntegration:
             "successful_items": 0,
             "failed_items": 0,
             "skipped_items": 1,
+            "id_maps": {"media": {}, "notes": {}},
         }
+        assert service.db.list_notes(limit=10, offset=0) == imported_notes
+        assert imported_note["content"] == "Imported content"
 
     def test_cancel_export_job(self, service):
         """Test cancelling an export job."""

@@ -226,6 +226,27 @@ describe("workspace persist lifecycle flush durability", () => {
     expect(state.putCalls).toHaveLength(1)
   })
 
+  it("keeps already-durable artifact payload pointers during a lifecycle flush", async () => {
+    const workspaceId = "durable-lifecycle-ws"
+    const { adapter, state } = createGatedAdapter()
+    state.releasePuts()
+    const storage = createWorkspaceStorage({ indexedDbAdapter: adapter })
+    const artifacts = [makeArtifact("durable-artifact", "saved")]
+    artifacts[0].versionMetadata = { workspaceClient: { data: { evidence: "x".repeat(30_000) } } }
+    await storage.setItem(STORAGE_KEY, buildEnvelope(workspaceId, "notes v1", artifacts))
+    const saved = JSON.parse(localStorage.getItem(snapshotKey(workspaceId))!)
+
+    const write = storage.setItem(STORAGE_KEY, buildEnvelope(workspaceId, "notes v2", artifacts))
+    window.dispatchEvent(new Event("pagehide"))
+
+    const flushed = JSON.parse(localStorage.getItem(snapshotKey(workspaceId))!)
+    expect(flushed.notes).toBe("notes v2")
+    expect(flushed.generatedArtifacts[0]).toEqual(saved.generatedArtifacts[0])
+    expect(flushed.generatedArtifacts[0].versionMetadata).toBeUndefined()
+    expect(state.putCalls).toHaveLength(1)
+    await write
+  })
+
   it("removeItem awaits an in-flight drain instead of racing it (no resurrection of cleared storage)", async () => {
     const workspaceId = "remove-race-ws"
     const { adapter, state } = createGatedAdapter()

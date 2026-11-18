@@ -325,6 +325,7 @@ route_map:
     "/api/v1/evaluations*": evals.default
     "/api/v1/feedback*": evals.default
     "/api/v1/benchmarks*": evals.default
+    "/api/v1/research-workspace/citations/verify": rag.default
     "/api/v1/research*": research.default
     "/api/v1/paper-search*": research.default
     "/api/v1/web-scraping*": web_scraping.default

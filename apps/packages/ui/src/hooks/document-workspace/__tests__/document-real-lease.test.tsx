@@ -3,11 +3,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useDocumentOperation } from "../useDocumentOperation"
+import { usePdfOutline } from "../usePdfOutline"
 import { useAnnotations } from "../useAnnotations"
 import { useDocumentWorkspaceStore as store } from "@/store/document-workspace"
 import { useConnectionStore } from "@/store/connection"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
-const api = vi.hoisted(() => ({ listAnnotations: vi.fn() }))
+const api = vi.hoisted(() => ({ listAnnotations: vi.fn(), request: vi.fn() }))
+vi.mock("@/services/background-proxy", () => ({ bgRequest: api.request }))
 vi.mock(
   "@plasmohq/storage",
   async () =>
@@ -93,7 +95,7 @@ describe("Document real verified lease", () => {
     "aborts held document reads on real %s retirement",
     async (boundary) => {
       let finish!: (value: unknown) => void
-      api.listAnnotations.mockReturnValue(
+      api.listAnnotations.mockImplementation(() => new Promise(() => {})).mockReturnValueOnce(
         new Promise((resolve) => {
           finish = resolve
         })
@@ -132,4 +134,35 @@ describe("Document real verified lease", () => {
       expect(store.getState().annotations).toEqual([])
     }
   )
+  it.each(["server", "credential", "logout"])(
+    "aborts exact PDF page resolution on real %s retirement",
+    async boundary => {
+      let finish!: (value: unknown) => void
+      const held = new Promise(resolve => { finish = resolve })
+      api.request.mockImplementation(async ({ path }) => {
+        if (path.endsWith("/outline")) return { media_id: 1, has_outline: false, entries: [], total_pages: 922 }
+        if (path.includes("/content?")) return held
+        return { media_id: 1, available: true, navigation_version: "nav-v1", source_order_used: ["generated_toc"],
+          nodes: [{ id: "education", title: "Education", parent_id: null, level: 1, order: 0, target_type: "page", target_start: 319, target_end: null }],
+          stats: { node_count: 1, returned_node_count: 1, max_depth: 1, truncated: false } }
+      })
+      const hook = renderHook(() => usePdfOutline(1), { wrapper })
+      await waitFor(() => expect(hook.result.current.data?.items).toHaveLength(1))
+      const result = hook.result.current.resolvePage("education", new AbortController().signal).catch(error => error)
+      await waitFor(() => expect(api.request).toHaveBeenCalledTimes(3))
+      const options = api.request.mock.calls[2][0]
+      expect(options.servicePromptConfig).toMatchObject({ serverUrl: original.serverUrl, expectedSingleUserApiKeyScope: expect.any(String), expectedUserId: null })
+      act(() => {
+        if (boundary === "server") change({ ...original, serverUrl: "https://document-b.test" })
+        else if (boundary === "credential") change({ ...original, apiKey: "synthetic-replacement-key" })
+        else window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
+      })
+      expect(options.abortSignal.aborted).toBe(true)
+      await act(async () => finish({ media_id: 1, node_id: "education", navigation_version: "nav-v1", coverage_status: "exact",
+        resolved_start_char: 100, resolved_end_char: 200,
+        page_spans: [{ page_number: 352, start_char: 100, end_char: 200 }] }))
+      expect(await result).toBeInstanceOf(Error)
+    }
+  )
+
 })

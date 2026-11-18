@@ -1223,6 +1223,19 @@ const selectConfiguredCockpitModel = async (
   await ensureComposerOptionsVisible(page);
   await page.getByTestId('model-selector').first().click();
 
+  const optionReadinessDeadline = Date.now() + 30_000;
+  const modelKey = `${normalizeCockpitProviderKey(selection.provider)}:${selection.model}`;
+  const option = page
+    .locator(
+      `[data-testid="model-selector-option"][data-model-key="${escapeCssAttrValue(modelKey)}"]`
+    )
+    .first();
+  // Wait for the configured rows before they expand and reposition the popup
+  // beneath a scope-control pointer click. Both row checks share one budget.
+  await expect(option).toBeVisible({
+    timeout: Math.max(1, optionReadinessDeadline - Date.now()),
+  });
+
   // CC-06: the scope is a two-way "Ready to use | All models" control.
   const scopeToggle = page.getByTestId('model-list-scope-toggle');
   await expect(scopeToggle).toBeVisible();
@@ -1238,13 +1251,9 @@ const selectConfiguredCockpitModel = async (
 
   await page.getByLabel('Search models').fill(selection.model);
 
-  const modelKey = `${normalizeCockpitProviderKey(selection.provider)}:${selection.model}`;
-  const option = page
-    .locator(
-      `[data-testid="model-selector-option"][data-model-key="${escapeCssAttrValue(modelKey)}"]`
-    )
-    .first();
-  await expect(option).toBeVisible({ timeout: 30_000 });
+  await expect(option).toBeVisible({
+    timeout: Math.max(1, optionReadinessDeadline - Date.now()),
+  });
   await option.click();
 
   return modelKey;

@@ -1,4 +1,6 @@
 import { WORKSPACE_RAG_SOURCES_KEY, projectWorkspaceRagSources } from "@/utils/workspace-rag-sources"
+import { verifyWorkspaceAnswer, uncheckedAnswerVerification } from "@/services/workspace-claim-verification"
+import { CLAIM_VERIFICATION_KEY } from "@/utils/claim-verification"
 import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryEditRefusal } from "@/hooks/chat/native-character-preflight"
 import type { BaseMessage } from "@/types/messages"
 import {
@@ -101,6 +103,7 @@ const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
 let didLogPipelineSetHistoryMissing = false
 
 export type ChatModeParamsBase = {
+  claimVerificationWorkspaceId?: string
   saveToDb?: boolean
   onResponseDispatch?: () => void
   historyTurn?: HistorySendTurn
@@ -306,7 +309,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   const skipRetiredPreparation = () => {
     const owns = params.releaseAbortControllerIfOwned ? params.releaseAbortControllerIfOwned(signal) : (!params.ownsAbortController || params.ownsAbortController(signal))
     if (owns) { setIsProcessing(false); setStreaming(false); setAbortController(null) }
-    return chatSubmitSkipped("Conversation changed")
+    return chatSubmitSkipped("Conversation changed", {
+      discardedMessageIds: [resolvedAssistantMessageId,
+        ...(!isRegenerate && resolvedUserMessageId ? [resolvedUserMessageId] : [])]
+    })
   }
   if (!preparationIsCurrent()) return skipRetiredPreparation()
   let modelInfo: Awaited<ReturnType<typeof getModelNicknameByID>>
@@ -736,10 +742,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     ) {
       setStreaming(true)
     }
-    if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed")
+    if (!preparationIsCurrent()) return skipRetiredPreparation()
     const preflight = mode.preflight ? await mode.preflight(context) : null
     // Image preflight has dispatched its provider request; retrieval-only diagnostics have not.
-    if (!isImageGenerationTurn && !preparationIsCurrent()) return chatSubmitSkipped("Conversation changed")
+    if (!isImageGenerationTurn && !preparationIsCurrent()) return skipRetiredPreparation()
     if (preflight?.handled) {
       dispatched = isImageGenerationTurn
       fullText = preflight.fullText
@@ -809,9 +815,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
               : msg
         )
       )
-      if (!dispatched && !preparationIsCurrent()) return chatSubmitSkipped("Conversation changed")
+      if (!dispatched && !preparationIsCurrent()) return skipRetiredPreparation()
       setHistorySafely(nextHistory)
-      if (!dispatched && !preparationIsCurrent()) return chatSubmitSkipped("Conversation changed")
+      if (!dispatched && !preparationIsCurrent()) return skipRetiredPreparation()
 
       replyCompleted = true
       await saveMessageOnSuccess({
@@ -863,10 +869,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
     // Rewrite builders also read visible messages. Keep the context identity
     // used by preflight retrieval caches, while projecting only prompt rows.
-    if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed")
+    if (!preparationIsCurrent()) return skipRetiredPreparation()
     context.messages = excludeLocalRagDiagnostics(context.messages)
     const promptData = await mode.preparePrompt(context)
-    if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed")
+    if (!preparationIsCurrent()) return skipRetiredPreparation()
     if (params.dynamicUIRequest?.renderer === "openui") {
       promptData.chatHistory = [
         { role: "system", content: OPENUI_SYSTEM_PROMPT },
@@ -922,7 +928,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       requestScope: params.servicePromptSnapshot?.requestScope ?? params.actorSceneSend?.requestScope
     })
 
-    if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed")
+    if (!preparationIsCurrent()) return skipRetiredPreparation()
     if (signal.aborted || params.servicePromptSnapshot?.scopeInvalidatedSignal?.aborted) {
       const error = new Error("Request cancelled")
       error.name = "AbortError"
@@ -1175,10 +1181,25 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       !sourceProvenance
     )
       throw new Error("Source history is invalid or too large to save");
+    let claimVerification
+    if (mode.id === "rag" && params.claimVerificationWorkspaceId) {
+      if (streamTransportInterrupted || outputLimited || signal.aborted) {
+        claimVerification = uncheckedAnswerVerification(fullText, "This answer was interrupted or cut off. Its citation support has not been checked.")
+      } else {
+        setMessagesWithTransition(previous => previous.map(msg => msg.id === generateMessageId ? updateActiveVariant(msg, {
+          message: fullText, sources, generationInfo: viewGenerationInfo,
+          metadataExtra: { claim_verification_pending: true }
+        }) : msg))
+        claimVerification = await verifyWorkspaceAnswer({ workspaceId: params.claimVerificationWorkspaceId, text: fullText, sources,
+          provider: modelClient.apiProvider, model: modelClient.model, scope: params.servicePromptSnapshot, signal })
+        params.servicePromptSnapshot?.scopeInvalidatedSignal.throwIfAborted()
+      }
+    }
     const assistantMetadataExtra =
-      dynamicUIEnvelope || sourceProvenance
+      dynamicUIEnvelope || sourceProvenance || claimVerification
         ? {
             ...(dynamicUIEnvelope ? { dynamic_ui: dynamicUIEnvelope } : {}),
+            ...(claimVerification ? { [CLAIM_VERIFICATION_KEY]: claimVerification } : {}),
             ...(sourceProvenance
               ? { [WORKSPACE_RAG_SOURCES_KEY]: sourceProvenance }
               : {}),
@@ -1328,7 +1349,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
     if (!dispatched && !historyTurn?.dispatched && !preparationIsCurrent()) {
       await historyTurn?.cancelPreparation?.()
-      return chatSubmitSkipped("Conversation changed")
+      return skipRetiredPreparation()
     }
     if (historyTurn) {
       if (historyTurn.dispatched || e instanceof NativeHistoryBranchChoice) {

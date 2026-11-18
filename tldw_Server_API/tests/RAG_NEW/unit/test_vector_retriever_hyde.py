@@ -85,9 +85,11 @@ async def test_vector_retriever_hyde_only_returns_hyde_results(monkeypatch):
 
     docs = await retr._retrieve_vector("query", query_vector=[0.0, 0.1, 0.2])
     assert len(docs) == len(hyde)
-    # Media-level merge produces documents keyed by media_id
-    ids = {d.id for d in docs}
-    assert ids == {"101", "102"}
+    # Media-level merge retains the selected vector identity and parent metadata.
+    assert {doc.id: (doc.metadata.get("media_id"), doc.content) for doc in docs} == {
+        "c1": ("101", "A"),
+        "c2": ("102", "B"),
+    }
 
 
 @pytest.mark.unit
@@ -121,10 +123,13 @@ async def test_vector_retriever_hyde_merge_prefers_higher_score(monkeypatch):
 
     docs = await retr._retrieve_vector("query", query_vector=[0.1, 0.2, 0.3])
     # Expect both media 201 and 202
-    by_id = {d.id: d for d in docs}
-    assert set(by_id.keys()) == {"201", "202"}
+    by_media_id = {doc.metadata.get("media_id"): doc for doc in docs}
+    assert {media_id: (doc.id, doc.content) for media_id, doc in by_media_id.items()} == {
+        "201": ("chunkA", "base A"),
+        "202": ("chunkB_hyde", "hyde B"),
+    }
     # HYDE score boosted by weight = 0.50 + 0.05 = 0.55
-    assert abs(by_id["201"].score - 0.55) < 1e-6
+    assert abs(by_media_id["201"].score - 0.55) < 1e-6
 
 
 @pytest.mark.unit

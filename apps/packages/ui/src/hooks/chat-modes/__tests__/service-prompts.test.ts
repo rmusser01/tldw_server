@@ -1244,7 +1244,7 @@ describe("Service Prompt mode definitions", () => {
     })
   })
 
-  it("keeps ordinary packaged RAG provider messages byte-identical", async () => {
+  it("sends packaged citation instructions through the ordinary RAG provider request", async () => {
     useDefinitionPipeline()
     const question = "What is the answer?"
     const context = "Ordinary evidence."
@@ -1307,6 +1307,7 @@ describe("Service Prompt mode definitions", () => {
         }
       ]
     })
+    expect(promptText(prepared)).toContain("Cite supported claims inline using the supplied source numbers, for example [1].")
     expect(promptText(prepared)).toBe(
       LEGACY_SERVICE_PROMPT_DEFAULTS["chat.rag.answer"].template
         .replace("{context}", context)

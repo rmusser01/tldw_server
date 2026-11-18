@@ -3374,7 +3374,17 @@ export const useChatActions = ({
     []
   )
 
+  const lastGreetingHistoryProjection = React.useRef<{
+    messages: Message[]
+    greetingEnabled: boolean
+  } | null>(null)
   React.useEffect(() => {
+    const previous = lastGreetingHistoryProjection.current
+    const source = messagesRef.current
+    // A workspace may restore its transcript between StrictMode effect replays.
+    // Do not overwrite that restored history with the same stale mount projection.
+    if (previous?.messages === source && previous.greetingEnabled === greetingEnabled) return
+    lastGreetingHistoryProjection.current = { messages: source, greetingEnabled }
     refreshHistoryFromMessages()
   }, [greetingEnabled, refreshHistoryFromMessages])
 
@@ -3454,6 +3464,7 @@ export const useChatActions = ({
 
   const submitResponse = async ({
     message,
+    ragQuery,
     image,
     isRegenerate = false,
     messages: chatHistory,
@@ -3495,6 +3506,7 @@ export const useChatActions = ({
     historyRecoveryRetrySystemPrompts
   }: {
     message: string
+    ragQuery?: string
     image: string
     isRegenerate?: boolean
     isContinue?: boolean
@@ -4266,6 +4278,8 @@ export const useChatActions = ({
         sdkViewIsCurrent = workspaceServerChat.viewIsCurrent
         const ragModeParamsWithSnapshot = {
           ...chatModeParamsWithRegen,
+          claimVerificationWorkspaceId: scope?.type === "workspace" ? scope.workspaceId : undefined,
+          ragQuery,
           ...alternateHistoryParams,
           actorSceneSend: workspaceServerChat.sceneSend,
           servicePromptSnapshot: turnServicePromptSnapshot
@@ -5185,6 +5199,7 @@ export const useChatActions = ({
       if (!actorSceneSend.isCurrent()) throw new Error("actor_settings_scope_changed")
       const enhancedChatModeParams = {
         ...chatModeParams,
+        claimVerificationWorkspaceId: scope?.type === "workspace" ? scope.workspaceId : undefined,
         uploadedFiles: uploadedFiles,
         servicePromptSnapshot: replyServicePromptSnapshot
       }

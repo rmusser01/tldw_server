@@ -535,3 +535,16 @@ def test_refusals_carry_no_detail_of_the_existing_chat() -> None:
         resolve_import_replay(row, owner_id="2", stored_fingerprint="a" * 64, fingerprint="a" * 64)
     assert set(raised.value.detail()) == {"error_code", "message"}
     assert "private" not in json.dumps(raised.value.detail())
+
+
+def test_legacy_global_import_fingerprint_remains_replayable():
+    # Historical receipt from the existing schema: new optional scope must not invalidate it.
+    assert _prepare(_request()).fingerprint == "5722b31bc35ec7a477219aa94e3ff3d974720d8ace2525e5694bac19037a56fb"
+    assert _prepare(_request(scope_type="global", workspace_id=None)).fingerprint == _prepare(_request()).fingerprint
+
+
+def test_workspace_import_scope_changes_fingerprint():
+    global_import = _prepare(_request())
+    first = _prepare(_request(scope_type="workspace", workspace_id="workspace-a"))
+    second = _prepare(_request(scope_type="workspace", workspace_id="workspace-b"))
+    assert len({global_import.fingerprint, first.fingerprint, second.fingerprint}) == 3

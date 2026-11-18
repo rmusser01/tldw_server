@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WORKSPACE_STORAGE_KEY } from "@/store/workspace-events"
 import { DEFAULT_AUDIO_SETTINGS, DEFAULT_WORKSPACE_NOTE } from "@/types/workspace"
-import { createWorkspaceStorage } from "../workspace"
+import { createWorkspaceStorage, flushWorkspacePersistence, useWorkspaceStore } from "../workspace"
 
 const STORAGE_KEY = WORKSPACE_STORAGE_KEY
 type WorkspaceStorageOptions = Parameters<typeof createWorkspaceStorage>[0]
@@ -152,6 +152,56 @@ describe("workspace IndexedDB offload adapter", () => {
 
   afterEach(() => {
     localStorage.clear()
+    vi.unstubAllGlobals()
+  })
+
+  it("persists a new chat receipt arriving while an older artifact offload is pending", async () => {
+    // Browser Storage exposes saved keys to the identity-diff existence guard.
+    const browserStorage = new Proxy(localStorage, {
+      has: (target, key) => Reflect.has(target, key) || (typeof key === "string" && target.getItem(key) !== null),
+      get: (target, key) => {
+        const value = Reflect.get(target, key, target)
+        return typeof value === "function" ? value.bind(target) : value
+      }
+    })
+    vi.stubGlobal("localStorage", browserStorage)
+    localStorage.setItem("browser-storage-key", "present")
+    expect("browser-storage-key" in localStorage).toBe(true)
+    const workspaceId = "held-artifact-chat-receipt"
+    const { adapter, chatRecords } = createInMemoryIndexedDbAdapter()
+    const originalPut = adapter.putArtifactPayloadRecord
+    let release!: () => void
+    let started!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const entered = new Promise<void>(resolve => { started = resolve })
+    adapter.putArtifactPayloadRecord = async record => {
+      started()
+      await gate
+      return originalPut(record)
+    }
+    const storage = createWorkspaceStorage({ indexedDbAdapter: adapter })
+    const fixture = buildWorkspaceState(workspaceId)
+    const session = { ...fixture.workspaceChatSessions[workspaceId],
+      messages: fixture.workspaceChatSessions[workspaceId].messages.map(message => ({
+        ...message, id: "local-assistant", isBot: true
+      }))
+    }
+    const partialize = useWorkspaceStore.persist.getOptions().partialize!
+    const base = { ...useWorkspaceStore.getState(), ...fixture,
+      ...fixture.workspaceSnapshots[workspaceId] }
+    const write = (messages: typeof session.messages) => storage.setItem(STORAGE_KEY, buildEnvelope(partialize({
+      ...base, workspaceChatSessions: { [workspaceId]: { ...session, history: [], messages } }
+    } as Parameters<typeof partialize>[0]) as Record<string, unknown>))
+    const older = write(session.messages)
+    await entered
+    const latest = session.messages.map(message => ({ ...message, serverMessageId: "acknowledged-assistant" }))
+    const newer = write(latest)
+    release()
+    await Promise.all([older, newer])
+    await flushWorkspacePersistence()
+    expect(chatRecords.get(chatRecordKey(workspaceId))?.session.messages).toEqual(latest)
+    const reopened = JSON.parse((await storage.getItem(STORAGE_KEY))!)
+    expect(reopened.state.workspaceChatSessions[workspaceId].messages).toEqual(latest)
   })
 
   it("offloads large chat/artifact payloads and rehydrates them transparently", async () => {
@@ -221,6 +271,32 @@ describe("workspace IndexedDB offload adapter", () => {
 
     expect(idb.chatRecords.size).toBe(0)
     expect(idb.artifactRecords.size).toBe(0)
+  })
+
+  it("offloads multi-megabyte version metadata and restores every field exactly", async () => {
+    const workspaceId = "large-section-analysis"
+    const idb = createInMemoryIndexedDbAdapter(true)
+    const storage = createWorkspaceStorage({ indexedDbAdapter: idb.adapter })
+    const state = buildWorkspaceState(workspaceId)
+    const artifact = Object.assign(state.workspaceSnapshots[workspaceId].generatedArtifacts[0], {
+      serverId: "canonical-section-artifact",
+      versionMetadata: { workspaceClient: { schemaVersion: 1, data: {
+        sectionAnalysis: { evidence: "Exact source passage. ".repeat(300_000) }
+      } } }
+    })
+
+    await storage.setItem(STORAGE_KEY, buildEnvelope(state))
+
+    expect(localStorage.getItem(snapshotKey(workspaceId))!.length).toBeLessThan(10_000)
+    expect(localStorage.getItem(STORAGE_KEY)!.length).toBeLessThan(10_000)
+    const hydrated = JSON.parse((await storage.getItem(STORAGE_KEY))!)
+    expect(hydrated.state.workspaceSnapshots[workspaceId].generatedArtifacts[0]).toEqual(artifact)
+
+    // A metadata-only update must invalidate the offload dedup hash.
+    artifact.versionMetadata.workspaceClient.data.sectionAnalysis.evidence += "Updated evidence."
+    await storage.setItem(STORAGE_KEY, buildEnvelope(state))
+    const updated = JSON.parse((await storage.getItem(STORAGE_KEY))!)
+    expect(updated.state.workspaceSnapshots[workspaceId].generatedArtifacts[0]).toEqual(artifact)
   })
 
   it("cleans up offloaded records when workspace storage is removed", async () => {

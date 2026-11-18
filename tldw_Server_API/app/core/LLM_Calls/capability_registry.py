@@ -433,6 +433,7 @@ BASE_FIELDS: set[str] = {
 
 # Provider-specific extension fields (non-OpenAI keys).
 PROVIDER_EXTENSIONS: dict[str, set[str]] = {
+    "deepseek": {"thinking", "reasoning_effort"},
     "anthropic": {"top_k"},
     "google": {"top_k"},
     "huggingface": {"top_k"},

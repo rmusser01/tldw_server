@@ -14,6 +14,7 @@
 # Import necessary libraries
 import asyncio
 import gc
+import hashlib
 import importlib.util
 import re
 import sys
@@ -124,10 +125,7 @@ def _is_usable_torch_module_for_docling() -> bool:
     # Common stub modules in tests only provide Tensor/nn and omit runtime attrs.
     if not hasattr(torch_mod, "__version__"):
         return False
-    if not hasattr(torch_mod, "cuda"):
-        return False
-
-    return True
+    return hasattr(torch_mod, "cuda")
 
 
 def _is_table_like_line(line: str) -> bool:
@@ -306,7 +304,7 @@ def normalize_pdf_text_for_storage(text: str) -> str:
     return "\n".join(output_lines).strip("\n")
 
 
-def extract_text_and_format_from_pdf(pdf_path):
+def extract_text_and_format_from_pdf(pdf_path, *, page_chunks: bool = False):
     """
     Extract text from a PDF file and convert it to Markdown, preserving formatting.
     """
@@ -315,8 +313,10 @@ def extract_text_and_format_from_pdf(pdf_path):
         start_time = datetime.now()
 
         markdown_text = ""
+        pages = []
         with pymupdf.open(pdf_path) as doc:
             for page_num, page in enumerate(doc, 1):
+                page_start = len(markdown_text)
                 markdown_text += f"## Page {page_num}\n\n"
                 blocks = page.get_text("dict")["blocks"]
                 current_paragraph = ""
@@ -362,6 +362,7 @@ def extract_text_and_format_from_pdf(pdf_path):
                     elif block["type"] == 1:  # Image block
                         markdown_text += "[Image]\n\n"
                 markdown_text += "\n---\n\n"  # Page separator
+                pages.append({"metadata": {"page": page_num}, "text": markdown_text[page_start:]})
 
         # Clean up hyphenated words
         markdown_text = re.sub(r'(\w+)-\s*\n(\w+)', r'\1\2', markdown_text)
@@ -371,7 +372,7 @@ def extract_text_and_format_from_pdf(pdf_path):
         log_histogram("pdf_text_extraction_duration", processing_time, labels={"file_path": pdf_path})
         log_counter("pdf_text_extraction_success", labels={"file_path": pdf_path})
 
-        return markdown_text
+        return pages if page_chunks else markdown_text
     except _PDF_NONCRITICAL_EXCEPTIONS as e:
         logging.error(f"Error extracting text and formatting from PDF: {str(e)}")
         log_counter("pdf_text_extraction_error", labels={"file_path": pdf_path, "error": str(e)})
@@ -426,7 +427,7 @@ def docling_parse_pdf(pdf_path: str):
         raise
 
 
-def pymupdf4llm_parse_pdf(pdf_path):
+def pymupdf4llm_parse_pdf(pdf_path, *, page_chunks: bool = False):
     """
     Extract text from a PDF file and convert it to Markdown, preserving formatting.
     """
@@ -434,7 +435,7 @@ def pymupdf4llm_parse_pdf(pdf_path):
         log_counter("pdf_text_extraction_attempt", labels={"file_path": pdf_path})
         start_time = datetime.now()
 
-        markdown_text = pymupdf4llm.to_markdown(pdf_path)
+        markdown_text = pymupdf4llm.to_markdown(pdf_path, page_chunks=page_chunks)
 
         end_time = datetime.now()
         processing_time = (end_time - start_time).total_seconds()
@@ -474,6 +475,61 @@ import uuid
 from pathlib import Path
 
 # ... other imports ...
+
+def _extract_pdf_with_parser(
+    path: str, parser: str, filename: str, result: dict[str, Any],
+) -> Any:
+    """Dispatch PDF text extraction while recording the existing parser fallbacks."""
+    logging.info(f"Attempting text extraction for {filename} using parser: {parser} on path: {path}")
+    if parser == "pymupdf4llm":
+        # Now correctly called with a path
+        content = pymupdf4llm_parse_pdf(path, page_chunks=True)
+    elif parser == "pymupdf":
+        content = extract_text_and_format_from_pdf(path, page_chunks=True)
+    elif parser == "docling":
+        DOCLING_AVAILABLE = importlib.util.find_spec("docling.document_converter") is not None
+        if not DOCLING_AVAILABLE:
+            raise ImportError("Docling parser selected, but library is not installed.")
+        # Docling currently pulls torch-backed layout models. Avoid
+        # running docling when torch is missing or clearly stubbed.
+        if not _is_usable_torch_module_for_docling():
+            logging.info(
+                "Docling parser requested but torch is unavailable/stubbed; "
+                "falling back to pymupdf4llm for %s",
+                filename,
+            )
+            result["parser_used"] = "pymupdf4llm"
+            content = pymupdf4llm_parse_pdf(path, page_chunks=True)
+        else:
+            try:
+                content = docling_parse_pdf(path)
+            except _PDF_NONCRITICAL_EXCEPTIONS as docling_exc:
+                logging.warning(
+                    "Docling parser failed for %s (%s); falling back to pymupdf4llm",
+                    filename,
+                    docling_exc,
+                )
+                result["parser_used"] = "pymupdf4llm"
+                content = pymupdf4llm_parse_pdf(path, page_chunks=True)
+    else:
+        # This case should ideally be caught by Pydantic validation in the endpoint
+        logging.warning(f"Unsupported PDF parser specified: {parser}. Attempting fallback to pymupdf4llm.")
+        result["warnings"].append(f"Unsupported parser '{parser}', fallback to 'pymupdf4llm'")
+        result["parser_used"] = "pymupdf4llm"
+        content = pymupdf4llm_parse_pdf(path, page_chunks=True)
+    return content
+
+
+def _parser_page_number(metadata: Any) -> int | None:
+    """Read documented one-based page keys without guessing on conflicting metadata."""
+    if not isinstance(metadata, dict):
+        return None
+    # PyMuPDF4LLM <2 uses page; its 2.x grounding API uses page_number.
+    numbers = [metadata[key] for key in ("page", "page_number") if key in metadata]
+    if not numbers or any(type(number) is not int or number < 1 for number in numbers):
+        return None
+    return numbers[0] if all(number == numbers[0] for number in numbers) else None
+
 
 def process_pdf(
     file_input: Union[str, bytes, Path], # Can be path, bytes, or Path object
@@ -587,6 +643,8 @@ def process_pdf(
     temp_dir_for_pdf: Optional[str] = None
     path_for_processing: Optional[str] = None
     content: Optional[str] = None
+    extracted_page_map: list[dict[str, Any]] = []
+    mapped_content: str | None = None
 
     try:
         # --- Step 0: Handle Input Type and Ensure File Path for Processing ---
@@ -635,43 +693,21 @@ def process_pdf(
              raise RuntimeError("Internal logic error: path_for_processing not set")
 
         try:
-            logging.info(f"Attempting text extraction for {filename} using parser: {parser} on path: {path_for_processing}")
-            if parser == "pymupdf4llm":
-                # Now correctly called with a path
-                content = pymupdf4llm_parse_pdf(path_for_processing)
-            elif parser == "pymupdf":
-                 content = extract_text_and_format_from_pdf(path_for_processing)
-            elif parser == "docling":
-                DOCLING_AVAILABLE = importlib.util.find_spec("docling.document_converter") is not None
-                if not DOCLING_AVAILABLE:
-                    raise ImportError("Docling parser selected, but library is not installed.")
-                # Docling currently pulls torch-backed layout models. Avoid
-                # running docling when torch is missing or clearly stubbed.
-                if not _is_usable_torch_module_for_docling():
-                    logging.info(
-                        "Docling parser requested but torch is unavailable/stubbed; "
-                        "falling back to pymupdf4llm for %s",
-                        filename,
-                    )
-                    result["parser_used"] = "pymupdf4llm"
-                    content = pymupdf4llm_parse_pdf(path_for_processing)
-                else:
-                    try:
-                        content = docling_parse_pdf(path_for_processing)
-                    except _PDF_NONCRITICAL_EXCEPTIONS as docling_exc:
-                        logging.warning(
-                            "Docling parser failed for %s (%s); falling back to pymupdf4llm",
-                            filename,
-                            docling_exc,
-                        )
-                        result["parser_used"] = "pymupdf4llm"
-                        content = pymupdf4llm_parse_pdf(path_for_processing)
-            else:
-                # This case should ideally be caught by Pydantic validation in the endpoint
-                logging.warning(f"Unsupported PDF parser specified: {parser}. Attempting fallback to pymupdf4llm.")
-                result["warnings"].append(f"Unsupported parser '{parser}', fallback to 'pymupdf4llm'")
-                result["parser_used"] = "pymupdf4llm"
-                content = pymupdf4llm_parse_pdf(path_for_processing) # Fallback also uses path
+            content = _extract_pdf_with_parser(path_for_processing, parser, filename, result)
+
+            if isinstance(content, list):
+                normalized_pages = []
+                offset = 0
+                for page in content:
+                    page_text = normalize_pdf_text_for_storage(page["text"])
+                    normalized_pages.append(page_text)
+                    extracted_page_map.append({
+                        "page_number": _parser_page_number(page.get("metadata")),
+                        "start_char": offset,
+                        "end_char": offset + len(page_text),
+                    })
+                    offset += len(page_text) + 2
+                mapped_content = content = "\n\n".join(normalized_pages)
 
             result["content"] = content
             if content is not None: # Check if extraction actually yielded content
@@ -916,6 +952,13 @@ def process_pdf(
             with pymupdf.open(filename=path_for_processing) as doc: # Use filename= for path
                 raw_metadata = doc.metadata
                 page_count = doc.page_count
+                if extracted_page_map and doc.get_page_labels():
+                    for page_entry in extracted_page_map:
+                        if page_entry["page_number"] is None or not 1 <= page_entry["page_number"] <= page_count:
+                            continue
+                        label = doc[page_entry["page_number"] - 1].get_label()
+                        if label:
+                            page_entry["printed_page_label"] = label
             logging.info(f"Metadata extracted for {filename}.")
 
             # Add subject and keywords from metadata to the provided keywords list
@@ -1093,7 +1136,8 @@ def process_pdf(
             content = final_content
         if content and content.strip():
             try:
-                normalized_content = normalize_pdf_text_for_storage(content)
+                # A replacement OCR result cannot reuse offsets from native extraction.
+                normalized_content = content if content == mapped_content else normalize_pdf_text_for_storage(content)
                 result["content"] = normalized_content
                 content = normalized_content
                 result.setdefault("analysis_details", {})["text_normalization"] = {
@@ -1109,6 +1153,14 @@ def process_pdf(
                 result["warnings"] = (result.get("warnings") or []) + [
                     f"Text normalization failed: {normalization_error}"
                 ]
+
+        if mapped_content is not None and content == mapped_content:
+            from tldw_Server_API.app.core.Media.page_provenance import validate_page_map
+
+            page_map = validate_page_map(extracted_page_map, len(content))
+            if page_map:
+                result["metadata"]["page_map"] = page_map
+                result["metadata"]["page_map_content_hash"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
 
         # --- Step 3: Chunking ---
         processed_chunks = None

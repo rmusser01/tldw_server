@@ -29,7 +29,7 @@ from collections import Counter
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
-from functools import partial
+from functools import partial, wraps
 from numbers import Real
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Protocol, TypedDict, cast, overload
@@ -76,10 +76,13 @@ from .hyde import (
     _run_sync_embedding_call,
     _runtime_local_embedding_call_kwargs,
 )
+from .media_context_expansion import expand_media_context
 from .retrieval_executor import execute_retrieval_phase
 from .retrieval_plan import RetrievalPlan
 
 _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS = 500
+# Invalidate persisted retrieval snapshots when matching behavior changes.
+_RETRIEVAL_MATCHING_POLICY_VERSION = 6
 _RAG_PROVIDER_FAILURES = (ByokResolutionError, ChatAPIError)
 
 
@@ -2013,6 +2016,17 @@ def _should_restore_classification_local_retrieval(
     )
 
 
+def _with_request_deadline(operation):
+    """Bound the complete request, including sequential optional retrieval passes."""
+    @wraps(operation)
+    async def bounded(*args, **kwargs):
+        timeout = kwargs.get("timeout_seconds")
+        async with asyncio.timeout(timeout if timeout and timeout > 0 else None):
+            return await operation(*args, **kwargs)
+    return bounded
+
+
+@_with_request_deadline
 async def unified_rag_pipeline(
     # ========== REQUIRED PARAMETERS ==========
     query: str,
@@ -2123,7 +2137,7 @@ async def unified_rag_pipeline(
     generation_prompt: Optional[str] = None,
     enable_pre_retrieval_clarification: Optional[bool] = None,
     clarification_timeout_sec: Optional[float] = None,
-    max_generation_tokens: int = 500,
+    max_generation_tokens: int = 4096,
     # Abstention & multi-turn synthesis
     enable_abstention: bool = False,
     abstention_behavior: Literal["continue", "ask", "decline"] = "continue",
@@ -2831,12 +2845,14 @@ async def unified_rag_pipeline(
                 "end": str(date_range.get("end") or ""),
             }
         retrieval_scope = {
+            "matching_policy_version": _RETRIEVAL_MATCHING_POLICY_VERSION,
             "sources": sorted(
                 _normalize_pipeline_sources(
                     list(retrieval_sources) if retrieval_sources is not None else None
                 )
             ),
             "search_mode": normalized_search_mode,
+            "hybrid_alpha": float(hybrid_alpha) if normalized_search_mode == "hybrid" else None,
             "use_fts": normalized_search_mode in {"fts", "hybrid"},
             "use_vector": normalized_search_mode in {"vector", "hybrid"},
             "top_k": int(retrieval_top_k),
@@ -2913,7 +2929,9 @@ async def unified_rag_pipeline(
     # --- Internal helpers (defined early so downstream phases can use them) ---
     async def _with_timeout(coro, timeout: Optional[float]):
         if timeout and timeout > 0:
-            return await asyncio.wait_for(coro, timeout=timeout)
+            # Keep the outer request cancellation in this task on Python 3.11.
+            async with asyncio.timeout(timeout):
+                return await coro
         return await coro
 
     async def _resilient_call(
@@ -3184,7 +3202,7 @@ async def unified_rag_pipeline(
         effective_pre_clarify = (
             enable_pre_retrieval_clarification
             if enable_pre_retrieval_clarification is not None
-            else effective_enable_generation
+            else effective_enable_generation and not (include_media_ids or include_note_ids)
         )
         if effective_pre_clarify and assess_query_for_clarification is not None:
             clarification_start = time.time()
@@ -4221,6 +4239,7 @@ async def unified_rag_pipeline(
                         min_score=retrieval_min_score,
                         use_fts=(retrieval_search_mode in ["fts", "hybrid"]),
                         use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
+                        hybrid_alpha=hybrid_alpha,
                         include_metadata=True,
                         fts_level=fts_level,
                         enable_text_late_chunking=enable_text_late_chunking,
@@ -5216,6 +5235,28 @@ async def unified_rag_pipeline(
             ) as e:
                 result.errors.append(f"Gap analysis failed: {e}")
 
+        # ========== BOUNDED MEDIA CONTEXT ==========
+        verify_vector_locations = any(_document_metadata(doc).get("retrieval_method") == "vector" for doc in result.documents)
+        if result.documents and (enable_parent_expansion or include_sibling_chunks or verify_vector_locations):
+            context_start = time.time()
+            context_seeds = result.documents
+            # A failed parent read must not return evidence that bypassed the
+            # filters below when the outer pipeline handler reports the error.
+            result.documents = []
+            result.documents, context_metadata = await expand_media_context(
+                context_seeds,
+                media_db=media_db,
+                media_db_path=media_db_path,
+                enable_parent_expansion=enable_parent_expansion,
+                parent_context_size=parent_context_size,
+                include_sibling_chunks=include_sibling_chunks,
+                sibling_window=sibling_window,
+                verify_locations=verify_vector_locations,
+            )
+            result.metadata.update(context_metadata)
+            result.timings["context_expansion"] = time.time() - context_start
+            _apply_workspace_filtering_to_result()
+
         # ========== KEYWORD FILTERING ==========
         if keyword_filter and result.documents:
             filter_start = time.time()
@@ -5366,6 +5407,20 @@ async def unified_rag_pipeline(
             try:
                 if SecurityFilter and SensitivityLevel:
                     security_filter = SecurityFilter()
+                    security_user_id = _resolve_security_user_id(user_id, feedback_user_id)
+                    # AuthNZ already established this authority. Never infer an
+                    # admin role from client metadata or a requested user ID.
+                    if (
+                        authorization_cache_error is None
+                        and authorization_cache_scope is not None
+                        and authorization_cache_scope["is_admin"] is True
+                        and authorization_cache_scope["user_id"] is not None
+                        and str(authorization_cache_scope["user_id"]) == security_user_id
+                    ):
+                        access_controller = getattr(security_filter, "access_controller", None)
+                        set_user_role = getattr(access_controller, "set_user_role", None)
+                        if callable(set_user_role):
+                            set_user_role(security_user_id, "admin")
                     sensitivity_map = {
                         "public": SensitivityLevel.PUBLIC,
                         "internal": SensitivityLevel.INTERNAL,
@@ -5439,7 +5494,7 @@ async def unified_rag_pipeline(
                             ]
                             filtered_payloads = filter_documents(
                                 serialized_docs,
-                                user_id=_resolve_security_user_id(user_id, feedback_user_id),
+                                user_id=security_user_id,
                                 max_sensitivity=sensitivity_value,
                                 mask_pii=bool(redact_pii),
                             )
@@ -6623,52 +6678,6 @@ async def unified_rag_pipeline(
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             pass
 
-        # ========== SIBLING INCLUSION ==========
-        if include_sibling_chunks and result.documents and sibling_window and sibling_window > 0:
-            siblings_start = time.time()
-            try:
-                # Index docs by parent and index
-                parents: dict[str, dict[int, Document]] = {}
-                for d in result.documents:
-                    pid = str(d.metadata.get("parent_id", ""))
-                    cidx_md = d.metadata.get("chunk_index", -1)
-                    cidx = (
-                        int(cidx_md)
-                        if isinstance(cidx_md, int) or (isinstance(cidx_md, str) and cidx_md.isdigit())
-                        else -1
-                    )
-                    if pid and cidx >= 0:
-                        parents.setdefault(pid, {})[cidx] = d
-
-                sibling_added: list[Document] = []
-                seen_ids = {getattr(d, "id", None) for d in result.documents}
-
-                for d in list(result.documents):
-                    pid = str(d.metadata.get("parent_id", ""))
-                    cidx_md = d.metadata.get("chunk_index", -1)
-                    cidx = (
-                        int(cidx_md)
-                        if isinstance(cidx_md, int) or (isinstance(cidx_md, str) and cidx_md.isdigit())
-                        else -1
-                    )
-                    if not pid or cidx < 0:
-                        continue
-                    siblings = parents.get(pid, {})
-                    # expand symmetrically up to window size
-                    for w in range(1, int(sibling_window) + 1):
-                        for adj in (cidx - w, cidx + w):
-                            sdoc = siblings.get(adj)
-                            if sdoc is not None and getattr(sdoc, "id", None) not in seen_ids:
-                                sibling_added.append(sdoc)
-                                seen_ids.add(getattr(sdoc, "id", None))
-
-                if sibling_added:
-                    result.documents.extend(sibling_added)
-                result.metadata["siblings_added_count"] = len(sibling_added)
-                result.timings["sibling_inclusion"] = time.time() - siblings_start
-            except (AttributeError, TypeError, ValueError) as e:
-                result.errors.append(f"Sibling inclusion failed: {str(e)}")
-
         # Cap documents to top_k when reranking is disabled
         if (not enable_reranking or reranking_strategy == "none") and result.documents:
             try:
@@ -7062,7 +7071,13 @@ async def unified_rag_pipeline(
                         if isinstance(_writer_policy, dict):
                             result.metadata["structured_writer"]["depth_policy"] = _writer_policy
                     else:
-                        context = "\n\n".join([getattr(doc, "content", str(doc)) for doc in context_docs])
+                        from .response_writer import format_page_content, format_page_location
+
+                        context = "\n\n".join(
+                            f"[{index}] {format_page_location(getattr(doc, 'metadata', {}) or {})}\n"
+                            f"{format_page_content(getattr(doc, 'content', str(doc)), getattr(doc, 'metadata', {}) or {})}"
+                            for index, doc in enumerate(context_docs, 1)
+                        )
 
                     if enable_multi_turn_synthesis:
                         # Strict budget control
@@ -8860,7 +8875,7 @@ async def unified_rag_pipeline(
                 result.errors.append(f"Retrieval metrics failed: {_rm_err}")
 
         # ---- Faithfulness evaluation (optional) ----
-        if enable_faithfulness_eval and result.generated_answer:
+        if enable_faithfulness_eval and result.generated_answer and not asyncio.current_task().cancelling():
             try:
                 from .faithfulness import FaithfulnessEvaluator as _FaithEval
 

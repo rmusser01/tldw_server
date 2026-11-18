@@ -17,6 +17,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.Chat.conversation_import import (
+    ChatImportError,
     import_fingerprint_from_authority,
     import_message_authority,
 )
@@ -31,8 +32,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-# Only these conversation fields are taken from the caller. Owner, scope,
-# version and deleted state are fixed by the store.
+# Owner and scope are supplied separately; payload fields cannot override them.
 _CONVERSATION_FIELDS = (
     "id",
     "title",
@@ -106,6 +106,13 @@ class ChatImportStore:
                 return dict(row), fingerprint
         return dict(row), None
 
+    def require_owned_workspace(self, workspace_id: str, owner_client_id: str, *, conn: Any = None) -> None:
+        """Require an available same-owner workspace, locking it during an import write."""
+        workspace = self._db.get_workspace(workspace_id, conn=conn, for_update=conn is not None)
+        if (not workspace or workspace.get("deleted") or workspace.get("native_chat_admission_closed")
+                or str(workspace.get("client_id") or "").strip() != str(owner_client_id).strip()):
+            raise ChatImportError("workspace_not_found", 404, "Workspace not found")
+
     def import_conversation(
         self,
         conversation: Mapping[str, Any],
@@ -113,6 +120,8 @@ class ChatImportStore:
         *,
         owner_client_id: str,
         request_fingerprint: str,
+        scope_type: str = "global",
+        workspace_id: str | None = None,
     ) -> str:
         """Insert a conversation and all of its messages, or nothing.
 
@@ -127,6 +136,8 @@ class ChatImportStore:
             owner_client_id: The owner of every row written. Nothing in the
                 payload can change it.
             request_fingerprint: SHA-256 hex digest of the import request.
+            scope_type: Validated destination scope; defaults to global for existing callers.
+            workspace_id: Same-owner destination workspace for workspace scope.
 
         Returns:
             The conversation id.
@@ -142,6 +153,14 @@ class ChatImportStore:
         owner = str(owner_client_id or "").strip()
         if not owner:
             raise InputError("An imported chat needs an owner.")  # noqa: TRY003
+        if scope_type not in {"global", "workspace"} or (
+            scope_type == "global" and workspace_id is not None
+        ) or (
+            scope_type == "workspace" and (
+                not isinstance(workspace_id, str) or not workspace_id or workspace_id != workspace_id.strip()
+            )
+        ):
+            raise InputError("Choose global scope or an exact workspace ID.")  # noqa: TRY003
         try:
             authority = import_message_authority(request_fingerprint)
         except ValueError as error:
@@ -161,10 +180,12 @@ class ChatImportStore:
             known.add(message["id"])
 
         conv_data = {field: conversation.get(field) for field in _CONVERSATION_FIELDS}
-        conv_data.update(client_id=owner, scope_type="global", workspace_id=None)
+        conv_data.update(client_id=owner, scope_type=scope_type, workspace_id=workspace_id)
 
         self._require_own_transaction()
         with self._db.transaction() as conn:
+            if scope_type == "workspace":
+                self.require_owned_workspace(workspace_id, owner, conn=conn)
             if conn.execute("SELECT 1 FROM conversations WHERE id = ?", (conversation_id,)).fetchone() is not None:
                 raise ConflictError(  # noqa: TRY003
                     f"Conversation with ID '{conversation_id}' already exists.",

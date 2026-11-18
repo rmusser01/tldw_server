@@ -34586,6 +34586,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         cursor = self.execute_query(
             "SELECT * FROM workspace_artifacts WHERE workspace_id = ? AND id = ?",
             (workspace_id, artifact_id),
+            read_only=True,
         )
         row = cursor.fetchone()
         return self._normalize_workspace_artifact_row(row)

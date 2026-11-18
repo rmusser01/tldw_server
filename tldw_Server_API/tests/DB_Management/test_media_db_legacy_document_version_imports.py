@@ -138,14 +138,14 @@ def test_media_module_imports_document_version_from_legacy_wrappers(
     assert reloaded.get_document_version is media_db_api.get_document_version
 
 
-def test_navigation_endpoint_imports_document_version_from_legacy_wrappers(
+def test_navigation_core_imports_document_version_from_legacy_wrappers(
     monkeypatch,
 ) -> None:
-    navigation_endpoint = importlib.import_module(
-        "tldw_Server_API.app.api.v1.endpoints.media.navigation"
+    navigation_core = importlib.import_module(
+        "tldw_Server_API.app.core.Media.navigation"
     )
 
-    reloaded = importlib.reload(navigation_endpoint)
+    reloaded = importlib.reload(navigation_core)
     assert reloaded.get_document_version is media_db_api.get_document_version
 
 

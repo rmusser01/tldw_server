@@ -1,3 +1,10 @@
+import { materializeWorkspaceOutputs } from "@/services/workspace-artifact-catalog"
+import { SectionScopePicker } from "./SectionScopePicker"
+import { ArtifactRunIdentity, LongDocumentWaitingGuidance } from "./ArtifactRunIdentity"
+import { getSectionAnalysis, CurrentSectionAnalysisArtifactViewer } from "./SectionAnalysisArtifactViewer"
+import { getSectionArtifactErrorMessage } from "@/utils/section-artifact-status"
+import { hasUnfinishedSectionChecks } from "@/utils/claim-verification"
+import type { ResearchWorkspaceSectionSelection } from "@/services/tldw/domains/workspace-api"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React, { Suspense, useState, useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
@@ -46,7 +53,7 @@ import {
   Switch
 } from "antd"
 import { useMobile } from "@/hooks/useMediaQuery"
-import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
+import { persistWorkspaceArtifact, persistWorkspaceArtifactReview, hasCanonicalArtifactWorkspace, WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS } from "@/services/workspace-artifact-persistence"
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
 import { hasWorkspaceArtifactOrigin, sameWorkspaceArtifactPayload, workspaceArtifactDraftPayload } from "@/store/workspace-artifact-codec"
 import { hasResearchWorkspaceMigrationTombstone, useWorkspaceStore } from "@/store/workspace"
@@ -480,8 +487,8 @@ const buildSelectedSourceReadinessNotice = (input: {
       title: "Source text is ready",
       description:
         textReadyProcessingCount === 1
-          ? "Studio can use extracted text while chunking or vector indexing continues."
-          : "Studio can use extracted text from selected sources while chunking or vector indexing continues.",
+          ? "Studio can use the extracted text. Some search features are not ready."
+          : "Studio can use the selected sources' extracted text. Some search features are not ready.",
       blocking
     }
   }
@@ -561,6 +568,43 @@ const STATUS_ICONS: Record<
   generating: { icon: Loader2, className: "text-primary animate-spin" },
   completed: { icon: CheckCircle, className: "text-success" },
   failed: { icon: XCircle, className: "text-error" }
+}
+
+function SavedOutputCard({ artifact, onOpen }: { artifact: GeneratedArtifact; onOpen: (detail: GeneratedArtifact) => void }) {
+  const { t } = useTranslation("playground")
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState("")
+  const pending = React.useRef<AbortController | null>(null)
+  React.useEffect(() => () => pending.current?.abort(), [])
+  const open = async () => {
+    if (pending.current || !artifact.detailDeferred) return
+    const controller = new AbortController()
+    pending.current = controller
+    setLoading(true)
+    setError("")
+    try {
+      const detail = await materializeWorkspaceOutputs(artifact.detailDeferred.workspaceId, artifact, controller.signal)
+      if (detail) onOpen(detail)
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not open the saved output.")
+    } finally {
+      pending.current = null
+      setLoading(false)
+    }
+  }
+  return <div data-testid={`studio-artifact-card-${artifact.id}`} className="rounded border border-border p-3">
+    <div className="font-medium">{artifact.title}</div>
+    <ArtifactRunIdentity artifact={artifact} />
+    <div className="text-xs text-text-muted">
+      v{artifact.version}
+      {artifact.reviewStatus && ` · ${artifact.reviewStatus.replace(/_/g, " ")}`}
+      {artifact.status === "failed" && " · Incomplete"}
+    </div>
+    <button type="button" className="mt-2 text-sm text-primary" disabled={loading} onClick={open}>
+      {loading ? t("studio.loadingOutputViewer", "Loading output viewer...") : t("common:view", "View")}
+    </button>
+    {error && <p role="alert" className="text-sm text-error">{error}</p>}
+  </div>
 }
 
 const MindMapArtifactViewer = React.lazy(() =>
@@ -1030,6 +1074,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     temperature,
     topP,
     numPredict,
+    provider: selectedModelSelection.provider || normalizedApiProvider,
     setRagTopK,
     setRagAdvancedOptions,
     setTemperature,
@@ -1081,7 +1126,16 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
   // ── Hooks ──
 
+  const [sectionScopeOpen, setSectionScopeOpen] = React.useState(false)
+  const [sectionSelections, setSectionSelections] = React.useState<ResearchWorkspaceSectionSelection[]>([])
+  const selectedSections = React.useMemo(() => sectionSelections.filter(section =>
+    selectedSources.some(source => source.id === section.source_id)), [sectionSelections, selectedSources])
+  const changeSectionSelection = React.useCallback((sourceId: string, sections: ResearchWorkspaceSectionSelection[]) => {
+    setSectionSelections(previous => [...previous.filter(section => section.source_id !== sourceId), ...sections])
+  }, [])
+
   const artifactGeneration = useArtifactGeneration({
+    selectedSections,
     messageApi,
     selectedMediaIds,
     selectedSources,
@@ -1115,6 +1169,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
   const {
     generationPhase,
+    sectionProgress,
     chatModels: _chatModels,
     loadingChatModels,
     selectedUnavailableModel,
@@ -1138,6 +1193,12 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     handleRetryArtifactSave,
     loadFlashcardDecks,
   } = artifactGeneration
+
+  const generatingSectionOutput = isGeneratingOutput &&
+    ["summary", "report", "compare_sources"].includes(generatingOutputType || "") &&
+    (selectedSections.length > 0 || Boolean(sectionProgress) || generatedArtifacts.some(artifact =>
+      artifact.status === "generating" && artifact.type === generatingOutputType &&
+      artifact.producerMetadata?.origin === "research_workspace_output_job"));
 
   const claimsVerificationModelOptions = React.useMemo(() => {
     if (!claimsVerificationProviderForRequest) {
@@ -1323,7 +1384,12 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     async (type: ArtifactType, options?: ArtifactGenerationOptions) => {
       const button = OUTPUT_BUTTONS.find((entry) => entry.type === type)
       const label = button?.label ?? type.replace(/_/g, " ")
-      if (generationPrerequisiteMessage) {
+      const savedSectionRetry = options?.mode === "replace" && generatedArtifacts.some(artifact =>
+        artifact.id === options.targetArtifactId && artifact.workspaceArtifactId &&
+        ["summary", "report", "compare_sources"].includes(artifact.type) &&
+        artifact.producerMetadata?.origin === "research_workspace_output_job" &&
+        Array.isArray(artifact.producerMetadata?.source_ids) && artifact.producerMetadata.source_ids.length > 0)
+      if (generationPrerequisiteMessage && !savedSectionRetry) {
         messageApi.warning(generationPrerequisiteMessage)
         return
       }
@@ -1370,6 +1436,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     },
     [
       generationPrerequisiteMessage,
+      generatedArtifacts,
       getOutputCapability,
       handleGenerateOutput,
       messageApi,
@@ -1494,8 +1561,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     artifact: GeneratedArtifact, patch: Partial<GeneratedArtifact>, editorIsCurrent: () => boolean
   ) => {
     const controller = new AbortController()
-    const deadline = performance.now() + 15000
-    const timeout = setTimeout(() => controller.abort(), 15000)
+    const deadline = performance.now() + WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS
+    const timeout = setTimeout(() => controller.abort(), WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS)
     const stopWatching = watchChatAccountChanges(invalidated => {
       if (invalidated) controller.abort()
     })
@@ -1522,6 +1589,37 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
       }
       if (!isCurrent()) throw new DOMException("The editor or workspace changed.", "AbortError")
       updateArtifactStatus(saved.id, saved.status, saved)
+    } finally {
+      clearTimeout(timeout)
+      stopWatching()
+      scope?.release()
+    }
+  }
+
+  const saveArtifactReview = async (
+    artifact: GeneratedArtifact,
+    patch: Pick<GeneratedArtifact, "reviewStatus" | "reviewMetadata">,
+    editorIsCurrent: () => boolean
+  ): Promise<GeneratedArtifact> => {
+    const controller = new AbortController()
+    const deadline = performance.now() + WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS
+    const timeout = setTimeout(() => controller.abort(), WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS)
+    const stopWatching = watchChatAccountChanges(invalidated => { if (invalidated) controller.abort() })
+    let scope: ServicePromptSnapshot | undefined
+    const originalPayload = workspaceArtifactDraftPayload(artifact)
+    const isCurrent = () => {
+      const current = useWorkspaceStore.getState().generatedArtifacts.find(entry => entry.id === artifact.id)
+      return Boolean(editorIsCurrent() && !controller.signal.aborted && !scope?.scopeInvalidatedSignal.aborted &&
+        artifact.status !== "generating" && current && current.status !== "generating" &&
+        sameWorkspaceArtifactPayload(workspaceArtifactDraftPayload(current), originalPayload))
+    }
+    try {
+      if (!workspaceId || !isCurrent()) throw new Error("The output or workspace changed. Your review draft is retained.")
+      scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      const saved = await persistWorkspaceArtifactReview(artifact, patch, { workspaceId, scope, isCurrent, deadline })
+      if (!isCurrent()) throw new DOMException("The editor or workspace changed.", "AbortError")
+      updateArtifactStatus(saved.id, saved.status, saved)
+      return saved
     } finally {
       clearTimeout(timeout)
       stopWatching()
@@ -1762,6 +1860,20 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         ...responsiveModalProps(980),
         footer: null
       })
+      return
+    }
+
+    const sectionAnalysis = getSectionAnalysis(artifact)
+    if (sectionAnalysis) {
+      const editor = createEditorGuard()
+      const modal = artifactModal.info({
+        title: <span className="text-text">{artifact.title}</span>,
+        afterClose: editor.afterClose,
+        content: <CurrentSectionAnalysisArtifactViewer artifactId={artifact.id} workspaceId={workspaceId}
+          isCurrent={editor.isCurrent} onSaveReview={(original, patch) => saveArtifactReview(original, patch, editor.isCurrent)} />,
+        ...responsiveModalProps(960)
+      })
+      editor.attach(modal)
       return
     }
 
@@ -2226,6 +2338,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
+              {generatingSectionOutput ? (
+                <LongDocumentWaitingGuidance />
+              ) : <>
               <p className="text-[11px] text-text-muted">
                 {t(
                   "playground:studio.generatingWithEta",
@@ -2243,6 +2358,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                   "Usually takes 10\u201330 seconds"
                 )}
               </p>
+              </>}
             </div>
             <Button
               size="small"
@@ -2265,6 +2381,15 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             </Button>
           </div>
         )}
+        {selectedSources.length > 0 && <details onToggle={event => setSectionScopeOpen(event.currentTarget.open)} className="mb-3 rounded border border-border p-3">
+          <summary className="cursor-pointer text-sm font-medium">Review sections for summaries and comparisons</summary>
+          <p className="my-2 text-xs text-text-muted">Choose chapters or opposing contributions from the existing source outline. Selected sections set the scope for Summary, Report, Brief and Compare. With no section selection, Summary covers all selected source text.</p>
+          <p className="mb-2 text-xs">{selectedSections.length} sections selected. Check boundaries in the preview before generating.</p>
+          <LongDocumentWaitingGuidance />
+          <div className="space-y-2">{sectionScopeOpen && selectedSources.map(source => <SectionScopePicker key={source.id} source={source}
+            selections={selectedSections} onChange={changeSectionSelection} disabled={isGeneratingOutput} />)}</div>
+        </details>}
+        {sectionProgress && isGeneratingOutput && <p role="status" className="mb-2 text-sm">{sectionProgress}</p>}
         {(() => {
           const primaryButtons = OUTPUT_BUTTONS.filter((b) => PRIMARY_OUTPUT_TYPES.has(b.type))
           const secondaryButtons = OUTPUT_BUTTONS.filter((b) => !PRIMARY_OUTPUT_TYPES.has(b.type))
@@ -2284,7 +2409,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             const isGenerating =
               isGeneratingOutput && generatingOutputType === type
             const requiresMultipleSources =
-              type === "compare_sources" && selectedMediaCount < 2
+              type === "compare_sources" && (selectedSections.length ? selectedSections.length < 2 : selectedMediaCount < 2)
             const capability = getOutputCapability(type)
             const capabilityBlocked = capability?.mode === "block"
             const capabilityMessage = capability
@@ -2894,13 +3019,18 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         >
           {generatedArtifacts.length > 0 && (
             <div className="mb-2 rounded border border-border bg-surface/60 px-2.5 py-2 text-[11px] text-text-muted">
-              {t(
+              {cumulativeUsage.includedArtifacts === 0
+                ? t("playground:studio.workspaceUsageUnavailable", "Workspace usage unavailable")
+                : t(
                 "playground:studio.usageSummary",
                 "Estimated workspace usage: {{tokens}} tokens • ${{cost}}",
                 {
                   tokens: Math.round(cumulativeUsage.tokens).toLocaleString(),
                   cost: cumulativeUsage.costUsd.toFixed(3)
                 }
+              )}
+              {cumulativeUsage.includedArtifacts > 0 && cumulativeUsage.unmeasuredArtifacts > 0 && (
+                <> • {t("playground:studio.usageExcludesUnmeasured", "Excludes outputs with unavailable usage")}</>
               )}
             </div>
           )}
@@ -2926,20 +3056,48 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
               }
             >
               {visibleArtifacts.map((artifact) => {
+                if (artifact.detailDeferred) return <SavedOutputCard key={artifact.id} artifact={artifact} onOpen={handleViewArtifact} />
                 const Icon = ARTIFACT_TYPE_ICONS[artifact.type] || FileText
+                const sectionJob = ["summary", "report", "compare_sources"].includes(artifact.type) &&
+                  artifact.producerMetadata?.origin === "research_workspace_output_job"
+                const usageTokens = artifact.totalTokens ?? (sectionJob ? undefined : artifact.estimatedTokens)
+                const usageCost = artifact.totalCostUsd ?? (sectionJob ? undefined : artifact.estimatedCostUsd)
                 const StatusConfig = STATUS_ICONS[artifact.status]
                 const StatusIcon = StatusConfig.icon
                 const deepResearchLaunchHref =
                   buildLiteratureDeepResearchLaunchPath(artifact, {
                     workspaceId
                   })
-                const failedStatusDeleteLabel = t(
-                  "playground:studio.deleteFailedOutput",
-                  "Delete failed output"
-                )
+                const statusDeleteLabel = artifact.status === "failed"
+                  ? t("playground:studio.deleteFailedOutput", "Delete failed output")
+                  : t("playground:studio.deleteOutput", "Delete output")
                 const failedRetryLabel = t(
                   "playground:studio.retryFailedOutput",
                   "Retry"
+                )
+                const sectionAnalysis = getSectionAnalysis(artifact)
+                const canRetryChecks = artifact.status === "completed" && sectionJob && Boolean(artifact.workspaceArtifactId) &&
+                  hasUnfinishedSectionChecks(sectionAnalysis)
+                const canViewCompletedChapters = artifact.status === "generating" &&
+                  Boolean(sectionAnalysis?.sections.some(section => section.status === "completed" &&
+                    typeof section.content === "string" && section.content.trim()))
+                const canViewRetainedSections = canViewCompletedChapters || (artifact.status === "failed" &&
+                  Boolean(artifact.content && sectionAnalysis))
+                const artifactErrorMessage = getSectionArtifactErrorMessage(artifact)
+                const viewLabel = canViewCompletedChapters
+                  ? t("playground:studio.viewCompletedChapters", "View completed chapters") : t("common:view", "View")
+                const viewAction = (canViewCompletedChapters || artifact.content || artifact.audioUrl || hasTraceableArtifactMetadata(artifact)) && (
+                  <Tooltip title={viewLabel}>
+                    <button
+                      type="button"
+                      onClick={() => handleViewArtifact(artifact)}
+                      onKeyDown={handleIconButtonKeyDown}
+                      className="rounded p-1 text-text-muted hover:bg-surface2 hover:text-text"
+                      aria-label={viewLabel}
+                    >
+                      <Eye className="h-4 w-4" />
+                    </button>
+                  </Tooltip>
                 )
 
                 return (
@@ -2957,30 +3115,31 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                           <p className="truncate text-sm font-medium text-text">
                             {artifact.title}
                           </p>
-                          {artifact.status === "failed" ? (
+                          {artifact.status === "failed" || (artifact.status === "generating" && sectionJob && artifact.producerMetadata?.job_id && !isGeneratingOutput) ? (
                             <>
-                              <Tooltip title={failedRetryLabel}>
+                              <Tooltip title={artifact.status === "generating" ? "Check saved generation progress" : failedRetryLabel}>
                                 <button
                                   type="button"
-                                  disabled={!hasSelectedSources || isGeneratingOutput}
+                                  disabled={(!hasSelectedSources && !artifact.producerMetadata?.job_id) || isGeneratingOutput}
                                   onClick={(event) => {
                                     event.stopPropagation()
-                                    if (!hasSelectedSources || isGeneratingOutput) return
+                                    if ((!hasSelectedSources && !artifact.producerMetadata?.job_id) || isGeneratingOutput) return
                                     void handleCapabilityAwareGenerateOutput(artifact.type, {
                                       mode: "replace",
                                       targetArtifactId: artifact.id,
+                                      reconnectOnly: artifact.status === "generating",
                                       templateId: artifact.templateId
                                     })
                                   }}
                                   onKeyDown={handleIconButtonKeyDown}
                                   className="rounded p-0.5 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
-                                  aria-label={failedRetryLabel}
+                                  aria-label={artifact.status === "generating" ? "Check saved generation progress" : failedRetryLabel}
                                   data-testid={`studio-artifact-retry-${artifact.id}`}
                                 >
                                   <RefreshCw className="h-3.5 w-3.5 shrink-0 text-text-muted hover:text-primary" />
                                 </button>
                               </Tooltip>
-                              <Tooltip title={failedStatusDeleteLabel}>
+                              <Tooltip title={statusDeleteLabel}>
                                 <button
                                   type="button"
                                   onClick={(event) => {
@@ -2989,7 +3148,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                                   }}
                                   onKeyDown={handleIconButtonKeyDown}
                                   className="rounded p-0.5 hover:bg-error/10"
-                                  aria-label={failedStatusDeleteLabel}
+                                  aria-label={statusDeleteLabel}
                                 >
                                   <StatusIcon
                                     className={`h-4 w-4 shrink-0 ${StatusConfig.className}`}
@@ -3003,31 +3162,27 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                             />
                           )}
                         </div>
-                        <p className="text-xs text-text-muted">
+                        {sectionJob || getSectionAnalysis(artifact) ? <ArtifactRunIdentity artifact={artifact} /> : <p className="text-xs text-text-muted">
                           {artifact.createdAt.toLocaleString()}
-                        </p>
-                        {(artifact.totalTokens ||
-                          artifact.estimatedTokens ||
-                          artifact.totalCostUsd ||
-                          artifact.estimatedCostUsd) && (
+                        </p>}
+                        {(usageTokens !== undefined || usageCost !== undefined || sectionJob) && (
                           <p className="text-[11px] text-text-muted">
-                            {t(
-                              "playground:studio.usagePerOutput",
-                              "Tokens: {{tokens}} • Cost: ${{cost}}",
-                              {
-                                tokens: Math.round(
-                                  artifact.totalTokens || artifact.estimatedTokens || 0
-                                ).toLocaleString(),
-                                cost: (
-                                  artifact.totalCostUsd || artifact.estimatedCostUsd || 0
-                                ).toFixed(3)
-                              }
-                            )}
+                            {usageTokens === undefined
+                              ? t("playground:studio.tokenUsageUnavailable", "Token usage unavailable")
+                              : `${artifact.totalTokens === undefined
+                                ? t("playground:studio.estimatedTokens", "Estimated tokens")
+                                : t("playground:studio.actualTokens", "Tokens")}: ${Math.round(usageTokens).toLocaleString()}`}
+                            {" • "}
+                            {usageCost === undefined
+                              ? t("playground:studio.costUnavailable", "Cost unavailable")
+                              : `${artifact.totalCostUsd === undefined
+                                ? t("playground:studio.estimatedCost", "Estimated cost")
+                                : t("playground:studio.actualCost", "Cost")}: $${usageCost.toFixed(3)}`}
                           </p>
                         )}
-                        {artifact.errorMessage && (
+                        {artifactErrorMessage && (
                           <p className="mt-1 text-xs text-error">
-                            {artifact.errorMessage}
+                            {artifactErrorMessage}
                           </p>
                         )}
                         {hasTraceableArtifactMetadata(artifact) && (
@@ -3038,6 +3193,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                         )}
                       </div>
                     </div>
+                    {canViewRetainedSections && <div className="mt-2">{viewAction}</div>}
                     {artifact.status === "completed" && (
                       <div className="mt-2 space-y-1.5">
                         <div
@@ -3049,21 +3205,14 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                           )}
                           className="flex flex-wrap items-center gap-1 rounded border border-border/70 bg-surface/70 px-1.5 py-1"
                         >
-                          {(artifact.content ||
-                            artifact.audioUrl ||
-                            hasTraceableArtifactMetadata(artifact)) && (
-                            <Tooltip title={t("common:view", "View")}>
-                              <button
-                                type="button"
-                                onClick={() => handleViewArtifact(artifact)}
-                                onKeyDown={handleIconButtonKeyDown}
-                                className="rounded p-1 text-text-muted hover:bg-surface2 hover:text-text"
-                                aria-label={t("common:view", "View")}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </button>
-                            </Tooltip>
-                          )}
+                          {viewAction}
+                          {canRetryChecks && <button type="button"
+                            disabled={isGeneratingOutput}
+                            onClick={() => void handleCapabilityAwareGenerateOutput(artifact.type, { mode: "replace", targetArtifactId: artifact.id, retryCitationChecks: true })}
+                            className="rounded px-2 py-1 text-xs text-primary hover:bg-surface2 disabled:opacity-50"
+                            aria-label={t("playground:claims.retry", "Retry citation checks")}>
+                            {t("playground:claims.retry", "Retry citation checks")}
+                          </button>}
                           {(artifact.type === "flashcards" || artifact.type === "quiz") && (
                             <Tooltip title={t("common:edit", "Edit")}>
                               <button
@@ -3127,6 +3276,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                                   key === "replace" ? "replace" : "new_version"
                                 void handleCapabilityAwareGenerateOutput(artifact.type, {
                                   mode,
+                                  regenerateCompleted: mode === "replace" && artifact.status === "completed",
                                   targetArtifactId: artifact.id,
                                   templateId: artifact.templateId
                                 })

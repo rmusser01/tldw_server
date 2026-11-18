@@ -3,11 +3,12 @@ import { act, render as renderUI } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import type { WorkspaceSourceStatusDetails } from "@/types/workspace"
 import { ResearchWorkspace } from "../index"
 
 // WP-42: the workspace's two 5 s pollers (server status projection and
 // per-source readiness checks) collapse into one scheduler that only ticks
-// while sources are processing and the page is visible.
+// while sources are processing or recovering availability and the page is visible.
 
 const render: typeof renderUI = (ui, options) =>
   renderUI(ui, {
@@ -95,6 +96,7 @@ const testState = {
     type: "pdf" | "video" | "audio" | "website" | "document" | "text"
     addedAt: Date
     status?: "processing" | "ready" | "error"
+    statusDetails?: WorkspaceSourceStatusDetails
     url?: string
   }>,
   workspaceChatSessions: {} as Record<string, { messages: any[] }>,
@@ -460,6 +462,42 @@ describe("ResearchWorkspace source status polling (WP-42)", () => {
     expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalledTimes(4)
     expect(mockGetMediaDetails.mock.calls.length).toBeGreaterThanOrEqual(4)
   })
+
+  it.each(["unknown", "missing_media"])(
+    "recovers an unavailable %s lookup and stops polling once ready",
+    async (lifecycleState) => {
+      testState.sources = [{
+        id: "source-1",
+        mediaId: 808,
+        title: "Temporarily unavailable source",
+        type: "pdf",
+        status: "error",
+        statusDetails: { lifecycleState },
+        addedAt: new Date("2026-02-18T12:00:00.000Z")
+      }]
+      mockGetWorkspaceSourcesStatus
+        .mockResolvedValueOnce(makeStatusPayload({
+          sources: [makeStatusSource({ state: lifecycleState, status_reason: "lookup_unavailable" })]
+        }))
+        .mockResolvedValue(makeStatusPayload())
+
+      const view = render(<ResearchWorkspace />)
+      await waitForProjection()
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+
+      expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalledTimes(2)
+      expect(testState.setSourceStatusByMediaId).toHaveBeenLastCalledWith(
+        808, "ready", expect.any(String), expect.any(Object),
+        expect.objectContaining({ lifecycleState: "queryable" })
+      )
+      expect(mockGetMediaDetails).not.toHaveBeenCalled()
+
+      testState.sources = [{ ...testState.sources[0], status: "ready", statusDetails: { lifecycleState: "queryable" } }]
+      view.rerender(<ResearchWorkspace />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+      expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalledTimes(2)
+    }
+  )
 
   it("issues no polls while the document is hidden and catches up once when visible", async () => {
     testState.sources = [

@@ -48,7 +48,7 @@ describe("useMessage website RAG boundary", () => {
       include_media_ids: [321],
     })
     expect(result).toMatchObject({
-      context: "<doc id='0'>persisted website chunk</doc>",
+      context: "<doc id='0'>Source [1]. Page location unavailable\npersisted website chunk</doc>",
     })
   })
 

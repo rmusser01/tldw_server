@@ -31,7 +31,7 @@ async def test_pdf_ocr_attaches_structured_pages(monkeypatch):
         pytest.skip(f"Dependencies not available: {e}")
 
     monkeypatch.setattr(pdf_lib, "_get_ocr_backend", lambda name=None: _StubOCRBackend())
-    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path: "")
+    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path, **kwargs: "")
 
     doc = pymupdf.open()
     page = doc.new_page(width=300, height=200)

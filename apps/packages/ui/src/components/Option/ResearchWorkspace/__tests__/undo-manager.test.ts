@@ -30,6 +30,32 @@ describe("workspace undo manager", () => {
     expect(getWorkspaceUndoPendingCount()).toBe(0)
   })
 
+  it("does not register an action whose apply refuses persistence", () => {
+    const handle = scheduleWorkspaceUndoAction({ apply: () => false, undo: () => {} })
+    expect(handle).toBeNull()
+    expect(getWorkspaceUndoPendingCount()).toBe(0)
+  })
+
+  it("keeps a failed undo available for retry", () => {
+    let canRestore = false
+    let value = "saved"
+    const handle = scheduleWorkspaceUndoAction({
+      apply: () => { value = "deleted" },
+      undo: () => {
+        if (!canRestore) return false
+        value = "saved"
+        return true
+      }
+    })
+    expect(undoWorkspaceAction(handle.id)).toBe(false)
+    expect(value).toBe("deleted")
+    expect(getWorkspaceUndoPendingCount()).toBe(1)
+    canRestore = true
+    expect(undoWorkspaceAction(handle.id)).toBe(true)
+    expect(value).toBe("saved")
+    expect(getWorkspaceUndoPendingCount()).toBe(0)
+  })
+
   it("purges pending action after timeout and runs finalize", () => {
     vi.useFakeTimers()
     const finalize = vi.fn()
@@ -51,9 +77,9 @@ describe("workspace undo manager", () => {
   })
   it("finalizes one exact editor removal while retaining unrelated Undo", () => {
     const finalize = vi.fn()
-    const own = scheduleWorkspaceUndoAction({ apply: vi.fn(), undo: vi.fn(), finalize })
+    const own = scheduleWorkspaceUndoAction({ apply: () => {}, undo: vi.fn(), finalize })
     const otherUndo = vi.fn()
-    const other = scheduleWorkspaceUndoAction({ apply: vi.fn(), undo: otherUndo })
+    const other = scheduleWorkspaceUndoAction({ apply: () => {}, undo: otherUndo })
     expect(finalizeWorkspaceUndoAction(own.id)).toBe(true)
     expect(finalize).toHaveBeenCalledTimes(1)
     expect(undoWorkspaceAction(own.id)).toBe(false)

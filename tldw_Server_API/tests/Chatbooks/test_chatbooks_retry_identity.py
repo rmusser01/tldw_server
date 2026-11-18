@@ -207,6 +207,9 @@ async def test_collection_media_links_bind_only_to_selected_restored_media(store
         restored = dst_media.get_media_by_title("Rowan source")
         assert restored["id"] != source_id and restored["uuid"] != source_uuid  # nosec B101 -- Both destination identities genuinely differ.
         expected.update(media_id=restored["id"], media_uuid=restored["uuid"])
+        assert result["id_maps"]["media"] == {str(source_id): restored["id"], source_uuid: restored["id"]}
+    else:
+        assert not result["id_maps"]["media"]
     assert metadata["selected"] == expected  # nosec B101 -- Never bind old IDs to unrelated destination Media.
     assert metadata["unselected"] == {"label": "unselected"}  # nosec B101 -- Unselected source links clear explicitly.
     assert metadata["conflicting"] == {"label": "conflicting"}  # nosec B101 -- Every supplied source identity must agree.
@@ -348,6 +351,7 @@ async def test_unqualified_archive_media_aliases_do_not_bind(stores, case):
     if case == "duplicate-uuid":
         first = media.get_media_by_title("Alias source a")
         second = media.get_media_by_title("Alias source b")
+        assert result["id_maps"]["media"]["shared-source-uuid"] is None
         assert first["id"] != second["id"] and first["uuid"] != second["uuid"]  # nosec B101 -- Require two actual records rather than normal content deduplication.
     assert metadata["uuid-only"] == {"label": "keep"}  # nosec B101 -- Never bind ambiguous/unqualified source UUIDs.
     if case == "duplicate-uuid":
@@ -356,6 +360,7 @@ async def test_unqualified_archive_media_aliases_do_not_bind(stores, case):
             metadata["id-only"]["media_id"] == restored["id"] and metadata["id-only"]["media_uuid"] == restored["uuid"]
         )  # nosec B101 -- Independent unique source ID still maps correctly.
     else:
+        assert result["id_maps"]["media"] == {}
         assert metadata["id-only"] == {"label": "id"}  # nosec B101 -- No unqualified title/foreign-owner binding.
         assert get_media_by_id(media, existing)["content"] == "Keep existing body."  # nosec B101 -- Existing destination body is preserved.
     assert any("not imported" in warning for warning in result["warnings"])  # nosec B101 -- Truthful unresolved-link disclosure.

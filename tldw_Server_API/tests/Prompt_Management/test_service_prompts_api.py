@@ -79,6 +79,20 @@ def api_context(tmp_path: Path):
     db.close_connection()
 
 
+def test_rag_default_requests_inline_citations_without_changing_saved_custom_prompt(api_context) -> None:
+    path = "/api/v1/service-prompts/chat.rag.answer"
+    response = api_context.client.get(path)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["source"] == "packaged"
+    assert "Cite supported claims inline using the supplied source numbers, for example [1]." in response.json()["effective_parts"]["template"]
+    custom = {"template": "Custom answer style: {context} / {question}"}
+    saved = api_context.client.put(path, json={"parts": custom, "expected_revision": None})
+    assert saved.status_code == 200
+    reread = api_context.client.get(path).json()
+    assert (reread["source"], reread["effective_parts"]) == ("user", custom)
+
+
 def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
     client: TestClient,
 ) -> None:

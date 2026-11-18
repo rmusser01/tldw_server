@@ -353,6 +353,13 @@ class ExportJobResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ImportIdentityMaps(BaseModel):
+    """Destination identities verified by this import; null aliases are ambiguous."""
+
+    media: dict[str, int | None] = Field(default_factory=dict)
+    notes: dict[str, str | None] = Field(default_factory=dict)
+
+
 class ImportJobResponse(BaseModel):
     """Import job status."""
     job_id: str
@@ -375,6 +382,7 @@ class ImportJobResponse(BaseModel):
     conflicts: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     imported_items: Optional[dict[str, int]] = None
+    id_maps: Optional[ImportIdentityMaps] = None
     inventory_summary: Optional[dict[str, Any]] = None
     skipped_non_restorable: Optional[dict[str, int]] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -638,6 +646,7 @@ class ImportChatbookResponse(BaseModel):
     message: str
     source_format: ChatbookImportSourceFormat = ChatbookImportSourceFormat.CHATBOOK
     job_id: Optional[str] = Field(None, description="Job ID if async mode")
+    id_maps: Optional[ImportIdentityMaps] = None
     imported_items: Optional[dict[str, int]] = Field(
         None,
         description="Count of imported items by type"

@@ -407,6 +407,7 @@ export const useMessageOption = (
     historyId,
     setHistoryId,
     temporaryChat,
+    scope: opts.scope,
     t,
   });
 

@@ -32,6 +32,7 @@ import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQu
 import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 import { resolveServicePromptScope } from "@/services/service-prompts"
+import { generateHistory } from "@/utils/generate-history"
 
 const mocks = vi.hoisted(() => {
   // Creation-ordered deterministic ids (TASK-13523, W3 Task 7). The
@@ -64,6 +65,7 @@ const mocks = vi.hoisted(() => {
   ocr: vi.fn(),
   realFormatter: false,
   realPersistence: false,
+  greetingEnabled: undefined as boolean | undefined,
   ragSearch: vi.fn(),
   streamMessage: vi.fn(),
   saveHistory: vi.fn(),
@@ -294,7 +296,7 @@ vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
     // Keep the real hook's draft subscriptions while isolating settings storage.
     useStoreMessageOption((state) => state.chatDraftAddress)
     useStoreMessageOption((state) => state.chatDraftRevision)
-    return { settings: {}, updateSettings: vi.fn() }
+    return { settings: { greetingEnabled: mocks.greetingEnabled }, updateSettings: vi.fn() }
   }
 }))
 vi.mock("@/hooks/playground", () => ({
@@ -988,6 +990,7 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.withLoader = false
     mocks.realFormatter = false
     mocks.realPersistence = false
+    mocks.greetingEnabled = undefined
     mocks.realProviderResolution = false
     mocks.injectActor.mockImplementation(async history => history)
     mocks.getModels.mockResolvedValue([])
@@ -1071,6 +1074,60 @@ describe("saved normal Chat pipeline with autosave", () => {
         }
       }
     })
+  })
+
+  it.each([false, true])("preserves imported request history when the workspace restores after hook mount (StrictMode=%s)", async strict => {
+    const restoredMessages: Message[] = [
+      { id: "import-user", role: "user", isBot: false, name: "You", message: "Remember the Education proposal.", sources: [], images: [] },
+      { id: "import-answer", role: "assistant", isBot: true, name: "Assistant", message: "The proposal is on printed page 319.", sources: [], images: [] }
+    ]
+    const restoredHistory = restoredMessages.map(row => ({ role: row.role!, content: row.message }))
+    const hook = renderHook(() => {
+      const state = useStoreMessageOption()
+      const actions = useChatActions({ ...createHookOptions(), ...state })
+      const restored = React.useRef(false)
+      // ChatPane restores its workspace once; StrictMode replays the child hook's effects.
+      React.useEffect(() => {
+        if (restored.current) return
+        restored.current = true
+        const current = useStoreMessageOption.getState()
+        current.setMessages(restoredMessages)
+        current.setHistory(restoredHistory)
+        current.setHistoryId("imported-local-history", { preserveServerChatId: true })
+        current.setServerChatId(null)
+      }, [])
+      return { state, actions }
+    }, { wrapper: strict ? React.StrictMode : React.Fragment })
+    await waitFor(() => expect(hook.result.current.state.messages).toEqual(restoredMessages))
+    expect(hook.result.current.state.history).toEqual(restoredHistory)
+    expect(hook.result.current.state.serverChatId).toBeNull()
+    expect(mocks.createChat).not.toHaveBeenCalled()
+    // Both ordinary Chat and RAG format this restored history for inference.
+    const inferenceMessages = generateHistory(hook.result.current.state.history, hook.result.current.state.selectedModel!)
+    expect(JSON.stringify(inferenceMessages)).toContain(restoredMessages[0].message)
+    expect(JSON.stringify(inferenceMessages)).toContain(restoredMessages[1].message)
+    hook.unmount()
+  })
+
+  it("still projects greeting settings on mount and after explicit changes", async () => {
+    const greeting: Message = { id: "greeting", role: "assistant", isBot: true, name: "Assistant", message: "Welcome", messageType: "character:greeting", sources: [], images: [] }
+    const question: Message = { id: "question", role: "user", isBot: false, name: "You", message: "Keep my question", sources: [], images: [] }
+    useStoreMessageOption.setState({ messages: [greeting, question] })
+    mocks.greetingEnabled = false
+    const hook = renderHook(() => {
+      const state = useStoreMessageOption()
+      useChatActions({ ...createHookOptions(), ...state })
+      return state
+    }, { wrapper: React.StrictMode })
+    await waitFor(() => expect(hook.result.current.history.map(row => row.content)).toEqual([question.message]))
+    mocks.greetingEnabled = true
+    hook.rerender()
+    await waitFor(() => expect(hook.result.current.history.map(row => row.content)).toEqual([greeting.message, question.message]))
+    mocks.greetingEnabled = false
+    hook.rerender()
+    await waitFor(() => expect(hook.result.current.history.map(row => row.content)).toEqual([question.message]))
+    expect(hook.result.current.messages).toEqual([greeting, question])
+    hook.unmount()
   })
 
   it("publishes a current Temporary full-chat reply after an address-only draft change", async () => {
@@ -1469,6 +1526,7 @@ describe("saved normal Chat pipeline with autosave", () => {
         url: "https://sources.test/media-42-evidence",
         pageContent: "Evidence",
         metadata: {
+          citation_index: 1,
           media_id: 42,
           source: "media_db",
           title: "Distinctive media 42 evidence",
@@ -3208,6 +3266,69 @@ describe("saved normal Chat pipeline with autosave", () => {
       } finally { view.unmount() }
     })
 
+    it.each(["unchanged source status polling", "unselected source becoming ready", "unselected source failing", "unselected folder membership"])("continues a Research RAG answer across %s", async refresh => {
+      const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+      mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+      mocks.realFormatter = true
+      mocks.streamMessage.mockImplementation(async function* () { yield "The department proposal is described here [1]." })
+      const evidence = { documents: [{ content: "Education proposal evidence", metadata: { media_id: 42, title: "Education", type: "pdf" } }] }
+      const held = deferred<typeof evidence>()
+      mocks.ragSearch.mockImplementation(() => held.promise)
+      useWorkspaceStore.setState({ sources: [
+        { id: "education", mediaId: 42, title: "Education", type: "pdf", status: "ready", addedAt: new Date() },
+        { id: "unselected", mediaId: 43, title: "Other upload", type: "pdf", status: "processing", addedAt: new Date() }
+      ], selectedSourceIds: ["education"], selectedSourceFolderIds: [], sourceFolders: [], sourceFolderMemberships: [] })
+      const view = await mountSdkScene({ type: "workspace", workspaceId: "sdk-original-workspace" }, true)
+      act(() => useStoreMessageOption.setState({ ragMediaIds: [42], fileRetrievalEnabled: true, chatMode: "rag" }))
+      let pending!: ReturnType<typeof view.send>
+      try {
+        act(() => { pending = view.send() })
+        await waitFor(() => expect(mocks.ragSearch).toHaveBeenCalledOnce())
+        await act(async () => {
+          if (refresh === "unselected folder membership") useWorkspaceStore.setState({ sourceFolderMemberships: [{ sourceId: "unselected", folderId: "other" }] })
+          else useWorkspaceStore.getState().setSourceStatusByMediaId(refresh === "unchanged source status polling" ? 42 : 43,
+            refresh === "unselected source failing" ? "error" : "ready", "Keyword search status refreshed")
+        })
+        await act(async () => {
+          held.resolve(evidence)
+          expect(await pending).toMatchObject({ status: "submitted" })
+        })
+        expect(mocks.streamMessage).toHaveBeenCalledOnce()
+        await waitFor(() => expect(view.result.current.state.messages.at(-1)?.message).toContain("department proposal"))
+      } finally { held.resolve(evidence); await pending; view.unmount() }
+    })
+
+    it.each(["media", "capture", "readiness", "note evidence", "folder hierarchy"] as const)("retires a Research RAG turn when its %s changes and identifies its abandoned rows", async boundary => {
+      const evidence = { documents: [{ content: "Original evidence", metadata: { media_id: 42 } }] }
+      const held = deferred<typeof evidence>()
+      mocks.ragSearch.mockImplementation(() => held.promise)
+      useWorkspaceStore.setState({ sources: [{ id: "education", mediaId: 42, title: "Education", type: "pdf", status: "ready", addedAt: new Date() }],
+        selectedSourceIds: boundary === "folder hierarchy" ? [] : ["education"], selectedSourceFolderIds: boundary === "folder hierarchy" ? ["group"] : [],
+        sourceFolders: [{ id: "group", workspaceId: "sdk-original-workspace", name: "Group", parentFolderId: null, createdAt: new Date(), updatedAt: new Date() }, { id: "child", workspaceId: "sdk-original-workspace", name: "Child", parentFolderId: "group", createdAt: new Date(), updatedAt: new Date() }],
+        sourceFolderMemberships: [{ sourceId: "education", folderId: "child" }] })
+      const view = await mountSdkScene({ type: "workspace", workspaceId: "sdk-original-workspace" }, true)
+      act(() => useStoreMessageOption.setState({ ragMediaIds: [42], fileRetrievalEnabled: true, chatMode: "rag" }))
+      let pending!: ReturnType<typeof view.send>
+      try {
+        act(() => { pending = view.send() })
+        await waitFor(() => expect(mocks.ragSearch).toHaveBeenCalledOnce())
+        const provisionalIds = view.result.current.state.messages.map(row => row.id)
+        await act(async () => { useWorkspaceStore.setState(state => boundary === "folder hierarchy"
+          ? { sourceFolders: state.sourceFolders.map(folder => ({ ...folder, parentFolderId: null })) }
+          : { sources: state.sources.map(source => {
+          if (boundary === "media") return { ...source, mediaId: 43 }
+          if (boundary === "readiness") return { ...source, status: "processing" as const }
+          if (boundary === "note evidence") return { ...source, knowledgeQaEvidence: { importId: "changed-import", threadId: null, snapshot: true, sources: [] } }
+          return { ...source, webCapture: { clipId: "new", requestedUrl: "https://example.test", capturedAt: "2026-11-15", contentSha256: "changed", refreshOf: null, mediaId: 42, versionNumber: 2, versionUuid: "new-version" } }
+        }) }) })
+        await act(async () => {
+          held.resolve(evidence)
+          expect(await pending).toMatchObject({ status: "skipped", discardedMessageIds: expect.arrayContaining(provisionalIds) })
+        })
+        expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+      } finally { held.resolve(evidence); await pending; view.unmount() }
+    })
+
     it.each(["New reference", "workspace", "account", "selection", "unmount"] as const)("S04 retires a held Research scene before inference on %s", async boundary => {
       const view = await mountSdkScene({ type: "workspace", workspaceId: "sdk-original-workspace" }, true)
       act(() => useStoreMessageOption.setState({ ragMediaIds: [42], fileRetrievalEnabled: true, chatMode: "rag" }))
@@ -3497,6 +3618,32 @@ describe("saved normal Chat pipeline with autosave", () => {
         view.unmount();
       }
     });
+
+    it("publishes both RAG assistant save receipts to the live workspace after successive turns", async () => {
+      const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+      mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+      mocks.realFormatter = true
+      mocks.realPersistence = true
+      mocks.ragSearch.mockResolvedValue({ documents: [{
+        content: "Visitors enter through the east gate.",
+        metadata: { media_id: 42, title: "Rowan report", type: "text" }
+      }] })
+      mocks.streamMessage.mockImplementation(async function* () {
+        yield "<think>Check the supplied source.</think>"
+        yield "Visitors use the east gate [1]."
+      })
+      const view = await mountSdkScene({ type: "workspace", workspaceId: "sdk-original-workspace" }, true)
+      act(() => useStoreMessageOption.setState({ ragMediaIds: [42], fileRetrievalEnabled: true, chatMode: "rag" }))
+      try {
+        for (let turn = 0; turn < 2; turn += 1) {
+          await act(async () => { expect(await view.send()).toMatchObject({ status: "submitted" }) })
+          const local = view.result.current.state.messages.at(-1)!
+          const canonical = mocks.serverRows.get("chat-1")!.at(-1)!
+          expect(mocks.rows.find(row => row.id === local.id)).toMatchObject({ serverMessageId: canonical.id })
+          expect(local).toMatchObject({ serverMessageId: canonical.id })
+        }
+      } finally { view.unmount() }
+    })
 
     it.each(["first", "prior-local", "duplicate-ack", "server-alias", "unknown-parent"])("S04 retains cited workspace source references through the actual SDK model and manual server save (%s)", async parentCase => {
       const actualModels =

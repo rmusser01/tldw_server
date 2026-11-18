@@ -361,8 +361,8 @@ async def test_pdf_analysis_without_explicit_api_key(monkeypatch):
     import tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib as pdf_mod
 
     # Stub parser and metadata to avoid heavy dependencies and errors
-    monkeypatch.setattr(pdf_mod, "pymupdf4llm_parse_pdf", lambda path: "Some extracted content")
-    monkeypatch.setattr(pdf_mod, "extract_metadata_from_pdf", lambda path: {})
+    monkeypatch.setattr(pdf_mod, "pymupdf4llm_parse_pdf", lambda path, **kwargs: "Some extracted content")
+    monkeypatch.setattr(pdf_mod, "extract_metadata_from_pdf", lambda path, **kwargs: {})
     # Stub analyze to a quick response
     monkeypatch.setattr(pdf_mod, "analyze", lambda **kwargs: "OK")
 
@@ -401,7 +401,7 @@ async def test_pdf_text_normalization_applies_to_all_parser_paths(
         "We are not just interested in models that perform well on a\n"
         "single physical task."
     )
-    monkeypatch.setattr(pdf_mod, patch_attr, lambda path: wrapped_text)
+    monkeypatch.setattr(pdf_mod, patch_attr, lambda path, **kwargs: wrapped_text)
     if parser_name == "docling":
         original_find_spec = importlib.util.find_spec
         monkeypatch.setattr(
@@ -426,7 +426,7 @@ async def test_pdf_text_normalization_applies_to_all_parser_paths(
 async def test_pdf_text_normalization_applies_after_ocr_merge(monkeypatch):
     import tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib as pdf_mod
 
-    monkeypatch.setattr(pdf_mod, "pymupdf4llm_parse_pdf", lambda path: "Parser output")
+    monkeypatch.setattr(pdf_mod, "pymupdf4llm_parse_pdf", lambda path, **kwargs: "Parser output")
     monkeypatch.setattr(
         pdf_mod,
         "_ocr_pdf_pages",
@@ -458,7 +458,7 @@ async def test_pdf_text_normalization_records_analysis_details(monkeypatch):
     monkeypatch.setattr(
         pdf_mod,
         "pymupdf4llm_parse_pdf",
-        lambda path: "Paragraph starts here\nand continues there.",
+        lambda path, **kwargs: "Paragraph starts here\nand continues there.",
     )
 
     out = await pdf_mod.process_pdf_task(
@@ -481,7 +481,7 @@ async def test_pdf_text_normalization_fails_softly(monkeypatch):
     import tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib as pdf_mod
 
     raw_text = "Line one\nline two"
-    monkeypatch.setattr(pdf_mod, "pymupdf4llm_parse_pdf", lambda path: raw_text)
+    monkeypatch.setattr(pdf_mod, "pymupdf4llm_parse_pdf", lambda path, **kwargs: raw_text)
     monkeypatch.setattr(
         pdf_mod,
         "normalize_pdf_text_for_storage",

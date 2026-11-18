@@ -2311,6 +2311,44 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     expect(rail).toHaveTextContent("Generating summary")
   })
 
+  it("does not show a finished vector-index failure as active source processing", () => {
+    testState.sources = [{
+      id: "source-text-searchable", mediaId: 808, title: "Searchable PDF", type: "pdf",
+      status: "processing", addedAt: new Date("2026-02-18T12:00:00.000Z"),
+      statusMessage: "Text search is available, but vector indexing failed.",
+      readiness: { metadata_ready: true, text_extracted: true, fts_ready: true,
+        vector_ready: false, citation_ready: true, summary_ready: true, tool_accessible: true },
+      statusDetails: { lifecycleState: "partially_queryable", statusReason: "vector_index_failed",
+        retryEligible: true, nextAction: "retry_vector_indexing" }
+    }]
+    render(<ResearchWorkspace />)
+    expect(screen.queryByTestId("workspace-statusbar-activity")).not.toBeInTheDocument()
+  })
+
+  it("does not revoke source selection after repeated HTTP 500 polling failures during a restart", async () => {
+    const statusDeferred = createDeferred<ReturnType<typeof makeStatusPayload>>()
+    const capabilitiesDeferred = createDeferred<ReturnType<typeof makeCapabilitiesPayload>>()
+    mockGetWorkspaceSourcesStatus.mockReturnValueOnce(statusDeferred.promise)
+    mockGetWorkspaceCapabilities.mockReturnValueOnce(capabilitiesDeferred.promise)
+    testState.sources = [{
+      id: "source-restarting", mediaId: 909, title: "Searchable PDF", type: "pdf",
+      status: "processing", addedAt: new Date("2026-02-18T12:30:00.000Z")
+    }]
+    testState.selectedSourceIds = ["source-restarting"]
+    mockGetMediaDetails.mockRejectedValue(Object.assign(new Error("Internal Server Error"), { status: 500 }))
+
+    render(<ResearchWorkspace />)
+    await waitFor(() => expect(mockGetMediaDetails).toHaveBeenCalledTimes(1))
+    statusDeferred.resolve(makeStatusPayload({ sources: [] }))
+    capabilitiesDeferred.resolve(makeCapabilitiesPayload())
+    await waitFor(() => expect(mockGetMediaDetails).toHaveBeenCalledTimes(2))
+
+    expect(testState.setSourceStatusByMediaId).not.toHaveBeenCalled()
+    expect(mockUpdateWorkspaceSourceSelection.mock.calls.every(([, ids]) =>
+      ids.includes("source-restarting")
+    )).toBe(true)
+  })
+
   it("marks processing sources as error after repeated non-transient polling failures", async () => {
     const statusDeferred =
       createDeferred<ReturnType<typeof makeStatusPayload>>()

@@ -1,5 +1,8 @@
 import { KnowledgeIcon } from "@/components/Option/Knowledge/KnowledgeIcon"
+import { resolveOptionsHref } from "@/utils/browser-runtime"
+import { buildDocumentPagePath } from "@/routes/route-paths"
 import { safeExternalUrl } from "@/utils/safe-external-url"
+import { projectPdfPageSpans } from "@/utils/knowledge-note-provenance"
 import { useTranslation } from "react-i18next"
 import React from "react"
 
@@ -40,6 +43,12 @@ type Props = {
       rationale?: string
       selection_reason?: string
       why_selected?: string
+      media_id?: string | number
+      media_type?: string
+      page_number?: number
+      citation_index?: number
+      printed_page_label?: string
+      page_spans?: Array<{ page_number: number; start_char?: number; end_char?: number; printed_page_label?: string }>
       page?: number
       loc?: {
         lines?: {
@@ -49,6 +58,7 @@ type Props = {
       }
     }
   }
+  sourceIndex?: number
   onSourceClick?: (source: any) => void
   onSourceNavigate?: (source: any) => void
   onSourceDwell?: (source: any, dwellMs: number) => void
@@ -57,6 +67,7 @@ type Props = {
 
 export const MessageSource: React.FC<Props> = ({
   source,
+  sourceIndex,
   onSourceClick,
   onSourceNavigate,
   onSourceDwell,
@@ -79,8 +90,27 @@ export const MessageSource: React.FC<Props> = ({
     source?.snippet ||
     ""
   const url = source?.url
-  const safeUrl = safeExternalUrl(url)
-  const page = source?.metadata?.page
+  const page = source?.metadata?.page_number ?? source?.metadata?.page
+  const citationIndex = source.metadata?.citation_index ?? (sourceIndex != null ? sourceIndex + 1 : null)
+  const pageSpans = source.metadata?.page_spans
+  const printedPage = source.metadata?.printed_page_label || (Array.isArray(pageSpans)
+    ? pageSpans.find(span => span && typeof span === "object" && span.page_number === page)?.printed_page_label : undefined)
+  const locations = projectPdfPageSpans(pageSpans) || [{ pageNumber: page, printedPageLabel: printedPage }]
+  const isPdf = source.type === "pdf" || source.metadata?.media_type === "pdf" || source.metadata?.type === "pdf"
+  const pdfLinks = isPdf ? locations.flatMap(location => {
+    const path = buildDocumentPagePath(source.metadata?.media_id, location.pageNumber)
+    return path ? [{ ...location, href: resolveOptionsHref(path) }] : []
+  }) : []
+  const safeUrl = pdfLinks[0]?.href || safeExternalUrl(url)
+  const rangeLabel = (values: string[]) => values.length > 1 && values.every((value, index) => /^\d+$/.test(value) && Number(value) === Number(values[0]) + index)
+    ? `${values[0]}–${values[values.length - 1]}` : values.join(", ")
+  const pagePrefix = pdfLinks.length > 1 ? "pp." : "p."
+  const pageLabel = pdfLinks.length ? [
+    ...(pdfLinks.every(location => location.printedPageLabel) ? [`Printed ${pagePrefix} ${rangeLabel(pdfLinks.map(location => location.printedPageLabel!))}`] : []),
+    `PDF ${pagePrefix} ${rangeLabel(pdfLinks.map(location => String(location.pageNumber)))}`,
+  ].join(" · ") : null
+  const openLinks = pdfLinks.length ? pdfLinks.map(location => ({ href: location.href, label: `Open PDF page ${location.pageNumber}` }))
+    : safeUrl ? [{ href: safeUrl, label: t("sourceOpen", "Open source") }] : []
   const lineFrom = source?.metadata?.loc?.lines?.from
   const lineTo = source?.metadata?.loc?.lines?.to
   const isExpandable = Boolean(content)
@@ -222,7 +252,9 @@ export const MessageSource: React.FC<Props> = ({
         {isKnowledge && (
           <KnowledgeIcon type={source.type} className="h-3 w-3" />
         )}
+        {citationIndex != null && <span className="font-medium">[{citationIndex}]</span>}
         <span className="text-caption">{label}</span>
+        {pageLabel && <span className="text-text-muted">{pageLabel}</span>}
       </summary>
       <div className="mt-2 rounded-md border border-border bg-surface px-2 py-2 text-xs text-text-muted">
         <p className="whitespace-pre-wrap text-xs text-text-muted">{content}</p>
@@ -248,7 +280,7 @@ export const MessageSource: React.FC<Props> = ({
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-text-subtle">
             {page != null && (
               <span className="rounded-md border border-border bg-surface2 px-2 py-0.5">
-                {`Page ${page}`}
+                {pdfLinks.length > 1 ? `Pages ${rangeLabel(pdfLinks.map(location => String(location.pageNumber)))}` : `Page ${page}`}
               </span>
             )}
             {lineFrom != null && lineTo != null && (
@@ -256,9 +288,10 @@ export const MessageSource: React.FC<Props> = ({
                 {`Line ${lineFrom} - ${lineTo}`}
               </span>
             )}
-            {safeUrl && (
+            {openLinks.map(link => (
               <a
-                href={safeUrl}
+                key={link.href}
+                href={link.href}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => {
@@ -266,9 +299,9 @@ export const MessageSource: React.FC<Props> = ({
                 }}
                 className="rounded-md border border-border bg-surface2 px-2 py-0.5 text-text-subtle hover:text-text"
               >
-                {t("sourceOpen", "Open source")}
+                {link.label}
               </a>
-            )}
+            ))}
           </div>
         )}
         {onOpenKnowledgePanel && (

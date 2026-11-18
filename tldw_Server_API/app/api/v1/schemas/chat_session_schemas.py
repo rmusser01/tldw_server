@@ -3,12 +3,10 @@
 Pydantic schemas for character chat sessions and messages.
 """
 
-import json
 from datetime import datetime
 from typing import Any, Literal, Optional, Union
-from urllib.parse import quote
 
-from pydantic import AnyHttpUrl, BaseModel, Field, StrictBool, field_validator, model_serializer, model_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator, model_serializer, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     HISTORY_BRANCH_FIELD_DESCRIPTION,
@@ -42,8 +40,11 @@ from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
     RoleplayResumeUserAppendResponse as RoleplayResumeUserAppendResponse,
 )
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, reject_assistant_startup_input
+from tldw_Server_API.app.core.Chat.workspace_references import (
+    WORKSPACE_ASSISTANT_METADATA_KEYS,
+    validate_workspace_assistant_metadata,
+)
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
-from tldw_Server_API.app.core.Sync_Contracts.notes_provenance_contract import validate_notes_provenance_payload
 
 # Core-owned since TASK-13950.15; re-exported for the API layer.
 from tldw_Server_API.app.core.Workspaces.chat_session_schemas import (  # noqa: F401 - re-exported (TASK-13950.15)
@@ -387,34 +388,19 @@ class MessageCreate(BaseModel):
     metadata_extra: dict[str, Any] | None = Field(
         None,
         description=(
-            "Recorded workspace RAG references for an assistant message. Only "
-            "workspace_rag_sources_v1 is retained; unsupported legacy fields are ignored. "
-            "References confer no Media access."
+            "Recorded workspace RAG references and citation-support reports for an assistant message. "
+            "Unsupported legacy fields are ignored. Historical assessments confer no Media access "
+            "or proof of support for an edited message."
         ),
     )
 
     @field_validator("metadata_extra", mode="before")
     @classmethod
     def _validate_workspace_references(cls, value):
-        if not isinstance(value, dict) or "workspace_rag_sources_v1" not in value:
+        if not isinstance(value, dict):
             return None
-        raw = value["workspace_rag_sources_v1"]
-        if not isinstance(raw, dict) or set(raw) != {"origin", "sources"}:
-            raise ValueError("Workspace references require only origin and sources")
-        provenance = validate_notes_provenance_payload(raw)
-        sources = provenance.get("sources")
-        if provenance["origin"] != "knowledge_qa" or not sources or len(sources) > 64:
-            raise ValueError("Workspace references require 1..64 Knowledge sources")
-        for source in sources:
-            if source["mediaId"] is None or not source["title"].strip() or not source["excerpt"].strip():
-                raise ValueError("Workspace references require a Media ID, title and excerpt")
-            url = source.get("url")
-            if url:
-                AnyHttpUrl(url)
-        encoded = quote(json.dumps(provenance, ensure_ascii=False, separators=(",", ":")), safe="~()*!.'-")
-        if len(encoded) > 262_144:
-            raise ValueError("Workspace references exceed the encoded size limit")
-        return {"workspace_rag_sources_v1": provenance}
+        supported = {key: item for key, item in value.items() if key in WORKSPACE_ASSISTANT_METADATA_KEYS}
+        return validate_workspace_assistant_metadata(supported) if supported else None
 
     @model_validator(mode="after")
     def _validate_reference_role(self) -> "MessageCreate":

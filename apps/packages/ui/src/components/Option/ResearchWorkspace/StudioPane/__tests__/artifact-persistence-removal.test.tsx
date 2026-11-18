@@ -21,7 +21,8 @@ vi.mock('@/store/workspace', () => ({
   useWorkspaceStore: { getState: () => runtime.state },
   hasResearchWorkspaceMigrationTombstone: () => true,
 }));
-vi.mock('@/services/workspace-artifact-persistence', () => ({
+vi.mock('@/services/workspace-artifact-persistence', async original => ({
+  WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS: (await original<typeof import('@/services/workspace-artifact-persistence')>()).WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS,
   persistWorkspaceArtifact: runtime.save,
 }));
 vi.mock('@/services/service-prompts', () => ({
@@ -94,6 +95,26 @@ const setup = (artifact = draft()) => {
 };
 
 describe('saved Workspace output removal', () => {
+  it('keeps a slow full-artifact removal inside the shared save budget before allowing Undo', async () => {
+    const { artifact, confirmation, remove } = setup();
+    vi.useFakeTimers();
+    runtime.save.mockImplementationOnce((saved, options) => new Promise((resolve, reject) => {
+      setTimeout(() => {
+        if (performance.now() >= options.deadline || options.scope.scopeSignal.aborted) reject(new Error('Save deadline expired'));
+        else resolve({ ...saved, workspaceArtifactVersion: 2 });
+      }, 20_000);
+    }));
+    const pending = Promise.resolve(confirmation.onOk()).then(() => ({ ok: true }), error => ({ error }));
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(19_999); });
+      expect(remove).not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(await pending).toEqual({ ok: true });
+      expect(remove).toHaveBeenCalledWith(artifact.id);
+      expect(getWorkspaceUndoPendingCount()).toBe(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('keeps unenrolled Studio-style outputs locally removable in a migrated workspace', async () => {
     const local: GeneratedArtifact = {
       id: 'local-summary',

@@ -1,3 +1,4 @@
+import { createRequire } from "node:module"
 import React from "react"
 import {
   act,
@@ -19,22 +20,11 @@ import {
 import { DEFAULT_SOURCE_LIST_VIEW_STATE } from "../SourcesPane/source-list-view"
 import type { SourceSavedViewsController } from "../SourcesPane/use-source-saved-views"
 
-// rc-component uses the same "test-id" for tooltip and dialog in NODE_ENV=test.
-// Keep the real tooltip and give it the React ID used outside that test branch.
-vi.mock("antd", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("antd")>()
-  const React = await import("react")
-  return {
-    ...actual,
-    Tooltip: React.forwardRef<
-      React.ComponentRef<typeof actual.Tooltip>,
-      React.ComponentProps<typeof actual.Tooltip>
-    >(function Tooltip(props, ref) {
-      const id = React.useId()
-      return <actual.Tooltip {...props} id={props.id ?? id} ref={ref} />
-    })
-  }
-})
+const require = createRequire(import.meta.url)
+const antdRequire = createRequire(require.resolve("antd"))
+const rcUseId = antdRequire("@rc-component/util/lib/hooks/useId") as {
+  default: (id?: string) => string
+}
 
 // Keep real Ant Design dialogs and menus; jsdom never completes CSS leave motion.
 const render = (ui: React.ReactElement) =>
@@ -192,6 +182,11 @@ const activateMenuItemByKeyboard = (item: HTMLElement) => {
 describe("SourceViewControls", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Match production IDs: shared test-id lets tooltip cleanup erase the dialog's Escape owner.
+    vi.spyOn(rcUseId, "default").mockImplementation(function useId(id) {
+      const reactId = React.useId()
+      return id || reactId
+    })
   })
 
   it("reserves hidden validation text and exposes it only for an invalid touched name", async () => {
@@ -1469,9 +1464,14 @@ describe("SourceViewControls", () => {
     ).toBeInTheDocument()
   })
 
-  it.each(["Cancel", "Close", "Escape"])(
-      "dismisses a rapid reopened native Save via %s",
-      async (action) => {
+  it.each([
+    { opener: "pointer", action: "Cancel" },
+    { opener: "pointer", action: "Close" },
+    { opener: "keyboard", action: "Escape" },
+    { opener: "pointer", action: "Escape" }
+  ])(
+      "dismisses a rapid reopened native Save via $action after a $opener open",
+      async ({ opener, action }) => {
         const user = userEvent.setup()
         rtlRender(
           <Harness
@@ -1479,13 +1479,15 @@ describe("SourceViewControls", () => {
           />
         )
         const invoker = screen.getByRole("button", { name: "Save source view" })
-        if (action === "Escape") {
-          // Avoid a hover tooltip sharing the Modal's Escape registration ID in jsdom.
+        if (opener === "keyboard") {
           invoker.focus()
           await user.keyboard("{Enter}")
         } else {
           await user.click(invoker)
         }
+        const tooltip = opener === "pointer" && action === "Escape"
+          ? (await screen.findByRole("tooltip")).closest(".ant-tooltip")!
+          : null
         const first = await screen.findByRole("dialog")
         await waitFor(() =>
           expect(first.className).toContain("ant-zoom-appear-active")
@@ -1510,6 +1512,17 @@ describe("SourceViewControls", () => {
         fireEvent.animationEnd(current)
         await waitFor(() => expect(current.className).not.toContain("ant-zoom"))
         if (action === "Escape") {
+          if (opener === "pointer") {
+            // Finish the hovered trigger's real leave motion before keyboard dismissal.
+            await waitFor(() =>
+              expect(tooltip!.className).toMatch(/leave-active|ant-tooltip-hidden/)
+            )
+            if (tooltip!.className.includes("leave-active")) {
+              fireEvent(tooltip!, new Event("webkitAnimationEnd", { bubbles: true }))
+              fireEvent.animationEnd(tooltip!)
+            }
+            await waitFor(() => expect(tooltip).not.toBeVisible())
+          }
           await waitFor(() => expect(input).toHaveFocus())
           await user.keyboard("{Escape}")
         } else

@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 import type { NotesLeaveGuardState } from "../hooks/useNotesEditorState"
+import * as notesEditorState from "../hooks/useNotesEditorState"
 
 // The Notes page on the save state machine (#3102: NS-01, NS-03, NS-N2,
 // NS-05, NS-02, NS-06).
@@ -36,7 +37,8 @@ vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async (importOri
   return {
     ...actual,
     useNotesGraphAuthorityScope: () =>
-      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+      notesAuthority.principalId == null ? null :
+        actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, notesAuthority.principalId)
   }
 })
 
@@ -50,6 +52,7 @@ const {
   mockConfirmDanger,
   mockGetSetting,
   mockClearSetting,
+  notesAuthority,
   server
 } = vi.hoisted(() => ({
   mockBgRequest: vi.fn(),
@@ -61,6 +64,7 @@ const {
   mockConfirmDanger: vi.fn(),
   mockGetSetting: vi.fn(),
   mockClearSetting: vi.fn(),
+  notesAuthority: { principalId: 1 as number | null },
   server: {
     note: { id: 11, title: "Saved note", content: "Saved body", version: 1 },
     created: 0
@@ -252,6 +256,7 @@ describe("NotesManagerPage save state machine", { timeout: 60_000 }, () => {
     vi.clearAllMocks()
     localStorage.clear()
     leaveGuard.current = null
+    notesAuthority.principalId = 1
     server.note = { id: 11, title: "Saved note", content: "Saved body", version: 1 }
     server.created = 0
     mockConfirmDanger.mockResolvedValue(true)
@@ -266,6 +271,49 @@ describe("NotesManagerPage save state machine", { timeout: 60_000 }, () => {
 
   afterEach(() => {
     Reflect.deleteProperty(navigator, "clipboard")
+  })
+
+  it.each([
+    { name: "initial authority arrives", previousPrincipal: null, nextPrincipal: 1 },
+    { name: "verified account changes", previousPrincipal: 1, nextPrincipal: 2 },
+  ])("retires the draft lock when $name without clearing a newer draft", async ({ previousPrincipal, nextPrincipal }) => {
+    let release!: () => void
+    const pendingDecision = new Promise<void>((resolve) => { release = resolve })
+    const actualUseNotesEditorState = notesEditorState.useNotesEditorState
+    vi.spyOn(notesEditorState, "useNotesEditorState").mockImplementation((deps) => {
+      const editor = actualUseNotesEditorState(deps)
+      return {
+        ...editor,
+        confirmDiscardIfDirty: async (...args) => {
+          const decision = await editor.confirmDiscardIfDirty(...args)
+          await pendingDecision
+          return decision
+        },
+      }
+    })
+    notesAuthority.principalId = previousPrincipal
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const tree = () => <QueryClientProvider client={client}><NotesManagerPage LeaveGuard={CaptureLeaveGuard} /></QueryClientProvider>
+    const view = render(tree())
+    fireEvent.click(screen.getAllByRole("button", { name: "New note", exact: true })[0])
+    view.rerender(tree())
+    expect(screen.getByPlaceholderText("Title")).toBeDisabled()
+    try {
+      notesAuthority.principalId = nextPrincipal
+      view.rerender(tree())
+      expect(screen.getByPlaceholderText("Title")).toBeEnabled()
+      fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "New owner draft" } })
+      type("Keep the new owner body")
+      await act(async () => { release() })
+      expect(screen.getByPlaceholderText("Title")).toHaveValue("New owner draft")
+      expect(screen.getByPlaceholderText(EDITOR_PLACEHOLDER)).toHaveValue("Keep the new owner body")
+      expect(requestsTo("POST", "/api/v1/notes/")).toHaveLength(0)
+      expect(requestsTo("PUT", "/api/v1/notes/11")).toHaveLength(0)
+    } finally {
+      await act(async () => { release() })
+      view.unmount()
+      client.clear()
+    }
   })
 
   it.each(["new", "save-and-new"])("protects the prior note while %s waits for its save refresh", async (action) => {

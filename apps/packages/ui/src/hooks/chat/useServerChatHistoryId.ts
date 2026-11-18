@@ -23,6 +23,7 @@ type UseServerChatHistoryIdOptions = {
     options?: { preserveServerChatId?: boolean }
   ) => void
   temporaryChat: boolean
+  scope?: ChatScope
   t: TFunction
 }
 
@@ -31,9 +32,13 @@ export const useServerChatHistoryId = ({
   historyId,
   setHistoryId,
   temporaryChat,
+  scope,
   t
 }: UseServerChatHistoryIdOptions) => {
   const selection = useHistorySelectionContext()
+  const surfaceScopeKey = scope?.type === "workspace" ? JSON.stringify(["workspace", scope.workspaceId]) : "global"
+  const surfaceScopeKeyRef = React.useRef(surfaceScopeKey)
+  surfaceScopeKeyRef.current = surfaceScopeKey
   const scopedCache = React.useRef(new Map<string, string>())
   const historyIdRef = React.useRef(historyId)
   const serverChatHistoryIdRef = React.useRef<{
@@ -69,7 +74,7 @@ export const useServerChatHistoryId = ({
       const verifiedOwner = ownerOrSnapshot && "validateLease" in ownerOrSnapshot ? ownerOrSnapshot : undefined
       if (!snapshot && !verifiedOwner && !selection) throw createServicePromptScopeChangedError()
       const throwIfScopeInvalidated = () => {
-        if (scopeInvalidatedSignal?.aborted) {
+        if (scopeInvalidatedSignal?.aborted || surfaceScopeKeyRef.current !== surfaceScopeKey) {
           throw createServicePromptScopeChangedError()
         }
       }
@@ -142,7 +147,9 @@ export const useServerChatHistoryId = ({
       }
       assertLegacyCurrent()
       const ownerKey = serverChatMirrorOwnerKey(snapshot)
-      const mirrorScope = sceneSend?.scene.target.address?.kind === "local" ? undefined : sceneSend?.scene.target.address?.scope
+      const mirrorScope = sceneSend
+        ? sceneSend.scene.target.address?.kind === "local" ? undefined : sceneSend.scene.target.address?.scope
+        : scope
       const mirrorScopeKey = JSON.stringify(mirrorScope ?? { type: "global" })
       const session = usePlaygroundSessionStore.getState()
       const legacyHistoryId = session.isSessionValid(snapshot.scopeKey) &&
@@ -191,7 +198,7 @@ export const useServerChatHistoryId = ({
       }
       return linkedHistoryId
     },
-    [selection, setHistoryId, t, temporaryChat]
+    [selection, setHistoryId, t, temporaryChat, scope, surfaceScopeKey]
   )
 
   return {

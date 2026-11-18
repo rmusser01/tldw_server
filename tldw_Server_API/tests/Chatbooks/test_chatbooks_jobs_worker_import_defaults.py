@@ -53,7 +53,7 @@ async def test_handle_import_defaults_chatbook_media_and_embeddings_to_true(tmp_
                 "import_media": import_media,
                 "import_embeddings": import_embeddings,
             }
-            return True, "ok", {"imported_items": {"note": 1}, "warnings": []}
+            return True, "ok", {"imported_items": {"note": 1}, "warnings": [], "id_maps": {"media": {}, "notes": {"old-note": "new-note"}}}
 
         async def finalize_account_restore(self, success, message, result):
             return success, message, result
@@ -66,7 +66,8 @@ async def test_handle_import_defaults_chatbook_media_and_embeddings_to_true(tmp_
         job_id="job-1",
     )
 
-    assert result == {"imported_items": {"note": 1}, "warnings": []}
+    assert result == {"imported_items": {"note": 1}, "warnings": [], "id_maps": {"media": {}, "notes": {"old-note": "new-note"}}}
+    assert service.import_job.metadata["id_maps"] == result["id_maps"]
     assert service.called_args is not None
     assert service.called_args["selections"] is None
     assert service.called_args["import_media"] is True

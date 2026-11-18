@@ -8,6 +8,18 @@ const source = (url: string, sourceType = "media_db", sourceId = "1"): RagResult
 })
 
 describe("evidence source navigation", () => {
+  it("opens retained PDF evidence at its physical page through the authenticated viewer", () => {
+    const result = source("https://example.com/book.pdf")
+    result.metadata = { ...result.metadata, type: "pdf", page_number: 352 }
+    expect(getSourceOpenAction(result)).toEqual({
+      href: "/document-workspace?open=1&page=352", label: "Open PDF page 352"
+    })
+  })
+  it.each([0, -2, 1.5, Number.POSITIVE_INFINITY])("does not link invalid PDF page %s", (page) => {
+    const result = source("book.pdf")
+    result.metadata = { type: "pdf", page_number: page }
+    expect(getSourceOpenAction(result)).toEqual({ href: "/media?id=1", label: "Open in Media" })
+  })
   it.each(["study.txt", "/tmp/study.txt", "javascript:alert(1)", "//untrusted.example/path"])(
     "opens uploaded or unsafe reference %s in the supported media inspector", (url) => {
       expect(getSourceOpenAction(source(url))).toEqual({ href: "/media?id=1", label: "Open in Media" })

@@ -7,7 +7,7 @@ const OUTPUT_VIRTUAL_OVERSCAN = 4
 const STUDIO_DEFAULT_RAG_TOP_K = 8
 const STUDIO_DEFAULT_RAG_MIN_SCORE = 0.2
 const STUDIO_DEFAULT_ENABLE_RERANKING = true
-const STUDIO_DEFAULT_MAX_TOKENS = 800
+const STUDIO_DEFAULT_MAX_TOKENS = 4096
 const STUDIO_DEFAULT_SUMMARY_INSTRUCTION =
   "Provide a comprehensive summary of the key points and main ideas."
 
@@ -31,6 +31,7 @@ export interface UseStudioDerivedStateDeps {
   temperature: number | undefined
   topP: number | undefined
   numPredict: number | undefined
+  provider?: string
   setRagTopK: (v: number) => void
   setRagAdvancedOptions: (v: any) => void
   setTemperature: (v: any) => void
@@ -47,6 +48,7 @@ export function useStudioDerivedState(deps: UseStudioDerivedStateDeps) {
     temperature,
     topP,
     numPredict,
+    provider,
     setRagTopK,
     setRagAdvancedOptions,
     setTemperature,
@@ -108,9 +110,9 @@ export function useStudioDerivedState(deps: UseStudioDerivedStateDeps) {
     const value =
       typeof numPredict === "number" && Number.isFinite(numPredict)
         ? numPredict
-        : STUDIO_DEFAULT_MAX_TOKENS
+        : provider?.trim().toLowerCase() === "deepseek" ? 8192 : STUDIO_DEFAULT_MAX_TOKENS
     return Math.max(1, Math.min(32768, Math.round(value)))
-  }, [numPredict])
+  }, [numPredict, provider])
 
   // Local handlers
   const patchRagAdvancedOptions = React.useCallback(

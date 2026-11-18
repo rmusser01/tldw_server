@@ -173,6 +173,19 @@ class OpenAIAdapter(ChatProvider):
             payload.pop("top_p", None)
         return payload
 
+    def _finalize_openai_payload(self, payload: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
+        """Apply GPT-6 compatibility after extensions without changing reasoning effort."""
+        payload = merge_extra_body(payload, request)
+        model = payload.get("model")
+        if isinstance(model, str) and model.lower().startswith(("gpt-6-", "gpt-6.")):
+            if "max_tokens" in payload:
+                payload.setdefault("max_completion_tokens", payload.pop("max_tokens"))
+            # GPT-6 defaults to reasoning; only an explicit opt-out permits sampling.
+            if payload.get("reasoning_effort") != "none":
+                for key in ("temperature", "top_p", "top_logprobs", "logprobs"):
+                    payload.pop(key, None)
+        return payload
+
     def _openai_base_url(self) -> str:
         import os
         # Match legacy resolution precedence used by chat_calls._resolve_openai_api_base
@@ -249,7 +262,7 @@ class OpenAIAdapter(ChatProvider):
             payload["stream"] = False
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
             payload, cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
-            payload = merge_extra_body(payload, request)
+            payload = self._finalize_openai_payload(payload, request)
             headers = merge_extra_headers(self._openai_headers(api_key, request), request)
             try:
                 resolved_timeout = self._resolve_timeout(request, timeout)
@@ -300,7 +313,7 @@ class OpenAIAdapter(ChatProvider):
             payload["stream"] = True
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
             payload, _cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
-            payload = merge_extra_body(payload, request)
+            payload = self._finalize_openai_payload(payload, request)
             headers = merge_extra_headers(self._openai_headers(api_key, request), request)
             try:
                 # Inside the try: a malformed base URL (``http://[::1``) fails as a sanitized provider error.

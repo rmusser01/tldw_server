@@ -7,6 +7,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tldw_Server_API.tests.CI.test_required_workflow_contracts import (
+    _assert_browser_runner_supports_locked_playwright,
+)
+
 
 def test_frontend_required_enforces_strict_shared_security_boundaries() -> None:
     """The incremental strict project must execute as a failing merge gate."""
@@ -227,6 +231,31 @@ def test_shared_coverage_merge_rejects_missing_shards(
         check=False,
     )
     assert (result.returncode == 0) == (missing is None)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name"),
+    [
+        ("frontend-required.yml", "frontend-required"),
+        ("frontend-ux-gates.yml", "onboarding-gate"),
+        ("frontend-ux-gates.yml", "smoke-gate"),
+        ("frontend-e2e-tiers.yml", "critical"),
+        ("frontend-e2e-tiers.yml", "features"),
+        ("frontend-e2e-tiers.yml", "admin"),
+        ("frontend-e2e-tiers.yml", "ux-regression"),
+        ("ui-research-workspace-parity.yml", "webui-research-workspace-parity"),
+        ("ui-research-workspace-parity.yml", "extension-research-workspace-parity"),
+    ],
+)
+def test_ux_browser_jobs_select_a_host_supported_by_locked_playwright(
+    workflow_name: str, job_name: str,
+) -> None:
+    """Keep every UX host compatible with the actual locked browser toolchain."""
+    data = yaml.safe_load((Path(".github/workflows") / workflow_name).read_text())
+    _assert_browser_runner_supports_locked_playwright(
+        data["jobs"][job_name]["runs-on"], Path("apps/bun.lock").read_text(encoding="utf-8")
+    )
 
 
 @pytest.mark.unit

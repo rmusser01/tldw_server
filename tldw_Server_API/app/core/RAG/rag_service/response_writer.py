@@ -8,13 +8,62 @@ and appropriate depth. Inspired by Perplexica's writer prompt pattern.
 
 from __future__ import annotations
 
+import re
 from html import escape
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Context formatting
 # ---------------------------------------------------------------------------
+
+def format_page_location(metadata: dict[str, Any]) -> str:
+    """Separate physical and printed pages without trusting arbitrary prompt markup."""
+    spans = metadata.get("page_spans")
+    if not isinstance(spans, list) or not spans:
+        spans = [{"page_number": metadata.get("page_number")}]
+    locations = []
+    for span in spans[:20]:
+        if not isinstance(span, dict):
+            continue
+        number = span.get("page_number")
+        if type(number) is not int or number < 1:
+            continue
+        location = f"PDF page {number}"
+        label = span.get("printed_page_label")
+        if isinstance(label, str) and re.fullmatch(r"[\w.-]{1,24}", label):
+            location += f" (printed page {label})"
+        locations.append(location)
+    return "; ".join(locations) or "Page location unavailable"
+
+
+def format_page_content(content: str, metadata: dict[str, Any]) -> str:
+    """Mark exact page boundaries only when bounded spans account for the whole passage."""
+    spans = metadata.get("page_spans")
+    start, end = metadata.get("start_char"), metadata.get("end_char")
+
+    def offset(value: Any) -> bool:
+        return type(value) is int and 0 <= value <= 9_007_199_254_740_991
+
+    if (not isinstance(spans, list) or not 1 <= len(spans) <= 20
+            or not offset(start) or not offset(end) or end - start != len(content)):
+        return content
+    parts = []
+    previous_end, previous_page = start, 0
+    for span in spans:
+        if not isinstance(span, dict):
+            return content
+        page, lower, upper = (span.get(key) for key in ("page_number", "start_char", "end_char"))
+        if (not all(offset(value) for value in (page, lower, upper)) or page <= previous_page
+                or not previous_end <= lower < upper <= end or (previous_page == 0 and lower != start)):
+            return content
+        gap = content[previous_end - start:lower - start]
+        if re.fullmatch(r"[ \t\r\n\f\v]*", gap) is None:
+            return content
+        location = format_page_location({"page_spans": [span]})
+        parts.extend((gap, f"\n[{location} begins]\n", content[lower - start:upper - start]))
+        previous_end, previous_page = upper, page
+    return "".join(parts) if previous_end == end else content
+
 
 def format_context_xml(chunks: list[dict[str, Any]]) -> str:
     """Format retrieval results as XML-tagged context blocks.
@@ -31,8 +80,8 @@ def format_context_xml(chunks: list[dict[str, Any]]) -> str:
     parts = ["<context>"]
     emitted = 0
     for chunk in chunks:
-        content = str(chunk.get("content", "")).strip()
-        if not content:
+        content = str(chunk.get("content", ""))
+        if not content.strip():
             continue
         emitted += 1
 
@@ -52,7 +101,10 @@ def format_context_xml(chunks: list[dict[str, Any]]) -> str:
             safe_source = escape(str(source), quote=True)
             attrs += f' source="{safe_source}"'
 
-        safe_content = escape(content, quote=False)
+        location = format_page_location(metadata) if isinstance(metadata, dict) else "Page location unavailable"
+        if isinstance(metadata, dict):
+            content = format_page_content(content, metadata)
+        safe_content = escape(f"{location}\n{content}", quote=False)
         parts.append(f"  <result {attrs}>{safe_content}</result>")
 
     if emitted == 0:

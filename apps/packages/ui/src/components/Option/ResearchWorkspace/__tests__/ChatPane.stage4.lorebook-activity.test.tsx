@@ -41,6 +41,7 @@ const connectionStoreState = {
 }
 
 const workspaceStoreState = {
+  currentNote: { title: "", content: "", keywords: [], isDirty: false },
   sources: [] as Array<{ id: string; mediaId: number; title: string; type: string }>,
   selectedSourceIds: [] as string[],
   getSelectedSources: () => [] as Array<{ id: string; title: string }>,

@@ -54,7 +54,7 @@ PRIVATE_COERCER_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/api/v1/endpoints/jobs_admin.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/llm_providers.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/media/ingest_jobs.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/media/navigation.py": 1,
+    "tldw_Server_API/app/core/Media/navigation.py": 1,  # Moved unchanged from the endpoint (TASK-15505.8).
     "tldw_Server_API/app/core/Embeddings/media_embeddings.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/persona.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_optimization.py": 2,

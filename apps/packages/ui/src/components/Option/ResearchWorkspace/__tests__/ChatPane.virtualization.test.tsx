@@ -60,6 +60,7 @@ const connectionStoreState = {
 }
 
 const workspaceStoreState = {
+  currentNote: { title: "", content: "", keywords: [], isDirty: false },
   sources: [] as Array<Record<string, unknown>>,
   sourceFolders: [] as Array<{ id: string; parentFolderId: string | null }>,
   sourceFolderMemberships: [] as Array<{ sourceId: string; folderId: string }>,

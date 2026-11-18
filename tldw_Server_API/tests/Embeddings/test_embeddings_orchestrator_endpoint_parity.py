@@ -3055,6 +3055,7 @@ def test_concurrent_public_keyless_local_and_keyed_remote_hf_stay_isolated(
     client,
     monkeypatch,
     orchestrator_enabled,
+    local_hf_tokenizer_lookups,
 ):
     """The public adapter boundary keeps local and remote HF execution modes paired."""
     import tldw_Server_API.app.core.LLM_Calls.providers.huggingface_embeddings_adapter as hf_mod
@@ -3154,6 +3155,7 @@ def test_concurrent_public_keyless_local_and_keyed_remote_hf_stay_isolated(
         responses = (local.result(timeout=10), remote.result(timeout=10))
 
     assert [response.status_code for response in responses] == [200, 200]
+    assert local_hf_tokenizer_lookups == ["org/local-model"]
     assert len(local_calls) == 1
     assert local_calls[0]["model_id_override"] == "huggingface:org/local-model"
     assert remote_calls == [

@@ -108,6 +108,8 @@ from tldw_Server_API.app.core.Embeddings.provider_resolution import (
 )
 from tldw_Server_API.app.core.Embeddings.request_batching import (
     EmbeddingsRateLimitError,
+)
+from tldw_Server_API.app.core.Embeddings.request_batching import (
     create_embeddings_batch_async as batching_create_embeddings_batch_async,
 )
 from tldw_Server_API.app.core.Embeddings.request_types import (
@@ -143,7 +145,11 @@ from tldw_Server_API.app.core.http_client import (
 # Circuit Breaker
 from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
     CircuitBreaker,
+)
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
     CircuitBreakerOpenError as CircuitBreakerError,
+)
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
     registry as circuit_breaker_registry,
 )
 from tldw_Server_API.app.core.Infrastructure.redis_factory import (
@@ -232,8 +238,10 @@ try:
         LocalAPICfg,
         ONNXModelCfg,
         OpenAIModelCfg,
-        create_embeddings_batch_async as create_explicit_embeddings_batch_async,
         resolve_model_storage_base_dir,
+    )
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import (
+        create_embeddings_batch_async as create_explicit_embeddings_batch_async,
     )
 
     EMBEDDINGS_AVAILABLE = True
@@ -1461,6 +1469,8 @@ def get_cache_key(
 ) -> str:
     """Generate cache key for embedding"""
     key_parts = [text, provider, model]
+    if provider.lower() == "huggingface":
+        key_parts.append("complete-input-v1")
     if dimensions:
         key_parts.append(str(dimensions))
     if backend_identity:
@@ -2471,6 +2481,35 @@ def build_provider_config(
 # Enhanced Embedding Function with Circuit Breaker
 # ============================================================================
 
+def _local_hf_model_config(config: dict[str, Any], model_id: str) -> HFModelCfg:
+    """Share local model settings between input budgeting and dispatch."""
+    return HFModelCfg(
+        provider="huggingface", model_name_or_path=config.get("model_name_or_path", model_id),
+        trust_remote_code=config.get("trust_remote_code", False),
+        hf_cache_dir_subpath=config.get("hf_cache_dir_subpath", "huggingface_cache"),
+        revision=config.get("revision"), max_length=config.get("max_length", 512),
+    )
+
+
+async def prepare_media_chunks_for_embedding(chunks: list[dict[str, Any]], provider: str,
+                                             model_id: str) -> list[dict[str, Any]]:
+    """Refine exact media spans before local HF batching; keep other providers unchanged."""
+    provider = provider.strip().lower()
+    prefixed, bare_model = _split_provider_model(model_id)
+    if prefixed:
+        if prefixed != provider:
+            raise ValueError("Embedding model/provider mismatch")
+        model_id = bare_model
+    if provider != "huggingface":
+        return chunks
+    config = build_provider_config(EmbeddingProvider.HUGGINGFACE, model_id)
+    if config.get("api_url"):
+        return chunks
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import refine_hf_embedding_chunks
+    return await asyncio.to_thread(refine_hf_embedding_chunks, chunks, f"{provider}:{model_id}",
+        _local_hf_model_config(config, model_id), resolve_model_storage_base_dir())
+
+
 async def create_embeddings_with_circuit_breaker(
     texts: list[str],
     provider: str,
@@ -2480,6 +2519,10 @@ async def create_embeddings_with_circuit_breaker(
     dimensions: int | None = None,
 ) -> list[list[float]]:
     """Create embeddings with circuit breaker protection"""
+    if provider == "huggingface" and not config.get("api_url"):
+        from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import validate_hf_embedding_inputs
+        await asyncio.to_thread(validate_hf_embedding_inputs, texts, f"{provider}:{model_id}",
+            _local_hf_model_config(config, model_id), resolve_model_storage_base_dir())
     private_runtime_credentials = config.get("_runtime_credentials_private") is True
     breaker = None if private_runtime_credentials else get_or_create_circuit_breaker(provider)
 
@@ -2559,12 +2602,7 @@ async def create_embeddings_with_circuit_breaker(
                     )
                 return data
             elif provider == "huggingface":
-                model_cfg = HFModelCfg(
-                    provider="huggingface",
-                    model_name_or_path=config.get("model_name_or_path", model_id),
-                    trust_remote_code=config.get("trust_remote_code", False),
-                    hf_cache_dir_subpath=config.get("hf_cache_dir_subpath", "huggingface_cache"),
-                )
+                model_cfg = _local_hf_model_config(config, model_id)
             elif provider == "openai":
                 dim_override = dimensions if dimensions is not None else config.get("dimensions")
                 model_cfg = OpenAIModelCfg(

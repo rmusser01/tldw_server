@@ -1,8 +1,10 @@
 """Real archive imports preserve world-book entries and honor conflict choices."""
 
 import asyncio
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -188,13 +190,163 @@ def test_failed_result_recorder_preserves_cancellation_and_excludes_private_payl
             "successful_items": 1,
             "failed_items": 1,
             "imported_items": {"note": 1},
+            "id_maps": {"notes": {"source-note": "restored-note"}},
             "warnings": ["Selected item failed"],
             "_account_restore_payload": {"private": "synthetic-private-value"},
             "metadata": {"also_private": "synthetic-private-value"},
         },
     )
-    if cancelled:
-        assert job.to_dict() == before  # nosec B101 -- Late failure cannot overwrite cancellation.
+    for key in ("status", "started_at", "completed_at", "error_message", "progress_percentage"):
+        assert job.to_dict()[key] == before[key]  # nosec B101 -- Receipts cannot change the terminal lifecycle.
+    assert (job.total_items, job.processed_items, job.successful_items, job.failed_items) == (2, 2, 1, 1)  # nosec B101 -- Already-restored items remain visible after cancellation.
+    assert job.metadata == {"source_format": "chatbook", "imported_items": {"note": 1}, "id_maps": {"notes": {"source-note": "restored-note"}}}  # nosec B101 -- Only public result keys persist.
+    assert job.warnings == ["Queued warning", "Selected item failed"]  # nosec B101 -- Retain both diagnostic sources.
+
+
+@pytest.mark.parametrize("late_status", [ImportStatus.PENDING, ImportStatus.IN_PROGRESS, ImportStatus.FAILED, ImportStatus.COMPLETED])
+async def test_cancelled_import_rejects_stale_worker_save(world_archive, late_status):
+    """Cancellation committed after a worker read wins over that worker's late save."""
+    _, service, path = world_archive
+    job = ImportJob(
+        job_id="cancel-before-late-save", user_id="2", status=ImportStatus.IN_PROGRESS,
+        chatbook_path=str(path), warnings=["Cancellation retained"], metadata={"source_format": "chatbook"},
+    )
+    service._save_import_job(job)
+    stale = service._get_import_job(job.job_id)
+    cancelled = service._get_import_job(job.job_id)
+    cancelled.status = ImportStatus.CANCELLED
+    service._save_import_job(cancelled)
+    before = service._get_import_job(job.job_id).to_dict()
+
+    stale.status = late_status
+    stale.total_items = stale.processed_items = stale.successful_items = 4
+    stale.warnings = ["Late worker warning"]
+    stale.metadata = {"unrelated_stale": "No public result receipt"}
+    service._save_import_job(stale)
+
+    assert service._get_import_job(job.job_id).to_dict() == before  # nosec B101 -- The database must reject a stale lifecycle overwrite atomically.
+
+
+@pytest.mark.parametrize("late_status", [ImportStatus.FAILED, ImportStatus.COMPLETED])
+async def test_cancelled_import_merges_late_terminal_public_receipt(world_archive, late_status):
+    """A cancellation between the final worker read/save retains both public receipts."""
+    from tldw_Server_API.app.core.Chatbooks.chatbook_service import record_failed_import_result
+
+    _, service, path = world_archive
+    job = ImportJob(
+        job_id="cancel-before-result-save", user_id="2", status=ImportStatus.IN_PROGRESS,
+        chatbook_path=str(path), metadata={"source_format": "chatbook"},
+    )
+    service._save_import_job(job)
+    stale = service._get_import_job(job.job_id)
+    cancelled = service._get_import_job(job.job_id)
+    cancelled.status = ImportStatus.CANCELLED
+    cancelled.warnings = ["Cancellation observed"]
+    cancelled.successful_items = 3
+    cancelled.metadata.update({
+        "cancel_context": "Keep current metadata",
+        "imported_items": {"note": 3},
+        "id_maps": {"notes": {"earlier": "note-1", "ambiguous": "note-old"}},
+    })
+    service._save_import_job(cancelled)
+    before = service._get_import_job(job.job_id).to_dict()
+    record_failed_import_result(stale, {
+        "total_items": 5, "processed_items": 5, "successful_items": 2, "failed_items": 1,
+        "warnings": ["Late item warning"], "imported_items": {"media": 2},
+        "id_maps": {"notes": {"later": "note-2", "ambiguous": "note-new"}},
+        "inventory_summary": {"media": 2}, "skipped_non_restorable": {"external": 2},
+        "_account_restore_payload": {"private": "synthetic-private-value"},
+        "metadata": {"private": "synthetic-private-value"},
+    })
+    stale.status = late_status
+    stale.metadata["unrelated_stale"] = "Do not copy stale metadata"
+    stale.error_message = "Late worker outcome"
+    stale.completed_at = datetime.now(timezone.utc)
+    service._save_import_job(stale)
+    saved = service._get_import_job(job.job_id)
+    for key in ("status", "started_at", "completed_at", "error_message", "progress_percentage"):
+        assert saved.to_dict()[key] == before[key]  # nosec B101 -- Cancellation owns the lifecycle even after late result persistence.
+    assert saved.warnings == ["Cancellation observed", "Late item warning"]  # nosec B101 -- Neither current nor late warnings are lost.
+    assert (saved.total_items, saved.processed_items, saved.successful_items, saved.failed_items) == (5, 5, 2, 1)  # nosec B101 -- Persist prepared result counters without inventing aggregation.
+    assert saved.metadata == {  # nosec B101 -- Only public receipt fields enrich current metadata; ambiguous aliases stay unresolved.
+        "source_format": "chatbook", "cancel_context": "Keep current metadata",
+        "imported_items": {"note": 3, "media": 2},
+        "id_maps": {"notes": {"earlier": "note-1", "later": "note-2", "ambiguous": None}},
+        "inventory_summary": {"media": 2}, "skipped_non_restorable": {"external": 2},
+    }
+
+
+@pytest.mark.parametrize("backend_name", ["SQLITE", "POSTGRESQL"])
+def test_late_terminal_receipt_uses_owned_backend_lock(backend_name):
+    """The fallback joins a transaction and locks an owned cancelled PG row before merging."""
+    import json
+
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+    from tldw_Server_API.app.core.DB_Management.chacha.chatbook_job_store import save_import_job
+
+    calls = []
+    locked = False
+
+    @contextmanager
+    def transaction(*, preserve_existing):
+        nonlocal locked
+        assert preserve_existing  # nosec B101 -- Never settle a caller's pre-existing transaction.
+        locked = True
+        try:
+            yield
+        finally:
+            locked = False
+
+    parameter_logging = []
+
+    def execute(query, params, *, commit=False, log_params=True):
+        calls.append((query, params, commit, locked))
+        parameter_logging.append(log_params)
+        if query.startswith("SELECT"):
+            return SimpleNamespace(fetchone=lambda: {"warnings": "[]", "metadata": '{"current":true}'})
+        return SimpleNamespace(rowcount=0)
+
+    values = ("job", "owner", "failed", "archive", "created", None, None, "late", 30, 2, 2, 1, 1, 0, "[]", "[]", '{"imported_items":{"note":1}}')
+    save_import_job(SimpleNamespace(backend_type=BackendType[backend_name], transaction=transaction, execute_query=execute), values)
+    assert len(calls) == 3  # nosec B101 -- Only a rejected terminal save enters the receipt fallback.
+    assert calls[1][0].endswith(" FOR UPDATE") == (backend_name == "POSTGRESQL")  # nosec B101 -- PostgreSQL requires a row lock; SQLite's transaction owns its write lock.
+    assert calls[1][1] == ("job", "owner", "cancelled") and calls[1][3]  # nosec B101 -- Select and merge are scoped and transactional.
+    assert calls[2][1][-3:] == ("job", "owner", "cancelled") and calls[2][2:] == (False, True)  # nosec B101 -- Preserve owner/status and caller commit semantics.
+    assert json.loads(calls[2][1][6]) == {"current": True, "imported_items": {"note": 1}}  # nosec B101 -- Lock-protected current metadata survives.
+    assert parameter_logging == [False, True, False]  # nosec B101 -- Both payload-bearing writes redact parameters; the scoped identity read is unchanged.
+
+
+@pytest.mark.parametrize("selected_status", [ImportStatus.PENDING, ImportStatus.VALIDATING])
+@pytest.mark.parametrize("cancel_after_selection", [False, True])
+async def test_stale_import_cleanup_respects_cancellation_after_selection(
+    world_archive, monkeypatch, selected_status, cancel_after_selection,
+):
+    """Cleanup may fail a stale job only while its selected state still holds."""
+    _, service, path = world_archive
+    job = ImportJob(
+        job_id="cancel-before-orphan-update", user_id="2", status=selected_status,
+        chatbook_path=str(path), created_at=datetime.now(timezone.utc) - timedelta(days=2),
+        successful_items=1, metadata={"id_maps": {"notes": {"source": "restored"}}},
+    )
+    service._save_import_job(job)
+    before = None
+    remove_file = service._try_delete_import_file
+
+    def cancel_then_remove(file_path):
+        nonlocal before
+        current = service._get_import_job(job.job_id)
+        current.status = ImportStatus.CANCELLED
+        service._save_import_job(current)
+        before = service._get_import_job(job.job_id).to_dict()
+        return remove_file(file_path)
+
+    if cancel_after_selection:
+        monkeypatch.setattr(service, "_try_delete_import_file", cancel_then_remove)
+    service.cleanup_import_orphans(age_threshold_hours=24)
+    saved = service._get_import_job(job.job_id)
+    if cancel_after_selection:
+        assert before is not None and saved.to_dict() == before  # nosec B101 -- A selected stale row cannot overwrite a later cancellation.
     else:
-        assert job.metadata == {"source_format": "chatbook", "imported_items": {"note": 1}}  # nosec B101 -- Only public result keys persist.
-        assert job.warnings == ["Queued warning", "Selected item failed"]  # nosec B101 -- Retain both diagnostic sources.
+        assert saved.status is ImportStatus.FAILED  # nosec B101 -- Ordinary stale cleanup still completes.
+        assert saved.error_message == "Marked failed by orphan cleanup (stale job)"  # nosec B101 -- Preserve actionable cleanup outcome.
+        assert saved.metadata == job.metadata and saved.successful_items == 1  # nosec B101 -- Cleanup preserves existing restore receipts.

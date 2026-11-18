@@ -1428,6 +1428,9 @@ _SAFE_METADATA_ALLOWED_KEYS = frozenset(
         "source_key",
         "email_source_provider",
         "labels",
+        "page_count",
+        "page_map",
+        "page_map_content_hash",
     }
 )
 
@@ -2769,8 +2772,215 @@ def determine_add_media_final_status(results: list[dict[str, Any]]) -> int:
     return status.HTTP_207_MULTI_STATUS
 
 
+async def store_original_files(
+    *,
+    results: list[dict[str, Any]],
+    form_data: Any,
+    db: MediaDatabase,
+    user_id: str,
+    temp_dir: str | FilePath,
+    url_list: list[str] | tuple[str, ...] = (),
+) -> None:
+    """Retain requested uploaded originals before either orchestrator removes staging."""
+    if not getattr(form_data, "keep_original_file", False) or form_data.media_type not in {"pdf", "document", "ebook"}:
+        return
+    temp_dir_path = FilePath(temp_dir)
+    eligible = [
+        result
+        for result in results
+        if result.get("db_id")
+        and result.get("status") in {"Success", "Warning"}
+        and result.get("input_ref") not in url_list
+    ]
+    for result in eligible:
+        result["original_file_stored"] = False
+    if form_data.keep_original_file and form_data.media_type in ["pdf", "document", "ebook"]:
+        try:
+            from tldw_Server_API.app.core.Storage import get_storage_backend
+
+            storage = get_storage_backend()
+            user_id_str = str(user_id)
+
+            for result in results:
+                if result.get("status") not in {"Success", "Warning"} or not result.get("db_id"):
+                    continue
+
+                media_id = result["db_id"]
+                input_ref = result.get("input_ref")
+                source_path = result.get("original_processing_source") or result.get("processing_source")
+
+                # Only store uploaded files, not URLs
+                if not source_path or input_ref in url_list:
+                    continue
+
+                # Check if the source file exists and is within temp_dir
+                safe_source = resolve_safe_local_path(
+                    FilePath(source_path),
+                    temp_dir_path,
+                )
+                if safe_source is None:
+                    logger.warning(
+                        "Original file path rejected outside temp dir: {}",
+                        source_path,
+                    )
+                    _ensure_warnings_list(result).append("Original file not stored: unsafe local path")
+                    continue
+                source_file = safe_source
+                if not source_file.exists():
+                    logger.warning(
+                        "Original file not found for storage: {}",
+                        source_path,
+                    )
+                    continue
+
+                try:
+                    # Get file info
+                    file_size = source_file.stat().st_size
+                    original_filename = input_ref or source_file.name
+                    if form_data.media_type == "pdf":
+                        mime_type = "application/pdf"
+                    elif form_data.media_type == "ebook":
+                        mime_type = "application/epub+zip"
+                    else:
+                        mime_type = "application/octet-stream"
+
+                    # Check storage quota before storing
+                    try:
+                        from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
+
+                        quota_service = StorageQuotaService()
+                        await quota_service.initialize()
+
+                        has_quota, _info = await quota_service.check_quota(
+                            user_id=int(user_id),
+                            new_bytes=file_size,
+                            raise_on_exceed=False,
+                        )
+                        if not has_quota:
+                            logger.warning(
+                                f"Storage quota exceeded for user {user_id_str}, "
+                                f"skipping original file storage for media_id={media_id}"
+                            )
+                            _ensure_warnings_list(result).append("Original file not stored: storage quota exceeded")
+                            continue
+                    except ImportError:
+                        # Quota service not available, proceed without check
+                        pass
+                    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as quota_err:
+                        # Non-fatal quota check failure - log and proceed
+                        logger.debug(f"Quota check failed, proceeding: {quota_err}")
+
+                    # Read file bytes
+                    handle = open_safe_local_path(source_file, temp_dir_path, mode="rb")
+                    if handle is None:
+                        raise InputError("Original file path rejected outside temp directory.")
+                    try:
+                        # Compute checksum without loading the entire file into memory
+                        hasher = hashlib.sha256()
+                        while True:
+                            chunk = handle.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            hasher.update(chunk)
+                        checksum = hasher.hexdigest()
+                        try:
+                            handle.seek(0)
+                        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+                            raise InputError("Original file stream is not seekable for storage.") from None
+
+                        # Store in permanent storage
+                        storage_path = await storage.store(
+                            user_id=user_id_str,
+                            media_id=media_id,
+                            # Each registration owns its blob, including concurrent reuploads.
+                            filename=f"original-{uuid4().hex}{source_file.suffix}",
+                            data=handle,
+                            mime_type=mime_type,
+                        )
+                    finally:
+                        try:
+                            handle.close()
+                        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+                            logger.debug("Failed to close original file handle for {}", source_file)
+
+                    # Insert database record
+                    try:
+                        db.insert_media_file(
+                            media_id=media_id,
+                            file_type="original",
+                            storage_path=storage_path,
+                            original_filename=original_filename,
+                            file_size=file_size,
+                            mime_type=mime_type,
+                            checksum=checksum,
+                        )
+                    except Exception:  # noqa: BLE001 - cleanup must run for any registration failure
+                        try:
+                            deleted = await storage.delete(storage_path)
+                            if not deleted:
+                                logger.warning(
+                                    "Stored original file {} was not deleted after registration failure "
+                                    "for media_id={}",
+                                    storage_path,
+                                    media_id,
+                                )
+                        except Exception as cleanup_err:  # noqa: BLE001 - keep registration error
+                            logger.warning(
+                                "Failed to delete stored original file {} after registration failure "
+                                "for media_id={}: {}",
+                                storage_path,
+                                media_id,
+                                cleanup_err,
+                            )
+                        raise
+
+                    logger.info(f"Stored original file for media_id={media_id}: {storage_path}")
+                    result["original_file_stored"] = True
+                    try:
+                        cleanup_warnings = await cleanup_superseded_original_files(
+                            db,
+                            storage,
+                            media_id,
+                            user_id=user_id_str,
+                        )
+                        if cleanup_warnings:
+                            _ensure_warnings_list(result).extend(cleanup_warnings)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as cleanup_err:  # noqa: BLE001 - preserve committed replacement on cleanup errors
+                        logger.opt(exception=True).warning(
+                            "Failed to clean up superseded originals for media_id={}: {}",
+                            media_id,
+                            cleanup_err,
+                        )
+                        _ensure_warnings_list(result).append("Original stored, but cleanup of older originals failed.")
+
+                except asyncio.CancelledError:
+                    raise
+                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as store_err:
+                    logger.error(f"Failed to store original file for media_id={media_id}: {store_err}")
+                    # Non-fatal - don't fail the entire ingestion
+                    result["original_file_stored"] = False
+                    _ensure_warnings_list(result).append(f"Failed to store original file: {store_err}")
+
+        except asyncio.CancelledError:
+            raise
+        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as storage_init_err:
+            logger.error(f"Failed to initialize storage backend: {storage_init_err}")
+
+    for result in eligible:
+        if result.get("original_file_stored") is False:
+            result["status"] = "Warning"
+            if not any("original" in str(warning).lower() for warning in result.get("warnings") or []):
+                _ensure_warnings_list(result).append("Original file was not retained; text was saved.")
+
+
 async def cleanup_superseded_original_files(
-    db: Any, storage: Any, media_id: int, *, user_id: str | None = None,
+    db: Any,
+    storage: Any,
+    media_id: int,
+    *,
+    user_id: str | None = None,
 ) -> list[str]:
     """Retire older originals after a replacement commits, preserving plaintext history.
 
@@ -3380,180 +3590,10 @@ async def add_media_orchestrate(
                     else:
                         results.append(result)
 
-            # --- 6a. Store Original Files if Requested ---
-            # For PDFs, documents, and ebooks, save originals to permanent storage when keep_original_file=True
-            if form_data.keep_original_file and form_data.media_type in ["pdf", "document", "ebook"]:
-                try:
-                    from tldw_Server_API.app.core.Storage import get_storage_backend
-
-                    storage = get_storage_backend()
-                    user_id_str = str(current_user.id) if hasattr(current_user, "id") else "anonymous"
-
-                    for result in results:
-                        if result.get("status") != "Success" or not result.get("db_id"):
-                            continue
-
-                        media_id = result["db_id"]
-                        input_ref = result.get("input_ref")
-                        source_path = result.get("original_processing_source") or result.get("processing_source")
-
-                        # Only store uploaded files, not URLs
-                        if not source_path or input_ref in url_list:
-                            continue
-
-                        # Check if the source file exists and is within temp_dir
-                        safe_source = resolve_safe_local_path(
-                            FilePath(source_path),
-                            temp_dir_path,
-                        )
-                        if safe_source is None:
-                            logger.warning(
-                                "Original file path rejected outside temp dir: {}",
-                                source_path,
-                            )
-                            _ensure_warnings_list(result).append("Original file not stored: unsafe local path")
-                            continue
-                        source_file = safe_source
-                        if not source_file.exists():
-                            logger.warning(
-                                "Original file not found for storage: {}",
-                                source_path,
-                            )
-                            continue
-
-                        try:
-                            # Get file info
-                            file_size = source_file.stat().st_size
-                            original_filename = input_ref or source_file.name
-                            if form_data.media_type == "pdf":
-                                mime_type = "application/pdf"
-                            elif form_data.media_type == "ebook":
-                                mime_type = "application/epub+zip"
-                            else:
-                                mime_type = "application/octet-stream"
-
-                            # Check storage quota before storing
-                            try:
-                                from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
-
-                                quota_service = StorageQuotaService()
-                                await quota_service.initialize()
-
-                                has_quota, _info = await quota_service.check_quota(
-                                    user_id=int(current_user.id) if hasattr(current_user, "id") else 0,
-                                    new_bytes=file_size,
-                                    raise_on_exceed=False,
-                                )
-                                if not has_quota:
-                                    logger.warning(
-                                        f"Storage quota exceeded for user {user_id_str}, "
-                                        f"skipping original file storage for media_id={media_id}"
-                                    )
-                                    _ensure_warnings_list(result).append(
-                                        "Original file not stored: storage quota exceeded"
-                                    )
-                                    continue
-                            except ImportError:
-                                # Quota service not available, proceed without check
-                                pass
-                            except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as quota_err:
-                                # Non-fatal quota check failure - log and proceed
-                                logger.debug(f"Quota check failed, proceeding: {quota_err}")
-
-                            # Read file bytes
-                            handle = open_safe_local_path(source_file, temp_dir_path, mode="rb")
-                            if handle is None:
-                                raise InputError("Original file path rejected outside temp directory.")
-                            try:
-                                # Compute checksum without loading the entire file into memory
-                                hasher = hashlib.sha256()
-                                while True:
-                                    chunk = handle.read(1024 * 1024)
-                                    if not chunk:
-                                        break
-                                    hasher.update(chunk)
-                                checksum = hasher.hexdigest()
-                                try:
-                                    handle.seek(0)
-                                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-                                    raise InputError("Original file stream is not seekable for storage.") from None
-
-                                # Store in permanent storage
-                                storage_path = await storage.store(
-                                    user_id=user_id_str,
-                                    media_id=media_id,
-                                    # Each registration owns its blob, including concurrent reuploads.
-                                    filename=f"original-{uuid4().hex}{source_file.suffix}",
-                                    data=handle,
-                                    mime_type=mime_type,
-                                )
-                            finally:
-                                try:
-                                    handle.close()
-                                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-                                    logger.debug("Failed to close original file handle for {}", source_file)
-
-                            # Insert database record
-                            try:
-                                db.insert_media_file(
-                                    media_id=media_id,
-                                    file_type="original",
-                                    storage_path=storage_path,
-                                    original_filename=original_filename,
-                                    file_size=file_size,
-                                    mime_type=mime_type,
-                                    checksum=checksum,
-                                )
-                            except Exception:  # noqa: BLE001 - cleanup must run for any registration failure
-                                try:
-                                    deleted = await storage.delete(storage_path)
-                                    if not deleted:
-                                        logger.warning(
-                                            "Stored original file {} was not deleted after registration failure "
-                                            "for media_id={}",
-                                            storage_path,
-                                            media_id,
-                                        )
-                                except Exception as cleanup_err:  # noqa: BLE001 - cleanup failure must not mask registration error
-                                    logger.warning(
-                                        "Failed to delete stored original file {} after registration failure "
-                                        "for media_id={}: {}",
-                                        storage_path,
-                                        media_id,
-                                        cleanup_err,
-                                    )
-                                raise
-
-                            logger.info(f"Stored original file for media_id={media_id}: {storage_path}")
-                            result["original_file_stored"] = True
-                            try:
-                                cleanup_warnings = await cleanup_superseded_original_files(
-                                    db, storage, media_id, user_id=user_id_str,
-                                )
-                                if cleanup_warnings:
-                                    _ensure_warnings_list(result).extend(cleanup_warnings)
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception as cleanup_err:  # noqa: BLE001 - preserve committed replacement on cleanup errors
-                                logger.opt(exception=True).warning(
-                                    "Failed to clean up superseded originals for media_id={}: {}", media_id, cleanup_err,
-                                )
-                                _ensure_warnings_list(result).append(
-                                    "Original stored, but cleanup of older originals failed."
-                                )
-
-                        except asyncio.CancelledError:
-                            raise
-                        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as store_err:
-                            logger.error(f"Failed to store original file for media_id={media_id}: {store_err}")
-                            # Non-fatal - don't fail the entire ingestion
-                            result["original_file_stored"] = False
-                            _ensure_warnings_list(result).append(f"Failed to store original file: {store_err}")
-
-                except asyncio.CancelledError:
-                    raise
-                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as storage_init_err:
-                    logger.error(f"Failed to initialize storage backend: {storage_init_err}")
+            await store_original_files(
+                results=results, form_data=form_data, db=db,
+                user_id=str(current_user.id), temp_dir=temp_dir_path, url_list=url_list,
+            )
 
         # --- 6b. Dual-write to Collections content_items ---
         try:
@@ -5749,6 +5789,45 @@ def is_bodyless_parsed_email(result: dict[str, Any]) -> bool:
     )
 
 
+def _build_document_chunk_rows(
+    flat_chunks: list[dict[str, Any]], chunker: Any, safe_metadata: dict[str, Any], content: str,
+) -> list[dict[str, Any]]:
+    """Project document chunks into SQL rows with their verified page provenance."""
+    from tldw_Server_API.app.core.Media.page_provenance import (
+        page_map_for_content,
+        page_spans_for_range,
+    )
+
+    chunks_for_sql: list[dict[str, Any]] = []
+    page_map = page_map_for_content(safe_metadata, content)
+    for item in flat_chunks:
+        meta = item.get("metadata") or {}
+        chunk_type = (
+            chunker.normalize_chunk_type(meta.get("chunk_type") or meta.get("paragraph_kind")) or "text"
+        )
+        small_meta: dict[str, Any] = {}
+        if meta.get("ancestry_titles"):
+            small_meta["ancestry_titles"] = meta.get("ancestry_titles")
+        if meta.get("section_path"):
+            small_meta["section_path"] = meta.get("section_path")
+        page_spans = page_spans_for_range(
+            page_map, meta.get("start_offset"), meta.get("end_offset"),
+        )
+        if page_spans:
+            small_meta["page_number"] = page_spans[0]["page_number"]
+            small_meta["page_spans"] = page_spans
+        chunks_for_sql.append(
+            {
+                "text": item.get("text", ""),
+                "start_char": meta.get("start_offset"),
+                "end_char": meta.get("end_offset"),
+                "chunk_type": chunk_type,
+                "metadata": small_meta,
+            }
+        )
+    return chunks_for_sql
+
+
 async def persist_doc_item_and_children(
     *,
     final_result: dict[str, Any],
@@ -5933,26 +6012,7 @@ async def persist_doc_item_and_children(
                         max_size=opts.get("max_size") or 500,
                         overlap=opts.get("overlap") or 50,
                     )
-                    chunks_for_sql = []
-                    for item in flat_chunks:
-                        meta = item.get("metadata") or {}
-                        chunk_type = (
-                            chunker.normalize_chunk_type(meta.get("chunk_type") or meta.get("paragraph_kind")) or "text"
-                        )
-                        small_meta: dict[str, Any] = {}
-                        if meta.get("ancestry_titles"):
-                            small_meta["ancestry_titles"] = meta.get("ancestry_titles")
-                        if meta.get("section_path"):
-                            small_meta["section_path"] = meta.get("section_path")
-                        chunks_for_sql.append(
-                            {
-                                "text": item.get("text", ""),
-                                "start_char": meta.get("start_offset"),
-                                "end_char": meta.get("end_offset"),
-                                "chunk_type": chunk_type,
-                                "metadata": small_meta,
-                            }
-                        )
+                    chunks_for_sql = _build_document_chunk_rows(flat_chunks, chunker, safe_meta, content_for_db)
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 chunks_for_sql = None
 

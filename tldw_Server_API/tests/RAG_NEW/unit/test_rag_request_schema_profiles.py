@@ -18,9 +18,11 @@ def test_rag_profile_rejects_unknown_value() -> None:
         UnifiedRAGRequest(query="q", rag_profile="production")
 
 
-def test_max_generation_tokens_allows_2200_but_rejects_4001() -> None:
-    ok_req = UnifiedRAGRequest(query="q", max_generation_tokens=2200)
-    assert ok_req.max_generation_tokens == 2200
+@pytest.mark.parametrize("budget", [2200, 4096, 8192])
+def test_max_generation_tokens_preserves_budgets_through_8192(budget: int) -> None:
+    assert UnifiedRAGRequest(query="q", max_generation_tokens=budget).max_generation_tokens == budget
 
+
+def test_max_generation_tokens_rejects_8193() -> None:
     with pytest.raises(ValidationError):
-        UnifiedRAGRequest(query="q", max_generation_tokens=4001)
+        UnifiedRAGRequest(query="q", max_generation_tokens=8193)

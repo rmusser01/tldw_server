@@ -6,7 +6,8 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
-from tldw_Server_API.app.api.v1.endpoints.media import navigation as navigation_mod
+from tldw_Server_API.app.api.v1.endpoints.media import navigation as navigation_endpoint
+from tldw_Server_API.app.core.Media import navigation as navigation_mod
 from tldw_Server_API.app.api.v1.schemas.media_navigation_schemas import (
     MediaNavigationContentQueryParams,
     MediaNavigationNode,
@@ -86,7 +87,7 @@ class _LargePdfStorageBackend:
         return navigation_mod.MAX_OUTLINE_FILE_SIZE + 1
 
 
-def test_derive_content_span_swallows_typed_database_errors(monkeypatch) -> None:
+def test_unmapped_span_does_not_query_fuzzy_heading_lookup(monkeypatch) -> None:
     fake_logger = MagicMock()
     monkeypatch.setattr(navigation_mod, "logger", fake_logger)
 
@@ -114,10 +115,10 @@ def test_derive_content_span_swallows_typed_database_errors(monkeypatch) -> None
 
     if result is not None:
         pytest.fail(f"expected None fallback for DatabaseError, got {result!r}")
-    fake_logger.debug.assert_called_once_with("Section heading lookup failed")
+    fake_logger.debug.assert_not_called()
 
 
-def test_derive_content_span_does_not_hide_non_database_failures() -> None:
+def test_unmapped_href_fails_closed_without_heading_lookup() -> None:
     node = MediaNavigationNode(
         id="node-1",
         parent_id=None,
@@ -131,24 +132,23 @@ def test_derive_content_span_does_not_hide_non_database_failures() -> None:
         confidence=0.5,
     )
 
-    with pytest.raises(ValueError):
-        navigation_mod._derive_content_span(
+    assert navigation_mod._derive_content_span(
             node=node,
             all_nodes=[node],
             media={"type": "document"},
             db=_ProgrammerErrorDb(),
             media_id=7,
             content_length=500,
-        )
+        ) is None
 
 
 @pytest.mark.asyncio
 async def test_get_media_navigation_sanitizes_db_fetch_log(monkeypatch) -> None:
     fake_logger = MagicMock()
-    monkeypatch.setattr(navigation_mod, "logger", fake_logger)
+    monkeypatch.setattr(navigation_endpoint, "logger", fake_logger)
 
     with pytest.raises(HTTPException) as exc_info:
-        await navigation_mod.get_media_navigation(
+        await navigation_endpoint.get_media_navigation(
             media_id=7,
             params=MediaNavigationQueryParams(),
             db=_GetMediaByIdErrorDb(),
@@ -163,10 +163,10 @@ async def test_get_media_navigation_sanitizes_db_fetch_log(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_get_media_navigation_content_sanitizes_db_fetch_log(monkeypatch) -> None:
     fake_logger = MagicMock()
-    monkeypatch.setattr(navigation_mod, "logger", fake_logger)
+    monkeypatch.setattr(navigation_endpoint, "logger", fake_logger)
 
     with pytest.raises(HTTPException) as exc_info:
-        await navigation_mod.get_media_navigation_content(
+        await navigation_endpoint.get_media_navigation_content(
             media_id=7,
             node_id="dsi:10",
             params=MediaNavigationContentQueryParams(),
@@ -182,16 +182,16 @@ async def test_get_media_navigation_content_sanitizes_db_fetch_log(monkeypatch) 
 @pytest.mark.asyncio
 async def test_get_media_navigation_sanitizes_invalid_cached_payload_log(monkeypatch) -> None:
     fake_logger = MagicMock()
-    monkeypatch.setattr(navigation_mod, "logger", fake_logger)
-    monkeypatch.setattr(navigation_mod, "get_cached_response", lambda _cache_key: ("etag", {}))
-    monkeypatch.setattr(navigation_mod, "cache_response", lambda *_args, **_kwargs: "etag")
+    monkeypatch.setattr(navigation_endpoint, "logger", fake_logger)
+    monkeypatch.setattr(navigation_endpoint, "get_cached_response", lambda _cache_key: ("etag", {}))
+    monkeypatch.setattr(navigation_endpoint, "cache_response", lambda *_args, **_kwargs: "etag")
 
     async def _empty_source_nodes(**_kwargs):
         return [], []
 
-    monkeypatch.setattr(navigation_mod, "_select_source_nodes", _empty_source_nodes)
+    monkeypatch.setattr(navigation_endpoint, "_select_source_nodes", _empty_source_nodes)
 
-    response = await navigation_mod.get_media_navigation(
+    response = await navigation_endpoint.get_media_navigation(
         media_id=7,
         params=MediaNavigationQueryParams(),
         db=_GetMediaByIdDb(),
@@ -205,9 +205,9 @@ async def test_get_media_navigation_sanitizes_invalid_cached_payload_log(monkeyp
 @pytest.mark.asyncio
 async def test_get_media_navigation_content_sanitizes_invalid_cached_payload_log(monkeypatch) -> None:
     fake_logger = MagicMock()
-    monkeypatch.setattr(navigation_mod, "logger", fake_logger)
-    monkeypatch.setattr(navigation_mod, "get_cached_response", lambda _cache_key: ("etag", {}))
-    monkeypatch.setattr(navigation_mod, "cache_response", lambda *_args, **_kwargs: "etag")
+    monkeypatch.setattr(navigation_endpoint, "logger", fake_logger)
+    monkeypatch.setattr(navigation_endpoint, "get_cached_response", lambda _cache_key: ("etag", {}))
+    monkeypatch.setattr(navigation_endpoint, "cache_response", lambda *_args, **_kwargs: "etag")
 
     async def _source_nodes(**_kwargs):
         return [
@@ -227,9 +227,9 @@ async def test_get_media_navigation_content_sanitizes_invalid_cached_payload_log
             }
         ], ["document_structure_index"]
 
-    monkeypatch.setattr(navigation_mod, "_select_source_nodes", _source_nodes)
+    monkeypatch.setattr(navigation_endpoint, "_select_source_nodes", _source_nodes)
 
-    response = await navigation_mod.get_media_navigation_content(
+    response = await navigation_endpoint.get_media_navigation_content(
         media_id=7,
         node_id="dsi:10",
         params=MediaNavigationContentQueryParams(),

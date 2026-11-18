@@ -11,14 +11,14 @@ export interface WorkspaceUndoActionHandle {
 interface PendingWorkspaceUndoAction {
   id: string
   expiresAt: number
-  undo: () => void
+  undo: () => void | boolean
   finalize: () => void
   timer: ReturnType<typeof setTimeout>
 }
 
 interface ScheduleWorkspaceUndoActionInput {
-  apply: () => void
-  undo: () => void
+  apply: () => void | boolean
+  undo: () => void | boolean
   finalize?: () => void
   timeoutMs?: number
 }
@@ -50,13 +50,21 @@ const clearPendingWorkspaceUndoAction = (
   return action
 }
 
-export const scheduleWorkspaceUndoAction = ({
+export function scheduleWorkspaceUndoAction(
+  input: ScheduleWorkspaceUndoActionInput & { apply: () => boolean }
+): WorkspaceUndoActionHandle | null
+// eslint-disable-next-line no-redeclare -- TypeScript overload preserves the existing void-callback return type.
+export function scheduleWorkspaceUndoAction(
+  input: ScheduleWorkspaceUndoActionInput & { apply: () => void }
+): WorkspaceUndoActionHandle
+// eslint-disable-next-line no-redeclare -- Shared implementation of the two callback overloads.
+export function scheduleWorkspaceUndoAction({
   apply,
   undo,
   finalize,
   timeoutMs = WORKSPACE_UNDO_WINDOW_MS
-}: ScheduleWorkspaceUndoActionInput): WorkspaceUndoActionHandle => {
-  apply()
+}: ScheduleWorkspaceUndoActionInput): WorkspaceUndoActionHandle | null {
+  if (apply() === false) return null
 
   const id = createWorkspaceUndoActionId()
   const expiresAt = Date.now() + timeoutMs
@@ -102,9 +110,9 @@ export const finalizeWorkspaceUndoAction = (id: string): boolean => {
 }
 
 export const undoWorkspaceAction = (id: string): boolean => {
-  const action = clearPendingWorkspaceUndoAction(id)
-  if (!action) return false
-  action.undo()
+  const action = pendingWorkspaceUndoActions.get(id)
+  if (!action || action.undo() === false) return false
+  clearPendingWorkspaceUndoAction(id)
   void trackResearchWorkspaceTelemetry({
     type: "undo_triggered"
   })

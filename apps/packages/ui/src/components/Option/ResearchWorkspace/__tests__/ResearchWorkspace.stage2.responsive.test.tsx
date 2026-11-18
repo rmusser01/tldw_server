@@ -28,7 +28,10 @@ vi.mock("@/services/service-prompts", async original => ({
   ...(await original<typeof import("@/services/service-prompts")>()),
   loadServicePromptSnapshot: mockLoadArtifactScope,
 }))
-vi.mock("@/services/workspace-artifact-persistence", () => ({ persistWorkspaceArtifact: mockArtifactSave, hasCanonicalArtifactWorkspace: () => false }))
+vi.mock("@/services/workspace-artifact-persistence", async original => ({
+  WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS: (await original<typeof import("@/services/workspace-artifact-persistence")>()).WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS,
+  persistWorkspaceArtifact: mockArtifactSave, hasCanonicalArtifactWorkspace: () => false
+}))
 
 const ONBOARDING_KEY = "tldw:research-workspace:onboarding-dismissed:v1"
 const {
@@ -529,6 +532,25 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
 
     const statusBar = screen.getByTestId("workspace-status-bar")
     expect(statusBar).toHaveAttribute("data-compact", "true")
+  })
+
+  it("starts mobile workspace controls closed while keeping tabs and status outside", () => {
+    testState.isMobile = true
+    render(<ResearchWorkspace />)
+    const controls = screen.getByText("Workspace controls").closest("details")
+    expect(controls).not.toHaveAttribute("open")
+    expect(controls).toContainElement(screen.getByTestId("workspace-header"))
+    expect(controls).not.toContainElement(screen.getByTestId("workspace-mobile-tabs"))
+    expect(controls).not.toContainElement(screen.getByTestId("workspace-status-bar"))
+  })
+
+  it("opens the captured Note draft in mobile Studio and requests content focus", async () => {
+    testState.isMobile = true
+    render(<ResearchWorkspace />)
+    await waitFor(() => expect(mockChatPaneProps.at(-1)?.onOpenNoteDraft).toBeTypeOf("function"))
+    act(() => mockChatPaneProps.at(-1)?.onOpenNoteDraft())
+    expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute("data-active-key", "studio")
+    await waitFor(() => expect(testState.focusWorkspaceNote).toHaveBeenCalledWith("content"))
   })
 
   it("opens Studio from the mobile ?tab=studio route state", () => {

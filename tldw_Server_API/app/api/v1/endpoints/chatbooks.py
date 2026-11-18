@@ -180,6 +180,39 @@ def _safe_increment_metric(metric_name: str, labels: dict, error_context: str = 
         logger.debug("metrics increment failed")
 
 
+def _sync_import_response(
+    source_format: ChatbookImportSourceFormat, message: str, result: object
+) -> ImportChatbookResponse:
+    """Project a successful synchronous import into its source-specific API response."""
+    result_data = result if isinstance(result, dict) else {"imported_items": {}, "warnings": result or []}
+    if source_format == ChatbookImportSourceFormat.OPENWEBUI_JSON:
+        return ImportChatbookResponse(
+            success=True,
+            message=message,
+            source_format=source_format,
+            openwebui_result=result_data,
+            warnings=result_data.get("warnings") or [],
+        )
+    if source_format == ChatbookImportSourceFormat.OPENWEBUI_DB:
+        return ImportChatbookResponse(
+            success=True,
+            message=message,
+            source_format=source_format,
+            openwebui_db_result=result_data,
+            warnings=result_data.get("warnings") or [],
+        )
+    return ImportChatbookResponse(
+        success=True,
+        message=message,
+        source_format=source_format,
+        imported_items=result_data.get("imported_items") or {},
+        id_maps=result_data.get("id_maps"),
+        warnings=result_data.get("warnings") or [],
+        inventory_summary=result_data.get("inventory_summary"),
+        skipped_non_restorable=result_data.get("skipped_non_restorable"),
+    )
+
+
 def _import_job_response(job: ImportJob) -> ImportJobResponse:
     """Build an API import job response including structured async result metadata."""
     metadata = job.metadata if isinstance(getattr(job, "metadata", None), dict) else {}
@@ -215,6 +248,7 @@ def _import_job_response(job: ImportJob) -> ImportJobResponse:
         conflicts=_redact_server_path_values(job.conflicts),
         warnings=_redact_server_path_values(job.warnings),
         imported_items=safe_metadata.get("imported_items"),
+        id_maps=safe_metadata.get("id_maps"),
         inventory_summary=safe_metadata.get("inventory_summary"),
         skipped_non_restorable=safe_metadata.get("skipped_non_restorable"),
         metadata=safe_metadata,
@@ -986,32 +1020,7 @@ async def import_chatbook(
                     )
                 except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as audit_err:
                     logger.warning(f"Failed to log audit event for import completion: {audit_err}")
-                result_data = result if isinstance(result, dict) else {"imported_items": {}, "warnings": result or []}
-                if import_request.source_format == ChatbookImportSourceFormat.OPENWEBUI_JSON:
-                    return ImportChatbookResponse(
-                        success=True,
-                        message=message,
-                        source_format=import_request.source_format,
-                        openwebui_result=result_data,
-                        warnings=result_data.get("warnings") or [],
-                    )
-                if import_request.source_format == ChatbookImportSourceFormat.OPENWEBUI_DB:
-                    return ImportChatbookResponse(
-                        success=True,
-                        message=message,
-                        source_format=import_request.source_format,
-                        openwebui_db_result=result_data,
-                        warnings=result_data.get("warnings") or [],
-                    )
-                return ImportChatbookResponse(
-                    success=True,
-                    message=message,
-                    source_format=import_request.source_format,
-                    imported_items=result_data.get("imported_items") or {},
-                    warnings=result_data.get("warnings") or [],
-                    inventory_summary=result_data.get("inventory_summary"),
-                    skipped_non_restorable=result_data.get("skipped_non_restorable"),
-                )
+                return _sync_import_response(import_request.source_format, message, result)
         else:
             # For async jobs, return a failure response with job_id so clients can inspect status.
             if import_request.async_mode and result:
@@ -1036,6 +1045,17 @@ async def import_chatbook(
                     source_format=import_request.source_format,
                     job_id=result,
                 )
+            # Preserve recoverable writes without leaking private account restore data.
+            if isinstance(result, dict) and result.get("id_maps") is not None:
+                receipt = {
+                    key: result[key]
+                    for key in (
+                        "id_maps", "imported_items", "warnings", "total_items", "processed_items",
+                        "successful_items", "failed_items", "skipped_items",
+                    )
+                    if key in result
+                }
+                raise HTTPException(status_code=400, detail=_redact_server_path_values({"message": message, **receipt}))
             raise HTTPException(status_code=400, detail=message)
 
     except HTTPException:

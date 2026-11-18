@@ -172,6 +172,7 @@ const isLocalThreadId = (id: string | null | undefined) =>
   Boolean(id && id.startsWith(LOCAL_THREAD_PREFIX))
 
 type ResultsPayload = {
+  clarificationRequired?: boolean
   query: string | null
   completedGenerationEnabled?: boolean | null
   results: RagResult[]
@@ -292,7 +293,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
             : null,
         hasSearched: true,
         isSearching: false,
-        queryStage: "complete",
+        queryStage: action.payload.clarificationRequired ? "clarification" : "complete",
       }
     case "SET_PARTIAL_RESULTS":
       return {
@@ -680,6 +681,9 @@ function mapRagContextDocumentsToResults(
         url: typeof doc?.url === "string" ? doc.url : undefined,
         page_number:
           typeof doc?.page_number === "number" ? doc.page_number : undefined,
+        page_spans: Array.isArray(doc?.page_spans) ? doc.page_spans : metadata.page_spans,
+        start_char: typeof doc?.start_char === "number" ? doc.start_char : metadata.start_char,
+        end_char: typeof doc?.end_char === "number" ? doc.end_char : metadata.end_char,
       },
     } as RagResult
   })
@@ -706,6 +710,7 @@ function buildHistorySourceStatusFromResults(
 }
 
 function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
+  clarificationRequired?: boolean
   query: string | null
   answer: string | null
   results: RagResult[]
@@ -791,6 +796,7 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
   const query = queryFromContext || answeredUserMessage?.content || null
 
   return {
+    clarificationRequired: ragContext?.clarification_required === true,
     query,
     answer,
     results,
@@ -2449,6 +2455,11 @@ function OwnedKnowledgeQAProvider({
         unavailable_reason: getResultUnavailableReason(r) ?? undefined,
         url: r.metadata?.url,
         page_number: r.metadata?.page_number,
+        metadata: {
+          page_spans: r.metadata?.page_spans,
+          start_char: r.metadata?.start_char,
+          end_char: r.metadata?.end_char,
+        },
       })),
       generated_answer: answer || undefined,
       trust_state: answerTrustState,
@@ -2630,6 +2641,7 @@ function OwnedKnowledgeQAProvider({
         let usedStreaming = false
         let resolvedSearchDetails: SearchRuntimeDetails | null = null
         let backendTrust: KnowledgeTrustMetadata | null = null
+        let clarificationRequired = false
 
         if (
           canAttemptStreaming &&
@@ -2723,6 +2735,12 @@ function OwnedKnowledgeQAProvider({
               }
               const eventType = typeof event?.type === "string" ? event.type : ""
 
+              if (eventType === "clarification" && event.required === true) {
+                clarificationRequired = true
+                dispatch({ type: "SET_QUERY_STAGE", payload: "clarification" })
+                continue
+              }
+
               if (eventType === "contexts" && Array.isArray(event?.contexts)) {
                 dispatch({ type: "SET_QUERY_STAGE", payload: "ranking" })
                 const securityWarning = getSecurityFilterWarning(event.security_filter)
@@ -2748,7 +2766,7 @@ function OwnedKnowledgeQAProvider({
               }
 
               if (eventType === "delta") {
-                dispatch({ type: "SET_QUERY_STAGE", payload: "generating" })
+                dispatch({ type: "SET_QUERY_STAGE", payload: clarificationRequired ? "clarification" : "generating" })
                 const deltaText =
                   typeof event?.text === "string" ? event.text : ""
                 if (!deltaText) continue
@@ -2828,6 +2846,10 @@ function OwnedKnowledgeQAProvider({
           results = extracted.results
           answer = extracted.answer
           backendTrust = extractKnowledgeTrustMetadata(extracted.metadata)
+          const clarification = extracted.metadata?.clarification
+          clarificationRequired =
+            typeof clarification === "object" && clarification !== null &&
+            "required" in clarification && clarification.required === true
           if (answer) {
             dispatch({ type: "SET_QUERY_STAGE", payload: "generating" })
           }
@@ -2860,7 +2882,7 @@ function OwnedKnowledgeQAProvider({
         }
 
         // Parse citations from answer
-        dispatch({ type: "SET_QUERY_STAGE", payload: "verifying" })
+        dispatch({ type: "SET_QUERY_STAGE", payload: clarificationRequired ? "clarification" : "verifying" })
         const visibleCitationIndexes = new Set(
           results.map((result, index) => getOriginalResultIndex(result, index) + 1)
         )
@@ -2893,6 +2915,7 @@ function OwnedKnowledgeQAProvider({
             answer,
             citations,
             completedGenerationEnabled: effectiveSettings.enable_generation,
+            clarificationRequired,
             answerTrustState,
             answerTrustReasonCodes,
             answerEvidenceOrigin,
@@ -2921,6 +2944,7 @@ function OwnedKnowledgeQAProvider({
           answerTrustReasonCodes,
           answerEvidenceOrigin
         )
+        if (clarificationRequired) ragContext.clarification_required = true
 
         if (answer && threadId) {
           const persistedAssistant = await persistChatMessage(
@@ -3110,7 +3134,7 @@ function OwnedKnowledgeQAProvider({
 
   const rerunWithTokenLimit = useCallback(
     async (tokenLimit: number) => {
-      const normalized = Math.max(64, Math.min(4000, Math.round(tokenLimit)))
+      const normalized = Math.max(64, Math.min(8192, Math.round(tokenLimit)))
       await runKnowledgeQuery(state.resultQuery ?? state.query, false, {
         max_generation_tokens: normalized,
         enable_generation: true,
@@ -3217,6 +3241,7 @@ function OwnedKnowledgeQAProvider({
           type: "SET_RESULTS",
           payload: {
             query: hydration.query,
+            clarificationRequired: hydration.clarificationRequired,
             completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
             results: hydration.results,
             answer: hydration.answer,
@@ -3335,6 +3360,7 @@ function OwnedKnowledgeQAProvider({
             type: "SET_RESULTS",
             payload: {
               query: hydration.query,
+              clarificationRequired: hydration.clarificationRequired,
               completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
               results: hydration.results,
               answer: hydration.answer,
@@ -3503,6 +3529,7 @@ function OwnedKnowledgeQAProvider({
           type: "SET_RESULTS",
           payload: {
             query: hydration.query,
+            clarificationRequired: hydration.clarificationRequired,
             completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
             results: hydration.results,
             answer: hydration.answer,

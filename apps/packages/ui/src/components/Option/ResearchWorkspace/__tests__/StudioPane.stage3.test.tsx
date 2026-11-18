@@ -12,7 +12,8 @@ import { createGroundedClaimVerification } from "./studio-test-fixtures"
 const storedAudioRead = vi.hoisted(() => vi.fn())
 vi.mock("@/services/workspace-artifact-audio", () => ({ readStoredWorkspaceAudio: storedAudioRead }))
 const mediaSave = vi.hoisted(() => vi.fn(async artifact => artifact))
-vi.mock("@/services/workspace-artifact-persistence", () => ({
+vi.mock("@/services/workspace-artifact-persistence", async original => ({
+  WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS: (await original<typeof import("@/services/workspace-artifact-persistence")>()).WORKSPACE_ARTIFACT_SAVE_TIMEOUT_MS,
   persistWorkspaceArtifact: mediaSave, hasCanonicalArtifactWorkspace: () => false,
 }))
 vi.mock("@/services/service-prompts", () => ({

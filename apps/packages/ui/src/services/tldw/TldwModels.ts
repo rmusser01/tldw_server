@@ -75,6 +75,7 @@ const isAbortLikeModelFetchError = (error: unknown): boolean => {
   return (
     candidate?.name === "AbortError" ||
     candidate?.code === "REQUEST_ABORTED" ||
+    candidate?.code === "REQUEST_TIMEOUT" ||
     message.includes("abort")
   )
 }

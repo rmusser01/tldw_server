@@ -2511,6 +2511,48 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
   if (typeof FormData === "undefined") {
     throw new Error("File upload is not supported in this environment.")
   }
+  if (typeof process !== "undefined" && process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE === "quickstart") {
+    // Next's quickstart body-clone cap is 129 MiB. Bound the complete request
+    // below it, including legacy duplicate file aliases and multipart framing.
+    const maximum = 128 * 1024 * 1024
+    let bytes = 1024
+    const add = (size: number) => {
+      bytes += size
+      if (bytes > maximum) throw Object.assign(new Error("Upload exceeds the WebUI limit of 128 MiB including files and form fields. Reduce the upload size and try again."), { status: 413 })
+    }
+    const textSize = (value: unknown) => {
+      const text = String(value)
+      let size = 0
+      for (let index = 0; index < text.length && size <= maximum; index++) {
+        const code = text.charCodeAt(index)
+        // Multipart converts lone CR/LF to CRLF; count the wire bytes, not JS characters.
+        if (code === 13) size += text.charCodeAt(index + 1) === 10 ? 1 : 2
+        else if (code === 10) size += text.charCodeAt(index - 1) === 13 ? 1 : 2
+        else if (code < 128) size++
+        else if (code < 2048) size += 2
+        else if (code >= 0xd800 && code <= 0xdbff && text.charCodeAt(index + 1) >= 0xdc00 && text.charCodeAt(index + 1) <= 0xdfff) { size += 4; index++ }
+        else size += 3
+      }
+      return size
+    }
+    for (const [key, value] of Object.entries(fields || {})) {
+      if (value == null) continue
+      for (const item of Array.isArray(value) ? value : [value]) add(textSize(key) * 3 + textSize(item) + 512)
+    }
+    const addFile = (item: Pick<BgUploadFile, "name" | "type">, name: string, size: number) => add(
+      size +
+      (textSize(name) + textSize(item.name || "file")) * 3 + textSize(item.type || "application/octet-stream") + 512
+    )
+    if (directFile) {
+      addFile(directFile, fileFieldName || "files", directFile.size)
+      if (!fileFieldName) addFile(directFile, "file", directFile.size)
+    } else if (files?.length) files.forEach(item => addFile(item, item.fieldName || "files", Array.isArray(item.data) ? item.data.length : item.data.byteLength))
+    else if (file) {
+      const size = Array.isArray(file.data) ? file.data.length : file.data.byteLength
+      addFile(file, fileFieldName || "files", size)
+      if (!fileFieldName) addFile(file, "file", size)
+    }
+  }
   const formData = new FormData()
   Object.entries(fields || {}).forEach(([key, value]) => {
     if (value == null) return

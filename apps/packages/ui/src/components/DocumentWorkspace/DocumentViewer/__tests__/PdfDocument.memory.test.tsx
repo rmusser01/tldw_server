@@ -78,6 +78,11 @@ vi.mock('react-pdf', async () => {
   }
 })
 
+it('uses the packaged same-origin PDF worker outside production too', async () => {
+  const { pdfjs } = await import('react-pdf')
+  expect(pdfjs.GlobalWorkerOptions.workerSrc).toBe('/pdf.worker.min.mjs')
+})
+
 beforeEach(() => {
   metrics.gate = null
   vi.stubGlobal(

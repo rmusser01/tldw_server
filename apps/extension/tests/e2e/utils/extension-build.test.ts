@@ -24,7 +24,16 @@ const setupBuiltExtensionLaunchTest = async () => {
     serviceWorkers: vi.fn(() => []),
     backgroundPages: vi.fn(() => []),
     waitForEvent: vi.fn(() => new Promise(() => {})),
-    addInitScript: vi.fn().mockResolvedValue(undefined),
+    addInitScript: vi.fn(async (_script: unknown, _arg?: unknown, options?: unknown) => {
+      // Playwright accepts one script argument and an optional options object.
+      if (options !== undefined && (
+        typeof options !== "object" || options === null || Array.isArray(options)
+      )) {
+        throw new Error(
+          "Too many arguments. If you need to pass more than 1 argument to the function wrap them in an object."
+        )
+      }
+    }),
     newPage: vi.fn().mockResolvedValue(page),
     close: vi.fn().mockResolvedValue(undefined),
   }
@@ -134,6 +143,78 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
       }
     })
     expect(normalized.storagePayload.tldwConfig).not.toHaveProperty("tldwConfig")
+  })
+
+  it.each([
+    { allowOffline: false, alreadySeeded: false },
+    { allowOffline: true, alreadySeeded: false },
+    { allowOffline: false, alreadySeeded: true },
+    { allowOffline: true, alreadySeeded: true },
+  ])("seeds configuration and offline=$allowOffline without replacing seeded=$alreadySeeded storage", async ({ allowOffline, alreadySeeded }) => {
+    const { cleanup, context, launchWithBuiltExtension } =
+      await setupBuiltExtensionLaunchTest()
+    const seedConfig = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-key",
+      "tldw:workflow:landing-config": {
+        showOnFirstRun: true,
+        dismissedAt: 123,
+        completedWorkflows: [],
+      },
+    }
+    const initialData = alreadySeeded
+      ? { __e2eSeeded: true, retained: "existing configuration" }
+      : {}
+    const local: Record<string, unknown> = { ...initialData }
+    const sync: Record<string, unknown> = { ...initialData }
+    const setLocal = vi.fn((data, done) => {
+      Object.assign(local, data)
+      queueMicrotask(() => done?.())
+    })
+    const setSync = vi.fn((data, done) => {
+      Object.assign(sync, data)
+      queueMicrotask(() => done?.())
+    })
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: (_key: string, done: (data: unknown) => void) => done({ ...local }),
+          set: setLocal,
+        },
+        sync: { set: setSync },
+      },
+    })
+
+    try {
+      await launchWithBuiltExtension({ seedConfig, allowOffline })
+      const seedCall = context.addInitScript.mock.calls.find(([, arg]) => arg !== undefined)
+      expect(seedCall).toBeDefined()
+      const [seed, arg] = seedCall!
+      ;(seed as (arg: unknown) => void)(arg)
+      await Promise.resolve()
+      await Promise.resolve()
+
+      if (alreadySeeded) {
+        expect(setLocal).not.toHaveBeenCalled()
+        expect(setSync).not.toHaveBeenCalled()
+        expect(local).toEqual(initialData)
+        expect(sync).toEqual(initialData)
+      } else {
+        const expected = {
+          ...normalizeBuiltExtensionSeedConfig(seedConfig).storagePayload,
+          __e2eSeeded: true,
+        }
+        expect(local).toEqual({
+          ...expected,
+          ...(allowOffline ? { __tldw_allow_offline: true } : {}),
+        })
+        expect(sync).toEqual(expected)
+      }
+      expect(context.close).not.toHaveBeenCalled()
+    } finally {
+      cleanup()
+    }
   })
 
   it("launches built extensions with crashpad-disabled Chromium options", async () => {

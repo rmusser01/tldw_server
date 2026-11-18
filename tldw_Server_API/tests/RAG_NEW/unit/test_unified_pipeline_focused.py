@@ -66,6 +66,26 @@ class TestUnifiedPipelineCore:
     """Core tests for the unified pipeline - the main entry point."""
 
     @pytest.mark.asyncio
+    async def test_retrieval_policy_upgrade_does_not_reuse_old_matching_results(self, monkeypatch):
+        _, cache_factory = _memory_shared_cache_factory()
+        monkeypatch.setattr(up, "get_shared_cache", cache_factory)
+        retrieve = AsyncMock(side_effect=[
+            [Document(id="old-miss", content="Old partial evidence", metadata={})],
+            [Document(id="new-match", content="Newly matched complete proposal", metadata={})],
+        ])
+        monkeypatch.setattr(up, "MultiDatabaseRetriever", lambda *args, **kwargs: types.SimpleNamespace(retrieve=retrieve))
+        options = {"query": "Does this document propose eliminating?", "sources": ["media_db"],
+                   "search_mode": "fts", "fts_level": "chunk", "enable_cache": True, "adaptive_cache": False,
+                   "enable_generation": False, "enable_reranking": False, "enable_pre_retrieval_clarification": False}
+        monkeypatch.setattr(up, "_RETRIEVAL_MATCHING_POLICY_VERSION", 1, raising=False)
+        old = await unified_rag_pipeline(**options)
+        monkeypatch.setattr(up, "_RETRIEVAL_MATCHING_POLICY_VERSION", 2)
+        upgraded = await unified_rag_pipeline(**options)
+        assert old.documents[0]["id"] == "old-miss"
+        assert upgraded.documents[0]["id"] == "new-match"
+        assert retrieve.await_count == 2
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("allowed,expected", [
         (["text", "code", "table", "list"], {"whole-text", "code", "paragraph"}),
         (["text"], {"whole-text", "paragraph"}),
@@ -464,7 +484,7 @@ class TestUnifiedPipelineFeatures:
         assert result.metadata["retrieval_cache_hit"] is True
         assert result.metadata["generation_executed"] is True
         generator.generate.assert_awaited_once()
-        assert generator.generate.await_args.kwargs["context"] == "Cached content"
+        assert generator.generate.await_args.kwargs["context"] == "[1] Page location unavailable\nCached content"
         mock_retriever.assert_not_called()
 
     @pytest.mark.asyncio

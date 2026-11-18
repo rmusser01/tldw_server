@@ -117,6 +117,7 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-088](088-mcp-certified-completion-lifecycle.md) | Proposed | Certify one bounded native-async completion path and retain ownership through cancellation, abandonment, and shutdown. |
 | [ADR-094](094-jobs-resource-admission-and-domain-publication.md) | Accepted | Keep exclusive resource admission and monotonic authority in shared Jobs, with atomic output fences and replay receipts in domain storage. |
 | [ADR-095](095-coordinated-chroma-sdk-storage-lifetimes.md) | Proposed | Coordinate validation and complete canonical Chroma SDK lifetimes in shared storage sessions; fail closed on unsupported or incomplete existing storage. |
+| [ADR-096](096-research-citation-bound-claims-verification.md) | Proposed | Verify research claims against their cited owned passages through Claims, preserving coverage and portable findings separately from generation and reviewer decisions. |
 
 
 

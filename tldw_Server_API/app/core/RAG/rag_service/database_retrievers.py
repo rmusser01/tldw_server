@@ -12,6 +12,7 @@ import copy
 import json
 import re
 import sqlite3
+import threading
 import time
 import urllib.parse as _urlparse
 from abc import ABC, abstractmethod
@@ -41,6 +42,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.chat_history_queries import (
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import KanbanDB
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
+    get_document_version,
     search_media,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
@@ -50,6 +52,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_r
     append_sqlite_media_visibility,
 )
 from tldw_Server_API.app.core.Kanban.vector_search import create_kanban_vector_search
+from tldw_Server_API.app.core.Media.page_provenance import page_map_for_content, page_spans_for_range
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
 from tldw_Server_API.app.core.testing import is_production_like_env
@@ -64,7 +67,8 @@ from .hyde import (
 )
 from .retrieval_plan import RetrievalPlan
 from .types import DataSource, Document
-from .utils import get_float_env as _get_float_env, normalize_scores as _normalize_scores
+from .utils import get_float_env as _get_float_env
+from .utils import normalize_scores as _normalize_scores
 from .vector_stores import (
     VectorStoreAdapter,
     create_from_settings_for_user,
@@ -230,9 +234,12 @@ _MEDIA_FALLBACK_STOP_WORDS = {
     "be",
     "by",
     "can",
+    "chapter",
     "did",
     "do",
     "does",
+    "document",
+    "doing",
     "during",
     "each",
     "explain",
@@ -248,10 +255,13 @@ _MEDIA_FALLBACK_STOP_WORDS = {
     "its",
     "mention",
     "mentions",
+    "major",
     "new",
     "of",
     "on",
     "or",
+    "propose",
+    "proposes",
     "issue",
     "issues",
     "reveal",
@@ -282,6 +292,37 @@ _MEDIA_FALLBACK_STOP_WORDS = {
     "with",
 }
 
+_MEDIA_ANSWER_DIRECTIVE_RE = re.compile(
+    r"\b(?:give|provide|return|write)\s+"
+    r"(?:(?:a|an|the|brief|concise|short|detailed|neutral|factual|balanced|clear)\s+){0,6}"
+    r"(?:answer|response|summary|explanation)\b|"
+    r"\b(?:cite|include)\s+(?:the\s+)?(?:supporting\s+)?(?:passages|sources|citations|page\s+numbers)\b|"
+    r"\b(?:cite|citing)\s+(?:(?:its|their|the|relevant|supporting|printed|physical|pdf|and)\s+){0,8}pages?\b|"
+    r"[.!?;]\s+use\s+only\s+(?:the\s+)?selected\s+(?:pdf|source|document)s?\b|"
+    r"[.!?;]\s+(?:quote|cite)\b",
+    re.IGNORECASE,
+)
+_MEDIA_QUOTE_REQUEST_PREFIX_RE = re.compile(
+    r"^(?:please\s+)?quote\s+"
+    r"(?:(?:a|an|the|original|opening|initial|exact|relevant|supporting)\s+){0,6}"
+    r"(?:proposal|recommendation|statement|passage|text|wording)\s+(?:about|on|regarding|for)\s+",
+    re.IGNORECASE,
+)
+_MEDIA_NAMED_CHAPTER_RE = re.compile(r"\b((?:[A-Z][a-z]+\s+){2,5}[A-Z][a-z]+)\s+(?:chapter|section)\b")
+
+
+def _has_explicit_fts_syntax(query: str) -> bool:
+    """Keep deliberate phrases, operators, scopes and prefixes strict."""
+    if re.search(r'["*()^]|\b(?:AND|OR|NOT|NEAR)\b', query):
+        return True
+    # Natural questions use colons too. Preserve actual Media FTS scopes with
+    # optional whitespace and compact unknown scopes without broadening them.
+    return bool(re.search(
+        r"\b(?:title|content|chunk_text)\s*:|\b[A-Za-z_][A-Za-z0-9_]*:\S",
+        query,
+        re.IGNORECASE,
+    ))
+
 
 def _derive_bounded_media_term_query(query: Optional[str], *, max_terms: int = 3) -> Optional[str]:
     if query is None:
@@ -293,15 +334,31 @@ def _derive_bounded_media_term_query(query: Optional[str], *, max_terms: int = 3
     if not raw_text:
         return None
 
-    candidates = re.findall(r"[A-Za-z0-9']+", raw_text.lower())
+    # Presentation instructions are not source-search facets. Spell correction
+    # may remove '?' punctuation, so recognize the imperative clause itself.
+    raw_text = _MEDIA_QUOTE_REQUEST_PREFIX_RE.sub("", raw_text, count=1)
+    directive = _MEDIA_ANSWER_DIRECTIVE_RE.search(raw_text)
+    if directive and directive.start() > 0:
+        raw_text = raw_text[:directive.start()]
+    candidates = re.findall(r"[A-Za-z0-9']+", raw_text)
     filtered_terms: list[str] = []
     seen: set[str] = set()
     for token in candidates:
-        normalized = token.strip("'")
-        if len(normalized) < 4 or normalized in _MEDIA_FALLBACK_STOP_WORDS or normalized in seen:
+        normalized = token.strip("'").lower()
+        short_acronym = 2 <= len(token) <= 3 and token.isalpha() and token.isupper()
+        if (len(normalized) < 4 and not short_acronym) or normalized in _MEDIA_FALLBACK_STOP_WORDS or normalized in seen:
             continue
         seen.add(normalized)
         filtered_terms.append(normalized)
+
+    # Named organizations often use their initials in body paragraphs while
+    # repeating the full name in page headers. This is an additional bounded
+    # search term, never a replacement for the supplied name.
+    for match in _MEDIA_NAMED_CHAPTER_RE.finditer(raw_text):
+        initials = "".join(word[0] for word in match[1].split()).lower()
+        if initials not in seen:
+            seen.add(initials)
+            filtered_terms.append(initials)
 
     if not filtered_terms:
         return None
@@ -325,7 +382,7 @@ def _derive_bounded_media_term_query(query: Optional[str], *, max_terms: int = 3
     return " OR ".join(ordered_terms)
 
 
-def _extract_media_query_terms(query: Optional[str], *, max_terms: int = 8) -> list[str]:
+def _extract_media_query_terms(query: Optional[str], *, max_terms: int = 8, min_term_length: int = 3) -> list[str]:
     if query is None:
         return []
     try:
@@ -339,7 +396,7 @@ def _extract_media_query_terms(query: Optional[str], *, max_terms: int = 8) -> l
     seen: set[str] = set()
     for token in re.findall(r"[A-Za-z0-9']+", raw_text):
         normalized = token.strip("'")
-        if len(normalized) < 3 or normalized in _MEDIA_FALLBACK_STOP_WORDS or normalized in seen:
+        if len(normalized) < min_term_length or normalized in _MEDIA_FALLBACK_STOP_WORDS or normalized in seen:
             continue
         seen.add(normalized)
         terms.append(normalized)
@@ -387,6 +444,52 @@ def _score_media_chunk_text(
     return (matched_score / max(len(query_terms), 1)) + min(total_occurrences, 0.25)
 
 
+def _natural_media_term_root(term: str) -> str:
+    """Normalize common English inflections without broad fuzzy substring matches."""
+    root = term
+    if len(term) >= 7 and term.endswith("ing"):
+        root = term[:-3]
+    elif len(term) >= 6 and term.endswith("ed"):
+        root = term[:-2]
+    elif len(term) >= 6 and (
+        term.endswith("e") or (term.endswith("s") and not term.endswith(("ss", "us", "is")))
+    ):
+        root = term[:-1]
+    if term.endswith(("ing", "ed")) and len(root) >= 5 and root[-1] == root[-2] and root[-1] in "bdgmnprt":
+        root = root[:-1]
+    return root
+
+
+def _natural_media_chunk_query(terms: list[str]) -> str:
+    """Use bounded trusted prefixes for inflections on the unstemmed chunk index."""
+    return " OR ".join(
+        root + "*" if root != term else term
+        for term in terms
+        for root in [_natural_media_term_root(term)]
+    )
+
+
+def _score_natural_media_chunk(content: str, metadata: dict[str, Any], terms: list[str], bm25_score: float) -> float:
+    """Rank a bounded candidate pool by topic coverage and usable passage text."""
+    # Repeated terms inside link targets must not outweigh the visible evidence.
+    visible_text = re.sub(r"https?://\S+", "", content)
+    words = re.findall(r"[A-Za-z0-9']+", visible_text.lower())
+    body_terms = {_natural_media_term_root(word) for word in words}
+    ancestry = metadata.get("ancestry_titles")
+    section = " ".join(item for item in ancestry if isinstance(item, str)) if isinstance(ancestry, list) else ""
+    section += " " + str(metadata.get("section_title") or "")
+    section_terms = {_natural_media_term_root(word) for word in re.findall(r"[A-Za-z0-9']+", section.lower())}
+    query_terms = {_natural_media_term_root(term) for term in terms}
+    denominator = max(len(query_terms), 1)
+    coverage = len(query_terms & (body_terms | section_terms)) / denominator
+    body_coverage = len(query_terms & body_terms) / denominator
+    section_coverage = len(query_terms & section_terms) / denominator
+    return (
+        0.5 * coverage + 0.2 * body_coverage + 0.15 * section_coverage
+        + 0.1 * min(len(words) / 60, 1) + 0.05 * bm25_score
+    )
+
+
 _SQL_INPUT_PREFIX_RE = re.compile(
     r"^(?:\s|--[^\n]*\n|/\*.*?\*/)*(select|with)\b",
     flags=re.IGNORECASE | re.DOTALL,
@@ -427,13 +530,13 @@ def _apply_location_metadata(document: Document) -> None:
     metadata = document.metadata or {}
 
     if document.start_char is None:
-        start_val = _get_metadata_value(metadata, "start_char", "start_index", "start_offset", "paragraph_start")
+        start_val = _get_metadata_value(metadata, "start_char", "start_index", "start_offset", "paragraph_start", "chunk_start")
         start_int = _coerce_int(start_val)
         if start_int is not None:
             document.start_char = start_int
 
     if document.end_char is None:
-        end_val = _get_metadata_value(metadata, "end_char", "end_index", "end_offset", "paragraph_end")
+        end_val = _get_metadata_value(metadata, "end_char", "end_index", "end_offset", "paragraph_end", "chunk_end")
         end_int = _coerce_int(end_val)
         if end_int is not None:
             document.end_char = end_int
@@ -480,6 +583,7 @@ class RetrievalConfig:
     min_score: float = 0.0
     use_fts: bool = True
     use_vector: bool = True
+    hybrid_alpha: float = 0.7
     include_metadata: bool = True
     date_filter: Optional[tuple[datetime, datetime]] = None
     tags_filter: Optional[list[str]] = None
@@ -1269,7 +1373,20 @@ class MediaDBRetriever(BaseRetriever):
         )
 
     async def retrieve(self, query: str, media_type: Optional[str] = None, **kwargs) -> list[Document]:
-        """Retrieve documents from the media database."""
+        """Keep synchronous database and chunk work off the request event loop."""
+        cancelled = threading.Event()
+        try:
+            return await asyncio.to_thread(
+                self._retrieve_sync, query, media_type, _cancelled=cancelled, **kwargs,
+            )
+        finally:
+            cancelled.set()
+
+    def _retrieve_sync(self, query: str, media_type: Optional[str] = None, **kwargs) -> list[Document]:
+        """Retrieve documents using the adapter's worker-local database connection."""
+        cancelled = kwargs.get("_cancelled")
+        if cancelled is not None and cancelled.is_set():
+            return []
         if self.media_db is not None:
             # Branch on FTS level when FTS search is enabled
             try:
@@ -1294,14 +1411,47 @@ class MediaDBRetriever(BaseRetriever):
                             return late_chunk_documents
                         return media_documents
                     chunk_documents, chunk_raw_count = self._retrieve_chunk_fts_with_stats(query, media_type, **kwargs)
+                    if cancelled is not None and cancelled.is_set():
+                        return []
                     if chunk_raw_count > 0:
                         return chunk_documents
+                    if _has_explicit_fts_syntax(query):
+                        return []
+                    term_query = _derive_bounded_media_term_query(
+                        query, max_terms=32 if kwargs.get("allowed_media_ids") else 8,
+                    )
+                    if term_query:
+                        # The bounded natural compiler has already admitted any
+                        # two-letter terms as explicit uppercase acronyms.
+                        fallback_terms = _extract_media_query_terms(term_query, max_terms=32, min_term_length=2)
+                        # PostgreSQL already stems its English tsvector; its
+                        # tsquery parser does not accept a lone SQLite prefix.
+                        candidate_query = (
+                            _natural_media_chunk_query(fallback_terms)
+                            if getattr(self.media_db, "backend_type", None) == BackendType.SQLITE
+                            else term_query
+                        )
+                        chunk_documents, chunk_raw_count = self._retrieve_chunk_fts_with_stats(
+                            candidate_query, media_type,
+                            _fallback_query_terms=fallback_terms, **kwargs,
+                        )
+                        if cancelled is not None and cancelled.is_set():
+                            return []
+                        if chunk_raw_count > 0:
+                            return chunk_documents
                     media_documents = self._retrieve_via_backend(
                         query,
                         media_type,
                         apply_min_score=False,
                         **kwargs,
                     )
+                    if cancelled is not None and cancelled.is_set():
+                        return []
+                    # A search miss is not evidence that persisted chunks need rebuilding.
+                    media_documents = [
+                        doc for doc in media_documents
+                        if not self.media_db.has_unvectorized_chunks(int(doc.id))
+                    ]
                     late_chunk_documents = self._late_chunk_media_documents(
                         query,
                         media_documents,
@@ -1442,6 +1592,16 @@ class MediaDBRetriever(BaseRetriever):
         if not media_documents:
             return []
 
+        # Large sources require ingestion-time chunks; never silently inspect a prefix.
+        if sum(len(doc.content or "") for doc in media_documents) > 200_000:
+            raise RAGDatabaseError(
+                "Prepare stored chunks for these sources before searching their full text.",
+                database_name="media", operation_type="late_chunk",
+            )
+        cancelled = kwargs.get("_cancelled")
+        if cancelled is not None and cancelled.is_set():
+            return []
+
         try:
             from tldw_Server_API.app.core.Chunking.chunker import Chunker  # type: ignore
         except ImportError:
@@ -1468,7 +1628,9 @@ class MediaDBRetriever(BaseRetriever):
 
         late_chunk_docs: list[Document] = []
         for parent_rank, media_doc in enumerate(media_documents[: max(1, self.config.max_results)]):
-            parent_text = str(media_doc.content or "").strip()
+            if cancelled is not None and cancelled.is_set():
+                return []
+            parent_text = str(media_doc.content or "")
             if not parent_text:
                 continue
 
@@ -1494,6 +1656,8 @@ class MediaDBRetriever(BaseRetriever):
             total_chunks = len(flat_chunks)
             parent_score = float(getattr(media_doc, "score", 0.0) or 0.0)
             for idx, chunk_item in enumerate(flat_chunks):
+                if cancelled is not None and cancelled.is_set():
+                    return []
                 if not isinstance(chunk_item, dict):
                     continue
                 chunk_text = str(chunk_item.get("text") or "").strip()
@@ -1526,6 +1690,11 @@ class MediaDBRetriever(BaseRetriever):
                 for key in ("chunk_type", "paragraph_kind", "section_path", "ancestry_titles"):
                     if key in chunk_metadata and chunk_metadata.get(key) is not None and key not in md:
                         md[key] = chunk_metadata.get(key)
+
+                page_spans = page_spans_for_range(md.get("page_map"), md.get("start_char"), md.get("end_char"))
+                if page_spans:
+                    md["page_spans"] = page_spans
+                    md["page_number"] = page_spans[0]["page_number"]
 
                 chunk_score = _score_media_chunk_text(
                     chunk_text,
@@ -1570,6 +1739,10 @@ class MediaDBRetriever(BaseRetriever):
         if self.media_db is None:
             return [], 0
 
+        fallback_terms = kwargs.get("_fallback_query_terms")
+        # Rerank only natural-question fallback. Explicit FTS expressions retain
+        # their exact matching and scoring policy, including score thresholds.
+        candidate_limit = 128 if fallback_terms else self.config.max_results
         backend_type = getattr(self.media_db, "backend_type", None)
         if backend_type == BackendType.SQLITE:
             # Ensure FTS virtual table exists; rebuild if empty to prime content
@@ -1667,7 +1840,7 @@ class MediaDBRetriever(BaseRetriever):
             sql += " ORDER BY rank ASC LIMIT ?"
         else:
             sql += " ORDER BY rank DESC LIMIT ?"
-        params.append(self.config.max_results)
+        params.append(candidate_limit)
 
         try:
             execute_query = getattr(self.media_db, "execute_query", None)
@@ -1703,7 +1876,7 @@ class MediaDBRetriever(BaseRetriever):
 
         min_score = float(self.config.min_score or 0.0)
         for row, score_val in zip(row_maps, norm_scores):
-            if float(score_val) < min_score:
+            if not fallback_terms and float(score_val) < min_score:
                 continue
 
             md: dict[str, Any] = {}
@@ -1772,6 +1945,10 @@ class MediaDBRetriever(BaseRetriever):
             })
             chunk_uuid = str(row.get("chunk_uuid"))
             content_text = row.get("chunk_text") or ""
+            if fallback_terms:
+                score_val = _score_natural_media_chunk(content_text, md, fallback_terms, float(score_val))
+                if score_val < min_score:
+                    continue
 
             doc = Document(
                 id=chunk_uuid,
@@ -1786,6 +1963,9 @@ class MediaDBRetriever(BaseRetriever):
             _apply_location_metadata(doc)
             docs.append(doc)
 
+        if fallback_terms:
+            docs.sort(key=lambda doc: doc.score, reverse=True)
+            docs = docs[:self.config.max_results]
         return docs, len(rows)
 
     def _retrieve_via_backend(
@@ -1823,7 +2003,7 @@ class MediaDBRetriever(BaseRetriever):
                 backend_type=backend_type,
                 apply_min_score=False,
             )
-        if documents or not self.config.use_fts:
+        if documents or not self.config.use_fts or _has_explicit_fts_syntax(query):
             return documents
         if raw_row_count > 0:
             return documents
@@ -1927,11 +2107,27 @@ class MediaDBRetriever(BaseRetriever):
                 "evidence_origin": "local_library",
             })
             title_text = (row.get("title") or "").strip()
-            body_text = (row.get("content") or "").strip()
-            if title_text and (not body_text or title_text.lower() not in body_text.lower()):
+            body_text = row.get("content") or ""
+            safe_metadata = row.get("safe_metadata") or {}
+            if not safe_metadata and self.media_db is not None:
+                version = get_document_version(self.media_db, media_id=int(doc_id), include_content=True)
+                safe_metadata = (version or {}).get("safe_metadata") or {}
+                if version and isinstance(version.get("content"), str):
+                    body_text = version["content"]
+            if isinstance(safe_metadata, str):
+                try:
+                    safe_metadata = json.loads(safe_metadata)
+                except (TypeError, ValueError):
+                    safe_metadata = {}
+            page_map = page_map_for_content(safe_metadata, body_text)
+            if page_map:
+                metadata.update(page_map=page_map, page_count=len(page_map))
+                content_text = body_text
+            elif title_text and (not body_text or title_text.lower() not in body_text.lower()):
+                body_text = body_text.strip()
                 content_text = f"{title_text}\n{body_text}" if body_text else title_text
             else:
-                content_text = body_text or title_text
+                content_text = body_text.strip() or title_text
             documents.append(
                 Document(
                     id=str(doc_id),
@@ -2173,6 +2369,7 @@ class MediaDBRetriever(BaseRetriever):
 
         def _finalize_docs(documents: list[Document]) -> list[Document]:
             for doc in documents:
+                doc.metadata = {**doc.metadata, "retrieval_method": "vector", "chunk_id": str(doc.id)}
                 _apply_location_metadata(doc)
             return documents
 
@@ -2432,7 +2629,7 @@ class MediaDBRetriever(BaseRetriever):
                         continue
                     documents.append(
                         Document(
-                            id=result.metadata.get("media_id", result.id),
+                            id=str(result.id),
                             content=result.content,
                             metadata=result.metadata,
                             score=result.score,
@@ -2461,7 +2658,7 @@ class MediaDBRetriever(BaseRetriever):
                     # Convert VectorSearchResult to Document (id=media_id preferred)
                     d_id = result_obj.metadata.get("media_id", result_obj.id)
                     d = Document(
-                        id=d_id,
+                        id=str(result_obj.id),
                         content=result_obj.content,
                         metadata=result_obj.metadata,
                         score=result_obj.score,
@@ -2489,7 +2686,7 @@ class MediaDBRetriever(BaseRetriever):
                             doc_map[d_id].score = adj
                         else:
                             doc_map[d_id] = Document(
-                                id=d_id,
+                                id=str(r.id),
                                 content=r.content,
                                 metadata=r.metadata,
                                 score=adj,
@@ -2543,9 +2740,8 @@ class MediaDBRetriever(BaseRetriever):
                 src = base_tuple[1] if base_tuple else (hyde_tuple[1] if hyde_tuple else None)
                 if not src:
                     continue
-                d_id = src.metadata.get("media_id", src.id)
                 d = Document(
-                    id=d_id,
+                    id=str(src.id),
                     content=src.content,
                     metadata=src.metadata,
                     score=best_sc,
@@ -2640,43 +2836,36 @@ class MediaDBRetriever(BaseRetriever):
         Returns:
             Merged and re-ranked documents
         """
-        # Create score dictionaries
-        fts_scores = {}
-        vector_scores = {}
-        doc_map = {}
-
-        # Calculate RRF scores for FTS results
-        for rank, doc in enumerate(fts_docs):
-            doc_id = doc.id
-            fts_scores[doc_id] = 1.0 / (k + rank + 1)
-            doc_map[doc_id] = doc
-
-        # Calculate RRF scores for vector results
-        for rank, doc in enumerate(vector_docs):
-            doc_id = doc.id
-            vector_scores[doc_id] = 1.0 / (k + rank + 1)
-            if doc_id not in doc_map:
-                doc_map[doc_id] = doc
-
-        # Combine scores with weighting
-        final_scores = {}
-        all_doc_ids = set(fts_scores.keys()) | set(vector_scores.keys())
-
-        for doc_id in all_doc_ids:
-            fts_score = fts_scores.get(doc_id, 0)
-            vector_score = vector_scores.get(doc_id, 0)
-            # Weighted combination
-            final_scores[doc_id] = (1 - alpha) * fts_score + alpha * vector_score
-
-        # Sort by final score
-        sorted_ids = sorted(final_scores.keys(), key=lambda x: final_scores[x], reverse=True)
-
-        # Create final document list
+        # Zero-weight lanes must not contribute evidence. Keep insertion order
+        # for deterministic equal-score ties across separately keyed indexes.
+        fts_docs = fts_docs if alpha < 1 else []
+        vector_docs = vector_docs if alpha > 0 else []
+        fts_scores, vector_scores, doc_map = {}, {}, {}
+        for docs, scores in ((fts_docs, fts_scores), (vector_docs, vector_scores)):
+            for rank, doc in enumerate(docs):
+                scores.setdefault(doc.id, 1.0 / (k + rank + 1))
+                doc_map.setdefault(doc.id, doc)
+        final_scores = {
+            doc_id: (1 - alpha) * fts_scores.get(doc_id, 0) + alpha * vector_scores.get(doc_id, 0)
+            for doc_id in doc_map
+        }
+        sorted_ids = sorted(final_scores, key=final_scores.get, reverse=True)
+        limit = max(0, self.config.max_results)
+        selected = set()
+        if limit >= 2 and fts_docs and vector_docs:
+            # Different chunkers use different IDs. Weighted RRF can otherwise
+            # fill the entire cap from one lane even when both were requested.
+            selected.update((fts_docs[0].id, vector_docs[0].id))
+        for doc_id in sorted_ids:
+            if len(selected) >= limit:
+                break
+            selected.add(doc_id)
         merged_docs = []
-        for doc_id in sorted_ids[: self.config.max_results]:
-            doc = doc_map[doc_id]
-            doc.score = final_scores[doc_id]
-            merged_docs.append(doc)
+        for doc_id in sorted_ids:
+            if doc_id in selected:
+                doc = doc_map[doc_id]
+                doc.score = final_scores[doc_id]
+                merged_docs.append(doc)
 
         logger.debug(f"Hybrid search merged {len(merged_docs)} documents")
         return merged_docs
@@ -2727,6 +2916,8 @@ class MediaDBRetriever(BaseRetriever):
         text = (query or "").strip()
         if not text:
             return "*"
+        if _has_explicit_fts_syntax(text):
+            return FTSQueryTranslator.normalize_query(text, "sqlite")
         # Normalize quotes
         safe = text.replace('"', '""')
         # Heuristic: phrase if contains whitespace, hyphens, or parentheses/quotes
@@ -4948,6 +5139,7 @@ class MultiDatabaseRetriever:
                         retr,
                         retr.retrieve_hybrid,
                         query=query,
+                        alpha=config.hybrid_alpha,
                         index_namespace=index_namespace,
                         allowed_media_ids=allowed_media_ids,
                     )

@@ -13,7 +13,7 @@ import {
   createWorkspaceOrganizationStateIndex,
   reviveDateOrNull
 } from '../workspace'
-import { isWorkspaceSourceSelectable } from '../workspace-source-status'
+import { isWorkspaceSourceAvailabilityUnknown, isWorkspaceSourceSelectable } from '../workspace-source-status'
 
 import {
   collectDescendantFolderIds,
@@ -420,7 +420,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       return {
         sources: nextSources,
         selectedSourceIds:
-          status === "error"
+          status === "error" && !isWorkspaceSourceAvailabilityUnknown(statusDetails)
             ? state.selectedSourceIds.filter((id) => id !== sourceId)
             : state.selectedSourceIds
       }
@@ -462,7 +462,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       return {
         sources: nextSources,
         selectedSourceIds:
-          status === "error"
+          status === "error" && !isWorkspaceSourceAvailabilityUnknown(statusDetails)
             ? state.selectedSourceIds.filter((id) => id !== targetSource.id)
             : state.selectedSourceIds
       }
@@ -573,11 +573,12 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       .getEffectiveSelectedSources()
       .map((source) => source.mediaId),
 
-  getSourceContentText: (mediaId, version = null) => {
+  getSourceContentText: (mediaId, version = null, authorityKey = null) => {
     const entry = get().sourceContentCache.get(mediaId)
     if (
       !entry ||
       entry.version !== version ||
+      (entry.authorityKey ?? null) !== authorityKey ||
       typeof entry.text !== "string" ||
       entry.text.length === 0
     ) {
@@ -586,7 +587,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
     return entry.text
   },
 
-  setSourceContentText: (mediaId, version, text, title = null) => {
+  setSourceContentText: (mediaId, version, text, title = null, authorityKey = null) => {
     const normalizedText = text.trim()
     if (!Number.isFinite(mediaId) || normalizedText.length === 0) return
     set((state) => {
@@ -597,7 +598,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       // the first key is the least-recently-used entry to evict.
       const nextCache = new Map(state.sourceContentCache)
       nextCache.delete(mediaId)
-      nextCache.set(mediaId, { version, text: normalizedText, title })
+      nextCache.set(mediaId, { version, authorityKey, text: normalizedText, title })
       if (nextCache.size > SOURCE_CONTENT_CACHE_MAX_ENTRIES) {
         const oldestKey = nextCache.keys().next().value
         if (oldestKey !== undefined) {

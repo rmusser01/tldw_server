@@ -2120,7 +2120,8 @@ class ResearchWorkspaceOutputJobError(RuntimeError):
         self.public_code = _safe_research_workspace_output_error_code(public_code)
         self.status_code = status_code
         self.retryable = retryable
-        self.backoff_seconds = backoff_seconds
+        if backoff_seconds is not None:
+            self.backoff_seconds = backoff_seconds
         self.failure_code = self.public_code
 
 

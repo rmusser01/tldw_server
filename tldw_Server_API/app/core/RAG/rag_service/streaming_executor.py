@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatBadRequestError,
     ChatConfigurationError,
 )
+from tldw_Server_API.app.core.Media.page_provenance import page_spans_for_range
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
@@ -381,7 +382,9 @@ async def _retrieve_standard_documents(
     kwargs["enable_generation"] = False  # retrieval only: the stream makes the one answer call (TASK-15482)
     if kwargs.get("enable_pre_retrieval_clarification") is None:
         # Unset, the gate follows enable_generation: the request's, not this retrieval step's.
-        kwargs["enable_pre_retrieval_clarification"] = bool(payload.get("enable_generation"))
+        kwargs["enable_pre_retrieval_clarification"] = bool(payload.get("enable_generation")) and not (
+            kwargs.get("include_media_ids") or kwargs.get("include_note_ids")
+        )
 
     if progress_queue is not None and bool(payload.get("enable_research_progress", False)):
 
@@ -604,12 +607,23 @@ def _context_events(
             "source_status",
             "unavailable_reason",
             "page_number",
+            "start_char",
+            "end_char",
         ):
             value = metadata.get(key)
             if key == "source_id" and value is None:
                 value = metadata.get("media_id") or metadata.get("note_id")
             if isinstance(value, (str, int, float)):
                 context[key] = str(value) if key in ("source_id", "chunk_id") else value
+        spans = metadata.get("page_spans")
+        if isinstance(spans, list):
+            public_spans = page_spans_for_range(spans[:20], 0, 2**63 - 1)
+            for span in public_spans:
+                label = span.get("printed_page_label")
+                if label is not None:
+                    span["printed_page_label"] = label[:64]
+            if public_spans:
+                context["page_spans"] = public_spans
         top_contexts.append(context)
 
     scores = [_score_for_doc(doc) for doc in (docs or [])]
@@ -671,7 +685,7 @@ def _generation_config(
         _value(payload, request_defaults, "generation_model"),
     )
 
-    max_tokens = _to_int(_value(payload, request_defaults, "max_generation_tokens", 500), 500)
+    max_tokens = _to_int(_value(payload, request_defaults, "max_generation_tokens", 4096), 4096)
     config = {
         "streaming": True,
         "provider": provider,
@@ -729,6 +743,36 @@ async def _stream_generation_events(
 
 
 async def stream_rag_events(
+    *,
+    resolved_request: ResolvedRAGRequest,
+    retrieval_plan: RetrievalPlan,
+    standard_pipeline: PipelineCallable = unified_rag_pipeline,
+    agentic_pipeline: PipelineCallable = agentic_rag_pipeline,
+    extra_context: dict[str, Any] | None = None,
+) -> AsyncGenerator[RAGStreamEvent | RAGTerminalEvent, None]:
+    """Keep one deadline across retrieval, heartbeats and answer generation."""
+    timeout = resolved_request.payload.get("timeout_seconds")
+    output_emitted = False
+    events = _stream_rag_events(
+        resolved_request=resolved_request, retrieval_plan=retrieval_plan,
+        standard_pipeline=standard_pipeline, agentic_pipeline=agentic_pipeline,
+        extra_context=extra_context,
+    )
+    try:
+        async with asyncio.timeout(timeout if timeout and timeout > 0 else None):
+            async with aclosing(events):
+                async for event in events:
+                    output_emitted |= event.get("type") == "delta" and bool(event.get("text"))
+                    yield event
+    except TimeoutError:
+        yield _rag_terminal_event(
+            event_type="error", code="request_timeout",
+            message="Search exceeded its time limit. Try a narrower question or retry.",
+            upstream_dispatched=True, output_emitted=output_emitted,
+        )
+
+
+async def _stream_rag_events(
     *,
     resolved_request: ResolvedRAGRequest,
     retrieval_plan: RetrievalPlan,

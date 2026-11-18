@@ -1463,6 +1463,25 @@ class WorkspaceMigrationResponse(BaseModel):
 WorkspaceArtifactExportFormat = Literal["md", "html", "json"]
 
 
+class WorkspaceArtifactRevisionResponse(BaseModel):
+    """Current card fields for one artifact in an owner-visible workspace."""
+
+    id: str
+    display_id: str
+    workspace_id: str
+    version: int
+    display_version: int
+    title: str
+    artifact_type: str
+    status: str
+    review_state: WorkspaceArtifactReviewState
+    created_at: str
+    defer_detail: bool
+    imported: bool
+    model: str | None
+    provider: str | None
+
+
 class WorkspaceArtifactCreateRequest(BaseModel):
     id: str
     artifact_type: str

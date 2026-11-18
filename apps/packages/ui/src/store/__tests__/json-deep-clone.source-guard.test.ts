@@ -29,7 +29,9 @@ const PATTERN = "JSON.parse(JSON.stringify("
  */
 const ALLOWLIST: Record<string, string> = {
   "workspace.ts":
-    "cloneWorkspaceValue: structuredClone-first guarded fallback (see reason above)"
+    "cloneWorkspaceValue: structuredClone-first guarded fallback (see reason above)",
+  "workspace-import-authority.ts":
+    "Historical bundle import: JSON date/undefined normalization with nested source-ID remapping; the single bundle/replacer transform is guarded below"
 }
 
 const isTestDir = (path: string) => path.split("/").includes("__tests__")
@@ -65,5 +67,11 @@ describe("store source guard: no JSON deep clones in mutation paths", () => {
     // deleted, this allowlist entry must be revisited (fail loudly either way).
     expect(source).toContain("typeof structuredClone === \"function\"")
     expect(source).toContain(PATTERN)
+  })
+
+  it("allowlisted workspace import contains only its JSON bundle/replacer transform", () => {
+    const source = readFileSync(resolve(storeDir, "workspace-import-authority.ts"), "utf8")
+    expect(source.split(PATTERN)).toHaveLength(2)
+    expect(source).toContain("JSON.parse(JSON.stringify(bundle, function (this: object, key: string, value: unknown) {")
   })
 })

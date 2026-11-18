@@ -70,6 +70,7 @@ export const SourceFeedback = ({
     <div data-source-feedback className="flex items-center gap-2">
       <MessageSource
         source={source}
+        sourceIndex={sourceIndex}
         onSourceClick={handleSourceClick}
         onSourceNavigate={handleSourceNavigate}
         onSourceDwell={handleSourceDwell}

@@ -182,3 +182,53 @@ def test_safe_positive_source_ids_roundtrip(source_id):
     data = payload()
     data["research"]["sources"][0]["mediaId"] = source_id
     assert validate_notes_provenance_payload(data) == data
+
+
+def test_retains_bounded_pdf_citation_identity():
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import validate_notes_provenance_payload
+
+    data = payload()
+    source = data["research"]["sources"][0]["evidence"]["sources"][0]
+    source.update(chunkId="chunk-1", printedPageLabel="319", pageNumber=352, citationIndex=2)
+    assert validate_notes_provenance_payload(data) == data
+    for field in ("chunkId", "printedPageLabel"):
+        invalid = copy.deepcopy(data)
+        invalid["research"]["sources"][0]["evidence"]["sources"][0][field] = "x" * 513
+        with pytest.raises(ValueError):
+            validate_notes_provenance_payload(invalid)
+
+
+def test_pdf_page_spans_survive_canonical_and_portable_roundtrip():
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import (
+        read_notes_provenance,
+        retain_notes_provenance,
+        validate_notes_provenance_payload,
+    )
+
+    data = payload()
+    source = data["research"]["sources"][0]["evidence"]["sources"][0]
+    source.update(pageNumber=871, pageSpans=[
+        {"pageNumber": 871, "startChar": 100, "endChar": 120, "printedPageLabel": "838"},
+        {"pageNumber": 872, "startChar": 122, "endChar": 140, "printedPageLabel": "839"},
+    ])
+    assert validate_notes_provenance_payload(data) == data
+    assert read_notes_provenance(retain_notes_provenance("Exact quote", data)) == data
+
+
+@pytest.mark.parametrize("spans", [
+    [], [{"pageNumber": 1, "startChar": 0, "endChar": 1}] * 21,
+    [{"pageNumber": True, "startChar": 0, "endChar": 1}],
+    [{"pageNumber": 1, "startChar": -1, "endChar": 1}],
+    [{"pageNumber": 1, "startChar": 1, "endChar": 1}],
+    [{"pageNumber": 1, "startChar": 0, "endChar": 2**53}],
+    [{"pageNumber": 1, "startChar": 0, "endChar": 1, "secret": "omit"}],
+    [{"pageNumber": 1, "startChar": 0, "endChar": 2}, {"pageNumber": 2, "startChar": 1, "endChar": 3}],
+    [{"pageNumber": 2, "startChar": 0, "endChar": 1}, {"pageNumber": 1, "startChar": 1, "endChar": 2}],
+])
+def test_rejects_noncanonical_page_spans(spans):
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import validate_notes_provenance_payload
+
+    data = payload()
+    data["research"]["sources"][0]["evidence"]["sources"][0]["pageSpans"] = spans
+    with pytest.raises(ValueError):
+        validate_notes_provenance_payload(data)

@@ -302,7 +302,7 @@ export const GenerationSection: React.FC<GenerationSectionProps> = ({
           value={settings.max_generation_tokens}
           onChange={handleMaxGenerationTokens}
           min={100}
-          max={4000}
+          max={8192}
           step={100}
         />
       )}

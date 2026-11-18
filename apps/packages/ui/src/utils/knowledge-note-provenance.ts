@@ -2,6 +2,13 @@ import type { WorkspaceSource } from "@/types/workspace";
 import type { KnowledgeQaScope } from "./research-workspace-prefill";
 import { isKnowledgeAnswerTrustState } from "@/components/Option/KnowledgeQA/trustState";
 
+export type KnowledgeNotePageSpan = {
+  pageNumber: number;
+  startChar: number;
+  endChar: number;
+  printedPageLabel?: string | null;
+};
+
 export type KnowledgeNoteSource = {
   originalId: string | number | null;
   excerpt: string;
@@ -14,6 +21,9 @@ export type KnowledgeNoteSource = {
   originalVersion?: number | null;
   pageNumber?: number | null;
   citationIndex?: number | null;
+  chunkId?: string | null;
+  printedPageLabel?: string | null;
+  pageSpans?: KnowledgeNotePageSpan[] | null;
 };
 export type KnowledgeNoteEvidence = {
   importId: string;
@@ -72,6 +82,28 @@ const list = (value: unknown, valid: (item: unknown) => boolean): boolean =>
 const stringList = (value: unknown) => list(value, shortString);
 const optional = (value: unknown, valid: (item: unknown) => boolean) =>
   value == null || valid(value);
+const pageSpans = (value: unknown): value is KnowledgeNotePageSpan[] =>
+  Array.isArray(value) && value.length > 0 && value.length <= 20 &&
+  value.every((span, index) =>
+    keys(span, ["pageNumber", "startChar", "endChar", "printedPageLabel"]) &&
+    positiveId(span.pageNumber) &&
+    typeof span.startChar === "number" && Number.isSafeInteger(span.startChar) && span.startChar >= 0 &&
+    typeof span.endChar === "number" && Number.isSafeInteger(span.endChar) && span.endChar > span.startChar &&
+    optional(span.printedPageLabel, shortString) &&
+    (index === 0 || (span.pageNumber > value[index - 1].pageNumber && span.startChar >= value[index - 1].endChar)),
+  );
+
+/** Retain only bounded canonical PDF locations, never arbitrary retrieval metadata. */
+export const projectPdfPageSpans = (value: unknown): KnowledgeNotePageSpan[] | null => {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 20 || !value.every(isRecord)) return null;
+  const projected = value.map(span => ({
+    pageNumber: span.page_number,
+    startChar: span.start_char,
+    endChar: span.end_char,
+    ...(span.printed_page_label != null ? { printedPageLabel: span.printed_page_label } : {}),
+  }));
+  return pageSpans(projected) ? projected : null;
+};
 const origin = (value: unknown) =>
   typeof value === "string" && ["local_library", "web_fallback", "mixed", "unknown_origin"].includes(
     value,
@@ -112,10 +144,16 @@ const source = (value: unknown): boolean =>
     "originalVersion",
     "pageNumber",
     "citationIndex",
+    "chunkId",
+    "printedPageLabel",
+    "pageSpans",
   ]) &&
   (value.originalId === null ||
     shortString(value.originalId) ||
     positiveId(value.originalId)) &&
+  optional(value.chunkId, shortString) &&
+  optional(value.printedPageLabel, shortString) &&
+  optional(value.pageSpans, pageSpans) &&
   excerpt(value.excerpt) &&
   (value.mediaId === null || positiveId(value.mediaId)) &&
   shortString(value.title) &&

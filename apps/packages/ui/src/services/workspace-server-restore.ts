@@ -5,6 +5,7 @@ import { canonicalHistoryJson } from "@/db/dexie/history-selection";
 import { fetchAllServerChatMessages, mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import type { Message } from "@/store/option";
+import { readWorkspaceArtifactCatalog } from "./workspace-artifact-catalog";
 import { rememberCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
 import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import { recoverWebCapturePin, WebCaptureNotCurrentError } from "@/utils/research-web-capture";
@@ -19,7 +20,7 @@ import { bgRequest } from "@/services/background-proxy";
 import { loadServicePromptSnapshot } from "@/services/service-prompts";
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts";
 import type {
-  WorkspaceArtifactApiResponse,
+
   WorkspaceContextResponse,
   WorkspaceListApiResponse,
   WorkspaceNoteApiResponse,
@@ -28,7 +29,6 @@ import { createServicePromptScopeChangedError } from "@/services/tldw/service-pr
 import {
   createEmptyWorkspaceSnapshot,
   deriveHistoryFromMessages,
-  createSlug,
   useWorkspaceStore,
   type WorkspaceState,
   type WorkspaceChatSession,
@@ -99,7 +99,9 @@ export const readMigratedResearchWorkspaceId = (
   storage: Storage,
 ): string | null => readMigrationReceipts(storage)[0]?.id ?? null;
 
-const cachedMessagesMatchCanonical = (cached: Message[], canonical: Message[], retainLegacyLinearParent = false): boolean => {
+const cachedMessagesMatchCanonical = (
+  cached: Message[], canonical: Message[], retainLegacyLinearParent = false, requireCanonicalPayload = false,
+): boolean => {
   const ids = cached.map(message => message.serverMessageId || message.id);
   if (cached.length !== canonical.length || ids.some(id => !id) ||
       new Set(ids).size !== ids.length) return false;
@@ -123,7 +125,22 @@ const cachedMessagesMatchCanonical = (cached: Message[], canonical: Message[], r
       if (ids[index] !== saved.serverMessageId || message.isBot !== saved.isBot) return false;
       // Optimistic display labels and timing are retained, not canonical payload.
       const display = ["id", "name", "createdAt", "modelId", "modelName", "modelImage", "reasoning_time_taken"];
-      const fields = Object.keys(message).filter(key => !display.includes(key) && message[key as keyof Message] !== undefined);
+      // Parent-derived recovery must also detect deleted canonical content in
+      // every copy and its mirror prefix. Server receipts and derived display
+      // fields may legitimately be absent from the optimistic message.
+      const nullableDefaults = ["parentMessageId", "speakerCharacterId", "moodConfidence", "moodTopic",
+        "visualActorKind", "visualActorId", "visualPackId", "visualPackVersionId", "visualExpressionKey",
+        "visualAssetId", "visualAssetUrl", "visualPreviewUrl", "visualFallbackReason", "visualIsAnimated"];
+      const required = requireCanonicalPayload ? Object.keys(saved).filter(key => {
+        const value = saved[key as keyof Message];
+        if (value === undefined || display.includes(key) || key === "serverMessageVersion") return false;
+        if (["sources", "images", "documents"].includes(key) && Array.isArray(value) && !value.length) return false;
+        if (key === "pinned" && value === false) return false;
+        // Unknown future keys remain required, including null/false/empty data.
+        return !(value === null && nullableDefaults.includes(key));
+      }) : [];
+      const fields = [...new Set([...Object.keys(message).filter(key =>
+        !display.includes(key) && message[key as keyof Message] !== undefined), ...required])];
       const payload = (row: Message, local: boolean) => Object.fromEntries(fields.map(key => {
         // Text-only local saves retain an empty image marker and document list.
         if (key === "images") {
@@ -139,6 +156,8 @@ const cachedMessagesMatchCanonical = (cached: Message[], canonical: Message[], r
           if (!provenance) throw new Error("Unverified saved citation projection");
           return [key, provenance];
         }
+        if (key === "role" && local && requireCanonicalPayload)
+          return [key, row.role ?? (row.isBot ? "assistant" : "user")];
         return [key, key === "parentMessageId" && local ? parentId(row.parentMessageId) : row[key as keyof Message]];
       }));
       return canonicalHistoryJson(payload(message, true)) === canonicalHistoryJson(payload(saved, false));
@@ -146,6 +165,74 @@ const cachedMessagesMatchCanonical = (cached: Message[], canonical: Message[], r
   } catch {
     return false; // Opaque or unverified local work must remain untouched.
   }
+};
+
+/** Recover a lost ACK through an owned mirror or an explicit unique parent, never equal text. */
+const recoverCachedMirrorAcknowledgments = (
+  cached: Message[], mirror: Message[], canonical: Message[],
+): Message[] | null => {
+  const incompleteMirror = mirror.length < canonical.length;
+  if (!mirror.length || !cachedMessagesMatchCanonical(mirror, canonical.slice(0, mirror.length), false, incompleteMirror)) return null;
+  const canonicalIds = new Set(canonical.map(row => row.serverMessageId!));
+  const mirrorById = new Map(mirror.map(row => [row.id, row]));
+  const recoverChildAcknowledgment = (row: Message): string | undefined => {
+    if (!incompleteMirror || !row.isBot || row.serverMessageId || !row.parentMessageId) return;
+    const parents = cached.filter(parent => !parent.isBot && parent.serverMessageId &&
+      (parent.id === row.parentMessageId || parent.serverMessageId === row.parentMessageId));
+    if (parents.length !== 1) return;
+    const parent = parents[0];
+    if (cached.filter(copy => copy.serverMessageId === parent.serverMessageId).length !== 1) return;
+    if (canonical.find(saved => saved.serverMessageId === parent.serverMessageId)?.role !== "user") return;
+    const children = canonical.filter(saved => saved.parentMessageId === parent.serverMessageId);
+    if (children.length !== 1 || !children[0].isBot) return;
+    const id = children[0].serverMessageId!;
+    if (mirror.some(saved => saved.serverMessageId === id)) return;
+    // The interrupted save must already have an acknowledged canonical copy.
+    // No identity is inferred for an isolated optimistic answer or a branch.
+    const duplicates = cached.filter(copy => copy.id === id && copy.serverMessageId === id);
+    const orphans = cached.filter(copy => copy.isBot && !copy.serverMessageId && typeof copy.id === "string" &&
+      !canonicalIds.has(copy.id) && !mirrorById.get(copy.id)?.serverMessageId &&
+      (copy.parentMessageId === parent.id || copy.parentMessageId === parent.serverMessageId));
+    return duplicates.length === 1 && orphans.length === 1 ? id : undefined;
+  };
+  const localIds = new Map<string, string>();
+  const groups = new Map<string, Message[]>();
+  for (const row of cached) {
+    if (!row.id) return null;
+    const acknowledged = mirrorById.get(row.id)?.serverMessageId;
+    const id = row.serverMessageId || (canonicalIds.has(row.id) ? row.id : acknowledged) || recoverChildAcknowledgment(row);
+    if (!id || !canonicalIds.has(id) || (acknowledged && acknowledged !== id) ||
+        (localIds.has(row.id) && localIds.get(row.id) !== id)) return null;
+    localIds.set(row.id, id);
+    groups.set(id, [...(groups.get(id) || []), { ...row, serverMessageId: id }]);
+  }
+  if (groups.size !== canonical.length) return null;
+  const normalizeParent = (row: Message): Message | null => {
+    if (row.parentMessageId == null) return row;
+    const parent = row.parentMessageId;
+    const ids = new Set([localIds.get(parent), canonicalIds.has(parent) ? parent : undefined].filter(Boolean));
+    return ids.size === 1 ? { ...row, parentMessageId: [...ids][0] } : null;
+  };
+  const preferred = canonical.map(row => {
+    const copies = groups.get(row.serverMessageId!)!;
+    return copies.find(copy => mirrorById.get(copy.id)?.serverMessageId === row.serverMessageId) || copies[0];
+  });
+  const projected = preferred.map(normalizeParent);
+  if (projected.some(row => !row)) return null;
+  // Validate every copy before collapsing a hydration duplicate. A changed draft
+  // or citation blocks the entire repair, even when another copy is canonical.
+  for (let index = 0; index < canonical.length; index++) {
+    for (const copy of groups.get(canonical[index].serverMessageId!)!) {
+      const normalized = normalizeParent(copy);
+      if (!normalized) return null;
+      const candidate = [...projected] as Message[];
+      candidate[index] = normalized;
+      if (!cachedMessagesMatchCanonical(candidate, canonical, false, incompleteMirror)) return null;
+    }
+  }
+  // Parents may name an alias just collapsed above. Keep the validated canonical
+  // parent identity so no surviving child points at a removed local copy.
+  return projected as Message[];
 };
 
 /** Restore an owned target or the latest migration while its captured account lease remains live. */
@@ -249,10 +336,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
       throw new Error("The server workspace could not be restored completely");
     }
     const [artifacts, notes] = await Promise.all([
-      bgRequest<WorkspaceArtifactApiResponse[]>({
-        ...request,
-        path: `${path}/artifacts`,
-      }),
+      readWorkspaceArtifactCatalog(workspaceId, scope.scopeKey, request),
       bgRequest<WorkspaceNoteApiResponse[]>({
         ...request,
         path: `${path}/notes`,
@@ -260,7 +344,6 @@ export const restoreMigratedResearchWorkspace = async (options: {
     ]);
     assertCurrent();
     if (
-      artifacts.some((artifact) => artifact.workspace_id !== workspaceId) ||
       notes.some((note) => note.workspace_id !== workspaceId)
     ) {
       throw new Error("Workspace restoration returned a different workspace");
@@ -269,7 +352,6 @@ export const restoreMigratedResearchWorkspace = async (options: {
       fetch: async () => ({
         ...context.workspace,
         sources: context.sources.items,
-        artifacts,
         notes,
       }),
     });
@@ -278,7 +360,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
     const snapshot = createEmptyWorkspaceSnapshot({
       id: workspaceId,
       name: local.name || "Research Workspace",
-      tag: `workspace:${createSlug(local.name) || workspaceId.slice(0, 8)}`,
+      tag: `workspace:${workspaceId}`,
       createdAt: new Date(workspace.created_at),
       studyMaterialsPolicy: workspace.study_materials_policy,
       assistantDefaults: normalizeWorkspaceAssistantDefaults(
@@ -383,7 +465,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
             ),
         ),
     );
-    snapshot.generatedArtifacts = local.artifacts.map(artifact => bindWorkspaceArtifactOrigin(artifact, scope.scopeKey, workspaceId));
+    snapshot.generatedArtifacts = artifacts.filter(artifact => !(artifact.reviewStatus === "archived" && artifact.removedFromStudio)).map(artifact => bindWorkspaceArtifactOrigin(artifact, scope.scopeKey, workspaceId));
     snapshot.workspaceBanner = {
       ...snapshot.workspaceBanner,
       title: workspace.banner_title || "",
@@ -484,7 +566,22 @@ export const restoreMigratedResearchWorkspace = async (options: {
       ? readResearchWorkspaceChatReference({
           referenceId: cachedSelection!.referenceId, serverChatId: cachedChat.serverChatId,
         }) : undefined;
-    const chatReference = savedChat.value ?? markerReference ?? provisional;
+    let chatReference = savedChat.value ?? markerReference ?? provisional;
+    if (!chatReference && !cachedChat?.messages.length && !cachedChat?.history.length && !cachedChat?.historyId && !cachedChat?.serverChatId) {
+      // A new browser has no local hint. Select only a proven sole live chat;
+      // a truncated page or several conversations never implies a selection.
+      const query = new URLSearchParams({ scope_type: "workspace", workspace_id: workspaceId, limit: "2", offset: "0", include_deleted: "false" });
+      const listed = await bgRequest<{ chats?: Array<{ id: string; scope_type?: string; workspace_id?: string; deleted?: boolean }>; total?: number; has_more?: boolean; pagination?: { has_more?: boolean; total?: number } }>({ ...request,
+        path: `/api/v1/chats/?${query.toString()}` });
+      assertCurrent();
+      if (listed?.chats?.length === 1 && (listed.total ?? listed.pagination?.total) === 1 &&
+          listed.has_more !== true && listed.pagination?.has_more !== true) {
+        const sole = listed.chats[0];
+        if (sole.scope_type !== "workspace" || sole.workspace_id !== workspaceId || sole.deleted)
+          throw new Error("Workspace conversation discovery returned a different scope.");
+        chatReference = readResearchWorkspaceChatReference({ referenceId: workspaceId, serverChatId: sole.id });
+      }
+    }
     let chatSession: WorkspaceChatSession | undefined;
     if (chatReference) {
       if (chatReference.serverChatId) {
@@ -503,14 +600,20 @@ export const restoreMigratedResearchWorkspace = async (options: {
       }
     }
     let verifiedCachedChat: CachedWorkspaceChat | undefined;
+    let recoveredCachedMessages: Message[] | null = null;
     const mirrorBinding = chatReference?.serverChatId && cachedChat?.historyId ? {
       historyId: cachedChat.historyId, chatId: chatReference.serverChatId,
       ownerKey: serverChatMirrorOwnerKey(scope), workspaceId,
+      recoverEmptyGlobalAlias: true,
     } : undefined;
     const mirror = mirrorBinding ? await readWorkspaceServerChatMirror(mirrorBinding) : undefined;
     assertCurrent();
-    if (chatReference?.serverChatId && cachedChat?.serverChatId === chatReference.serverChatId &&
-        cachedChat.messages.length) {
+    const recoverEmptyCache = !!mirror?.rows.length && !!(savedChat.value ?? markerReference)?.serverChatId &&
+      cachedSelection?.referenceId === chatReference?.referenceId &&
+      cachedChat?.messages.length === 0 && cachedChat.history.length === 0 &&
+      (cachedChat.serverChatId === null || cachedChat.serverChatId === chatReference?.serverChatId);
+    if (chatReference?.serverChatId && cachedChat &&
+        ((cachedChat.serverChatId === chatReference.serverChatId && cachedChat.messages.length) || recoverEmptyCache)) {
       const signal = AbortSignal.any([scope.scopeSignal, AbortSignal.timeout(15000)]);
       const serverMessages = await fetchAllServerChatMessages(
         ({ limit, offset }) => tldwClient.listChatMessages(chatReference.serverChatId!, {
@@ -535,6 +638,20 @@ export const restoreMigratedResearchWorkspace = async (options: {
           (cachedChat.history.length === 0 ||
             canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(canonical))))
         verifiedCachedChat = cachedSelection!;
+      if (recoverEmptyCache && mirrorMessages && mirror!.rows.length === mirrorMessages.length &&
+          cachedMessagesMatchCanonical(mirrorMessages, canonical)) {
+        recoveredCachedMessages = mirrorMessages;
+        verifiedCachedChat = cachedSelection!;
+      }
+      if (!verifiedCachedChat && mirrorMessages && mirror!.rows.length === mirrorMessages.length) {
+        const recovered = recoverCachedMirrorAcknowledgments(cachedChat.messages, mirrorMessages, canonical);
+        if (recovered && (cachedChat.history.length === 0 ||
+            canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(canonical)) ||
+            canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(cachedChat.messages)))) {
+          recoveredCachedMessages = recovered;
+          verifiedCachedChat = cachedSelection!;
+        }
+      }
     }
     if (provisional && verifiedCachedChat) {
       snapshot.workspaceChatReferenceId = provisional.referenceId;
@@ -544,7 +661,10 @@ export const restoreMigratedResearchWorkspace = async (options: {
       if (canonicalHistoryJson(await readWorkspaceServerChatMirror(mirrorBinding!)) !== canonicalHistoryJson(mirror))
         throw new Error("Workspace Chat mirror changed during restoration");
       // Keep its exact local settings association and optimistic display data.
-      chatSession = cachedChat;
+      chatSession = { ...cachedChat!, historyId: mirror.header.id };
+      if (recoveredCachedMessages) chatSession = { ...chatSession,
+        messages: recoveredCachedMessages, history: deriveHistoryFromMessages(recoveredCachedMessages),
+        serverChatId: chatReference!.serverChatId };
     }
     assertCurrent();
     const relevantReceipts = (rows: MigrationReceipt[]) => rows

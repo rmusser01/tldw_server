@@ -12,17 +12,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, resolve_user_id_for_request, User
-from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    get_request_user,
+    rbac_rate_limit,
+    resolve_user_id_for_request,
+)
 
 # Local imports
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.rag_cache import invalidate_rag_caches
 from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_id
+from tldw_Server_API.app.core.Embeddings import media_embeddings as _media_embeddings
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
 from tldw_Server_API.app.core.Embeddings.jobs_adapter import EmbeddingsJobsAdapter
-from tldw_Server_API.app.core.Embeddings import media_embeddings as _media_embeddings
 from tldw_Server_API.app.core.Embeddings.media_embeddings import _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS
 
 router = APIRouter(prefix="/media", tags=["media-embeddings"])

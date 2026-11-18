@@ -13,16 +13,17 @@ describe("workspace import safety", () => {
     expect(sanitized.serverChatId).toBeNull()
   })
 
-  it("preserves other session fields during sanitization", () => {
+  it("detaches foreign local history identity while preserving portable conversation content", () => {
     const session = {
       serverChatId: "server-123",
       messages: [{ role: "user", content: "hi" }],
-      history: [],
+      history: [{ role: "user", content: "hi" }, { role: "assistant", content: "Cited answer [1]" }],
       historyId: "hist-1",
     }
     const sanitized = sanitizeImportedChatSession(session)
     expect(sanitized.messages).toEqual([{ role: "user", content: "hi" }])
-    expect(sanitized.historyId).toBe("hist-1")
+    expect(sanitized.historyId).toBeNull()
+    expect(sanitized.history).toEqual(session.history)
     expect(sanitized.serverChatId).toBeNull()
   })
 })

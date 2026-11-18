@@ -1,4 +1,6 @@
 import { useResearchActorScene } from "./useResearchActorScene"
+import { ClaimVerificationPanel } from "../ClaimVerificationPanel"
+import { CLAIM_VERIFICATION_KEY, CLAIM_VERIFICATION_IMPORTED_KEY } from "@/utils/claim-verification"
 import { projectWorkspaceRagSources } from "@/utils/workspace-rag-sources"
 import { isChatSubmitSuccess } from "@/hooks/chat/chat-action-utils"
 import { sha256Text } from "@/store/workspace-migration"
@@ -20,6 +22,7 @@ import {
   Trash2,
   RotateCcw,
   SlidersHorizontal,
+  ChevronDown,
   Loader2,
   Share2,
   Plus,
@@ -77,10 +80,10 @@ import {
 } from "@/utils/message-variants"
 import { buildConversationShareUrl } from "@/components/Layouts/chat-share-links"
 import { PlaygroundMessage } from "@/components/Common/Playground/Message"
-import { Link, useNavigate } from "react-router-dom"
+import { Link } from "react-router-dom"
 import { EmptyState } from "@/components/ui/feedback/EmptyState"
 import { ChatModelSelectorDropdown } from "@/components/Option/Playground/ChatModelSelectorDropdown"
-import { buildChatLorebookDebugPath } from "@/routes/route-paths"
+import { buildChatLorebookDebugPath, buildDocumentPagePath } from "@/routes/route-paths"
 import {
   WORKSPACE_SOURCE_DRAG_TYPE,
   parseWorkspaceSourceDragPayload
@@ -1167,6 +1170,7 @@ interface ChatPaneProps {
   researchWorkspaceCapabilitiesStale?: boolean
   onRefreshResearchWorkspaceCapabilities?: () => Promise<ResearchWorkspaceCapabilitiesResponse>
   onStartWorkspaceTask?: (prefill: WorkspaceAgentTaskPrefill) => void
+  onOpenNoteDraft?: () => void
 }
 
 export const ChatPane: React.FC<ChatPaneProps> = ({
@@ -1177,7 +1181,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   workspaceCapabilities = null,
   researchWorkspaceCapabilitiesStale = false,
   onRefreshResearchWorkspaceCapabilities,
-  onStartWorkspaceTask
+  onStartWorkspaceTask,
+  onOpenNoteDraft
 }) => {
   const { t } = useTranslation(["playground", "common"])
   const translate = React.useCallback(
@@ -1194,7 +1199,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     [t]
   )
   const isMobile = useMobile()
-  const navigate = useNavigate()
   const [messageApi, messageContextHolder] = message.useMessage()
 
   // Workspace store
@@ -1206,6 +1210,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const focusSourceById = useWorkspaceStore((s) => s.focusSourceById)
   const focusSourceByMediaId = useWorkspaceStore((s) => s.focusSourceByMediaId)
   const captureToCurrentNote = useWorkspaceStore((s) => s.captureToCurrentNote)
+  const noteDraftIsDirty = useWorkspaceStore((s) => s.currentNote.isDirty)
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
   const workspaceChatReferenceId = useWorkspaceStore(
     (s) => s.workspaceChatReferenceId
@@ -1309,6 +1314,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [submitError, setSubmitError] = React.useState<string | null>(null)
   const [includeFullSourceContents, setIncludeFullSourceContents] =
     React.useState(false)
+  const [sourceContextNotice, setSourceContextNotice] = React.useState<string | null>(null)
   const [preparingSourceContext, setPreparingSourceContext] =
     React.useState(false)
   const [lorebookActivityTurns, setLorebookActivityTurns] = React.useState<
@@ -1330,8 +1336,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   >([])
   const [composerModels, setComposerModels] =
     React.useState<ChatComposerModel[]>([])
+  const [startupModelsLoading, setStartupModelsLoading] = React.useState(true)
+  const [menuModelsLoading, setMenuModelsLoading] = React.useState(false)
+  const [reconnectModelsLoading, setReconnectModelsLoading] = React.useState(false)
   const slashCommandsFetchedRef = React.useRef(false)
-  const modelsFetchedRef = React.useRef(false)
   const workspaceSessionRef = React.useRef<string | null>(null)
   const chatMessageItemRefs = React.useRef<Record<string, HTMLDivElement | null>>(
     {}
@@ -1361,6 +1369,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       ),
     [workspaceChatReferenceId, workspaceId]
   )
+  const [noteCaptureSessionId, setNoteCaptureSessionId] = React.useState<string | null>(null)
 
   const saveOwnedChatSession = React.useCallback(
     (session: Parameters<typeof saveWorkspaceChatSession>[1], clear = false) => {
@@ -1781,18 +1790,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     }
   }, [hasQueryableSelectedSources, showAdvancedRagSettings])
 
-  const applyComposerModels = React.useCallback(
-    (models: ChatComposerModel[]) => {
-      modelsFetchedRef.current = models.length > 0
-      setComposerModels(models)
-    },
-    []
-  )
-
   React.useEffect(() => {
-    if (modelsFetchedRef.current) return
-    modelsFetchedRef.current = true
-
     let isMounted = true
     void fetchChatModels({ returnEmpty: true })
       .then((models) => {
@@ -1803,11 +1801,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         if (!isMounted) return
         setComposerModels([])
       })
+      .finally(() => {
+        if (isMounted) setStartupModelsLoading(false)
+      })
 
     return () => {
       isMounted = false
     }
-  }, [applyComposerModels])
+  }, [])
 
   React.useEffect(() => {
     selectedSourceIdsRef.current = selectedSourceIds
@@ -2175,13 +2176,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       responsePresetInstruction?: string | null,
       options?: ScopedRequestOptions,
       assertCurrent: () => void = () => {}
-    ): Promise<string> => {
+    ): Promise<{ message: string; focusedRetrieval?: boolean }> => {
+      setSourceContextNotice(null)
       const messageWithResponsePreset = responsePresetInstruction
         ? `${responsePresetInstruction}\n\nUser question: ${message}`
         : message
 
       if (!includeFullSourceContents || queryableSelectedSources.length === 0) {
-        return messageWithResponsePreset
+        return { message: messageWithResponsePreset }
       }
 
       setPreparingSourceContext(true)
@@ -2265,7 +2267,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               "Couldn't load full source contents; sending your question without inline source text."
             )
           )
-          return messageWithResponsePreset
+          return { message: messageWithResponsePreset }
         }
 
         if (skippedSourceCount > 0) {
@@ -2281,6 +2283,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           )
         }
 
+        if (resolvedSourceContexts.reduce((total, item) => total + item.fullText.length, 0) > 18000) {
+          setSourceContextNotice(t(
+            "playground:chat.longSourceUsesRetrieval",
+            "This source is too long for one answer. Searching relevant passages; use Studio chapter summaries to cover the whole document."
+          ))
+          return { message: messageWithResponsePreset, focusedRetrieval: true }
+        }
+
         const fullSourceBlock = resolvedSourceContexts
           .map(({ source, fullText }) => {
             const sourceHeader = `Source ${source.mediaId}: ${source.title}`
@@ -2288,7 +2298,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           })
           .join("\n\n")
 
-        return [
+        return { message: [
           t(
             "playground:chat.fullSourceContextInstruction",
             "Use the complete source contents below when answering the user question."
@@ -2302,7 +2312,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           fullSourceBlock,
           "",
           `${t("playground:chat.fullSourceContextQuestionLabel", "User question")}: ${message}`
-        ].join("\n")
+        ].join("\n") }
       } catch (reason) {
         assertCurrent()
         if (queryableSelectedSources.some((source) => source.webCapture))
@@ -2313,7 +2323,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             "Failed to fetch full source contents; sending your question without inline source text."
           )
         )
-        return messageWithResponsePreset
+        return { message: messageWithResponsePreset }
       } finally {
         setPreparingSourceContext(false)
       }
@@ -2341,6 +2351,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleSubmit = async (message: string): Promise<boolean> => {
     if (preparingSourceContext) return false
+    const submissionOwner = captureChatReferenceOwner()
     if (
       typeof selectedModel !== "string" ||
       selectedModel.trim().length === 0
@@ -2435,7 +2446,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           }
           assertCurrent()
           const submitResult = await onSubmit({
-            message: preparedMessage,
+            message: preparedMessage.message,
+            ragQuery: message,
+            ...(preparedMessage.focusedRetrieval ? {
+              requestOverrides: { fileRetrievalEnabled: true, ragMediaIds: queryableSelectedSources.map(source => source.mediaId) }
+            } : {}),
             image: "",
             ...(controller ? { controller, assertCurrent } : {})
           })
@@ -2445,6 +2460,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             "status" in submitResult &&
             (submitResult as { status?: unknown }).status !== "submitted"
           ) {
+            if (submitResult.status === "skipped" && submissionOwner?.isCurrent()) {
+              if ("discardedMessageIds" in submitResult && Array.isArray(submitResult.discardedMessageIds)) {
+                const discarded = new Set(submitResult.discardedMessageIds.filter((id): id is string => typeof id === "string"))
+                setMessages(previous => previous.filter(row => !discarded.has(row.id)))
+              }
+              setSourceContextNotice(t(
+                "playground:chat.preparationChanged",
+                "Your sources or chat changed before answering. Review your selection and send the question again."
+              ))
+            }
             return false
           }
           const activeScope = temporarySourceScopeRef.current
@@ -2808,16 +2833,17 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
     setSubmitError(null)
     await checkConnectionOnce()
-    modelsFetchedRef.current = false
+    setReconnectModelsLoading(true)
     try {
       const models = await fetchChatModels({
         returnEmpty: true,
         forceRefresh: true
       })
-      applyComposerModels(models)
+      setComposerModels(models)
     } catch {
-      modelsFetchedRef.current = false
       setComposerModels([])
+    } finally {
+      setReconnectModelsLoading(false)
     }
   }
 
@@ -2830,6 +2856,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         workspace_id: workspaceSessionId || null,
         has_media_id: citationMediaId !== null
       })
+      const record = isRecord(citation) ? citation : null
+      const metadata = isRecord(record?.metadata) ? record.metadata : null
+      const source = sources.find(item => item.mediaId === citationMediaId)
+      const type = source?.type || record?.type || metadata?.type || metadata?.media_type
+      const pagePath = type === "pdf" ? buildDocumentPagePath(citationMediaId, metadata?.page_number ?? record?.page_number) : null
+      if (pagePath) {
+        // The disclosure stays in chat; its explicit page links own navigation.
+        return
+      }
       if (citationMediaId !== null && focusSourceByMediaId(citationMediaId)) {
         return
       }
@@ -2992,6 +3027,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           content: snippet,
           mode: "append",
         });
+        setNoteCaptureSessionId(workspaceSessionId);
       } catch {
         messageApi.error(
           t(
@@ -3001,7 +3037,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         );
       }
     },
-    [captureToCurrentNote, messageApi, sources, t],
+    [captureToCurrentNote, messageApi, sources, t, workspaceSessionId],
   );
 
   // Share conversation handler (UX-044)
@@ -3095,13 +3131,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     composerModels,
     selectedModel,
     setSelectedModel: handleModelSelect,
-    navigate: navigateTo
+    navigate: navigateTo,
+    modelsLoading: startupModelsLoading || menuModelsLoading || reconnectModelsLoading
   })
 
   React.useEffect(() => {
     if (!modelDropdownOpen || composerModels.length > 0) return
 
     let isMounted = true
+    setMenuModelsLoading(true)
     void fetchChatModels({ returnEmpty: true, forceRefresh: true })
       .then((models) => {
         if (!isMounted) return
@@ -3111,9 +3149,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         if (!isMounted) return
         setComposerModels([])
       })
+      .finally(() => {
+        if (isMounted) setMenuModelsLoading(false)
+      })
 
     return () => {
       isMounted = false
+      setMenuModelsLoading(false)
     }
   }, [composerModels.length, modelDropdownOpen])
 
@@ -3506,10 +3548,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         onSourceClick={
                           provenanceEnabled ? handleCitationSourceClick : undefined
                         }
-                        onSaveToWorkspaceNotes={() =>
+                        onSaveToWorkspaceNotes={(capture) =>
                           handleSaveMessageToNotes({
                             isBot: msg.isBot,
-                            message: msg.message,
+                            message: capture.message,
                             name: msg.name,
                             sources: msg.sources
                           })
@@ -3566,6 +3608,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         hideContinue={true}
                         temporaryChat={false}
                       />
+                      {msg.isBot && msg.message.trim() && (msg.sources?.length || msg.metadataExtra?.[CLAIM_VERIFICATION_KEY]) && <div className="px-2">
+                        <ClaimVerificationPanel text={msg.message} report={msg.metadataExtra?.[CLAIM_VERIFICATION_KEY]}
+                          checking={isProcessing && idx === messages.length - 1 && msg.metadataExtra?.claim_verification_pending === true}
+                          imported={msg.metadataExtra?.[CLAIM_VERIFICATION_IMPORTED_KEY] === true} />
+                      </div>}
                       {msg.isBot && diagnostics && provenanceEnabled && (
                         <div className="px-2">
                           <RetrievalDiagnosticsPanel diagnostics={diagnostics} />
@@ -3649,257 +3696,273 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               </button>
             </div>
           )}
-          <div
-            data-testid="workspace-chat-controls-toolbar"
-            role="toolbar"
-            aria-label={t("playground:chat.controlsToolbarAria", "Chat controls")}
-            className="mb-2 flex flex-wrap items-center gap-1.5 text-xs"
-          >
-            <div className="inline-flex items-center rounded-full border border-border/70 bg-surface/80 p-0.5 shadow-sm">
-              <button
-                type="button"
-                onClick={() => setPreferredChatMode("normal")}
-                className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
-                  effectiveChatMode === "normal"
-                    ? "bg-primary text-white"
-                    : "text-text-muted hover:text-text"
-                }`}
-                aria-pressed={effectiveChatMode === "normal"}
-              >
-                {t("playground:chat.generalMode", "General chat")}
-              </button>
-              <Tooltip
-                title={ragModeDisabledMessage || undefined}
-              >
-                <button
-                  type="button"
-                  disabled={Boolean(ragModeDisabledMessage)}
-                  onClick={() => setPreferredChatMode("rag")}
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
-                    effectiveChatMode === "rag"
-                      ? "bg-primary text-white"
-                      : "text-text-muted hover:text-text"
-                  } disabled:cursor-not-allowed disabled:opacity-50`}
-                  aria-pressed={effectiveChatMode === "rag"}
-                >
-                  {t("playground:chat.ragMode", "RAG mode")}
-                </button>
-              </Tooltip>
-            </div>
-            <label className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-[11px] text-text-muted">
-              <span>{t("playground:chat.responseStyleCompactLabel", "Style")}</span>
-              <select
-                aria-label={t("playground:chat.responseStyleAria", "Response style")}
-                value={responseStyle}
-                onChange={(event) =>
-                  setResponseStyle(event.target.value as ChatResponseStyle)
-                }
-                className="rounded border border-border bg-surface px-1.5 py-0.5 text-xs text-text"
-              >
-                {CHAT_RESPONSE_STYLE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-[11px] text-text-muted">
-              <span>{t("playground:chat.responseLengthCompactLabel", "Length")}</span>
-              <select
-                aria-label={t("playground:chat.responseLengthAria", "Answer length")}
-                value={responseLength}
-                onChange={(event) =>
-                  setResponseLength(event.target.value as ChatResponseLength)
-                }
-                className="rounded border border-border bg-surface px-1.5 py-0.5 text-xs text-text"
-              >
-                {CHAT_RESPONSE_LENGTH_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {hasQueryableSelectedSources && (
-              <label
-                className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-[11px] text-text-muted"
-                title={
-                  t(
-                    "playground:chat.includeFullSourcesHint",
-                    "Inject complete extracted source text with your question (helpful for synopsis-style prompts)."
-                  ) as string
-                }
-              >
-                <span className="whitespace-nowrap">
-                  {t(
-                    "playground:chat.includeFullSourcesCompactLabel",
-                    "Full source text"
-                  )}
-                </span>
-                <Switch
-                  size="small"
-                  checked={includeFullSourceContents}
-                  onChange={setIncludeFullSourceContents}
-                  aria-label={t(
-                    "playground:chat.includeFullSourcesAria",
-                    "Include full source contents"
-                  )}
-                />
-              </label>
-            )}
-            <div className="ml-auto flex flex-wrap items-center gap-1">
-              {provenanceEnabled && (
-                <ChatModelSelectorDropdown
-                  apiModelLabel={apiModelLabel}
-                  connectionStatusLabel={connectionStatusLabel}
-                  connectionStatusWarning={connectionStatusWarning}
-                  modelDropdownMenuItems={modelDropdownMenuItems}
-                  modelDropdownOpen={modelDropdownOpen}
-                  modelSearchQuery={modelSearchQuery}
-                  modelSelectorWarning={modelSelectorWarning}
-                  modelSortMode={modelSortMode}
-                  placement="topLeft"
-                  resolvedProviderKey={resolvedProviderKey}
-                  selectedModel={selectedModel}
-                  setModelDropdownOpen={setModelDropdownOpen}
-                  setModelSearchQuery={setModelSearchQuery}
-                  setModelSortMode={setModelSortMode}
-                />
-              )}
-              {/* Share conversation button (UX-044) */}
-              {serverChatId && hasMessages && (
-                <Tooltip
-                  title={t("playground:chat.shareConversation", "Share conversation")}
-                >
-                  <button
-                    type="button"
-                    onClick={handleShareConversation}
-                    disabled={sharingConversation}
-                    className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-xs text-text-muted transition hover:bg-surface2 hover:text-text disabled:opacity-50"
-                    aria-label={t("playground:chat.shareConversation", "Share conversation")}
-                  >
-                    {sharingConversation ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Share2 className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </Tooltip>
-              )}
-              {preferredChatMode !== null && (
-                <button
-                  type="button"
-                  onClick={() => setPreferredChatMode(null)}
-                  className="text-xs text-text-muted transition hover:text-text hover:underline"
-                >
-                  {t("playground:chat.modeAuto", "Auto")}
-                </button>
-              )}
-              {hasQueryableSelectedSources && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setShowAdvancedRagSettings((current) => !current)
-                  }
-                  className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-xs text-text-muted transition hover:bg-surface2 hover:text-text"
-                  aria-expanded={showAdvancedRagSettings}
-                >
-                  <SlidersHorizontal className="h-3.5 w-3.5" />
-                  {t(
-                    "playground:chat.advancedRagSettings",
-                    "Advanced RAG settings"
-                  )}
-                </button>
-              )}
-            </div>
-          </div>
-          {sourceQueryabilityMessage && (
-            <p className="mb-2 text-xs text-text-muted">
-              {sourceQueryabilityMessage}
-            </p>
-          )}
-          {hasQueryableSelectedSources && effectiveChatMode === "normal" && (
-            <p className="mb-2 text-xs text-warn">
-              {t(
-                "playground:chat.generalModeWithSourcesHint",
-                "General chat mode is active. Selected sources will not be used unless RAG mode is enabled."
-              )}
-            </p>
-          )}
+          {sourceContextNotice && <p role="status" className="mb-2 text-xs text-text-muted">{sourceContextNotice}</p>}
           {preparingSourceContext && (
             <p className="mb-2 flex items-center gap-1.5 text-xs text-text-muted">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {t(
-                "playground:chat.preparingSourceContext",
-                "Preparing source context"
-              )}
+              {t("playground:chat.preparingSourceContext", "Preparing source context")}
             </p>
           )}
-          {hasQueryableSelectedSources && showAdvancedRagSettings && (
-            <div className="mb-2 rounded-lg border border-border/70 bg-surface2/40 p-3">
-              <div className="space-y-3">
-                <div>
-                  <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
-                    <span>{t("playground:chat.ragTopK", "Top K")}</span>
-                    <span className="font-medium text-text">{resolvedTopK}</span>
-                  </div>
-                  <Slider
-                    ariaLabelForHandle={t("playground:chat.ragTopK", "Top K")}
-                    min={1}
-                    max={50}
-                    step={1}
-                    value={resolvedTopK}
-                    onChange={handleTopKChange}
-                  />
+          <details open={!isMobile} className={isMobile ? "group mb-2 rounded border border-border text-text" : undefined}>
+            <summary className={isMobile ? "flex min-h-11 cursor-pointer items-center justify-between gap-2 px-2 py-2 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus" : "hidden"}>
+              <span className="shrink-0 font-medium">{t("playground:chat.mobileSettings", "Chat settings")}</span>
+              <span className="min-w-0 truncate text-text-muted">
+                {effectiveChatMode === "rag" ? t("playground:chat.ragMode", "RAG mode") : t("playground:chat.generalMode", "General chat")} · {apiModelLabel || selectedModel}
+                {isChatCapabilityWarn ? ` · ${t("playground:chat.setupWarning", "Setup warning")}` : ""}
+              </span>
+              <ChevronDown aria-hidden="true" className="h-4 w-4 shrink-0 group-open:rotate-180" />
+            </summary>
+            <div className={isMobile ? "max-h-[35dvh] overflow-y-auto px-2 pb-2" : undefined}>
+              <div
+                data-testid="workspace-chat-controls-toolbar"
+                role="toolbar"
+                aria-label={t("playground:chat.controlsToolbarAria", "Chat controls")}
+                className="mb-2 flex flex-wrap items-center gap-1.5 text-xs"
+              >
+                <div className="inline-flex items-center rounded-full border border-border/70 bg-surface/80 p-0.5 shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setPreferredChatMode("normal")}
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                      effectiveChatMode === "normal"
+                        ? "bg-primary text-white"
+                        : "text-text-muted hover:text-text"
+                    }`}
+                    aria-pressed={effectiveChatMode === "normal"}
+                  >
+                    {t("playground:chat.generalMode", "General chat")}
+                  </button>
+                  <Tooltip
+                    title={ragModeDisabledMessage || undefined}
+                  >
+                    <button
+                      type="button"
+                      disabled={Boolean(ragModeDisabledMessage)}
+                      onClick={() => setPreferredChatMode("rag")}
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                        effectiveChatMode === "rag"
+                          ? "bg-primary text-white"
+                          : "text-text-muted hover:text-text"
+                      } disabled:cursor-not-allowed disabled:opacity-50`}
+                      aria-pressed={effectiveChatMode === "rag"}
+                    >
+                      {t("playground:chat.ragMode", "RAG mode")}
+                    </button>
+                  </Tooltip>
                 </div>
-                <div>
-                  <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
-                    <span>
+                <label className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-[11px] text-text-muted">
+                  <span>{t("playground:chat.responseStyleCompactLabel", "Style")}</span>
+                  <select
+                    aria-label={t("playground:chat.responseStyleAria", "Response style")}
+                    value={responseStyle}
+                    onChange={(event) =>
+                      setResponseStyle(event.target.value as ChatResponseStyle)
+                    }
+                    className="rounded border border-border bg-surface px-1.5 py-0.5 text-xs text-text"
+                  >
+                    {CHAT_RESPONSE_STYLE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-[11px] text-text-muted">
+                  <span>{t("playground:chat.responseLengthCompactLabel", "Length")}</span>
+                  <select
+                    aria-label={t("playground:chat.responseLengthAria", "Answer length")}
+                    value={responseLength}
+                    onChange={(event) =>
+                      setResponseLength(event.target.value as ChatResponseLength)
+                    }
+                    className="rounded border border-border bg-surface px-1.5 py-0.5 text-xs text-text"
+                  >
+                    {CHAT_RESPONSE_LENGTH_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {hasQueryableSelectedSources && (
+                  <label
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-[11px] text-text-muted"
+                    title={
+                      t(
+                        "playground:chat.includeFullSourcesHint",
+                        "Inject complete extracted source text with your question (helpful for synopsis-style prompts)."
+                      ) as string
+                    }
+                  >
+                    <span className="whitespace-nowrap">
                       {t(
-                        "playground:chat.ragSimilarityThreshold",
-                        "Similarity threshold"
+                        "playground:chat.includeFullSourcesCompactLabel",
+                        "Full source text"
                       )}
                     </span>
-                    <span className="font-medium text-text">
-                      {similarityThreshold.toFixed(2)}
-                    </span>
-                  </div>
-                  <Slider
-                    ariaLabelForHandle={t(
-                      "playground:chat.ragSimilarityThreshold",
-                      "Similarity threshold"
-                    )}
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={similarityThreshold}
-                    onChange={handleSimilarityThresholdChange}
-                  />
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-text-muted">
-                    {t("playground:chat.ragReranking", "Enable reranking")}
-                  </span>
-                  <Switch
-                    size="small"
-                    checked={rerankingEnabled}
-                    onChange={handleRerankingToggle}
-                    aria-label={t("playground:chat.ragReranking", "Enable reranking")}
-                  />
+                    <Switch
+                      size="small"
+                      checked={includeFullSourceContents}
+                      onChange={setIncludeFullSourceContents}
+                      aria-label={t(
+                        "playground:chat.includeFullSourcesAria",
+                        "Include full source contents"
+                      )}
+                    />
+                  </label>
+                )}
+                <div className="ml-auto flex flex-wrap items-center gap-1">
+                  {provenanceEnabled && (
+                    <ChatModelSelectorDropdown
+                      apiModelLabel={apiModelLabel}
+                      connectionStatusLabel={connectionStatusLabel}
+                      connectionStatusWarning={connectionStatusWarning}
+                      modelDropdownMenuItems={modelDropdownMenuItems}
+                      modelDropdownOpen={modelDropdownOpen}
+                      modelSearchQuery={modelSearchQuery}
+                      modelSelectorWarning={modelSelectorWarning}
+                      modelSortMode={modelSortMode}
+                      placement="topLeft"
+                      resolvedProviderKey={resolvedProviderKey}
+                      selectedModel={selectedModel}
+                      setModelDropdownOpen={setModelDropdownOpen}
+                      setModelSearchQuery={setModelSearchQuery}
+                      setModelSortMode={setModelSortMode}
+                    />
+                  )}
+                  {/* Share conversation button (UX-044) */}
+                  {serverChatId && hasMessages && (
+                    <Tooltip
+                      title={t("playground:chat.shareConversation", "Share conversation")}
+                    >
+                      <button
+                        type="button"
+                        onClick={handleShareConversation}
+                        disabled={sharingConversation}
+                        className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-xs text-text-muted transition hover:bg-surface2 hover:text-text disabled:opacity-50"
+                        aria-label={t("playground:chat.shareConversation", "Share conversation")}
+                      >
+                        {sharingConversation ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Share2 className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </Tooltip>
+                  )}
+                  {preferredChatMode !== null && (
+                    <button
+                      type="button"
+                      onClick={() => setPreferredChatMode(null)}
+                      className="text-xs text-text-muted transition hover:text-text hover:underline"
+                    >
+                      {t("playground:chat.modeAuto", "Auto")}
+                    </button>
+                  )}
+                  {hasQueryableSelectedSources && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowAdvancedRagSettings((current) => !current)
+                      }
+                      className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-xs text-text-muted transition hover:bg-surface2 hover:text-text"
+                      aria-expanded={showAdvancedRagSettings}
+                    >
+                      <SlidersHorizontal className="h-3.5 w-3.5" />
+                      {t(
+                        "playground:chat.advancedRagSettings",
+                        "Advanced RAG settings"
+                      )}
+                    </button>
+                  )}
                 </div>
               </div>
+              {sourceQueryabilityMessage && (
+                <p className="mb-2 text-xs text-text-muted">
+                  {sourceQueryabilityMessage}
+                </p>
+              )}
+              {hasQueryableSelectedSources && effectiveChatMode === "normal" && (
+                <p className="mb-2 text-xs text-warn">
+                  {t(
+                    "playground:chat.generalModeWithSourcesHint",
+                    "General chat mode is active. Selected sources will not be used unless RAG mode is enabled."
+                  )}
+                </p>
+              )}
+              {hasQueryableSelectedSources && showAdvancedRagSettings && (
+                <div className="mb-2 rounded-lg border border-border/70 bg-surface2/40 p-3">
+                  <div className="space-y-3">
+                    <div>
+                      <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
+                        <span>{t("playground:chat.ragTopK", "Top K")}</span>
+                        <span className="font-medium text-text">{resolvedTopK}</span>
+                      </div>
+                      <Slider
+                        ariaLabelForHandle={t("playground:chat.ragTopK", "Top K")}
+                        min={1}
+                        max={50}
+                        step={1}
+                        value={resolvedTopK}
+                        onChange={handleTopKChange}
+                      />
+                    </div>
+                    <div>
+                      <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
+                        <span>
+                          {t(
+                            "playground:chat.ragSimilarityThreshold",
+                            "Similarity threshold"
+                          )}
+                        </span>
+                        <span className="font-medium text-text">
+                          {similarityThreshold.toFixed(2)}
+                        </span>
+                      </div>
+                      <Slider
+                        ariaLabelForHandle={t(
+                          "playground:chat.ragSimilarityThreshold",
+                          "Similarity threshold"
+                        )}
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={similarityThreshold}
+                        onChange={handleSimilarityThresholdChange}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-text-muted">
+                        {t("playground:chat.ragReranking", "Enable reranking")}
+                      </span>
+                      <Switch
+                        size="small"
+                        checked={rerankingEnabled}
+                        onChange={handleRerankingToggle}
+                        aria-label={t("playground:chat.ragReranking", "Enable reranking")}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+              {isChatCapabilityWarn && chatCapabilityMessage && (
+                <div
+                  data-testid="workspace-chat-capability-status"
+                  className="mb-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-text"
+                >
+                  {chatCapabilityMessage}
+                </div>
+              )}
+              {statusGuardrailsEnabled && (
+                <WorkspaceCapabilityRemediation capabilities={workspaceCapabilities} />
+              )}
             </div>
-          )}
-          {isChatCapabilityWarn && chatCapabilityMessage && (
-            <div
-              data-testid="workspace-chat-capability-status"
-              className="mb-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
-            >
-              {chatCapabilityMessage}
+          </details>
+          {noteCaptureSessionId === workspaceSessionId && noteDraftIsDirty && (
+            <div role="status" className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-text">
+              <span>{t("playground:chat.noteDraftCaptured", "Added to the current note draft. Not saved yet.")}</span>
+              {onOpenNoteDraft && <button type="button" onClick={onOpenNoteDraft} className="min-h-11 rounded border border-border px-3 font-medium hover:bg-surface2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus">{t("playground:chat.openNoteDraft", "Open draft")}</button>}
             </div>
-          )}
-          {statusGuardrailsEnabled && (
-            <WorkspaceCapabilityRemediation capabilities={workspaceCapabilities} />
           )}
           <SimpleChatInput
             onSubmit={handleSubmit}

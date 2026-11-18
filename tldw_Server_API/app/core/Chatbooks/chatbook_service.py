@@ -51,6 +51,7 @@ from ..DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
 )
 from ..DB_Management.db_path_utils import DatabasePaths
+from ..DB_Management.chacha.chatbook_job_store import fail_stale_import_job, save_import_job
 from ..Notes.organization_capture import active_coordinator, capture_note_upsert, stable_note_id
 from ..Templating.template_renderer import (
     TemplateContext,
@@ -224,7 +225,7 @@ class ChatbookJobLimits:
 
 def record_failed_import_result(job: ImportJob, result: Any) -> None:
     """Retain public partial-restore evidence without persisting private account payloads."""
-    if not isinstance(result, dict) or job.status == ImportStatus.CANCELLED:
+    if not isinstance(result, dict):
         return
     for key in ("total_items", "processed_items", "successful_items", "failed_items", "skipped_items"):
         value = result.get(key)
@@ -235,7 +236,7 @@ def record_failed_import_result(job: ImportJob, result: Any) -> None:
         job.warnings = list(job.warnings or []) + [row for row in warnings if row not in (job.warnings or [])]
     job.metadata = {
         **(job.metadata if isinstance(job.metadata, dict) else {}),
-        **{key: result[key] for key in ("imported_items", "inventory_summary", "skipped_non_restorable") if key in result},
+        **{key: result[key] for key in ("imported_items", "inventory_summary", "skipped_non_restorable", "id_maps") if key in result},
     }
 
 
@@ -245,6 +246,7 @@ def _build_import_result(
     inventory_summary: dict[str, Any] | None,
     skipped_non_restorable: dict[str, int],
     account_restore_payload: dict[str, Any] | None,
+    id_maps: dict[str, Any] | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Build the complete synchronous result before the caller cleans its extracted archive."""
     # Build result message
@@ -260,6 +262,8 @@ def _build_import_result(
     }
     if inventory_summary:
         sync_result["inventory_summary"] = inventory_summary
+    if id_maps is not None:
+        sync_result["id_maps"] = id_maps
     if skipped_non_restorable:
         sync_result["skipped_non_restorable"] = skipped_non_restorable
     if account_restore_payload:
@@ -1188,6 +1192,25 @@ class ChatbookService:
                 payload[key] = value
         return payload
 
+    @staticmethod
+    def _portable_media_metadata(metadata: Any, content: str) -> dict[str, Any]:
+        """Export only verified canonical page locations, never arbitrary server metadata."""
+        from ..Media.page_provenance import page_map_for_content
+
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except (TypeError, ValueError):
+                return {}
+        page_map = page_map_for_content(metadata, content)
+        if not page_map:
+            return {}
+        return {
+            "page_count": len(page_map),
+            "page_map": page_map,
+            "page_map_content_hash": metadata["page_map_content_hash"],
+        }
+
     def _normalize_transcript_row(self, row: dict[str, Any]) -> dict[str, Any]:
         """Normalize transcript row from Media DB helpers."""
         payload: dict[str, Any] = {}
@@ -1210,20 +1233,34 @@ class ChatbookService:
         }
 
     def _resolve_owned_media_artifact_path(self, storage_path: Any) -> Path | None:
-        """Resolve stored media bytes only when they live under the account-owned user root."""
+        """Resolve legacy files and configured blob keys within this account's subtree."""
         raw = str(storage_path or "").strip()
         if not raw:
             return None
         try:
-            user_root = DatabasePaths.resolve_user_base_directory(self.user_id_int or self.user_id).resolve()
+            user_directory = DatabasePaths.resolve_user_base_directory(self.user_id_int or self.user_id)
+            user_root = user_directory.resolve()
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
             return None
 
-        candidates = [Path(raw)] if Path(raw).is_absolute() else [user_root / raw]
-        for candidate in candidates:
+        candidates = [(user_root, Path(raw) if Path(raw).is_absolute() else user_root / raw)]
+        try:
+            from ..Storage import FileSystemStorage, get_storage_backend
+
+            storage = get_storage_backend()
+            if isinstance(storage, FileSystemStorage):
+                storage_root = storage.base_path.resolve()
+                # Do not resolve the owner root: a symlink to another account
+                # must not turn that account's files into authorized exports.
+                owned_root = storage_root / user_directory.name
+                candidate = Path(raw) if Path(raw).is_absolute() else storage_root / raw
+                candidates.append((owned_root, candidate))
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            pass
+        for owned_root, candidate in candidates:
             try:
                 resolved = candidate.resolve()
-                resolved.relative_to(user_root)
+                resolved.relative_to(owned_root)
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
                 continue
             if resolved.is_file():
@@ -1473,31 +1510,6 @@ class ChatbookService:
 
         return payloads, errors
 
-    def _safe_import_artifact_destination(
-        self,
-        *,
-        media_id: int,
-        original_filename: Any,
-        fallback_name: str,
-    ) -> tuple[Path, str] | None:
-        """Return an account-owned destination for a bundled media artifact."""
-        try:
-            user_root = DatabasePaths.resolve_user_base_directory(self.user_id_int or self.user_id).resolve()
-        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
-            return None
-        raw_name = str(original_filename or fallback_name or "artifact.bin")
-        safe_name = Path(raw_name.replace("\\", "/")).name or "artifact.bin"
-        if self._is_unsafe_archive_path(safe_name):
-            safe_name = "artifact.bin"
-        dest_dir = user_root / "imported_media" / f"media_{media_id}"
-        dest_name = f"{uuid4().hex}_{safe_name}"
-        dest = (dest_dir / dest_name).resolve()
-        try:
-            dest.relative_to(user_root)
-        except ValueError:
-            return None
-        return dest, dest.relative_to(user_root).as_posix()
-
     def _restore_media_artifacts(
         self,
         *,
@@ -1527,33 +1539,72 @@ class ChatbookService:
                 pointer_only += 1
                 status.warnings.append(f"Stored media artifact missing from archive: {archive_path}")
                 continue
-            destination = self._safe_import_artifact_destination(
-                media_id=media_id,
-                original_filename=artifact.get("original_filename"),
-                fallback_name=Path(str(archive_path)).name or f"artifact_{index}.bin",
-            )
-            if destination is None:
-                pointer_only += 1
-                status.warnings.append("Stored media artifact skipped: could not resolve account-owned destination.")
-                continue
-            dest_path, storage_path = destination
+            storage_path = None
+            storage = None
             try:
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, dest_path)
+                from ..Storage import get_storage_backend
+
+                storage = get_storage_backend()
+                raw_name = str(artifact.get("original_filename") or Path(str(archive_path)).name or f"artifact_{index}.bin")
+                safe_name = Path(raw_name.replace("\\", "/")).name or "artifact.bin"
+                with source.open("rb") as stream:
+                    checksum = hashlib.file_digest(stream, "sha256").hexdigest()
+                    stream.seek(0)
+                    # All public import lanes execute this synchronous importer
+                    # in a worker thread. Store keys must match media/file reads.
+                    storage_path = asyncio.run(storage.store(
+                        user_id=str(self.user_id_int or self.user_id),
+                        media_id=int(media_id), filename=f"imported-{uuid4().hex}_{safe_name}",
+                        data=stream, mime_type=artifact.get("mime_type"),
+                    ))
                 insert_media_file(
                     media_id=int(media_id),
                     file_type=str(artifact.get("file_type") or "artifact"),
                     storage_path=storage_path,
                     original_filename=artifact.get("original_filename"),
-                    file_size=int(artifact.get("file_size") or source.stat().st_size),
+                    file_size=source.stat().st_size,
                     mime_type=artifact.get("mime_type"),
-                    checksum=artifact.get("checksum"),
+                    checksum=checksum,
                 )
                 restored += 1
             except Exception as exc:
+                if storage_path is not None and storage is not None:
+                    try:
+                        asyncio.run(storage.delete(storage_path))
+                    except Exception:  # noqa: BLE001 - Preserve the registration failure if cleanup also fails.
+                        logger.warning("Could not clean up an unregistered restored media artifact.")
                 pointer_only += 1
                 status.warnings.append(f"Stored media artifact restore failed: {str(exc)}")
         return restored, pointer_only
+
+    def _media_import_artifacts_match(self, media_db: Any, media_id: int, extract_dir: Path, payload: dict[str, Any]) -> bool:
+        """Reuse an import identity only while its bundled account-owned bytes still match."""
+        expected = [item for item in payload.get("stored_artifacts") or [] if isinstance(item, dict) and item.get("bundled")]
+        if not expected:
+            return True
+        list_files = getattr(media_db, "get_media_files", None)
+        if not callable(list_files):
+            return False
+        rows = list_files(media_id) or []
+        for item in expected:
+            source = self._safe_extracted_content_path(extract_dir, str(item.get("archive_path") or ""))
+            if source is None or not source.is_file():
+                return False
+            with source.open("rb") as stream:
+                expected_hash = hashlib.file_digest(stream, "sha256").digest()
+            matched = False
+            for row in rows:
+                if row.get("file_type") != item.get("file_type") or row.get("original_filename") != item.get("original_filename"):
+                    continue
+                destination = self._resolve_owned_media_artifact_path(row.get("storage_path"))
+                if destination is not None and destination.is_file():
+                    with destination.open("rb") as stream:
+                        if hashlib.file_digest(stream, "sha256").digest() == expected_hash:
+                            matched = True
+                            break
+            if not matched:
+                return False
+        return True
 
     @staticmethod
     def _media_chunks_for_restore(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -3376,6 +3427,7 @@ class ChatbookService:
             conversation_id_map: dict[str, str] = {}
             message_id_map: dict[tuple[str, str], str] = {}
             media_id_map: dict[str, int | None] = {}
+            note_id_map: dict[str, str | None] = {}
             imported_items: dict[str, int] = {}
 
             def _run_import_for_type(
@@ -3503,6 +3555,7 @@ class ChatbookService:
                     manifest_path_index=manifest_path_index,
                     conversation_id_map=conversation_id_map,
                     message_id_map=message_id_map,
+                    note_id_map=note_id_map,
                 )
 
             # Import Explainer sessions from first-class content items.
@@ -3562,6 +3615,7 @@ class ChatbookService:
                 inventory_summary,
                 skipped_non_restorable,
                 account_restore_payload,
+                id_maps={"media": media_id_map, "notes": note_id_map},
             )
 
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
@@ -3705,6 +3759,8 @@ class ChatbookService:
 
             latest = self._get_import_job(job.job_id)
             if latest and latest.status == ImportStatus.CANCELLED:
+                record_failed_import_result(latest, result)
+                self._save_import_job(latest)
                 return
             if success:
                 job.status = ImportStatus.COMPLETED
@@ -3731,6 +3787,7 @@ class ChatbookService:
                         "imported_items": imported_items,
                         "inventory_summary": result.get("inventory_summary"),
                         "skipped_non_restorable": skipped_non_restorable,
+                        **({"id_maps": result["id_maps"]} if "id_maps" in result else {}),
                     }
                 else:
                     job.progress_percentage = 100
@@ -5619,15 +5676,9 @@ class ChatbookService:
 
                     if job_id:
                         try:
-                            self.db.execute_query(
-                                "UPDATE import_jobs SET status = ?, error_message = ? "
-                                "WHERE job_id = ?",
-                                (
-                                    ImportStatus.FAILED.value,
-                                    "Marked failed by orphan cleanup (stale job)",
-                                    job_id,
-                                ),
-                                commit=True,
+                            fail_stale_import_job(
+                                self.db, job_id=job_id, user_id=self.user_id,
+                                selected_status=status_val, cutoff=cutoff_str,
                             )
                         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
                             logger.warning(f"Failed to mark stale import job {job_id} as failed: {e}")
@@ -5791,6 +5842,16 @@ class ChatbookService:
 
             normalized = self._normalize_media_record(media_record)
             media_id = str(normalized.get("id", media_identifier))
+            version = (
+                get_document_version(media_db, int(media_record["id"]))
+                if get_document_version is not None else None
+            )
+            if version and isinstance(version.get("content"), str):
+                normalized["content"] = version["content"]
+            normalized["safe_metadata"] = self._portable_media_metadata(
+                (version or {}).get("safe_metadata", normalized.get("safe_metadata")),
+                normalized.get("content") or "",
+            )
 
             # Attach transcripts when helper is available
             transcripts: list[dict[str, Any]] = []
@@ -6906,6 +6967,7 @@ class ChatbookService:
         manifest_path_index: ManifestImportPathIndex | None = None,
         conversation_id_map: dict[str, str] | None = None,
         message_id_map: dict[tuple[str, str], str] | None = None,
+        note_id_map: dict[str, str | None] | None = None,
     ):
         """Import notes from chatbook."""
         template_settings = self._resolve_template_settings(manifest)
@@ -7047,6 +7109,10 @@ class ChatbookService:
                     )
 
                 if new_note_id:
+                    if note_id_map is not None:
+                        key = str(note_id)
+                        value = str(new_note_id)
+                        note_id_map[key] = value if key not in note_id_map or note_id_map[key] == value else None
                     status.successful_items += 1
                 else:
                     # If add failed, it might be a duplicate not caught by search
@@ -7403,7 +7469,7 @@ class ChatbookService:
                 if existing and conflict_resolution == ConflictResolution.SKIP:
                     version = None
                     if str(existing.get("owner_user_id")) == str(self.user_id_int) and get_document_version is not None:
-                        version = get_document_version(media_db, int(existing["id"]), include_content=False)
+                        version = get_document_version(media_db, int(existing["id"]), include_content=True)
                     stored_metadata = (version or {}).get("safe_metadata") or {}
                     if isinstance(stored_metadata, str):
                         try:
@@ -7417,6 +7483,10 @@ class ChatbookService:
                         and payload.get("uuid")
                         and isinstance(provenance, dict)
                         and provenance.get("source_uuid") == payload["uuid"]
+                        and (version or {}).get("content") == (payload.get("content") or "")
+                        and self._portable_media_metadata(stored_metadata, version["content"])
+                        == self._portable_media_metadata(payload.get("safe_metadata"), payload.get("content") or "")
+                        and self._media_import_artifacts_match(media_db, int(existing["id"]), extract_dir, payload)
                     ):
                         self._record_imported_media_ids(
                             media_id_map, media_id_text, payload.get("uuid"), int(existing["id"])
@@ -7437,6 +7507,7 @@ class ChatbookService:
                     analysis_content=payload.get("analysis_content"),
                     safe_metadata=json.dumps(
                         {
+                            **self._portable_media_metadata(payload.get("safe_metadata"), payload.get("content") or ""),
                             "chatbook_import": {
                                 "source_media_id": payload.get("id") or media_id_text,
                                 "source_uuid": payload.get("uuid"),
@@ -7456,6 +7527,20 @@ class ChatbookService:
                 )
                 if not new_media_id:
                     status.failed_items += 1
+                    continue
+                restored_row = get_media_by_id(media_db, int(new_media_id)) if get_media_by_id is not None else None
+                version = (
+                    get_document_version(media_db, int(new_media_id))
+                    if restored_row and str(restored_row.get("owner_user_id")) == str(self.user_id_int)
+                    and get_document_version is not None else None
+                )
+                if (
+                    not version or version.get("content") != (payload.get("content") or "")
+                    or self._portable_media_metadata(version.get("safe_metadata"), version["content"])
+                    != self._portable_media_metadata(payload.get("safe_metadata"), payload.get("content") or "")
+                ):
+                    status.failed_items += 1
+                    status.warnings.append(f"Media {media_id_text} did not restore its exact canonical content and page locations.")
                     continue
                 self._restore_media_transcripts(
                     media_db=media_db,
@@ -7478,6 +7563,13 @@ class ChatbookService:
                     status.warnings.append(
                         f"Restored {restored_artifacts} bundled stored media artifact(s) for media {media_id_text}."
                     )
+                requested_artifacts = sum(
+                    1 for item in payload.get("stored_artifacts") or [] if isinstance(item, dict) and item.get("bundled")
+                )
+                if restored_artifacts != requested_artifacts:
+                    status.failed_items += 1
+                    status.warnings.append(f"Media {media_id_text} was only partially restored; bundled original files are missing.")
+                    continue
                 if media_id_map is not None:
                     self._record_imported_media_ids(media_id_map, media_id_text, payload.get("uuid"), int(new_media_id))
                 status.successful_items += 1
@@ -8425,6 +8517,9 @@ class ChatbookService:
     def _save_import_job(self, job: ImportJob, *, commit: bool = True):
         """Save import job to database.
 
+        Cancelled rows reject stale lifecycle changes but retain public terminal
+        receipts, so a racing worker cannot revive the job or lose restored IDs.
+
         Note: Uses execute_query with commit=True by default, which handles its own transaction.
         Previous _with_transaction wrapper was removed because it created a separate
         connection that didn't share the transaction with execute_query's connection.
@@ -8433,32 +8528,7 @@ class ChatbookService:
             if job.status == ImportStatus.COMPLETED:
                 job.progress_percentage = 100
                 job.processed_items = job.total_items
-            self.db.execute_query("""
-                INSERT INTO import_jobs (
-                    job_id, user_id, status, chatbook_path,
-                    created_at, started_at, completed_at, error_message,
-                    progress_percentage, total_items, processed_items,
-                    successful_items, failed_items, skipped_items,
-                    conflicts, warnings, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(job_id) DO UPDATE SET
-                    user_id = excluded.user_id,
-                    status = excluded.status,
-                    chatbook_path = excluded.chatbook_path,
-                    created_at = excluded.created_at,
-                    started_at = excluded.started_at,
-                    completed_at = excluded.completed_at,
-                    error_message = excluded.error_message,
-                    progress_percentage = excluded.progress_percentage,
-                    total_items = excluded.total_items,
-                    processed_items = excluded.processed_items,
-                    successful_items = excluded.successful_items,
-                    failed_items = excluded.failed_items,
-                    skipped_items = excluded.skipped_items,
-                    conflicts = excluded.conflicts,
-                    warnings = excluded.warnings,
-                    metadata = excluded.metadata
-            """, (
+            save_import_job(self.db, (
                 job.job_id, job.user_id, job.status.value, job.chatbook_path,
                 self._serialize_job_timestamp(job.created_at),
                 self._serialize_job_timestamp(job.started_at),

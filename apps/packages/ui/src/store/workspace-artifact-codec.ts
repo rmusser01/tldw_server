@@ -111,6 +111,7 @@ export const readWorkspaceArtifactClientPayload = (
 export const workspaceArtifactDraftPayload = (
   artifact: GeneratedArtifact
 ): WorkspaceArtifactCreateRequest => {
+  if (artifact.detailDeferred) throw new Error("Open the saved output before changing it.");
   const client: Record<string, unknown> = { schemaVersion: 1, id: artifact.id };
   for (const key of CLIENT_FIELDS) if (artifact[key] !== undefined) client[key] = artifact[key];
   const payload: WorkspaceArtifactCreateRequest = {
@@ -168,6 +169,21 @@ export const sameWorkspaceArtifactPayload = (left: unknown, right: unknown): boo
           )
         : value;
   return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+};
+
+/** Export one copy of identical structured data; persistence rebuilds the client projection. */
+export const compactWorkspaceArtifactForExport = (artifact: GeneratedArtifact): GeneratedArtifact => {
+  if (artifact.detailDeferred) throw new Error("Load the saved output before exporting it.");
+  const client = artifact.versionMetadata?.workspaceClient;
+  if (!record(client) || client.schemaVersion !== 1 || !record(client.data) ||
+      !record(artifact.data)) return artifact;
+  // Compare the exported JSON values, including Date/toJSON normalization.
+  const serialized = (data: unknown) => JSON.stringify({ data }, (_key, item) => record(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+  if (serialized(client.data) !== serialized(artifact.data)) return artifact;
+  const compactClient = { ...client };
+  delete compactClient.data;
+  return { ...artifact, versionMetadata: { ...artifact.versionMetadata, workspaceClient: compactClient } };
 };
 
 // Runtime-only evidence: JSON/localStorage cannot mint or carry an authenticated draft origin.

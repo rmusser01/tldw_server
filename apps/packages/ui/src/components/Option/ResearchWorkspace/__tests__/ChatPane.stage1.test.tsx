@@ -89,6 +89,7 @@ const workspaceSessions = new Map<
 >()
 
 const workspaceStoreState = {
+  currentNote: { title: "", content: "", keywords: [], isDirty: false },
   sources: [] as Array<{
     id: string
     mediaId: number
@@ -574,6 +575,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     await waitFor(() => {
       expect(mockOnSubmit).toHaveBeenCalledWith({
         message: "Shortcut submission",
+        ragQuery: "Shortcut submission",
         image: ""
       })
     })
@@ -716,6 +718,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     await waitFor(() => {
       expect(mockOnSubmit).toHaveBeenCalledWith({
         message: "Can you help me plan questions?",
+        ragQuery: "Can you help me plan questions?",
         image: ""
       })
     })
@@ -865,6 +868,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     await waitFor(() => {
       expect(mockOnSubmit).toHaveBeenCalledWith({
         message: "What evidence supports this?",
+        ragQuery: "What evidence supports this?",
         image: ""
       })
     })
@@ -876,6 +880,36 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     )
     expect(mockSetRagMediaIds).not.toHaveBeenLastCalledWith(null)
     expect(screen.queryByText(/Unable to reach server/)).not.toBeInTheDocument()
+  })
+
+  it("removes only abandoned provisional rows and explains a skipped answer without blocking retry", async () => {
+    mockOnSubmit.mockResolvedValueOnce({ status: "skipped", reason: "Conversation changed", discardedMessageIds: ["old-user", "old-answer"] })
+    renderChatPane()
+    mockSetMessages.mockClear()
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    fireEvent.change(textarea, { target: { value: "Explain this proposal" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    expect(await screen.findByText("Your sources or chat changed before answering. Review your selection and send the question again.")).toBeInTheDocument()
+    const update = mockSetMessages.mock.calls.at(-1)?.[0]
+    expect(typeof update).toBe("function")
+    expect(update([{ id: "old-user" }, { id: "old-answer", message: "▋" }, { id: "newer-turn" }])).toEqual([{ id: "newer-turn" }])
+    expect(textarea).toHaveValue("Explain this proposal")
+    expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled()
+  })
+
+  it.each(["workspace", "chat reference"])("does not clean up a replacement %s after an old skipped answer", async boundary => {
+    mockOnSubmit.mockImplementationOnce(async () => {
+      if (boundary === "workspace") workspaceStoreState.workspaceId = "replacement-workspace"
+      else workspaceStoreState.workspaceChatReferenceId = "replacement-reference"
+      return { status: "skipped", reason: "Conversation changed", discardedMessageIds: ["old-user", "old-answer"] }
+    })
+    renderChatPane()
+    mockSetMessages.mockClear()
+    fireEvent.change(screen.getByPlaceholderText("Type a message..."), { target: { value: "Explain this proposal" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalledOnce())
+    expect(mockSetMessages.mock.calls.some(([update]) => typeof update === "function")).toBe(false)
+    expect(screen.queryByText("Your sources or chat changed before answering. Review your selection and send the question again.")).not.toBeInTheDocument()
   })
 
   it("does not restore a failed submitted draft over newer composer edits", async () => {
@@ -1414,6 +1448,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       expect(refreshCapabilities).toHaveBeenCalledTimes(1)
       expect(mockOnSubmit).toHaveBeenCalledWith({
         message: "Check this",
+        ragQuery: "Check this",
         image: ""
       })
     })

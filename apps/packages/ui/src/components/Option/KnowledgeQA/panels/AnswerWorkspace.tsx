@@ -23,6 +23,7 @@ const STAGE_COPY: Record<Exclude<QueryStage, "cancelled">, string> = {
   generating: "Generating answer",
   verifying: "Checking source citations",
   complete: "Answer complete",
+  clarification: "Needs clarification; search not run.",
   error: "Search needs attention",
 }
 
@@ -58,7 +59,7 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
     settings,
   } = useKnowledgeQA()
   const isActiveStage =
-    queryStage !== "idle" && queryStage !== "complete" && queryStage !== "error" && queryStage !== "cancelled"
+    queryStage !== "idle" && queryStage !== "complete" && queryStage !== "error" && queryStage !== "cancelled" && queryStage !== "clarification"
   const sourceFailureLines =
     queryStage === "complete" && results.length > 0 && !answer?.trim()
       ? buildSourceFailureSummary(
@@ -169,6 +170,16 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
   useEffect(() => {
     setAssertiveAnnouncement(error ? `Search error. ${error}` : "")
   }, [error])
+
+  if (queryStage === "clarification") {
+    return <div className={cn("space-y-4", className)}>
+      <p role="status" aria-live="polite" className="text-sm text-text-muted">
+        {t("answerWorkspace.clarification", { defaultValue: "Needs clarification; search not run." })}
+      </p>
+      <p className="whitespace-pre-wrap text-text">{answer}</p>
+      <FollowUpInput />
+    </div>
+  }
 
   return (
     <div className={cn("space-y-6", className)}>
