@@ -6,6 +6,25 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+SECTION_FAILURE_MESSAGES = {
+    "study_pack_sections_changed": "The saved source changed. Review its sections again before creating a Study Pack.",
+    "study_pack_sections_invalid": "Select at least one available Study Pack section.",
+    "study_pack_sections_conflict": "Study Pack sections cannot be combined with an excerpt, chunk or timestamp.",
+    "study_pack_sections_too_many": "This source has too many Study Pack sections. Use a smaller document.",
+    "study_pack_section_budget": "This Study Pack needs too many generation passes. Review the sources and select fewer sections.",
+    "study_pack_sections_no_cards": "The selected sections did not contain material for any cards.",
+}
+
+
+class StudyPackSectionError(ValueError):
+    """Section selection or source limits that a job retry cannot change."""
+
+    retryable = False
+
+    def __init__(self, failure_code: str):
+        self.failure_code = failure_code
+        super().__init__(SECTION_FAILURE_MESSAGES[failure_code])
+
 
 def _clean_text(value: Any) -> str:
     if value is None:
@@ -241,6 +260,8 @@ class StudyPackCreationResult:
 
 
 __all__ = [
+    "SECTION_FAILURE_MESSAGES",
+    "StudyPackSectionError",
     "StudyCitationDraft",
     "StudyPackCardDraft",
     "StudyPackCreationResult",

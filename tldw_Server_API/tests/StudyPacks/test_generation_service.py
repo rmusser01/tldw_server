@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from importlib import import_module
 from types import SimpleNamespace
 from typing import Any
@@ -8,7 +9,9 @@ import pytest
 
 from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobRequest, StudyPackSourceSelection
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
-
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.StudyPacks.jobs import extract_study_pack_source_items
+from tldw_Server_API.app.core.StudyPacks.media_sections import plan_media_sections
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 
@@ -535,3 +538,104 @@ async def test_create_study_pack_from_request_passes_expected_version_when_super
 
     assert captured["pack_id"] == original_pack_id  # nosec B101
     assert captured["expected_version"] == 1  # nosec B101
+
+
+@pytest.mark.parametrize("selection_mode", ["all", "last", "stale", "empty", "empty_without_revision", "nonstudy_section", "bad_repair", "budget"])
+async def test_whole_media_pack_generates_cited_cards_through_the_end(
+    db: CharactersRAGDB,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    selection_mode: str,
+):
+    _, service_mod = _load_generation_modules()
+    media = MediaDatabase(db_path=str(tmp_path / "book.db"), client_id="study-pack-book")
+    first_chapter = "Chapter 1: Seedlings need light."
+    final_chapter = "Chapter 2: Seed banks preserve biodiversity."
+    book = "\n".join([first_chapter, "Plants respond to their environment. " * 500, final_chapter])
+    media_id, _, _ = media.add_media_with_keywords(
+        title="A study guide to plants",
+        content=book,
+        media_type="ebook",
+        keywords=[],
+    )
+    service = service_mod.StudyPackGenerationService(note_db=db, media_db=media, provider="openai", model="test")
+    (item,) = service.source_resolver.resolve([{"source_type": "media", "source_id": str(media_id)}]).items
+    revision, _ = plan_media_sections(item.evidence_text, 12_000)
+    locator = {}
+    indices = [0, 1]
+    if selection_mode not in {"all", "nonstudy_section", "bad_repair", "budget"}:
+        indices = [] if selection_mode.startswith("empty") else [1]
+        locator = {
+            "section_indices": [99] if selection_mode == "stale" else indices,
+            "section_revision": "stale" if selection_mode == "stale" else revision,
+        }
+    if selection_mode == "empty_without_revision":
+        locator.pop("section_revision")
+    request = StudyPackCreateJobRequest(
+        title="Plant study guide",
+        workspace_id="ws-1",
+        source_items=[StudyPackSourceSelection(source_type="media", source_id=str(media_id), locator=locator)],
+    )
+    passages: list[str] = []
+
+    async def generate(*, system_prompt: str, user_prompt: str):
+        bundle_json = user_prompt.split("Allowed source bundle:\n", 1)[1].split("\n\n", 1)[0]
+        excerpt = json.loads(bundle_json)["items"][0]["evidence_text"]
+        passages.append(excerpt)
+        if selection_mode == "bad_repair" and final_chapter in excerpt:
+            return '{"cards":[]}' if system_prompt.startswith("You repair") else "malformed response"
+        if selection_mode == "nonstudy_section" and final_chapter not in excerpt:
+            return '{"cards":[]}'
+        citation = excerpt.splitlines()[0][:96].strip()
+        return json.dumps({"cards": [{
+            "front": f"What is the focus of section {len(passages)}?",
+            "back": citation,
+            "citations": [{
+                "source_type": "media",
+                "source_id": str(media_id),
+                "citation_text": citation,
+                "locator": {"chunk_index": 99, "timestamp_seconds": 120},
+            }],
+        }]})
+
+    monkeypatch.setattr(service, "_call_generation_model", generate)
+    if selection_mode == "budget":
+        monkeypatch.setattr(service_mod, "MAX_STUDY_PACK_PASSES", 1)
+    try:
+        if selection_mode == "stale" or selection_mode.startswith("empty"):
+            match = "Review its sections" if selection_mode == "stale" else "Select at least one"
+            with pytest.raises(ValueError, match=match):
+                await service.create_from_request(request)
+            assert passages == []  # nosec B101
+            assert not db.get_deck_by_name("Plant study guide")  # nosec B101
+            return
+        if selection_mode == "budget":
+            with pytest.raises(ValueError, match="too many generation passes"):
+                await service.create_from_request(request)
+            assert not passages  # nosec B101
+            return
+        if selection_mode == "bad_repair":
+            with pytest.raises(ValueError, match="repair returned no cards"):
+                await service.create_from_request(request)
+            assert not db.get_deck_by_name("Plant study guide")  # nosec B101
+            return
+        result = await service.create_from_request(request)
+    finally:
+        media.close_connection()
+
+    expected_text = final_chapter if selection_mode == "last" else book
+    assert "".join("".join(passage.split()) for passage in passages) == "".join(expected_text.split())  # nosec B101
+    assert max(map(len, passages)) <= 12_000  # nosec B101
+    citation = db.list_flashcard_citations(result.card_uuids[-1])[0]
+    assert citation["citation_text"] == final_chapter  # nosec B101
+    saved_locator = json.loads(citation["locator"])
+    assert set(saved_locator) == {"media_id", "start_char", "end_char"}  # nosec B101
+    pack = db.get_study_pack(result.pack_id)
+    snapshot = pack["source_bundle_json"]
+    if isinstance(snapshot, str):
+        snapshot = json.loads(snapshot)
+    assert len(snapshot["items"][0]["evidence_text"]) <= 12_000  # nosec B101
+    (selection,) = extract_study_pack_source_items(snapshot)
+    assert "excerpt_text" not in selection  # nosec B101
+    assert selection["locator"]["section_indices"] == indices  # nosec B101
+    assert selection["locator"]["section_revision"] == revision  # nosec B101

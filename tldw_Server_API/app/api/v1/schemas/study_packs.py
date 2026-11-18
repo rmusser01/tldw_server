@@ -41,6 +41,19 @@ class StudyPackSummaryResponse(BaseModel):
         return value.isoformat() if isinstance(value, datetime) else value
 
 
+class StudyPackMediaSection(BaseModel):
+    index: int
+    title: str
+    character_count: int
+    generation_passes: int
+
+
+class StudyPackMediaSectionPreview(BaseModel):
+    revision: str
+    max_generation_passes: int
+    sections: list[StudyPackMediaSection]
+
+
 StudyPackJobApiStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 

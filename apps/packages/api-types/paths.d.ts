@@ -716,6 +716,7 @@ export type ApiPath =
   | "/api/v1/flashcards/source-review-plans/{plan_id}"
   | "/api/v1/flashcards/study-packs/jobs"
   | "/api/v1/flashcards/study-packs/jobs/{job_id}"
+  | "/api/v1/flashcards/study-packs/media/{media_id}/sections"
   | "/api/v1/flashcards/study-packs/{pack_id}"
   | "/api/v1/flashcards/study-packs/{pack_id}/regenerate"
   | "/api/v1/flashcards/tags"

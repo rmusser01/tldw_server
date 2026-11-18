@@ -150,6 +150,17 @@ export type StudyPackSourceSelection = {
   locator?: Record<string, unknown> | null
 }
 
+export type StudyPackMediaSectionsResponse = {
+  revision: string
+  max_generation_passes?: number
+  sections: Array<{
+    index: number
+    title: string
+    character_count: number
+    generation_passes?: number
+  }>
+}
+
 export type StudyPackCreateJobRequest = {
   title: string
   workspace_id?: string | null
@@ -1176,6 +1187,17 @@ export async function createStudyPackJob(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: sanitizeStudyPackRequest(request),
+    abortSignal: options?.signal
+  })
+}
+
+export async function getStudyPackMediaSections(
+  mediaId: string,
+  options?: { signal?: AbortSignal }
+): Promise<StudyPackMediaSectionsResponse> {
+  return await bgRequest<StudyPackMediaSectionsResponse, AllowedPath, "GET">({
+    path: `/api/v1/flashcards/study-packs/media/${encodeURIComponent(mediaId)}/sections`,
+    method: "GET",
     abortSignal: options?.signal
   })
 }

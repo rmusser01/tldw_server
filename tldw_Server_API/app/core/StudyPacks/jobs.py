@@ -160,7 +160,9 @@ def extract_study_pack_source_items(source_bundle_json: Any) -> list[dict[str, A
         if label:
             source_item["label"] = label
         locator = _compact_mapping(item.get("locator"))
-        excerpt_text = _clean_text(item.get("excerpt_text")) or _clean_text(item.get("evidence_text"))
+        excerpt_text = ""
+        if source_type != "media" or "section_indices" not in locator:
+            excerpt_text = _clean_text(item.get("excerpt_text")) or _clean_text(item.get("evidence_text"))
         if excerpt_text:
             excerpt_text, locator = _bound_regeneration_excerpt(excerpt_text, locator)
         if locator:
