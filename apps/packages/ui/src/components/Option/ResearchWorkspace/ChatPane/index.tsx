@@ -353,8 +353,7 @@ const findSourceIdFromCitation = (
 
   const citationMediaId = extractCitationMediaId(citation)
   if (citationMediaId !== null) {
-    const byMediaId = sources.find((source) => source.mediaId === citationMediaId)
-    if (byMediaId) return byMediaId.id
+    return sources.find((source) => source.mediaId === citationMediaId)?.id ?? null
   }
 
   const metadata = isRecord(citation.metadata) ? citation.metadata : null
@@ -2768,8 +2767,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         has_media_id: citationMediaId !== null
       })
       const matchedSourceId = findSourceIdFromCitation(citation, sources)
+      if (!matchedSourceId) return
       const focusedByMediaId = citationMediaId !== null && focusSourceByMediaId(citationMediaId)
-      if (!matchedSourceId || (!focusedByMediaId && !focusSourceById(matchedSourceId))) return
+      if (!focusedByMediaId && !focusSourceById(matchedSourceId)) return
 
       const excerpt = isRecord(citation)
         ? [citation.pageContent, citation.content, citation.text, citation.snippet].find(

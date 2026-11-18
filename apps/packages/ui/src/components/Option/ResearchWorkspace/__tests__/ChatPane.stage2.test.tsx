@@ -442,6 +442,32 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     expect(mockFocusSourceById).not.toHaveBeenCalled()
   })
 
+  it("keeps a historical citation from opening a replacement with the same title and URL", () => {
+    mockFocusSourceByMediaId.mockReturnValue(false)
+    const url = "https://example.test/report"
+    workspaceStoreState.sources = [
+      { id: "replacement", mediaId: 101, title: "Report", type: "pdf", url }
+    ]
+    messageOptionState.messages = [
+      {
+        id: "historical-answer",
+        isBot: true,
+        name: "Assistant",
+        message: "A historical answer",
+        sources: [
+          { name: "Report", content: "Original passage", url, metadata: { media_id: 42 } }
+        ]
+      }
+    ]
+
+    const openPreview = vi.fn()
+    renderChatPane(openPreview)
+    fireEvent.click(screen.getByRole("button", { name: "Open citation" }))
+
+    expect(openPreview).not.toHaveBeenCalled()
+    expect(mockFocusSourceById).not.toHaveBeenCalled()
+  })
+
   it("falls back to title-based source matching when citation media id is missing", () => {
     mockFocusSourceByMediaId.mockReturnValue(false)
     workspaceStoreState.sources = [
