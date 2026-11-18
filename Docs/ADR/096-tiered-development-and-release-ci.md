@@ -4,7 +4,7 @@
 **Date:** 2026-11-18
 **Decision owner:** Repository maintainer
 **Related task:** TASK-15572
-**Related plan:** [Server CI tiers](../Development/CI_REQUIRED_GATES.md#server-ci-tiers)
+**Related plan:** [Server CI tiers](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Development/CI_REQUIRED_GATES.md#server-ci-tiers)
 
 ## Decision
 
