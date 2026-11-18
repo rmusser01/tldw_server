@@ -72,7 +72,7 @@ def test_publish_pypi_workflow_runs_targeted_release_contract_gate() -> None:
     tests_step = _get_step(steps, "Run release contract tests")
     smoke_step = _get_step(steps, "Run minimal startup smoke")
 
-    assert ".github/workflows/publish-pypi.yml" in on["push"]["paths"]  # nosec B101
+    assert on["push"] == {"branches": ["main"]}  # nosec B101
     assert install_step["uses"] == "./.github/actions/setup-ffmpeg"  # nosec B101
     assert install_step["with"]["install-ffmpeg"] == "false"  # nosec B101
     assert install_step["with"]["install-portaudio"] == "true"  # nosec B101
@@ -87,12 +87,15 @@ def test_publish_pypi_workflow_runs_targeted_release_contract_gate() -> None:
 
 def test_publish_ghcr_main_workflow_remains_push_to_main_driven() -> None:
     workflow = _load(".github/workflows/publish-ghcr-main.yml")
-    on = _workflow_on(workflow)
-
-    assert "push" in on
-    assert on["push"] == {"branches": ["main"]}
-    assert "release" not in on
-    assert "workflow_dispatch" not in on
+    assert _workflow_on(workflow) == {"workflow_call": None}
+    caller = _load(".github/workflows/publish-pypi.yml")
+    assert _workflow_on(caller)["push"] == {"branches": ["main"]}
+    job = caller["jobs"]["rolling-image"]
+    assert job["uses"] == "./.github/workflows/publish-ghcr-main.yml"
+    assert job["needs"] == "qualify"
+    condition = job["if"]
+    for event, output, expected in (("push", "true", True), ("push", "", False), ("workflow_dispatch", "true", False)):
+        assert _evaluate(condition, {"github.event_name": event, "needs.qualify.outputs.qualified": output}) is expected
 
 
 def test_publish_ghcr_main_matrix_is_backend_only_during_frontend_freeze() -> None:
