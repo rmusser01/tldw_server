@@ -82,6 +82,18 @@ def reload_app_main() -> ModuleType:
     return set_app_main(imported)
 
 
+def snapshot_app_main_namespace(module: ModuleType | None) -> dict | None:
+    """Shallow copy of ``module.__dict__``: what an in-place reload overwrites."""
+    return dict(module.__dict__) if module is not None else None
+
+
+def restore_app_main_namespace(module: ModuleType, saved: dict) -> None:
+    """Undo ``importlib.reload(module)``: put every global back, drop new ones."""
+    for name in [n for n in vars(module) if n not in saved]:
+        delattr(module, name)
+    vars(module).update(saved)
+
+
 @contextlib.contextmanager
 def app_main_isolated() -> Iterator[None]:
     """Confine an app-main reload to this block.
@@ -110,10 +122,17 @@ def app_main_isolated() -> Iterator[None]:
         stays).
     """
     snapshot = snapshot_app_main()
+    saved = snapshot_app_main_namespace(snapshot)
     try:
         yield
     finally:
         current = snapshot_app_main()
+        # ``importlib.reload(app_main)`` keeps the module object, so the identity
+        # check below cannot see it; it rebinds ``app`` (and every other global)
+        # in place. Later tests then import the rebuilt app, whose routes need
+        # not match the ones they override.
+        if saved is not None and current is snapshot and getattr(snapshot, "app", None) is not saved.get("app"):
+            restore_app_main_namespace(snapshot, saved)
         # An ordinary first import is not a swap: nothing held an earlier app
         # to split from. Unloading it made every later test re-import app.main,
         # leaking a whole FastAPI app per test until shards crawled into the CI
