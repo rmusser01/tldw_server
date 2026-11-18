@@ -48,15 +48,6 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
 )
 
 from . import audio_tts as audio_tts
-import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
-import tldw_Server_API.app.core.Audio.streaming_service as _streaming_service
-import tldw_Server_API.app.core.Audio.tokenizer_service as _tokenizer_service
-import tldw_Server_API.app.core.Audio.tts_service as _tts_service
-import tldw_Server_API.app.core.Chat.chat_helpers as _chat_helpers
-import tldw_Server_API.app.core.Metrics.metrics_manager as _metrics_manager
-import tldw_Server_API.app.core.Storage.generated_file_helpers as _generated_file_helpers
-import tldw_Server_API.app.core.Usage.audio_quota as _audio_quota
-import tldw_Server_API.app.core.config_llm_providers as _config_llm_providers
 
 # Endpoint helpers that tests patch at package scope.
 create_speech = audio_tts.create_speech
@@ -211,11 +202,7 @@ __all__ = sorted(
     if not name.startswith("_")
     or name
     in {
-        "_audio_ws_authenticate",
-        "_get_qwen3_tokenizer_settings",
-        "_load_qwen3_tokenizer",
         "_resolve_tts_byok",
-        "_sanitize_speech_request",
         "_stream_tts_to_websocket",
         "_tts_fallback_resolver",
     }

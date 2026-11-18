@@ -70,7 +70,6 @@ from tldw_Server_API.app.core.Prompt_Management.optimization_model_config import
     normalize_optimization_strategy,
 )
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.job_types import JobType
-from tldw_Server_API.app.core.Prompt_Management.prompt_studio.jobs_adapter import PromptStudioJobsAdapter
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 

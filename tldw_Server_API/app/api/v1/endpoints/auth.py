@@ -144,9 +144,6 @@ from tldw_Server_API.app.services.auth_service import (
     fetch_user_by_email_for_verification as _svc_fetch_user_by_email_for_verification,
 )
 from tldw_Server_API.app.services.auth_service import (
-    mark_user_verified as _svc_mark_user_verified,
-)
-from tldw_Server_API.app.services.auth_service import (
     store_password_reset_token as _svc_store_password_reset_token,
 )
 from tldw_Server_API.app.services.auth_service import (
