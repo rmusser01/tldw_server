@@ -312,11 +312,11 @@ class WorkflowsSchedulerDB:
             json.dumps(inputs or {}),
             run_mode,
             validation_mode,
-            1 if enabled else 0,
-            1 if require_online else 0,
+            bool(enabled),
+            bool(require_online),
             concurrency_mode,
             int(misfire_grace_sec),
-            1 if coalesce else 0,
+            bool(coalesce),
             0,
             acp_config_json,
             None,
@@ -343,15 +343,9 @@ class WorkflowsSchedulerDB:
             if k == "inputs":
                 fields.append("inputs_json = ?")
                 params.append(json.dumps(v or {}))
-            elif k == "enabled":
-                fields.append("enabled = ?")
-                params.append(1 if bool(v) else 0)
-            elif k == "require_online":
-                fields.append("require_online = ?")
-                params.append(1 if bool(v) else 0)
-            elif k == "coalesce":
-                fields.append("coalesce = ?")
-                params.append(1 if bool(v) else 0)
+            elif k in {"enabled", "require_online", "coalesce"}:
+                fields.append(f"{k} = ?")
+                params.append(bool(v))
             elif k == "acp_config_json":
                 fields.append("acp_config_json = ?")
                 # Accept dict (serialize) or str/None (store as-is)

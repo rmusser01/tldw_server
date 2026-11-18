@@ -6,7 +6,7 @@ Provides a lightweight recurring scheduler (cron-based) that enqueues
 in the Workflows Scheduler DB.
 
 Env:
-  WORKFLOWS_SCHEDULER_ENABLED=true   -> start service at app startup
+  WORKFLOWS_SCHEDULER_ENABLED=false  -> opt out of startup (enabled by default)
   WORKFLOWS_SCHEDULER_TZ=<IANA>      -> default timezone (e.g., UTC)
 """
 
@@ -758,8 +758,7 @@ def get_workflows_scheduler() -> _WFRecurringScheduler:
 
 
 async def start_workflows_scheduler() -> asyncio.Task | None:
-    enabled = env_flag_enabled("WORKFLOWS_SCHEDULER_ENABLED")
-    if not enabled:
+    if not env_flag_enabled("WORKFLOWS_SCHEDULER_ENABLED", default=True):
         return None
     svc = get_workflows_scheduler()
     await svc.start()
