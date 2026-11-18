@@ -487,8 +487,9 @@ class _WFRecurringScheduler:
         try:
             next_run = job.next_run_time
             stored_next = schedule.next_run_at
-            if isinstance(stored_next, str):
-                stored_next = datetime.fromisoformat(stored_next)
+            if stored_next is not None:
+                with contextlib.suppress(ValueError):
+                    stored_next = datetime.fromisoformat(stored_next)
             if next_run is not None and next_run != stored_next:
                 self._get_db(user_id).set_history(schedule.id, next_run_at=next_run.isoformat())
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:

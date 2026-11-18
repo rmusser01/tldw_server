@@ -278,7 +278,10 @@ class WorkflowsSchedulerDB:
                     out.append(dict(row))  # type: ignore[arg-type]
                 except Exception:
                     out.append({})
-        return out
+        return [
+            {key: value.isoformat() if isinstance(value, datetime) else value for key, value in row.items()}
+            for row in out
+        ]
 
     def create_schedule(
         self,
