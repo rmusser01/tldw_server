@@ -3895,7 +3895,12 @@ async def create_chat_completion(
 
             # Slash command handling: compute, moderate, then optionally inject
             try:
-                if command_router.commands_enabled() and request_data and request_data.messages:
+                if (
+                    media_analysis_id is None
+                    and command_router.commands_enabled()
+                    and request_data
+                    and request_data.messages
+                ):
                     # Locate the most recent user message text
                     last_user_idx = None
                     last_text = None
