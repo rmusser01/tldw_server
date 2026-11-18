@@ -20,6 +20,7 @@ Implement the approved notebook layout in the existing shared owner workspace so
 - [x] #2 Compact header, source organization and contextual chat controls reclaim reading space while preserving existing actions and recovery.
 - [x] #3 Studio leads with saved outputs, exposes generation on demand and avoids fixed empty sections.
 - [x] #4 Verify owner workspace behavior, shared-client contracts and desktop/tablet/phone rendering.
+- [x] #5 Verify real selected-source retrieval, cited passage preview, and generated Studio output with the local model.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -29,6 +30,8 @@ ADR check: no new ADR. Docs/ADR/007-research-workspace-canonical-first-slice-she
 Approved mockup reviewed 2026-11-17. Implementation in codex/research-notebook-layout. Verify existing linked WebUI/extension contract. Stages and objectives in IMPLEMENTATION_PLAN_research_notebook_layout.md during development.
 Implemented the shell and pane changes. Browser checks cover source intake, keyboard RAG, tablet citation preview with draft preservation, Quick Notes keyboard focus, Review/Download, generation cancellation/reload Retry, desktop restore rails and Chrome extension parity. Independent review found first-visit Studio discussion, cross-workspace draft isolation, and constrained-width tour targets; fixing and verifying all three before delivery.
 Independent review fixes verified. Chat receives Studio discussions on first entry, drafts are scoped to the active chat, and every workspace tour pane has a visible tab fallback. The shared workspace and tutorial suite passed 1,530 tests across 83 files. Chromium passed all 18 WebUI browser workflows together, including desktop/tablet/phone navigation and light/dark composer readability. The production Chrome extension build and its shared parity workflow passed. Frontend TypeScript, scoped ESLint, and git diff --check passed. Bandit ran on the touched scope, with zero Python lines and zero findings. Live provider and real-backend generation were not exercised. User-facing guidance and tour targets were updated in the UI.
+Follow-up requested live-backend verification using isolated test data and a real local inference server.
+Live follow-up passed all five selected Chromium workflows in one run (2.0 minutes, zero skips). Used the real FastAPI service, Qwen2.5-0.5B-Instruct via local llama.cpp, and installed all-MiniLM-L6-v2 embeddings. Grounded chat returned 37 blue herons from the selected document, omitted the distractor from retrieval, and opened the correct source and quoted passage. Workspace search found the live conversation. The saved Studio comparison matched the real completion. Quiz questions and flashcards were persisted and their workspace/general visibility and record IDs checked. Fixed an early pass on streaming status and an obsolete flashcard modal selector in the live tests. TypeScript, scoped ESLint and diff checks passed. Bandit has no Python scope in this follow-up. No production code changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
