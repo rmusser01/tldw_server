@@ -1,5 +1,5 @@
 ---
-id: TASK-15571
+id: TASK-15573
 title: Give Research Workspace a compact notebook layout
 status: Done
 labels:
@@ -42,6 +42,7 @@ Repeated live verification with the OpenAI key specifically designated by the us
 User requested root-cause repairs for the Luna HTTP 400, false flashcard-verification rejection, and misleading Workspace Readiness source state. Keep provider handling in the existing adapter boundary and retain evidence validation and workspace capability contracts.
 Root causes confirmed in browser traces and failing regression tests. Luna inherited token and sampling fields rejected by GPT-6 reasoning. Reused the native OpenAI request normalization from 2355113b80 with streaming, non-streaming, legacy model and explicit reasoning tests. The flashcard judge received a fixed 480-character prefix that cut off the supporting passage. Semantic claims now select overlapping, relevant passages while still requiring the judge to verify the question and answer together. Concurrent source reconciliations let an older empty selection overwrite the newer selection after readiness fetched. Writes now run in order and the page refreshes readiness after saving. An empty selection no longer counts as a source failure. Existing decisions ADR-007 and ADR-025 govern the same workspace and adapter boundaries.
 Live verification on the notebook branch with the Chatbook OpenAI key, gpt-6-luna and queued execution off covered all five workflows across runs: selected-source chat and cited passage, comparison, search, quiz persistence and flashcard persistence. The grounded trace recorded one selected source and grounded readiness after the write. Flashcards passed with the original source pair. A local per-excerpt NLI contradiction on a cross-source artifact now goes to the full-evidence judge, with ambiguity remaining blocked. The quiz verification fixture now contains two factual survey notes after the old placeholder fixture elicited an unsupported explanation that the guard correctly blocked. Targeted final backend suite: 145 passed. Targeted final WebUI suite: 71 passed. Bandit found zero issues on changed lines. Evidence: /private/tmp/rw-root-fix.gU9icp.
+Renumbered before opening the dev PR because dev assigned TASK-15571 to the provider-model allowlist.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
