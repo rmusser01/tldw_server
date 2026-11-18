@@ -40,7 +40,7 @@ const {
 
   return {
     mockGetMediaDetails: vi.fn(),
-    useWorkspaceStoreMock: vi.fn(),
+    useWorkspaceStoreMock: Object.assign(vi.fn(), { getState: () => testState }),
     workspaceStorage: storage,
     workspaceStorageItems: storageItems
   }
@@ -54,7 +54,7 @@ const testState = {
   workspaceId: "workspace-1",
   workspaceName: "Workspace One",
   initializeWorkspace: vi.fn(),
-  duplicateWorkspace: vi.fn(),
+  duplicateWorkspace: vi.fn<(id: string) => string | null>(),
   addSources: vi.fn(),
   setSelectedSourceIds: vi.fn(),
   captureToCurrentNote: vi.fn(),
@@ -294,6 +294,7 @@ describe("ResearchWorkspace stage 9 persistence resilience", () => {
   })
 
   it("shows changed field hints and can fork workspace from conflict banner", async () => {
+    testState.duplicateWorkspace.mockReturnValueOnce(null).mockReturnValueOnce("forked-workspace")
     render(<ResearchWorkspace />)
 
     dispatchWorkspaceStorageUpdate(
@@ -317,8 +318,12 @@ describe("ResearchWorkspace stage 9 persistence resilience", () => {
       await screen.findByText("Changed fields: sources, chat history")
     ).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Save as new workspace" }))
+    const fork = screen.getByRole("button", { name: "Save as new workspace" })
+    fireEvent.click(fork)
     expect(testState.duplicateWorkspace).toHaveBeenCalledWith("workspace-1")
+    expect(screen.getByTestId("workspace-storage-sync-banner")).toBeInTheDocument()
+    fireEvent.click(fork)
+    expect(testState.duplicateWorkspace).toHaveBeenCalledTimes(2)
     await waitFor(() => {
       expect(
         screen.queryByTestId("workspace-storage-sync-banner")
