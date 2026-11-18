@@ -18,6 +18,7 @@ from tldw_Server_API.app.api.v1.schemas.media_response_models import (
 from tldw_Server_API.app.api.v1.utils.cache import generate_etag, is_not_modified
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_DELETE, MEDIA_UPDATE
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
+    fetch_keywords_for_media,
     get_media_by_id,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
