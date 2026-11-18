@@ -62,7 +62,7 @@ async def _submit_job_and_convert(
 
     monkeypatch.setattr("tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _resolve_tts_byok)
-    monkeypatch.setattr(audio_tts, "preflight_gateway_speech", _preflight_gateway_speech)
+    monkeypatch.setattr("tldw_Server_API.app.core.TTS.gateway_preflight.preflight_gateway_speech", _preflight_gateway_speech)
     job_manager = _CapturingJobManager()
 
     await audio_tts.create_speech_job(

@@ -166,7 +166,7 @@ async def billing_api(tmp_path, monkeypatch):
     async def _fake_get_db_pool() -> DatabasePool:
         return pool
 
-    monkeypatch.setattr(billing_endpoints, "get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
     app.dependency_overrides[get_auth_principal] = _admin_principal_override
     reset_lifecycle_state(app)
     try:

@@ -22,7 +22,6 @@ from fastapi.routing import APIRoute
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    check_rate_limit,
     get_auth_principal,
 )
 from tldw_Server_API.app.api.v1.schemas.admin_webhooks import (
@@ -55,8 +54,6 @@ from tldw_Server_API.app.core.Admin_Webhooks.audit import (
     DeliveryMutationAuditSink,
     MutationAudit,
     MutationAuditSink,
-    emit_mandatory_webhook_audit,
-    emit_mandatory_webhook_delivery_audit,
     validate_actor_kind,
     validate_actor_principal_id,
     validate_actor_roles,
@@ -67,7 +64,6 @@ from tldw_Server_API.app.core.Admin_Webhooks.control_plane import (
     PatchRegistrationCommand,
     RegistrationChanges,
     RotateSecretCommand,
-    get_admin_webhook_control_plane,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.delivery import (
     AdminWebhookDeliveryService,
@@ -91,6 +87,9 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     MandatoryAuditWriteError,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
+import tldw_Server_API.app.core.Admin_Webhooks.audit as _audit
+import tldw_Server_API.app.core.Admin_Webhooks.control_plane as _control_plane
 
 _DOMAIN_ERRORS: dict[WebhookErrorCode, tuple[int, str]] = {
     WebhookErrorCode.VALIDATION_FAILED: (422, "Webhook request validation failed"),
@@ -199,7 +198,7 @@ def _request_id(request: Request) -> str:
 async def _enforce_admin_webhook_rate_limit(request: Request) -> None:
     """Apply the shared ingress guard without exposing its legacy test hook."""
 
-    await check_rate_limit(request)
+    await _auth_deps.check_rate_limit(request)
 
 
 def _webhook_error_response(
@@ -359,7 +358,7 @@ def _build_webhook_audit_sink(
     async def sink(record: MutationAudit) -> None:
         if record.actor_id != actor_id or record.request_id != request_id:
             raise MandatoryAuditWriteError("Mandatory audit identity mismatch")
-        await emit_mandatory_webhook_audit(
+        await _audit.emit_mandatory_webhook_audit(
             record,
             actor_principal_id=principal_id,
             actor_kind=actor_kind,
@@ -383,7 +382,7 @@ def _build_delivery_audit_sink(
         if record.actor_id != actor_id or record.request_id != request_id:
             raise WebhookError(WebhookErrorCode.AUDIT_UNAVAILABLE)
         try:
-            await emit_mandatory_webhook_delivery_audit(record)
+            await _audit.emit_mandatory_webhook_delivery_audit(record)
         except Exception:  # noqa: BLE001 - mandatory adapter is fail closed
             raise WebhookError(WebhookErrorCode.AUDIT_UNAVAILABLE) from None
 
@@ -601,7 +600,7 @@ async def get_webhook_status(
     _require_platform_admin(principal)
     request_id = _request_id(request)
     try:
-        service = await get_admin_webhook_control_plane()
+        service = await _control_plane.get_admin_webhook_control_plane()
         status = await service.status()
     except Exception as exc:
         await _audit_read_failure(
@@ -631,7 +630,7 @@ async def get_webhook_catalog(
     _require_platform_admin(principal)
     request_id = _request_id(request)
     try:
-        service = await get_admin_webhook_control_plane()
+        service = await _control_plane.get_admin_webhook_control_plane()
         catalog = await service.catalog()
     except Exception as exc:
         await _audit_read_failure(
@@ -668,7 +667,7 @@ async def list_webhooks(
     _require_platform_admin(principal)
     request_id = _request_id(request)
     try:
-        service = await get_admin_webhook_control_plane()
+        service = await _control_plane.get_admin_webhook_control_plane()
         page = await service.list_page(limit=limit, offset=offset)
     except Exception as exc:
         await _audit_read_failure(
@@ -725,7 +724,7 @@ async def create_webhook(
         principal=principal,
         actor_id=actor_id,
     )
-    service = await get_admin_webhook_control_plane()
+    service = await _control_plane.get_admin_webhook_control_plane()
     result = await service.create(
         CreateRegistrationCommand(
             actor_id=actor_id,
@@ -1068,7 +1067,7 @@ async def rotate_webhook_secret(
         principal=principal,
         actor_id=actor_id,
     )
-    service = await get_admin_webhook_control_plane()
+    service = await _control_plane.get_admin_webhook_control_plane()
     result = await service.rotate_secret(
         RotateSecretCommand(
             actor_id=actor_id,
@@ -1103,7 +1102,7 @@ async def get_webhook(
     _require_platform_admin(principal)
     request_id = _request_id(request)
     try:
-        service = await get_admin_webhook_control_plane()
+        service = await _control_plane.get_admin_webhook_control_plane()
         registration = await service.get(webhook_id)
     except Exception as exc:
         await _audit_read_failure(
@@ -1150,7 +1149,7 @@ async def patch_webhook(
         principal=principal,
         actor_id=actor_id,
     )
-    service = await get_admin_webhook_control_plane()
+    service = await _control_plane.get_admin_webhook_control_plane()
     result = await service.patch(
         PatchRegistrationCommand(
             actor_id=actor_id,
@@ -1183,7 +1182,7 @@ async def delete_webhook(
         principal=principal,
         actor_id=actor_id,
     )
-    service = await get_admin_webhook_control_plane()
+    service = await _control_plane.get_admin_webhook_control_plane()
     result = await service.delete(
         DeleteRegistrationCommand(
             actor_id=actor_id,

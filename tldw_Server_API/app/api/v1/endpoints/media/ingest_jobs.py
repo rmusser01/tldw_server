@@ -41,7 +41,6 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
-    save_uploaded_files,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
@@ -51,6 +50,7 @@ from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from tldw_Server_API.app.services.worker_startup_policy import media_ingest_heavy_worker_available
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+import tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing as _input_sourcing
 
 router = APIRouter()
 
@@ -720,7 +720,7 @@ async def submit_media_ingest_jobs(
             try:
                 with TempDirManager(prefix="media_ingest_job_", cleanup=False) as temp_dir:
                     temp_dir_path = str(temp_dir)
-                    saved_files, file_errors = await save_uploaded_files(
+                    saved_files, file_errors = await _input_sourcing.save_uploaded_files(
                         [upload],
                         temp_dir=temp_dir,
                         validator=file_validator_instance,

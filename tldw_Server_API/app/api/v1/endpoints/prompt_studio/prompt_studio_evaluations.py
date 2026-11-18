@@ -47,11 +47,6 @@ from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import Database
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
-from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
-from tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager import EvaluationManager
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
-    derive_trusted_credential_scope,
-)
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     record_byok_missing_credentials,
@@ -64,16 +59,18 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
     ProviderCredentialRuntime,
     mark_provider_credential_used,
 )
-from tldw_Server_API.app.core.testing import is_test_context, is_test_mode
 
 router = APIRouter(prefix="/api/v1/prompt-studio", tags=["prompt-studio"])
 
 from tldw_Server_API.app.core.Logging.log_context import (
-    ensure_request_id,
-    ensure_traceparent,
-    get_ps_logger,
     log_context,
 )
+import tldw_Server_API.app.core.LLM_Calls.provider_metadata as _provider_metadata
+import tldw_Server_API.app.core.Logging.log_context as _log_context
+import tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager as _evaluation_manager
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
+import tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime as _provider_credential_runtime
+import tldw_Server_API.app.core.testing as _testing
 
 _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -215,7 +212,7 @@ async def create_evaluation(
     Returns:
         Created evaluation response
     """
-    credential_runtime: ProviderCredentialRuntime | None = None
+    credential_runtime: _provider_credential_runtime.ProviderCredentialRuntime | None = None
     credential_runtime_transferred = False
     try:
         _, project_id = authoritative_prompt_project(
@@ -309,11 +306,11 @@ async def create_evaluation(
             user_id_int = None
 
         runtime_user_id, team_ids, org_ids, trusted_base_url_override = (
-            derive_trusted_credential_scope(request, None)
+            _byok_helpers.derive_trusted_credential_scope(request, None)
         )
         if runtime_user_id is None:
             runtime_user_id = user_id_int
-        credential_runtime = ProviderCredentialRuntime(
+        credential_runtime = _provider_credential_runtime.ProviderCredentialRuntime(
             user_id=runtime_user_id,
             team_ids=team_ids,
             org_ids=org_ids,
@@ -334,12 +331,12 @@ async def create_evaluation(
             )
 
         if (
-            provider_requires_api_key(provider_key)
+            _provider_metadata.provider_requires_api_key(provider_key)
             and not _prompt_studio_provider_auth_is_resolved(
                 provider_key,
                 provider_credentials,
             )
-            and not is_test_context()
+            and not _testing.is_test_context()
         ):
             record_byok_missing_credentials(provider_key, operation="prompt_studio")
             raise HTTPException(
@@ -351,7 +348,7 @@ async def create_evaluation(
             )
 
         # Use EvaluationManager for sync path; for async we create a record and update later
-        eval_manager = EvaluationManager(db)
+        eval_manager = _evaluation_manager.EvaluationManager(db)
 
         if getattr(evaluation, 'run_async', False):
             # Create a pending evaluation record tied to this request
@@ -370,9 +367,9 @@ async def create_evaluation(
 
             # In test environments, run inline to ensure timely completion for polling tests
             import os as _os
-            if _os.getenv("PYTEST_CURRENT_TEST") or is_test_mode():
-                req_id = ensure_request_id(request) if request is not None else None
-                tp = ensure_traceparent(request) if request is not None else ""
+            if _os.getenv("PYTEST_CURRENT_TEST") or _testing.is_test_mode():
+                req_id = _log_context.ensure_request_id(request) if request is not None else None
+                tp = _log_context.ensure_traceparent(request) if request is not None else ""
                 credential_runtime_transferred = True
                 await run_evaluation_async(
                     eval_id,
@@ -401,8 +398,8 @@ async def create_evaluation(
             else:
                 # Schedule via FastAPI BackgroundTasks for normal operation.
                 # Propagate request_id/traceparent for log correlation.
-                req_id = ensure_request_id(request) if request is not None else None
-                tp = ensure_traceparent(request) if request is not None else ""
+                req_id = _log_context.ensure_request_id(request) if request is not None else None
+                tp = _log_context.ensure_traceparent(request) if request is not None else ""
                 background_tasks.add_task(
                     run_evaluation_async,
                     eval_id,
@@ -463,9 +460,9 @@ async def create_evaluation(
     except ByokResolutionError as e:
         raise_detached_error(_prompt_studio_credential_http_exception(e))
     except DatabaseError as e:
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request) if request is not None else ""
-        get_ps_logger(
+        rid = _log_context.ensure_request_id(request) if request is not None else None
+        tp = _log_context.ensure_traceparent(request) if request is not None else ""
+        _log_context.get_ps_logger(
             request_id=rid,
             ps_component="endpoint",
             ps_job_kind="evaluations",
@@ -479,9 +476,9 @@ async def create_evaluation(
             )
         )
     except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request) if request is not None else ""
-        get_ps_logger(
+        rid = _log_context.ensure_request_id(request) if request is not None else None
+        tp = _log_context.ensure_traceparent(request) if request is not None else ""
+        _log_context.get_ps_logger(
             request_id=rid,
             ps_component="endpoint",
             ps_job_kind="evaluations",
@@ -594,7 +591,7 @@ async def list_evaluations(
     await require_project_access(project_id, user_context=user_context, db=db)
     try:
         # Use EvaluationManager to list evaluations
-        eval_manager = EvaluationManager(db)
+        eval_manager = _evaluation_manager.EvaluationManager(db)
 
         # Convert the public offset contract onto the manager's page API without
         # returning rows before the requested offset.
@@ -639,9 +636,9 @@ async def list_evaluations(
         }
 
     except DatabaseError as e:
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request) if request is not None else ""
-        get_ps_logger(
+        rid = _log_context.ensure_request_id(request) if request is not None else None
+        tp = _log_context.ensure_traceparent(request) if request is not None else ""
+        _log_context.get_ps_logger(
             request_id=rid,
             ps_component="endpoint",
             ps_job_kind="evaluations",
@@ -655,9 +652,9 @@ async def list_evaluations(
             )
         )
     except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request) if request is not None else ""
-        get_ps_logger(
+        rid = _log_context.ensure_request_id(request) if request is not None else None
+        tp = _log_context.ensure_traceparent(request) if request is not None else ""
+        _log_context.get_ps_logger(
             request_id=rid,
             ps_component="endpoint",
             ps_job_kind="evaluations",
@@ -723,9 +720,9 @@ async def get_evaluation(
     except HTTPException:
         raise
     except DatabaseError as e:
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request) if request is not None else ""
-        get_ps_logger(
+        rid = _log_context.ensure_request_id(request) if request is not None else None
+        tp = _log_context.ensure_traceparent(request) if request is not None else ""
+        _log_context.get_ps_logger(
             request_id=rid,
             ps_component="endpoint",
             ps_job_kind="evaluations",
@@ -739,9 +736,9 @@ async def get_evaluation(
             )
         )
     except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request) if request is not None else ""
-        get_ps_logger(
+        rid = _log_context.ensure_request_id(request) if request is not None else None
+        tp = _log_context.ensure_traceparent(request) if request is not None else ""
+        _log_context.get_ps_logger(
             request_id=rid,
             ps_component="endpoint",
             ps_job_kind="evaluations",
@@ -780,9 +777,9 @@ async def delete_evaluation(
     except HTTPException:
         raise
     except DatabaseError as e:
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request) if request is not None else ""
-        get_ps_logger(
+        rid = _log_context.ensure_request_id(request) if request is not None else None
+        tp = _log_context.ensure_traceparent(request) if request is not None else ""
+        _log_context.get_ps_logger(
             request_id=rid,
             ps_component="endpoint",
             ps_job_kind="evaluations",
@@ -796,9 +793,9 @@ async def delete_evaluation(
             )
         )
     except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request) if request is not None else ""
-        get_ps_logger(
+        rid = _log_context.ensure_request_id(request) if request is not None else None
+        tp = _log_context.ensure_traceparent(request) if request is not None else ""
+        _log_context.get_ps_logger(
             request_id=rid,
             ps_component="endpoint",
             ps_job_kind="evaluations",
@@ -938,7 +935,7 @@ async def run_evaluation_async(
             provider_key = provider_name
 
             if credential_runtime is None:
-                credential_runtime = ProviderCredentialRuntime(
+                credential_runtime = _provider_credential_runtime.ProviderCredentialRuntime(
                     user_id=user_id,
                     team_ids=None,
                     org_ids=None,
@@ -960,16 +957,16 @@ async def run_evaluation_async(
                 )
 
             if (
-                provider_requires_api_key(provider_key)
+                _provider_metadata.provider_requires_api_key(provider_key)
                 and not _prompt_studio_provider_auth_is_resolved(
                     provider_key,
                     provider_credentials,
                 )
-                and not is_test_context()
+                and not _testing.is_test_context()
             ):
                 raise RuntimeError(f"Provider '{provider_name}' requires an API key.")
 
-            eval_manager = EvaluationManager(db)
+            eval_manager = _evaluation_manager.EvaluationManager(db)
             result = await eval_manager.run_evaluation_with_existing_record(
                 evaluation_id=evaluation_id,
                 prompt_id=int(prompt_id),
@@ -994,7 +991,7 @@ async def run_evaluation_async(
             )
 
     except asyncio.CancelledError:
-        cancellation_log = get_ps_logger(
+        cancellation_log = _log_context.get_ps_logger(
             request_id=request_id,
             ps_component="evaluation_bg",
             ps_job_kind="evaluations",
@@ -1015,7 +1012,7 @@ async def run_evaluation_async(
         raise
     except LLMQuotaExceededError:
         # EvaluationManager has marked the record failed with llm_quota_exceeded.
-        get_ps_logger(
+        _log_context.get_ps_logger(
             request_id=request_id,
             ps_component="evaluation_bg",
             ps_job_kind="evaluations",
@@ -1023,7 +1020,7 @@ async def run_evaluation_async(
         ).info("PS evaluation.async.refused evaluation_id={}", evaluation_id)
     except (ByokResolutionError, *_PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS) as e:
         safe_error = sanitized_provider_stream_exception(e)
-        get_ps_logger(
+        _log_context.get_ps_logger(
             request_id=request_id,
             ps_component="evaluation_bg",
             ps_job_kind="evaluations",

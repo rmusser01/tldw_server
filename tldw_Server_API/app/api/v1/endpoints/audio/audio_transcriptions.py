@@ -23,8 +23,6 @@ from tldw_Server_API.app.api.v1.API_Deps.billing_deps import get_billing_org_id,
 from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.Billing.enforcement import (
     LimitCategory,
-    enforcement_enabled,
-    get_billing_enforcer,
 )
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
@@ -46,7 +44,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import
     apply_transcript_text_policy,
     build_audio_retention_decision,
     redact_timed_segments,
-    resolve_effective_stt_policy,
     retain_stt_audio_artifact,
 )
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
@@ -63,6 +60,8 @@ import tldw_Server_API.app.core.Usage.audio_quota as _audio_quota
 from tldw_Server_API.app.core.Usage.audio_quota import (
     consume_daily_minutes_with_compat,
 )
+import tldw_Server_API.app.core.Billing.enforcement as _enforcement
+import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy as _stt_policy
 
 TRANSCRIPTIONS_KEY = "limits.audio_concurrent_transcriptions"
 
@@ -605,7 +604,7 @@ async def create_transcription(
     temp_audio_path = None
     canonical_path = None
     try:
-        effective_stt_policy = await resolve_effective_stt_policy(
+        effective_stt_policy = await _stt_policy.resolve_effective_stt_policy(
             principal=principal,
             user_id=int(current_user.id) if getattr(current_user, "id", None) is not None else None,
             db=db,
@@ -876,10 +875,10 @@ async def create_transcription(
             )
         # Secondary billing check with the real minute estimate (the dependency
         # pre-check only gates on 1 unit to verify the org has *any* quota).
-        if enforcement_enabled() and billing_org_id is not None and minutes_est > 1:
+        if _enforcement.enforcement_enabled() and billing_org_id is not None and minutes_est > 1:
             _real_units = max(1, int(math.ceil(minutes_est)))
             try:
-                _enforcer = get_billing_enforcer()
+                _enforcer = _enforcement.get_billing_enforcer()
                 _recheck = await _enforcer.check_limit(
                     billing_org_id,
                     LimitCategory.TRANSCRIPTION_MINUTES_MONTH,
@@ -1104,10 +1103,10 @@ async def create_transcription(
             redaction_outcome = "skipped"
 
         # Billing: record actual transcription minutes to org-level enforcement
-        if enforcement_enabled() and billing_org_id is not None and minutes_est > 0:
+        if _enforcement.enforcement_enabled() and billing_org_id is not None and minutes_est > 0:
             _billed_minutes = max(1, int(math.ceil(minutes_est)))
             try:
-                get_billing_enforcer().apply_usage_delta(
+                _enforcement.get_billing_enforcer().apply_usage_delta(
                     billing_org_id,
                     LimitCategory.TRANSCRIPTION_MINUTES_MONTH,
                     _billed_minutes,

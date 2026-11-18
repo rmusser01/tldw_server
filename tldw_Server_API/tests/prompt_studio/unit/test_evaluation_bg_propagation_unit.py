@@ -659,8 +659,7 @@ async def test_direct_prompt_checks_authoritative_project_before_runtime_constru
         lambda _provider: False,
     )
     monkeypatch.setattr(
-        prompt_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         _deny_project,
         raising=False,
     )
@@ -1358,8 +1357,7 @@ def test_evaluation_async_add_task_receives_request_id(app, monkeypatch, overrid
             return None
 
     monkeypatch.setattr(
-        eval_ep,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: _IsolatedRuntime(),
         raising=True,
     )
@@ -1536,25 +1534,22 @@ async def test_evaluation_endpoint_retries_explicit_false_provider_mark(
 
     runtime = _Runtime()
     monkeypatch.setattr(
-        eval_endpoint,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: runtime,
     )
-    monkeypatch.setattr(eval_endpoint, "EvaluationManager", _Manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager.EvaluationManager", _Manager)
     monkeypatch.setattr(
-        eval_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda *_args: (1, [], [], False),
     )
     monkeypatch.setattr(
-        eval_endpoint,
-        "provider_requires_api_key",
+        "tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key",
         lambda _provider: False,
     )
-    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
-    monkeypatch.setattr(eval_endpoint, "is_test_mode", lambda: False)
-    monkeypatch.setattr(eval_endpoint, "ensure_request_id", lambda _request: "req-1")
-    monkeypatch.setattr(eval_endpoint, "ensure_traceparent", lambda _request: "")
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_context", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Logging.log_context.ensure_request_id", lambda _request: "req-1")
+    monkeypatch.setattr("tldw_Server_API.app.core.Logging.log_context.ensure_traceparent", lambda _request: "")
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
     background_tasks = _CapturedBackgroundTasks()
@@ -1640,16 +1635,14 @@ async def test_evaluation_binds_prompt_and_cases_before_runtime_construction(
                 "metrics": {},
             }
 
-    monkeypatch.setattr(eval_endpoint, "ProviderCredentialRuntime", _Runtime)
-    monkeypatch.setattr(eval_endpoint, "EvaluationManager", _Manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", _Runtime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager.EvaluationManager", _Manager)
     monkeypatch.setattr(
-        eval_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda *_args: (1, [], [], False),
     )
     monkeypatch.setattr(
-        eval_endpoint,
-        "provider_requires_api_key",
+        "tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key",
         lambda _provider: False,
     )
 
@@ -1756,11 +1749,11 @@ async def test_prompt_studio_sync_cancellation_stops_before_next_provider_call(m
             dispatches.append("second")
             return result
 
-    monkeypatch.setattr(eval_endpoint, "ProviderCredentialRuntime", lambda **_kwargs: runtime)
-    monkeypatch.setattr(eval_endpoint, "EvaluationManager", _Manager)
-    monkeypatch.setattr(eval_endpoint, "derive_trusted_credential_scope", lambda *_args: (1, [], [], False))
-    monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: True)
-    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", lambda **_kwargs: runtime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager.EvaluationManager", _Manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope", lambda *_args: (1, [], [], False))
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda _provider: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_context", lambda: False)
 
     task = asyncio.create_task(
         eval_endpoint.create_evaluation(
@@ -1848,9 +1841,9 @@ async def test_prompt_studio_background_cancellation_stops_before_next_provider_
             dispatches.append("second")
             return result
 
-    monkeypatch.setattr(eval_endpoint, "EvaluationManager", _Manager)
-    monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: True)
-    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager.EvaluationManager", _Manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda _provider: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_context", lambda: False)
 
     task = asyncio.create_task(
         eval_endpoint.run_evaluation_async(
@@ -1913,7 +1906,7 @@ async def test_prompt_studio_background_cancel_after_running_is_persisted_and_cl
         ) -> dict[str, Any]:
             raise asyncio.CancelledError()
 
-    monkeypatch.setattr(eval_endpoint, "EvaluationManager", _CancelledManager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager.EvaluationManager", _CancelledManager)
     project = isolated_db.create_project(
         "Cancelled background evaluation",
         user_id="owner-1",
@@ -2003,12 +1996,12 @@ async def test_prompt_studio_bedrock_auth_contract(
                 await on_provider_success()
             return {"metrics": {"total_tests": 1, "pass_rate": 1.0}}
 
-    monkeypatch.setattr(eval_endpoint, "ProviderCredentialRuntime", lambda **_kwargs: runtime)
-    monkeypatch.setattr(eval_endpoint, "EvaluationManager", _Manager)
-    monkeypatch.setattr(eval_endpoint, "derive_trusted_credential_scope", lambda *_args: (1, [], [], False))
-    monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: True)
-    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
-    monkeypatch.setattr(eval_endpoint, "is_test_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", lambda **_kwargs: runtime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager.EvaluationManager", _Manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope", lambda *_args: (1, [], [], False))
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda _provider: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_context", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
     evaluation = EvaluationCreate.model_construct(
@@ -2133,10 +2126,9 @@ async def test_prompt_studio_keeps_request_snapshot_at_adapter_boundary(
             await on_provider_success()
         return {"id": None, "scores": {"aggregate_score": 1.0}, "actual": {"response": "ok"}}
 
-    monkeypatch.setattr(eval_endpoint, "ProviderCredentialRuntime", FakeRuntime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", FakeRuntime)
     monkeypatch.setattr(
-        eval_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [2], [3], True),
     )
     monkeypatch.setattr(
@@ -2151,11 +2143,11 @@ async def test_prompt_studio_keeps_request_snapshot_at_adapter_boundary(
         lambda *_a, **_k: ("prompt-key-b", {}),
         raising=False,
     )
-    monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: False)
-    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
-    monkeypatch.setattr(eval_endpoint, "is_test_mode", lambda: False)
-    monkeypatch.setattr(eval_endpoint, "ensure_request_id", lambda _request: "req-1")
-    monkeypatch.setattr(eval_endpoint, "ensure_traceparent", lambda _request: "")
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda _provider: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_context", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Logging.log_context.ensure_request_id", lambda _request: "req-1")
+    monkeypatch.setattr("tldw_Server_API.app.core.Logging.log_context.ensure_traceparent", lambda _request: "")
     monkeypatch.setattr(evaluation_manager, "is_test_mode", lambda: False)
     monkeypatch.setattr(evaluation_manager, "resolve_provider_api_key_from_config", lambda *_a: "prompt-key-b")
     monkeypatch.setattr(
@@ -2326,14 +2318,13 @@ async def test_prompt_studio_concurrent_adapter_snapshots_remain_isolated(
             "actual": {"response": model_config["model"]},
         }
 
-    monkeypatch.setattr(eval_endpoint, "ProviderCredentialRuntime", FakeRuntime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", FakeRuntime)
     monkeypatch.setattr(
-        eval_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda *_args: (1, [], [], False),
     )
-    monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: True)
-    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda _provider: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_context", lambda: False)
     monkeypatch.setattr(evaluation_manager, "is_test_mode", lambda: False)
     monkeypatch.setattr(
         evaluation_manager,
@@ -2477,17 +2468,16 @@ async def test_prompt_studio_timeout_drains_adapter_before_runtime_close_without
             "scores": {"aggregate_score": 0.0},
         }
 
-    monkeypatch.setattr(eval_endpoint, "ProviderCredentialRuntime", lambda **_kwargs: runtime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", lambda **_kwargs: runtime)
     monkeypatch.setattr(
-        eval_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda *_args: (1, [], [], False),
     )
-    monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: False)
-    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
-    monkeypatch.setattr(eval_endpoint, "is_test_mode", lambda: False)
-    monkeypatch.setattr(eval_endpoint, "ensure_request_id", lambda _request: "req-timeout")
-    monkeypatch.setattr(eval_endpoint, "ensure_traceparent", lambda _request: "")
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda _provider: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_context", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Logging.log_context.ensure_request_id", lambda _request: "req-timeout")
+    monkeypatch.setattr("tldw_Server_API.app.core.Logging.log_context.ensure_traceparent", lambda _request: "")
     monkeypatch.setattr(evaluation_manager, "is_test_mode", lambda: False)
     monkeypatch.setattr(evaluation_manager, "get_adapter_or_raise", lambda _provider: _TimeoutAdapter())
     monkeypatch.setattr(test_runner.TestRunner, "run_single_test", _run_single_test)
@@ -3604,7 +3594,7 @@ async def test_prompt_studio_background_sanitizes_failure_log_and_record(
             raise RuntimeError(sentinel)
 
     db = _RecordingDb()
-    monkeypatch.setattr(eval_endpoint, "EvaluationManager", _FailingManager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager.EvaluationManager", _FailingManager)
     sink_id = logger.add(logs.append, format="{message}")
     try:
         await eval_endpoint.run_evaluation_async(

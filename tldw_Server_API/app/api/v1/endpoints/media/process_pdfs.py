@@ -33,7 +33,6 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
-from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import (
     file_validator_instance,
@@ -56,13 +55,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     resolve_chunking_options_and_plan,
     uses_hierarchical_chunking,
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils import (
-    download_url_async as core_download_url_async,
-)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     first_saved_filename,
-    save_uploaded_files,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
     ProcessItem,
@@ -73,6 +68,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.result_normalization im
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import FileValidator
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
+import tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps as _Prompts_DB_Deps
+import tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils as _download_utils
+import tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing as _input_sourcing
 
 router = APIRouter()
 
@@ -165,7 +163,7 @@ async def process_pdfs_endpoint(
     if system_prompt is None and (await request.form()).get("system_prompt") == "":
         system_prompt = ""
     if form_data.perform_analysis and form_data.api_name and system_prompt is None:
-        prompts_db = await get_prompts_db_for_user(request, current_user)
+        prompts_db = await _Prompts_DB_Deps.get_prompts_db_for_user(request, current_user)
 
         def resolve_system_prompt() -> str:
             """Capture PDF instructions and release this worker's connection."""
@@ -196,7 +194,7 @@ async def process_pdfs_endpoint(
 
         # ---- Handle uploads via shared input_sourcing helper ----
         if files:
-            saved_files, upload_errors = await save_uploaded_files(
+            saved_files, upload_errors = await _input_sourcing.save_uploaded_files(
                 files,
                 temp_dir=temp_dir_path,
                 validator=validator,
@@ -232,7 +230,7 @@ async def process_pdfs_endpoint(
 
         # ---- Handle URL inputs via shared downloader ----
         if form_data.urls:
-            download_url_async = core_download_url_async
+            download_url_async = _download_utils.download_url_async
             download_tasks = [
                 download_url_async(
                     client=None,

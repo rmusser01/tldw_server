@@ -64,13 +64,11 @@ def test_accept_relationship_materializes_using_guardian_database(
         return {"materialized_count": 0, "failed_count": 0, "policy_ids": []}
 
     monkeypatch.setattr(
-        guardian_controls,
-        "materialize_pending_plans_for_relationship",
+        "tldw_Server_API.app.core.Moderation.family_wizard_materializer.materialize_pending_plans_for_relationship",
         fake_materialize,
     )
     monkeypatch.setattr(
-        guardian_controls,
-        "get_guardian_db_for_user_id",
+        "tldw_Server_API.app.api.v1.API_Deps.guardian_deps.get_guardian_db_for_user_id",
         lambda _user_id: guardian_db,
     )
 

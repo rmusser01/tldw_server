@@ -133,7 +133,7 @@ async def test_get_embeddings_status_chroma_failure_log_is_sanitized(monkeypatch
         "get_media_by_id",
         lambda *_args, **_kwargs: {"id": 123, "title": "Doc"},
     )
-    monkeypatch.setattr(media_embeddings, "ChromaDBManager", _FailingChromaDBManager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.ChromaDB_Library.ChromaDBManager", _FailingChromaDBManager)
 
     response = await media_embeddings.get_embeddings_status(
         media_id=123,
@@ -224,8 +224,8 @@ async def test_delete_embeddings_sanitizes_where_delete_fallback_log(monkeypatch
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(core_media_embeddings, "_user_embedding_config", lambda: {})
     monkeypatch.setattr(media_embeddings, "get_media_by_id", lambda *_args, **_kwargs: {"id": 123})
-    monkeypatch.setattr(media_embeddings, "ChromaDBManager", _ChromaDBManager)
-    monkeypatch.setattr(media_embeddings, "invalidate_rag_caches", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.ChromaDB_Library.ChromaDBManager", _ChromaDBManager)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.rag_cache.invalidate_rag_caches", lambda *_args, **_kwargs: None)
 
     response = await media_embeddings.delete_embeddings(
         media_id=123,
@@ -260,8 +260,8 @@ async def test_delete_embeddings_sanitizes_verify_failure_log(monkeypatch):
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(core_media_embeddings, "_user_embedding_config", lambda: {})
     monkeypatch.setattr(media_embeddings, "get_media_by_id", lambda *_args, **_kwargs: {"id": 123})
-    monkeypatch.setattr(media_embeddings, "ChromaDBManager", _ChromaDBManager)
-    monkeypatch.setattr(media_embeddings, "invalidate_rag_caches", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.ChromaDB_Library.ChromaDBManager", _ChromaDBManager)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.rag_cache.invalidate_rag_caches", lambda *_args, **_kwargs: None)
 
     response = await media_embeddings.delete_embeddings(
         media_id=123,
@@ -284,7 +284,7 @@ async def test_generate_embeddings_fails_when_job_create_raises(monkeypatch):
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
     monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
-    monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _FailingAdapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _FailingAdapter)
 
     with pytest.raises(HTTPException) as excinfo:
         await media_embeddings.generate_embeddings(
@@ -310,7 +310,7 @@ async def test_generate_embeddings_fails_when_job_id_missing(monkeypatch):
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
     monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
-    monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _MissingIdAdapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _MissingIdAdapter)
 
     with pytest.raises(HTTPException) as excinfo:
         await media_embeddings.generate_embeddings(
@@ -339,7 +339,7 @@ async def test_generate_embeddings_batch_returns_partial_response_on_partial_enq
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
     monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
-    monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _PartialAdapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _PartialAdapter)
 
     response = await media_embeddings.generate_embeddings_batch(
         request=media_embeddings.BatchMediaEmbeddingsRequest(media_ids=[123, 456]),
@@ -363,7 +363,7 @@ async def test_generate_embeddings_batch_returns_partial_when_some_media_ids_mis
 
     monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
     monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
-    monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _OkAdapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _OkAdapter)
 
     # _FakeMediaDB only knows about media_id 123; 999 is missing
     response = await media_embeddings.generate_embeddings_batch(
@@ -431,7 +431,7 @@ async def test_search_embeddings_sanitizes_chroma_query_failure_log(monkeypatch)
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(core_media_embeddings, "_user_embedding_config", lambda: {})
     monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
-    monkeypatch.setattr(media_embeddings, "ChromaDBManager", _ChromaDBManager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.ChromaDB_Library.ChromaDBManager", _ChromaDBManager)
     monkeypatch.setattr(
         embeddings_v5_production_enhanced,
         "create_embeddings_batch_async",
@@ -457,7 +457,7 @@ async def test_generate_embeddings_batch_raises_when_all_media_ids_missing(monke
 
     monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
     monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
-    monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _OkAdapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _OkAdapter)
 
     # _FakeMediaDB is empty — both IDs are missing
     with pytest.raises(HTTPException) as excinfo:
@@ -481,7 +481,7 @@ async def test_generate_embeddings_batch_raises_when_all_enqueues_fail_before_an
 
     monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
     monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
-    monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _AlwaysFailingAdapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _AlwaysFailingAdapter)
 
     with pytest.raises(HTTPException) as excinfo:
         await media_embeddings.generate_embeddings_batch(

@@ -23,7 +23,6 @@ from tldw_Server_API.app.api.v1.schemas.ingestion_sources import (
     IngestionSourceSyncTriggerResponse,
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, User
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Ingestion_Sources.archive_snapshot import (
@@ -31,10 +30,6 @@ from tldw_Server_API.app.core.Ingestion_Sources.archive_snapshot import (
     persist_archive_artifact_from_file,
     validate_archive_upload_filename,
 )
-from tldw_Server_API.app.core.Ingestion_Sources.git_repository import (
-    validate_git_repository_source,
-)
-from tldw_Server_API.app.core.Ingestion_Sources.jobs import enqueue_ingestion_source_job
 from tldw_Server_API.app.core.Ingestion_Sources.local_directory import validate_local_directory_source
 from tldw_Server_API.app.core.Ingestion_Sources.access_policy import (
     can_create_local_directory_ingestion_source,
@@ -42,19 +37,19 @@ from tldw_Server_API.app.core.Ingestion_Sources.access_policy import (
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.Ingestion_Sources.service import (
     create_source_snapshot,
-    create_source,
-    ensure_ingestion_sources_schema,
-    get_source_by_id,
     get_source_item_by_id,
     list_sources_by_user,
     list_source_items,
-    update_source,
     update_source_item_state,
     update_source_snapshot,
     validate_source_sink_pair,
 )
-from tldw_Server_API.app.core.config import get_ingestion_source_allowed_roots
 from tldw_Server_API.app.core.exceptions import IngestionSourceValidationError
+import tldw_Server_API.app.core.AuthNZ.database as _database
+import tldw_Server_API.app.core.Ingestion_Sources.git_repository as _git_repository
+import tldw_Server_API.app.core.Ingestion_Sources.jobs as _jobs
+import tldw_Server_API.app.core.Ingestion_Sources.service as _service
+import tldw_Server_API.app.core.config as _config
 
 router = APIRouter(prefix="/ingestion-sources", tags=["ingestion-sources"])
 _ARCHIVE_UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -144,7 +139,7 @@ def _prepare_source_config(source_type: str, config: dict[str, Any]) -> dict[str
         normalized["path"] = str(validate_local_directory_source(normalized))
         return normalized
     if source_type == "git_repository":
-        return validate_git_repository_source(config)
+        return _git_repository.validate_git_repository_source(config)
     return dict(config)
 
 
@@ -230,7 +225,7 @@ def _browseable_allowed_roots() -> list[Path]:
     """Return unique, existing allowed roots that may be exposed to the picker."""
     roots: list[Path] = []
     seen: set[str] = set()
-    for root in get_ingestion_source_allowed_roots():
+    for root in _config.get_ingestion_source_allowed_roots():
         resolved = Path(root).expanduser().resolve(strict=False)
         marker = str(resolved)
         if marker in seen:
@@ -410,19 +405,19 @@ async def create_ingestion_source(
         prepared_payload = _prepare_create_payload(payload)
     except IngestionSourceValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    db_pool = await get_db_pool()
+    db_pool = await _database.get_db_pool()
     async with db_pool.transaction() as db:
-        await ensure_ingestion_sources_schema(db)
-        row = await create_source(db, user_id=int(current_user.id), payload=prepared_payload)
+        await _service.ensure_ingestion_sources_schema(db)
+        row = await _service.create_source(db, user_id=int(current_user.id), payload=prepared_payload)
     return row
 
 
 @router.get("/", response_model=list[IngestionSourceResponse])
 async def list_ingestion_sources(current_user: User = Depends(get_request_user)):
     """List ingestion sources owned by the authenticated user."""
-    db_pool = await get_db_pool()
+    db_pool = await _database.get_db_pool()
     async with db_pool.transaction() as db:
-        await ensure_ingestion_sources_schema(db)
+        await _service.ensure_ingestion_sources_schema(db)
         rows = await list_sources_by_user(db, user_id=int(current_user.id))
     return rows
 
@@ -466,10 +461,10 @@ async def browse_ingestion_source_directories(
 @router.get("/{source_id}", response_model=IngestionSourceResponse)
 async def get_ingestion_source(source_id: int, current_user: User = Depends(get_request_user)):
     """Fetch a single ingestion source by identifier for the authenticated user."""
-    db_pool = await get_db_pool()
+    db_pool = await _database.get_db_pool()
     async with db_pool.transaction() as db:
-        await ensure_ingestion_sources_schema(db)
-        row = await get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
+        await _service.ensure_ingestion_sources_schema(db)
+        row = await _service.get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingestion source not found")
     return row
@@ -483,10 +478,10 @@ async def patch_ingestion_source(
     current_user: User = Depends(get_request_user),
 ) -> IngestionSourceResponse:
     """Update mutable ingestion source settings while enforcing identity immutability."""
-    db_pool = await get_db_pool()
+    db_pool = await _database.get_db_pool()
     async with db_pool.transaction() as db:
-        await ensure_ingestion_sources_schema(db)
-        existing = await get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
+        await _service.ensure_ingestion_sources_schema(db)
+        existing = await _service.get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
         if not existing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingestion source not found")
         raw_patch = payload.model_dump(exclude_unset=True)
@@ -514,7 +509,7 @@ async def patch_ingestion_source(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Local directory ingestion sources are not enabled for this user",
                 )
-            row = await update_source(
+            row = await _service.update_source(
                 db,
                 source_id=source_id,
                 user_id=int(current_user.id),
@@ -534,10 +529,10 @@ async def patch_ingestion_source(
 @router.get("/{source_id}/items", response_model=list[IngestionSourceItemResponse])
 async def list_ingestion_source_items(source_id: int, current_user: User = Depends(get_request_user)):
     """List tracked items currently bound to an ingestion source."""
-    db_pool = await get_db_pool()
+    db_pool = await _database.get_db_pool()
     async with db_pool.transaction() as db:
-        await ensure_ingestion_sources_schema(db)
-        row = await get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
+        await _service.ensure_ingestion_sources_schema(db)
+        row = await _service.get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingestion source not found")
         items = await list_source_items(db, source_id=source_id)
@@ -552,15 +547,15 @@ async def list_ingestion_source_items(source_id: int, current_user: User = Depen
 )
 async def trigger_ingestion_source_sync(source_id: int, current_user: User = Depends(get_request_user)):
     """Enqueue a manual sync job for an ingestion source."""
-    db_pool = await get_db_pool()
+    db_pool = await _database.get_db_pool()
     async with db_pool.transaction() as db:
-        await ensure_ingestion_sources_schema(db)
-        row = await get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
+        await _service.ensure_ingestion_sources_schema(db)
+        row = await _service.get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingestion source not found")
 
     job = await asyncio.to_thread(
-        enqueue_ingestion_source_job,
+        _jobs.enqueue_ingestion_source_job,
         user_id=int(current_user.id),
         source_id=source_id,
     )
@@ -590,11 +585,11 @@ async def upload_ingestion_source_archive(
 
     artifact_storage_path: str | None = None
     staged_upload_path: Path | None = None
-    db_pool = await get_db_pool()
+    db_pool = await _database.get_db_pool()
     try:
         async with db_pool.transaction() as db:
-            await ensure_ingestion_sources_schema(db)
-            row = await get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
+            await _service.ensure_ingestion_sources_schema(db)
+            row = await _service.get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
             if not row:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingestion source not found")
             if str(row.get("source_type") or "").strip().lower() != "archive_snapshot":
@@ -625,7 +620,7 @@ async def upload_ingestion_source_archive(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
         async with db_pool.transaction() as db:
-            await ensure_ingestion_sources_schema(db)
+            await _service.ensure_ingestion_sources_schema(db)
             snapshot = await create_source_snapshot(
                 db,
                 source_id=source_id,
@@ -672,7 +667,7 @@ async def upload_ingestion_source_archive(
         raise
 
     job = await asyncio.to_thread(
-        enqueue_ingestion_source_job,
+        _jobs.enqueue_ingestion_source_job,
         user_id=int(current_user.id),
         source_id=source_id,
     )
@@ -691,10 +686,10 @@ async def reattach_ingestion_source_item(
     current_user: User = Depends(get_request_user),
 ):
     """Reattach a detached notes-backed source item to resume managed sync updates."""
-    db_pool = await get_db_pool()
+    db_pool = await _database.get_db_pool()
     async with db_pool.transaction() as db:
-        await ensure_ingestion_sources_schema(db)
-        source = await get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
+        await _service.ensure_ingestion_sources_schema(db)
+        source = await _service.get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
         if not source:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingestion source not found")
         if str(source.get("sink_type") or "").strip().lower() != "notes":

@@ -17,9 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.reading_progress import (
     ViewMode,
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
-from tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository import (
-    DocumentWorkspaceRepository,
-)
+import tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository as _document_workspace_repository
 
 router = APIRouter(tags=["Document Workspace"])
 
@@ -82,7 +80,7 @@ async def get_reading_progress(
             detail="Media not found",
         )
 
-    repo = DocumentWorkspaceRepository.from_media_db(db)
+    repo = _document_workspace_repository.DocumentWorkspaceRepository.from_media_db(db)
     try:
         row = repo.get_reading_progress(media_id=media_id, user_id=user_id)
     except Exception as e:
@@ -164,7 +162,7 @@ async def update_reading_progress(
 
     now = _now_iso()
 
-    repo = DocumentWorkspaceRepository.from_media_db(db)
+    repo = _document_workspace_repository.DocumentWorkspaceRepository.from_media_db(db)
     try:
         repo.upsert_reading_progress(
             media_id=media_id,
@@ -239,7 +237,7 @@ async def delete_reading_progress(
             detail="Media not found",
         )
 
-    repo = DocumentWorkspaceRepository.from_media_db(db)
+    repo = _document_workspace_repository.DocumentWorkspaceRepository.from_media_db(db)
     try:
         repo.delete_reading_progress(media_id=media_id, user_id=user_id)
     except Exception as e:

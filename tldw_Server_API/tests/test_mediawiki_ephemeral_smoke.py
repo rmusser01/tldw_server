@@ -225,8 +225,7 @@ def test_mediawiki_process_dump_cleanup_failure_log_is_sanitized(monkeypatch, tm
     logger_stub = _LoggerStub()
     monkeypatch.setattr(process_mediawiki, "logger", logger_stub)
     monkeypatch.setattr(
-        process_mediawiki,
-        "core_import_mediawiki_dump",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.MediaWiki.Media_Wiki.import_mediawiki_dump",
         lambda **kwargs: iter([{"type": "summary", "message": "Processed 1 page"}]),
     )
 
@@ -270,13 +269,11 @@ def test_mediawiki_ingest_passes_request_writer_and_checkpoint_scope(
         return iter([{"type": "summary", "message": "Processed 1 page"}])
 
     monkeypatch.setattr(
-        process_mediawiki,
-        "core_import_mediawiki_dump",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.MediaWiki.Media_Wiki.import_mediawiki_dump",
         _fake_core_import,
     )
     monkeypatch.setattr(
-        process_mediawiki,
-        "get_media_repository",
+        "tldw_Server_API.app.core.DB_Management.media_db.api.get_media_repository",
         lambda db: fake_repo if db is fake_media_db else None,
         raising=False,
     )

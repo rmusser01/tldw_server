@@ -21,7 +21,7 @@ async def test_get_json_metrics_failure_log_is_sanitized(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import metrics
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(metrics, "get_metrics_registry", _failing_metrics_registry)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", _failing_metrics_registry)
     monkeypatch.setattr(metrics, "logger", logger_stub)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -80,7 +80,7 @@ async def test_reset_metrics_failure_log_is_sanitized(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import metrics
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(metrics, "get_metrics_registry", _failing_metrics_registry)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", _failing_metrics_registry)
     monkeypatch.setattr(metrics, "logger", logger_stub)
 
     with pytest.raises(HTTPException) as exc_info:

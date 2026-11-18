@@ -135,8 +135,7 @@ async def test_audio_sync_call_never_starts_late_when_default_executor_is_satura
     executor_worker = loop.run_in_executor(None, occupy_default_executor)
     await executor_started.wait()
     monkeypatch.setattr(
-        audio_streaming_module,
-        "STREAM_DAEMON_POOL",
+        "tldw_Server_API.app.core.LLM_Calls.bounded_daemon.STREAM_DAEMON_POOL",
         BoundedDaemonPool(1),
     )
 
@@ -456,7 +455,7 @@ async def test_audio_sync_timeout_defers_resource_release_until_worker_exits(
         cleanup_finished.set()
 
     pool = BoundedDaemonPool(1)
-    monkeypatch.setattr(audio_streaming_module, "STREAM_DAEMON_POOL", pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.STREAM_DAEMON_POOL", pool)
     with pytest.raises(TimeoutError, match="audio-factory timed out"):
         await audio_streaming_module._run_bounded_audio_sync_call(
             blocked,
@@ -798,15 +797,14 @@ def mock_audio_ws_dependencies(monkeypatch: pytest.MonkeyPatch) -> _DummyRegistr
     async def _hb(_uid: int) -> None:
         return None
 
-    monkeypatch.setattr(audio, "_audio_ws_authenticate", _auth)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", _auth)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _can_start_stream)
-    monkeypatch.setattr(audio, "finish_stream", _finish_stream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_stream", _finish_stream)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_minutes)
-    monkeypatch.setattr(audio, "heartbeat_stream", _hb)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.heartbeat_stream", _hb)
     monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified.UnifiedStreamingTranscriber", _DummyTranscriber)
     monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified.SileroTurnDetector", _DummyVAD)
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _llm_stub)
-    monkeypatch.setattr(audio, "get_api_keys", lambda: {"stub": "fake"})
     monkeypatch.setattr(
         provider_credential_runtime,
         "load_server_config_snapshot",
@@ -814,7 +812,7 @@ def mock_audio_ws_dependencies(monkeypatch: pytest.MonkeyPatch) -> _DummyRegistr
     )
 
     registry = _DummyRegistry()
-    monkeypatch.setattr(audio, "get_metrics_registry", lambda: registry)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: registry)
 
     return registry
 
@@ -1038,11 +1036,10 @@ async def test_audio_chat_ws_tts_keeps_two_user_runtime_snapshots_isolated(
         return RecordingTTSService()
 
     monkeypatch.setenv("OPENAI_API_KEY", "global-chat-tts-key-must-not-dispatch")
-    monkeypatch.setattr(audio_streaming_module, "is_multi_user_mode", lambda: True)
-    monkeypatch.setattr(audio, "_audio_ws_authenticate", auth_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_multi_user_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", auth_stub)
     monkeypatch.setattr(
-        audio_streaming_module,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         LLMRuntime,
     )
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", get_tts_service)
@@ -1176,8 +1173,7 @@ async def test_audio_chat_ws_realtime_tts_keeps_runtime_through_first_audio(
         return service
 
     monkeypatch.setattr(
-        audio_streaming_module,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: LLMRuntime(),
     )
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", get_tts_service)
@@ -1291,10 +1287,9 @@ async def test_audio_chat_ws_keeps_static_snapshot_at_llm_boundary(
     elif dispatch == "not-implemented":
         adapter = NotImplementedAdapter()
 
-    monkeypatch.setattr(audio_streaming_module, "ProviderCredentialRuntime", FakeRuntime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", FakeRuntime)
     monkeypatch.setattr(
-        audio_streaming_module,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [2], [3], True),
     )
     monkeypatch.setattr(
@@ -1309,10 +1304,9 @@ async def test_audio_chat_ws_keeps_static_snapshot_at_llm_boundary(
         lambda *_args: "audio-key-b",
         raising=False,
     )
-    monkeypatch.setattr(audio_streaming_module, "provider_requires_api_key", lambda _provider: False, raising=False)
-    monkeypatch.setattr(audio_streaming_module, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _p: adapter))
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda _provider: False, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry", lambda: SimpleNamespace(get_adapter=lambda _p: adapter))
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", fallback_call)
-    monkeypatch.setattr(audio, "get_api_keys", lambda: {"stub": "audio-key-b"})
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", lambda: asyncio.sleep(0, result=_DummyTTSService([b"tts"])))
 
     config_frame = _strict_chat_config()
@@ -1433,18 +1427,15 @@ async def test_audio_chat_ws_sync_stream_runs_off_loop_and_closes_before_runtime
         return stream
 
     monkeypatch.setattr(
-        audio_streaming_module,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
     monkeypatch.setattr(
-        audio_streaming_module,
-        "await_bounded_daemon_with_timeout",
+        "tldw_Server_API.app.core.LLM_Calls.bounded_daemon.await_bounded_daemon_with_timeout",
         _bounded_call,
     )
     monkeypatch.setattr(
-        audio_streaming_module,
-        "get_registry",
+        "tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: None),
     )
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _fallback)
@@ -1531,13 +1522,11 @@ async def test_audio_chat_ws_closes_distinct_iterator_and_source_before_runtime(
         return Source()
 
     monkeypatch.setattr(
-        audio_streaming_module,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
     monkeypatch.setattr(
-        audio_streaming_module,
-        "get_registry",
+        "tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: None),
     )
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _fallback)
@@ -1641,13 +1630,11 @@ async def test_audio_chat_ws_close_timeout_retains_runtime_until_close_exits(
         return ResistantCloseStream()
 
     monkeypatch.setattr(
-        audio_streaming_module,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
     monkeypatch.setattr(
-        audio_streaming_module,
-        "get_registry",
+        "tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: None),
     )
     monkeypatch.setattr(
@@ -1712,13 +1699,11 @@ async def test_audio_chat_ws_empty_or_error_stream_is_unmarked_and_sanitized(
         return _stream()
 
     monkeypatch.setattr(
-        audio_streaming_module,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
     monkeypatch.setattr(
-        audio_streaming_module,
-        "get_registry",
+        "tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: None),
     )
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _fallback)
@@ -1802,13 +1787,11 @@ async def test_audio_chat_ws_accepts_bedrock_default_chain_runtime_auth(
             return _stream()
 
     monkeypatch.setattr(
-        audio_streaming_module,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
     monkeypatch.setattr(
-        audio_streaming_module,
-        "get_registry",
+        "tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: Adapter()),
     )
     monkeypatch.setattr(
@@ -1896,13 +1879,11 @@ async def test_audio_chat_ws_partial_success_cancellation_drains_before_runtime_
         return BlockingSyncStream()
 
     monkeypatch.setattr(
-        audio_streaming_module,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
     monkeypatch.setattr(
-        audio_streaming_module,
-        "get_registry",
+        "tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: None),
     )
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _fallback)
@@ -1987,13 +1968,11 @@ async def test_audio_chat_ws_disconnect_cancels_inflight_provider_turn(
         return BlockingSyncStream()
 
     monkeypatch.setattr(
-        audio_streaming_module,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
     monkeypatch.setattr(
-        audio_streaming_module,
-        "get_registry",
+        "tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: None),
     )
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _fallback)
@@ -2104,10 +2083,9 @@ async def test_audio_chat_ws_concurrent_turns_keep_runtime_snapshots_isolated(
 
             return _stream()
 
-    monkeypatch.setattr(audio_streaming_module, "ProviderCredentialRuntime", Runtime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", Runtime)
     monkeypatch.setattr(
-        audio_streaming_module,
-        "get_registry",
+        "tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: Adapter()),
     )
     monkeypatch.setattr(
@@ -2262,10 +2240,9 @@ async def test_audio_chat_ws_keeps_empty_runtime_config_frozen_after_live_reload
         loader_calls.append(live_config["generation"])
         return {"stub_api": dict(live_config)}
 
-    monkeypatch.setattr(audio_streaming_module, "ProviderCredentialRuntime", Runtime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", Runtime)
     monkeypatch.setattr(
-        audio_streaming_module,
-        "get_registry",
+        "tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: Adapter()),
     )
     monkeypatch.setattr(chat_calls, "load_and_log_configs", live_loader)
@@ -2314,7 +2291,8 @@ async def test_audio_chat_ws_emits_bounded_stt_metrics(monkeypatch: pytest.Monke
     import tldw_Server_API.app.core.Metrics.metrics_manager as metrics_manager
 
     metrics_manager._metrics_registry = None
-    registry = metrics_manager.get_metrics_registry()
+    registry = metrics_manager.MetricsRegistry()
+    monkeypatch.setattr(metrics_manager, "get_metrics_registry", lambda: registry)
 
     audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     messages = [
@@ -2372,7 +2350,8 @@ async def test_audio_chat_ws_counts_final_frames_in_redaction_metrics(
     import tldw_Server_API.app.core.Metrics.metrics_manager as metrics_manager
 
     metrics_manager._metrics_registry = None
-    registry = metrics_manager.get_metrics_registry()
+    registry = metrics_manager.MetricsRegistry()
+    monkeypatch.setattr(metrics_manager, "get_metrics_registry", lambda: registry)
 
     class _FinalFrameTranscriber(_DummyTranscriber):
         async def process_audio_chunk(self, audio_bytes: bytes) -> Dict[str, Any]:  # noqa: ARG002
@@ -2561,13 +2540,11 @@ async def test_audio_chat_ws_records_failure_metrics_for_invalid_audio_frame(
     request_statuses: list[str] = []
     session_close_reasons: list[str] = []
     monkeypatch.setattr(
-        audio_streaming_module,
-        "emit_stt_request_total",
+        "tldw_Server_API.app.core.Metrics.stt_metrics.emit_stt_request_total",
         lambda **kwargs: request_statuses.append(kwargs["status"]),
     )
     monkeypatch.setattr(
-        audio_streaming_module,
-        "emit_stt_session_end_total",
+        "tldw_Server_API.app.core.Metrics.stt_metrics.emit_stt_session_end_total",
         lambda **kwargs: session_close_reasons.append(kwargs["session_close_reason"]),
     )
     ws = DummyWebSocket(
@@ -2592,13 +2569,11 @@ async def test_audio_chat_ws_records_failure_metrics_for_push_to_talk_violation(
     request_statuses: list[str] = []
     session_close_reasons: list[str] = []
     monkeypatch.setattr(
-        audio_streaming_module,
-        "emit_stt_request_total",
+        "tldw_Server_API.app.core.Metrics.stt_metrics.emit_stt_request_total",
         lambda **kwargs: request_statuses.append(kwargs["status"]),
     )
     monkeypatch.setattr(
-        audio_streaming_module,
-        "emit_stt_session_end_total",
+        "tldw_Server_API.app.core.Metrics.stt_metrics.emit_stt_session_end_total",
         lambda **kwargs: session_close_reasons.append(kwargs["session_close_reason"]),
     )
     ws = DummyWebSocket(
@@ -2961,9 +2936,9 @@ async def test_audio_chat_ws_persists_turn_when_enabled(monkeypatch: pytest.Monk
         return {"action": "demo_tool", "status": "ok", "payload": {"value": 1}}
 
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service)
-    monkeypatch.setattr(audio, "get_chacha_db_for_user_id", _get_db_for_user_id, raising=False)
-    monkeypatch.setattr(audio, "get_or_create_character_context", _character_context, raising=False)
-    monkeypatch.setattr(audio, "get_or_create_conversation", _conversation_context, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id", _get_db_for_user_id, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_helpers.get_or_create_character_context", _character_context, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_helpers.get_or_create_conversation", _conversation_context, raising=False)
     monkeypatch.setattr(audio_streaming_module.speech_chat_service, "_actions_enabled", lambda: True)
     monkeypatch.setattr(audio_streaming_module.speech_chat_service, "_execute_action", _execute_action)
 
@@ -3069,9 +3044,9 @@ async def test_audio_chat_ws_existing_session_merges_settings_with_version_cas(
         return "resume-chat", False
 
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service)
-    monkeypatch.setattr(audio, "get_chacha_db_for_user_id", _get_db_for_user_id, raising=False)
-    monkeypatch.setattr(audio, "get_or_create_character_context", _character_context, raising=False)
-    monkeypatch.setattr(audio, "get_or_create_conversation", _conversation_context, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id", _get_db_for_user_id, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_helpers.get_or_create_character_context", _character_context, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_helpers.get_or_create_conversation", _conversation_context, raising=False)
 
     await audio.websocket_audio_chat_stream(ws, token=None)
 
@@ -3306,8 +3281,7 @@ def test_audio_writer_uses_transactional_conversation_identity(monkeypatch) -> N
         return settings
 
     monkeypatch.setattr(
-        audio_streaming_module,
-        "validate_chat_settings_storage",
+        "tldw_Server_API.app.core.Character_Chat.chat_settings_validation.validate_chat_settings_storage",
         _capture_validation,
     )
     db = _SettingsDB()
@@ -3616,9 +3590,9 @@ async def test_audio_chat_ws_existing_session_conflict_does_not_blind_replace(
         return "resume-chat-conflict", False
 
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service)
-    monkeypatch.setattr(audio, "get_chacha_db_for_user_id", _get_db_for_user_id, raising=False)
-    monkeypatch.setattr(audio, "get_or_create_character_context", _character_context, raising=False)
-    monkeypatch.setattr(audio, "get_or_create_conversation", _conversation_context, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id", _get_db_for_user_id, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_helpers.get_or_create_character_context", _character_context, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_helpers.get_or_create_conversation", _conversation_context, raising=False)
 
     await audio.websocket_audio_chat_stream(ws, token=None)
 
@@ -3715,20 +3689,17 @@ async def test_audio_chat_ws_existing_resumable_session_rejects_credential_metad
 
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service)
     monkeypatch.setattr(
-        audio,
-        "get_chacha_db_for_user_id",
+        "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id",
         _get_db_for_user_id,
         raising=False,
     )
     monkeypatch.setattr(
-        audio,
-        "get_or_create_character_context",
+        "tldw_Server_API.app.core.Chat.chat_helpers.get_or_create_character_context",
         _character_context,
         raising=False,
     )
     monkeypatch.setattr(
-        audio,
-        "get_or_create_conversation",
+        "tldw_Server_API.app.core.Chat.chat_helpers.get_or_create_conversation",
         _conversation_context,
         raising=False,
     )
@@ -3805,9 +3776,9 @@ async def test_audio_chat_ws_applies_stt_redaction_to_turn_output_and_persistenc
 
     monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified.UnifiedStreamingTranscriber", _PiiTranscriber)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service)
-    monkeypatch.setattr(audio, "get_chacha_db_for_user_id", _get_db_for_user_id, raising=False)
-    monkeypatch.setattr(audio, "get_or_create_character_context", _character_context, raising=False)
-    monkeypatch.setattr(audio, "get_or_create_conversation", _conversation_context, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id", _get_db_for_user_id, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_helpers.get_or_create_character_context", _character_context, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_helpers.get_or_create_conversation", _conversation_context, raising=False)
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _llm_with_capture)
 
     async def _resolve_policy(**kwargs: Any) -> Any:  # noqa: ARG001
@@ -3820,7 +3791,7 @@ async def test_audio_chat_ws_applies_stt_redaction_to_turn_output_and_persistenc
             redact_categories=["pii_email"],
         )
 
-    monkeypatch.setattr(audio_streaming_module, "resolve_effective_stt_policy", _resolve_policy)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy.resolve_effective_stt_policy", _resolve_policy)
 
     await audio.websocket_audio_chat_stream(ws, token=None)
 
@@ -3856,7 +3827,7 @@ async def test_audio_chat_ws_persistence_failure_is_fail_soft(monkeypatch: pytes
         raise RuntimeError("simulated ChaCha initialization failure")
 
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service)
-    monkeypatch.setattr(audio, "get_chacha_db_for_user_id", _db_failure, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id", _db_failure, raising=False)
 
     await audio.websocket_audio_chat_stream(ws, token=None)
 
@@ -3986,7 +3957,7 @@ async def test_audio_chat_ws_records_metrics(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_minutes)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service)
-    monkeypatch.setattr(audio, "get_metrics_registry", lambda: reg)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: reg)
 
     # Ensure WS helper uses the same registry
     import tldw_Server_API.app.core.Streaming.streams as streams

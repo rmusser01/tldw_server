@@ -65,7 +65,7 @@ async def test_onboarding_telemetry_ingest_failure_log_is_sanitized(monkeypatch)
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(watchlists, "logger", logger_stub)
-    monkeypatch.setattr(watchlists, "record_onboarding_ingest_result", lambda _status: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Watchlists.watchlists_telemetry_metrics.record_onboarding_ingest_result", lambda _status: None)
 
     response = await watchlists.record_watchlists_onboarding_telemetry(
         payload=watchlists.WatchlistOnboardingTelemetryIngestRequest(
@@ -93,8 +93,7 @@ async def test_onboarding_telemetry_summary_failure_log_is_sanitized(monkeypatch
     summary_requests: list[tuple[str, str]] = []
     monkeypatch.setattr(watchlists, "logger", logger_stub)
     monkeypatch.setattr(
-        watchlists,
-        "record_summary_request",
+        "tldw_Server_API.app.core.Watchlists.watchlists_telemetry_metrics.record_summary_request",
         lambda name, status, _duration: summary_requests.append((name, status)),
     )
 
@@ -151,8 +150,7 @@ async def test_rc_telemetry_summary_failure_log_is_sanitized(monkeypatch) -> Non
     summary_requests: list[tuple[str, str]] = []
     monkeypatch.setattr(watchlists, "logger", logger_stub)
     monkeypatch.setattr(
-        watchlists,
-        "record_summary_request",
+        "tldw_Server_API.app.core.Watchlists.watchlists_telemetry_metrics.record_summary_request",
         lambda name, status, _duration: summary_requests.append((name, status)),
     )
 

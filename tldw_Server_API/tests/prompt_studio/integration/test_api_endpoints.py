@@ -261,7 +261,7 @@ def owned_websocket_project(test_db, websocket_auth):
         user_id=user_id,
     )
     with patch(
-        "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket.managed_prompt_studio_db",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.managed_prompt_studio_db",
         return_value=nullcontext(test_db),
     ):
         yield headers, project
@@ -1368,11 +1368,11 @@ class TestTestCaseEndpoints:
                     side_effect=_run_batch,
                 ),
                 patch(
-                    'tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_test_cases.derive_trusted_credential_scope',
+                    "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
                     return_value=(7, [71], [72], False),
                 ),
                 patch(
-                    'tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_test_cases.ProviderCredentialRuntime',
+                    "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
                     return_value=credential_runtime,
                 ),
             ):
@@ -1465,8 +1465,8 @@ class TestEvaluationEndpoints:
             async def close(self):
                 return None
 
-        monkeypatch.setattr(ps_eval, "is_test_context", lambda: False)
-        monkeypatch.setattr(ps_eval, "ProviderCredentialRuntime", lambda **_kwargs: _MissingRuntime())
+        monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_context", lambda: False)
+        monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", lambda **_kwargs: _MissingRuntime())
 
         with patch('tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.get_current_active_user', return_value=mock_user):
             evaluation_data = {

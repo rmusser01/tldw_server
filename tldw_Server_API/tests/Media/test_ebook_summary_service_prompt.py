@@ -88,7 +88,7 @@ def context(
         return "An EPUB section summary."
 
     monkeypatch.setitem(client.app.dependency_overrides, get_request_user, current_user)
-    monkeypatch.setattr(endpoint, "get_prompts_db_for_user", get_db, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps.get_prompts_db_for_user", get_db, raising=False)
     monkeypatch.setattr(ebook, "analyze", analyze)
     yield state
     for database in state.databases.values():
@@ -248,7 +248,7 @@ def test_corrupt_override_fails_before_input_processing(
         """Detect input processing that starts before prompt validation."""
         raise AssertionError("Uploads started before validating the prompt")
 
-    monkeypatch.setattr(endpoint, "save_uploaded_files", unexpected_upload)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing.save_uploaded_files", unexpected_upload)
     with pytest.raises(ServicePromptCorruptOverride):
         context.client.post(
             "/api/v1/media/process-ebooks",

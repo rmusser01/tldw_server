@@ -350,8 +350,8 @@ def test_audio_transcriptions_sanitizes_billing_recheck_fail_open_log(
     app.dependency_overrides[get_billing_org_id] = lambda: 123
     monkeypatch.setattr(audio_tx, "logger", logger_stub)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions.sf", _LongDurationSoundFile())
-    monkeypatch.setattr(audio_tx, "enforcement_enabled", lambda: True)
-    monkeypatch.setattr(audio_tx, "get_billing_enforcer", lambda: _FailingBillingEnforcer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Billing.enforcement.enforcement_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Billing.enforcement.get_billing_enforcer", lambda: _FailingBillingEnforcer())
 
     with bypass_api_limits(app), TestClient(app) as client:
         wav_bytes = _make_wav_bytes()

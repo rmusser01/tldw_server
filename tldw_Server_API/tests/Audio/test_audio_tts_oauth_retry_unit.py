@@ -478,7 +478,7 @@ async def test_audio_speech_history_hash_failure_log_is_sanitized(monkeypatch):
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
     monkeypatch.setattr(audio_tts, "_tts_history_config", lambda: {"enabled": True, "store_text": True, "store_failed": True, "hash_key": None})
-    monkeypatch.setattr(audio_tts, "compute_tts_history_text_hash", _fail_text_hash)
+    monkeypatch.setattr("tldw_Server_API.app.core.TTS.utils.compute_tts_history_text_hash", _fail_text_hash)
 
     response = await audio_tts.create_speech(
         _request_data(),
@@ -508,7 +508,7 @@ async def test_audio_speech_history_write_failure_log_is_sanitized(monkeypatch):
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
     monkeypatch.setattr(audio_tts, "_tts_history_config", lambda: {"enabled": True, "store_text": True, "store_failed": True, "hash_key": None})
-    monkeypatch.setattr(audio_tts, "compute_tts_history_text_hash", lambda *args, **kwargs: "safe-hash")
+    monkeypatch.setattr("tldw_Server_API.app.core.TTS.utils.compute_tts_history_text_hash", lambda *args, **kwargs: "safe-hash")
 
     response = await audio_tts.create_speech(
         _request_data(),

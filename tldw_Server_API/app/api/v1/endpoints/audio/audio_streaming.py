@@ -32,7 +32,6 @@ from tldw_Server_API.app.api.v1.API_Deps.billing_deps import resolve_org_id_for_
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
 )
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import _resolve_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import UsageEventLogger, get_usage_event_logger
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import get_tts_service
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
@@ -44,18 +43,13 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     StreamingTestResponse,
 )
 from tldw_Server_API.app.core.Audio.error_payloads import _maybe_debug_details
-from tldw_Server_API.app.core.Audio.quota_helpers import EXPECTED_DB_EXC, EXPECTED_REDIS_EXC, _get_failopen_cap_minutes
+from tldw_Server_API.app.core.Audio.quota_helpers import EXPECTED_DB_EXC, EXPECTED_REDIS_EXC
 from tldw_Server_API.app.core.Audio.streaming_exceptions import QuotaExceeded
 from tldw_Server_API.app.core.Audio.streaming_service import (
     CHAT_HISTORY_MAX_MESSAGES,
-    _stream_tts_to_websocket,
     receive_audio_websocket_text,
 )
 from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_audio_model_to_whisper
-from tldw_Server_API.app.core.Audio.tts_service import (
-    tts_provider_credential_scope,
-)
-from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
 from tldw_Server_API.app.core.Billing.enforcement import (
     LimitCategory,
     billing_checks_active,
@@ -63,10 +57,8 @@ from tldw_Server_API.app.core.Billing.enforcement import (
 )
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
     INTERNAL_CHAT_SETTINGS_KEYS,
-    validate_chat_settings_storage,
 )
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
-    STREAM_DAEMON_POOL,
     await_bounded_daemon_with_timeout,
     await_owned_worker,
 )
@@ -78,7 +70,6 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_stream_error_payload,
 )
 from tldw_Server_API.app.core.config import (
-    load_comprehensive_config,
     resolve_default_transcription_model_setting,
 )
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
@@ -106,28 +97,20 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import
     apply_transcript_payload_policy,
     apply_transcript_text_policy,
     get_websocket_auth_principal,
-    resolve_effective_stt_policy,
 )
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     normalize_provider,
     provider_auth_is_resolved,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, get_ps_logger
 from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
 from tldw_Server_API.app.core.Metrics.stt_metrics import (
     emit_stt_error_total,
     emit_stt_redaction_total,
-    emit_stt_request_total,
     emit_stt_run_write_total,
-    emit_stt_session_end_total,
     emit_stt_session_start_total,
     observe_stt_final_latency_seconds,
-)
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
-    derive_trusted_credential_scope,
 )
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
@@ -151,7 +134,6 @@ from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 from tldw_Server_API.app.core.Usage.audio_quota import (
     consume_daily_minutes_with_compat,
 )
-from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
 import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
 import tldw_Server_API.app.core.Audio.streaming_service as _streaming_service
 import tldw_Server_API.app.core.Chat.chat_helpers as _chat_helpers
@@ -159,6 +141,20 @@ import tldw_Server_API.app.core.Chat.chat_service as _chat_service
 import tldw_Server_API.app.core.Metrics.metrics_manager as _metrics_manager
 import tldw_Server_API.app.core.Usage.audio_quota as _audio_quota
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_tts
+import tldw_Server_API.app.api.v1.API_Deps.DB_Deps as _DB_Deps
+import tldw_Server_API.app.core.Audio.quota_helpers as _quota_helpers
+import tldw_Server_API.app.core.Audio.tts_service as _tts_service
+import tldw_Server_API.app.core.AuthNZ.settings as _settings
+import tldw_Server_API.app.core.Character_Chat.chat_settings_validation as _chat_settings_validation
+import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy as _stt_policy
+import tldw_Server_API.app.core.LLM_Calls.adapter_registry as _adapter_registry
+import tldw_Server_API.app.core.LLM_Calls.bounded_daemon as _bounded_daemon
+import tldw_Server_API.app.core.LLM_Calls.provider_metadata as _provider_metadata
+import tldw_Server_API.app.core.Metrics.stt_metrics as _stt_metrics
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
+import tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime as _provider_credential_runtime
+import tldw_Server_API.app.core.config as _config
+import tldw_Server_API.app.services.app_lifecycle as _app_lifecycle
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified import (
@@ -356,7 +352,7 @@ async def _guard_audio_ws_work_start(
     if app is None:
         return True
     try:
-        assert_may_start_work(app, kind)
+        _app_lifecycle.assert_may_start_work(app, kind)
         return True
     except HTTPException:
         payload = _audio_ws_error_payload(
@@ -457,7 +453,7 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
     default_whisper_model_size = "distil-large-v3"
 
     try:
-        cfg = load_comprehensive_config()
+        cfg = _config.load_comprehensive_config()
         if cfg is not None and cfg.has_section("STT-Settings"):
             configured_default = cfg.get(
                 "STT-Settings",
@@ -638,7 +634,7 @@ async def _mark_audio_credentials_used_once(
         return
     usage_claimed.set()
     try:
-        await await_owned_worker(credential_runtime.mark_used(provider_credentials))
+        await _bounded_daemon.await_owned_worker(credential_runtime.mark_used(provider_credentials))
     except asyncio.CancelledError:
         current_task = asyncio.current_task()
         if current_task is not None and current_task.cancelling():
@@ -663,9 +659,9 @@ async def _run_bounded_audio_sync_call(
     """Run one blocking provider-stream operation with capacity and a deadline."""
     worker_released = threading.Event()
     return await await_bounded_owned_operation(
-        await_bounded_daemon_with_timeout(
+        _bounded_daemon.await_bounded_daemon_with_timeout(
             call,
-            pool=STREAM_DAEMON_POOL,
+            pool=_bounded_daemon.STREAM_DAEMON_POOL,
             name=name,
             timeout_seconds=timeout_seconds,
             timeout_message=f"{name} timed out",
@@ -822,7 +818,7 @@ def _persist_audio_chat_settings(
         )
     if conversation_created:
         final_settings = dict(settings_payload)
-        final_settings = validate_chat_settings_storage(
+        final_settings = _chat_settings_validation.validate_chat_settings_storage(
             final_settings,
             reject_credentials=True,
         )
@@ -845,7 +841,7 @@ def _persist_audio_chat_settings(
                 **dict(resume_state.get("settings") or {}),
                 **settings_payload,
             }
-            final_settings = validate_chat_settings_storage(
+            final_settings = _chat_settings_validation.validate_chat_settings_storage(
                 final_settings,
                 reject_credentials=True,
                 allow_internal=True,
@@ -871,7 +867,7 @@ def _persist_audio_chat_settings(
         **dict((settings_row or {}).get("settings") or {}),
         **settings_payload,
     }
-    final_settings = validate_chat_settings_storage(
+    final_settings = _chat_settings_validation.validate_chat_settings_storage(
         final_settings,
         reject_credentials=True,
         conversation=conversation,
@@ -1208,7 +1204,7 @@ async def websocket_transcribe(
 
         # Enforce per-user streaming quotas and daily minutes during streaming
         # Resolve user id for quotas (JWT in multi-user; fixed id in single-user)
-        if is_multi_user_mode() and jwt_user_id is not None:
+        if _settings.is_multi_user_mode() and jwt_user_id is not None:
             user_id_for_usage = int(jwt_user_id)
         else:
             from tldw_Server_API.app.core.AuthNZ.settings import get_settings as _get_settings
@@ -1216,7 +1212,7 @@ async def websocket_transcribe(
             _s = _get_settings()
             user_id_for_usage = getattr(_s, "SINGLE_USER_FIXED_ID", 1)
 
-        effective_stt_policy = await resolve_effective_stt_policy(
+        effective_stt_policy = await _stt_policy.resolve_effective_stt_policy(
             principal=get_websocket_auth_principal(websocket),
             user_id=int(user_id_for_usage) if user_id_for_usage is not None else None,
             db=None,
@@ -1319,7 +1315,7 @@ async def websocket_transcribe(
                     is_active=True,
                     is_verified=True,
                 )
-                persistence_db = _resolve_media_db_for_user(persistence_user)
+                persistence_db = _DB_Deps._resolve_media_db_for_user(persistence_user)
                 return persistence_db, persistence_media_id
             except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
                 logger.warning(
@@ -1458,7 +1454,7 @@ async def websocket_transcribe(
         used_minutes = 0.0
         _billing_minutes_accumulator = 0.0  # fractional minutes pending billing flush
         # Bounded fail-open budget in minutes if DB is unavailable while streaming
-        FAIL_OPEN_CAP_MINUTES = _get_failopen_cap_minutes()
+        FAIL_OPEN_CAP_MINUTES = _quota_helpers._get_failopen_cap_minutes()
         failopen_remaining = FAIL_OPEN_CAP_MINUTES
 
         # Local snapshot of remaining minutes for this connection; when None,
@@ -1615,11 +1611,11 @@ async def websocket_transcribe(
             if acquired_stream and not stt_session_started:
                 _ensure_stt_session_started()
             if stt_session_started:
-                emit_stt_session_end_total(
+                _stt_metrics.emit_stt_session_end_total(
                     provider=stt_metrics_provider,
                     session_close_reason=stt_session_close_reason,
                 )
-                emit_stt_request_total(
+                _stt_metrics.emit_stt_request_total(
                     endpoint="audio.stream.transcribe",
                     provider=stt_metrics_provider,
                     model=stt_metrics_model,
@@ -1808,7 +1804,7 @@ async def websocket_audio_chat_stream(
         return
 
     # Determine quota user id
-    if is_multi_user_mode() and jwt_user_id is not None:
+    if _settings.is_multi_user_mode() and jwt_user_id is not None:
         user_id_for_usage = int(jwt_user_id)
     else:
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings as _get_settings
@@ -1816,7 +1812,7 @@ async def websocket_audio_chat_stream(
         _s = _get_settings()
         user_id_for_usage = getattr(_s, "SINGLE_USER_FIXED_ID", 1)
 
-    effective_stt_policy = await resolve_effective_stt_policy(
+    effective_stt_policy = await _stt_policy.resolve_effective_stt_policy(
         principal=get_websocket_auth_principal(websocket),
         user_id=int(user_id_for_usage) if user_id_for_usage is not None else None,
         db=None,
@@ -1860,7 +1856,7 @@ async def websocket_audio_chat_stream(
 
         # Daily minute tracking (bounded fail-open like STT WS)
         used_minutes = 0.0
-        FAIL_OPEN_CAP_MINUTES = _get_failopen_cap_minutes()
+        FAIL_OPEN_CAP_MINUTES = _quota_helpers._get_failopen_cap_minutes()
         failopen_remaining = FAIL_OPEN_CAP_MINUTES
         remaining_minutes_snapshot: Optional[float] = None
 
@@ -2373,7 +2369,7 @@ async def websocket_audio_chat_stream(
 
         async def _stream_llm_with_runtime(
             transcript_text: str,
-            credential_runtime: ProviderCredentialRuntime,
+            credential_runtime: _provider_credential_runtime.ProviderCredentialRuntime,
             cleanup_claimed: threading.Event,
             on_delta: Optional[Any] = None,
             turn_id: Optional[str] = None,
@@ -2382,7 +2378,7 @@ async def websocket_audio_chat_stream(
             nonlocal active_turn_cancelled
             nonlocal active_turn_id
             try:
-                provider_credentials = await await_owned_worker(
+                provider_credentials = await _bounded_daemon.await_owned_worker(
                     credential_runtime.resolve(
                         llm_provider,
                         model=llm_model,
@@ -2406,7 +2402,7 @@ async def websocket_audio_chat_stream(
             provider_llm_extra_params = speech_chat_service._provider_llm_extra_params(
                 llm_extra_params
             )
-            if provider_requires_api_key(llm_provider) and not provider_auth_is_resolved(
+            if _provider_metadata.provider_requires_api_key(llm_provider) and not provider_auth_is_resolved(
                 llm_provider,
                 api_key=provider_api_key,
                 app_config=app_config,
@@ -2484,7 +2480,7 @@ async def websocket_audio_chat_stream(
                 return source
 
             async def _acquire_stream() -> Any:
-                adapter = get_registry().get_adapter(normalize_provider(llm_provider))
+                adapter = _adapter_registry.get_registry().get_adapter(normalize_provider(llm_provider))
                 if adapter is None:
                     source = await await_bounded_owned_operation(
                         _await_and_store(_fallback_stream()),
@@ -2706,12 +2702,12 @@ async def websocket_audio_chat_stream(
         ) -> tuple[str, Optional[str], Optional[dict[str, Any]]]:
             """Run one LLM turn with a fresh, turn-scoped credential snapshot."""
             runtime_user_id, runtime_team_ids, runtime_org_ids, runtime_trusted_base_url = (
-                derive_trusted_credential_scope(
+                _byok_helpers.derive_trusted_credential_scope(
                     websocket,
                     get_websocket_auth_principal(websocket),
                 )
             )
-            turn_runtime = ProviderCredentialRuntime(
+            turn_runtime = _provider_credential_runtime.ProviderCredentialRuntime(
                 user_id=runtime_user_id,
                 team_ids=runtime_team_ids,
                 org_ids=runtime_org_ids,
@@ -2729,7 +2725,7 @@ async def websocket_audio_chat_stream(
                 )
             finally:
                 if not cleanup_claimed.is_set():
-                    await await_owned_worker(turn_runtime.close())
+                    await _bounded_daemon.await_owned_worker(turn_runtime.close())
 
         async def _stream_tts(text: str, voice_to_voice_start: float) -> None:
             if not text:
@@ -2801,13 +2797,13 @@ async def websocket_audio_chat_stream(
                     get_websocket_auth_principal(websocket)
                     or SimpleNamespace(id=user_id_for_usage)
                 )
-                async with tts_provider_credential_scope(
+                async with _tts_service.tts_provider_credential_scope(
                     provider=tts_provider,
                     model=tts_model,
                     request=websocket,
                     current_user=tts_principal,
                 ) as (tts_user_id, tts_overrides, tts_runtime, tts_credentials):
-                    await _stream_tts_to_websocket(
+                    await _streaming_service._stream_tts_to_websocket(
                         websocket=websocket,
                         speech_req=speech_req,
                         tts_service=tts_service,
@@ -2923,7 +2919,7 @@ async def websocket_audio_chat_stream(
                             overlap_tts_runtime,
                             overlap_tts_credentials,
                         ) = await tts_scope_stack.enter_async_context(
-                            tts_provider_credential_scope(
+                            _tts_service.tts_provider_credential_scope(
                                 provider=tts_provider,
                                 model=tts_model,
                                 request=websocket,
@@ -2979,7 +2975,7 @@ async def websocket_audio_chat_stream(
                                         and overlap_tts_runtime is not None
                                         and overlap_tts_credentials is not None
                                     ):
-                                        await await_owned_worker(
+                                        await _bounded_daemon.await_owned_worker(
                                             overlap_tts_runtime.mark_used(
                                                 overlap_tts_credentials
                                             )
@@ -3117,7 +3113,7 @@ async def websocket_audio_chat_stream(
                         await tts_scope_stack.aclose()
 
                 try:
-                    await await_owned_worker(_close_overlap_tts_resources())
+                    await _bounded_daemon.await_owned_worker(_close_overlap_tts_resources())
                 except asyncio.CancelledError as cancelled:
                     cleanup_cancelled = cancelled
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
@@ -3453,11 +3449,11 @@ async def websocket_audio_chat_stream(
         if active_tts_sender_task is not None and not active_tts_sender_task.done():
             active_tts_sender_task.cancel()
         if stt_session_started:
-            emit_stt_session_end_total(
+            _stt_metrics.emit_stt_session_end_total(
                 provider=stt_metrics_provider,
                 session_close_reason=stt_session_close_reason,
             )
-            emit_stt_request_total(
+            _stt_metrics.emit_stt_request_total(
                 endpoint="audio.chat.stream",
                 provider=stt_metrics_provider,
                 model=stt_metrics_model,
@@ -3558,7 +3554,7 @@ async def websocket_tts(
         return
 
     # Determine quota user id
-    if is_multi_user_mode() and jwt_user_id is not None:
+    if _settings.is_multi_user_mode() and jwt_user_id is not None:
         user_id_for_usage = int(jwt_user_id)
     else:
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings as _get_settings
@@ -3680,13 +3676,13 @@ async def websocket_tts(
                 get_websocket_auth_principal(websocket)
                 or SimpleNamespace(id=user_id_for_usage)
             )
-            async with tts_provider_credential_scope(
+            async with _tts_service.tts_provider_credential_scope(
                 provider=provider_hint,
                 model=resolved_tts.model,
                 request=websocket,
                 current_user=tts_principal,
             ) as (tts_user_id, tts_overrides, tts_runtime, tts_credentials):
-                await _stream_tts_to_websocket(
+                await _streaming_service._stream_tts_to_websocket(
                     websocket=websocket,
                     speech_req=speech_req,
                     tts_service=tts_service,
@@ -3857,7 +3853,7 @@ async def websocket_tts_realtime(
     ):
         return
 
-    if is_multi_user_mode() and jwt_user_id is not None:
+    if _settings.is_multi_user_mode() and jwt_user_id is not None:
         user_id_for_usage = int(jwt_user_id)
     else:
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings as _get_settings
@@ -3951,7 +3947,7 @@ async def websocket_tts_realtime(
             get_websocket_auth_principal(websocket)
             or SimpleNamespace(id=user_id_for_usage)
         )
-        credential_scope = tts_provider_credential_scope(
+        credential_scope = _tts_service.tts_provider_credential_scope(
             provider=str(provider_hint),
             model=str(model),
             request=websocket,
@@ -4013,7 +4009,7 @@ async def websocket_tts_realtime(
                     if not chunk:
                         continue
                     if not credentials_marked:
-                        await await_owned_worker(
+                        await _bounded_daemon.await_owned_worker(
                             tts_runtime.mark_used(tts_credentials)
                         )
                         credentials_marked = True
@@ -4187,7 +4183,7 @@ async def websocket_tts_realtime(
                     await credential_scope.__aexit__(None, None, None)
 
         try:
-            await await_owned_worker(_close_realtime_tts_resources())
+            await _bounded_daemon.await_owned_worker(_close_realtime_tts_resources())
         except asyncio.CancelledError as cancelled:
             cleanup_cancelled = cancelled
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:

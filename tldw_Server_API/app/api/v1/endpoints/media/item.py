@@ -16,15 +16,9 @@ from tldw_Server_API.app.api.v1.schemas.media_response_models import (
     MediaKeywordsResponse,
 )
 from tldw_Server_API.app.api.v1.utils.cache import generate_etag, is_not_modified
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.api.v1.utils.rag_cache import (
-    delete_media_vectors,
-    invalidate_rag_caches,
-)
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_DELETE, MEDIA_UPDATE
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     fetch_keywords_for_media,
-    get_full_media_details_rich,
     get_media_by_id,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
@@ -32,12 +26,16 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
-from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 from .....core.DB_Management.media_db.legacy_maintenance import (
     permanently_delete_item,
 )
+import tldw_Server_API.app.api.v1.schemas.media_response_models as _media_response_models
+import tldw_Server_API.app.api.v1.utils.http_errors as _http_errors
+import tldw_Server_API.app.api.v1.utils.rag_cache as _rag_cache
+import tldw_Server_API.app.core.DB_Management.media_db.api as _api
+import tldw_Server_API.app.core.testing as _testing
 
 router = APIRouter(tags=["Media Management"])
 
@@ -85,7 +83,7 @@ async def get_media_item(
 
     # TEST_MODE diagnostics
     try:
-        if is_test_mode():
+        if _testing.is_test_mode():
             db_path = getattr(db, "db_path_str", getattr(db, "db_path", "?"))
             headers = getattr(request, "headers", {}) or {}
             logger.info(
@@ -101,7 +99,7 @@ async def get_media_item(
         logger.debug("Failed to emit media item auth header diagnostics")
 
     try:
-        details = get_full_media_details_rich(
+        details = _api.get_full_media_details_rich(
             db,
             media_id=media_id,
             include_content=include_content,
@@ -118,7 +116,7 @@ async def get_media_item(
                 detail="Media not found or is inactive/trashed",
             )
 
-        response_model = MediaDetailResponse(**details)
+        response_model = _media_response_models.MediaDetailResponse(**details)
         payload = response_model.model_dump()
 
         etag = generate_etag(payload)
@@ -131,7 +129,7 @@ async def get_media_item(
     except HTTPException:
         raise
     except (DatabaseError, InputError, ConflictError) as exc:
-        raise map_db_error_to_http(
+        raise _http_errors.map_db_error_to_http(
             exc,
             default_detail="Database error retrieving media details",
             input_detail="Invalid media identifier",
@@ -192,8 +190,8 @@ async def delete_media_item(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Media could not be moved to trash",
             )
-        invalidate_rag_caches(current_user, media_id=media_id)
-        await delete_media_vectors(current_user, media_id=media_id)
+        _rag_cache.invalidate_rag_caches(current_user, media_id=media_id)
+        await _rag_cache.delete_media_vectors(current_user, media_id=media_id)
         logger.info(
             "User {} moved media {} to trash",
             getattr(current_user, "id", "?"),
@@ -203,7 +201,7 @@ async def delete_media_item(
     except HTTPException:
         raise
     except (ConflictError, InputError, DatabaseError) as exc:
-        raise map_db_error_to_http(
+        raise _http_errors.map_db_error_to_http(
             exc,
             default_detail="Database error moving media to trash",
             input_detail="Invalid media identifier",
@@ -280,7 +278,7 @@ async def restore_media_item(
                 getattr(current_user, "id", "?"),
                 media_id,
             )
-        details = get_full_media_details_rich(
+        details = _api.get_full_media_details_rich(
             db,
             media_id=media_id,
             include_content=include_content,
@@ -292,11 +290,11 @@ async def restore_media_item(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Media not found or is inactive/trashed",
             )
-        return MediaDetailResponse(**details)
+        return _media_response_models.MediaDetailResponse(**details)
     except HTTPException:
         raise
     except (ConflictError, InputError, DatabaseError) as exc:
-        raise map_db_error_to_http(
+        raise _http_errors.map_db_error_to_http(
             exc,
             default_detail="Database error restoring media from trash",
             input_detail="Invalid media identifier",
@@ -360,8 +358,8 @@ async def permanently_delete_media_item(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Media not found or already deleted",
             )
-        invalidate_rag_caches(current_user, media_id=media_id)
-        await delete_media_vectors(current_user, media_id=media_id)
+        _rag_cache.invalidate_rag_caches(current_user, media_id=media_id)
+        await _rag_cache.delete_media_vectors(current_user, media_id=media_id)
         logger.warning(
             "User {} permanently deleted media {}",
             getattr(current_user, "id", "?"),
@@ -371,7 +369,7 @@ async def permanently_delete_media_item(
     except HTTPException:
         raise
     except (ConflictError, InputError, DatabaseError) as exc:
-        raise map_db_error_to_http(
+        raise _http_errors.map_db_error_to_http(
             exc,
             default_detail="Database error permanently deleting media",
             input_detail="Invalid media identifier",
@@ -448,7 +446,7 @@ async def update_media_item(
                 detail="Media item not found or inactive.",
             )
         # Use the rich detail view for consistency with normal responses.
-        details = get_full_media_details_rich(
+        details = _api.get_full_media_details_rich(
             db,
             media_id=media_id,
             include_content=True,
@@ -460,8 +458,8 @@ async def update_media_item(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Media not found after update",
             )
-        invalidate_rag_caches(current_user, media_id=media_id)
-        return MediaDetailResponse(**details)
+        _rag_cache.invalidate_rag_caches(current_user, media_id=media_id)
+        return _media_response_models.MediaDetailResponse(**details)
 
     try:
         effects = db.apply_media_item_update(
@@ -471,7 +469,7 @@ async def update_media_item(
             analysis_content=payload.analysis,
         )
 
-        details = get_full_media_details_rich(
+        details = _api.get_full_media_details_rich(
             db,
             media_id=media_id,
             include_content=True,
@@ -484,12 +482,12 @@ async def update_media_item(
                 detail="Media not found after update",
             )
         if effects.get("invalidate_rag", True):
-            invalidate_rag_caches(current_user, media_id=media_id)
-        return MediaDetailResponse(**details)
+            _rag_cache.invalidate_rag_caches(current_user, media_id=media_id)
+        return _media_response_models.MediaDetailResponse(**details)
     except HTTPException:
         raise
     except InputError as exc:
-        raise map_db_error_to_http(
+        raise _http_errors.map_db_error_to_http(
             exc,
             input_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             default_detail="Database error during update",
@@ -500,7 +498,7 @@ async def update_media_item(
             not_found_detail="Media item not found or is inactive/trashed",
         ) from exc
     except (ConflictError, DatabaseError) as exc:
-        raise map_db_error_to_http(
+        raise _http_errors.map_db_error_to_http(
             exc,
             input_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             default_detail="Database error during update",
@@ -538,7 +536,7 @@ async def update_media_keywords(
     mode = payload.mode
     target_keywords = [k.strip() for k in payload.keywords if k and k.strip()]
     try:
-        current_keywords = fetch_keywords_for_media(db, media_id)
+        current_keywords = _api.fetch_keywords_for_media(db, media_id)
         if mode == "set":
             desired = target_keywords
         elif mode == "remove":
@@ -548,12 +546,12 @@ async def update_media_keywords(
             # add (default); the store dedupes by keyword identity and keeps the existing casing
             desired = current_keywords + target_keywords
         db.update_keywords_for_media(media_id=media_id, keywords=desired)
-        updated_keywords = fetch_keywords_for_media(db, media_id)
+        updated_keywords = _api.fetch_keywords_for_media(db, media_id)
         return MediaKeywordsResponse(media_id=media_id, keywords=updated_keywords)
     except HTTPException:
         raise
     except (ConflictError, InputError, DatabaseError) as exc:
-        raise map_db_error_to_http(
+        raise _http_errors.map_db_error_to_http(
             exc,
             input_status=status.HTTP_404_NOT_FOUND,
             default_detail="Failed to update keywords",

@@ -43,7 +43,7 @@ def _make_request() -> Request:
 @pytest.mark.asyncio
 async def test_return_download_link_persists_tts_audio(monkeypatch):
     """Non-streaming requests with return_download_link register a file and set header."""
-    monkeypatch.setattr(audio_endpoint, "_sanitize_speech_request", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *args, **kwargs: None)
 
     async def _resolve_tts_byok(*args, **kwargs):
         return (1, {}, None)
@@ -51,7 +51,7 @@ async def test_return_download_link_persists_tts_audio(monkeypatch):
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _resolve_tts_byok)
 
     save_mock = AsyncMock(return_value={"id": 123})
-    monkeypatch.setattr(audio_endpoint, "save_and_register_tts_audio", save_mock)
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.generated_file_helpers.save_and_register_tts_audio", save_mock)
 
     req = OpenAISpeechRequest(
         input="hello world",
@@ -81,7 +81,7 @@ async def test_return_download_link_persists_tts_audio(monkeypatch):
 @pytest.mark.asyncio
 async def test_return_download_link_rejected_for_streaming(monkeypatch):
     """Streaming requests cannot request return_download_link."""
-    monkeypatch.setattr(audio_endpoint, "_sanitize_speech_request", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *args, **kwargs: None)
 
     async def _resolve_tts_byok(*args, **kwargs):
         return (1, {}, None)
@@ -114,7 +114,7 @@ async def test_return_download_link_rejected_for_streaming(monkeypatch):
 @pytest.mark.unit
 def test_tts_headers_via_http(monkeypatch):
     """HTTP call returns storage download headers when requested."""
-    monkeypatch.setattr(audio_endpoint, "_sanitize_speech_request", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *args, **kwargs: None)
 
     async def _resolve_tts_byok(*args, **kwargs):
         return (1, {}, None)
@@ -122,7 +122,7 @@ def test_tts_headers_via_http(monkeypatch):
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _resolve_tts_byok)
 
     save_mock = AsyncMock(return_value={"id": 456})
-    monkeypatch.setattr(audio_endpoint, "save_and_register_tts_audio", save_mock)
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.generated_file_helpers.save_and_register_tts_audio", save_mock)
 
     usage_log = SimpleNamespace(log_event=lambda *args, **kwargs: None)
 

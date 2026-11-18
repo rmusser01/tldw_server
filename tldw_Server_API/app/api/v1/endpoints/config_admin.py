@@ -17,7 +17,6 @@ from tldw_Server_API.app.api.v1.schemas.config_schemas import (
     ConfigValue,
     EffectiveConfigResponse,
 )
-from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.config_paths import (
     resolve_config_file,
     resolve_config_root,
@@ -96,7 +95,7 @@ def _filter_defaults(
 
 def _build_config_txt_values() -> dict[str, ConfigValue]:
     values: dict[str, ConfigValue] = {}
-    config_parser = load_comprehensive_config()
+    config_parser = _config.load_comprehensive_config()
     if not hasattr(config_parser, "sections"):
         return values
 
@@ -250,6 +249,7 @@ async def get_effective_config(
 # ---------------------------------------------------------------------------
 
 from pydantic import BaseModel, Field
+import tldw_Server_API.app.core.config as _config
 
 
 class ConfigSectionUpdateRequest(BaseModel):

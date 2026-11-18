@@ -255,7 +255,7 @@ def test_ebooks_process_sanitizes_url_download_failure(
     async def _fail_download_url_async(*_args, **_kwargs):
         raise RuntimeError("ebook download failed at /private/cache/book.epub")
 
-    monkeypatch.setattr(process_ebooks_mod, "core_download_url_async", _fail_download_url_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils.download_url_async", _fail_download_url_async)
 
     response = client.post(
         "/api/v1/media/process-ebooks",
@@ -450,7 +450,7 @@ def test_documents_process_sanitizes_url_download_failure(
     async def _fail_download_url_async(*_args, **_kwargs):
         raise RuntimeError("document download failed at /private/cache/doc.txt")
 
-    monkeypatch.setattr(process_documents_mod, "core_download_url_async", _fail_download_url_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils.download_url_async", _fail_download_url_async)
 
     response = client.post(
         "/api/v1/media/process-documents",
@@ -624,7 +624,7 @@ def test_pdfs_process_sanitizes_url_download_failure(
     async def _fail_download_url_async(*_args, **_kwargs):
         raise RuntimeError("pdf download failed at /private/cache/paper.pdf")
 
-    monkeypatch.setattr(process_pdfs_mod, "core_download_url_async", _fail_download_url_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils.download_url_async", _fail_download_url_async)
 
     response = client.post(
         "/api/v1/media/process-pdfs",

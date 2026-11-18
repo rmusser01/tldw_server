@@ -38,42 +38,25 @@ from tldw_Server_API.app.api.v1.schemas.connectors import (
 from tldw_Server_API.app.api.v1.utils.pagination import build_cursor_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
-from tldw_Server_API.app.core.External_Sources import (
-    get_connector_by_name,
-)
 from tldw_Server_API.app.core.External_Sources.connectors_service import (
     FILE_SYNC_PROVIDERS,
-    consume_oauth_state,
     count_connectors_jobs_today,
-    create_account,
-    create_import_job,
-    create_oauth_state,
-    create_source,
     delete_account,
-    get_account_email,
-    get_account_for_user,
-    get_account_tokens,
-    get_policy,
-    get_source_binding_health,
-    get_source_by_id,
-    get_source_by_webhook_subscription,
-    get_source_sync_state,
     list_accounts,
-    list_sources,
-    record_webhook_receipt,
-    update_source,
-    upsert_source_sync_state,
     upsert_policy,
 )
 from tldw_Server_API.app.core.External_Sources.policy import (
-    evaluate_policy_constraints,
     get_default_policy_from_env,
 )
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
-from tldw_Server_API.app.core.http_client import afetch as _http_afetch
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from tldw_Server_API.app.core.testing import env_flag_enabled
+import tldw_Server_API.app.core.External_Sources as _External_Sources
+import tldw_Server_API.app.core.External_Sources.connectors_service as _connectors_service
+import tldw_Server_API.app.core.External_Sources.policy as _policy
+import tldw_Server_API.app.core.http_client as _http_client
+import tldw_Server_API.app.core.testing as _testing
 
 router = APIRouter(prefix="/connectors", tags=["connectors"])
 
@@ -136,7 +119,7 @@ def _resolve_redirect_base(request: Request | None, conn) -> str:
         return configured_base
 
     request_base = _extract_request_base(request)
-    if not (is_test_mode() or env_flag_enabled("TESTING")):
+    if not (_testing.is_test_mode() or env_flag_enabled("TESTING")):
         if request_base:
             logger.warning(
                 "Rejecting request-derived base_url for connector OAuth redirect base in non-test mode: {}",
@@ -179,7 +162,7 @@ def _resolve_webhook_callback_base(request: Request | None, conn) -> str:
     if connector_base:
         return connector_base
     request_base = _extract_request_base(request)
-    if request_base and (is_test_mode() or env_flag_enabled("TESTING") or _is_local_callback_base(request_base)):
+    if request_base and (_testing.is_test_mode() or env_flag_enabled("TESTING") or _is_local_callback_base(request_base)):
         return _validate_redirect_base(request_base)
     raise HTTPException(
         status_code=500,
@@ -381,7 +364,7 @@ async def _queue_source_job(
             raise HTTPException(status_code=429, detail="Daily import quota reached for your role")
     rid = ensure_request_id(request) if request is not None else None
     tp = ensure_traceparent(request) if request is not None else ""
-    job = await create_import_job(user_id, source_id, request_id=rid, job_type=job_type)
+    job = await _connectors_service.create_import_job(user_id, source_id, request_id=rid, job_type=job_type)
     get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="connectors", traceparent=tp).info(
         "Queued connectors job: type=%s job_id=%s source_id=%s", job_type, job.get("id"), source_id
     )
@@ -466,7 +449,7 @@ async def start_authorize(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> AuthorizeURLResponse:
     provider = _ensure_connector_provider_enabled(provider)
-    conn = get_connector_by_name(provider)
+    conn = _External_Sources.get_connector_by_name(provider)
     redirect_base = _resolve_redirect_base(request, conn)
     if redirect_base:
         conn.redirect_base = redirect_base
@@ -487,7 +470,7 @@ async def start_authorize(
             "oauth_token_secret": oauth_token_secret,
         }
         scopes_list = [*scopes_list, f"oauth_token={oauth_token}"]
-    await create_oauth_state(db, user_id, provider, state, metadata=oauth_state_metadata)
+    await _connectors_service.create_oauth_state(db, user_id, provider, state, metadata=oauth_state_metadata)
     url = conn.authorize_url(state=state, scopes=scopes_list or None, redirect_path=f"/api/v1/connectors/providers/{provider}/callback")
     return AuthorizeURLResponse(auth_url=url, state=state)
 
@@ -505,7 +488,7 @@ async def oauth_callback(
     org_policy: dict[str, Any] = Depends(get_org_policy_from_principal),
 ) -> ConnectorAccount:
     provider = _ensure_connector_provider_enabled(provider)
-    conn = get_connector_by_name(provider)
+    conn = _External_Sources.get_connector_by_name(provider)
     pol = org_policy
     user_id = _get_user_id(principal)
     if not state:
@@ -536,7 +519,7 @@ async def oauth_callback(
             default_ttl_minutes,
         )
         ttl_minutes = default_ttl_minutes
-    oauth_state = await consume_oauth_state(
+    oauth_state = await _connectors_service.consume_oauth_state(
         db,
         user_id=user_id,
         provider=provider,
@@ -593,7 +576,7 @@ async def oauth_callback(
     if provider == 'drive' and (tokens.get('access_token')):
         try:
             # userinfo endpoint provides email when scopes include 'email'
-            resp = await _http_afetch(
+            resp = await _http_client.afetch(
                 method="GET",
                 url="https://openidconnect.googleapis.com/v1/userinfo",
                 headers={"Authorization": f"Bearer {tokens['access_token']}"},
@@ -621,7 +604,7 @@ async def oauth_callback(
     # Enforce additional org policy constraints at callback across modes using
     # the same org policy surface.
     try:
-        ok, why = evaluate_policy_constraints(
+        ok, why = _policy.evaluate_policy_constraints(
             pol,
             provider=provider,
             remote_path=None,
@@ -637,7 +620,7 @@ async def oauth_callback(
     if not ok:
         raise HTTPException(status_code=403, detail=why or "Account not permitted by org policy")
 
-    acct = await create_account(
+    acct = await _connectors_service.create_account(
         db,
         user_id=user_id,
         provider=provider,
@@ -682,15 +665,15 @@ async def browse_provider_sources(
 ) -> ConnectorBrowseResponse:
     provider = _ensure_connector_provider_enabled(provider)
     user_id = _get_user_id(principal)
-    tokens = await get_account_tokens(db, user_id, account_id)
-    acct = await get_account_for_user(db, user_id, account_id) or {}
+    tokens = await _connectors_service.get_account_tokens(db, user_id, account_id)
+    acct = await _connectors_service.get_account_for_user(db, user_id, account_id) or {}
     if not tokens:
         raise HTTPException(status_code=404, detail="Account not found")
     acct_provider = str(acct.get("provider") or "").lower()
     if acct_provider and acct_provider != provider:
         raise HTTPException(status_code=400, detail="Account provider mismatch")
-    email = await get_account_email(db, user_id, account_id)
-    conn = get_connector_by_name(provider)
+    email = await _connectors_service.get_account_email(db, user_id, account_id)
+    conn = _External_Sources.get_connector_by_name(provider)
     account_payload = {**acct, "tokens": tokens, "email": email}
     if provider == "zotero" and not str(account_payload.get("provider_user_id") or "").strip():
         provider_user_id = str(tokens.get("provider_user_id") or tokens.get("userID") or tokens.get("user_id") or "").strip()
@@ -744,7 +727,7 @@ async def add_source(
     options = _normalize_source_options_for_provider(provider, payload.options)
 
     user_id = _get_user_id(principal)
-    acct = await get_account_for_user(db, user_id, account_id)
+    acct = await _connectors_service.get_account_for_user(db, user_id, account_id)
     if not acct:
         raise HTTPException(status_code=404, detail="Account not found")
     acct_provider = str(acct.get("provider") or "").lower()
@@ -754,7 +737,7 @@ async def add_source(
     # Enforce org policy on provider/path for all modes; single-user callers
     # rely on their admin/role claims rather than mode flags.
     try:
-        ok, why = evaluate_policy_constraints(org_policy, provider=provider, remote_path=path)
+        ok, why = _policy.evaluate_policy_constraints(org_policy, provider=provider, remote_path=path)
     except Exception as e:
         logger.error("Connector source policy evaluation failed")
         raise HTTPException(
@@ -764,7 +747,7 @@ async def add_source(
     if not ok:
         raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail=why or "Source denied by org policy")
 
-    row = await create_source(
+    row = await _connectors_service.create_source(
         db,
         account_id=account_id,
         provider=provider,
@@ -776,9 +759,9 @@ async def add_source(
     )
     if provider in {"onedrive", "drive"}:
         try:
-            tokens = await get_account_tokens(db, user_id, account_id)
+            tokens = await _connectors_service.get_account_tokens(db, user_id, account_id)
             if tokens:
-                conn = get_connector_by_name(provider)
+                conn = _External_Sources.get_connector_by_name(provider)
                 callback_base = _resolve_webhook_callback_base(request, conn)
                 callback_url = f"{callback_base}/api/v1/connectors/providers/{provider}/webhook"
                 resource_id = str(remote_id or "root").strip("/") or "root"
@@ -812,14 +795,14 @@ async def add_source(
                         if page_token:
                             sync_updates["cursor"] = page_token
                             sync_updates["cursor_kind"] = "drive_start_page_token"
-                await upsert_source_sync_state(
+                await _connectors_service.upsert_source_sync_state(
                     db,
                     source_id=int(row.get("id")),
                     **sync_updates,
                 )
         except Exception as exc:
             logger.warning("Connector webhook provisioning failed")
-            await upsert_source_sync_state(
+            await _connectors_service.upsert_source_sync_state(
                 db,
                 source_id=int(row.get("id")),
                 sync_mode="hybrid",
@@ -844,11 +827,11 @@ async def get_sources(
     db=Depends(get_db_transaction), principal: AuthPrincipal = Depends(get_auth_principal)
 ) -> list[ConnectorSource]:
     user_id = _get_user_id(principal)
-    rows = await list_sources(db, user_id)
+    rows = await _connectors_service.list_sources(db, user_id)
     out: list[ConnectorSource] = []
     for r in rows:
-        sync_state = await get_source_sync_state(db, source_id=int(r.get("id")))
-        binding_health = await get_source_binding_health(db, source_id=int(r.get("id")))
+        sync_state = await _connectors_service.get_source_sync_state(db, source_id=int(r.get("id")))
+        binding_health = await _connectors_service.get_source_binding_health(db, source_id=int(r.get("id")))
         out.append(
             ConnectorSource(
                 id=int(r.get("id")),
@@ -876,13 +859,13 @@ async def patch_source(
     enabled = payload.enabled
     options = payload.options
     user_id = _get_user_id(principal)
-    source = await get_source_by_id(db, user_id, source_id)
+    source = await _connectors_service.get_source_by_id(db, user_id, source_id)
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
     provider = str(source.get("provider") or "").strip().lower()
     if options is not None:
         options = _normalize_source_options_for_provider(provider, options)
-    row = await update_source(db, user_id, source_id, enabled=enabled, options=options)
+    row = await _connectors_service.update_source(db, user_id, source_id, enabled=enabled, options=options)
     if not row:
         raise HTTPException(status_code=404, detail="Source not found")
     return ConnectorSource(
@@ -924,12 +907,12 @@ async def get_source_sync_status(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> ConnectorSourceSyncStatus:
     user_id = _get_user_id(principal)
-    source = await get_source_by_id(db, user_id, source_id)
+    source = await _connectors_service.get_source_by_id(db, user_id, source_id)
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    sync_state = await get_source_sync_state(db, source_id=source_id) or {}
-    binding_health = await get_source_binding_health(db, source_id=source_id)
+    sync_state = await _connectors_service.get_source_sync_state(db, source_id=source_id) or {}
+    binding_health = await _connectors_service.get_source_binding_health(db, source_id=source_id)
     active_job = _load_active_job(sync_state)
     active_job_id = str(sync_state.get("active_job_id") or "").strip() or None
 
@@ -970,10 +953,10 @@ async def trigger_source_sync(
     count_jobs_fn: Callable[[int], int] = Depends(get_connectors_job_counter),
 ) -> ConnectorSourceSyncTriggerResponse:
     user_id = _get_user_id(principal)
-    source = await get_source_by_id(db, user_id, source_id)
+    source = await _connectors_service.get_source_by_id(db, user_id, source_id)
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
-    sync_state = await get_source_sync_state(db, source_id=source_id) or {}
+    sync_state = await _connectors_service.get_source_sync_state(db, source_id=source_id) or {}
 
     job = await _queue_source_job(
         source_id=source_id,
@@ -1022,7 +1005,7 @@ async def provider_webhook_callback(
         if not channel_id or not receipt_key:
             return _webhook_response(provider=provider, status="ignored", ignored_notifications=1)
 
-        source = await get_source_by_webhook_subscription(
+        source = await _connectors_service.get_source_by_webhook_subscription(
             db,
             provider=provider,
             subscription_id=channel_id,
@@ -1040,7 +1023,7 @@ async def provider_webhook_callback(
             return _webhook_response(provider=provider, status="ignored", ignored_notifications=1)
 
         source_id = int(source.get("id"))
-        is_new = await record_webhook_receipt(
+        is_new = await _connectors_service.record_webhook_receipt(
             db,
             provider=provider,
             receipt_key=receipt_key,
@@ -1054,7 +1037,7 @@ async def provider_webhook_callback(
                 duplicate_notifications=1,
             )
 
-        await create_import_job(
+        await _connectors_service.create_import_job(
             int(source.get("user_id")),
             source_id,
             request_id=request_id,
@@ -1094,7 +1077,7 @@ async def provider_webhook_callback(
         if not receipt_key or not subscription_id:
             ignored_notifications += 1
             continue
-        source = await get_source_by_webhook_subscription(
+        source = await _connectors_service.get_source_by_webhook_subscription(
             db,
             provider=provider,
             subscription_id=subscription_id,
@@ -1113,7 +1096,7 @@ async def provider_webhook_callback(
             ignored_notifications += 1
             continue
         source_id = int(source.get("id"))
-        is_new = await record_webhook_receipt(
+        is_new = await _connectors_service.record_webhook_receipt(
             db,
             provider=provider,
             receipt_key=receipt_key,
@@ -1126,7 +1109,7 @@ async def provider_webhook_callback(
         if source_id in seen_source_ids:
             continue
         seen_source_ids.add(source_id)
-        await create_import_job(
+        await _connectors_service.create_import_job(
             int(source.get("user_id")),
             source_id,
             request_id=request_id,
@@ -1182,7 +1165,7 @@ async def get_org_policy(
     db=Depends(get_db_transaction),
 ) -> ConnectorPolicy:
     # In single-user mode, mimic multi-user but no enforcement beyond exposure
-    pol = await get_policy(db, org_id)
+    pol = await _connectors_service.get_policy(db, org_id)
     if not pol:
         pol = get_default_policy_from_env(org_id)
     return ConnectorPolicy(

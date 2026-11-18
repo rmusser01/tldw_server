@@ -108,7 +108,7 @@ async def test_submit_explicit_feedback_sanitizes_duplicate_merge_failure_log(mo
 
     monkeypatch.setattr(feedback_endpoint, "logger", logger_stub)
     monkeypatch.setattr(feedback_endpoint, "_reserve_idempotency_record", _reserve_duplicate)
-    monkeypatch.setattr(feedback_endpoint, "UnifiedFeedbackSystem", _FeedbackSystemStub)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.analytics_system.UnifiedFeedbackSystem", _FeedbackSystemStub)
 
     with pytest.raises(HTTPException) as exc_info:
         await feedback_endpoint.submit_explicit_feedback(
@@ -140,7 +140,7 @@ async def test_submit_explicit_feedback_sanitizes_finalize_merge_failure_log(mon
     monkeypatch.setattr(feedback_endpoint, "logger", logger_stub)
     monkeypatch.setattr(feedback_endpoint, "_reserve_idempotency_record", _reserve_new)
     monkeypatch.setattr(feedback_endpoint, "_finalize_idempotency_record", _finalize_pending_merge)
-    monkeypatch.setattr(feedback_endpoint, "UnifiedFeedbackSystem", _FeedbackSystemStub)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.analytics_system.UnifiedFeedbackSystem", _FeedbackSystemStub)
 
     with pytest.raises(HTTPException) as exc_info:
         await feedback_endpoint.submit_explicit_feedback(
@@ -172,7 +172,7 @@ async def test_submit_explicit_feedback_sanitizes_unexpected_submit_failure_log(
     monkeypatch.setattr(feedback_endpoint, "logger", logger_stub)
     monkeypatch.setattr(feedback_endpoint, "_reserve_idempotency_record", _reserve_new)
     monkeypatch.setattr(feedback_endpoint, "_clear_idempotency_record", _clear_record)
-    monkeypatch.setattr(feedback_endpoint, "UnifiedFeedbackSystem", _SubmitFailureFeedbackSystemStub)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.analytics_system.UnifiedFeedbackSystem", _SubmitFailureFeedbackSystemStub)
 
     with pytest.raises(HTTPException) as exc_info:
         await feedback_endpoint.submit_explicit_feedback(
@@ -204,7 +204,7 @@ async def test_submit_explicit_feedback_sanitizes_successful_submit_errors_log(m
     monkeypatch.setattr(feedback_endpoint, "logger", logger_stub)
     monkeypatch.setattr(feedback_endpoint, "_reserve_idempotency_record", _reserve_new)
     monkeypatch.setattr(feedback_endpoint, "_finalize_idempotency_record", _finalize_record)
-    monkeypatch.setattr(feedback_endpoint, "UnifiedFeedbackSystem", _SubmitErrorsFeedbackSystemStub)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.analytics_system.UnifiedFeedbackSystem", _SubmitErrorsFeedbackSystemStub)
 
     response = await feedback_endpoint.submit_explicit_feedback(
         payload=_request(),

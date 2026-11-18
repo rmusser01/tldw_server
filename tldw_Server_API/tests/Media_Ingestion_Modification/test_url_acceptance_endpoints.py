@@ -141,10 +141,10 @@ def patch_http_fetch(monkeypatch):
         return target_path
 
     monkeypatch.setattr(download_utils, "_m_afetch", fake_afetch)
-    monkeypatch.setattr(process_ebooks, "core_download_url_async", fake_download_url_async)
-    monkeypatch.setattr(process_pdfs, "core_download_url_async", fake_download_url_async)
-    monkeypatch.setattr(process_documents, "core_download_url_async", fake_download_url_async)
-    monkeypatch.setattr(process_code, "download_url_async", fake_download_url_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils.download_url_async", fake_download_url_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils.download_url_async", fake_download_url_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils.download_url_async", fake_download_url_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils.download_url_async", fake_download_url_async)
     yield
     _STUB_TABLE.clear()
 

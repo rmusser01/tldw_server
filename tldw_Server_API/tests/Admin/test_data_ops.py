@@ -57,7 +57,7 @@ async def test_list_backups_sanitizes_generic_failure_log(monkeypatch):
     def _raise_list_backup_items(**_kwargs):
         raise RuntimeError("backup list backend exploded at /private/backups.db")
 
-    monkeypatch.setattr(admin_data_ops, "svc_list_backup_items", _raise_list_backup_items)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_data_ops_service.list_backup_items", _raise_list_backup_items)
 
     with pytest.raises(HTTPException) as exc_info:
         await admin_data_ops.list_backups(
@@ -83,7 +83,7 @@ async def test_create_backup_sanitizes_generic_failure_log(monkeypatch):
     def _raise_create_backup_snapshot(**_kwargs):
         raise RuntimeError("backup create backend exploded at /private/backups.db")
 
-    monkeypatch.setattr(admin_data_ops, "svc_create_backup_snapshot", _raise_create_backup_snapshot)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_data_ops_service.create_backup_snapshot", _raise_create_backup_snapshot)
 
     with pytest.raises(HTTPException) as exc_info:
         await admin_data_ops.create_backup(
@@ -107,7 +107,7 @@ async def test_restore_backup_sanitizes_generic_failure_log(monkeypatch):
     def _raise_restore_backup_snapshot(**_kwargs):
         raise RuntimeError("backup restore backend exploded at /private/backups.db")
 
-    monkeypatch.setattr(admin_data_ops, "svc_restore_backup_snapshot", _raise_restore_backup_snapshot)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_data_ops_service.restore_backup_snapshot", _raise_restore_backup_snapshot)
 
     with pytest.raises(HTTPException) as exc_info:
         await admin_data_ops.restore_backup(

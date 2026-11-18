@@ -83,7 +83,7 @@ from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
     resolve_ws_principal,
 )
 from tldw_Server_API.app.core.config import settings as app_settings
-from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
+from tldw_Server_API.app.core.Metrics import observe_histogram
 from tldw_Server_API.app.core.Sandbox.audit_metadata import build_run_completion_audit_metadata
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, SessionSpec
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType as CoreRuntimeType
@@ -110,6 +110,7 @@ from tldw_Server_API.app.core.testing import (
     is_truthy,
 )
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
+import tldw_Server_API.app.core.Metrics as _Metrics
 
 _SANDBOX_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -760,7 +761,7 @@ async def create_session(
         raise
     # Metrics
     try:
-        increment_counter(
+        _Metrics.increment_counter(
             "sandbox_sessions_created_total",
             labels={"runtime": session.runtime.value},
         )
@@ -1145,9 +1146,9 @@ async def upload_files(
     # Metrics
     try:
         if written:
-            increment_counter("sandbox_upload_bytes_total", value=float(written), labels={"kind": "session_upload"})
+            _Metrics.increment_counter("sandbox_upload_bytes_total", value=float(written), labels={"kind": "session_upload"})
         if count:
-            increment_counter("sandbox_upload_files_total", value=float(count), labels={"kind": "session_upload"})
+            _Metrics.increment_counter("sandbox_upload_files_total", value=float(count), labels={"kind": "session_upload"})
     except _SANDBOX_NONCRITICAL_EXCEPTIONS:
         logger.debug("metrics: sandbox upload counters failed")
 
@@ -1342,7 +1343,7 @@ async def start_run(
                 # Include runtime label where possible for taxonomy consistency
                 rt_label = str(payload.runtime or "unknown")
                 metric_reason = str(quota_reason or "queue_full")
-                increment_counter(
+                _Metrics.increment_counter(
                     "sandbox_queue_full_total",
                     labels={"component": "sandbox", "runtime": rt_label, "reason": metric_reason},
                 )
@@ -1386,7 +1387,7 @@ async def start_run(
         raise
     try:
         rt = (status.runtime.value if status.runtime else (payload.runtime or "unknown"))
-        increment_counter("sandbox_runs_started_total", labels={"runtime": str(rt)})
+        _Metrics.increment_counter("sandbox_runs_started_total", labels={"runtime": str(rt)})
     except _SANDBOX_NONCRITICAL_EXCEPTIONS:
         logger.debug("metrics: sandbox_runs_started_total failed")
     # Metrics and audit post-run (if completed)
@@ -1408,7 +1409,7 @@ async def start_run(
                     "outcome": outcome,
                     "reason": reason_norm,
                 }
-                increment_counter("sandbox_runs_completed_total", labels=labels_completed)
+                _Metrics.increment_counter("sandbox_runs_completed_total", labels=labels_completed)
             except _SANDBOX_NONCRITICAL_EXCEPTIONS:
                 logger.debug("metrics: sandbox_runs_completed_total failed")
             try:
@@ -1962,7 +1963,7 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
     )
     if ws_quota_token is None:
         with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
-            increment_counter(
+            _Metrics.increment_counter(
                 "sandbox_ws_quota_rejections_total",
                 labels={"component": "sandbox", "reason": str(ws_quota_reason or "quota_exceeded")},
             )
@@ -2034,7 +2035,7 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
 
     # Metrics: connection opened
     try:
-        increment_counter("sandbox_ws_connections_opened_total", labels={"component": "sandbox"})
+        _Metrics.increment_counter("sandbox_ws_connections_opened_total", labels={"component": "sandbox"})
     except _SANDBOX_NONCRITICAL_EXCEPTIONS:
         logger.debug("metrics: sandbox_ws_connections_opened_total failed")
 
@@ -2053,7 +2054,7 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
                     if not hub.publish_heartbeat(run_id):
                         return
                     with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
-                        increment_counter("sandbox_ws_heartbeats_sent_total", labels={"component": "sandbox"})
+                        _Metrics.increment_counter("sandbox_ws_heartbeats_sent_total", labels={"component": "sandbox"})
                 except _SANDBOX_NONCRITICAL_EXCEPTIONS:
                     continue
         except _SANDBOX_NONCRITICAL_EXCEPTIONS:
@@ -2168,7 +2169,7 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
     except WebSocketDisconnect:
         logger.info(f"WS disconnected for run {run_id}")
         with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
-            increment_counter("sandbox_ws_disconnects_total", labels={"component": "sandbox"})
+            _Metrics.increment_counter("sandbox_ws_disconnects_total", labels={"component": "sandbox"})
     except _SANDBOX_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"WS stream error: {e}")
     finally:

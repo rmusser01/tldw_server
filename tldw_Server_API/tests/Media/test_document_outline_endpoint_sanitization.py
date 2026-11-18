@@ -134,7 +134,7 @@ async def test_document_outline_sanitizes_database_error_log(monkeypatch):
 async def test_document_outline_sanitizes_storage_error_log(monkeypatch):
     logger_stub = _patch_logger(monkeypatch)
     monkeypatch.setattr(outline_endpoint, "_check_pymupdf_available", lambda: True)
-    monkeypatch.setattr(outline_endpoint, "get_storage_backend", lambda: _FailingStorage())
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.get_storage_backend", lambda: _FailingStorage())
 
     with pytest.raises(HTTPException) as exc_info:
         await outline_endpoint.get_document_outline(
@@ -155,7 +155,7 @@ async def test_document_outline_sanitizes_extraction_error_log(monkeypatch):
         raise RuntimeError("outline extraction leaked /private/tmp/document-outline-extract")
 
     monkeypatch.setattr(outline_endpoint, "_check_pymupdf_available", lambda: True)
-    monkeypatch.setattr(outline_endpoint, "get_storage_backend", lambda: _WorkingStorage())
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.get_storage_backend", lambda: _WorkingStorage())
     monkeypatch.setattr(outline_endpoint, "_extract_pdf_outline", _raise_extract_failure)
 
     with pytest.raises(HTTPException) as exc_info:

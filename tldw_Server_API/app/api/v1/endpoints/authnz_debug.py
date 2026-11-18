@@ -7,14 +7,9 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
-from tldw_Server_API.app.core.AuthNZ.key_resolution import resolve_api_key_by_hash
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.virtual_keys import (
-    get_key_limits,
-    is_key_over_budget,
-    summarize_usage_for_key_day,
-    summarize_usage_for_key_month,
-)
+import tldw_Server_API.app.core.AuthNZ.key_resolution as _key_resolution
+import tldw_Server_API.app.core.AuthNZ.virtual_keys as _virtual_keys
 
 router = APIRouter()
 
@@ -90,7 +85,7 @@ async def _resolve_api_key_id(request: Request, x_api_key: str | None) -> dict[s
     if not api_key:
         return {"api_key_id": None, "user_id": None}
 
-    result = await resolve_api_key_by_hash(api_key)
+    result = await _key_resolution.resolve_api_key_by_hash(api_key)
     if not result:
         return {"api_key_id": None, "user_id": None}
 
@@ -142,10 +137,10 @@ async def debug_budget_summary(
     if not key_id:
         return {"status": "ok", "api_key_id": None, "message": "no api key resolved"}
 
-    limits = await get_key_limits(int(key_id))
-    day = await summarize_usage_for_key_day(int(key_id))
-    month = await summarize_usage_for_key_month(int(key_id))
-    decision = await is_key_over_budget(int(key_id))
+    limits = await _virtual_keys.get_key_limits(int(key_id))
+    day = await _virtual_keys.summarize_usage_for_key_day(int(key_id))
+    month = await _virtual_keys.summarize_usage_for_key_month(int(key_id))
+    decision = await _virtual_keys.is_key_over_budget(int(key_id))
     return {
         "status": "ok",
         "api_key_id": key_id,

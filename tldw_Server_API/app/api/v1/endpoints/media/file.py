@@ -12,8 +12,8 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
-from tldw_Server_API.app.core.Storage import get_storage_backend
 from tldw_Server_API.app.core.Storage.storage_interface import StorageError
+import tldw_Server_API.app.core.Storage as _Storage
 
 router = APIRouter(tags=["Media Files"])
 
@@ -193,7 +193,7 @@ async def get_media_file(
         )
 
     # 3. Verify file exists on storage
-    storage = get_storage_backend()
+    storage = _Storage.get_storage_backend()
     try:
         file_exists = await storage.exists(storage_path)
         if not file_exists:
@@ -412,7 +412,7 @@ async def head_media_file(
         )
 
     # Verify on storage
-    storage = get_storage_backend()
+    storage = _Storage.get_storage_backend()
     try:
         if not await storage.exists(storage_path):
             raise HTTPException(

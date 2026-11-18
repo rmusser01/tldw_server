@@ -303,7 +303,7 @@ def test_briefing_stage_retry_passes_resolved_target_tenant(projection_case, mon
     retry = AsyncMock()
     tenant = AsyncMock(return_value="tenant-target")
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.watchlists.retry_briefing_stage",
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment.retry_briefing_stage",
         retry,
     )
     monkeypatch.setattr(
@@ -337,7 +337,7 @@ def test_unknown_delivery_retry_requires_duplicate_risk_confirmation(projection_
     )
     submit = AsyncMock(return_value="delivery-task-2")
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.watchlists.schedule_briefing_delivery",
+        "tldw_Server_API.app.core.Watchlists.briefing_delivery.schedule_briefing_delivery",
         submit,
     )
 
@@ -374,7 +374,7 @@ def test_sending_delivery_retry_requires_duplicate_risk_confirmation(projection_
     )
     submit = AsyncMock(return_value="delivery-task-sending")
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.watchlists.schedule_briefing_delivery",
+        "tldw_Server_API.app.core.Watchlists.briefing_delivery.schedule_briefing_delivery",
         submit,
     )
 
@@ -421,7 +421,7 @@ def test_successful_attempt_ledger_blocks_retry_when_stage_is_stale_sending(proj
     )
     submit = AsyncMock(return_value="must-not-submit")
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.watchlists.schedule_briefing_delivery",
+        "tldw_Server_API.app.core.Watchlists.briefing_delivery.schedule_briefing_delivery",
         submit,
     )
 

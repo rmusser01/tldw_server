@@ -466,7 +466,7 @@ def test_ws_service_principal_owns_no_run(client_with_wf, monkeypatch):
     async def service_principal(websocket, **_kwargs):
         return AuthPrincipal(kind="service", subject="service:engine")
 
-    monkeypatch.setattr(wf_mod, "resolve_ws_principal", service_principal)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.websocket_principal.resolve_ws_principal", service_principal)
     with pytest.raises(WebSocketDisconnect) as rejection:
         with client_with_wf.websocket_connect("/api/v1/workflows/ws?run_id=service-run"):
             pytest.fail("A service principal was treated as the run owner")
@@ -594,7 +594,7 @@ async def test_ws_peer_disconnect_finishes_without_asgi_exception(client_with_wf
         definition_version=1,
         definition_snapshot={"name": "peer-disconnect", "version": 1, "steps": []},
     )
-    monkeypatch.setattr(wf_mod, "resolve_ws_principal", _owner_principal)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.websocket_principal.resolve_ws_principal", _owner_principal)
 
     async def receive():
         return {"type": "websocket.connect"}
@@ -646,7 +646,7 @@ async def test_ws_history_burst_allows_other_loop_work(client_with_wf, monkeypat
     )
     for index in range(500):
         db.append_event("default", run_id, "history", {"index": index})
-    monkeypatch.setattr(wf_mod, "resolve_ws_principal", _owner_principal)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.websocket_principal.resolve_ws_principal", _owner_principal)
     event_sequences, probe_counts = [], []
 
     async def receive():

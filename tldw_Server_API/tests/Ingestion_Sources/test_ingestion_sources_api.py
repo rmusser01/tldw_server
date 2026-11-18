@@ -121,10 +121,10 @@ def test_manual_sync_endpoint_enqueues_job(ingestion_sources_client, monkeypatch
         )
         return {"id": "job-17", "status": "queued"}
 
-    monkeypatch.setattr(ep, "get_db_pool", _fake_get_db_pool)
-    monkeypatch.setattr(ep, "ensure_ingestion_sources_schema", _fake_ensure_schema)
-    monkeypatch.setattr(ep, "get_source_by_id", _fake_get_source_by_id)
-    monkeypatch.setattr(ep, "enqueue_ingestion_source_job", _fake_enqueue_ingestion_source_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Sources.service.ensure_ingestion_sources_schema", _fake_ensure_schema)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Sources.service.get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Sources.jobs.enqueue_ingestion_source_job", _fake_enqueue_ingestion_source_job)
 
     response = client.post(
         "/api/v1/ingestion-sources/17/sync",
@@ -154,7 +154,7 @@ def test_create_source_endpoint_returns_400_for_invalid_local_directory(
     def _fake_validate_local_directory_source(_config):
         raise ValueError("Path outside allowed roots")
 
-    monkeypatch.setattr(ep, "get_db_pool", _unexpected_get_db_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _unexpected_get_db_pool)
     monkeypatch.setattr(ep, "validate_local_directory_source", _fake_validate_local_directory_source)
 
     response = client.post(
@@ -186,7 +186,7 @@ def test_create_source_endpoint_returns_400_for_invalid_git_repository_payload(
             "create endpoint should reject invalid git repository payloads before opening the DB"
         )
 
-    monkeypatch.setattr(ep, "get_db_pool", _unexpected_get_db_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _unexpected_get_db_pool)
 
     response = client.post(
         "/api/v1/ingestion-sources/",
@@ -220,7 +220,7 @@ def test_create_source_endpoint_rejects_git_repository_media_sink(
             "create endpoint should reject unsupported git_repository sink combinations before opening the DB"
         )
 
-    monkeypatch.setattr(ep, "get_db_pool", _unexpected_get_db_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _unexpected_get_db_pool)
 
     response = client.post(
         "/api/v1/ingestion-sources/",
@@ -302,8 +302,8 @@ def test_archive_upload_endpoint_stages_snapshot_and_enqueues_job(tmp_path, inge
                 )
                 return {"id": "job-29", "status": "queued"}
 
-            monkeypatch.setattr(ep, "get_db_pool", _fake_get_db_pool)
-            monkeypatch.setattr(ep, "enqueue_ingestion_source_job", _fake_enqueue_ingestion_source_job)
+            monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
+            monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Sources.jobs.enqueue_ingestion_source_job", _fake_enqueue_ingestion_source_job)
 
             archive_buffer = io.BytesIO()
             with zipfile.ZipFile(archive_buffer, "w") as archive:
@@ -427,8 +427,8 @@ def test_archive_upload_endpoint_rejects_unsupported_archive_type(
                 )
                 return {"id": "job-unsupported", "status": "queued"}
 
-            monkeypatch.setattr(ep, "get_db_pool", _fake_get_db_pool)
-            monkeypatch.setattr(ep, "enqueue_ingestion_source_job", _fake_enqueue_ingestion_source_job)
+            monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
+            monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Sources.jobs.enqueue_ingestion_source_job", _fake_enqueue_ingestion_source_job)
 
             response = client.post(
                 f"/api/v1/ingestion-sources/{int(source['id'])}/archive",
@@ -518,8 +518,8 @@ def test_archive_upload_endpoint_rejects_oversized_archive(
                 )
                 return {"id": "job-too-large", "status": "queued"}
 
-            monkeypatch.setattr(ep, "get_db_pool", _fake_get_db_pool)
-            monkeypatch.setattr(ep, "enqueue_ingestion_source_job", _fake_enqueue_ingestion_source_job)
+            monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
+            monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Sources.jobs.enqueue_ingestion_source_job", _fake_enqueue_ingestion_source_job)
             monkeypatch.setenv("INGESTION_SOURCES_ARCHIVE_UPLOAD_MAX_BYTES", "16")
 
             response = client.post(
@@ -606,8 +606,8 @@ def test_archive_upload_endpoint_accepts_tar_gz(tmp_path, ingestion_sources_clie
                 )
                 return {"id": "job-41", "status": "queued"}
 
-            monkeypatch.setattr(ep, "get_db_pool", _fake_get_db_pool)
-            monkeypatch.setattr(ep, "enqueue_ingestion_source_job", _fake_enqueue_ingestion_source_job)
+            monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
+            monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Sources.jobs.enqueue_ingestion_source_job", _fake_enqueue_ingestion_source_job)
 
             archive_buffer = io.BytesIO()
             with tarfile.open(fileobj=archive_buffer, mode="w:gz") as archive:
@@ -703,7 +703,7 @@ def test_list_source_items_endpoint_returns_tracked_items(tmp_path, ingestion_so
             async def _fake_get_db_pool():
                 return _FakePool(db)
 
-            monkeypatch.setattr(ep, "get_db_pool", _fake_get_db_pool)
+            monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
 
             response = client.get(
                 f"/api/v1/ingestion-sources/{int(source['id'])}/items",
@@ -789,7 +789,7 @@ def test_source_responses_include_last_successful_sync_summary(tmp_path, ingesti
             async def _fake_get_db_pool():
                 return _FakePool(db)
 
-            monkeypatch.setattr(ep, "get_db_pool", _fake_get_db_pool)
+            monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
 
             detail_response = client.get(
                 f"/api/v1/ingestion-sources/{int(source['id'])}",
@@ -892,7 +892,7 @@ def test_reattach_item_endpoint_clears_detached_status(tmp_path, ingestion_sourc
             async def _fake_get_db_pool():
                 return _FakePool(db)
 
-            monkeypatch.setattr(ep, "get_db_pool", _fake_get_db_pool)
+            monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
 
             response = client.post(
                 f"/api/v1/ingestion-sources/{int(source['id'])}/items/{int(item['id'])}/reattach",
@@ -977,7 +977,7 @@ def test_patch_source_endpoint_allows_git_repository_identity_updates_before_fir
             async def _fake_get_db_pool():
                 return _FakePool(db)
 
-            monkeypatch.setattr(ep, "get_db_pool", _fake_get_db_pool)
+            monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
 
             response = client.patch(
                 f"/api/v1/ingestion-sources/{int(source['id'])}",
@@ -1063,7 +1063,7 @@ def test_patch_source_endpoint_updates_mutable_fields(tmp_path, ingestion_source
             async def _fake_get_db_pool():
                 return _FakePool(db)
 
-            monkeypatch.setattr(ep, "get_db_pool", _fake_get_db_pool)
+            monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
 
             response = client.patch(
                 f"/api/v1/ingestion-sources/{int(source['id'])}",
@@ -1147,7 +1147,7 @@ def test_patch_source_endpoint_rejects_sink_change_after_first_success(tmp_path,
             async def _fake_get_db_pool():
                 return _FakePool(db)
 
-            monkeypatch.setattr(ep, "get_db_pool", _fake_get_db_pool)
+            monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
 
             response = client.patch(
                 f"/api/v1/ingestion-sources/{int(source['id'])}",

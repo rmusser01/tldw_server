@@ -51,9 +51,6 @@ from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
     PROVIDER_APP_CONFIG_KEYS,
     is_runtime_base_url_override,
 )
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
-    load_server_config_snapshot,
-)
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     merge_server_fallback_snapshot,
     resolve_static_server_fallback_from_snapshot,
@@ -68,6 +65,8 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_truthy
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
 
 router = APIRouter()
 _DOCS_API_KEY_PLACEHOLDER = "YOUR_API_KEY"
@@ -246,7 +245,7 @@ async def get_documentation_config(request: Request = None, response: Response =
     if request is not None:
         principal = None
         try:
-            principal = await get_auth_principal(request)
+            principal = await _auth_deps.get_auth_principal(request)
         except HTTPException as exc:
             if exc.status_code != 401 or "authorization" in request.headers or "x-api-key" in request.headers:
                 raise
@@ -857,7 +856,7 @@ async def validate_provider_key(body: ProviderValidateRequest, request: Request)
         )
 
     try:
-        server_config_snapshot = load_server_config_snapshot()
+        server_config_snapshot = _byok_helpers.load_server_config_snapshot()
         server_fallback = resolve_static_server_fallback_from_snapshot(
             provider,
             server_config_snapshot,

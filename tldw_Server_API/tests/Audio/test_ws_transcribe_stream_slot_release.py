@@ -35,7 +35,7 @@ def test_setup_failure_after_admission_leaves_no_slot_held(monkeypatch: pytest.M
 
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _start)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_stream", _finish)
-    monkeypatch.setattr(audio_streaming, "_get_failopen_cap_minutes", _broken_setup)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.quota_helpers._get_failopen_cap_minutes", _broken_setup)
     token = get_settings().SINGLE_USER_API_KEY
 
     with ws_client_without_lifespan(app) as client:

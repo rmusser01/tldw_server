@@ -344,7 +344,7 @@ def production_factories(
         "sync_v2_service_for_user",
         traced_sync_factory,
     )
-    monkeypatch.setattr(sync_endpoint, "sync_v2_service_for_user", traced_sync_factory)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.factory.sync_v2_service_for_user", traced_sync_factory)
     try:
         canonical = personal_context_service_for_user(_USER_ID)
         sync = track_sync_backend(actual_sync_factory(_USER_ID))

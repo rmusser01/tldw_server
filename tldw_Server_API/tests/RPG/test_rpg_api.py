@@ -91,8 +91,8 @@ def test_rules_service_closes_rag_retriever(monkeypatch):
             self.closed = True
 
     fake_retriever = FakeRetriever()
-    monkeypatch.setattr(rpg_endpoint, "MultiDatabaseRetriever", lambda *args, **kwargs: fake_retriever)
-    monkeypatch.setattr(rpg_endpoint, "get_media_db_path_for_rag", lambda media_db: "/tmp/media.db")
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.database_retrievers.MultiDatabaseRetriever", lambda *args, **kwargs: fake_retriever)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.DB_Deps.get_media_db_path_for_rag", lambda media_db: "/tmp/media.db")
     monkeypatch.setattr(rpg_endpoint.RPGRepository, "initialized", staticmethod(lambda db: object()))
 
     dependency = rpg_endpoint._rules_service(
@@ -673,9 +673,9 @@ def test_answer_mode_generation_controls_pass_bearer_credentials(monkeypatch):
 
     monkeypatch.setattr(rpg_endpoint, "_answer_mode_permission_guard", fake_permission_guard)
     monkeypatch.setattr(rpg_endpoint, "_answer_mode_scope_guard", fake_scope_guard)
-    monkeypatch.setattr(rpg_endpoint, "enforce_llm_budget", fake_llm_budget)
-    monkeypatch.setattr(rpg_endpoint, "enforce_rbac_rate_limit", fake_rbac_limit)
-    monkeypatch.setattr(rpg_endpoint, "get_db_pool", fake_get_db_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.llm_budget_guard.enforce_llm_budget", fake_llm_budget)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.enforce_rbac_rate_limit", fake_rbac_limit)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", fake_get_db_pool)
 
     request = Request(
         {

@@ -61,7 +61,6 @@ from tldw_Server_API.app.core.Collections.reading_import_jobs import (
     READING_IMPORT_DOMAIN,
     READING_IMPORT_JOB_TYPE,
     reading_import_queue,
-    stage_reading_import_file,
 )
 from tldw_Server_API.app.core.Collections.reading_service import ReadingService
 from tldw_Server_API.app.core.DB_Management.Collections_DB import (
@@ -76,7 +75,6 @@ from tldw_Server_API.app.core.feature_flags import (
     is_collections_reading_saved_searches_enabled,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze as summarize_analyze
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_reading_item_archived,
     record_reading_item_deleted,
@@ -95,14 +93,15 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSRateLimitError,
     TTSValidationError,
 )
-from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 from tldw_Server_API.app.core.TTS.tts_validation import TTSInputValidator
 from tldw_Server_API.app.services.outputs_service import (
-    _outputs_dir_for_user,
-    _resolve_output_path_for_user,
     _sanitize_title_for_filename,
 )
 from tldw_Server_API.app.services.reading_digest_scheduler import get_reading_digest_scheduler
+import tldw_Server_API.app.core.Collections.reading_import_jobs as _reading_import_jobs
+import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as _Summarization_General_Lib
+import tldw_Server_API.app.core.TTS.tts_service_v2 as _tts_service_v2
+import tldw_Server_API.app.services.outputs_service as _outputs_service
 
 READING_ARCHIVE_MAX_BYTES = int(os.getenv("READING_ARCHIVE_MAX_BYTES", str(5 * 1024 * 1024)))
 READING_ARCHIVE_RETENTION_DAYS = int(os.getenv("READING_ARCHIVE_RETENTION_DAYS", "30") or "30")
@@ -835,7 +834,7 @@ async def import_reading_items(
 
     staged_path = None
     try:
-        staged_path = stage_reading_import_file(
+        staged_path = _reading_import_jobs.stage_reading_import_file(
             user_id=current_user.id,
             filename=file.filename,
             raw_bytes=raw,
@@ -998,7 +997,7 @@ async def summarize_reading_item(
     try:
         summary = await loop.run_in_executor(
             None,
-            lambda: summarize_analyze(
+            lambda: _Summarization_General_Lib.analyze(
                 api_name=provider,
                 input_data=text,
                 custom_prompt_arg=payload.prompt,
@@ -1116,7 +1115,7 @@ async def tts_reading_item(
         tts_request.speed = payload.speed
 
     try:
-        tts_service = await get_tts_service_v2()
+        tts_service = await _tts_service_v2.get_tts_service_v2()
         speech_iter = tts_service.generate_speech(
             tts_request,
             fallback=True,
@@ -1300,7 +1299,7 @@ async def create_reading_archive(
         raise HTTPException(status_code=413, detail="reading_archive_too_large")
 
     user_id = int(current_user.id)
-    out_dir = _outputs_dir_for_user(user_id)
+    out_dir = _outputs_service._outputs_dir_for_user(user_id)
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
@@ -1311,7 +1310,7 @@ async def create_reading_archive(
     archive_title = f"{base_title} (archive {ts})"
     safe_title = _sanitize_title_for_filename(base_title)
     filename = f"reading_archive_{item_id}_{safe_title}_{ts}.{ext}"
-    path = _resolve_output_path_for_user(user_id, filename)
+    path = _outputs_service._resolve_output_path_for_user(user_id, filename)
 
     try:
         # lgtm[py/path-injection] path is resolved by _resolve_output_path_for_user under the user's outputs dir.

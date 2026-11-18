@@ -75,7 +75,7 @@ async def test_personalization_opt_in_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(personalization_ep, "logger", logger)
-    monkeypatch.setattr(personalization_ep, "is_personalization_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_personalization_enabled", lambda: True)
 
     with pytest.raises(HTTPException) as exc_info:
         await personalization_ep.personalization_opt_in(
@@ -100,7 +100,7 @@ async def test_personalization_purge_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(personalization_ep, "logger", logger)
-    monkeypatch.setattr(personalization_ep, "is_personalization_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_personalization_enabled", lambda: True)
 
     with pytest.raises(HTTPException) as exc_info:
         await personalization_ep.personalization_purge(

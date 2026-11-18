@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_auth_principal, get_request_user
 from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
     VNPlayGenerationActionRequest,
@@ -78,6 +77,7 @@ from tldw_Server_API.app.core.VN_Play.service import (
 )
 from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
 from tldw_Server_API.app.core.VN_Platform.errors import vn_error_detail
+import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
 
 
 router = APIRouter(prefix="/vn-play", tags=["vn-play"])
@@ -796,7 +796,7 @@ async def get_script_generation_revision_debug(
     else:
         service = VNPlayService(
             repo=VNPlayRepository.initialized(
-                await get_chacha_db_for_user_id(target_owner_user_id)
+                await _ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id(target_owner_user_id)
             ),
             owner_user_id=target_owner_user_id,
         )

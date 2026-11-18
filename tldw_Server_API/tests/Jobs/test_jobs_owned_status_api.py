@@ -337,7 +337,7 @@ def test_owned_status_establishes_and_restores_jobs_rls_context(jobs_pg_dsn, tmp
         finally:
             observed.append((threading.get_ident(), before, context_values()))
 
-    monkeypatch.setattr(jobs_owned, "get_owned_job_status", observed_read)
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.owned_status.get_owned_job_status", observed_read)
 
     @app.middleware("http")
     async def inherited_context(request, call_next):

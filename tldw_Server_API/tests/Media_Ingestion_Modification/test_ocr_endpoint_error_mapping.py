@@ -39,7 +39,7 @@ def test_preload_points_transformers_sanitizes_loader_failure(monkeypatch):
     fake_points_reader._load_transformers = _fail_load_transformers
     monkeypatch.setitem(sys.modules, module_name, fake_points_reader)
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(ocr_endpoint, "logging", logger_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Utils.Utils.logging", logger_stub)
 
     result = ocr_endpoint.preload_points_transformers()
 

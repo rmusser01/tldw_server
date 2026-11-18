@@ -2640,7 +2640,7 @@ def test_script_generation_confirm_regenerate_activate_and_debug_api_redaction(
             permissions=["vn_play.debug.read_raw"],
         )
 
-    monkeypatch.setattr(vn_play_endpoint, "get_chacha_db_for_user_id", test_owner_db)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id", test_owner_db)
     api_client.app.dependency_overrides[get_auth_principal] = override_debug_reader
     raw_forbidden = api_client.get(
         f"/api/v1/vn-play/sessions/{session_id}/script/generations/{generation_id}/"

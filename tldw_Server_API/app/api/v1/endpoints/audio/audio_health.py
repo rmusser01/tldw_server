@@ -21,19 +21,19 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     TokenScopeGuard,
     User,
     check_rate_limit,
-    get_auth_principal,
     get_request_user,
 )
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import get_tts_service
 from tldw_Server_API.app.api.v1.schemas.audio_health import SttCapabilitiesResponse
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
 from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_audio_model_to_whisper
-from tldw_Server_API.app.core.Ingestion_Media_Processing.transcription_models import get_transcription_models_payload
-from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.TTS.circuit_breaker import build_qwen_runtime_breaker_key
-from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
-from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
+import tldw_Server_API.app.core.Ingestion_Media_Processing.transcription_models as _transcription_models
+import tldw_Server_API.app.core.Logging.log_context as _log_context
+import tldw_Server_API.app.core.TTS.tts_config as _tts_config
+import tldw_Server_API.app.core.Utils.pydantic_compat as _pydantic_compat
 
 router = APIRouter(
     tags=["Audio"],
@@ -146,7 +146,7 @@ def _serialize_tts_caps_for_health(tts_service: TTSServiceV2, caps: Any) -> Any:
     if isinstance(caps, dict):
         return dict(caps)
     try:
-        dumped = model_dump_compat(caps)
+        dumped = _pydantic_compat.model_dump_compat(caps)
         if isinstance(dumped, dict):
             return dumped
     except Exception:
@@ -255,7 +255,7 @@ def _normalize_provider_api_key(provider_name: str, raw_key: Any) -> Optional[st
 
 def _load_auth_provider_configs() -> tuple[bool, dict[str, Any]]:
     try:
-        config_manager = get_tts_config_manager()
+        config_manager = _tts_config.get_tts_config_manager()
         return True, {
             provider_name: config_manager.get_provider_config(provider_name) for provider_name in _AUTH_HEALTH_PROVIDERS
         }
@@ -710,7 +710,7 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
         return health
     except Exception as e:
         logger.exception("Error getting TTS health")
-        request_id = ensure_request_id(request)
+        request_id = _log_context.ensure_request_id(request)
         payload = _http_error_detail("TTS health check failed", request_id, exc=e)
         return {"status": "error", **payload, "timestamp": datetime.utcnow().isoformat()}
 
@@ -739,7 +739,7 @@ async def collect_setup_tts_health() -> dict[str, Any]:
         }
     except Exception as exc:  # noqa: BLE001
         logger.exception("TTS setup health collection failed")
-        request_id = ensure_request_id(request)
+        request_id = _log_context.ensure_request_id(request)
         payload = _http_error_detail("TTS health check failed", request_id, exc=exc)
         return {
             "status": "error",
@@ -796,7 +796,7 @@ def _set_cached_stt_capabilities(payload: dict[str, Any]) -> None:
 
 
 def _stt_catalog_entries() -> list[dict[str, Any]]:
-    catalog = get_transcription_models_payload()
+    catalog = _transcription_models.get_transcription_models_payload()
     categories = catalog.get("categories") if isinstance(catalog, dict) else {}
     all_models = catalog.get("all_models") if isinstance(catalog, dict) else []
     metadata_by_id: dict[str, dict[str, Any]] = {}
@@ -897,7 +897,7 @@ def get_stt_capabilities(
         logger.warning("STT capabilities: transcription modules unavailable ({})", type(exc).__name__)
         audio_files = None
 
-    ensure_request_id(request)
+    _log_context.ensure_request_id(request)
     cached_payload = _get_cached_stt_capabilities()
     if cached_payload is not None:
         return cached_payload
@@ -972,7 +972,7 @@ def get_stt_capabilities(
 async def _authorize_stt_health_warm(request: Request, warm: bool = Query(default=False)) -> None:
     """Reserve model warm-up for admins; plain status needs any authenticated caller."""
     if warm:
-        principal = await get_auth_principal(request)
+        principal = await _auth_deps.get_auth_principal(request)
         await RequireRole("admin")(principal)
 
 
@@ -1000,7 +1000,7 @@ async def get_stt_health(
     """
     from datetime import datetime
 
-    request_id = ensure_request_id(request)
+    request_id = _log_context.ensure_request_id(request)
     try:
         import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as stt_lib
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files

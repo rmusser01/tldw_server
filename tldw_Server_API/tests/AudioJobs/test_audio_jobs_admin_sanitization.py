@@ -220,8 +220,8 @@ async def test_audio_jobs_admin_tier_failure_logs_are_sanitized(
 
     logger = _LoggerStub()
     monkeypatch.setattr(audio_jobs, "logger", logger)
-    monkeypatch.setattr(audio_jobs, "get_user_tier", _raise_tier_error)
-    monkeypatch.setattr(audio_jobs, "set_user_tier", _raise_tier_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.get_user_tier", _raise_tier_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.set_user_tier", _raise_tier_error)
 
     with pytest.raises(HTTPException) as exc_info:
         await handler_factory()

@@ -110,7 +110,7 @@ def _admin_audio_installer_setup(monkeypatch):
             "excluded": [],
         },
     )
-    monkeypatch.setattr(setup_endpoint, "get_audio_bundle_catalog", lambda: _BundleCatalogStub())
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.audio_bundle_catalog.get_audio_bundle_catalog", lambda: _BundleCatalogStub())
     monkeypatch.setattr(
         setup_endpoint.install_manager,
         "get_install_status_snapshot",
@@ -314,8 +314,7 @@ def test_setup_complete_accepts_direct_omnivoice_install_plan(monkeypatch, tmp_p
     monkeypatch.setattr(setup_endpoint.setup_manager, "mark_setup_completed", lambda _value: None)
     monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        setup_endpoint,
-        "execute_install_plan",
+        "tldw_Server_API.app.core.Setup.install_manager.execute_install_plan",
         lambda payload: install_calls.append(payload),
     )
     _seed_completion_ready_first_run_state(state_path)

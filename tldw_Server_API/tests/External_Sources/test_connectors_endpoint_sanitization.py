@@ -92,10 +92,10 @@ async def test_browse_provider_sources_error_log_is_sanitized(monkeypatch):
 
     fake_logger = MagicMock()
     monkeypatch.setattr(connectors, "logger", fake_logger)
-    monkeypatch.setattr(connectors, "get_account_tokens", _get_tokens)
-    monkeypatch.setattr(connectors, "get_account_for_user", _get_account)
-    monkeypatch.setattr(connectors, "get_account_email", _get_email)
-    monkeypatch.setattr(connectors, "get_connector_by_name", lambda provider: _FailingConnector())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_tokens", _get_tokens)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _get_account)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_email", _get_email)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FailingConnector())
 
     principal = AuthPrincipal(kind="user", user_id=7)
 
@@ -124,8 +124,8 @@ async def test_add_source_policy_error_log_is_sanitized(monkeypatch):
 
     fake_logger = MagicMock()
     monkeypatch.setattr(connectors, "logger", fake_logger)
-    monkeypatch.setattr(connectors, "get_account_for_user", _get_account)
-    monkeypatch.setattr(connectors, "evaluate_policy_constraints", _failing_policy)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _get_account)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.policy.evaluate_policy_constraints", _failing_policy)
 
     payload = connectors.ConnectorSourceCreateRequest(
         account_id=11,
@@ -187,12 +187,12 @@ async def test_add_source_webhook_warning_log_is_sanitized(monkeypatch):
 
     fake_logger = MagicMock()
     monkeypatch.setattr(connectors, "logger", fake_logger)
-    monkeypatch.setattr(connectors, "get_account_for_user", _get_account)
-    monkeypatch.setattr(connectors, "evaluate_policy_constraints", lambda *args, **kwargs: (True, None))
-    monkeypatch.setattr(connectors, "create_source", _create_source)
-    monkeypatch.setattr(connectors, "get_account_tokens", _get_tokens)
-    monkeypatch.setattr(connectors, "get_connector_by_name", lambda provider: _FailingWebhookConnector())
-    monkeypatch.setattr(connectors, "upsert_source_sync_state", _upsert_sync_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _get_account)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.policy.evaluate_policy_constraints", lambda *args, **kwargs: (True, None))
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_source", _create_source)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_tokens", _get_tokens)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FailingWebhookConnector())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.upsert_source_sync_state", _upsert_sync_state)
 
     payload = connectors.ConnectorSourceCreateRequest(
         account_id=11,
@@ -237,8 +237,8 @@ async def test_oauth_callback_policy_enforcement_log_is_sanitized(monkeypatch):
 
     fake_logger = MagicMock()
     monkeypatch.setattr(connectors, "logger", fake_logger)
-    monkeypatch.setattr(connectors, "get_connector_by_name", lambda provider: _Connector())
-    monkeypatch.setattr(connectors, "consume_oauth_state", _consume_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _Connector())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.consume_oauth_state", _consume_state)
 
     principal = AuthPrincipal(kind="user", user_id=7, roles=["member"])
 
@@ -287,11 +287,11 @@ async def test_oauth_callback_drive_userinfo_log_is_sanitized(monkeypatch):
     fake_logger = MagicMock()
     monkeypatch.setenv("TESTING", "true")
     monkeypatch.setattr(connectors, "logger", fake_logger)
-    monkeypatch.setattr(connectors, "get_connector_by_name", lambda provider: _Connector())
-    monkeypatch.setattr(connectors, "consume_oauth_state", _consume_state)
-    monkeypatch.setattr(connectors, "_http_afetch", _failing_fetch)
-    monkeypatch.setattr(connectors, "evaluate_policy_constraints", lambda *args, **kwargs: (True, None))
-    monkeypatch.setattr(connectors, "create_account", _create_account)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _Connector())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.consume_oauth_state", _consume_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", _failing_fetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.policy.evaluate_policy_constraints", lambda *args, **kwargs: (True, None))
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_account", _create_account)
 
     principal = AuthPrincipal(kind="user", user_id=7, roles=["admin"])
 
@@ -332,9 +332,9 @@ async def test_oauth_callback_constraint_log_is_sanitized(monkeypatch):
     fake_logger = MagicMock()
     monkeypatch.setenv("TESTING", "true")
     monkeypatch.setattr(connectors, "logger", fake_logger)
-    monkeypatch.setattr(connectors, "get_connector_by_name", lambda provider: _Connector())
-    monkeypatch.setattr(connectors, "consume_oauth_state", _consume_state)
-    monkeypatch.setattr(connectors, "evaluate_policy_constraints", _failing_policy)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _Connector())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.consume_oauth_state", _consume_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.policy.evaluate_policy_constraints", _failing_policy)
 
     principal = AuthPrincipal(kind="user", user_id=7, roles=["admin"])
 

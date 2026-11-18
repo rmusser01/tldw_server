@@ -42,10 +42,8 @@ from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResol
 from tldw_Server_API.app.core.TTS.adapter_registry import canonicalize_tts_backend
 from tldw_Server_API.app.core.TTS.gateway_preflight import (
     gateway_route_provenance,
-    preflight_gateway_speech,
     reject_gateway_persistence_authority,
 )
-from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSAuthenticationError,
     TTSError,
@@ -63,7 +61,6 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import (
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2, get_tts_service_v2
 from tldw_Server_API.app.core.TTS.utils import (
     build_tts_segments_payload,
-    compute_tts_history_text_hash,
     contains_tts_credential_fields,
     parse_bool,
     tts_history_text_length,
@@ -72,6 +69,9 @@ from tldw_Server_API.app.core.TTS.utils import (
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 import tldw_Server_API.app.core.Audio.tts_service as _tts_service
 import tldw_Server_API.app.core.Storage.generated_file_helpers as _generated_file_helpers
+import tldw_Server_API.app.core.TTS.gateway_preflight as _gateway_preflight
+import tldw_Server_API.app.core.TTS.tts_config as _tts_config
+import tldw_Server_API.app.core.TTS.utils as _utils
 
 _AUDIO_TTS_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -612,7 +612,7 @@ async def create_speech_job(
     if explicit_backend is not None:
         supplied_fields = frozenset(getattr(request_data, "model_fields_set", set()) or ())
         try:
-            resolved = preflight_gateway_speech(
+            resolved = _gateway_preflight.preflight_gateway_speech(
                 backend=explicit_backend,
                 model=request_data.model,
                 voice=request_data.voice,
@@ -620,7 +620,7 @@ async def create_speech_job(
                 response_format=request_data.response_format,
                 allow_fallback=request_data.allow_fallback,
                 supplied_fields=supplied_fields,
-                gateway_specs=get_tts_config_manager().get_gateway_specs(),
+                gateway_specs=_tts_config.get_tts_config_manager().get_gateway_specs(),
                 speed=request_data.speed,
                 lang_code=request_data.lang_code,
                 language=request_data.language,
@@ -914,7 +914,7 @@ async def create_speech(
         if media_db is None:
             return
         try:
-            text_hash = compute_tts_history_text_hash(request_data.input, history_cfg.get("hash_key"))
+            text_hash = _utils.compute_tts_history_text_hash(request_data.input, history_cfg.get("hash_key"))
         except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
             logger.debug("TTS history: failed to compute text hash")
             return

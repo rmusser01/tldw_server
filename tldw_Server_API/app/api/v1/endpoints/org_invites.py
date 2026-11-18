@@ -30,8 +30,8 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DatabaseLockError,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.services.auth_service import fetch_active_user_by_id
-from tldw_Server_API.app.services.org_invite_service import get_invite_service
+import tldw_Server_API.app.services.auth_service as _auth_service
+import tldw_Server_API.app.services.org_invite_service as _org_invite_service
 
 router = APIRouter(
     prefix="/invites",
@@ -55,7 +55,7 @@ async def preview_invite(
     This allows users to see what organization/team they would join before
     logging in or signing up.
     """
-    invite_service = await get_invite_service()
+    invite_service = await _org_invite_service.get_invite_service()
     preview = await invite_service.preview_invite(code)
 
     if preview is None:
@@ -98,12 +98,12 @@ async def redeem_invite(
 
     The user's IP address and user agent are recorded for audit purposes.
     """
-    invite_service = await get_invite_service()
+    invite_service = await _org_invite_service.get_invite_service()
 
     # Extract client info for audit logging
     ip_address = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
-    user_record = await fetch_active_user_by_id(db, principal.user_id)
+    user_record = await _auth_service.fetch_active_user_by_id(db, principal.user_id)
     if not user_record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

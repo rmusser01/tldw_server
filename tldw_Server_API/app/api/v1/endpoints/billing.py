@@ -19,9 +19,9 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequireRole,
     get_auth_principal,
 )
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.repos.billing_repo import AuthnzBillingRepo
+import tldw_Server_API.app.core.AuthNZ.database as _database
+import tldw_Server_API.app.core.AuthNZ.repos.billing_repo as _billing_repo
 
 router = APIRouter(
     prefix="/billing",
@@ -170,8 +170,8 @@ async def get_billing_overview(
     - active_subscriptions / canceled_subscriptions / past_due_subscriptions: counts
     """
     try:
-        pool = await get_db_pool()
-        billing_repo = AuthnzBillingRepo(db_pool=pool)
+        pool = await _database.get_db_pool()
+        billing_repo = _billing_repo.AuthnzBillingRepo(db_pool=pool)
         return await billing_repo.get_overview()
     except Exception:
         logger.error("get_billing_overview failed")
@@ -201,8 +201,8 @@ async def list_subscriptions(
     - cancel_at_period_end: whether the subscription is set to cancel
     """
     try:
-        pool = await get_db_pool()
-        billing_repo = AuthnzBillingRepo(db_pool=pool)
+        pool = await _database.get_db_pool()
+        billing_repo = _billing_repo.AuthnzBillingRepo(db_pool=pool)
 
         subscriptions, total = await billing_repo.list_subscriptions(
             status=status, limit=limit, offset=offset
@@ -232,8 +232,8 @@ async def list_billing_events(
     ``created_at``; ``amount`` is not part of this source and stays absent.
     """
     try:
-        pool = await get_db_pool()
-        billing_repo = AuthnzBillingRepo(db_pool=pool)
+        pool = await _database.get_db_pool()
+        billing_repo = _billing_repo.AuthnzBillingRepo(db_pool=pool)
         events, total = await billing_repo.list_billing_events(
             limit=limit, offset=offset
         )

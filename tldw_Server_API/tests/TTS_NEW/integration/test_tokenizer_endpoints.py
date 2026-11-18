@@ -46,7 +46,7 @@ def _make_wav_base64():
 
 
 def test_tokenizer_encode_decode_round_trip(client, monkeypatch):
-    monkeypatch.setattr(audio_endpoints, "_load_qwen3_tokenizer", lambda *_: _FakeTokenizer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.tokenizer_service._load_qwen3_tokenizer", lambda *_: _FakeTokenizer())
 
     payload = {"audio_base64": _make_wav_base64()}
     r = client.post(
@@ -70,10 +70,9 @@ def test_tokenizer_encode_decode_round_trip(client, monkeypatch):
 
 
 def test_tokenizer_encode_enforces_max_tokens(client, monkeypatch):
-    monkeypatch.setattr(audio_endpoints, "_load_qwen3_tokenizer", lambda *_: _FakeTokenizer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.tokenizer_service._load_qwen3_tokenizer", lambda *_: _FakeTokenizer())
     monkeypatch.setattr(
-        audio_endpoints,
-        "_get_qwen3_tokenizer_settings",
+        "tldw_Server_API.app.core.Audio.tokenizer_service._get_qwen3_tokenizer_settings",
         lambda: {
             "tokenizer_model": "Qwen/Qwen3-TTS-Tokenizer-12Hz",
             "tokenizer_max_audio_seconds": 300,
@@ -93,10 +92,9 @@ def test_tokenizer_encode_enforces_max_tokens(client, monkeypatch):
 
 
 def test_tokenizer_encode_enforces_max_payload(client, monkeypatch):
-    monkeypatch.setattr(audio_endpoints, "_load_qwen3_tokenizer", lambda *_: _FakeTokenizer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.tokenizer_service._load_qwen3_tokenizer", lambda *_: _FakeTokenizer())
     monkeypatch.setattr(
-        audio_endpoints,
-        "_get_qwen3_tokenizer_settings",
+        "tldw_Server_API.app.core.Audio.tokenizer_service._get_qwen3_tokenizer_settings",
         lambda: {
             "tokenizer_model": "Qwen/Qwen3-TTS-Tokenizer-12Hz",
             "tokenizer_max_audio_seconds": 300,
@@ -117,10 +115,9 @@ def test_tokenizer_encode_enforces_max_payload(client, monkeypatch):
 
 
 def test_tokenizer_encode_enforces_max_audio_seconds(client, monkeypatch):
-    monkeypatch.setattr(audio_endpoints, "_load_qwen3_tokenizer", lambda *_: _FakeTokenizer())
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.tokenizer_service._load_qwen3_tokenizer", lambda *_: _FakeTokenizer())
     monkeypatch.setattr(
-        audio_endpoints,
-        "_get_qwen3_tokenizer_settings",
+        "tldw_Server_API.app.core.Audio.tokenizer_service._get_qwen3_tokenizer_settings",
         lambda: {
             "tokenizer_model": "Qwen/Qwen3-TTS-Tokenizer-12Hz",
             "tokenizer_max_audio_seconds": 0.001,

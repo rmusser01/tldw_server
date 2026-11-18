@@ -97,7 +97,7 @@ class TestDocumentOutlineEndpoint:
         app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
         with patch(
-            "tldw_Server_API.app.api.v1.endpoints.media.document_outline.get_storage_backend",
+            "tldw_Server_API.app.core.Storage.get_storage_backend",
             return_value=mock_storage,
         ), patch(
             "tldw_Server_API.app.api.v1.endpoints.media.document_outline._check_pymupdf_available",
@@ -152,7 +152,7 @@ class TestDocumentOutlineEndpoint:
         app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
         with patch(
-            "tldw_Server_API.app.api.v1.endpoints.media.document_outline.get_storage_backend",
+            "tldw_Server_API.app.core.Storage.get_storage_backend",
             return_value=mock_storage,
         ), patch(
             "tldw_Server_API.app.api.v1.endpoints.media.document_outline._check_pymupdf_available",
@@ -236,7 +236,7 @@ class TestDocumentOutlineEndpoint:
         app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
         with patch(
-            "tldw_Server_API.app.api.v1.endpoints.media.document_outline.get_storage_backend",
+            "tldw_Server_API.app.core.Storage.get_storage_backend",
             return_value=mock_storage,
         ), patch(
             "tldw_Server_API.app.api.v1.endpoints.media.document_outline._check_pymupdf_available",
@@ -269,7 +269,7 @@ class TestDocumentOutlineEndpoint:
         app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
         with patch(
-            "tldw_Server_API.app.api.v1.endpoints.media.document_outline.get_storage_backend",
+            "tldw_Server_API.app.core.Storage.get_storage_backend",
             return_value=mock_storage,
         ), patch(
             "tldw_Server_API.app.api.v1.endpoints.media.document_outline._check_pymupdf_available",
@@ -355,7 +355,7 @@ class TestDocumentOutlineEndpoint:
         app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
         with patch(
-            "tldw_Server_API.app.api.v1.endpoints.media.document_outline.get_storage_backend",
+            "tldw_Server_API.app.core.Storage.get_storage_backend",
             return_value=mock_storage,
         ), patch(
             "tldw_Server_API.app.api.v1.endpoints.media.document_outline._check_pymupdf_available",

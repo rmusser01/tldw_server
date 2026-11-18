@@ -114,7 +114,7 @@ def _patch_reference_repository(monkeypatch: pytest.MonkeyPatch, repo: _Referenc
             repo.calls.append(("from_media_db", (db,), {}))
             return repo
 
-    monkeypatch.setattr(refs_mod, "DocumentWorkspaceRepository", RepositoryFactory, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository.DocumentWorkspaceRepository", RepositoryFactory, raising=False)
 
 
 def _assert_log_sanitized(
@@ -167,7 +167,7 @@ async def test_references_endpoint_extracts_basic(mock_user, mock_db):
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(refs_mod, "get_cached_response", return_value=None):
+    with patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/media/1/references?enrich=false")
 
@@ -200,7 +200,7 @@ async def test_references_endpoint_applies_pagination_window(mock_user, mock_db)
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(refs_mod, "get_cached_response", return_value=None):
+    with patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/media/1/references?enrich=false&offset=2&limit=2")
 
@@ -241,7 +241,7 @@ async def test_references_endpoint_applies_search_before_pagination(mock_user, m
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(refs_mod, "get_cached_response", return_value=None):
+    with patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/media/1/references?enrich=false&offset=0&limit=2&search=Example%206")
 
@@ -281,7 +281,7 @@ async def test_references_endpoint_parse_cap_limits_available_refs(mock_user, mo
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(refs_mod, "get_cached_response", return_value=None):
+    with patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/media/1/references?enrich=false&parse_cap=3&limit=50")
 
@@ -315,7 +315,7 @@ async def test_references_endpoint_uses_parsed_reference_db_cache(mock_user, moc
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
     with (
-        patch.object(refs_mod, "get_cached_response", return_value=None),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
         patch.object(
             refs_mod,
             "_split_references_with_meta",
@@ -351,7 +351,7 @@ async def test_references_endpoint_cache_hit(mock_user, mock_db):
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(refs_mod, "get_cached_response", return_value=("etag", cached_payload)):
+    with patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=("etag", cached_payload)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/media/1/references")
 
@@ -384,7 +384,7 @@ async def test_references_endpoint_sanitizes_db_fetch_error_log(
     monkeypatch.setattr(refs_mod, "logger", logger_stub, raising=True)
 
     try:
-        with patch.object(refs_mod, "get_cached_response", return_value=None):
+        with patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.get("/api/v1/media/1/references")
 
@@ -422,7 +422,7 @@ async def test_references_endpoint_sanitizes_parsed_cache_load_error(
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
     try:
         with (
-            patch.object(refs_mod, "get_cached_response", return_value=None),
+            patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
             patch.object(
                 refs_mod,
                 "_split_references_with_meta",
@@ -464,7 +464,7 @@ async def test_references_endpoint_sanitizes_parsed_cache_save_error(
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
     try:
         with (
-            patch.object(refs_mod, "get_cached_response", return_value=None),
+            patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
             patch.object(
                 refs_mod,
                 "_split_references_with_meta",
@@ -939,7 +939,7 @@ async def test_references_endpoint_enriches_only_requested_reference_index(mock_
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
     with (
-        patch.object(refs_mod, "get_cached_response", return_value=None),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
         patch.object(refs_mod, "_is_provider_cooldown", return_value=False),
         patch.object(
             refs_mod,
@@ -976,7 +976,7 @@ async def test_references_endpoint_reference_index_out_of_range_returns_400(mock
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(refs_mod, "get_cached_response", return_value=None):
+    with patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/media/1/references?enrich=true&reference_index=5")
 
@@ -998,7 +998,7 @@ async def test_references_endpoint_skips_enrichment_when_all_providers_in_cooldo
     arxiv = AsyncMock(side_effect=lambda refs: (refs, True))
 
     with (
-        patch.object(refs_mod, "get_cached_response", return_value=None),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
         patch.object(refs_mod, "_is_provider_cooldown", return_value=True),
         patch.object(refs_mod, "_enrich_with_semantic_scholar", new=semantic),
         patch.object(refs_mod, "_enrich_with_crossref", new=crossref),
@@ -1025,7 +1025,7 @@ async def test_references_endpoint_sanitizes_enrichment_failure_log(mock_user, m
     monkeypatch.setattr(refs_mod, "logger", logger_stub, raising=True)
 
     with (
-        patch.object(refs_mod, "get_cached_response", return_value=None),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
         patch.object(refs_mod, "_is_provider_cooldown", return_value=False),
         patch.object(
             refs_mod,

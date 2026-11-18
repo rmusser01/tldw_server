@@ -34,7 +34,7 @@ async def test_evaluation_metadata_survives_canonical_reload(isolated_db, monkey
         async def close(self):
             closed.append(True)
 
-    monkeypatch.setattr(endpoint, "ProviderCredentialRuntime", lambda **_kwargs: Runtime())
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", lambda **_kwargs: Runtime())
     monkeypatch.setattr(EvaluationManager, "_call_adapter_text", staticmethod(lambda **_kwargs: "hello"))
     payload = EvaluationCreate(
         project_id=project["id"],

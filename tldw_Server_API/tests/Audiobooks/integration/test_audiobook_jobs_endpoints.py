@@ -205,8 +205,7 @@ def test_gateway_audiobook_job_persists_only_preflighted_route_identity(
         },
     )
     monkeypatch.setattr(
-        audiobook_endpoints,
-        "get_tts_config_manager",
+        "tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager",
         lambda: type("Manager", (), {"get_gateway_specs": lambda self: specs})(),
     )
     payload = {
@@ -268,8 +267,7 @@ def test_gateway_audiobook_job_rejects_authority_metadata(
         },
     )
     monkeypatch.setattr(
-        audiobook_endpoints,
-        "get_tts_config_manager",
+        "tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager",
         lambda: type("Manager", (), {"get_gateway_specs": lambda self: specs})(),
     )
     payload = {
@@ -324,8 +322,7 @@ def test_chapter_gateway_override_resolves_its_own_voice_and_fallback_policy(
         },
     )
     monkeypatch.setattr(
-        audiobook_endpoints,
-        "get_tts_config_manager",
+        "tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager",
         lambda: type("Manager", (), {"get_gateway_specs": lambda self: specs})(),
     )
     payload = {

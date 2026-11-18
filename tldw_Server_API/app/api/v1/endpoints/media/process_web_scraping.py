@@ -18,12 +18,12 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
-from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import WebScrapingRequest
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Web_Scraping.summary_prompts import resolve_web_summary_overrides
 from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
+import tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps as _Prompts_DB_Deps
 
 router = APIRouter()
 
@@ -92,7 +92,7 @@ async def process_web_scraping_endpoint(
 
         task = _resolve_process_web_scraping_task()
         summary_prompt_overrides = await resolve_web_summary_overrides(
-            lambda: get_prompts_db_for_user(request, current_user),
+            lambda: _Prompts_DB_Deps.get_prompts_db_for_user(request, current_user),
             enabled=payload.summarize_checkbox,
             system_prompt=payload.system_prompt,
             custom_prompt=payload.custom_prompt,

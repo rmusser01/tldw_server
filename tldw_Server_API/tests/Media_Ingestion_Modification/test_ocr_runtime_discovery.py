@@ -23,8 +23,7 @@ def test_list_ocr_backends_matches_response_schema(monkeypatch):
     from tldw_Server_API.app.api.v1.schemas.ocr_schemas import OCRBackendsResponse
 
     monkeypatch.setattr(
-        ocr_mod,
-        "_list_backends",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry.list_backends",
         lambda: {
             "llamacpp": {"available": True},
             "mineru": {"available": False},
@@ -78,8 +77,7 @@ def test_list_ocr_backends_enriches_llamacpp_discovery(monkeypatch):
             }
 
     monkeypatch.setattr(
-        ocr_mod,
-        "_list_backends",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry.list_backends",
         lambda: {"llamacpp": {"available": True}},
     )
     monkeypatch.setattr(
@@ -128,8 +126,7 @@ def test_list_ocr_backends_enriches_chatllm_discovery(monkeypatch):
             }
 
     monkeypatch.setattr(
-        ocr_mod,
-        "_list_backends",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry.list_backends",
         lambda: {"chatllm": {"available": True}},
     )
     monkeypatch.setattr(
@@ -159,8 +156,7 @@ def test_list_ocr_backends_records_llamacpp_discovery_errors(monkeypatch):
             raise ValueError("llama describe failed")
 
     monkeypatch.setattr(
-        ocr_mod,
-        "_list_backends",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry.list_backends",
         lambda: {"llamacpp": {"available": True}},
     )
     monkeypatch.setattr(
@@ -183,8 +179,7 @@ def test_list_ocr_backends_records_chatllm_discovery_errors(monkeypatch):
             raise ValueError("chatllm describe failed")
 
     monkeypatch.setattr(
-        ocr_mod,
-        "_list_backends",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry.list_backends",
         lambda: {"chatllm": {"available": False}},
     )
     monkeypatch.setattr(
@@ -206,7 +201,7 @@ def test_record_backend_discovery_error_log_is_sanitized(monkeypatch):
     out = {}
     exc = RuntimeError("ocr backend failed /tmp/source token=secret")
 
-    monkeypatch.setattr(ocr_mod, "logging", logger)
+    monkeypatch.setattr("tldw_Server_API.app.core.Utils.Utils.logging", logger)
 
     ocr_mod._record_backend_discovery_error(out, "llamacpp", exc)
 

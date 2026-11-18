@@ -85,7 +85,7 @@ async def test_platform_admin_membership_route_requests_persisted_platform_autho
         return object()
 
     monkeypatch.setattr(orgs, "get_db_pool", _pool)
-    monkeypatch.setattr(orgs, "AuthnzOrgsTeamsRepo", _Repo)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo.AuthnzOrgsTeamsRepo", _Repo)
 
     response = await orgs.add_org_member(
         body=OrgMemberAddRequest(user_id=23, role="member"),
@@ -166,7 +166,7 @@ async def test_create_org_uses_one_atomic_owner_provisioning_boundary(monkeypatc
         return object()
 
     monkeypatch.setattr(orgs, "get_db_pool", _pool)
-    monkeypatch.setattr(orgs, "AuthnzOrgsTeamsRepo", _Repo)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo.AuthnzOrgsTeamsRepo", _Repo)
 
     response = await orgs.create_org(
         body=OrgSelfCreateRequest(name="Example", slug="example"),
@@ -238,7 +238,7 @@ async def test_update_org_budgets_upsert_failure_log_is_sanitized(monkeypatch):
         raise RuntimeError("budget upsert exploded at /private/org-budget.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(orgs, "svc_upsert_org_budget", _failing_upsert_org_budget)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_budgets_service.upsert_org_budget", _failing_upsert_org_budget)
     monkeypatch.setattr(orgs, "logger", logger_stub)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -284,8 +284,8 @@ async def test_update_org_budgets_audit_failure_log_is_sanitized(monkeypatch):
         raise RuntimeError("budget audit exploded at /private/org-audit.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(orgs, "svc_upsert_org_budget", _successful_upsert_org_budget)
-    monkeypatch.setattr(orgs, "emit_budget_audit_event", _failing_emit_budget_audit_event)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_budgets_service.upsert_org_budget", _successful_upsert_org_budget)
+    monkeypatch.setattr("tldw_Server_API.app.services.budget_audit_service.emit_budget_audit_event", _failing_emit_budget_audit_event)
     monkeypatch.setattr(orgs, "logger", logger_stub)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -336,9 +336,9 @@ async def test_delete_org_subscription_lookup_warning_log_is_sanitized(monkeypat
         return object()
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(orgs, "get_subscription_service", _fake_get_subscription_service)
+    monkeypatch.setattr("tldw_Server_API.app.core.Billing.subscription_service.get_subscription_service", _fake_get_subscription_service)
     monkeypatch.setattr(orgs, "get_db_pool", _fake_get_db_pool)
-    monkeypatch.setattr(orgs, "AuthnzOrgsTeamsRepo", _FakeOrgsRepo)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo.AuthnzOrgsTeamsRepo", _FakeOrgsRepo)
     monkeypatch.setattr(orgs, "logger", logger_stub)
 
     response = await orgs.delete_org(
@@ -383,7 +383,7 @@ async def test_transfer_ownership_missing_organization_maps_existing_404(
         return object()
 
     monkeypatch.setattr(orgs, "get_db_pool", _fake_get_db_pool)
-    monkeypatch.setattr(orgs, "AuthnzOrgsTeamsRepo", _FakeOrgsRepo)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo.AuthnzOrgsTeamsRepo", _FakeOrgsRepo)
 
     with pytest.raises(HTTPException) as exc_info:
         await orgs.transfer_ownership(
@@ -471,12 +471,11 @@ async def test_scope_control_errors_map_to_sanitized_http_contracts(
         return object()
 
     monkeypatch.setattr(
-        orgs,
-        "get_subscription_service",
+        "tldw_Server_API.app.core.Billing.subscription_service.get_subscription_service",
         _fake_get_subscription_service,
     )
     monkeypatch.setattr(orgs, "get_db_pool", _fake_get_db_pool)
-    monkeypatch.setattr(orgs, "AuthnzOrgsTeamsRepo", _FailingRepo)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo.AuthnzOrgsTeamsRepo", _FailingRepo)
 
     with pytest.raises(HTTPException) as exc_info:
         if operation == "delete_org":
@@ -536,7 +535,7 @@ async def test_create_invite_audit_failure_log_is_sanitized(monkeypatch):
         raise RuntimeError("org invite audit exploded at /private/org-audit.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(orgs, "get_invite_service", _fake_get_invite_service)
+    monkeypatch.setattr("tldw_Server_API.app.services.org_invite_service.get_invite_service", _fake_get_invite_service)
     monkeypatch.setattr(orgs, "get_or_create_audit_service_for_user_id", _raise_audit_service)
     monkeypatch.setattr(orgs, "logger", logger_stub)
 
@@ -571,7 +570,7 @@ async def test_revoke_invite_audit_failure_log_is_sanitized(monkeypatch):
         raise RuntimeError("org invite revoke audit exploded at /private/org-audit.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(orgs, "get_invite_service", _fake_get_invite_service)
+    monkeypatch.setattr("tldw_Server_API.app.services.org_invite_service.get_invite_service", _fake_get_invite_service)
     monkeypatch.setattr(orgs, "get_or_create_audit_service_for_user_id", _raise_audit_service)
     monkeypatch.setattr(orgs, "logger", logger_stub)
 
@@ -626,7 +625,7 @@ async def test_list_invites_includes_canonical_pagination(monkeypatch):
     async def _fake_get_invite_service():
         return _InviteService()
 
-    monkeypatch.setattr(orgs, "get_invite_service", _fake_get_invite_service)
+    monkeypatch.setattr("tldw_Server_API.app.services.org_invite_service.get_invite_service", _fake_get_invite_service)
 
     response = await orgs.list_invites(
         ctx=OrgContext(org_id=9, role="admin"),
@@ -677,7 +676,7 @@ async def test_list_my_orgs_includes_canonical_pagination(monkeypatch):
         return object()
 
     monkeypatch.setattr(orgs, "get_db_pool", _fake_get_db_pool)
-    monkeypatch.setattr(orgs, "AuthnzOrgsTeamsRepo", _Repo)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo.AuthnzOrgsTeamsRepo", _Repo)
 
     response = await orgs.list_my_orgs(
         principal=SimpleNamespace(user_id=7),
@@ -868,8 +867,8 @@ async def test_redeem_invite_audit_failure_log_is_sanitized(monkeypatch):
         raise RuntimeError("org invite redeem audit exploded at /private/org-audit.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(org_invites, "get_invite_service", _fake_get_invite_service)
-    monkeypatch.setattr(org_invites, "fetch_active_user_by_id", _fake_fetch_active_user_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.services.org_invite_service.get_invite_service", _fake_get_invite_service)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.fetch_active_user_by_id", _fake_fetch_active_user_by_id)
     monkeypatch.setattr(org_invites, "get_or_create_audit_service_for_user_id", _raise_audit_service)
     monkeypatch.setattr(org_invites, "logger", logger_stub)
 
@@ -928,10 +927,9 @@ async def test_redeem_invite_busy_database_returns_retryable_503(
     async def _fake_fetch_active_user_by_id(_db, _user_id):
         return {"email": "user@example.test"}
 
-    monkeypatch.setattr(org_invites, "get_invite_service", _fake_get_invite_service)
+    monkeypatch.setattr("tldw_Server_API.app.services.org_invite_service.get_invite_service", _fake_get_invite_service)
     monkeypatch.setattr(
-        org_invites,
-        "fetch_active_user_by_id",
+        "tldw_Server_API.app.services.auth_service.fetch_active_user_by_id",
         _fake_fetch_active_user_by_id,
     )
 

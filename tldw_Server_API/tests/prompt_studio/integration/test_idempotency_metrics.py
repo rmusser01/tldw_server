@@ -40,7 +40,7 @@ def test_optimization_idempotency_metrics(prompt_studio_dual_backend_client, mon
     # Stub metrics in the endpoint module
     from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_optimization as mod
     stub = _StubPSMetrics()
-    monkeypatch.setattr(mod, "prompt_studio_metrics", stub, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.monitoring.prompt_studio_metrics", stub, raising=True)
 
     # First call => miss_total
     body = {

@@ -13,7 +13,7 @@ async def test_workflows_config_reports_default_egress_ports(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv(egress.ALLOWED_PORTS_ENV, raising=False)
-    monkeypatch.setattr(workflows_api, "get_content_backend_instance", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.DB_Manager.get_content_backend_instance", lambda: None)
 
     cfg = await workflows_api.get_workflows_config(_current_user=object())
 
@@ -27,7 +27,7 @@ async def test_workflows_tests_do_not_touch_authnz_daily_ledger(
     """The conftest keeps runs out of the checkout's users.db ledger (TASK-13367)."""
     from tldw_Server_API.app.core.Workflows import daily_ledger
 
-    monkeypatch.setattr(workflows_api, "get_content_backend_instance", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.DB_Manager.get_content_backend_instance", lambda: None)
     cfg = await workflows_api.get_workflows_config(_current_user=object())
 
     assert cfg["rate_limits"]["quotas_disabled"] is True

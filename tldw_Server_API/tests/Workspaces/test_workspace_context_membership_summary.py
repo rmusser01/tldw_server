@@ -548,7 +548,7 @@ def _context_app(db: ContextFakeDB, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
             "allowed_actions": {},
         }
 
-    monkeypatch.setattr(workspaces_endpoint, "collect_workspace_service_capabilities", fake_capabilities)
+    monkeypatch.setattr("tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities", fake_capabilities)
     app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="user-1")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     app.dependency_overrides[try_get_media_db_for_user] = lambda: None

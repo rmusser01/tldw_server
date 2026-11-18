@@ -24,18 +24,14 @@ from tldw_Server_API.app.api.v1.utils.chatops.discord_support import (
     _INTERACTION_RECEIPTS,
     _RATE_LIMITER,
     _coerce_nonempty_string,
-    _decrypt_discord_payload,
     _dedupe_ttl_seconds,
     _discord_oauth_token_exchange,
     _discord_policy_error_response,
     _discord_policy_for_guild,
     _discord_response_mode,
-    _encrypt_discord_payload,
     _error_response,
     _evaluate_discord_policy,
     _get_job_manager,
-    _get_oauth_state_repo,
-    _get_user_secret_repo,
     _ingress_rate_limit_per_minute,
     _interaction_dedupe_key,
     _normalize_installations_payload,
@@ -62,6 +58,7 @@ from tldw_Server_API.app.core.AuthNZ.repos import (
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
+import tldw_Server_API.app.api.v1.utils.chatops.discord_support as _discord_support
 
 router = APIRouter(prefix="/discord", tags=["discord"])
 
@@ -269,8 +266,8 @@ async def discord_oauth_start(
         oauth_client_id=_oauth_client_id,
         oauth_redirect_uri=_oauth_redirect_uri,
         oauth_state_ttl_seconds=_oauth_state_ttl_seconds,
-        get_oauth_state_repo=_get_oauth_state_repo,
-        encrypt_discord_payload=_encrypt_discord_payload,
+        get_oauth_state_repo=_discord_support._get_oauth_state_repo,
+        encrypt_discord_payload=_discord_support._encrypt_discord_payload,
         oauth_auth_url=_oauth_auth_url,
         oauth_scope=_oauth_scope,
         oauth_permissions=_oauth_permissions,
@@ -291,17 +288,17 @@ async def discord_oauth_callback(
         guild_id=guild_id,
         guild_name=guild_name,
         coerce_nonempty_string=_coerce_nonempty_string,
-        get_oauth_state_repo=_get_oauth_state_repo,
+        get_oauth_state_repo=_discord_support._get_oauth_state_repo,
         oauth_client_id=_oauth_client_id,
         oauth_client_secret=_oauth_client_secret,
         oauth_token_url=_oauth_token_url,
-        discord_oauth_token_exchange=_discord_oauth_token_exchange,
-        get_user_secret_repo=_get_user_secret_repo,
+        discord_oauth_token_exchange=_discord_support._discord_oauth_token_exchange,
+        get_user_secret_repo=_discord_support._get_user_secret_repo,
         get_workspace_provider_installations_repo=_get_workspace_provider_installations_repo,
         resolve_workspace_org_id=lambda user_id: _resolve_workspace_org_id(None, user_id),
-        decrypt_discord_payload=_decrypt_discord_payload,
+        decrypt_discord_payload=_discord_support._decrypt_discord_payload,
         normalize_installations_payload=_normalize_installations_payload,
-        encrypt_discord_payload=_encrypt_discord_payload,
+        encrypt_discord_payload=_discord_support._encrypt_discord_payload,
     )
 
 
@@ -340,8 +337,8 @@ async def discord_admin_list_installations(
 ):
     return await discord_admin_list_installations_impl(
         user=user,
-        get_user_secret_repo=_get_user_secret_repo,
-        decrypt_discord_payload=_decrypt_discord_payload,
+        get_user_secret_repo=_discord_support._get_user_secret_repo,
+        decrypt_discord_payload=_discord_support._decrypt_discord_payload,
         normalize_installations_payload=_normalize_installations_payload,
         public_installation_record=_public_installation_record,
     )
@@ -357,12 +354,12 @@ async def discord_admin_delete_installation(
         guild_id=guild_id,
         user=user,
         coerce_nonempty_string=_coerce_nonempty_string,
-        get_user_secret_repo=_get_user_secret_repo,
+        get_user_secret_repo=_discord_support._get_user_secret_repo,
         get_workspace_provider_installations_repo=_get_workspace_provider_installations_repo,
         resolve_workspace_org_id=lambda resolved_user_id: _resolve_workspace_org_id(request, resolved_user_id),
-        decrypt_discord_payload=_decrypt_discord_payload,
+        decrypt_discord_payload=_discord_support._decrypt_discord_payload,
         normalize_installations_payload=_normalize_installations_payload,
-        encrypt_discord_payload=_encrypt_discord_payload,
+        encrypt_discord_payload=_discord_support._encrypt_discord_payload,
     )
 
 
@@ -378,10 +375,10 @@ async def discord_admin_set_installation_state(
         payload=payload,
         user=user,
         coerce_nonempty_string=_coerce_nonempty_string,
-        get_user_secret_repo=_get_user_secret_repo,
+        get_user_secret_repo=_discord_support._get_user_secret_repo,
         get_workspace_provider_installations_repo=_get_workspace_provider_installations_repo,
         resolve_workspace_org_id=lambda resolved_user_id: _resolve_workspace_org_id(request, resolved_user_id),
-        decrypt_discord_payload=_decrypt_discord_payload,
+        decrypt_discord_payload=_discord_support._decrypt_discord_payload,
         normalize_installations_payload=_normalize_installations_payload,
-        encrypt_discord_payload=_encrypt_discord_payload,
+        encrypt_discord_payload=_discord_support._encrypt_discord_payload,
     )

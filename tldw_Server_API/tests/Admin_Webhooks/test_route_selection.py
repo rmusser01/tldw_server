@@ -141,8 +141,7 @@ def test_legacy_create_and_update_audits_omit_target_and_event_values(
     monkeypatch.setattr(admin_ops, "_require_platform_admin", lambda _principal: None)
     monkeypatch.setattr(admin_ops, "_emit_admin_audit_event", capture_audit)
     monkeypatch.setattr(
-        admin_ops,
-        "svc_create_webhook",
+        "tldw_Server_API.app.services.admin_system_ops_service.create_webhook",
         lambda **_kwargs: {
             "id": "wh_test",
             "url": f"https://receiver.example/private?token={canary}",
@@ -154,8 +153,7 @@ def test_legacy_create_and_update_audits_omit_target_and_event_values(
         },
     )
     monkeypatch.setattr(
-        admin_ops,
-        "svc_update_webhook",
+        "tldw_Server_API.app.services.admin_system_ops_service.update_webhook",
         lambda **_kwargs: {
             "id": "wh_test",
             "url": f"https://receiver.example/changed?token={canary}",

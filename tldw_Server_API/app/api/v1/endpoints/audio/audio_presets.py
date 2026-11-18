@@ -33,8 +33,8 @@ from tldw_Server_API.app.core.TTS.gateway_preflight import (
     preflight_gateway_speech,
     reject_gateway_persistence_authority,
 )
-from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
+import tldw_Server_API.app.core.TTS.tts_config as _tts_config
 
 router = APIRouter(
     tags=["Audio"],
@@ -91,7 +91,7 @@ def _normalize_audio_preset_config(kind: str, config: dict[str, Any]) -> dict[st
                 supplied_fields=frozenset(normalized).intersection(
                     _TTS_PRESET_GATEWAY_PREFLIGHT_FIELDS
                 ),
-                gateway_specs=get_tts_config_manager().get_gateway_specs(),
+                gateway_specs=_tts_config.get_tts_config_manager().get_gateway_specs(),
                 speed=normalized.get("speed"),
                 lang_code=normalized.get("lang_code"),
                 language=normalized.get("language"),

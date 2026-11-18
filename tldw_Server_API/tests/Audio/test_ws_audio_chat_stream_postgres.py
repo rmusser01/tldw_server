@@ -92,7 +92,7 @@ async def test_chat_stream_sessions_return_every_checkout_while_the_server_runs(
         return owners[next(order)]
 
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _tts)
-    monkeypatch.setattr(audio, "get_chacha_db_for_user_id", _db_for_user, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id", _db_for_user, raising=False)
     sockets = [_persisting_session() for _ in range(len(owners) * sessions_per_user)]
 
     await asyncio.gather(*(audio.websocket_audio_chat_stream(ws, token=None) for ws in sockets))

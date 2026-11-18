@@ -97,7 +97,7 @@ async def test_upsert_policy_db_loader_init_failure_log_is_sanitized(
 
     monkeypatch.setattr(resource_governor, "logger", logger_stub)
     monkeypatch.setattr(resource_governor, "_get_app", lambda: app)
-    monkeypatch.setattr(resource_governor, "AuthNZPolicyAdmin", _FakePolicyAdmin)
+    monkeypatch.setattr("tldw_Server_API.app.core.Resource_Governance.policy_admin.AuthNZPolicyAdmin", _FakePolicyAdmin)
     monkeypatch.setattr(authnz_policy_store, "AuthNZPolicyStore", _ExplodingStore)
     monkeypatch.setenv("RG_POLICY_STORE", "db")
 
@@ -122,7 +122,7 @@ async def test_upsert_policy_refresh_failure_log_is_sanitized(
 
     monkeypatch.setattr(resource_governor, "logger", logger_stub)
     monkeypatch.setattr(resource_governor, "_get_app", lambda: app)
-    monkeypatch.setattr(resource_governor, "AuthNZPolicyAdmin", _FakePolicyAdmin)
+    monkeypatch.setattr("tldw_Server_API.app.core.Resource_Governance.policy_admin.AuthNZPolicyAdmin", _FakePolicyAdmin)
     monkeypatch.setenv("RG_POLICY_STORE", "db")
 
     response = await resource_governor.upsert_policy(
@@ -148,7 +148,7 @@ async def test_delete_policy_db_loader_init_failure_log_is_sanitized(
 
     monkeypatch.setattr(resource_governor, "logger", logger_stub)
     monkeypatch.setattr(resource_governor, "_get_app", lambda: app)
-    monkeypatch.setattr(resource_governor, "AuthNZPolicyAdmin", _FakePolicyAdmin)
+    monkeypatch.setattr("tldw_Server_API.app.core.Resource_Governance.policy_admin.AuthNZPolicyAdmin", _FakePolicyAdmin)
     monkeypatch.setattr(authnz_policy_store, "AuthNZPolicyStore", _ExplodingStore)
     monkeypatch.setenv("RG_POLICY_STORE", "db")
 
@@ -170,7 +170,7 @@ async def test_delete_policy_refresh_failure_log_is_sanitized(
 
     monkeypatch.setattr(resource_governor, "logger", logger_stub)
     monkeypatch.setattr(resource_governor, "_get_app", lambda: app)
-    monkeypatch.setattr(resource_governor, "AuthNZPolicyAdmin", _FakePolicyAdmin)
+    monkeypatch.setattr("tldw_Server_API.app.core.Resource_Governance.policy_admin.AuthNZPolicyAdmin", _FakePolicyAdmin)
     monkeypatch.setenv("RG_POLICY_STORE", "db")
 
     response = await resource_governor.delete_policy("safe.policy")
@@ -191,7 +191,7 @@ async def test_upsert_policy_version_conflict_log_is_sanitized(
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(resource_governor, "logger", logger_stub)
-    monkeypatch.setattr(resource_governor, "AuthNZPolicyAdmin", _ConflictPolicyAdmin)
+    monkeypatch.setattr("tldw_Server_API.app.core.Resource_Governance.policy_admin.AuthNZPolicyAdmin", _ConflictPolicyAdmin)
 
     response = await resource_governor.upsert_policy(
         "safe.policy",
@@ -215,7 +215,7 @@ async def test_delete_policy_version_conflict_log_is_sanitized(
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(resource_governor, "logger", logger_stub)
-    monkeypatch.setattr(resource_governor, "AuthNZPolicyAdmin", _ConflictPolicyAdmin)
+    monkeypatch.setattr("tldw_Server_API.app.core.Resource_Governance.policy_admin.AuthNZPolicyAdmin", _ConflictPolicyAdmin)
 
     response = await resource_governor.delete_policy("safe.policy", version=2)
 

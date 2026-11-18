@@ -219,11 +219,6 @@ async def test_e2e_authnz_debug_deny_headers_retry_after(monkeypatch, tmp_path, 
         _ = key_id
         return {"over": False, "reasons": []}
 
-    monkeypatch.setattr(authnz_debug_ep, "resolve_api_key_by_hash", _fake_resolve_api_key)
-    monkeypatch.setattr(authnz_debug_ep, "get_key_limits", _fake_get_key_limits)
-    monkeypatch.setattr(authnz_debug_ep, "summarize_usage_for_key_day", _fake_summarize_usage_for_key_day)
-    monkeypatch.setattr(authnz_debug_ep, "summarize_usage_for_key_month", _fake_summarize_usage_for_key_month)
-    monkeypatch.setattr(authnz_debug_ep, "is_key_over_budget", _fake_is_key_over_budget)
 
     from tldw_Server_API.app.main import app
 

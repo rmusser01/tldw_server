@@ -55,8 +55,8 @@ from tldw_Server_API.app.api.v1.schemas.prompt_studio_project import (
     ProjectUpdate,
 )
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import ConflictError, DatabaseError, InputError
-from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
+import tldw_Server_API.app.core.Logging.log_context as _log_context
 
 ########################################################################################################################
 # Router Setup
@@ -206,9 +206,9 @@ async def create_project(
             user_id=user_id_str
         )
 
-        rid = ensure_request_id(request)
-        tp = ensure_traceparent(request)
-        get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="prompt_studio", traceparent=tp).info(
+        rid = _log_context.ensure_request_id(request)
+        tp = _log_context.ensure_traceparent(request)
+        _log_context.get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="prompt_studio", traceparent=tp).info(
             "User {} created project: {}", user_context.get('user_id'), project.get('name')
         )
 
@@ -550,9 +550,9 @@ async def archive_project(
         # Update status to archived
         project = db.update_project(project_id, {"status": "archived"})
 
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request)
-        get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="prompt_studio", project_id=project_id, traceparent=tp).info(
+        rid = _log_context.ensure_request_id(request) if request is not None else None
+        tp = _log_context.ensure_traceparent(request)
+        _log_context.get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="prompt_studio", project_id=project_id, traceparent=tp).info(
             "User {} archived project {}", user_context.get('user_id'), project_id
         )
 
@@ -598,9 +598,9 @@ async def unarchive_project(
         # Update status to active
         project = db.update_project(project_id, {"status": "active"})
 
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request)
-        get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="prompt_studio", project_id=project_id, traceparent=tp).info(
+        rid = _log_context.ensure_request_id(request) if request is not None else None
+        tp = _log_context.ensure_traceparent(request)
+        _log_context.get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="prompt_studio", project_id=project_id, traceparent=tp).info(
             "User {} unarchived project {}", user_context.get('user_id'), project_id
         )
 

@@ -100,7 +100,7 @@ def test_a_policy_resolution_failure_leaves_no_heartbeat_task(client: TestClient
         calls.append(True)
         raise RuntimeError("policy failed")
 
-    monkeypatch.setattr(audio_tx, "resolve_effective_stt_policy", _broken)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy.resolve_effective_stt_policy", _broken)
     # The route's get_db_transaction rolls back and re-raises endpoint errors as TransactionError.
     with pytest.raises(TransactionError):
         _post(client)

@@ -92,8 +92,7 @@ async def test_endpoint_real_manager_runner_cancellation_keeps_runtime_order(
 
     adapter = _BlockingAdapter()
     monkeypatch.setattr(
-        test_case_endpoint,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         _ObservedProductionRuntime,
         raising=True,
     )

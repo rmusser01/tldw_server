@@ -151,9 +151,9 @@ async def test_websocket_tts_realtime_streams_audio(monkeypatch: pytest.MonkeyPa
     async def _get_tts_service_stub():
         return DummyRealtimeService()
 
-    monkeypatch.setattr(audio, "_audio_ws_authenticate", _auth_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", _auth_stub)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _can_start_stream_stub)
-    monkeypatch.setattr(audio, "finish_stream", _finish_stream_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_stream", _finish_stream_stub)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service_stub)
 
     await audio.websocket_tts_realtime(ws, token=None)
@@ -189,9 +189,9 @@ async def test_websocket_tts_realtime_interrupt_cancels_without_close(monkeypatc
     async def _get_tts_service_stub():
         return DummyRealtimeService()
 
-    monkeypatch.setattr(audio, "_audio_ws_authenticate", _auth_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", _auth_stub)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _can_start_stream_stub)
-    monkeypatch.setattr(audio, "finish_stream", _finish_stream_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_stream", _finish_stream_stub)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service_stub)
 
     await audio.websocket_tts_realtime(ws, token=None)
@@ -226,9 +226,9 @@ async def test_websocket_tts_realtime_accepts_text_after_interrupt(monkeypatch: 
     async def _get_tts_service_stub():
         return DummyRealtimeService()
 
-    monkeypatch.setattr(audio, "_audio_ws_authenticate", _auth_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", _auth_stub)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _can_start_stream_stub)
-    monkeypatch.setattr(audio, "finish_stream", _finish_stream_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_stream", _finish_stream_stub)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service_stub)
 
     await audio.websocket_tts_realtime(ws, token=None)
@@ -267,9 +267,9 @@ async def test_websocket_tts_realtime_error_frame_shape(monkeypatch: pytest.Monk
     async def _get_tts_service_stub():
         return DummyRealtimeService()
 
-    monkeypatch.setattr(audio, "_audio_ws_authenticate", _auth_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", _auth_stub)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _can_start_stream_stub)
-    monkeypatch.setattr(audio, "finish_stream", _finish_stream_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_stream", _finish_stream_stub)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service_stub)
 
     await audio.websocket_tts_realtime(ws, token=None)
@@ -307,9 +307,9 @@ async def test_websocket_tts_realtime_provider_format_mismatch(monkeypatch: pyte
     async def _get_tts_service_stub():
         return MismatchRealtimeService()
 
-    monkeypatch.setattr(audio, "_audio_ws_authenticate", _auth_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", _auth_stub)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _can_start_stream_stub)
-    monkeypatch.setattr(audio, "finish_stream", _finish_stream_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_stream", _finish_stream_stub)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service_stub)
 
     await audio.websocket_tts_realtime(ws, token=None)
@@ -341,9 +341,9 @@ async def test_websocket_tts_realtime_error_without_compat_alias(monkeypatch: py
     async def _get_tts_service_stub():
         return DummyRealtimeService()
 
-    monkeypatch.setattr(audio, "_audio_ws_authenticate", _auth_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", _auth_stub)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _can_start_stream_stub)
-    monkeypatch.setattr(audio, "finish_stream", _finish_stream_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_stream", _finish_stream_stub)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _get_tts_service_stub)
     monkeypatch.setenv("AUDIO_WS_COMPAT_ERROR_TYPE", "0")
 
@@ -484,10 +484,10 @@ async def test_websocket_tts_realtime_keeps_two_user_snapshots_across_interrupt(
         return Service()
 
     monkeypatch.setenv("OPENAI_API_KEY", "global-realtime-key-must-not-dispatch")
-    monkeypatch.setattr(audio_streaming_module, "is_multi_user_mode", lambda: True)
-    monkeypatch.setattr(audio, "_audio_ws_authenticate", auth_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_multi_user_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", auth_stub)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", can_start_stream_stub)
-    monkeypatch.setattr(audio, "finish_stream", finish_stream_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_stream", finish_stream_stub)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", get_service)
     monkeypatch.setattr(credential_service, "ProviderCredentialRuntime", Runtime)
     monkeypatch.setattr(
@@ -568,10 +568,10 @@ def test_a_cancelled_cleanup_reraises_the_hosts_own_cancellation(monkeypatch: py
             raise
         return await owned_worker(awaitable, **kwargs)
 
-    monkeypatch.setattr(audio, "_audio_ws_authenticate", _auth_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", _auth_stub)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _can_start_stream_stub)
-    monkeypatch.setattr(audio, "finish_stream", _finish_stream_stub)
-    monkeypatch.setattr(audio_streaming_module, "await_owned_worker", _slow_owned_worker)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_stream", _finish_stream_stub)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.await_owned_worker", _slow_owned_worker)
     app = FastAPI()
     app.include_router(audio_streaming_module.ws_router, prefix="/api/v1/audio")
 

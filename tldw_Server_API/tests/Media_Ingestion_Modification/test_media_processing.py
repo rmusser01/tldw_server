@@ -1516,7 +1516,7 @@ class TestProcessDocuments:
             return target_path
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.api.v1.endpoints.media.process_documents.core_download_url_async",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils.download_url_async",
             fake_download_url_async,
         )
         form_data = {"urls": [VALID_TXT_URL, INVALID_URL], "perform_analysis": "false"}
@@ -1612,7 +1612,7 @@ class TestProcessDocuments:
             return target_path
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.api.v1.endpoints.media.process_documents.core_download_url_async",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils.download_url_async",
             fake_download_url_async,
         )
 

@@ -105,7 +105,7 @@ def test_create_fish_s2_reference_requires_upload_fields_when_voice_missing(clie
 
 def test_create_fish_s2_reference_rejects_oversized_upload_before_service(client, monkeypatch):
     client_obj, app = client
-    monkeypatch.setattr(audio_voices, "FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES", 2)
+    monkeypatch.setattr("tldw_Server_API.app.core.TTS.fish_s2_reference_imports.FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES", 2)
     called = False
 
     class _FakeTTSService:
@@ -413,7 +413,7 @@ def test_import_fish_s2_references_returns_partial_provider_errors(client):
 
 def test_import_fish_s2_references_rejects_oversized_file(client, monkeypatch):
     client_obj, app = client
-    monkeypatch.setattr(audio_voices, "FISH_S2_REFERENCE_IMPORT_MAX_BYTES", 5)
+    monkeypatch.setattr("tldw_Server_API.app.core.TTS.fish_s2_reference_imports.FISH_S2_REFERENCE_IMPORT_MAX_BYTES", 5)
     app.dependency_overrides[audio_voices.get_tts_service] = lambda: object()
     try:
         response = client_obj.post(
@@ -430,7 +430,7 @@ def test_import_fish_s2_references_rejects_oversized_file(client, monkeypatch):
 
 def test_import_fish_s2_references_rejects_too_many_items(client, monkeypatch):
     client_obj, app = client
-    monkeypatch.setattr(audio_voices, "FISH_S2_REFERENCE_IMPORT_MAX_ITEMS", 1)
+    monkeypatch.setattr("tldw_Server_API.app.core.TTS.fish_s2_reference_imports.FISH_S2_REFERENCE_IMPORT_MAX_ITEMS", 1)
     app.dependency_overrides[audio_voices.get_tts_service] = lambda: object()
     try:
         response = client_obj.post(
@@ -453,7 +453,7 @@ def test_import_fish_s2_references_rejects_too_many_items(client, monkeypatch):
 
 def test_import_fish_s2_references_rejects_oversized_embedded_audio(client, monkeypatch):
     client_obj, app = client
-    monkeypatch.setattr(audio_voices, "FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES", 2)
+    monkeypatch.setattr("tldw_Server_API.app.core.TTS.fish_s2_reference_imports.FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES", 2)
     called = False
 
     class _FakeTTSService:

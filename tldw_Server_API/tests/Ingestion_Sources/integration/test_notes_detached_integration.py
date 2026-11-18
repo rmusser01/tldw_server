@@ -135,7 +135,7 @@ async def test_reattach_allows_next_sync_to_apply_pending_upstream_note_change(
             return _SQLitePool(db)
 
         monkeypatch.setattr(worker, "get_db_pool", _fake_get_db_pool, raising=False)
-        monkeypatch.setattr(endpoint_module, "get_db_pool", _fake_get_db_pool)
+        monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
 
         first_job = _FakeJobManager()
         await worker._process_sync_job(

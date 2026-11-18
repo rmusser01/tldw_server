@@ -477,8 +477,7 @@ async def test_gateway_speech_job_rejects_allowlisted_authority_extra_params(
     monkeypatch.setattr("tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _no_credentials)
     monkeypatch.setattr(
-        audio_tts,
-        "get_tts_config_manager",
+        "tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager",
         lambda: SimpleNamespace(get_gateway_specs=lambda: specs),
     )
 
@@ -519,8 +518,7 @@ async def test_gateway_speech_job_enqueue_is_config_only_and_secret_free(monkeyp
     monkeypatch.setattr("tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _no_credentials)
     monkeypatch.setattr(
-        audio_tts,
-        "get_tts_config_manager",
+        "tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager",
         lambda: SimpleNamespace(get_gateway_specs=_gateway_specs),
     )
     manager = DummyJM()

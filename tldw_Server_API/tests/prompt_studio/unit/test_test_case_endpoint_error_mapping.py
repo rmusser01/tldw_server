@@ -209,8 +209,7 @@ def _patch_test_case_dependencies(
     logger_stub = _LoggerStub()
     monkeypatch.setattr(test_cases_endpoint, "logger", logger_stub, raising=True)
     monkeypatch.setattr(
-        test_cases_endpoint,
-        "TestCaseManager",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager.TestCaseManager",
         lambda db: _BrokenTestCaseManager(db, manager_exc, get_result=get_result),
         raising=True,
     )
@@ -219,8 +218,7 @@ def _patch_test_case_dependencies(
         return True
 
     monkeypatch.setattr(
-        test_cases_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write_access,
         raising=True,
     )
@@ -229,8 +227,7 @@ def _patch_test_case_dependencies(
         return True
 
     monkeypatch.setattr(
-        test_cases_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         _allow_read_access,
         raising=True,
     )
@@ -241,14 +238,12 @@ def _patch_successful_import_dependencies(monkeypatch: pytest.MonkeyPatch) -> _L
     logger_stub = _LoggerStub()
     monkeypatch.setattr(test_cases_endpoint, "logger", logger_stub, raising=True)
     monkeypatch.setattr(
-        test_cases_endpoint,
-        "TestCaseManager",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager.TestCaseManager",
         _LimitImportTestCaseManager,
         raising=True,
     )
     monkeypatch.setattr(
-        test_cases_endpoint,
-        "TestCaseIO",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_io.TestCaseIO",
         _SuccessfulImportTestCaseIO,
         raising=True,
     )
@@ -257,8 +252,7 @@ def _patch_successful_import_dependencies(monkeypatch: pytest.MonkeyPatch) -> _L
         return True
 
     monkeypatch.setattr(
-        test_cases_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write_access,
         raising=True,
     )
@@ -274,8 +268,7 @@ def _patch_test_case_io(
     effective_manager_exc = manager_exc or DatabaseError("manager should not be called")
     logger_stub = _patch_test_case_dependencies(monkeypatch, effective_manager_exc)
     monkeypatch.setattr(
-        test_cases_endpoint,
-        "TestCaseIO",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_io.TestCaseIO",
         lambda manager: _BrokenTestCaseIO(manager, io_exc),
         raising=True,
     )
@@ -291,8 +284,7 @@ def _patch_test_case_generator(
     effective_manager_exc = manager_exc or DatabaseError("manager should not be called")
     logger_stub = _patch_test_case_dependencies(monkeypatch, effective_manager_exc)
     monkeypatch.setattr(
-        test_cases_endpoint,
-        "TestCaseGenerator",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_generator.TestCaseGenerator",
         lambda manager: _BrokenTestCaseGenerator(manager, generator_exc),
         raising=True,
     )

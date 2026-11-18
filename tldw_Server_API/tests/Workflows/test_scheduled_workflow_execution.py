@@ -43,7 +43,7 @@ def service(tmp_path, monkeypatch):
     monkeypatch.setenv("WORKFLOWS_SCHEDULER_SQLITE_PATH", str(tmp_path / "schedules.db"))
     monkeypatch.delenv("WORKFLOWS_MINT_VIRTUAL_KEYS", raising=False)
     svc = recurring._WFRecurringScheduler()
-    monkeypatch.setattr(routes, "get_workflows_scheduler", lambda: svc)
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: svc)
     yield svc
     for db in svc._db_cache.values():
         db.backend.get_pool().close_all()
@@ -231,7 +231,7 @@ async def test_run_now_uses_same_real_worker_admission(service, owned_db, tmp_pa
     await core.start()
     async def existing_core():
         return core
-    monkeypatch.setattr(routes, "get_global_scheduler", existing_core)
+    monkeypatch.setattr("tldw_Server_API.app.core.Scheduler.get_global_scheduler", existing_core)
     workflow_id = saved_definition(owned_db)
     schedule_id = create_schedule(service, workflow_id, enabled=False)
     user = User(id=1, username="owner", is_active=True, tenant_id="default")

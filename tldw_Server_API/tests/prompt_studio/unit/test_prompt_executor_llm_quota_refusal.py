@@ -80,8 +80,8 @@ async def test_prompt_execute_endpoint_answers_the_refusal(monkeypatch: pytest.M
             return None
 
     monkeypatch.setattr(PromptExecutor, "_call_llm", _refused_call)
-    monkeypatch.setattr(prompts_endpoint, "authoritative_prompt_project", lambda *_args, **_kwargs: (1, 7))
-    monkeypatch.setattr(prompts_endpoint, "require_project_access", _allow_project)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.prompt_studio_resource_binding.authoritative_prompt_project", lambda *_args, **_kwargs: (1, 7))
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access", _allow_project)
     monkeypatch.setattr(
         prompts_endpoint, "derive_trusted_credential_scope", lambda *_args, **_kwargs: (7, [], [], False)
     )

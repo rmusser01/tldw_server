@@ -111,10 +111,10 @@ def test_add_source_success(connectors_client, monkeypatch):
         }
 
     import tldw_Server_API.app.api.v1.endpoints.connectors as ep
-    monkeypatch.setattr(ep, "create_source", _fake_create_source)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_source", _fake_create_source)
     async def _fake_get_account_for_user(db, user_id, account_id):
         return {"id": account_id, "user_id": user_id, "provider": "drive"}
-    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _fake_get_account_for_user)
 
     payload = {
         "account_id": 1,
@@ -188,12 +188,12 @@ def test_add_onedrive_source_provisions_webhook_subscription(connectors_client, 
                 metadata={"expirationDateTime": "2026-03-10T00:00:00Z"},
             )
 
-    monkeypatch.setattr(ep, "create_source", _fake_create_source)
-    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
-    monkeypatch.setattr(ep, "get_account_tokens", _fake_get_account_tokens)
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
-    monkeypatch.setattr(ep, "evaluate_policy_constraints", lambda *a, **kw: (True, None))
-    monkeypatch.setattr(ep, "upsert_source_sync_state", _fake_upsert_source_sync_state, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_source", _fake_create_source)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_tokens", _fake_get_account_tokens)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.policy.evaluate_policy_constraints", lambda *a, **kw: (True, None))
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.upsert_source_sync_state", _fake_upsert_source_sync_state, raising=False)
 
     payload = {
         "account_id": 12,
@@ -281,12 +281,12 @@ def test_add_drive_source_provisions_webhook_subscription_and_cursor(connectors_
                 },
             )
 
-    monkeypatch.setattr(ep, "create_source", _fake_create_source)
-    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
-    monkeypatch.setattr(ep, "get_account_tokens", _fake_get_account_tokens)
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
-    monkeypatch.setattr(ep, "evaluate_policy_constraints", lambda *a, **kw: (True, None))
-    monkeypatch.setattr(ep, "upsert_source_sync_state", _fake_upsert_source_sync_state, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_source", _fake_create_source)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_tokens", _fake_get_account_tokens)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.policy.evaluate_policy_constraints", lambda *a, **kw: (True, None))
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.upsert_source_sync_state", _fake_upsert_source_sync_state, raising=False)
 
     payload = {
         "account_id": 13,
@@ -319,7 +319,7 @@ def test_add_source_rejects_missing_account(connectors_client, monkeypatch):
         return None
 
     import tldw_Server_API.app.api.v1.endpoints.connectors as ep
-    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _fake_get_account_for_user)
 
     payload = {
         "account_id": 999,
@@ -339,7 +339,7 @@ def test_add_source_rejects_provider_mismatch(connectors_client, monkeypatch):
         return {"id": account_id, "user_id": user_id, "provider": "notion"}
 
     import tldw_Server_API.app.api.v1.endpoints.connectors as ep
-    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _fake_get_account_for_user)
 
     payload = {
         "account_id": 1,
@@ -398,8 +398,8 @@ def test_patch_source_success(connectors_client, monkeypatch):
         }
 
     import tldw_Server_API.app.api.v1.endpoints.connectors as ep
-    monkeypatch.setattr(ep, "get_source_by_id", _fake_get_source_by_id)
-    monkeypatch.setattr(ep, "update_source", _fake_update_source)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.update_source", _fake_update_source)
 
     r = client.patch(
         "/api/v1/connectors/sources/55",
@@ -421,7 +421,7 @@ def test_patch_source_404(connectors_client, monkeypatch):
         return None
 
     import tldw_Server_API.app.api.v1.endpoints.connectors as ep
-    monkeypatch.setattr(ep, "update_source", _fake_update_source_none)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.update_source", _fake_update_source_none)
 
     r = client.patch(
         "/api/v1/connectors/sources/9999",
@@ -490,9 +490,9 @@ def test_get_sources_includes_sync_summary(connectors_client, monkeypatch):
             assert job_id == 88
             return None
 
-    monkeypatch.setattr(ep, "list_sources", _fake_list_sources)
-    monkeypatch.setattr(ep, "get_source_sync_state", _fake_get_source_sync_state)
-    monkeypatch.setattr(ep, "get_source_binding_health", _fake_get_source_binding_health)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.list_sources", _fake_list_sources)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_sync_state", _fake_get_source_sync_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_binding_health", _fake_get_source_binding_health)
     monkeypatch.setattr(jobs_manager, "JobManager", _FakeJobManager)
 
     response = client.get("/api/v1/connectors/sources", headers=headers)
@@ -528,8 +528,8 @@ def test_oauth_callback_rejects_invalid_state(connectors_client, monkeypatch):
         async def exchange_code(self, *a, **kw):
             raise AssertionError("exchange_code should not be called on invalid state")
 
-    monkeypatch.setattr(ep, "consume_oauth_state", _fake_consume_oauth_state)
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.consume_oauth_state", _fake_consume_oauth_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
 
     r = client.get(
         "/api/v1/connectors/providers/notion/callback",
@@ -565,9 +565,9 @@ def test_oauth_callback_accepts_valid_state(connectors_client, monkeypatch):
     async def _fake_create_account(db, user_id, provider, display_name, email, tokens):
         return {"id": 123, "display_name": display_name, "email": email, "created_at": "now"}
 
-    monkeypatch.setattr(ep, "consume_oauth_state", _fake_consume_oauth_state)
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
-    monkeypatch.setattr(ep, "create_account", _fake_create_account)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.consume_oauth_state", _fake_consume_oauth_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_account", _fake_create_account)
     monkeypatch.setenv("ORG_CONNECTORS_ACCOUNT_LINKING_ROLE", "member")
 
     r = client.get(
@@ -624,8 +624,8 @@ def test_start_authorize_zotero_requests_temporary_credential_and_persists_state
             )
             return "https://www.zotero.org/oauth/authorize?oauth_token=temp-token"
 
-    monkeypatch.setattr(ep, "create_oauth_state", _fake_create_oauth_state)
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_oauth_state", _fake_create_oauth_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
 
     response = client.post("/api/v1/connectors/providers/zotero/authorize", headers=headers)
     assert response.status_code == 200, response.text
@@ -687,8 +687,8 @@ def test_start_authorize_zotero_ignores_untrusted_request_base_when_connector_ba
             return "https://www.zotero.org/oauth/authorize?oauth_token=temp-token"
 
     client = TestClient(base_client.app, base_url="https://evil.example")
-    monkeypatch.setattr(ep, "create_oauth_state", _fake_create_oauth_state)
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_oauth_state", _fake_create_oauth_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
 
     response = client.post("/api/v1/connectors/providers/zotero/authorize", headers=headers)
     assert response.status_code == 200, response.text
@@ -719,9 +719,9 @@ def test_start_authorize_zotero_rejects_request_derived_localhost_base_in_produc
             raise AssertionError("authorize_url must not be reached when redirect base is unconfigured")
 
     monkeypatch.delenv("CONNECTOR_REDIRECT_BASE_URL", raising=False)
-    monkeypatch.setattr(ep, "is_test_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: False)
     monkeypatch.delenv("TESTING", raising=False)
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
 
     client = TestClient(base_client.app, base_url="http://localhost")
     response = client.post("/api/v1/connectors/providers/zotero/authorize", headers=headers)
@@ -749,10 +749,10 @@ def test_start_authorize_zotero_rejects_insecure_non_https_redirect_base(
         def authorize_url(self, *a, **kw):
             raise AssertionError("authorize_url must not be reached for insecure redirect bases")
 
-    monkeypatch.setattr(ep, "is_test_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: False)
     monkeypatch.delenv("TESTING", raising=False)
     monkeypatch.setenv("CONNECTOR_REDIRECT_BASE_URL", "http://example.com")
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
 
     response = client.post("/api/v1/connectors/providers/zotero/authorize", headers=headers)
 
@@ -780,9 +780,9 @@ def test_start_authorize_zotero_treats_whitespace_redirect_base_as_unconfigured(
             raise AssertionError("authorize_url must not be reached when redirect base is blank")
 
     monkeypatch.setenv("CONNECTOR_REDIRECT_BASE_URL", "   ")
-    monkeypatch.setattr(ep, "is_test_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: False)
     monkeypatch.delenv("TESTING", raising=False)
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
 
     client = TestClient(base_client.app, base_url="http://localhost")
     response = client.post("/api/v1/connectors/providers/zotero/authorize", headers=headers)
@@ -795,7 +795,7 @@ def test_resolve_webhook_callback_base_treats_whitespace_redirect_base_as_missin
     import tldw_Server_API.app.api.v1.endpoints.connectors as ep
 
     monkeypatch.setenv("CONNECTOR_REDIRECT_BASE_URL", "   ")
-    monkeypatch.setattr(ep, "is_test_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: False)
     monkeypatch.delenv("TESTING", raising=False)
 
     with pytest.raises(HTTPException) as exc:
@@ -853,9 +853,9 @@ def test_oauth_callback_accepts_zotero_oauth1_payload_and_persists_provider_iden
         )
         return {"id": 456, "display_name": display_name, "email": email, "created_at": "now"}
 
-    monkeypatch.setattr(ep, "consume_oauth_state", _fake_consume_oauth_state)
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
-    monkeypatch.setattr(ep, "create_account", _fake_create_account)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.consume_oauth_state", _fake_consume_oauth_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_account", _fake_create_account)
     monkeypatch.setenv("ORG_CONNECTORS_ACCOUNT_LINKING_ROLE", "member")
 
     response = client.get(
@@ -914,10 +914,10 @@ def test_browse_provider_sources_returns_zotero_collection_rows(connectors_clien
         assert account_id == 15
         return {"id": account_id, "user_id": user_id, "provider": "zotero"}
 
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
-    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
-    monkeypatch.setattr(ep, "get_account_tokens", _fake_get_account_tokens)
-    monkeypatch.setattr(ep, "get_account_email", _fake_get_account_email)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_tokens", _fake_get_account_tokens)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_email", _fake_get_account_email)
 
     response = client.get(
         "/api/v1/connectors/providers/zotero/sources/browse",
@@ -959,10 +959,10 @@ def test_browse_provider_sources_includes_canonical_cursor_pagination(connectors
     async def _fake_get_account_for_user(db: object, user_id: object, account_id: int) -> dict[str, object]:
         return {"id": account_id, "user_id": user_id, "provider": "zotero"}
 
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
-    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
-    monkeypatch.setattr(ep, "get_account_tokens", _fake_get_account_tokens)
-    monkeypatch.setattr(ep, "get_account_email", _fake_get_account_email)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_tokens", _fake_get_account_tokens)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_email", _fake_get_account_email)
 
     response = client.get(
         "/api/v1/connectors/providers/zotero/sources/browse",
@@ -1019,10 +1019,10 @@ def test_browse_provider_sources_backfills_blank_zotero_provider_user_id(connect
             "provider_user_id": "",
         }
 
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
-    monkeypatch.setattr(ep, "get_account_tokens", _fake_get_account_tokens)
-    monkeypatch.setattr(ep, "get_account_email", _fake_get_account_email)
-    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_tokens", _fake_get_account_tokens)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_email", _fake_get_account_email)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _fake_get_account_for_user)
 
     response = client.get(
         "/api/v1/connectors/providers/zotero/sources/browse",
@@ -1055,10 +1055,10 @@ def test_browse_provider_sources_sanitizes_connector_error(connectors_client, mo
     async def _fake_get_account_for_user(db, user_id, account_id):
         return {"id": account_id, "user_id": user_id, "provider": "zotero"}
 
-    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FailingConn())
-    monkeypatch.setattr(ep, "get_account_tokens", _fake_get_account_tokens)
-    monkeypatch.setattr(ep, "get_account_email", _fake_get_account_email)
-    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.get_connector_by_name", lambda provider: _FailingConn())
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_tokens", _fake_get_account_tokens)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_email", _fake_get_account_email)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _fake_get_account_for_user)
 
     response = client.get(
         "/api/v1/connectors/providers/zotero/sources/browse",
@@ -1082,8 +1082,8 @@ def test_browse_provider_sources_rejects_account_provider_mismatch(connectors_cl
     async def _fake_get_account_for_user(db, user_id, account_id):
         return {"id": account_id, "user_id": user_id, "provider": "drive"}
 
-    monkeypatch.setattr(ep, "get_account_tokens", _fake_get_account_tokens)
-    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_tokens", _fake_get_account_tokens)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _fake_get_account_for_user)
 
     response = client.get(
         "/api/v1/connectors/providers/zotero/sources/browse",
@@ -1116,8 +1116,8 @@ def test_add_zotero_source_accepts_collection_type(connectors_client, monkeypatc
     async def _fake_get_account_for_user(db, user_id, account_id):
         return {"id": account_id, "user_id": user_id, "provider": "zotero"}
 
-    monkeypatch.setattr(ep, "create_source", _fake_create_source)
-    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_source", _fake_create_source)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _fake_get_account_for_user)
 
     payload = {
         "account_id": 19,
@@ -1142,7 +1142,7 @@ def test_add_zotero_source_rejects_recursive_option(connectors_client, monkeypat
     async def _fake_get_account_for_user(db, user_id, account_id):
         return {"id": account_id, "user_id": user_id, "provider": "zotero"}
 
-    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_account_for_user", _fake_get_account_for_user)
 
     payload = {
         "account_id": 19,
@@ -1175,7 +1175,7 @@ def test_patch_zotero_source_rejects_recursive_option(connectors_client, monkeyp
             "last_synced_at": None,
         }
 
-    monkeypatch.setattr(ep, "get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_id", _fake_get_source_by_id)
 
     response = client.patch(
         "/api/v1/connectors/sources/19",
@@ -1221,8 +1221,8 @@ def test_patch_zotero_source_preserves_flat_recursive_false(connectors_client, m
             "last_synced_at": None,
         }
 
-    monkeypatch.setattr(ep, "get_source_by_id", _fake_get_source_by_id)
-    monkeypatch.setattr(ep, "update_source", _fake_update_source)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.update_source", _fake_update_source)
 
     response = client.patch(
         "/api/v1/connectors/sources/19",
@@ -1285,9 +1285,9 @@ def test_get_source_sync_status_returns_state_and_active_job(connectors_client, 
             "metadata_only_count": 5,
         }
 
-    monkeypatch.setattr(ep, "get_source_by_id", _fake_get_source_by_id)
-    monkeypatch.setattr(ep, "get_source_sync_state", _fake_get_source_sync_state)
-    monkeypatch.setattr(ep, "get_source_binding_health", _fake_get_source_binding_health)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_sync_state", _fake_get_source_sync_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_binding_health", _fake_get_source_binding_health)
     monkeypatch.setattr(jobs_manager, "JobManager", _FakeJobManager)
 
     response = client.get("/api/v1/connectors/sources/22/sync", headers=headers)
@@ -1350,9 +1350,9 @@ def test_get_source_sync_status_prefers_active_job_state_over_needs_full_rescan(
                 "result": {"processed": 1, "failed": 0, "skipped": 0},
             }
 
-    monkeypatch.setattr(ep, "get_source_by_id", _fake_get_source_by_id)
-    monkeypatch.setattr(ep, "get_source_sync_state", _fake_get_source_sync_state)
-    monkeypatch.setattr(ep, "get_source_binding_health", _fake_get_source_binding_health)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_sync_state", _fake_get_source_sync_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_binding_health", _fake_get_source_binding_health)
     monkeypatch.setattr(jobs_manager, "JobManager", _FakeJobManager)
 
     response = client.get("/api/v1/connectors/sources/88/sync", headers=headers)
@@ -1399,9 +1399,9 @@ def test_trigger_source_sync_endpoint_queues_job(connectors_client, monkeypatch)
             "counts": {"processed": 0, "skipped": 0, "failed": 0},
         }
 
-    monkeypatch.setattr(ep, "get_source_by_id", _fake_get_source_by_id)
-    monkeypatch.setattr(ep, "get_source_sync_state", _fake_get_source_sync_state)
-    monkeypatch.setattr(ep, "create_import_job", _fake_create_import_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_sync_state", _fake_get_source_sync_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_import_job", _fake_create_import_job)
 
     response = client.post("/api/v1/connectors/sources/22/sync", headers=headers)
     assert response.status_code == 200, response.text
@@ -1450,9 +1450,9 @@ def test_trigger_source_sync_endpoint_falls_back_to_import_for_non_file_provider
             "counts": {"processed": 0, "skipped": 0, "failed": 0},
         }
 
-    monkeypatch.setattr(ep, "get_source_by_id", _fake_get_source_by_id)
-    monkeypatch.setattr(ep, "get_source_sync_state", _fake_get_source_sync_state)
-    monkeypatch.setattr(ep, "create_import_job", _fake_create_import_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_sync_state", _fake_get_source_sync_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_import_job", _fake_create_import_job)
 
     response = client.post("/api/v1/connectors/sources/41/sync", headers=headers)
     assert response.status_code == 200, response.text
@@ -1498,9 +1498,9 @@ def test_trigger_source_sync_endpoint_uses_repair_rescan_when_source_requires_it
             "counts": {"processed": 0, "skipped": 0, "failed": 0},
         }
 
-    monkeypatch.setattr(ep, "get_source_by_id", _fake_get_source_by_id)
-    monkeypatch.setattr(ep, "get_source_sync_state", _fake_get_source_sync_state)
-    monkeypatch.setattr(ep, "create_import_job", _fake_create_import_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_sync_state", _fake_get_source_sync_state)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_import_job", _fake_create_import_job)
 
     response = client.post("/api/v1/connectors/sources/52/sync", headers=headers)
     assert response.status_code == 200, response.text

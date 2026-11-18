@@ -146,7 +146,7 @@ def test_dlq_replay_appends_delivery_event(monkeypatch, auth_headers, tmp_path):
     async def _fake_http_afetch(**kwargs):  # noqa: ANN003
         return _DummyResp()
 
-    monkeypatch.setattr(wf_mod, "_http_afetch", _fake_http_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", _fake_http_afetch)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Security.egress.is_webhook_url_allowed_for_tenant",
         lambda url, tenant_id: True,
@@ -234,7 +234,7 @@ def test_dlq_replay_deletes_successful_delivery_when_evidence_append_fails(monke
     def _failing_append_event(*args, **kwargs):  # noqa: ANN002, ANN003
         raise sqlite3.OperationalError("event store unavailable")
 
-    monkeypatch.setattr(wf_mod, "_http_afetch", _fake_http_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", _fake_http_afetch)
     monkeypatch.setattr(db_for_app, "append_event", _failing_append_event)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Security.egress.is_webhook_url_allowed_for_tenant",

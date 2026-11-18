@@ -79,8 +79,7 @@ async def test_list_versions_maps_database_error(monkeypatch):
         raise _database_failure()
 
     monkeypatch.setattr(
-        media_versions_endpoint,
-        "list_document_versions",
+        "tldw_Server_API.app.core.DB_Management.media_db.api.list_document_versions",
         _raise_database_error,
         raising=True,
     )
@@ -146,8 +145,7 @@ async def test_list_versions_sanitizes_unexpected_error_log(monkeypatch):
         raise RuntimeError("versions read exploded /private/tmp/media-versions.db")
 
     monkeypatch.setattr(
-        media_versions_endpoint,
-        "list_document_versions",
+        "tldw_Server_API.app.core.DB_Management.media_db.api.list_document_versions",
         _raise_unexpected_error,
         raising=True,
     )
