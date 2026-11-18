@@ -205,10 +205,10 @@ Notes:
 
 #### SimpleQA Verified (Local Dataset)
 
-Support added for a curated SimpleQA Verified dataset stored in the repo at `Helper_Scripts/Evals/SimpleQA_verified/`.
+The curated SimpleQA Verified set ships in the repo as `Helper_Scripts/Evals/simpleqa-verified.zip` (one CSV with `problem`, `answer` and `topic` columns).
 
 - Registry key: `simpleqa_verified`
-- Loader auto-detects `.jsonl` or `.json` within that directory (prefers files with `verified` in the name)
+- The loader reads the CSV out of the zip; its `problem` column reaches the evaluator as `question`
 - Usage via CLI or programmatic APIs that reference benchmarks:
 
 ```bash
@@ -218,11 +218,12 @@ tldw-evals benchmark run simpleqa_verified --limit 100
 Or via the registry programmatically:
 
 ```python
+from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
 from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
 
 reg = get_registry()
 evaluator = reg.create_evaluator("simpleqa_verified")
-data = reg.load_dataset("simpleqa_verified", limit=100)
+data = load_benchmark_dataset("simpleqa_verified", limit=100)
 # ... run evaluation using your model and evaluator
 ```
 
@@ -382,6 +383,7 @@ for result in results:
 ### Programmatic Usage
 
 ```python
+from benchmark_loaders import load_benchmark_dataset
 from benchmark_registry import get_registry
 from evaluation_manager import EvaluationManager
 
@@ -392,8 +394,8 @@ registry = get_registry()
 benchmarks = registry.list_benchmarks()
 print(f"Available: {benchmarks}")
 
-# Load dataset
-dataset = registry.load_dataset("simple_bench", limit=10)
+# Load dataset (rows come back in the benchmark's own fields)
+dataset = load_benchmark_dataset("simple_bench", limit=10)
 
 # Create evaluator
 evaluator = registry.create_evaluator("simple_bench")

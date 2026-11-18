@@ -1,7 +1,7 @@
 ---
 id: TASK-15496
 title: Own-key calls through analyze skip the DEFAULT_MODEL_<PROVIDER> fallback
-status: To Do
+status: Done
 labels:
 - byok
 - llm
@@ -16,26 +16,29 @@ Found by TASK-15426 PR B's plan review (B-6); measured by PR D's plan refresh (V
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An own-key analyze call on a server whose only default model for the provider is DEFAULT_MODEL_<PROVIDER> (no model in config) reaches that model, with a test
-- [ ] #2 That model is checked against the provider-override model policy, as the configured model is, with a test
+- [x] #1 An own-key analyze call on a server whose only default model for the provider is DEFAULT_MODEL_<PROVIDER> (no model in config) reaches that model, with a test
+- [x] #2 That model is checked against the provider-override model policy, as the configured model is, with a test
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-11-17-own-key-default-model.md. Owner decisions 2026-11-16: (1) a denied fallback model reuses the configuration code, no model_not_allowed code; (2) an allowlisted provider with no configured model and no env default still fails missing_model; (3) ADR-004 Change summary waiver covers this PR, the controller writes the final PR body.
+Measured 2026-11-17: RED 5 failed/4 passed (plan: 4 failed/2 passed on its 6 cases; the patch adds a 7th case and the summarization pair), GREEN 219 passed (boundary + summarization_adapter files). Wider set: runtime_credentials 10, authoritative_adapter_translation 23, audio_summary 22, email_summary 25, media_ingest_job_llm_quota_refusal 8, study_assistant_adapter_contract 73, study_assistant_service 7, evaluations_benchmarks_api 6, eval_runner 44, output_enrichment_scheduler 5, media_llm_quota 35; tests/Docs 214 passed; tests/lint 313 passed (setuptools-less test_runtime_package_discovery ignored); tests/CI 1074 passed, 2 known coverage failures. netlines 0 everywhere. Bandit clean. DoD 3 docs: not applicable (no mirrored doc or config change).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Own-key analyze calls now fall back to DEFAULT_MODEL_<PROVIDER> when the handle config has no model, and that model is enforced against the provider-override policy; denials fail with the configuration code.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

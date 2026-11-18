@@ -11,6 +11,8 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Evaluations.benchmark_utils import JUDGE_SCALE_LINE
+
 logger = logger
 
 
@@ -40,14 +42,14 @@ Model Answer: {model_answer}
 Evaluate if the model answer is correct and complete.
 Consider factual accuracy and coverage of key points.
 
-Score from 0.0 to 1.0 where:
-- 1.0 = Perfectly correct and complete
-- 0.75 = Mostly correct with minor issues
-- 0.5 = Partially correct
-- 0.25 = Mostly incorrect but has some correct elements
-- 0.0 = Completely incorrect
+Score from 1 (worst) to 10 (best) where:
+- 10 = Perfectly correct and complete
+- 7 = Mostly correct with minor issues
+- 5 = Partially correct
+- 3 = Mostly incorrect but has some correct elements
+- 1 = Completely incorrect
 
-Respond with: SCORE: X.X EXPLANATION: [brief explanation]"""
+""" + JUDGE_SCALE_LINE
 
     def normalize_text(self, text: str) -> str:
         """Normalize text for comparison."""

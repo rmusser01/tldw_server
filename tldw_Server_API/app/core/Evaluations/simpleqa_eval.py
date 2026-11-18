@@ -55,6 +55,8 @@ class SimpleQAEvaluation(BaseEvaluation):
         expected_answer = input_data.get("answer", "")
         topic = input_data.get("topic", "general")
         metadata = input_data.get("metadata", {})
+        if not isinstance(metadata, dict):  # OpenAI's CSV has a string metadata column
+            metadata = {}
 
         # SimpleQA uses a specific prompt format for evaluation
         evaluation_prompt = self._create_grading_prompt(

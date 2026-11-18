@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile, status
@@ -83,11 +84,16 @@ async def add_media(
     helper.
     """
 
+    research_handoff = is_research_discovery_handoff(form_data)
+    admit_after_duplicate_check = None
     if media_analysis_requested(form_data):
-        # Usage quotas (LLM usage accounting spec §4a), before any download or processing.
-        await admit_media_analysis(current_user.id, form_data)
+        admit = partial(admit_media_analysis, current_user.id, form_data)
+        if not research_handoff and form_data.media_type != "email" and not form_data.overwrite_existing:
+            admit_after_duplicate_check = admit
+        else:
+            await admit()
 
-    if is_research_discovery_handoff(form_data):
+    if research_handoff:
         try:
             result = await _research_discovery_handoff.add_research_discovery_pdfs(
                 background_tasks=background_tasks,
@@ -113,6 +119,7 @@ async def add_media(
             usage_log=usage_log,
             response=None,
             request=request,
+            admit_after_duplicate_check=admit_after_duplicate_check,
         )
 
     if isinstance(result, Response):

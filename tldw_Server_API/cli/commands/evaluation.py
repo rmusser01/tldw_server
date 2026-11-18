@@ -295,10 +295,9 @@ def batch_eval(ctx, input_file, output, provider, model, api_key, parallel, outp
 @click.option('--provider', default='openai', help='LLM provider to use')
 @click.option('--model', help='Specific model to use')
 @click.option('--api-key', help='API key (overrides config)')
-@click.option('--save/--no-save', default=True, help='Save evaluation results')
 @click.option('--format', 'output_format', type=click.Choice(['table', 'json']), default='table', help='Output format')
 @click.pass_context
-def custom_eval(ctx, metric_name, text, prompt, provider, model, api_key, save, output_format):
+def custom_eval(ctx, metric_name, text, prompt, provider, model, api_key, output_format):
     """
     Run custom metric evaluation.
 
@@ -326,7 +325,7 @@ def custom_eval(ctx, metric_name, text, prompt, provider, model, api_key, save, 
 
         # Run evaluation
         result = _run_custom_evaluation(
-            metric_name, text_content, prompt, provider, model, api_key, save, cli_context.config
+            metric_name, text_content, prompt, provider, model, api_key, cli_context.config
         )
 
         # Display results
@@ -335,6 +334,9 @@ def custom_eval(ctx, metric_name, text, prompt, provider, model, api_key, save, 
         else:
             print_evaluation_results(result)
 
+        if result['status'] == 'unscored':  # the judge call failed or its reply held no score: not a success
+            print_error(f"Custom evaluation '{metric_name}' produced no score: {result['details'].get('explanation')}")
+            sys.exit(1)
         print_success(f"Custom evaluation '{metric_name}' completed successfully")
 
     except _EVAL_CLI_NONCRITICAL_EXCEPTIONS as e:
@@ -728,8 +730,8 @@ def _run_quality_evaluation(text: str, response: str, provider: str, model: str,
         raise
 
 
-def _run_custom_evaluation(metric_name: str, text: str, prompt: str, provider: str,
-                          model: str, api_key: str, save: bool, config: dict[str, Any]) -> dict[str, Any]:
+def _run_custom_evaluation(metric_name: str, text: str, prompt: Optional[str], provider: str,
+                          model: str, api_key: str, config: dict[str, Any]) -> dict[str, Any]:
     """Run custom metric evaluation."""
     try:
         from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
@@ -741,22 +743,24 @@ def _run_custom_evaluation(metric_name: str, text: str, prompt: str, provider: s
         eval_manager = EvaluationManager()
 
         result = asyncio.run(eval_manager.evaluate_custom_metric(
-            text=text,
             metric_name=metric_name,
-            custom_prompt=prompt,
-            api_key=api_key,
+            description=metric_name,
+            evaluation_prompt=prompt or f"Evaluate the text below on the metric '{metric_name}'.\n\n{{text}}",
+            input_data={'text': text},
+            scoring_criteria={metric_name: prompt or 'Overall quality on this metric'},
             api_name=provider,
-            save_results=save
+            api_key=api_key,
         ))
+        score = result.get('score')  # None: no score, kept apart from a 0.0 (TASK-15485)
 
         return {
             'evaluation_type': 'custom',
+            'status': 'unscored' if score is None else 'completed',
             'metric_name': metric_name,
-            'evaluation_id': result.get('evaluation_id'),
             'provider': provider,
             'model': model,
             'timestamp': format_timestamp(None),
-            'metrics': result.get('metrics', {}),
+            'metrics': {metric_name: {'score': score, 'explanation': result.get('explanation', '')}},
             'details': result
         }
 
@@ -881,7 +885,7 @@ def _run_single_evaluation(eval_spec: dict[str, Any], default_provider: str,
     elif eval_type == 'custom':
         return _run_custom_evaluation(
             eval_spec['metric_name'], eval_spec['text'],
-            eval_spec.get('prompt'), provider, model, api_key, save, config
+            eval_spec.get('prompt'), provider, model, api_key, config
         )
     else:
         raise ValueError(f"Unknown evaluation type: {eval_type}")
@@ -901,13 +905,15 @@ def _save_batch_results(results: list[dict[str, Any]], output_file: Path):
 
 def _display_batch_summary(results: list[dict[str, Any]]):
     """Display batch evaluation summary."""
-    successful = sum(1 for r in results if r.get('status') != 'failed')
-    failed = len(results) - successful
+    unscored = sum(1 for r in results if r.get('status') == 'unscored')
+    successful = sum(1 for r in results if r.get('status') not in ('failed', 'unscored'))
+    failed = len(results) - successful - unscored
 
     summary_data = [
         {'Metric': 'Total Evaluations', 'Count': len(results)},
         {'Metric': 'Successful', 'Count': successful},
         {'Metric': 'Failed', 'Count': failed},
+        {'Metric': 'Unscored', 'Count': unscored},
         {'Metric': 'Success Rate', 'Count': f"{successful/len(results)*100:.1f}%" if results else "0%"}
     ]
 

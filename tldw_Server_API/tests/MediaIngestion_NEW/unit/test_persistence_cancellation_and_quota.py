@@ -17,6 +17,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
@@ -79,9 +80,9 @@ def _patch_upload(monkeypatch: pytest.MonkeyPatch, quota_service: Any) -> list[s
     return processed
 
 
-def _orchestrate() -> Any:
+def _orchestrate(media_type: str = "document", **kwargs: Any) -> Any:
     form_data = SimpleNamespace(
-        media_type="document",
+        media_type=media_type,
         urls=[],
         keep_original_file=False,
         perform_chunking=False,
@@ -95,11 +96,13 @@ def _orchestrate() -> Any:
         db=_FakeDB(),
         current_user=SimpleNamespace(id=1),
         usage_log=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
+        **kwargs,
     )
 
 
 @pytest.mark.asyncio
 async def test_cancelling_add_media_mid_persistence_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "0")
     quota_service = _BlockingQuotaService()
     processed = _patch_upload(monkeypatch, quota_service)
 
@@ -122,6 +125,51 @@ async def test_over_quota_upload_is_rejected_with_413(monkeypatch: pytest.Monkey
     assert exc_info.value.status_code == 413
     assert "Storage quota exceeded" in str(exc_info.value.detail)
     assert processed == []
+
+
+@pytest.mark.asyncio
+async def test_analysis_refusal_does_not_record_upload_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    quota_service = AsyncMock()
+    quota_service.check_quota.return_value = (True, {})
+    processed = _patch_upload(monkeypatch, quota_service)
+    admit_analysis = AsyncMock(side_effect=HTTPException(status_code=429, detail="Monthly token quota exceeded"))
+    record_bytes = AsyncMock()
+    monkeypatch.setattr(persistence, "_enforce_and_record_media_bytes", record_bytes)
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "0")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _orchestrate(admit_after_duplicate_check=admit_analysis)
+
+    assert exc_info.value.status_code == 429
+    admit_analysis.assert_awaited_once()
+    record_bytes.assert_not_awaited()
+    assert processed == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_new_item", [False, True])
+async def test_batch_records_upload_bytes_once_after_precheck(monkeypatch: pytest.MonkeyPatch, has_new_item: bool) -> None:
+    quota_service = AsyncMock()
+    quota_service.check_quota.return_value = (True, {})
+    _patch_upload(monkeypatch, quota_service)
+    admit_analysis = AsyncMock()
+    record_bytes = AsyncMock()
+
+    async def batch(**kwargs: Any) -> list[dict[str, Any]]:
+        results = [{"status": "Skipped"}, {"status": "Error"}]
+        if has_new_item:
+            await kwargs["prepare_new_items"]()
+            results.append({"status": "Success"})
+        return results
+
+    monkeypatch.setattr(persistence, "process_batch_media", batch)
+    monkeypatch.setattr(persistence, "_enforce_and_record_media_bytes", record_bytes)
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "0")
+
+    await _orchestrate(media_type="audio", admit_after_duplicate_check=admit_analysis)
+
+    assert admit_analysis.await_count == int(has_new_item)
+    record_bytes.assert_awaited_once_with(1, 5)
 
 
 @pytest.mark.asyncio

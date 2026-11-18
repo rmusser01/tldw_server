@@ -184,11 +184,11 @@ class MetricStats(OpenAIBaseModel):
 
 class AggregateResults(OpenAIBaseModel):
     """Aggregate evaluation results"""
-    mean_score: float
-    std_dev: float
-    min_score: float
-    max_score: float
-    pass_rate: float = Field(..., description="Percentage of samples passing threshold")
+    mean_score: Optional[float] = Field(None, description="None when no sample was scored")
+    std_dev: Optional[float] = None
+    min_score: Optional[float] = None
+    max_score: Optional[float] = None
+    pass_rate: Optional[float] = Field(None, description="Share of scored samples passing threshold (None when none scored)")
     total_samples: int
     failed_samples: int
 

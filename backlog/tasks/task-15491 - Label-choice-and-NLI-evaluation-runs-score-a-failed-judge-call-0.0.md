@@ -1,7 +1,7 @@
 ---
 id: TASK-15491
 title: Label-choice and NLI evaluation runs score a failed judge call 0.0
-status: To Do
+status: Done
 labels:
 - evaluations
 - bug
@@ -15,27 +15,31 @@ Found by TASK-15426 PR C's plan refresh and review (2026-11-12). Pre-existing: t
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A label-choice run whose judge call raises an error _eval_label_choice catches today (ChatConfigurationError, ConnectionError, TimeoutError) records that sample as a sample error (its error set, counted in the run's failed_samples, no accuracy score), not accuracy 0.0, with a test
-- [ ] #2 The same for an NLI fact-check run, with a test
-- [ ] #3 The run's aggregate leaves such a sample out of mean_score and pass_rate, as by_metric already does, with a test. This changes the aggregate of every run type with a sample error; the owner confirmed it on 2026-11-12 ("yes")
+- [x] #1 A label-choice run whose judge call raises an error _eval_label_choice catches today (ChatConfigurationError, ConnectionError, TimeoutError) records that sample as a sample error (its error set, counted in the run's failed_samples, no accuracy score), not accuracy 0.0, with a test
+- [x] #2 The same for an NLI fact-check run, with a test
+- [x] #3 The run's aggregate leaves such a sample out of mean_score and pass_rate, as by_metric already does, with a test. This changes the aggregate of every run type with a sample error; the owner confirmed it on 2026-11-12 ("yes")
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Owner decisions 2026-11-16 (plan Docs/superpowers/plans/2026-11-17-evals-runner-cli.md): (1) a label-choice or NLI call that succeeds but returns an unparseable reply keeps accuracy 0.0, since that call is the system under test, not a judge; (2) the known-provider check is the built-in adapter table (ChatProviderRegistry.DEFAULT_ADAPTERS plus canonical_provider_name aliases); (3) --save/--no-save removed from eval custom; (4) an unscored eval custom exits 1; (5) an explicitly named provider stops the prefix:/prefix/ split; (6) eval rag and eval quality runners are filed as TASK-15561, not fixed here; (7) ADR-004 waiver covers this PR. PR #3499.
+Evidence: AC1/AC2 four failed-call cases plus two config-error cases; AC3 the aggregate test and the all-unscored test; owner confirmation 2026-11-12 cited. An unparseable reply from a successful call stays accuracy 0.0 (Decision 1), pinned by test_an_unparseable_reply_from_a_successful_call_is_a_wrong_answer.
+Final review fixes (PR #3499): (I2) a run with no scored sample now reports mean_score, std_dev, min_score, max_score and pass_rate as null (owner rule: never a 0.0 that is not a score); consumers checked, none read them (see PR). (I3) model-graded runs (RAG, summarization, response quality) still score a failed judge 0.0: pre-existing, tracked in TASK-15562; the API doc says so. (I4) correcting the earlier M3 note: an empty reply from a successful label-choice/NLI call used to be read through the repr of the raw response and could score 1.0; it now returns the empty string, a non-answer that scores 0.0 per Decision 1, pinned by test_an_empty_reply_from_a_successful_call_is_a_wrong_answer_not_a_label_in_its_repr.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+A failed label-choice or NLI judge call is a sample error (no score); the aggregate leaves unscored samples out of mean_score, std_dev, min/max and pass_rate. test_eval_runner.py: 7 of the 26 new cases failed RED for this task and pass GREEN; wider set 316 passed. PR #3499.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

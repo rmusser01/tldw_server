@@ -956,8 +956,7 @@ Brief description of changes
 # Evaluate multiple models simultaneously
 async def compare_models(benchmark_name: str, models: List[str]):
     """Run benchmark on multiple models."""
-    registry = get_registry()
-    dataset = registry.load_dataset(benchmark_name)
+    dataset = load_benchmark_dataset(benchmark_name)
 
     results = {}
     for model in models:

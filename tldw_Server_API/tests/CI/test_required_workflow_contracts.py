@@ -496,7 +496,14 @@ def test_playwright_browser_jobs_use_supported_ubuntu_image(
     workflow_name: str, job_name: str
 ) -> None:
     job = _load(f".github/workflows/{workflow_name}")["jobs"][job_name]
-    assert job["runs-on"] in {"ubuntu-22.04", "ubuntu-24.04"}
+    locked = re.search(
+        r'"playwright": \["playwright@(\d+)\.(\d+)\.', Path("apps/bun.lock").read_text(encoding="utf-8"),
+    )
+    assert locked is not None
+    supported = {"ubuntu-22.04", "ubuntu-24.04"}
+    if tuple(map(int, locked.groups())) >= (1, 61):
+        supported.update({"ubuntu-latest", "ubuntu-26.04"})
+    assert job["runs-on"] in supported
 
 
 def test_playwright_browser_job_inventory_is_complete() -> None:
