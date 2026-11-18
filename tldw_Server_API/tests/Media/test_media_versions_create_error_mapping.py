@@ -221,7 +221,8 @@ async def test_create_version_requires_the_analyzed_source(monkeypatch, changed)
     db.create_document_version = Mock(return_value={"version_number": 2, "uuid": "version-uuid-2"})
     text = "x" * 1_405_967
     monkeypatch.setattr(media_versions_endpoint, "check_media_exists", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(media_versions_endpoint, "read_saved_media_text", lambda *_args, **_kwargs: text)
+    read_text = Mock(return_value=text)
+    monkeypatch.setattr(media_versions_endpoint, "read_saved_media_text", read_text)
     monkeypatch.setattr(media_versions_endpoint, "get_full_media_details_rich", lambda **_kwargs: {"id": 42})
     monkeypatch.setattr(media_versions_endpoint, "MediaDetailResponse", lambda **_kwargs: MediaDetailResponse.model_construct(id=42))
 
@@ -239,10 +240,12 @@ async def test_create_version_requires_the_analyzed_source(monkeypatch, changed)
         with pytest.raises(HTTPException) as error:
             await request
         assert error.value.status_code == 409
+        read_text.assert_called_once_with(db, 42, owner_user_id=1, for_update=True)
         db.create_document_version.assert_not_called()
         return
 
     await request
+    read_text.assert_called_once_with(db, 42, owner_user_id=1, for_update=True)
     db.create_document_version.assert_called_once_with(
         media_id=42, content=text, prompt="prompt", analysis_content="analysis", safe_metadata=None
     )

@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
+from starlette.responses import StreamingResponse
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.core.Chat import request_queue as request_queue_module
@@ -328,6 +329,43 @@ async def test_queued_noncooperative_provider_tasks_are_bounded_and_capacity_rec
     assert healthy_result["status"] == "stream_completed"
     assert await healthy_request.stream_channel.get() == "healthy queued output"
     assert healthy.closed is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sanitize_provider_errors", [True, False])
+async def test_cancel_after_initial_metadata_closes_primed_stream_and_runtime(
+    sanitize_provider_errors: bool,
+) -> None:
+    closed = []
+    digest = "a" * 64
+
+    async def upstream():
+        try:
+            yield 'data: {"choices":[{"delta":{"content":"provider output"}}]}\n\n'
+        finally:
+            closed.append("upstream")
+
+    class Runtime:
+        async def close(self) -> None:
+            closed.append("runtime")
+
+    provider_stream = upstream()
+    try:
+        first_chunk = await anext(provider_stream)
+        response = StreamingResponse(provider_stream)
+        chat_endpoint._attach_credential_runtime_cleanup(
+            response,
+            Runtime(),
+            (first_chunk,),
+            sanitize_provider_errors=sanitize_provider_errors,
+            initial_metadata={"tldw_media_source_sha256": digest},
+        )
+        iterator = response.body_iterator
+        assert await anext(iterator) == f'data: {{"tldw_media_source_sha256": "{digest}"}}\n\n'
+        await iterator.aclose()
+        assert closed == ["upstream", "runtime"]
+    finally:
+        await provider_stream.aclose()
 
 
 @pytest.mark.asyncio

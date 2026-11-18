@@ -350,7 +350,8 @@ def get_media_source_projection(
     *,
     max_chars: int,
     owner_user_id: str | None = None,
-    prefer_current_content: bool = False,
+    current_content_only: bool = False,
+    for_update: bool = False,
 ) -> dict[str, Any] | None:
     """Return a bounded active text projection for generation from stored media."""
     db_instance = unwrap_media_database_like(db)
@@ -359,16 +360,18 @@ def get_media_source_projection(
             media_id,
             max_chars=max_chars,
             owner_user_id=owner_user_id,
-            prefer_current_content=prefer_current_content,
+            current_content_only=current_content_only,
+            for_update=for_update,
         )
     reader = _require_read_method(
         db,
         "get_media_source_projection",
         error_message="db must expose the bounded Media DB source read contract.",
     )
-    if prefer_current_content:
+    if current_content_only:
         return reader.get_media_source_projection(
-            media_id, max_chars=max_chars, owner_user_id=owner_user_id, prefer_current_content=True,
+            media_id, max_chars=max_chars, owner_user_id=owner_user_id,
+            current_content_only=True, for_update=for_update,
         )
     if owner_user_id is None:
         return reader.get_media_source_projection(media_id, max_chars=max_chars)

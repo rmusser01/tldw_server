@@ -123,7 +123,8 @@ class MediaLookupRepository:
         *,
         max_chars: int,
         owner_user_id: str | None = None,
-        prefer_current_content: bool = False,
+        current_content_only: bool = False,
+        for_update: bool = False,
     ) -> dict[str, Any] | None:
         """Return bounded text with the source precedence requested by the caller."""
         if isinstance(media_id, bool) or not isinstance(media_id, int) or not 1 <= media_id <= 2**63 - 1:
@@ -132,6 +133,8 @@ class MediaLookupRepository:
             raise InputError("max_chars must be a positive integer.")  # noqa: TRY003
         if owner_user_id is not None and (not isinstance(owner_user_id, str) or not owner_user_id.strip()):
             raise InputError("owner_user_id must be a non-empty string.")  # noqa: TRY003
+        if for_update and not current_content_only:
+            raise InputError("Only current media content can be locked by the source projection.")  # noqa: TRY003
 
         prefix_chars = max_chars + 1
         backend_name = getattr(getattr(self.session, "backend_type", None), "name", None)
@@ -189,28 +192,12 @@ class MediaLookupRepository:
             )
         """
         source_type_column = ""
-        if prefer_current_content:
-            resolved_text = f"""
-                COALESCE(
-                    CASE WHEN NULLIF(TRIM(m.content), '') IS NOT NULL THEN m.content END,
-                    NULLIF(TRIM({transcript_text}), ''),
-                    NULLIF(TRIM(dv.content), '')
-                )
-            """
+        if current_content_only:
+            resolved_text = "m.content"
             source_type_column = "m.type AS media_type,"
         invalid_expression = "FALSE" if is_postgres else f"COALESCE(INSTR({resolved_text}, CHAR(0)), 0) > 0"
 
-        query = f"""
-            SELECT
-                m.id AS id,
-                {source_type_column}
-                SUBSTR(
-                    {resolved_text},
-                    1,
-                    ?
-                ) AS source_text,
-                {invalid_expression} AS source_invalid
-            FROM Media m
+        source_joins = "" if current_content_only else f"""
             LEFT JOIN Transcripts t
               ON t.id = COALESCE(
                     (
@@ -246,12 +233,27 @@ class MediaLookupRepository:
                     LIMIT 1
                 )
              AND dv.deleted = {false_literal}
+        """  # nosec B608
+        row_lock = "FOR NO KEY UPDATE OF m" if for_update and is_postgres else ""
+        query = f"""
+            SELECT
+                m.id AS id,
+                {source_type_column}
+                SUBSTR(
+                    {resolved_text},
+                    1,
+                    ?
+                ) AS source_text,
+                {invalid_expression} AS source_invalid
+            FROM Media m
+            {source_joins}
             WHERE m.id = ?
               AND m.system_operation_id IS NULL
               AND m.deleted = {false_literal}
               AND m.is_trash = {false_literal}
               {owner_clause}
             LIMIT 1
+            {row_lock}
         """  # nosec B608
         params = (
             prefix_chars,

@@ -13,14 +13,15 @@ from tldw_Server_API.app.core.DB_Management.media_db.services.media_details_serv
 MAX_MEDIA_ANALYSIS_BYTES = 2 * 1024 * 1024
 
 
-def read_saved_media_text(db: Any, media_id: int, *, owner_user_id: int) -> str:
+def read_saved_media_text(db: Any, media_id: int, *, owner_user_id: int, for_update: bool = False) -> str:
     """Use the bounded, explicitly owner-filtered source projection."""
     source = get_media_source_projection(
         db,
         media_id,
         max_chars=MAX_MEDIA_ANALYSIS_BYTES,
         owner_user_id=str(owner_user_id),
-        prefer_current_content=True,
+        current_content_only=True,
+        for_update=for_update,
     )
     if source is None:
         raise HTTPException(404, "Media item not found.")

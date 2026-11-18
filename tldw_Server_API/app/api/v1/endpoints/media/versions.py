@@ -353,7 +353,7 @@ async def create_version(
 
             content = request_body.content
             if content is None:
-                content = read_saved_media_text(db, media_id, owner_user_id=current_user.id)
+                content = read_saved_media_text(db, media_id, owner_user_id=current_user.id, for_update=True)
                 if media_source_sha256(content) != request_body.source_sha256:
                     raise HTTPException(409, detail={
                         "code": "media_analysis_source_changed",

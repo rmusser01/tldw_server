@@ -1190,22 +1190,12 @@ def _attach_credential_runtime_cleanup(
     stream_error_state: dict[str, Any] | None = None,
     *,
     sanitize_provider_errors: bool = True,
+    initial_metadata: dict[str, Any] | None = None,
 ) -> Any:
     """Keep credentials alive through streaming and release them on termination."""
     body_iterator = response.body_iterator
 
     async def iterator():
-        if not sanitize_provider_errors:
-            try:
-                async for chunk in body_iterator:
-                    yield chunk
-            finally:
-                try:
-                    await _close_provider_stream_iterator(body_iterator)
-                finally:
-                    await runtime.close()
-            return
-
         error_emitted = False
 
         async def emit(chunk: Any):
@@ -1227,6 +1217,12 @@ def _attach_credential_runtime_cleanup(
             yield _provider_stream_error_frame_for_code(error_code) if error_code else chunk
 
         try:
+            if initial_metadata is not None:
+                yield sse_data(initial_metadata)
+            if not sanitize_provider_errors:
+                async for chunk in body_iterator:
+                    yield chunk
+                return
             for chunk in initial_chunks:
                 async for emitted_chunk in emit(chunk):
                     yield emitted_chunk
@@ -5997,6 +5993,11 @@ async def create_chat_completion(
                     alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
                     for header_key, header_value in alias_headers.items():
                         stream_response.headers[header_key] = header_value
+                    initial_metadata = None
+                    if analyzed_source_sha256 is not None:
+                        initial_metadata = {"tldw_media_source_sha256": analyzed_source_sha256}
+                    elif history_admission is not None:
+                        initial_metadata = {"tldw_history_admission_v1": history_admission}
                     _attach_credential_runtime_cleanup(
                         stream_response,
                         credential_runtime,
@@ -6005,26 +6006,9 @@ async def create_chat_completion(
                         sanitize_provider_errors=(
                             not trusted_terminal_local_response
                         ),
+                        initial_metadata=initial_metadata,
                     )
                     credential_runtime_owned_by_stream = True
-                    if history_admission is not None or analyzed_source_sha256 is not None:
-                        accepted_stream = stream_response.body_iterator
-
-                        async def with_admission_metadata():
-                            try:
-                                metadata = (
-                                    {"tldw_media_source_sha256": analyzed_source_sha256}
-                                    if analyzed_source_sha256 is not None
-                                    else {"tldw_history_admission_v1": history_admission}
-                                )
-                                yield "data: " + json.dumps(metadata) + "\n\n"
-                                async for chunk in accepted_stream:
-                                    yield chunk
-                            finally:
-                                close = getattr(accepted_stream, "aclose", None)
-                                if close is not None:
-                                    await close()
-                        stream_response.body_iterator = with_admission_metadata()
                     return stream_response
 
                 else:  # Non-streaming

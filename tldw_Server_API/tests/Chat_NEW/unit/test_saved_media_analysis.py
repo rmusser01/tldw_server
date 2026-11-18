@@ -17,7 +17,7 @@ def test_incident_sized_media_is_loaded_in_full(monkeypatch):
     combined = media_analysis.prepare_analysis_text("Focus on evidence", text)
     assert combined == "Focus on evidence\n\n" + text
     lookup.assert_called_once_with(
-        db, 42, max_chars=2 * 1024 * 1024, owner_user_id="7", prefer_current_content=True,
+        db, 42, max_chars=2 * 1024 * 1024, owner_user_id="7", current_content_only=True, for_update=False,
     )
 
 
