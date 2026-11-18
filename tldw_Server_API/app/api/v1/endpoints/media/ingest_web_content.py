@@ -16,7 +16,6 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
-from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     IngestWebContentRequest,
@@ -26,9 +25,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     attach_chunking_plan_to_result,
 )
 from tldw_Server_API.app.core.Web_Scraping.summary_prompts import resolve_web_summary_overrides
-from tldw_Server_API.app.services.web_scraping_service import (
-    ingest_web_content_orchestrate,
-)
+import tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps as _Prompts_DB_Deps
+import tldw_Server_API.app.services.web_scraping_service as _web_scraping_service
 
 router = APIRouter()
 
@@ -84,12 +82,12 @@ async def ingest_web_content(
     raw_results: list[dict[str, Any]] = []
     try:
         summary_prompt_overrides = await resolve_web_summary_overrides(
-            lambda: get_prompts_db_for_user(http_request, current_user),
+            lambda: _Prompts_DB_Deps.get_prompts_db_for_user(http_request, current_user),
             enabled=request.perform_analysis,
             system_prompt=request.system_prompt,
             custom_prompt=request.custom_prompt,
         )
-        helper_results = await ingest_web_content_orchestrate(
+        helper_results = await _web_scraping_service.ingest_web_content_orchestrate(
             request=request,
             db=db,
             usage_log=usage_log,

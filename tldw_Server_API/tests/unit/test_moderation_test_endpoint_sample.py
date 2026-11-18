@@ -184,8 +184,7 @@ def test_moderation_test_guardian_overlay_returns_overlaid_effective_policy(monk
 
     monkeypatch.setattr(moderation_mod, "get_moderation_service", lambda: svc)
     monkeypatch.setattr(
-        moderation_mod,
-        "bootstrap_guardian_moderation_runtime",
+        "tldw_Server_API.app.core.Moderation.supervised_policy.bootstrap_guardian_moderation_runtime",
         _fake_bootstrap_guardian_runtime,
     )
 

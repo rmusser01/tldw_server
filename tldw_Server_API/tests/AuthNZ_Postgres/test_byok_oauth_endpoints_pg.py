@@ -840,13 +840,12 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
     async def _fake_test_provider_credentials(**_kwargs):
         return "gpt-4o-mini"
 
-    monkeypatch.setattr(user_keys_endpoints, "_http_afetch", _fake_http_afetch)
-    monkeypatch.setattr(user_keys_endpoints, "test_provider_credentials", _fake_test_provider_credentials)
-    monkeypatch.setattr(user_keys_endpoints, "increment_counter", _fake_increment_counter)
-    monkeypatch.setattr(user_keys_endpoints, "observe_histogram", _fake_observe_histogram)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", _fake_http_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_testing.test_provider_credentials", _fake_test_provider_credentials)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.increment_counter", _fake_increment_counter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.observe_histogram", _fake_observe_histogram)
     monkeypatch.setattr(
-        user_keys_endpoints,
-        "get_or_create_audit_service_for_user_id_optional",
+        "tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps.get_or_create_audit_service_for_user_id_optional",
         _fake_get_audit_service_for_user_id_optional,
     )
 

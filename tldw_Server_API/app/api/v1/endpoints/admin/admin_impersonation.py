@@ -22,10 +22,8 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
-from tldw_Server_API.app.services.admin_audit_service import (
-    emit_admin_account_audit_event as _emit_admin_account_audit_event,
-)
+import tldw_Server_API.app.core.AuthNZ.repos.users_repo as _users_repo
+import tldw_Server_API.app.services.admin_audit_service as _admin_audit_service
 
 router = APIRouter(prefix="/impersonate", tags=["admin-impersonation"])
 
@@ -72,7 +70,7 @@ async def create_impersonation_token(
                 detail="Impersonation requires a non-impersonated user principal",
             )
 
-        users_repo = await AuthnzUsersRepo.from_pool()
+        users_repo = await _users_repo.AuthnzUsersRepo.from_pool()
         target_user = await users_repo.get_user_by_id(user_id)
         if not target_user:
             raise HTTPException(
@@ -109,7 +107,7 @@ async def create_impersonation_token(
             },
         )
 
-        await _emit_admin_account_audit_event(
+        await _admin_audit_service.emit_admin_account_audit_event(
             actor_id=actor_id,
             target_user_id=target_user_id,
             event_type=AuditEventType.AUTH_TOKEN_CREATED,

@@ -1,7 +1,6 @@
 import io
 import os as real_os
 import time
-from unittest.mock import call
 
 import numpy as np
 import pytest
@@ -234,11 +233,10 @@ def _setup_stubbed_audio_app(
         def get_adapter(self, _provider):
             return _StubAdapter()
 
-    monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
-    monkeypatch.setattr(audio_ep, "increment_jobs_started", _noop_async)
-    monkeypatch.setattr(audio_ep, "finish_job", _noop_async)
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_job)
-    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_job", _allow_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.increment_jobs_started", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_job", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_job)
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
     monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *args, **kwargs: path)
 
@@ -249,59 +247,6 @@ def _setup_stubbed_audio_app(
     app.dependency_overrides[get_billing_org_id] = lambda: None
     app.include_router(audio_router, prefix="/api/v1/audio")
     return app, captured
-
-
-@pytest.mark.unit
-def test_audio_transcriptions_sanitizes_shim_lookup_logs(monkeypatch):
-    import builtins
-
-    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
-
-    class _KwargLoggerStub:
-        def __init__(self) -> None:
-            self.debug_calls = []
-
-        def debug(self, message, *args, **kwargs) -> None:
-            self.debug_calls.append(call(message, *args, **kwargs))
-
-    original_import = builtins.__import__
-    scenarios = [
-        (
-            ImportError("package lookup leaked /private/audio-package.py"),
-            ArithmeticError("module lookup leaked /private/audio-module.py"),
-            [
-                call("audio_transcriptions shim package lookup failed"),
-                call("audio_transcriptions shim module lookup raised unexpected error"),
-            ],
-        ),
-        (
-            ArithmeticError("package lookup leaked /private/audio-package.py"),
-            ImportError("module lookup leaked /private/audio-module.py"),
-            [
-                call("audio_transcriptions shim package lookup raised unexpected error"),
-                call("audio_transcriptions shim module lookup failed"),
-            ],
-        ),
-    ]
-
-    for package_error, module_error, expected_calls in scenarios:
-        logger_stub = _KwargLoggerStub()
-        monkeypatch.setattr(audio_tx, "logger", logger_stub)
-
-        def _raising_import(
-            name, globals=None, locals=None, fromlist=(), level=0,
-            package_error=package_error, module_error=module_error,
-        ):
-            if name == "tldw_Server_API.app.api.v1.endpoints" and "audio" in fromlist:
-                raise package_error
-            if name == "tldw_Server_API.app.api.v1.endpoints.audio" and "audio" in fromlist:
-                raise module_error
-            return original_import(name, globals, locals, fromlist, level)
-
-        monkeypatch.setattr(builtins, "__import__", _raising_import)
-
-        assert audio_tx._audio_shim_attr("sf") is audio_tx.sf
-        assert logger_stub.debug_calls == expected_calls
 
 
 @pytest.mark.unit
@@ -404,9 +349,9 @@ def test_audio_transcriptions_sanitizes_billing_recheck_fail_open_log(
     logger_stub = _LoggerStub()
     app.dependency_overrides[get_billing_org_id] = lambda: 123
     monkeypatch.setattr(audio_tx, "logger", logger_stub)
-    monkeypatch.setattr(audio_pkg, "sf", _LongDurationSoundFile())
-    monkeypatch.setattr(audio_tx, "enforcement_enabled", lambda: True)
-    monkeypatch.setattr(audio_tx, "get_billing_enforcer", lambda: _FailingBillingEnforcer())
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions.sf", _LongDurationSoundFile())
+    monkeypatch.setattr("tldw_Server_API.app.core.Billing.enforcement.enforcement_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Billing.enforcement.get_billing_enforcer", lambda: _FailingBillingEnforcer())
 
     with bypass_api_limits(app), TestClient(app) as client:
         wav_bytes = _make_wav_bytes()
@@ -537,17 +482,12 @@ def test_audio_transcriptions_sanitizes_heartbeat_interval_failure_log(
     logger_stub = _LoggerStub()
     monkeypatch.setattr(audio_tx, "logger", logger_stub)
 
-    original_shim_attr = audio_tx._audio_shim_attr
+    def _raise_interval_failure():
+        raise RuntimeError("heartbeat interval leaked /private/rg.sock")
 
-    def _shim_attr(name):
-        if name == "get_job_heartbeat_interval_seconds":
-            def _raise_interval_failure():
-                raise RuntimeError("heartbeat interval leaked /private/rg.sock")
-
-            return _raise_interval_failure
-        return original_shim_attr(name)
-
-    monkeypatch.setattr(audio_tx, "_audio_shim_attr", _shim_attr)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Usage.audio_quota.get_job_heartbeat_interval_seconds", _raise_interval_failure
+    )
 
     with bypass_api_limits(app), TestClient(app) as client:
         wav_bytes = _make_wav_bytes()
@@ -588,13 +528,6 @@ def test_audio_transcriptions_sanitizes_heartbeat_task_start_failure_log(
     logger_stub = _LoggerStub()
     monkeypatch.setattr(audio_tx, "logger", logger_stub)
 
-    original_shim_attr = audio_tx._audio_shim_attr
-
-    def _shim_attr(name):
-        if name == "get_job_heartbeat_interval_seconds":
-            return lambda: 10
-        return original_shim_attr(name)
-
     real_create_task = audio_tx.asyncio.create_task
 
     # audio_tx.asyncio is the global asyncio module, so only fail the heartbeat
@@ -605,7 +538,7 @@ def test_audio_transcriptions_sanitizes_heartbeat_task_start_failure_log(
         coro.close()
         raise RuntimeError("heartbeat task leaked /private/rg-task")
 
-    monkeypatch.setattr(audio_tx, "_audio_shim_attr", _shim_attr)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.get_job_heartbeat_interval_seconds", lambda: 10)
 
     with bypass_api_limits(app), TestClient(app) as client:
         monkeypatch.setattr(audio_tx.asyncio, "create_task", _raise_create_task)
@@ -647,7 +580,6 @@ def test_audio_transcriptions_sanitizes_heartbeat_jobs_failure_log(
     logger_stub = _LoggerStub()
     monkeypatch.setattr(audio_tx, "logger", logger_stub)
 
-    original_shim_attr = audio_tx._audio_shim_attr
     heartbeat_calls = 0
     heartbeat_observed = audio_tx.asyncio.Event()
 
@@ -663,16 +595,10 @@ def test_audio_transcriptions_sanitizes_heartbeat_jobs_failure_log(
             raise RuntimeError("heartbeat job leaked /private/rg-heartbeat")
         raise audio_tx.asyncio.CancelledError()
 
-    def _shim_attr(name):
-        if name == "get_job_heartbeat_interval_seconds":
-            return lambda: 0.001
-        if name == "check_daily_minutes_allow":
-            return _wait_for_heartbeat_before_quota_check
-        if name == "heartbeat_jobs":
-            return _failing_heartbeat_jobs
-        return original_shim_attr(name)
-
-    monkeypatch.setattr(audio_tx, "_audio_shim_attr", _shim_attr)
+    quota = "tldw_Server_API.app.core.Usage.audio_quota"
+    monkeypatch.setattr(f"{quota}.get_job_heartbeat_interval_seconds", lambda: 0.001)
+    monkeypatch.setattr(f"{quota}.consume_daily_minutes", _wait_for_heartbeat_before_quota_check)
+    monkeypatch.setattr(f"{quota}.heartbeat_jobs", _failing_heartbeat_jobs)
 
     with bypass_api_limits(app), TestClient(app) as client:
         wav_bytes = _make_wav_bytes()
@@ -1089,7 +1015,7 @@ def test_audio_transcriptions_sanitizes_soundfile_info_fallback_log(
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(audio_tx, "logger", logger_stub)
-    monkeypatch.setattr(audio_pkg, "sf", _DurationFallbackSoundFile())
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions.sf", _DurationFallbackSoundFile())
 
     with bypass_api_limits(app), TestClient(app) as client:
         wav_bytes = _make_wav_bytes()
@@ -1128,7 +1054,7 @@ def test_audio_transcriptions_sanitizes_soundfile_read_fallback_log(
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(audio_tx, "logger", logger_stub)
-    monkeypatch.setattr(audio_pkg, "sf", _UnreadableSoundFile())
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions.sf", _UnreadableSoundFile())
 
     with bypass_api_limits(app), TestClient(app) as client:
         wav_bytes = _make_wav_bytes()

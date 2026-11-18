@@ -20,12 +20,12 @@ from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Collections_DB import ContentItemRow
-from tldw_Server_API.app.core.DB_Management.media_db.api import search_media
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
 from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
+import tldw_Server_API.app.core.DB_Management.media_db.api as _api
 
 router = APIRouter(prefix="/items", tags=["items"])
 
@@ -162,7 +162,7 @@ async def list_items(
 
     # Legacy fallback to Media DB when collections layer has no data
     try:
-        rows, total = search_media(
+        rows, total = _api.search_media(
             db,
             search_query=q,
             search_fields=["title", "content"],
@@ -225,7 +225,7 @@ async def get_item(
         raise HTTPException(status_code=500, detail="item_fetch_failed") from e
 
     try:
-        rows, _total = search_media(
+        rows, _total = _api.search_media(
             db,
             search_query=None,
             search_fields=["title", "content"],

@@ -42,13 +42,11 @@ async def _allow_project(*_args, **_kwargs) -> bool:
 
 def _patch_prompt_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        prompts_endpoint,
-        "authoritative_prompt_project",
+        "tldw_Server_API.app.api.v1.utils.prompt_studio_resource_binding.authoritative_prompt_project",
         lambda *_args, **_kwargs: (1, 7),
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         _allow_project,
     )
     monkeypatch.setattr(executor_module, "PromptExecutor", lambda _db: object())
@@ -122,11 +120,10 @@ async def test_execute_prompt_invalid_provider_request_stops_before_adapters(
 ) -> None:
     """Defensive endpoint validation precedes runtime and executor construction."""
     monkeypatch.setattr(
-        prompts_endpoint,
-        "authoritative_prompt_project",
+        "tldw_Server_API.app.api.v1.utils.prompt_studio_resource_binding.authoritative_prompt_project",
         lambda *_args, **_kwargs: (1, 7),
     )
-    monkeypatch.setattr(prompts_endpoint, "require_project_access", _allow_project)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access", _allow_project)
 
     def _must_not_run(*_args, **_kwargs):
         raise AssertionError("adapter boundary was crossed")

@@ -450,7 +450,7 @@ class TestAdminOpsWebhookDeliveryPagination:
             ]
             return items[offset:offset + limit], len(items)
 
-        monkeypatch.setattr(admin_ops, "svc_list_webhook_deliveries", _fake_deliveries)
+        monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.list_webhook_deliveries", _fake_deliveries)
 
         response = await admin_ops.list_webhook_deliveries(
             webhook_id="wh_1",
@@ -852,7 +852,7 @@ class TestAdminOpsScheduleErrorSanitization:
         def _raise_schedules() -> list[dict[str, Any]]:
             raise OSError("report schedules backend exploded")
 
-        monkeypatch.setattr(admin_ops, "svc_list_report_schedules", _raise_schedules)
+        monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.list_report_schedules", _raise_schedules)
 
         with pytest.raises(HTTPException) as exc_info:
             await admin_ops.get_report_schedules(principal=mock.MagicMock())
@@ -872,7 +872,7 @@ class TestAdminOpsDigestErrorSanitization:
             _ = user_id
             raise OSError("digest preference backend exploded")
 
-        monkeypatch.setattr(admin_ops, "svc_get_digest_preference", _raise_pref)
+        monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.get_digest_preference", _raise_pref)
 
         with pytest.raises(HTTPException) as exc_info:
             await admin_ops.get_digest_preference(
@@ -894,7 +894,7 @@ class TestAdminOpsDigestErrorSanitization:
             _ = (user_id, email, frequency)
             raise OSError("digest preference write exploded")
 
-        monkeypatch.setattr(admin_ops, "svc_set_digest_preference", _raise_pref)
+        monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.set_digest_preference", _raise_pref)
 
         with pytest.raises(HTTPException) as exc_info:
             await admin_ops.set_digest_preference(

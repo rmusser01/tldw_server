@@ -19,7 +19,7 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_reminder_task_deleted,
     record_reminder_task_updated,
 )
-from tldw_Server_API.app.services.reminders_scheduler import get_reminders_scheduler
+import tldw_Server_API.app.services.reminders_scheduler as _reminders_scheduler
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -36,14 +36,14 @@ _REMINDERS_ENDPOINT_NONCRITICAL_EXCEPTIONS = (
 
 async def _reconcile_task_best_effort(*, task_id: str, user_id: int) -> None:
     try:
-        await get_reminders_scheduler().reconcile_task(task_id=task_id, user_id=user_id)
+        await _reminders_scheduler.get_reminders_scheduler().reconcile_task(task_id=task_id, user_id=user_id)
     except _REMINDERS_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         logger.warning("reminders endpoint reconcile_task failed")
 
 
 async def _unschedule_task_best_effort(*, task_id: str) -> None:
     try:
-        await get_reminders_scheduler().unschedule_task(task_id=task_id)
+        await _reminders_scheduler.get_reminders_scheduler().unschedule_task(task_id=task_id)
     except _REMINDERS_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         logger.warning("reminders endpoint unschedule_task failed")
 

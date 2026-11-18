@@ -102,7 +102,7 @@ def test_task_mutations_notify_scheduler(reminders_app, monkeypatch):
             unschedule_calls.append(task_id)
 
     scheduler = _FakeScheduler()
-    monkeypatch.setattr(reminders_endpoint, "get_reminders_scheduler", lambda: scheduler, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.services.reminders_scheduler.get_reminders_scheduler", lambda: scheduler, raising=False)
 
     with TestClient(reminders_app) as client:
         create_payload = {
@@ -162,7 +162,7 @@ def test_task_mutations_log_scheduler_sync_failures(reminders_app, monkeypatch):
             raise RuntimeError(f"unschedule failed for {task_id} at /private/reminders.db")
 
     monkeypatch.setattr(reminders_endpoint, "logger", _FakeLogger(), raising=False)
-    monkeypatch.setattr(reminders_endpoint, "get_reminders_scheduler", lambda: _FailingScheduler(), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.services.reminders_scheduler.get_reminders_scheduler", lambda: _FailingScheduler(), raising=False)
 
     with TestClient(reminders_app) as client:
         create_payload = {

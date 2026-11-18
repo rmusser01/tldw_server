@@ -31,10 +31,10 @@ from tldw_Server_API.app.core.AuthNZ.permissions import NOTIFICATIONS_CONTROL, N
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, UserNotificationRow
 from tldw_Server_API.app.core.Reminders.reminders_service import (
     NotificationSnoozeMatch,
-    RemindersService,
 )
-from tldw_Server_API.app.core.Streaming.streams import SSEStream
-from tldw_Server_API.app.services.reminders_scheduler import get_reminders_scheduler
+import tldw_Server_API.app.core.Reminders.reminders_service as _reminders_service
+import tldw_Server_API.app.core.Streaming.streams as _streams
+import tldw_Server_API.app.services.reminders_scheduler as _reminders_scheduler
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -55,14 +55,14 @@ _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS = (
 
 async def _reconcile_snooze_task_best_effort(*, task_id: str, user_id: int) -> None:
     try:
-        await get_reminders_scheduler().reconcile_task(task_id=task_id, user_id=user_id)
+        await _reminders_scheduler.get_reminders_scheduler().reconcile_task(task_id=task_id, user_id=user_id)
     except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS:
         logger.warning("notifications snooze reconcile_task failed")
 
 
 async def _unschedule_snooze_task_best_effort(*, task_id: str) -> None:
     try:
-        await get_reminders_scheduler().unschedule_task(task_id=task_id)
+        await _reminders_scheduler.get_reminders_scheduler().unschedule_task(task_id=task_id)
     except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS:
         logger.warning("notifications snooze unschedule_task failed")
 
@@ -167,7 +167,7 @@ async def list_notifications(
     rows: list[UserNotificationRow]
     total: int
     snooze_matches: dict[int, NotificationSnoozeMatch] = {}
-    service = RemindersService(user_id=db.user_id, collections_db=db)
+    service = _reminders_service.RemindersService(user_id=db.user_id, collections_db=db)
     if only_snoozed:
         rows, snooze_matches, total = service.list_snoozed_notifications(limit=limit, offset=offset)
     else:
@@ -249,7 +249,7 @@ async def snooze_notification(
 ) -> NotificationSnoozeResponse:
     """Create a one-time reminder derived from an existing notification."""
 
-    service = RemindersService(user_id=db.user_id, collections_db=db)
+    service = _reminders_service.RemindersService(user_id=db.user_id, collections_db=db)
     try:
         task = service.snooze_notification(notification_id=notification_id, minutes=payload.minutes)
     except KeyError as exc:
@@ -275,7 +275,7 @@ async def cancel_notification_snooze(
 ) -> NotificationCancelSnoozeResponse:
     """Cancel any active snooze reminder derived from an existing notification."""
 
-    service = RemindersService(user_id=db.user_id, collections_db=db)
+    service = _reminders_service.RemindersService(user_id=db.user_id, collections_db=db)
     try:
         deleted_task_ids = service.cancel_notification_snooze(notification_id=notification_id)
     except KeyError as exc:
@@ -370,7 +370,7 @@ async def stream_notifications(
     max_duration_s = _stream_float_env("NOTIFICATIONS_STREAM_MAX_DURATION_SEC", 0.0, min_value=0.0)
     if max_duration_s <= 0:
         max_duration_s = None
-    stream = SSEStream(
+    stream = _streams.SSEStream(
         heartbeat_interval_s=heartbeat_interval_s,
         heartbeat_mode="data",
         max_duration_s=max_duration_s,

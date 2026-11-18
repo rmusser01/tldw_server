@@ -141,7 +141,7 @@ def credential_runtime(monkeypatch):
         close=AsyncMock(),
     )
     factory = Mock(return_value=runtime)
-    monkeypatch.setattr(endpoint, "ProviderCredentialRuntime", factory)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", factory)
     return factory, runtime
 
 

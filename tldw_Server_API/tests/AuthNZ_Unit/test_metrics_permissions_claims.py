@@ -215,7 +215,7 @@ def test_metrics_reset_invokes_chat_reset_hook_for_admin(monkeypatch):
     stub_registry = StubRegistry()
     stub_chat = StubChatMetrics()
 
-    monkeypatch.setattr(metrics_mod, "get_metrics_registry", lambda: stub_registry)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: stub_registry)
     monkeypatch.setattr(metrics_mod, "get_chat_metrics", lambda: stub_chat)
 
     with TestClient(app) as client:

@@ -29,8 +29,8 @@ from tldw_Server_API.app.core.exceptions import FileArtifactsError, file_artifac
 from tldw_Server_API.app.core.File_Artifacts.file_artifacts_service import FileArtifactsService
 from tldw_Server_API.app.core.Image_Generation.reference_images import (
     ReferenceImageOperationalError,
-    list_reference_image_candidates,
 )
+import tldw_Server_API.app.core.Image_Generation.reference_images as _reference_images
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -148,7 +148,7 @@ async def get_reference_images(
     current_user: User = Depends(get_request_user),
 ) -> ReferenceImageListResponse:
     try:
-        items = await list_reference_image_candidates(media_db, user_id=current_user.id)
+        items = await _reference_images.list_reference_image_candidates(media_db, user_id=current_user.id)
     except ReferenceImageOperationalError as exc:
         raise HTTPException(status_code=503, detail="reference_image_storage_unavailable") from exc
     return ReferenceImageListResponse(

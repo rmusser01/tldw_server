@@ -59,9 +59,7 @@ from tldw_Server_API.app.api.v1.utils.shared_workspace_recipient_route import (
 from tldw_Server_API.app.core.Chat.chat_service import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_target_resolution import (
     resolve_chat_provider_identity,
-    resolve_chat_target,
 )
-from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
     custom_openai_section_name,
@@ -74,9 +72,6 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     IdempotentOperationConflictReason,
     IdempotentOperationDisposition,
     IdempotentOperationUnavailableError,
-)
-from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
-    provider_requires_api_key,
 )
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.Sharing.shared_workspace_chat_service import (
@@ -122,6 +117,10 @@ from ..utils.prototype_error_contract import (
     PROTOTYPE_LINK_ERROR_RESPONSES,
     prototype_http_error,
 )
+import tldw_Server_API.app.core.Chat.chat_target_resolution as _chat_target_resolution
+import tldw_Server_API.app.core.LLM_Calls.provider_metadata as _provider_metadata
+import tldw_Server_API.app.core.Provider_Credentials.byok_runtime as _byok_runtime
+import tldw_Server_API.app.core.config as _config
 
 router = APIRouter(prefix="/sharing", tags=["sharing"])
 recipient_router = APIRouter(
@@ -644,7 +643,7 @@ async def _resolve_recipient_generation_default(context: Any) -> dict[str, Any]:
         "reason_code": "no_provider_configured",
     }
     try:
-        target = resolve_chat_target(
+        target = _chat_target_resolution.resolve_chat_target(
             requested_provider=None,
             requested_model=None,
         )
@@ -654,7 +653,7 @@ async def _resolve_recipient_generation_default(context: Any) -> dict[str, Any]:
         org_ids = (
             [context.share_scope_id] if context.share_scope_type == "org" else []
         )
-        credentials = await resolve_byok_credentials(
+        credentials = await _byok_runtime.resolve_byok_credentials(
             target.provider,
             user_id=context.recipient_user_id,
             request=None,
@@ -662,7 +661,7 @@ async def _resolve_recipient_generation_default(context: Any) -> dict[str, Any]:
             org_ids=org_ids,
             trusted_base_url_override=False,
         )
-        if provider_requires_api_key(target.provider) and not credentials.api_key:
+        if _provider_metadata.provider_requires_api_key(target.provider) and not credentials.api_key:
             return unavailable
         return {
             "provider": target.provider,
@@ -778,7 +777,7 @@ def _shared_chat_lease_seconds(body: SharedWorkspaceChatRequest) -> int:
 
     timeout_seconds = 90.0
     try:
-        config = load_and_log_configs()
+        config = _config.load_and_log_configs()
         provider_config = config.get(section) if isinstance(config, dict) else None
         configured_timeout = (
             provider_config.get("api_timeout")
@@ -1059,7 +1058,7 @@ async def _orchestrate_shared_workspace_chat(
             and claim.source_mode
         )
         if frozen_claim:
-            target = resolve_chat_target(
+            target = _chat_target_resolution.resolve_chat_target(
                 requested_provider=claim.provider,
                 requested_model=claim.model,
             )
@@ -1069,7 +1068,7 @@ async def _orchestrate_shared_workspace_chat(
                     message="The frozen chat target is no longer available.",
                 )
         else:
-            target = resolve_chat_target(
+            target = _chat_target_resolution.resolve_chat_target(
                 requested_provider=body.provider,
                 requested_model=body.model,
             )

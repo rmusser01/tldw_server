@@ -259,7 +259,7 @@ def test_list_media_sanitizes_outer_failure_log(monkeypatch):
     def _raise_paginated_files(*_args, **_kwargs):
         raise _database_failure()
 
-    monkeypatch.setattr(listing_endpoints, "get_paginated_files", _raise_paginated_files)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_paginated_files", _raise_paginated_files)
 
     with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, _db):
         response = client.get("/api/v1/media/")
@@ -288,7 +288,7 @@ def test_list_media_invalid_row_id_log_is_sanitized(monkeypatch):
             2,
         )
 
-    monkeypatch.setattr(listing_endpoints, "get_paginated_files", _fake_paginated_files)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_paginated_files", _fake_paginated_files)
 
     with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, _db):
         response = client.get("/api/v1/media/")
@@ -336,7 +336,7 @@ def test_list_media_exposes_source_picker_metadata(monkeypatch):
             1,
         )
 
-    monkeypatch.setattr(listing_endpoints, "get_paginated_files", _fake_paginated_files)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_paginated_files", _fake_paginated_files)
 
     with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, _db):
         response = client.get("/api/v1/media/")
@@ -387,7 +387,7 @@ def test_search_media_exposes_source_picker_metadata(monkeypatch):
             1,
         )
 
-    monkeypatch.setattr(listing_endpoints, "search_media", _fake_search_media)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.search_media", _fake_search_media)
 
     with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, _db):
         response = client.post("/api/v1/media/search", json={"query": "generated", "fields": ["title"]})
@@ -418,7 +418,7 @@ def test_list_media_trash_sanitizes_outer_failure_log(monkeypatch):
     def _raise_paginated_trash_files(*_args, **_kwargs):
         raise _database_failure()
 
-    monkeypatch.setattr(listing_endpoints, "get_paginated_trash_files", _raise_paginated_trash_files)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_paginated_trash_files", _raise_paginated_trash_files)
 
     with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, _db):
         response = client.get("/api/v1/media/trash")
@@ -430,7 +430,7 @@ def test_list_media_trash_sanitizes_outer_failure_log(monkeypatch):
 
 def test_list_media_trash_preserves_deletion_date(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints.media import listing as listing_endpoints
-    monkeypatch.setattr(listing_endpoints, "get_paginated_trash_files", lambda *_args, **_kwargs: (
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_paginated_trash_files", lambda *_args, **_kwargs: (
         [{"id": 1, "title": "Aster", "type": "document", "trash_date": "2026-09-15T05:00:00Z"}], 1, 1, 1
     ))
     with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, _db):
@@ -458,7 +458,7 @@ def test_list_media_trash_invalid_row_id_log_is_sanitized(monkeypatch):
             2,
         )
 
-    monkeypatch.setattr(listing_endpoints, "get_paginated_trash_files", _fake_paginated_trash_files)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_paginated_trash_files", _fake_paginated_trash_files)
 
     with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, _db):
         response = client.get("/api/v1/media/trash")
@@ -561,8 +561,7 @@ def test_reading_progress_endpoint_delegates_to_repository(monkeypatch):
             return FakeRepository()
 
     monkeypatch.setattr(
-        reading_progress_endpoints,
-        "DocumentWorkspaceRepository",
+        "tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository.DocumentWorkspaceRepository",
         FakeRepositoryFactory,
         raising=False,
     )

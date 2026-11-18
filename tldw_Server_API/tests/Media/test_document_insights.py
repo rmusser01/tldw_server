@@ -108,11 +108,11 @@ async def test_generate_document_insights_success(mock_user, mock_db):
 
     with (
         patch.object(insights_mod, "_get_adapter", return_value=_StubAdapter()),
-        patch.object(insights_mod, "resolve_provider_api_key", return_value=("key", None)),
-        patch.object(insights_mod, "provider_requires_api_key", return_value=False),
+        patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
+        patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value="test-model"),
-        patch.object(insights_mod, "extract_response_content", return_value=insights_payload),
-        patch.object(insights_mod, "get_cached_response", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.chat_helpers.extract_response_content", return_value=insights_payload),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/media/1/insights")
@@ -145,7 +145,7 @@ async def test_generate_document_insights_cached(mock_user, mock_db):
     }
 
     with (
-        patch.object(insights_mod, "get_cached_response", return_value=("etag", cached_payload)),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=("etag", cached_payload)),
         patch.object(insights_mod, "_get_adapter", side_effect=AssertionError("LLM should not be called")),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -186,11 +186,11 @@ async def test_generate_document_insights_parses_fenced_json_with_think(mock_use
 
     with (
         patch.object(insights_mod, "_get_adapter", return_value=_StubAdapter()),
-        patch.object(insights_mod, "resolve_provider_api_key", return_value=("key", None)),
-        patch.object(insights_mod, "provider_requires_api_key", return_value=False),
+        patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
+        patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value="test-model"),
-        patch.object(insights_mod, "extract_response_content", return_value=fenced_payload),
-        patch.object(insights_mod, "get_cached_response", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.chat_helpers.extract_response_content", return_value=fenced_payload),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/media/1/insights")
@@ -217,11 +217,11 @@ async def test_generate_document_insights_sanitizes_missing_insights_list_warnin
 
     with (
         patch.object(insights_mod, "_get_adapter", return_value=_StubAdapter()),
-        patch.object(insights_mod, "resolve_provider_api_key", return_value=("key", None)),
-        patch.object(insights_mod, "provider_requires_api_key", return_value=False),
+        patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
+        patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value="test-model"),
-        patch.object(insights_mod, "extract_response_content", return_value={"unexpected": "shape"}),
-        patch.object(insights_mod, "get_cached_response", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.chat_helpers.extract_response_content", return_value={"unexpected": "shape"}),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/media/1/insights")
@@ -253,10 +253,10 @@ async def test_generate_document_insights_sanitizes_llm_service_error_log(
 
     with (
         patch.object(insights_mod, "_get_adapter", return_value=_ExplodingAdapter()),
-        patch.object(insights_mod, "resolve_provider_api_key", return_value=("key", None)),
-        patch.object(insights_mod, "provider_requires_api_key", return_value=False),
+        patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
+        patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value="test-model"),
-        patch.object(insights_mod, "get_cached_response", return_value=None),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/media/1/insights")
@@ -285,7 +285,7 @@ async def test_generate_document_insights_sanitizes_db_fetch_error_log(
     logger_stub = _LoggerStub()
     monkeypatch.setattr(insights_mod, "logger", logger_stub, raising=True)
 
-    with patch.object(insights_mod, "get_cached_response", return_value=None):
+    with patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/media/1/insights")
 
@@ -310,11 +310,11 @@ async def test_generate_document_insights_invalid_json_returns_500(mock_user, mo
 
     with (
         patch.object(insights_mod, "_get_adapter", return_value=_StubAdapter()),
-        patch.object(insights_mod, "resolve_provider_api_key", return_value=("key", None)),
-        patch.object(insights_mod, "provider_requires_api_key", return_value=False),
+        patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
+        patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value="test-model"),
-        patch.object(insights_mod, "extract_response_content", return_value="this is not json"),
-        patch.object(insights_mod, "get_cached_response", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.chat_helpers.extract_response_content", return_value="this is not json"),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/media/1/insights")
@@ -341,10 +341,10 @@ async def test_generate_document_insights_sanitizes_configuration_errors(mock_us
 
     with (
         patch.object(insights_mod, "_get_adapter", return_value=_StubAdapter()),
-        patch.object(insights_mod, "resolve_provider_api_key", return_value=("key", None)),
-        patch.object(insights_mod, "provider_requires_api_key", return_value=False),
+        patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
+        patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value=None),
-        patch.object(insights_mod, "get_cached_response", return_value=None),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/media/1/insights")
@@ -368,9 +368,9 @@ async def test_generate_document_insights_sanitizes_missing_api_key(mock_user, m
     monkeypatch.setattr(insights_mod, "logger", logger_stub, raising=True)
 
     with (
-        patch.object(insights_mod, "resolve_provider_api_key", return_value=("", None)),
-        patch.object(insights_mod, "provider_requires_api_key", return_value=True),
-        patch.object(insights_mod, "get_cached_response", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("", None)),
+        patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=True),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/media/1/insights")
@@ -405,10 +405,10 @@ async def test_generate_document_insights_passes_an_llm_quota_refusal_through(mo
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
     with (
         patch.object(insights_mod, "_get_adapter", return_value=_RefusingAdapter()),
-        patch.object(insights_mod, "resolve_provider_api_key", return_value=("key", None)),
-        patch.object(insights_mod, "provider_requires_api_key", return_value=False),
+        patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
+        patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value="test-model"),
-        patch.object(insights_mod, "get_cached_response", return_value=None),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/media/1/insights")

@@ -14,14 +14,13 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     TokenScopeGuard,
     User,
-    enforce_rbac_rate_limit,
     get_auth_principal,
     get_request_user,
     rbac_rate_limit,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user, get_media_db_path_for_rag
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.rpg_schemas import (
     RPGCampaignCreateRequest,
     RPGCampaignResponse,
@@ -39,19 +38,21 @@ from tldw_Server_API.app.api.v1.schemas.rpg_schemas import (
     RPGSessionResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
-from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MultiDatabaseRetriever
 from tldw_Server_API.app.core.RPG.errors import RPGConflictError, RPGNotFoundError, RPGValidationError
 from tldw_Server_API.app.core.RPG.rules.answering import ChatRulesAnswerGenerator, RulesAnswerOptions
 from tldw_Server_API.app.core.RPG.rules.lookup import RulesLookupService
 from tldw_Server_API.app.core.RPG.rules.retrieval import RulesRetrievalAdapter
 from tldw_Server_API.app.core.RPG.rules.source_validation import RPGRulesSourceValidator
 from tldw_Server_API.app.core.RPG.service import RPGService
-from tldw_Server_API.app.core.Usage.llm_budget_guard import enforce_llm_budget
+import tldw_Server_API.app.api.v1.API_Deps.DB_Deps as _DB_Deps
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
+import tldw_Server_API.app.core.AuthNZ.database as _database
+import tldw_Server_API.app.core.RAG.rag_service.database_retrievers as _database_retrievers
+import tldw_Server_API.app.core.Usage.llm_budget_guard as _llm_budget_guard
 
 router = APIRouter(prefix="/rpg", tags=["rpg"])
 
@@ -99,8 +100,8 @@ async def _enforce_answer_mode_generation_controls(
 
     await _answer_mode_permission_guard(principal)
     await _answer_mode_scope_guard(request, credentials=_bearer_credentials_from_request(request))
-    await enforce_llm_budget(request)
-    await enforce_rbac_rate_limit(request, CHAT_CREATE_RATE_LIMIT, await get_db_pool())
+    await _llm_budget_guard.enforce_llm_budget(request)
+    await _auth_deps.enforce_rbac_rate_limit(request, CHAT_CREATE_RATE_LIMIT, await _database.get_db_pool())
 
 
 def _bearer_credentials_from_request(request: Request) -> HTTPAuthorizationCredentials | None:
@@ -137,8 +138,8 @@ def _rules_service(
 
     owner_user_id = _owner_user_id(current_user)
     validator = RPGRulesSourceValidator(media_db=media_db, collections_db=collections_db)
-    media_db_path = get_media_db_path_for_rag(media_db)
-    rag_retriever = MultiDatabaseRetriever(
+    media_db_path = _DB_Deps.get_media_db_path_for_rag(media_db)
+    rag_retriever = _database_retrievers.MultiDatabaseRetriever(
         {"media_db": media_db_path} if media_db_path else {},
         user_id=str(owner_user_id),
         media_db=media_db,

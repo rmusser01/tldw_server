@@ -30,7 +30,6 @@ from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     MediaWikiDumpOptionsForm,
     ProcessedMediaWikiPage,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
 )
@@ -38,10 +37,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.MediaWiki.Media_Wiki im
     ALLOWED_MEDIAWIKI_DUMP_EXTENSIONS,
     MAX_MEDIAWIKI_FILE_SIZE_BYTES,
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.MediaWiki.Media_Wiki import (
-    import_mediawiki_dump as core_import_mediawiki_dump,
-)
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
+import tldw_Server_API.app.core.DB_Management.media_db.api as _api
+import tldw_Server_API.app.core.Ingestion_Media_Processing.MediaWiki.Media_Wiki as _Media_Wiki
 
 router = APIRouter()
 
@@ -152,7 +150,7 @@ async def _process_mediawiki_dump(
             detail="File too large",
         )
 
-    if core_import_mediawiki_dump is None:  # pragma: no cover - defensive
+    if _Media_Wiki.import_mediawiki_dump is None:  # pragma: no cover - defensive
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="MediaWiki processing module not loaded.",
@@ -210,7 +208,7 @@ async def _process_mediawiki_dump(
 
         async def stream_ingestion_results() -> AsyncGenerator[str, None]:
             try:
-                for result_event in core_import_mediawiki_dump(
+                for result_event in _Media_Wiki.import_mediawiki_dump(
                     file_path=str(temp_file_path),
                     wiki_name=form_data.wiki_name,
                     namespaces=namespaces,
@@ -293,7 +291,7 @@ async def ingest_mediawiki_dump_endpoint(
     Streams ingestion events while processing a MediaWiki XML dump and
     persisting results to the primary database and vector store.
     """
-    media_writer = get_media_repository(db)
+    media_writer = _api.get_media_repository(db)
 
     return await _process_mediawiki_dump(
         form_data=form_data,

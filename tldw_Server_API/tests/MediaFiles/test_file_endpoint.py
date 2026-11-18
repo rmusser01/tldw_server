@@ -109,7 +109,7 @@ class TestGetMediaFile:
 
         try:
             with patch(
-                'tldw_Server_API.app.api.v1.endpoints.media.file.get_storage_backend',
+                "tldw_Server_API.app.core.Storage.get_storage_backend",
                 return_value=mock_storage
             ):
                 with TestClient(fastapi_app) as client:
@@ -162,7 +162,7 @@ class TestGetMediaFile:
 
         try:
             with patch(
-                'tldw_Server_API.app.api.v1.endpoints.media.file.get_storage_backend',
+                "tldw_Server_API.app.core.Storage.get_storage_backend",
                 return_value=mock_storage
             ):
                 with TestClient(fastapi_app) as client:
@@ -291,7 +291,7 @@ class TestGetMediaFileHeaders:
 
         try:
             with patch(
-                'tldw_Server_API.app.api.v1.endpoints.media.file.get_storage_backend',
+                "tldw_Server_API.app.core.Storage.get_storage_backend",
                 return_value=mock_storage
             ):
                 with TestClient(fastapi_app) as client:
@@ -345,7 +345,7 @@ class TestGetMediaFileHeaders:
 
         try:
             with patch(
-                'tldw_Server_API.app.api.v1.endpoints.media.file.get_storage_backend',
+                "tldw_Server_API.app.core.Storage.get_storage_backend",
                 return_value=mock_storage
             ):
                 with TestClient(fastapi_app) as client:
@@ -399,7 +399,7 @@ class TestRangeRequests:
 
         try:
             with patch(
-                'tldw_Server_API.app.api.v1.endpoints.media.file.get_storage_backend',
+                "tldw_Server_API.app.core.Storage.get_storage_backend",
                 return_value=mock_storage
             ):
                 with TestClient(fastapi_app) as client:
@@ -457,7 +457,7 @@ class TestETagCaching:
 
         try:
             with patch(
-                'tldw_Server_API.app.api.v1.endpoints.media.file.get_storage_backend',
+                "tldw_Server_API.app.core.Storage.get_storage_backend",
                 return_value=mock_storage
             ):
                 with TestClient(fastapi_app) as client:
@@ -509,7 +509,7 @@ class TestETagCaching:
 
         try:
             with patch(
-                'tldw_Server_API.app.api.v1.endpoints.media.file.get_storage_backend',
+                "tldw_Server_API.app.core.Storage.get_storage_backend",
                 return_value=mock_storage
             ):
                 with TestClient(fastapi_app) as client:
@@ -566,7 +566,7 @@ class TestHeadMediaFile:
 
         try:
             with patch(
-                'tldw_Server_API.app.api.v1.endpoints.media.file.get_storage_backend',
+                "tldw_Server_API.app.core.Storage.get_storage_backend",
                 return_value=mock_storage
             ):
                 with TestClient(fastapi_app) as client:

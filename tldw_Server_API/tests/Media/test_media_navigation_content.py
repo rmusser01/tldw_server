@@ -74,13 +74,11 @@ async def test_navigation_content_auto_resolves_markdown(mock_user, mock_db):
         navigation_mod,
         "get_document_version",
         return_value={"content": "## Section 1\nBody line here"},
-    ), patch.object(
-        navigation_mod,
-        "get_cached_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.get_cached_response",
         return_value=None,
-    ), patch.object(
-        navigation_mod,
-        "cache_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.cache_response",
         return_value="etag",
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -116,13 +114,11 @@ async def test_navigation_content_html_request_with_alternates(mock_user, mock_d
         navigation_mod,
         "get_document_version",
         return_value={"content": "Plain section content only"},
-    ), patch.object(
-        navigation_mod,
-        "get_cached_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.get_cached_response",
         return_value=None,
-    ), patch.object(
-        navigation_mod,
-        "cache_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.cache_response",
         return_value="etag",
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -156,9 +152,8 @@ async def test_navigation_content_returns_contract_404_for_unknown_node(mock_use
         navigation_mod,
         "_select_source_nodes",
         return_value=(sample_nodes, ["pdf_outline", "document_structure_index"]),
-    ), patch.object(
-        navigation_mod,
-        "get_cached_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.get_cached_response",
         return_value=None,
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -213,13 +208,11 @@ async def test_navigation_content_falls_back_to_latest_transcript(mock_user, moc
         navigation_mod,
         "get_latest_transcription",
         return_value="Transcript fallback content",
-    ), patch.object(
-        navigation_mod,
-        "get_cached_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.get_cached_response",
         return_value=None,
-    ), patch.object(
-        navigation_mod,
-        "cache_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.cache_response",
         return_value="etag",
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

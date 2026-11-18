@@ -541,7 +541,11 @@ def test_selected_durable_generation_recovery_rejects_live_metadata_mutation(sel
         original_state = state(
             record.cid, record.mid, owner_client_id="1", owner_key=record.reference["owner_key"], conn=conn
         )
-    assert record.db.set_message_metadata_extra(record.mid, {"generation_status": "complete"})
+    assert record.db.set_message_metadata_extra(
+        record.mid,
+        {"generation_status": "complete"},
+        _advance_history=fence != "intent",
+    )
     if fence == "intent":
 
         def original_result_state(conversation_id, message_id, **kwargs):

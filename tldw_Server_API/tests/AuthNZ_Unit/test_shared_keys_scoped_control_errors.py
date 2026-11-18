@@ -50,13 +50,13 @@ async def _invoke(scope, operation, principal):
 
 def _allow_validation(monkeypatch):
     monkeypatch.setattr(routes, "_require_byok_enabled", lambda: None)
-    monkeypatch.setattr(routes, "is_provider_allowlisted", lambda _provider: True)
-    monkeypatch.setattr(routes, "is_trusted_base_url_request", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(routes, "encrypt_byok_payload", lambda _payload: {})
-    monkeypatch.setattr(routes, "dumps_envelope", lambda _envelope: "sealed")
-    monkeypatch.setattr(routes, "loads_envelope", lambda _blob: {})
-    monkeypatch.setattr(routes, "decrypt_byok_payload", lambda _envelope: {"api_key": "sk-test"})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.is_trusted_base_url_request", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.encrypt_byok_payload", lambda _payload: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.dumps_envelope", lambda _envelope: "sealed")
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.loads_envelope", lambda _blob: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.decrypt_byok_payload", lambda _envelope: {"api_key": "sk-test"})
 
 
 @pytest.mark.asyncio
@@ -118,8 +118,8 @@ async def test_shared_repository_acquisition_contention_is_retryable(
         return object()
 
     monkeypatch.setenv("AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS", "17")
-    monkeypatch.setattr(routes, "get_db_pool", get_pool)
-    monkeypatch.setattr(routes, "AuthnzOrgProviderSecretsRepo", lambda _pool: Repo())
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", get_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_repo.AuthnzOrgProviderSecretsRepo", lambda _pool: Repo())
     with pytest.raises(HTTPException) as exc:
         await routes._get_shared_byok_repo()
     assert (exc.value.status_code, exc.value.detail, exc.value.headers) == (

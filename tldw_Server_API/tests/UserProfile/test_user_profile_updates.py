@@ -1557,8 +1557,8 @@ async def test_user_profile_update_delegates_to_command_service(monkeypatch) -> 
         captured["audit"] = _kwargs
 
     monkeypatch.setattr(users_endpoints, "_resolve_user_context", _fake_resolve_user_context)
-    monkeypatch.setattr(users_endpoints, "get_db_pool", _fake_pool)
-    monkeypatch.setattr(users_endpoints, "ProfileCommandService", _CommandService, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.UserProfiles.command_service.ProfileCommandService", _CommandService, raising=False)
     monkeypatch.setattr(
         users_endpoints,
         "UserProfileUpdateService",
@@ -1639,8 +1639,8 @@ async def test_user_profile_v1_forbidden_command_result_has_no_audit(monkeypatch
         audit_calls.append(kwargs)
 
     monkeypatch.setattr(users_endpoints, "_resolve_user_context", _fake_resolve_user_context)
-    monkeypatch.setattr(users_endpoints, "get_db_pool", _fake_pool)
-    monkeypatch.setattr(users_endpoints, "ProfileCommandService", _CommandService)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.UserProfiles.command_service.ProfileCommandService", _CommandService)
     monkeypatch.setattr(users_endpoints, "_emit_user_profile_audit_event", _audit)
 
     response = await users_endpoints.update_current_user_profile(

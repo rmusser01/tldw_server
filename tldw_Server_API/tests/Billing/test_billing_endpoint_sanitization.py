@@ -39,8 +39,8 @@ async def test_list_subscriptions_repo_failure_log_is_sanitized(monkeypatch):
         return object()
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(billing, "get_db_pool", _fake_get_db_pool)
-    monkeypatch.setattr(billing, "AuthnzBillingRepo", _FailingBillingRepo)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.repos.billing_repo.AuthnzBillingRepo", _FailingBillingRepo)
     monkeypatch.setattr(billing, "logger", logger_stub)
 
     with pytest.raises(RuntimeError):
@@ -59,7 +59,7 @@ async def test_list_subscriptions_outer_failure_log_is_sanitized(monkeypatch):
         raise RuntimeError("billing backend exploded at /private/billing.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(billing, "get_db_pool", _failing_get_db_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _failing_get_db_pool)
     monkeypatch.setattr(billing, "logger", logger_stub)
 
     with pytest.raises(RuntimeError):

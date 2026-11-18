@@ -107,7 +107,7 @@ def test_audio_chat_endpoint_concurrency_limit(monkeypatch, client: TestClient):
     async def _deny(_user_id: int):
         return False, "Concurrent streams limit reached (1)"
 
-    monkeypatch.setattr(audio_module, "can_start_stream", _deny)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _deny)
 
     payload = {
         "session_id": None,

@@ -191,20 +191,17 @@ def _install_runtime(
         return runtime
 
     monkeypatch.setattr(
-        test_case_endpoint,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         _factory,
         raising=False,
     )
     monkeypatch.setattr(
-        test_case_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         scope_resolver or (lambda _request, _user: (7, [8], [9], True)),
         raising=False,
     )
     monkeypatch.setattr(
-        test_case_endpoint,
-        "provider_requires_api_key",
+        "tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key",
         provider_requires_key
         or (lambda provider: provider not in {"ollama", "llama.cpp"}),
         raising=False,
@@ -251,10 +248,9 @@ async def test_run_endpoint_passes_one_request_snapshot_and_marks_before_close(
             await kwargs["on_provider_success"]()
             return [{"test_case_id": 3, "actual": {"response": "ok"}}]
 
-    monkeypatch.setattr(test_case_endpoint, "TestCaseManager", _Manager, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager.TestCaseManager", _Manager, raising=True)
     monkeypatch.setattr(
-        test_case_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         lambda *_args, **_kwargs: asyncio.sleep(0),
         raising=True,
     )
@@ -303,10 +299,9 @@ async def test_run_endpoint_retries_explicit_false_provider_mark(
             await kwargs["on_provider_success"]()
             return [{"test_case_id": 3, "actual": {"response": "ok"}}]
 
-    monkeypatch.setattr(test_case_endpoint, "TestCaseManager", _Manager, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager.TestCaseManager", _Manager, raising=True)
     monkeypatch.setattr(
-        test_case_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         lambda *_args, **_kwargs: asyncio.sleep(0),
         raising=True,
     )
@@ -358,10 +353,9 @@ async def test_run_endpoint_derives_omitted_non_openai_model_from_runtime_snapsh
             await kwargs["on_provider_success"]()
             return [{"test_case_id": 3, "actual": {"response": "ok"}}]
 
-    monkeypatch.setattr(test_case_endpoint, "TestCaseManager", _Manager, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager.TestCaseManager", _Manager, raising=True)
     monkeypatch.setattr(
-        test_case_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         lambda *_args, **_kwargs: asyncio.sleep(0),
         raising=True,
     )
@@ -412,10 +406,9 @@ async def test_run_endpoint_rejects_cross_project_ids_before_runtime_constructio
         async def run_batch_tests(self, **_kwargs: Any) -> list[dict[str, Any]]:
             return []
 
-    monkeypatch.setattr(test_case_endpoint, "TestCaseManager", _Manager, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager.TestCaseManager", _Manager, raising=True)
     monkeypatch.setattr(
-        test_case_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         lambda *_args, **_kwargs: asyncio.sleep(0),
         raising=True,
     )
@@ -481,14 +474,12 @@ async def test_run_endpoint_credential_failures_stop_before_adapter_dispatch(
             raise AssertionError("credential failure reached the adapter manager")
 
     monkeypatch.setattr(
-        test_case_endpoint,
-        "TestCaseManager",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager.TestCaseManager",
         _ForbiddenManager,
         raising=True,
     )
     monkeypatch.setattr(
-        test_case_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         lambda *_args, **_kwargs: asyncio.sleep(0),
         raising=True,
     )
@@ -532,10 +523,9 @@ async def test_run_endpoint_allows_keyless_local_provider_control(
             await kwargs["on_provider_success"]()
             return [{"test_case_id": 3, "actual": {"response": "local"}}]
 
-    monkeypatch.setattr(test_case_endpoint, "TestCaseManager", _Manager, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager.TestCaseManager", _Manager, raising=True)
     monkeypatch.setattr(
-        test_case_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         lambda *_args, **_kwargs: asyncio.sleep(0),
         raising=True,
     )
@@ -602,10 +592,9 @@ async def test_concurrent_run_endpoints_keep_owner_provider_snapshots_isolated(
             await kwargs["on_provider_success"]()
             return [{"test_case_id": kwargs["test_case_ids"][0], "actual": {"response": "ok"}}]
 
-    monkeypatch.setattr(test_case_endpoint, "TestCaseManager", _Manager, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager.TestCaseManager", _Manager, raising=True)
     monkeypatch.setattr(
-        test_case_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         lambda *_args, **_kwargs: asyncio.sleep(0),
         raising=True,
     )
@@ -724,8 +713,7 @@ async def test_run_endpoint_propagates_safe_failure_instead_of_empty_success(
 
     monkeypatch.setattr(test_runner.TestRunner, "run_multiple_tests", _fail, raising=True)
     monkeypatch.setattr(
-        test_case_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         lambda *_args, **_kwargs: asyncio.sleep(0),
         raising=True,
     )
@@ -773,10 +761,9 @@ async def test_run_endpoint_cancellation_stops_after_inflight_call_before_next_c
             dispatches.append("second")
             return [{"test_case_id": 3, "actual": {"response": "ok"}}]
 
-    monkeypatch.setattr(test_case_endpoint, "TestCaseManager", _Manager, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager.TestCaseManager", _Manager, raising=True)
     monkeypatch.setattr(
-        test_case_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         lambda *_args, **_kwargs: asyncio.sleep(0),
         raising=True,
     )

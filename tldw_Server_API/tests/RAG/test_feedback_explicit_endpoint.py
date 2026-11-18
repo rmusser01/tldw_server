@@ -292,7 +292,7 @@ def test_get_feedback_fails_closed_when_conversation_is_missing(feedback_setup, 
         def __init__(self, chacha_db):
             self.user_feedback = _OrphanedFeedbackStore()
 
-    monkeypatch.setattr(feedback_endpoint, "UnifiedFeedbackSystem", _OrphanedFeedbackSystem)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.analytics_system.UnifiedFeedbackSystem", _OrphanedFeedbackSystem)
 
     resp = client.get("/api/v1/feedback/fb_orphaned")
 
@@ -319,7 +319,7 @@ def test_list_feedback_returns_500_for_db_error(feedback_setup, monkeypatch):
         def __init__(self, chacha_db):
             self.user_feedback = _FailingFeedbackStore()
 
-    monkeypatch.setattr(feedback_endpoint, "UnifiedFeedbackSystem", _FailingFeedbackSystem)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.analytics_system.UnifiedFeedbackSystem", _FailingFeedbackSystem)
 
     resp = client.get("/api/v1/feedback", params={"conversation_id": conversation_id})
 
@@ -387,7 +387,7 @@ def test_delete_feedback_returns_500_for_db_error(feedback_setup, monkeypatch):
         def __init__(self, chacha_db):
             self.user_feedback = _FailingFeedbackStore()
 
-    monkeypatch.setattr(feedback_endpoint, "UnifiedFeedbackSystem", _FailingFeedbackSystem)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.analytics_system.UnifiedFeedbackSystem", _FailingFeedbackSystem)
 
     resp = client.delete("/api/v1/feedback/fb_problem")
 
@@ -459,7 +459,7 @@ def test_patch_feedback_returns_500_for_db_error(feedback_setup, monkeypatch):
         def __init__(self, chacha_db):
             self.user_feedback = _FailingFeedbackStore()
 
-    monkeypatch.setattr(feedback_endpoint, "UnifiedFeedbackSystem", _FailingFeedbackSystem)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.analytics_system.UnifiedFeedbackSystem", _FailingFeedbackSystem)
 
     resp = client.patch(
         "/api/v1/feedback/fb_problem",

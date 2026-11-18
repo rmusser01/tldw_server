@@ -33,8 +33,7 @@ NOW = datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc)
 @pytest.fixture(autouse=True)
 def _resolved_target(monkeypatch):
     monkeypatch.setattr(
-        sharing,
-        "resolve_chat_target",
+        "tldw_Server_API.app.core.Chat.chat_target_resolution.resolve_chat_target",
         lambda **kwargs: ResolvedChatTarget("openai", "gpt-model"),
     )
 
@@ -511,7 +510,7 @@ async def test_reclaimed_frozen_receipt_rechecks_current_provider_override(
         captured.append(kwargs)
         return ResolvedChatTarget("openai", "newly-allowed-model")
 
-    monkeypatch.setattr(sharing, "resolve_chat_target", _drifted_target)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_target_resolution.resolve_chat_target", _drifted_target)
 
     with pytest.raises(HTTPException) as exc_info:
         await _run(frozen=True, frozen_snapshot_hash="snapshot-hash")
@@ -532,7 +531,7 @@ async def test_reclaimed_frozen_receipt_rejects_unavailable_adapter(
     def _unavailable_target(**kwargs):
         raise sharing.ChatConfigurationError(message="private adapter state")
 
-    monkeypatch.setattr(sharing, "resolve_chat_target", _unavailable_target)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_target_resolution.resolve_chat_target", _unavailable_target)
 
     with pytest.raises(HTTPException) as exc_info:
         await _run(frozen=True, frozen_snapshot_hash="snapshot-hash")
@@ -635,8 +634,7 @@ async def test_receipt_lease_derives_from_provider_timeout_and_stays_bounded(
 
     monkeypatch.setattr(chat_target_resolution, "get_default_provider", lambda: "openai")
     monkeypatch.setattr(
-        sharing,
-        "load_and_log_configs",
+        "tldw_Server_API.app.core.config.load_and_log_configs",
         lambda: {
             "openai_api": {"api_timeout": "90"},
             "ollama_api": {"api_timeout": "9009"},
@@ -656,8 +654,7 @@ async def test_receipt_lease_uses_qualified_model_provider_and_registry_alias(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        sharing,
-        "load_and_log_configs",
+        "tldw_Server_API.app.core.config.load_and_log_configs",
         lambda: {
             "anthropic_api": {"api_timeout": "900"},
             "llama_api": {"api_timeout": "420"},
@@ -698,8 +695,7 @@ async def test_receipt_lease_uses_unique_catalog_provider_for_unqualified_model(
         lambda model: ("ollama",),
     )
     monkeypatch.setattr(
-        sharing,
-        "load_and_log_configs",
+        "tldw_Server_API.app.core.config.load_and_log_configs",
         lambda: {
             "llama_api": {"api_timeout": "240"},
             "ollama_api": {"api_timeout": "900"},

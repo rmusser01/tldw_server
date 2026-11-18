@@ -567,7 +567,7 @@ def test_run_now_routes_watchlist_backed_schedules_to_watchlists_queue(client_ad
         return _StubScheduler()
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.scheduler_workflows.get_global_scheduler",
+        "tldw_Server_API.app.core.Scheduler.get_global_scheduler",
         _get_global_scheduler_stub,
     )
 

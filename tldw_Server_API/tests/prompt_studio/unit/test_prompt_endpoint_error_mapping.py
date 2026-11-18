@@ -212,14 +212,12 @@ async def test_create_prompt_maps_database_error(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write_access,
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "_prepare_prompt_record_fields",
+        "tldw_Server_API.app.core.DB_Management.PromptStudioDatabase._prepare_prompt_record_fields",
         lambda **_kwargs: {
             "system_prompt": "system",
             "user_prompt": "{task}",
@@ -242,8 +240,7 @@ async def test_create_prompt_maps_database_error(monkeypatch):
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "convert_legacy_prompt_to_definition",
+        "tldw_Server_API.app.core.Prompt_Management.structured_prompts.convert_legacy_prompt_to_definition",
         lambda **_kwargs: object(),
         raising=True,
     )
@@ -285,14 +282,12 @@ async def test_create_prompt_idempotency_lookup_failure_log_is_sanitized(monkeyp
         return True
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write_access,
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "_prepare_prompt_record_fields",
+        "tldw_Server_API.app.core.DB_Management.PromptStudioDatabase._prepare_prompt_record_fields",
         lambda **_kwargs: {
             "system_prompt": "system",
             "user_prompt": "{task}",
@@ -315,8 +310,7 @@ async def test_create_prompt_idempotency_lookup_failure_log_is_sanitized(monkeyp
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "convert_legacy_prompt_to_definition",
+        "tldw_Server_API.app.core.Prompt_Management.structured_prompts.convert_legacy_prompt_to_definition",
         lambda **_kwargs: object(),
         raising=True,
     )
@@ -359,14 +353,12 @@ async def test_create_prompt_maps_input_error_safe_message(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write_access,
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "_prepare_prompt_record_fields",
+        "tldw_Server_API.app.core.DB_Management.PromptStudioDatabase._prepare_prompt_record_fields",
         lambda **_kwargs: {
             "system_prompt": "system",
             "user_prompt": "{task}",
@@ -389,8 +381,7 @@ async def test_create_prompt_maps_input_error_safe_message(monkeypatch):
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "convert_legacy_prompt_to_definition",
+        "tldw_Server_API.app.core.Prompt_Management.structured_prompts.convert_legacy_prompt_to_definition",
         lambda **_kwargs: object(),
         raising=True,
     )
@@ -428,14 +419,12 @@ async def test_create_prompt_maps_conflict_error(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write_access,
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "_prepare_prompt_record_fields",
+        "tldw_Server_API.app.core.DB_Management.PromptStudioDatabase._prepare_prompt_record_fields",
         lambda **_kwargs: {
             "system_prompt": "system",
             "user_prompt": "{task}",
@@ -458,8 +447,7 @@ async def test_create_prompt_maps_conflict_error(monkeypatch):
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "convert_legacy_prompt_to_definition",
+        "tldw_Server_API.app.core.Prompt_Management.structured_prompts.convert_legacy_prompt_to_definition",
         lambda **_kwargs: object(),
         raising=True,
     )
@@ -576,8 +564,7 @@ async def test_update_prompt_maps_database_error(monkeypatch):
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "_prepare_prompt_record_fields",
+        "tldw_Server_API.app.core.DB_Management.PromptStudioDatabase._prepare_prompt_record_fields",
         lambda **_kwargs: {
             "system_prompt": "updated system",
             "user_prompt": "{task}",
@@ -594,8 +581,7 @@ async def test_update_prompt_maps_database_error(monkeypatch):
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "convert_legacy_prompt_to_definition",
+        "tldw_Server_API.app.core.Prompt_Management.structured_prompts.convert_legacy_prompt_to_definition",
         lambda **_kwargs: object(),
         raising=True,
     )
@@ -632,8 +618,7 @@ async def test_update_prompt_maps_input_error_safe_message(monkeypatch):
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "_prepare_prompt_record_fields",
+        "tldw_Server_API.app.core.DB_Management.PromptStudioDatabase._prepare_prompt_record_fields",
         lambda **_kwargs: {
             "system_prompt": "updated system",
             "user_prompt": "{task}",
@@ -650,8 +635,7 @@ async def test_update_prompt_maps_input_error_safe_message(monkeypatch):
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "convert_legacy_prompt_to_definition",
+        "tldw_Server_API.app.core.Prompt_Management.structured_prompts.convert_legacy_prompt_to_definition",
         lambda **_kwargs: object(),
         raising=True,
     )
@@ -683,8 +667,7 @@ async def test_revert_prompt_maps_conflict_error(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write_access,
         raising=True,
     )
@@ -709,8 +692,7 @@ async def test_revert_prompt_maps_database_error(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write_access,
         raising=True,
     )
@@ -737,8 +719,7 @@ async def test_revert_prompt_maps_input_error_safe_message(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write_access,
         raising=True,
     )
@@ -765,8 +746,7 @@ async def test_get_prompt_history_maps_database_error(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         _allow_access,
         raising=True,
     )
@@ -792,8 +772,7 @@ async def test_get_prompt_history_maps_input_error_safe_message(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         _allow_access,
         raising=True,
     )
@@ -817,14 +796,12 @@ async def test_preview_prompt_maps_input_error_safe_message(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        prompts_endpoint,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         _allow_access,
         raising=True,
     )
     monkeypatch.setattr(
-        prompts_endpoint,
-        "assemble_prompt_definition",
+        "tldw_Server_API.app.core.Prompt_Management.structured_prompts.assemble_prompt_definition",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             InputError("raw preview failure", safe_message="sanitized preview failure")
         ),

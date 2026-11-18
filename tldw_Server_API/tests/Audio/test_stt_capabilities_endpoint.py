@@ -39,8 +39,7 @@ def small_catalog(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints.audio import audio_health
 
     monkeypatch.setattr(
-        audio_health,
-        "get_transcription_models_payload",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.transcription_models.get_transcription_models_payload",
         lambda: {
             "categories": {
                 "Whisper Models": [
@@ -197,8 +196,7 @@ def test_transcription_capabilities_preserves_unknown_when_provider_metadata_is_
             raise RuntimeError("provider metadata unavailable")
 
     monkeypatch.setattr(
-        audio_health,
-        "get_transcription_models_payload",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.transcription_models.get_transcription_models_payload",
         lambda: {
             "categories": {
                 "Custom": [

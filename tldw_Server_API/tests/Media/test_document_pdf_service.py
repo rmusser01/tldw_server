@@ -129,7 +129,7 @@ async def test_export_admission_precedes_source_buffering(monkeypatch):
     monkeypatch.setattr(
         document_rendering.DocumentWorkspaceRepository, "list_annotations_for_export", lambda *_args, **_kwargs: []
     )
-    monkeypatch.setattr(document_rendering, "annotate_document_pdf", AsyncMock(return_value=b"%PDF-complete\n%%EOF"))
+    monkeypatch.setattr("tldw_Server_API.app.core.Document_Workspace.pdf_service.annotate_document_pdf", AsyncMock(return_value=b"%PDF-complete\n%%EOF"))
     tasks = [
         asyncio.create_task(document_rendering.get_annotated_document(media_id=1, db=db, user=SimpleNamespace(id=1)))
         for _ in range(2)
@@ -185,7 +185,7 @@ async def test_oversized_source_closes_stream_without_starting_pdf_child(monkeyp
         document_rendering.DocumentWorkspaceRepository, "list_annotations_for_export", lambda *_args, **_kwargs: []
     )
     worker = AsyncMock()
-    monkeypatch.setattr(document_rendering, "annotate_document_pdf", worker)
+    monkeypatch.setattr("tldw_Server_API.app.core.Document_Workspace.pdf_service.annotate_document_pdf", worker)
     with pytest.raises(HTTPException) as error:
         await document_rendering.get_annotated_document(media_id=1, db=db, user=SimpleNamespace(id=1))
     assert (error.value.status_code, closed, worker.call_count, pdf_service._PDF_REQUESTS.active_count) == (

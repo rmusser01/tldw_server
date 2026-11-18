@@ -314,7 +314,7 @@ async def test_import_reading_items_sanitizes_job_create_log(monkeypatch):
             raise RuntimeError("job create exploded at /private/jobs.db")
 
     monkeypatch.setattr(reading, "logger", logger_stub)
-    monkeypatch.setattr(reading, "stage_reading_import_file", lambda **_kwargs: _StagedPath())
+    monkeypatch.setattr("tldw_Server_API.app.core.Collections.reading_import_jobs.stage_reading_import_file", lambda **_kwargs: _StagedPath())
 
     with pytest.raises(HTTPException) as excinfo:
         await reading.import_reading_items(
@@ -351,7 +351,7 @@ async def test_import_reading_items_sanitizes_staged_cleanup_log(monkeypatch):
             raise RuntimeError("job create exploded at /private/jobs.db")
 
     monkeypatch.setattr(reading, "logger", logger_stub)
-    monkeypatch.setattr(reading, "stage_reading_import_file", lambda **_kwargs: _StagedPath())
+    monkeypatch.setattr("tldw_Server_API.app.core.Collections.reading_import_jobs.stage_reading_import_file", lambda **_kwargs: _StagedPath())
 
     with pytest.raises(HTTPException) as excinfo:
         await reading.import_reading_items(
@@ -513,7 +513,7 @@ async def test_summarize_reading_item_sanitizes_backend_log(monkeypatch):
 
     monkeypatch.setattr(reading, "logger", logger_stub)
     monkeypatch.setattr(reading, "_service_for_user", lambda _user: _Service())
-    monkeypatch.setattr(reading, "summarize_analyze", _failing_summarize)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze", _failing_summarize)
 
     with pytest.raises(HTTPException) as excinfo:
         await reading.summarize_reading_item(
@@ -537,7 +537,7 @@ async def test_summarize_reading_item_sanitizes_error_string_log(monkeypatch):
 
     monkeypatch.setattr(reading, "logger", logger_stub)
     monkeypatch.setattr(reading, "_service_for_user", lambda _user: _Service())
-    monkeypatch.setattr(reading, "summarize_analyze", lambda *_args, **_kwargs: "Error: /private/llm.key")
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze", lambda *_args, **_kwargs: "Error: /private/llm.key")
 
     with pytest.raises(HTTPException) as excinfo:
         await reading.summarize_reading_item(
@@ -592,7 +592,7 @@ async def test_create_reading_archive_sanitizes_outputs_dir_log(monkeypatch):
 
     monkeypatch.setattr(reading, "logger", logger_stub)
     monkeypatch.setattr(reading, "_service_for_user", lambda _user: _ArchiveService(collections=object()))
-    monkeypatch.setattr(reading, "_outputs_dir_for_user", lambda _user_id: _FailingDir())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._outputs_dir_for_user", lambda _user_id: _FailingDir())
 
     with pytest.raises(HTTPException) as excinfo:
         await reading.create_reading_archive(
@@ -620,8 +620,8 @@ async def test_create_reading_archive_sanitizes_write_log(monkeypatch):
 
     monkeypatch.setattr(reading, "logger", logger_stub)
     monkeypatch.setattr(reading, "_service_for_user", lambda _user: _ArchiveService(collections=object()))
-    monkeypatch.setattr(reading, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
-    monkeypatch.setattr(reading, "_resolve_output_path_for_user", lambda *_args, **_kwargs: _FailingPath())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._resolve_output_path_for_user", lambda *_args, **_kwargs: _FailingPath())
 
     with pytest.raises(HTTPException) as excinfo:
         await reading.create_reading_archive(
@@ -656,8 +656,8 @@ async def test_create_reading_archive_sanitizes_db_insert_log(monkeypatch):
 
     monkeypatch.setattr(reading, "logger", logger_stub)
     monkeypatch.setattr(reading, "_service_for_user", lambda _user: _ArchiveService(_FailingCollections()))
-    monkeypatch.setattr(reading, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
-    monkeypatch.setattr(reading, "_resolve_output_path_for_user", lambda *_args, **_kwargs: _Path())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._resolve_output_path_for_user", lambda *_args, **_kwargs: _Path())
 
     with pytest.raises(HTTPException) as excinfo:
         await reading.create_reading_archive(
@@ -692,8 +692,8 @@ async def test_create_reading_archive_sanitizes_cleanup_log(monkeypatch):
 
     monkeypatch.setattr(reading, "logger", logger_stub)
     monkeypatch.setattr(reading, "_service_for_user", lambda _user: _ArchiveService(_FailingCollections()))
-    monkeypatch.setattr(reading, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
-    monkeypatch.setattr(reading, "_resolve_output_path_for_user", lambda *_args, **_kwargs: _Path())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service._resolve_output_path_for_user", lambda *_args, **_kwargs: _Path())
 
     with pytest.raises(HTTPException) as excinfo:
         await reading.create_reading_archive(

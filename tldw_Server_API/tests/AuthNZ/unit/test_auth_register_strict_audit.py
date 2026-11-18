@@ -48,12 +48,11 @@ async def test_register_returns_503_when_default_api_key_audit_fails(
         return _FailingAPIKeyManager()
 
     monkeypatch.setattr(
-        auth_endpoints,
-        "get_settings",
+        "tldw_Server_API.app.core.AuthNZ.settings.get_settings",
         lambda: SimpleNamespace(DATABASE_URL="sqlite:///tmp/authnz-test.db", PII_REDACT_LOGS=False),
     )
-    monkeypatch.setattr(auth_endpoints, "get_profile", lambda: "multi_user")
-    monkeypatch.setattr(auth_endpoints, "get_api_key_manager", _fake_get_api_key_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.get_profile", lambda: "multi_user")
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.api_key_manager.get_api_key_manager", _fake_get_api_key_manager)
     monkeypatch.setattr(auth_endpoints, "_finalize_register_diag", lambda *_args, **_kwargs: None)
 
     request = SimpleNamespace(
@@ -105,14 +104,13 @@ async def test_register_returns_retryable_503_when_auth_database_is_busy(
             raise failure_type()
 
     monkeypatch.setattr(
-        auth_endpoints,
-        "get_settings",
+        "tldw_Server_API.app.core.AuthNZ.settings.get_settings",
         lambda: SimpleNamespace(
             DATABASE_URL="sqlite:///tmp/authnz-test.db",
             PII_REDACT_LOGS=False,
         ),
     )
-    monkeypatch.setattr(auth_endpoints, "get_profile", lambda: "multi_user")
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.get_profile", lambda: "multi_user")
     monkeypatch.setattr(
         auth_endpoints,
         "_finalize_register_diag",

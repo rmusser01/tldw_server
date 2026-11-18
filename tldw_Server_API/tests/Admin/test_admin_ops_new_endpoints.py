@@ -605,7 +605,7 @@ class TestCompliancePosture:
         mock_pool.fetchone = _fake_fetchone
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops.get_db_pool",
+            "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
             mock.AsyncMock(return_value=mock_pool),
         )
 
@@ -645,7 +645,7 @@ class TestCompliancePosture:
         mock_pool.fetchone = _fake_fetchone
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops.get_db_pool",
+            "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
             mock.AsyncMock(return_value=mock_pool),
         )
 
@@ -679,7 +679,7 @@ class TestCompliancePosture:
         mock_pool.fetchone = _raise_always
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops.get_db_pool",
+            "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
             mock.AsyncMock(return_value=mock_pool),
         )
 
@@ -719,7 +719,7 @@ class TestCompliancePosture:
         mock_pool.fetchone = _fake_fetchone
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops.get_db_pool",
+            "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
             mock.AsyncMock(return_value=mock_pool),
         )
 
@@ -758,7 +758,7 @@ class TestAdminOpsErrorSanitization:
             "tldw_Server_API.app.core.AuthNZ.repos.billing_repo.AuthnzBillingRepo",
             _ExplodingBillingRepo,
         )
-        monkeypatch.setattr(admin_ops, "get_db_pool", mock.AsyncMock(return_value=object()))
+        monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", mock.AsyncMock(return_value=object()))
 
         result = await admin_ops.get_billing_analytics(principal=mock.MagicMock())
 
@@ -780,7 +780,7 @@ class TestAdminOpsErrorSanitization:
             _ = (name, days)
             raise OSError("uptime backend exploded")
 
-        monkeypatch.setattr(admin_ops, "svc_get_uptime_stats", _raise_uptime)
+        monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.get_uptime_stats", _raise_uptime)
 
         with pytest.raises(HTTPException) as exc_info:
             await admin_ops.get_dependency_uptime(
@@ -805,7 +805,7 @@ class TestAdminOpsErrorSanitization:
             _ = (limit, offset, status)
             raise OSError("email delivery backend exploded")
 
-        monkeypatch.setattr(admin_ops, "svc_list_email_deliveries", _raise_deliveries)
+        monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.list_email_deliveries", _raise_deliveries)
 
         with pytest.raises(HTTPException) as exc_info:
             await admin_ops.list_email_deliveries(
@@ -833,7 +833,7 @@ class TestAdminOpsErrorSanitization:
             assert status == "failed"
             return ([{"id": "delivery-2"}], 3)
 
-        monkeypatch.setattr(admin_ops, "svc_list_email_deliveries", _list_deliveries)
+        monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.list_email_deliveries", _list_deliveries)
 
         response = await admin_ops.list_email_deliveries(
             limit=2,
@@ -877,7 +877,7 @@ class TestAdminOpsErrorSanitization:
 
         messages: list[str] = []
         sink_id = admin_ops.logger.add(lambda message: messages.append(str(message)), level="ERROR")
-        monkeypatch.setattr(admin_ops, "reset_pricing_catalog", _raise_reload)
+        monkeypatch.setattr("tldw_Server_API.app.core.Usage.pricing_catalog.reset_pricing_catalog", _raise_reload)
 
         try:
             with pytest.raises(HTTPException) as exc_info:
@@ -901,7 +901,7 @@ class TestAdminOpsErrorSanitization:
 
         messages: list[str] = []
         sink_id = admin_ops.logger.add(lambda message: messages.append(str(message)), level="ERROR")
-        monkeypatch.setattr(admin_ops, "invalidate_model_alias_caches", _raise_reload)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.invalidate_model_alias_caches", _raise_reload)
 
         try:
             with pytest.raises(HTTPException) as exc_info:

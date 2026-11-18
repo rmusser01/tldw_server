@@ -29,12 +29,10 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     PromptStudioDatabase,
     SecurityConfig,
-    check_rate_limit,
     get_prompt_studio_db,
     get_prompt_studio_user,
     get_security_config,
     require_project_access,
-    require_project_write_access,
 )
 from tldw_Server_API.app.api.v1.utils.pagination import (
     build_page_pagination_meta,
@@ -72,8 +70,6 @@ from tldw_Server_API.app.core.Prompt_Management.optimization_model_config import
     normalize_optimization_strategy,
 )
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.job_types import JobType
-from tldw_Server_API.app.core.Prompt_Management.prompt_studio.jobs_adapter import PromptStudioJobsAdapter
-from tldw_Server_API.app.core.Prompt_Management.prompt_studio.monitoring import prompt_studio_metrics
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
@@ -558,7 +554,7 @@ async def _rl_optimizations(
     user_context: dict = Depends(get_prompt_studio_user),
     security_config: SecurityConfig = Depends(get_security_config),
 ) -> bool:
-    return await check_rate_limit(
+    return await _prompt_studio_deps.check_rate_limit(
         "optimize",
         user_context=user_context,
         security_config=security_config,
@@ -580,7 +576,7 @@ async def create_optimization_simple(
     req_id = ensure_request_id(request) if request is not None else None
     tp = ensure_traceparent(request) if request is not None else ""
     prompt_row, project_id = authoritative_prompt_project(db, prompt_id)
-    await require_project_write_access(
+    await _prompt_studio_deps.require_project_write_access(
         project_id,
         user_context=user_context,
         db=db,
@@ -618,7 +614,7 @@ async def create_optimization_simple(
         optimization_record["id"],
         {"test_case_ids": test_case_ids},
     )
-    adapter = PromptStudioJobsAdapter()
+    adapter = _jobs_adapter.PromptStudioJobsAdapter()
     job_payload: dict[str, Any] = {
         "optimization_id": optimization_record["id"],
         "optimization_uuid": optimization_record["uuid"],
@@ -772,7 +768,7 @@ async def create_optimization(
             )
 
         project_id = prompt_row["project_id"]
-        await require_project_write_access(project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_write_access(project_id, user_context=user_context, db=db)
         project_owner_user_id = _require_project_owner_user_id(
             db,
             project_id,
@@ -823,7 +819,7 @@ async def create_optimization(
                 existing_id = db.lookup_idempotency("optimization", idempotency_key, user_id_str)
                 if existing_id:
                     with contextlib.suppress(_OPTIMIZATION_NONCRITICAL_EXCEPTIONS):
-                        prompt_studio_metrics.metrics_manager.increment(
+                        _monitoring.prompt_studio_metrics.metrics_manager.increment(
                             "prompt_studio.idempotency.hit_total", labels={"entity_type": "optimization"}
                         )
                     existing_opt = db.get_optimization(existing_id)
@@ -869,7 +865,7 @@ async def create_optimization(
             try:
                 db.record_idempotency("optimization", idempotency_key, int(optimization_record["id"]), user_id_str)
                 with contextlib.suppress(_OPTIMIZATION_NONCRITICAL_EXCEPTIONS):
-                    prompt_studio_metrics.metrics_manager.increment(
+                    _monitoring.prompt_studio_metrics.metrics_manager.increment(
                         "prompt_studio.idempotency.miss_total", labels={"entity_type": "optimization"}
                     )
             except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS:
@@ -891,7 +887,7 @@ async def create_optimization(
         if req_id:
             job_payload["request_id"] = req_id
 
-        adapter = PromptStudioJobsAdapter()
+        adapter = _jobs_adapter.PromptStudioJobsAdapter()
         job = adapter.create_job(
             user_id=project_owner_user_id,
             job_type=JobType.OPTIMIZATION.value,
@@ -1049,7 +1045,7 @@ async def get_optimization(
                 detail=f"Optimization {optimization_id} not found",
             )
 
-        await require_project_access(
+        await _prompt_studio_deps.require_project_access(
             optimization.get("project_id"),
             user_context=user_context,
             db=db,
@@ -1103,7 +1099,7 @@ async def cancel_optimization(
             )
 
         project_id = optimization.get("project_id")
-        await require_project_write_access(project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_write_access(project_id, user_context=user_context, db=db)
         project = db.get_project(project_id)
         if not project:
             raise HTTPException(
@@ -1132,7 +1128,7 @@ async def cancel_optimization(
                 detail=f"Cannot cancel optimization with status: {status_value}",
             )
 
-        adapter = PromptStudioJobsAdapter()
+        adapter = _jobs_adapter.PromptStudioJobsAdapter()
         latest_job = adapter.get_latest_job_for_entity(
             db=db,
             user_id=project_owner_user_id,
@@ -1318,7 +1314,7 @@ async def get_optimization_job_status(
     db: PromptStudioDatabase = Depends(get_prompt_studio_db),
     user_context: dict = Depends(get_prompt_studio_user),
 ) -> dict[str, Any]:
-    adapter = PromptStudioJobsAdapter()
+    adapter = _jobs_adapter.PromptStudioJobsAdapter()
     job = adapter.get_job(
         job_id,
         db=db,
@@ -1374,13 +1370,13 @@ async def get_optimization_history(
         if not optimization or optimization.get("deleted"):
             raise HTTPException(status_code=404, detail="Optimization not found")
 
-        await require_project_access(
+        await _prompt_studio_deps.require_project_access(
             optimization.get("project_id"),
             user_context=user_context,
             db=db,
         )
 
-        adapter = PromptStudioJobsAdapter()
+        adapter = _jobs_adapter.PromptStudioJobsAdapter()
         job = adapter.get_latest_job_for_entity(
             db=db,
             user_id=user_context.get("user_id"),
@@ -1433,6 +1429,10 @@ async def get_optimization_history(
 # Iteration Events (persisted)
 
 from pydantic import BaseModel, Field
+import tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps as _prompt_studio_deps
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio.jobs_adapter import PromptStudioJobsAdapter
+import tldw_Server_API.app.core.Prompt_Management.prompt_studio.jobs_adapter as _jobs_adapter
+import tldw_Server_API.app.core.Prompt_Management.prompt_studio.monitoring as _monitoring
 
 
 class OptimizationIterationCreate(BaseModel):
@@ -1482,7 +1482,7 @@ async def add_optimization_iteration(
         if not optimization or optimization.get("deleted"):
             raise HTTPException(status_code=404, detail="Optimization not found")
 
-        await require_project_write_access(
+        await _prompt_studio_deps.require_project_write_access(
             optimization.get("project_id"),
             user_context=user_context,
             db=db,
@@ -1553,7 +1553,7 @@ async def list_optimization_iterations(
         if not optimization or optimization.get("deleted"):
             raise HTTPException(status_code=404, detail="Optimization not found")
 
-        await require_project_access(
+        await _prompt_studio_deps.require_project_access(
             optimization.get("project_id"),
             user_context=user_context,
             db=db,
@@ -1641,7 +1641,7 @@ async def compare_strategies(
             )
 
         project_id = prompt_row["project_id"]
-        await require_project_write_access(project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_write_access(project_id, user_context=user_context, db=db)
         project_owner_user_id = _require_project_owner_user_id(
             db,
             project_id,
@@ -1664,7 +1664,7 @@ async def compare_strategies(
         tp = ensure_traceparent(http_request) if http_request is not None else ""
         optimization_ids: list[int] = []
         job_ids: list[str] = []
-        adapter = PromptStudioJobsAdapter()
+        adapter = _jobs_adapter.PromptStudioJobsAdapter()
 
         for strategy in strategies:
             combined_config = normalize_durable_optimization_config({

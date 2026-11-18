@@ -275,7 +275,7 @@ def test_sources_check_now_reports_run_errors_and_missing_sources(client_with_us
     async def _raise_run_error(*_args, **_kwargs):
         raise RuntimeError("run_failed")
 
-    monkeypatch.setattr(watchlists_endpoints, "run_watchlist_job", _raise_run_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.Watchlists.pipeline.run_watchlist_job", _raise_run_error)
 
     c = client_with_user
     src_resp = c.post(
@@ -315,7 +315,7 @@ def test_sources_check_now_preserves_source_failure_status(client_with_user, mon
             db.update_source_scrape_meta(source_id, status=source_status)
         return {"run_id": None, "status": "failed"}
 
-    monkeypatch.setattr(endpoints, "run_watchlist_job", failed_run)
+    monkeypatch.setattr("tldw_Server_API.app.core.Watchlists.pipeline.run_watchlist_job", failed_run)
     response = client_with_user.post("/api/v1/watchlists/sources", json={
         "name": "Failed source", "url": "https://example.com/failure.xml", "source_type": "rss",
     })
@@ -1353,7 +1353,7 @@ def test_preview_site_sources_returns_items(client_with_user, monkeypatch):
 
     from tldw_Server_API.app.api.v1.endpoints import watchlists as watchlists_endpoints
 
-    monkeypatch.setattr(watchlists_endpoints, "fetch_site_items_with_rules", _fake_fetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Watchlists.fetchers.fetch_site_items_with_rules", _fake_fetch)
 
     # Create site source
     src_body = {
@@ -1499,7 +1499,7 @@ def test_output_creation_schedules_pending_enrichment(client_with_user, monkeypa
 
     endpoint_mod = import_module("tldw_Server_API.app.api.v1.endpoints.watchlists")
 
-    monkeypatch.setattr(endpoint_mod, "schedule_output_enrichment", fake_schedule_output_enrichment)
+    monkeypatch.setattr("tldw_Server_API.app.core.Watchlists.output_enrichment_handler.schedule_output_enrichment", fake_schedule_output_enrichment)
 
     r = c.post(
         "/api/v1/watchlists/sources",
@@ -1902,7 +1902,7 @@ def _over_quota_run(c, monkeypatch) -> tuple[int, list[list[dict]]]:
         summarized.append(items)
         return items
 
-    monkeypatch.setattr(watchlists_endpoint, "summarize_items_for_output", _summarize)
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.summarize_items_for_output", _summarize)
     r = c.post(
         "/api/v1/watchlists/sources",
         json={"name": "Quota Feed", "url": "https://example.com/quota.xml", "source_type": "rss", "tags": ["quota"]},
@@ -1933,7 +1933,7 @@ def test_output_summaries_name_their_provider_to_the_llm_quota(client_with_user,
         seen.append((getattr(kwargs.get("provider_credentials"), "api_key", None), current_llm_call_context().prechecked))
         return items
 
-    monkeypatch.setattr(watchlists_endpoint, "summarize_items_for_output", _summarize)
+    monkeypatch.setattr("tldw_Server_API.app.services.outputs_service.summarize_items_for_output", _summarize)
 
     r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "summarize": True, "llm_provider": "openai"})
 

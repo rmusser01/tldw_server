@@ -77,7 +77,7 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_watchlist_source_restored,
     record_watchlist_source_updated,
 )
-from tldw_Server_API.app.core.Scheduler import get_existing_global_scheduler, SchedulerError
+from tldw_Server_API.app.core.Scheduler import SchedulerError
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
@@ -91,26 +91,18 @@ from tldw_Server_API.app.core.Watchlists.briefing_contract import (
 from tldw_Server_API.app.core.Watchlists.briefing_delivery import (
     external_delivery_adapters,
     reconcile_successful_delivery_attempt,
-    schedule_briefing_delivery,
 )
-from tldw_Server_API.app.core.Watchlists.briefing_fulfillment import retry_briefing_stage
 from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
 from tldw_Server_API.app.core.Watchlists.fetchers import (
     fetch_rss_feed,
-    fetch_site_items_with_rules,
 )
 from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters as _evaluate_filters
 from tldw_Server_API.app.core.Watchlists.filters import normalize_filters as _normalize_job_filters
 from tldw_Server_API.app.core.Watchlists.opml import generate_opml, parse_opml
-from tldw_Server_API.app.core.Watchlists.output_enrichment_handler import schedule_output_enrichment
-from tldw_Server_API.app.core.Watchlists.pipeline import org_requires_include_default, run_watchlist_job
+from tldw_Server_API.app.core.Watchlists.pipeline import org_requires_include_default
 from tldw_Server_API.app.core.Watchlists.report_evidence import (
     build_legacy_live_only_readiness,
     build_report_evidence_snapshot,
-)
-from tldw_Server_API.app.core.Watchlists.watchlists_telemetry_metrics import (
-    record_onboarding_ingest_result,
-    record_summary_request,
 )
 from tldw_Server_API.app.core.Web_Scraping.selectors import validate_selector_rules
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as _DatabaseError
@@ -125,7 +117,6 @@ from tldw_Server_API.app.services.outputs_service import (
     build_source_name_map,
     group_items as _group_items,
     render_output_template,
-    summarize_items_for_output,
 )
 
 # Lazy/optional notifications import: avoid blocking router load if optional deps fail
@@ -281,6 +272,14 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     TemplateValidationResult,
     TemplateValidationErrorItem,
 )
+import tldw_Server_API.app.core.Scheduler as _Scheduler
+import tldw_Server_API.app.core.Watchlists.briefing_delivery as _briefing_delivery
+import tldw_Server_API.app.core.Watchlists.briefing_fulfillment as _briefing_fulfillment
+import tldw_Server_API.app.core.Watchlists.fetchers as _fetchers
+import tldw_Server_API.app.core.Watchlists.output_enrichment_handler as _output_enrichment_handler
+import tldw_Server_API.app.core.Watchlists.pipeline as _pipeline
+import tldw_Server_API.app.core.Watchlists.watchlists_telemetry_metrics as _watchlists_telemetry_metrics
+import tldw_Server_API.app.services.outputs_service as _outputs_service
 
 _WATCHLISTS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -2334,7 +2333,7 @@ async def check_sources_now(
     if active_source_ids:
         try:
             manual_job_id = _ensure_manual_refresh_job()
-            run_result = await run_watchlist_job(
+            run_result = await _pipeline.run_watchlist_job(
                 int(current_user.id),
                 manual_job_id,
                 tenant_id=_resolve_request_tenant_id(current_user),
@@ -2721,7 +2720,7 @@ async def _build_source_preview_response(
             )
             fetch_events: list[dict[str, Any]] = []
             try:
-                items = await fetch_site_items_with_rules(
+                items = await _fetchers.fetch_site_items_with_rules(
                     base_url=str(scrape_rules.get("list_url") or normalized_url),
                     rules=scrape_rules,
                     tenant_id=tenant_id,
@@ -3299,11 +3298,11 @@ async def record_watchlists_onboarding_telemetry(
         )
         accepted = bool(result.get("accepted"))
         code = result.get("code")
-        record_onboarding_ingest_result("accepted" if accepted else "rejected")
+        _watchlists_telemetry_metrics.record_onboarding_ingest_result("accepted" if accepted else "rejected")
         return WatchlistOnboardingTelemetryIngestResponse(accepted=accepted, code=code)
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         logger.debug("watchlists onboarding telemetry ingest failed")
-        record_onboarding_ingest_result("error")
+        _watchlists_telemetry_metrics.record_onboarding_ingest_result("error")
         return WatchlistOnboardingTelemetryIngestResponse(
             accepted=False,
             code="onboarding_telemetry_ingest_failed",
@@ -3341,7 +3340,7 @@ async def get_watchlists_onboarding_telemetry_summary(
             detail="watchlists_onboarding_telemetry_summary_failed",
         ) from exc
     finally:
-        record_summary_request(
+        _watchlists_telemetry_metrics.record_summary_request(
             "onboarding_summary",
             status_label,
             time.perf_counter() - started,
@@ -3426,7 +3425,7 @@ async def get_watchlists_rc_telemetry_summary(
         logger.error("watchlists RC telemetry summary failed")
         raise HTTPException(status_code=500, detail="watchlists_rc_telemetry_summary_failed") from exc
     finally:
-        record_summary_request(
+        _watchlists_telemetry_metrics.record_summary_request(
             "rc_summary",
             status_label,
             time.perf_counter() - started,
@@ -3724,7 +3723,7 @@ async def preview_job(
                         cfg = json.loads(src.settings_json or "{}") if getattr(src, "settings_json", None) else {}
                     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
                         cfg = {}
-                    per_items = await fetch_site_items_with_rules(str(src.url), rules=cfg.get("scrape_rules") or {})
+                    per_items = await _fetchers.fetch_site_items_with_rules(str(src.url), rules=cfg.get("scrape_rules") or {})
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(f"preview_job: fetch failed for source {src.id}: {exc}")
             per_items = []
@@ -4313,7 +4312,7 @@ async def trigger_run(
         raise HTTPException(status_code=404, detail="job_not_found") from None
 
     try:
-        result = await run_watchlist_job(
+        result = await _pipeline.run_watchlist_job(
             int(current_user.id),
             job_id,
             tenant_id=_resolve_request_tenant_id(current_user),
@@ -5409,7 +5408,7 @@ async def retry_watchlist_briefing_stage(
                 },
             )
         try:
-            await schedule_briefing_delivery(
+            await _briefing_delivery.schedule_briefing_delivery(
                 occurrence=occurrence,
                 audio_task_id=str(occurrence.audio_task_id) if occurrence.audio_task_id else None,
                 watchlists_db=target_db,
@@ -5422,7 +5421,7 @@ async def retry_watchlist_briefing_stage(
             raise HTTPException(status_code=503, detail="briefing_delivery_queue_unavailable") from exc
     else:
         try:
-            await retry_briefing_stage(
+            await _briefing_fulfillment.retry_briefing_stage(
                 user_id=resolved_user_id,
                 occurrence_id=int(occurrence.id),
                 stage=payload.stage,
@@ -5506,7 +5505,7 @@ async def retry_run_audio(
             )
             if retry_stage is None:
                 raise HTTPException(status_code=409, detail="stage_already_ready")
-            result = await retry_briefing_stage(
+            result = await _briefing_fulfillment.retry_briefing_stage(
                 user_id=resolved_user_id,
                 occurrence_id=int(occurrence.id),
                 stage=retry_stage,
@@ -5650,7 +5649,7 @@ async def retry_run_delivery(
         if not requested:
             raise HTTPException(status_code=409, detail="stage_already_ready")
         try:
-            task_id = await schedule_briefing_delivery(
+            task_id = await _briefing_delivery.schedule_briefing_delivery(
                 occurrence=occurrence,
                 audio_task_id=str(occurrence.audio_task_id) if occurrence.audio_task_id else None,
                 watchlists_db=target_db,
@@ -5898,7 +5897,7 @@ _SCHEDULER_AUDIO_STATUS_MAP = {
 async def _get_audio_scheduler_task_status(task_id: str) -> dict[str, Any] | None:
     """Return a safe Scheduler status snapshot for a Watchlists audio task."""
     try:
-        scheduler = await get_existing_global_scheduler()
+        scheduler = await _Scheduler.get_existing_global_scheduler()
         if scheduler is None:
             return None
         task = await scheduler.get_task(task_id)
@@ -7127,7 +7126,7 @@ async def create_output(
             for it in items
         ]
         try:
-            items_for_summary = await summarize_items_for_output(
+            items_for_summary = await _outputs_service.summarize_items_for_output(
                 items_for_summary, api_name=llm_provider, provider_credentials=own_key,
                 model_override=payload.llm_model,
                 custom_prompt=payload.summarize_prompt,
@@ -7682,7 +7681,7 @@ async def create_output(
         output = await _row_to_output(updated_row, user_id=user_id)
 
     if needs_async_enrichment:
-        await schedule_output_enrichment(
+        await _output_enrichment_handler.schedule_output_enrichment(
             output_id=int(output.id),
             user_id=int(user_id),
             grouping_config=payload.grouping,

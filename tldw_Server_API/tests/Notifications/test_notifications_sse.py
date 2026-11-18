@@ -110,7 +110,7 @@ async def test_notifications_stream_sanitizes_send_timeout_log(monkeypatch):
 
     fake_logger = MagicMock()
     monkeypatch.setattr(notifications_endpoint, "logger", fake_logger)
-    monkeypatch.setattr(notifications_endpoint, "SSEStream", _TimeoutSSEStream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Streaming.streams.SSEStream", _TimeoutSSEStream)
 
     response = await notifications_endpoint.stream_notifications(
         after=0,
@@ -130,7 +130,7 @@ async def test_notifications_stream_sanitizes_loop_error_log(monkeypatch):
 
     fake_logger = MagicMock()
     monkeypatch.setattr(notifications_endpoint, "logger", fake_logger)
-    monkeypatch.setattr(notifications_endpoint, "SSEStream", _LoopErrorSSEStream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Streaming.streams.SSEStream", _LoopErrorSSEStream)
     monkeypatch.setattr(
         notifications_endpoint.CollectionsDatabase,
         "for_user",

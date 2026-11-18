@@ -18,7 +18,6 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     SharedProviderKeyTestResponse,
     UserProviderKeyUpsertRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
     DatabaseConcurrencyConflict,
@@ -38,10 +37,7 @@ from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     is_byok_enabled,
-    is_provider_allowlisted,
-    is_trusted_base_url_request,
     validate_base_url_override,
-    validate_credential_fields,
 )
 from tldw_Server_API.app.core.Provider_Credentials.byok_testing import (
     provider_validation_public_error,
@@ -53,12 +49,12 @@ from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_re
 from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
     build_secret_payload,
-    decrypt_byok_payload,
-    dumps_envelope,
-    encrypt_byok_payload,
     key_hint_for_api_key,
-    loads_envelope,
 )
+import tldw_Server_API.app.core.AuthNZ.database as _database
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
+import tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_repo as _org_provider_secrets_repo
+import tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets as _user_provider_secrets
 
 router = APIRouter(prefix="", tags=["org-team-keys"])
 _ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
@@ -83,8 +79,8 @@ def _raise_provider_validation_http_error(exc: ChatAPIError) -> NoReturn:
 
 async def _get_shared_byok_repo() -> AuthnzOrgProviderSecretsRepo:
     try:
-        pool = await get_db_pool()
-        repo = AuthnzOrgProviderSecretsRepo(pool)
+        pool = await _database.get_db_pool()
+        repo = _org_provider_secrets_repo.AuthnzOrgProviderSecretsRepo(pool)
         await repo.ensure_tables()
         return repo
     except _BUSY_ERRORS as exc:
@@ -202,7 +198,7 @@ async def _touch_shared_last_used_if_match(
     if not encrypted_blob:
         return
     try:
-        payload = decrypt_byok_payload(loads_envelope(encrypted_blob))
+        payload = _user_provider_secrets.decrypt_byok_payload(_user_provider_secrets.loads_envelope(encrypted_blob))
     except Exception:
         return
     if payload.get("api_key") != api_key:
@@ -225,14 +221,14 @@ async def upsert_org_shared_key(
     await _require_org_manager(principal, org_id)
 
     provider_norm = canonical_provider_name(payload.provider)
-    if not is_provider_allowlisted(provider_norm):
+    if not _byok_helpers.is_provider_allowlisted(provider_norm):
         raise HTTPException(status_code=403, detail="Provider not allowed for BYOK")
 
     api_key = (payload.api_key or "").strip()
     if not api_key:
         raise HTTPException(status_code=400, detail="api_key is required")
 
-    allow_base_url = is_trusted_base_url_request(request, principal=principal)
+    allow_base_url = _byok_helpers.is_trusted_base_url_request(request, principal=principal)
     raw_fields = payload.credential_fields or {}
     if isinstance(raw_fields, dict) and "base_url" in raw_fields and not allow_base_url:
         raise HTTPException(
@@ -241,7 +237,7 @@ async def upsert_org_shared_key(
         )
 
     try:
-        credential_fields = validate_credential_fields(
+        credential_fields = _byok_helpers.validate_credential_fields(
             provider_norm,
             payload.credential_fields,
             allow_base_url=allow_base_url,
@@ -278,7 +274,7 @@ async def upsert_org_shared_key(
 
     secret_payload = build_secret_payload(api_key, credential_fields or None)
     try:
-        envelope = encrypt_byok_payload(secret_payload)
+        envelope = _user_provider_secrets.encrypt_byok_payload(secret_payload)
     except ValueError as exc:
         del exc
         raise_detached_error(
@@ -293,7 +289,7 @@ async def upsert_org_shared_key(
             scope_type="org",
             scope_id=org_id,
             provider=provider_norm,
-            encrypted_blob=dumps_envelope(envelope),
+            encrypted_blob=_user_provider_secrets.dumps_envelope(envelope),
             key_hint=key_hint_for_api_key(api_key),
             metadata=payload.metadata,
             updated_at=now,
@@ -371,7 +367,7 @@ async def test_org_shared_key(
     await _require_org_manager(principal, org_id)
 
     provider_norm = canonical_provider_name(payload.provider)
-    if not is_provider_allowlisted(provider_norm):
+    if not _byok_helpers.is_provider_allowlisted(provider_norm):
         raise HTTPException(status_code=403, detail="Provider not allowed for BYOK")
 
     repo = await _get_shared_byok_repo()
@@ -396,7 +392,7 @@ async def test_org_shared_key(
     if not encrypted_blob:
         raise HTTPException(status_code=404, detail="Key not found")
     try:
-        stored_payload = decrypt_byok_payload(loads_envelope(encrypted_blob))
+        stored_payload = _user_provider_secrets.decrypt_byok_payload(_user_provider_secrets.loads_envelope(encrypted_blob))
     except Exception:
         raise HTTPException(status_code=404, detail="Key not found") from None
 
@@ -404,14 +400,14 @@ async def test_org_shared_key(
     if not api_key:
         raise HTTPException(status_code=404, detail="Key not found")
 
-    allow_base_url = is_trusted_base_url_request(request, principal=principal)
+    allow_base_url = _byok_helpers.is_trusted_base_url_request(request, principal=principal)
     credential_fields_raw = stored_payload.get("credential_fields") or {}
     if isinstance(credential_fields_raw, dict) and "base_url" in credential_fields_raw and not allow_base_url:
         credential_fields_raw = dict(credential_fields_raw)
         credential_fields_raw.pop("base_url", None)
 
     try:
-        credential_fields = validate_credential_fields(
+        credential_fields = _byok_helpers.validate_credential_fields(
             provider_norm,
             credential_fields_raw,
             allow_base_url=allow_base_url,
@@ -517,14 +513,14 @@ async def upsert_team_shared_key(
     await _require_team_manager(principal, team_id)
 
     provider_norm = canonical_provider_name(payload.provider)
-    if not is_provider_allowlisted(provider_norm):
+    if not _byok_helpers.is_provider_allowlisted(provider_norm):
         raise HTTPException(status_code=403, detail="Provider not allowed for BYOK")
 
     api_key = (payload.api_key or "").strip()
     if not api_key:
         raise HTTPException(status_code=400, detail="api_key is required")
 
-    allow_base_url = is_trusted_base_url_request(request, principal=principal)
+    allow_base_url = _byok_helpers.is_trusted_base_url_request(request, principal=principal)
     raw_fields = payload.credential_fields or {}
     if isinstance(raw_fields, dict) and "base_url" in raw_fields and not allow_base_url:
         raise HTTPException(
@@ -533,7 +529,7 @@ async def upsert_team_shared_key(
         )
 
     try:
-        credential_fields = validate_credential_fields(
+        credential_fields = _byok_helpers.validate_credential_fields(
             provider_norm,
             payload.credential_fields,
             allow_base_url=allow_base_url,
@@ -570,7 +566,7 @@ async def upsert_team_shared_key(
 
     secret_payload = build_secret_payload(api_key, credential_fields or None)
     try:
-        envelope = encrypt_byok_payload(secret_payload)
+        envelope = _user_provider_secrets.encrypt_byok_payload(secret_payload)
     except ValueError as exc:
         del exc
         raise_detached_error(
@@ -585,7 +581,7 @@ async def upsert_team_shared_key(
             scope_type="team",
             scope_id=team_id,
             provider=provider_norm,
-            encrypted_blob=dumps_envelope(envelope),
+            encrypted_blob=_user_provider_secrets.dumps_envelope(envelope),
             key_hint=key_hint_for_api_key(api_key),
             metadata=payload.metadata,
             updated_at=now,
@@ -663,7 +659,7 @@ async def test_team_shared_key(
     await _require_team_manager(principal, team_id)
 
     provider_norm = canonical_provider_name(payload.provider)
-    if not is_provider_allowlisted(provider_norm):
+    if not _byok_helpers.is_provider_allowlisted(provider_norm):
         raise HTTPException(status_code=403, detail="Provider not allowed for BYOK")
 
     repo = await _get_shared_byok_repo()
@@ -688,7 +684,7 @@ async def test_team_shared_key(
     if not encrypted_blob:
         raise HTTPException(status_code=404, detail="Key not found")
     try:
-        stored_payload = decrypt_byok_payload(loads_envelope(encrypted_blob))
+        stored_payload = _user_provider_secrets.decrypt_byok_payload(_user_provider_secrets.loads_envelope(encrypted_blob))
     except Exception:
         raise HTTPException(status_code=404, detail="Key not found") from None
 
@@ -696,14 +692,14 @@ async def test_team_shared_key(
     if not api_key:
         raise HTTPException(status_code=404, detail="Key not found")
 
-    allow_base_url = is_trusted_base_url_request(request, principal=principal)
+    allow_base_url = _byok_helpers.is_trusted_base_url_request(request, principal=principal)
     credential_fields_raw = stored_payload.get("credential_fields") or {}
     if isinstance(credential_fields_raw, dict) and "base_url" in credential_fields_raw and not allow_base_url:
         credential_fields_raw = dict(credential_fields_raw)
         credential_fields_raw.pop("base_url", None)
 
     try:
-        credential_fields = validate_credential_fields(
+        credential_fields = _byok_helpers.validate_credential_fields(
             provider_norm,
             credential_fields_raw,
             allow_base_url=allow_base_url,

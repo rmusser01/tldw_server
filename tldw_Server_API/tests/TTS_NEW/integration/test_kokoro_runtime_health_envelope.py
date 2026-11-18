@@ -90,7 +90,7 @@ class _FakeCircuitManager:
 async def test_tts_health_error_log_is_sanitized(monkeypatch):
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_health, "logger", fake_logger)
-    monkeypatch.setattr(audio_health, "ensure_request_id", lambda _request: "req-test")
+    monkeypatch.setattr("tldw_Server_API.app.core.Logging.log_context.ensure_request_id", lambda _request: "req-test")
 
     health = await audio_health.get_tts_health(
         request=MagicMock(),
@@ -123,8 +123,7 @@ async def test_kokoro_health_marks_pytorch_runtime_missing_pipeline_as_unhealthy
     monkeypatch.setattr(adapter_registry, "get_tts_factory", _fake_get_tts_factory)
     monkeypatch.setattr(importlib.util, "find_spec", _fake_find_spec)
     monkeypatch.setattr(
-        audio_health,
-        "get_tts_config_manager",
+        "tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager",
         lambda: _FakeConfigManager(
             {
                 "kokoro": SimpleNamespace(enabled=True, api_key=None),
@@ -154,8 +153,7 @@ async def test_openai_health_marks_missing_api_key_as_unhealthy(monkeypatch):
 
     monkeypatch.setattr(adapter_registry, "get_tts_factory", _fake_get_tts_factory)
     monkeypatch.setattr(
-        audio_health,
-        "get_tts_config_manager",
+        "tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager",
         lambda: _FakeConfigManager(
             {
                 "openai": SimpleNamespace(enabled=True, api_key=None),
@@ -186,8 +184,7 @@ async def test_openai_health_marks_known_auth_failure_as_unhealthy(monkeypatch):
 
     monkeypatch.setattr(adapter_registry, "get_tts_factory", _fake_get_tts_factory)
     monkeypatch.setattr(
-        audio_health,
-        "get_tts_config_manager",
+        "tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager",
         lambda: _FakeConfigManager(
             {
                 "openai": SimpleNamespace(enabled=True, api_key="sk-live-but-bad"),

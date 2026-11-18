@@ -4290,3 +4290,40 @@ history, persona, moderation, message edits, and static ownership guards.
 
 ADR assessment: no new durable rule. This keeps existing migration, lock,
 wire, and audit ownership under the existing ADR-049, ADR-059 and ADR-080.
+
+## Stage 56: Capture and Runtime CI Follow-Up
+**Goal**: Clear the actual WebUI CI failure and preserve both migration paths
+while integrating the incoming endpoint collaborator changes.
+**Success Criteria**: The reviewed fixture fixes and the exact incoming
+preview pass focused and owning tests, contract checks, security, and normal
+preflight. The published successor must pass its own hosted gates.
+**Tests**: WebUI coverage, first-run and workspace context, selected durable
+chat, SQLite compatibility, canonical OpenAPI, and pre-commit.
+**Status**: In Progress
+
+1. Done locally: GitHub frontend-required failed on two WebUI capture cases
+   because jsdom provided no Web Locks. The fixture now installs and restores
+   a keyed lock on the existing navigator. Both original tests keep the real
+   storage shim and assertions. The full WebUI selection finished with 2,542
+   passes and 14 retained skips. A separate earlier run failed on seven
+   cases; the confirmed local differences were the scratch path and the
+   private copy's two Ant Design instances. No dependency or config edit
+   ships, and no native or hosted success is inferred.
+2. Done locally: The exact dev preview changes collaborator lookups. Five
+   setup assertions failed with obsolete mock targets, then passed after
+   three fixture-only target changes. Two workspace context cases passed.
+   The selected chat suite reproduced one intent fixture failure: its write
+   also advanced the row revision. Preserve the revision only for that
+   variant; all 134 original cases pass on the corrected fixture. The normal
+   live-state rejection remains tested. Both SQLite upgrade shapes and
+   rollback/reopen are retained; 10 dedicated compatibility cases passed.
+   No live PostgreSQL or provider run is claimed.
+3. Done locally: Scoped independent reviews found no remaining actionable
+   P1/P2. Canonical OpenAPI fingerprint and path checks passed. Bandit found
+   no new findings across 97 incoming production Python files and the two
+   changed Python fixtures; the reports are not raw-clean.
+4. Pending: Normal preflight, gated publication, exact successor hosted
+   results and applicable acceptance before any normal merge or cleanup.
+
+ADR assessment: no new durable rule; these are fixture corrections under
+the existing ADR-059 tracking and ADR-080 patch-target guidance.

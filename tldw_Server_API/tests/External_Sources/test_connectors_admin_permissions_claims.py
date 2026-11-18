@@ -85,7 +85,7 @@ async def _fake_policy(_: Any, __: int) -> Dict[str, Any]:
 @pytest.mark.asyncio
 async def test_connectors_admin_policy_401_when_principal_unavailable(monkeypatch):
     app = _build_app_with_overrides(principal=None, fail_with_401=True)
-    monkeypatch.setattr(connectors_mod, "get_policy", _fake_policy, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_policy", _fake_policy, raising=True)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/connectors/admin/policy", params={"org_id": 1})
@@ -103,7 +103,7 @@ async def test_connectors_admin_policy_403_when_missing_permission(monkeypatch):
         permissions=[],
     )
     app = _build_app_with_overrides(principal=principal)
-    monkeypatch.setattr(connectors_mod, "get_policy", _fake_policy, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_policy", _fake_policy, raising=True)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/connectors/admin/policy", params={"org_id": 1})
@@ -126,7 +126,7 @@ async def test_connectors_admin_policy_200_for_admin_principal(monkeypatch):
         permissions=[],
     )
     app = _build_app_with_overrides(principal=principal)
-    monkeypatch.setattr(connectors_mod, "get_policy", _fake_policy, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_policy", _fake_policy, raising=True)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/connectors/admin/policy", params={"org_id": 1})

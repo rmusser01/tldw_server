@@ -87,8 +87,7 @@ def test_create_evaluation_async_schedules_with_request_id(app, monkeypatch, ove
             return None
 
     monkeypatch.setattr(
-        eval_ep,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: _ResolvedRuntime(),
         raising=True,
     )

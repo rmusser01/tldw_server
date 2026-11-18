@@ -55,7 +55,7 @@ def test_started_metric_not_emitted_for_runtime_unavailable(monkeypatch: pytest.
     def _inc(*args: Any, **kwargs: Any) -> None:
         calls.append((args, kwargs))
 
-    monkeypatch.setattr(sandbox_endpoint, "increment_counter", _inc, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.increment_counter", _inc, raising=True)
     monkeypatch.setenv("TLDW_SANDBOX_FIRECRACKER_AVAILABLE", "0")
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
 
@@ -85,7 +85,7 @@ def test_started_metric_emitted_for_accepted_run(monkeypatch: pytest.MonkeyPatch
     def _inc(*args: Any, **kwargs: Any) -> None:
         calls.append((args, kwargs))
 
-    monkeypatch.setattr(sandbox_endpoint, "increment_counter", _inc, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.increment_counter", _inc, raising=True)
     _force_docker_preflight_available(monkeypatch)
 
     with _client(monkeypatch) as client:

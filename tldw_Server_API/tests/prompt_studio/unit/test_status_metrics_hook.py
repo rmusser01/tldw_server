@@ -34,17 +34,15 @@ def _patch_status_success_dependencies(monkeypatch):
 
     monkeypatch.setattr(prompt_studio_status, "_get_jobs_manager", lambda: _JobsManagerStub())
     monkeypatch.setattr(prompt_studio_status, "_get_prompt_studio_queue", lambda: "default")
-    monkeypatch.setattr(prompt_studio_status, "_get_by_status", lambda *args, **kwargs: {"queued": 1, "processing": 0})
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.queue_stats.get_by_status", lambda *args, **kwargs: {"queued": 1, "processing": 0})
     monkeypatch.setattr(
-        prompt_studio_status,
-        "_get_by_type_and_status",
+        "tldw_Server_API.app.core.Jobs.queue_stats.get_by_type_and_status",
         lambda *args, **kwargs: ({"optimization": 1}, {"optimization": 1}, {"optimization": 0}),
     )
-    monkeypatch.setattr(prompt_studio_status, "_get_avg_processing_time_seconds", lambda *args, **kwargs: 0.0)
-    monkeypatch.setattr(prompt_studio_status, "_get_success_rate", lambda *args, **kwargs: 100.0)
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.queue_stats.get_avg_processing_time_seconds", lambda *args, **kwargs: 0.0)
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.queue_stats.get_success_rate", lambda *args, **kwargs: 100.0)
     monkeypatch.setattr(
-        prompt_studio_status,
-        "_get_lease_stats",
+        "tldw_Server_API.app.core.Jobs.queue_stats.get_lease_stats",
         lambda *args, **kwargs: {"active": 0, "expiring_soon": 0, "stale_processing": 0},
     )
     monkeypatch.setattr(prompt_studio_status.JobManager, "set_rls_context", lambda **kwargs: None)
@@ -106,7 +104,7 @@ async def test_status_sanitizes_metrics_registry_failure(monkeypatch):
         raise RuntimeError("metrics registry leaked /private/metrics.sock")
 
     monkeypatch.setattr(prompt_studio_status, "logger", logger_stub)
-    monkeypatch.setattr(prompt_studio_status, "get_metrics_registry", _raise_metrics_failure)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", _raise_metrics_failure)
 
     response = await prompt_studio_status.get_prompt_studio_status(
         warn_seconds=30,
@@ -133,7 +131,7 @@ async def test_status_sanitizes_per_type_gauge_refresh_failure(monkeypatch):
         raise RuntimeError("per type gauge leaked /private/gauges.sock")
 
     monkeypatch.setattr(prompt_studio_status, "logger", logger_stub)
-    monkeypatch.setattr(prompt_studio_status, "get_metrics_registry", lambda: _RegistryStub())
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: _RegistryStub())
     monkeypatch.setattr(
         prompt_studio_status.prompt_studio_metrics,
         "update_job_queue_size",

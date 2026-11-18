@@ -99,7 +99,7 @@ class TestACPAdminSessionsList:
         _run(_seed())
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+            "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
             mock.AsyncMock(return_value=store),
         )
 
@@ -142,7 +142,7 @@ class TestACPAgentMetrics:
 
         async def _run_test():
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
@@ -165,7 +165,7 @@ class TestACPAgentMetrics:
             await _add_usage(store, "s2", 200, 100)
 
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
@@ -197,7 +197,7 @@ class TestACPAgentMetrics:
             await _add_usage(store, "s2", 300, 200)   # 500 total
 
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
@@ -222,7 +222,7 @@ class TestACPAgentMetrics:
             await store.close_session("s2")
 
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
@@ -246,7 +246,7 @@ class TestACPAgentMetrics:
             await _add_usage(store, "s1", 10, 5)
 
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
@@ -283,7 +283,7 @@ class TestACPExecutionHealthSummary:
 
         async def _run_test():
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
@@ -376,7 +376,7 @@ class TestACPExecutionHealthSummary:
             )
 
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             monkeypatch.setattr(
@@ -444,7 +444,7 @@ class TestACPExecutionHealthSummary:
 
         async def _run_test():
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             monkeypatch.setattr(
@@ -511,7 +511,7 @@ class TestACPExecutionHealthSummary:
 
         async def _run_test():
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             monkeypatch.setattr(
@@ -585,7 +585,7 @@ class TestACPSessionBudget:
             await _register_session(store, "s1")
 
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
@@ -614,7 +614,7 @@ class TestACPSessionBudget:
             await _register_session(store, "s1", token_budget=1000, auto_terminate=True)
 
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
@@ -637,7 +637,7 @@ class TestACPSessionBudget:
 
         async def _run_test():
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
@@ -664,7 +664,7 @@ class TestACPSessionBudget:
             await _add_usage(store, "s1", 200, 100)  # 300 total
 
             monkeypatch.setattr(
-                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
                 mock.AsyncMock(return_value=store),
             )
             from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (

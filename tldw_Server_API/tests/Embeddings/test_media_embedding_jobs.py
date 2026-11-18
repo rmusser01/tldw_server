@@ -53,7 +53,7 @@ async def test_list_media_embedding_jobs_includes_canonical_overfetch_pagination
             ]
             return rows[:limit]
 
-    monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _FakeJobsAdapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _FakeJobsAdapter)
 
     response = await media_embeddings_endpoint.list_media_embedding_jobs(
         current_user=SimpleNamespace(id=1),
@@ -128,7 +128,7 @@ async def test_media_embedding_job_lifecycle(monkeypatch):
         settings["ALLOWED_EMBEDDING_PROVIDERS"] = ["openai", "huggingface"]
         settings["ALLOWED_EMBEDDING_MODELS"] = ["text-embedding-3-small", "sentence-transformers/all-MiniLM-L6-v2"]
         settings["EMBEDDING_MODEL_MAX_TOKENS"] = {"openai:text-embedding-3-small": 8192}
-        monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _LifecycleJobsAdapter)
+        monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _LifecycleJobsAdapter)
 
         current_user = SimpleNamespace(id=1)
         response = await media_embeddings_endpoint.generate_embeddings(
@@ -182,7 +182,7 @@ async def test_media_embedding_job_returns_500_when_job_creation_fails(monkeypat
             def create_job(self, **_kwargs):
                 raise RuntimeError("queue unavailable")
 
-        monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _FailingAdapter)
+        monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _FailingAdapter)
 
         with pytest.raises(HTTPException) as exc_info:
             await media_embeddings_endpoint.generate_embeddings(
@@ -207,7 +207,7 @@ async def test_media_embedding_job_returns_500_when_job_id_missing(monkeypatch):
             def create_job(self, **_kwargs):
                 return {}
 
-        monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _EmptyAdapter)
+        monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _EmptyAdapter)
 
         with pytest.raises(HTTPException) as exc_info:
             await media_embeddings_endpoint.generate_embeddings(
@@ -235,7 +235,7 @@ async def test_media_embedding_batch_returns_partial_on_partial_enqueue_failure(
                     raise RuntimeError("enqueue failed")
                 return {"uuid": f"job-{media_id}"}
 
-        monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _PartialAdapter)
+        monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _PartialAdapter)
 
         body = await media_embeddings_endpoint.generate_embeddings_batch(
             request=media_embeddings_endpoint.BatchMediaEmbeddingsRequest(media_ids=[123, 456]),
@@ -262,7 +262,7 @@ async def test_media_embedding_batch_returns_accepted_with_empty_failure_lists(m
                 media_id = int(kwargs["media_id"])
                 return {"uuid": f"job-{media_id}"}
 
-        monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _SuccessfulAdapter)
+        monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _SuccessfulAdapter)
 
         body = await media_embeddings_endpoint.generate_embeddings_batch(
             request=media_embeddings_endpoint.BatchMediaEmbeddingsRequest(media_ids=[123, 456]),
@@ -288,7 +288,7 @@ async def test_media_embedding_batch_returns_500_when_nothing_queued(monkeypatch
             def create_job(self, **_kwargs):
                 raise RuntimeError("enqueue failed")
 
-        monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _FailingAdapter)
+        monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _FailingAdapter)
 
         with pytest.raises(HTTPException) as exc_info:
             await media_embeddings_endpoint.generate_embeddings_batch(
@@ -316,7 +316,7 @@ async def test_media_embedding_batch_returns_500_when_batch_job_id_missing(monke
             def create_job(self, **_kwargs):
                 return {}
 
-        monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _MissingIdAdapter)
+        monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.jobs_adapter.EmbeddingsJobsAdapter", _MissingIdAdapter)
 
         with pytest.raises(HTTPException) as exc_info:
             await media_embeddings_endpoint.generate_embeddings_batch(

@@ -36,9 +36,9 @@ async def test_get_media_item_passes_media_context_to_http_error_mapper(monkeypa
         captured.update(kwargs)
         return HTTPException(status_code=500, detail="Database error retrieving media details")
 
-    monkeypatch.setattr(item_mod, "is_test_mode", lambda: False)
-    monkeypatch.setattr(item_mod, "get_full_media_details_rich", _raise_db_error)
-    monkeypatch.setattr(item_mod, "map_db_error_to_http", _fake_mapper)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_full_media_details_rich", _raise_db_error)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.http_errors.map_db_error_to_http", _fake_mapper)
 
     with pytest.raises(HTTPException) as exc_info:
         await item_mod.get_media_item(
@@ -79,7 +79,7 @@ async def test_update_media_keywords_returns_not_found_for_missing_media(monkeyp
         def update_keywords_for_media(self, *, media_id: int, keywords: list[str]):
             raise InputError(f"Cannot update keywords: Media ID {media_id} not found or deleted.")
 
-    monkeypatch.setattr(item_mod, "fetch_keywords_for_media", lambda *args, **kwargs: ["alpha"])
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.fetch_keywords_for_media", lambda *args, **kwargs: ["alpha"])
 
     with pytest.raises(HTTPException) as exc_info:
         await item_mod.update_media_keywords(
@@ -98,7 +98,7 @@ async def test_update_media_keywords_returns_stable_500_for_unexpected_errors(mo
     def _explode(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(item_mod, "fetch_keywords_for_media", _explode)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.fetch_keywords_for_media", _explode)
 
     with pytest.raises(HTTPException) as exc_info:
         await item_mod.update_media_keywords(

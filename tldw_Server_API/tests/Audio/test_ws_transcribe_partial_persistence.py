@@ -52,7 +52,6 @@ if "transformers" not in sys.modules:
     _fake_tf.Qwen2AudioForConditionalGeneration = _StubModel
     sys.modules["transformers"] = _fake_tf
 
-from tldw_Server_API.app.api.v1.endpoints import audio
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_streaming
 from tldw_Server_API.app.core import config as config_module
 
@@ -107,22 +106,14 @@ def _mock_transcribe_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _finish_stream(_user_id: int) -> None:
         return None
 
-    async def _allow_minutes(_uid: int, _minutes: float) -> tuple[bool, float | None]:
+    async def _allow_minutes(_uid: int, _minutes: float, **_kwargs) -> tuple[bool, float | None]:
         return True, None
 
-    async def _add_minutes(_uid: int, _minutes: float) -> None:
-        return None
-
-    async def _heartbeat(_uid: int) -> None:
-        return None
-
-    monkeypatch.setattr(audio, "_audio_ws_authenticate", _auth)
-    monkeypatch.setattr(audio, "can_start_stream", _can_start_stream)
-    monkeypatch.setattr(audio, "finish_stream", _finish_stream)
-    monkeypatch.setattr(audio, "check_daily_minutes_allow", _allow_minutes)
-    monkeypatch.setattr(audio, "add_daily_minutes", _add_minutes)
-    monkeypatch.setattr(audio, "heartbeat_stream", _heartbeat)
-    monkeypatch.setattr(audio_streaming, "is_multi_user_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", _auth)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _can_start_stream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_stream", _finish_stream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_minutes)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_multi_user_mode", lambda: False)
 
     # Import unified streaming before patching the shared streams module so
     # these tests do not leak a patched WebSocketStream binding into later
@@ -151,7 +142,7 @@ async def test_stream_transcribe_persists_partial_and_final(monkeypatch: pytest.
     db = DummyMediaDB()
     calls: list[dict[str, Any]] = []
 
-    monkeypatch.setattr(audio_streaming, "_resolve_media_db_for_user", lambda _user: db)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.DB_Deps._resolve_media_db_for_user", lambda _user: db)
 
     def _upsert(
         db_instance,
@@ -213,7 +204,7 @@ async def test_stream_transcribe_skips_persistence_when_disabled(monkeypatch: py
     ws = DummyWebSocket(query_params={"media_id": "42"})
     calls: list[dict[str, Any]] = []
 
-    monkeypatch.setattr(audio_streaming, "_resolve_media_db_for_user", lambda _user: DummyMediaDB())
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.DB_Deps._resolve_media_db_for_user", lambda _user: DummyMediaDB())
 
     def _upsert(
         db_instance,
@@ -273,7 +264,7 @@ async def test_stream_transcribe_persistence_fail_open(monkeypatch: pytest.Monke
     db = DummyMediaDB()
     call_count = {"count": 0}
 
-    monkeypatch.setattr(audio_streaming, "_resolve_media_db_for_user", lambda _user: db)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.DB_Deps._resolve_media_db_for_user", lambda _user: db)
 
     def _upsert_raises(
         db_instance,
@@ -327,7 +318,7 @@ async def test_stream_transcribe_uses_default_streaming_model_from_config(monkey
     cfg.add_section("STT-Settings")
     cfg.set("STT-Settings", "default_streaming_transcription_model", "parakeet-onnx")
     cfg.set("STT-Settings", "nemo_model_variant", "standard")
-    monkeypatch.setattr(audio_streaming, "load_comprehensive_config", lambda: cfg)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: cfg)
 
     captured: dict[str, str] = {}
 
@@ -357,7 +348,7 @@ def test_default_streaming_model_auto_uses_mlx_on_macos(monkeypatch: pytest.Monk
     cfg.add_section("STT-Settings")
     cfg.set("STT-Settings", "default_streaming_transcription_model", "auto")
     cfg.set("STT-Settings", "nemo_model_variant", "onnx")
-    monkeypatch.setattr(audio_streaming, "load_comprehensive_config", lambda: cfg)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: cfg)
     monkeypatch.setattr(config_module.platform, "system", lambda: "Darwin")
 
     model, variant, _ = audio_streaming._resolve_default_streaming_model()
@@ -371,7 +362,7 @@ def test_default_streaming_model_auto_uses_onnx_off_macos(monkeypatch: pytest.Mo
     cfg.add_section("STT-Settings")
     cfg.set("STT-Settings", "default_streaming_transcription_model", "auto")
     cfg.set("STT-Settings", "nemo_model_variant", "mlx")
-    monkeypatch.setattr(audio_streaming, "load_comprehensive_config", lambda: cfg)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: cfg)
     monkeypatch.setattr(config_module.platform, "system", lambda: "Linux")
 
     model, variant, _ = audio_streaming._resolve_default_streaming_model()
@@ -414,7 +405,7 @@ async def test_stream_transcribe_emits_redaction_metric_for_outbound_payload(
             {"type": "transcription", "text": "contact alice@example.com", "is_final": True}
         )
 
-    monkeypatch.setattr(audio_streaming, "resolve_effective_stt_policy", _resolve_policy)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy.resolve_effective_stt_policy", _resolve_policy)
     monkeypatch.setattr(audio_streaming, "handle_unified_websocket", _mock_handle)
 
     try:
@@ -495,7 +486,7 @@ async def test_stream_transcribe_redacts_partial_and_final_payloads_when_partial
     db = DummyMediaDB()
     calls: list[dict[str, Any]] = []
 
-    monkeypatch.setattr(audio_streaming, "_resolve_media_db_for_user", lambda _user: db)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.DB_Deps._resolve_media_db_for_user", lambda _user: db)
 
     def _upsert(
         db_instance,
@@ -582,7 +573,7 @@ async def test_stream_transcribe_allows_unredacted_partials_but_redacts_final_pa
     db = DummyMediaDB()
     calls: list[dict[str, Any]] = []
 
-    monkeypatch.setattr(audio_streaming, "_resolve_media_db_for_user", lambda _user: db)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.DB_Deps._resolve_media_db_for_user", lambda _user: db)
 
     def _upsert(
         db_instance,

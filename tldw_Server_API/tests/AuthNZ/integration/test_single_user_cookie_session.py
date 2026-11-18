@@ -164,8 +164,7 @@ def test_revoked_cookie_is_replaced_on_mint(
         raise SessionRevokedException()
 
     monkeypatch.setattr(
-        auth_endpoints,
-        "validate_single_user_session",
+        "tldw_Server_API.app.core.AuthNZ.single_user_session.validate_single_user_session",
         revoked_session,
     )
     replacement = _mint(client, api_key)
@@ -188,8 +187,7 @@ def test_mint_returns_no_store_503_when_strict_validation_fails(
         return None
 
     monkeypatch.setattr(
-        auth_endpoints,
-        "validate_single_user_session",
+        "tldw_Server_API.app.core.AuthNZ.single_user_session.validate_single_user_session",
         fail_only_when_strict,
     )
 
@@ -335,8 +333,7 @@ def test_logout_preserves_cookie_when_strict_validation_fails(
         return None
 
     monkeypatch.setattr(
-        auth_endpoints,
-        "validate_single_user_session",
+        "tldw_Server_API.app.core.AuthNZ.single_user_session.validate_single_user_session",
         fail_only_when_strict,
     )
 

@@ -87,10 +87,10 @@ async def api_case(tmp_path, monkeypatch):
 
     monkeypatch.setattr(classification, "perform_chat_api_call_async", provider)
     monkeypatch.setattr(classification, "audited_transport", lambda p: p == "llama.cpp")
-    monkeypatch.setattr(moderation, "audited_transport", lambda p: p == "llama.cpp", raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Moderation.classification.audited_transport", lambda p: p == "llama.cpp", raising=False)
     # These names are supplied by the new boundary; raising=False establishes a real 404 red first.
-    monkeypatch.setattr(moderation, "ProviderCredentialRuntime", Runtime, raising=False)
-    monkeypatch.setattr(moderation, "load_server_config_snapshot", lambda: {}, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", Runtime, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", lambda: {}, raising=False)
     app = FastAPI()
     app.add_middleware(SlidesGenerationDisconnectMiddleware)
     app.include_router(moderation.router, prefix="/api/v1")

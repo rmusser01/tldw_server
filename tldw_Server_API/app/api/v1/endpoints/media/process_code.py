@@ -22,10 +22,6 @@ from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Ingestion_Media_Processing.code_utils import (
     chunk_code_lines,
     detect_code_language,
-    read_text_safe,
-)
-from tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils import (
-    download_url_async,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
@@ -39,6 +35,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import (
     CODE_FILE_EXTENSIONS,
 )
 from tldw_Server_API.app.core.testing import is_test_mode
+import tldw_Server_API.app.core.Ingestion_Media_Processing.code_utils as _code_utils
+import tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils as _download_utils
 
 router = APIRouter()
 
@@ -155,7 +153,7 @@ async def process_code_endpoint(
         # Handle URLs
         if urls:
             tasks = [
-                download_url_async(
+                _download_utils.download_url_async(
                     client=None,
                     url=u,
                     target_dir=temp_dir,
@@ -225,7 +223,7 @@ async def process_code_endpoint(
                 filename = local_path.name
                 language = detect_code_language(filename)
                 try:
-                    text = read_text_safe(local_path)
+                    text = _code_utils.read_text_safe(local_path)
                 except Exception as exc:
                     # TEST_MODE diagnostics for read errors after successful save
                     try:

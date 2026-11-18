@@ -151,10 +151,10 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleN
     app.dependency_overrides[get_media_db_for_user] = MediaStore
     app.dependency_overrides[get_prompts_db_for_user] = settings_database
     app.dependency_overrides[get_auth_principal] = principal
-    monkeypatch.setattr(endpoint, "get_prompts_db_for_user", database, raising=False)
-    monkeypatch.setattr(endpoint, "get_default_provider", lambda: "openai")
-    monkeypatch.setattr(endpoint, "resolve_provider_api_key", provider_key)
-    monkeypatch.setattr(endpoint, "load_and_log_configs", provider_config)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps.get_prompts_db_for_user", database, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_default_provider", lambda: "openai")
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", provider_key)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_and_log_configs", provider_config)
     monkeypatch.setattr(OpenAIAdapter, "chat", model)
     monkeypatch.setattr(cache, "get_cache_client", CacheTransport)
     with TestClient(app, raise_server_exceptions=False) as client:

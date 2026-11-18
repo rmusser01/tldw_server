@@ -702,7 +702,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=False),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                "tldw_Server_API.app.core.Scheduler.get_existing_global_scheduler",
                 new=AsyncMock(return_value=scheduler),
             ),
         ):
@@ -750,7 +750,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=False),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                "tldw_Server_API.app.core.Scheduler.get_existing_global_scheduler",
                 new=AsyncMock(return_value=scheduler),
             ),
         ):
@@ -950,7 +950,7 @@ class TestGetRunAudioEndpoint:
 
         with (
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                "tldw_Server_API.app.core.Scheduler.get_existing_global_scheduler",
                 new=AsyncMock(return_value=scheduler),
             ),
             patch.object(watchlists.logger, "warning") as warning,
@@ -1101,7 +1101,7 @@ class TestGetRunAudioEndpoint:
                 return_value=mock_wf_db,
             ),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                "tldw_Server_API.app.core.Scheduler.get_existing_global_scheduler",
                 new=AsyncMock(return_value=scheduler),
             ),
         ):
@@ -1166,7 +1166,7 @@ class TestGetRunAudioEndpoint:
                 return_value=mock_wf_db,
             ),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                "tldw_Server_API.app.core.Scheduler.get_existing_global_scheduler",
                 new=AsyncMock(return_value=scheduler),
             ),
         ):
@@ -1240,7 +1240,7 @@ class TestGetRunAudioEndpoint:
                 return_value=mock_wf_db,
             ),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                "tldw_Server_API.app.core.Scheduler.get_existing_global_scheduler",
                 new=AsyncMock(return_value=scheduler),
             ),
         ):
@@ -1344,7 +1344,7 @@ class TestGetRunAudioEndpoint:
                 return_value=mock_wf_db,
             ),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                "tldw_Server_API.app.core.Scheduler.get_existing_global_scheduler",
                 new=AsyncMock(return_value=scheduler),
             ),
         ):
@@ -1372,7 +1372,7 @@ class TestGetRunAudioEndpoint:
         scheduler.get_task = AsyncMock(side_effect=asyncio.CancelledError())
 
         with patch(
-            "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+            "tldw_Server_API.app.core.Scheduler.get_existing_global_scheduler",
             new=AsyncMock(return_value=scheduler),
         ):
             with pytest.raises(asyncio.CancelledError):
@@ -1412,7 +1412,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=False),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                "tldw_Server_API.app.core.Scheduler.get_existing_global_scheduler",
                 new=AsyncMock(return_value=scheduler),
             ),
         ):

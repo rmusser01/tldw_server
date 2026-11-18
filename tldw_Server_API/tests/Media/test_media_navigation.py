@@ -80,9 +80,8 @@ async def test_navigation_prefers_pdf_outline(mock_user, mock_db, mock_storage):
         SimpleNamespace(level=2, title="Section 1.1", page=3),
     ]
 
-    with patch.object(
-        navigation_mod,
-        "get_storage_backend",
+    with patch(
+        "tldw_Server_API.app.core.Storage.get_storage_backend",
         return_value=mock_storage,
     ), patch.object(
         navigation_mod,
@@ -92,13 +91,11 @@ async def test_navigation_prefers_pdf_outline(mock_user, mock_db, mock_storage):
         navigation_mod,
         "_extract_pdf_outline",
         return_value=(outline_entries, 12),
-    ), patch.object(
-        navigation_mod,
-        "get_cached_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.get_cached_response",
         return_value=None,
-    ), patch.object(
-        navigation_mod,
-        "cache_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.cache_response",
         return_value="etag",
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -164,9 +161,8 @@ async def test_navigation_falls_back_to_document_structure_index(mock_user, mock
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(navigation_mod, "get_cached_response", return_value=None), patch.object(
-        navigation_mod,
-        "cache_response",
+    with patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.cache_response",
         return_value="etag",
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -224,9 +220,8 @@ async def test_navigation_falls_back_to_chunk_metadata(mock_user, mock_db):
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(navigation_mod, "get_cached_response", return_value=None), patch.object(
-        navigation_mod,
-        "cache_response",
+    with patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.cache_response",
         return_value="etag",
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -289,13 +284,11 @@ async def test_navigation_falls_back_to_transcript_segments(mock_user, mock_db):
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(navigation_mod, "get_media_transcripts", return_value=[{"transcription": json.dumps(transcript_payload)}]), patch.object(
-        navigation_mod,
-        "get_cached_response",
+    with patch.object(navigation_mod, "get_media_transcripts", return_value=[{"transcription": json.dumps(transcript_payload)}]), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.get_cached_response",
         return_value=None,
-    ), patch.object(
-        navigation_mod,
-        "cache_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.cache_response",
         return_value="etag",
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -354,13 +347,11 @@ async def test_navigation_generated_fallback_is_opt_in(mock_user, mock_db):
         navigation_mod,
         "get_document_version",
         return_value={"content": generated_source_text},
-    ), patch.object(
-        navigation_mod,
-        "get_cached_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.get_cached_response",
         return_value=None,
-    ), patch.object(
-        navigation_mod,
-        "cache_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.cache_response",
         return_value="etag",
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -436,7 +427,7 @@ async def test_navigation_prefers_generated_when_pdf_outline_is_sparse(mock_user
         "More details."
     )
 
-    with patch.object(navigation_mod, "get_storage_backend", return_value=mock_storage), patch.object(
+    with patch("tldw_Server_API.app.core.Storage.get_storage_backend", return_value=mock_storage), patch.object(
         navigation_mod,
         "_check_pymupdf_available",
         return_value=True,
@@ -448,13 +439,11 @@ async def test_navigation_prefers_generated_when_pdf_outline_is_sparse(mock_user
         navigation_mod,
         "get_document_version",
         return_value={"content": generated_source_text},
-    ), patch.object(
-        navigation_mod,
-        "get_cached_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.get_cached_response",
         return_value=None,
-    ), patch.object(
-        navigation_mod,
-        "cache_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.cache_response",
         return_value="etag",
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -506,7 +495,7 @@ async def test_navigation_keeps_sparse_pdf_outline_when_no_fallback_enabled(mock
         SimpleNamespace(level=1, title="Contents", page=2),
     ]
 
-    with patch.object(navigation_mod, "get_storage_backend", return_value=mock_storage), patch.object(
+    with patch("tldw_Server_API.app.core.Storage.get_storage_backend", return_value=mock_storage), patch.object(
         navigation_mod,
         "_check_pymupdf_available",
         return_value=True,
@@ -514,13 +503,11 @@ async def test_navigation_keeps_sparse_pdf_outline_when_no_fallback_enabled(mock
         navigation_mod,
         "_extract_pdf_outline",
         return_value=(sparse_outline_entries, 20),
-    ), patch.object(
-        navigation_mod,
-        "get_cached_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.get_cached_response",
         return_value=None,
-    ), patch.object(
-        navigation_mod,
-        "cache_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.cache_response",
         return_value="etag",
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -593,13 +580,11 @@ async def test_navigation_prefers_generated_toc_when_contents_block_exists(mock_
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(navigation_mod, "get_document_version", return_value={"content": toc_content}), patch.object(
-        navigation_mod,
-        "get_cached_response",
+    with patch.object(navigation_mod, "get_document_version", return_value={"content": toc_content}), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.get_cached_response",
         return_value=None,
-    ), patch.object(
-        navigation_mod,
-        "cache_response",
+    ), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.cache_response",
         return_value="etag",
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -759,9 +744,8 @@ async def test_navigation_guardrails_and_parent_filter(mock_user, mock_db):
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(navigation_mod, "get_cached_response", return_value=None), patch.object(
-        navigation_mod,
-        "cache_response",
+    with patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None), patch(
+        "tldw_Server_API.app.api.v1.utils.cache.cache_response",
         return_value="etag",
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -790,7 +774,7 @@ async def test_navigation_returns_404_when_media_missing(mock_user, mock_db):
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(navigation_mod, "get_cached_response", return_value=None):
+    with patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/media/999/navigation")
 

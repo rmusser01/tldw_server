@@ -130,9 +130,9 @@ def test_onedrive_webhook_enqueues_incremental_sync_and_dedupes(connectors_clien
             "counts": {"processed": 0, "skipped": 0, "failed": 0},
         }
 
-    monkeypatch.setattr(ep, "get_source_by_webhook_subscription", _fake_get_source_by_webhook_subscription)
-    monkeypatch.setattr(ep, "record_webhook_receipt", _fake_record_webhook_receipt)
-    monkeypatch.setattr(ep, "create_import_job", _fake_create_import_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_webhook_subscription", _fake_get_source_by_webhook_subscription)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.record_webhook_receipt", _fake_record_webhook_receipt)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_import_job", _fake_create_import_job)
 
     payload = {"value": [{"subscriptionId": "sub-1", "changeType": "updated", "clientState": "state-123"}]}
 
@@ -184,9 +184,9 @@ def test_onedrive_webhook_ignores_invalid_client_state(connectors_client, monkey
     async def _unexpected_create_import_job(*args, **kwargs):
         raise AssertionError("invalid webhook notifications must not enqueue sync jobs")
 
-    monkeypatch.setattr(ep, "get_source_by_webhook_subscription", _fake_get_source_by_webhook_subscription)
-    monkeypatch.setattr(ep, "record_webhook_receipt", _unexpected_record_webhook_receipt)
-    monkeypatch.setattr(ep, "create_import_job", _unexpected_create_import_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_webhook_subscription", _fake_get_source_by_webhook_subscription)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.record_webhook_receipt", _unexpected_record_webhook_receipt)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_import_job", _unexpected_create_import_job)
 
     response = client.post(
         "/api/v1/connectors/providers/onedrive/webhook",
@@ -245,9 +245,9 @@ def test_drive_webhook_enqueues_incremental_sync_and_dedupes(connectors_client, 
             "counts": {"processed": 0, "skipped": 0, "failed": 0},
         }
 
-    monkeypatch.setattr(ep, "get_source_by_webhook_subscription", _fake_get_source_by_webhook_subscription)
-    monkeypatch.setattr(ep, "record_webhook_receipt", _fake_record_webhook_receipt)
-    monkeypatch.setattr(ep, "create_import_job", _fake_create_import_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_webhook_subscription", _fake_get_source_by_webhook_subscription)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.record_webhook_receipt", _fake_record_webhook_receipt)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_import_job", _fake_create_import_job)
 
     request_headers = dict(headers)
     request_headers.update(
@@ -300,9 +300,9 @@ def test_drive_webhook_ignores_invalid_channel_token(connectors_client, monkeypa
     async def _unexpected_create_import_job(*args, **kwargs):
         raise AssertionError("invalid drive notifications must not enqueue sync jobs")
 
-    monkeypatch.setattr(ep, "get_source_by_webhook_subscription", _fake_get_source_by_webhook_subscription)
-    monkeypatch.setattr(ep, "record_webhook_receipt", _unexpected_record_webhook_receipt)
-    monkeypatch.setattr(ep, "create_import_job", _unexpected_create_import_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_webhook_subscription", _fake_get_source_by_webhook_subscription)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.record_webhook_receipt", _unexpected_record_webhook_receipt)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_import_job", _unexpected_create_import_job)
 
     request_headers = dict(headers)
     request_headers.update(

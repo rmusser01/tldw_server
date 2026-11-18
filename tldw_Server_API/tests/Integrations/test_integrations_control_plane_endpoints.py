@@ -238,7 +238,7 @@ def test_personal_slack_connect_route_returns_auth_url(
             "expires_at": "2026-03-20T22:00:00+00:00",
         }
 
-    monkeypatch.setattr(integrations_module, "slack_oauth_start_impl", _fake_start)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.slack_oauth_admin.slack_oauth_start_impl", _fake_start)
 
     response = client.post("/api/v1/integrations/personal/slack/connect", headers=auth_headers)
 

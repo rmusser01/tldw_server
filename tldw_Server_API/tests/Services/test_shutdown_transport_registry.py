@@ -476,7 +476,7 @@ async def test_prompt_studio_websockets_reject_new_connections_while_draining(
     async def _allow_project(*args, **kwargs) -> bool:
         return True
 
-    monkeypatch.setattr(prompt_studio_websocket, "WebSocketStream", _UnexpectedPromptStudioStream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Streaming.streams.WebSocketStream", _UnexpectedPromptStudioStream)
     monkeypatch.setattr(prompt_studio_websocket.connection_manager, "connect", _unexpected_connect)
     monkeypatch.setattr(
         prompt_studio_websocket,
@@ -529,10 +529,10 @@ async def test_audio_websocket_handlers_block_new_work_when_draining(
     async def _unexpected_handle(*args, **kwargs):
         raise AssertionError("expensive audio work should not start while draining")
 
-    monkeypatch.setattr(audio_streaming, "_shim_audio_ws_authenticate", _fake_authenticate)
-    monkeypatch.setattr(audio_streaming, "assert_may_start_work", _fake_guard)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", _fake_authenticate)
+    monkeypatch.setattr("tldw_Server_API.app.services.app_lifecycle.assert_may_start_work", _fake_guard)
     monkeypatch.setattr(audio_streaming, "handle_unified_websocket", _unexpected_handle)
-    monkeypatch.setattr(audio_streaming, "_stream_tts_to_websocket", _unexpected_handle)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._stream_tts_to_websocket", _unexpected_handle)
     monkeypatch.setattr(streaming_streams, "WebSocketStream", _FakeOuterStream)
 
     endpoint = getattr(audio_streaming, endpoint_name)

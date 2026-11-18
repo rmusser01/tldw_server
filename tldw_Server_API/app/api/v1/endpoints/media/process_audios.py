@@ -36,7 +36,6 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
-from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
@@ -64,6 +63,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
 )
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
 from tldw_Server_API.app.core.testing import is_test_mode
+import tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps as _Prompts_DB_Deps
 
 router = APIRouter()
 
@@ -167,7 +167,7 @@ async def process_audios_endpoint(
         and form_data.api_name.lower() != "none"
         and (form_data.system_prompt is None or form_data.custom_prompt is None)
     ):
-        prompts_db = await get_prompts_db_for_user(request, current_user)
+        prompts_db = await _Prompts_DB_Deps.get_prompts_db_for_user(request, current_user)
 
         def resolve_audio_prompts() -> dict[str, str]:
             """Read and close the owner's connection on the same lookup worker."""

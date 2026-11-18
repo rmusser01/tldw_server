@@ -24,8 +24,9 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.TTS.utils import compute_tts_history_text_hash, parse_bool
+from tldw_Server_API.app.core.TTS.utils import parse_bool
 from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
+import tldw_Server_API.app.core.TTS.utils as _utils
 
 router = APIRouter(
     tags=["Audio"],
@@ -141,7 +142,7 @@ async def list_tts_history(
     text_hash = None
     if text_exact:
         try:
-            text_hash = compute_tts_history_text_hash(text_exact, cfg.get("hash_key"))
+            text_hash = _utils.compute_tts_history_text_hash(text_exact, cfg.get("hash_key"))
         except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("TTS history: failed to compute text_exact hash")
             raise HTTPException(

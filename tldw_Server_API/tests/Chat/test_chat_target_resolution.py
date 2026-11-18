@@ -491,16 +491,15 @@ async def test_bootstrap_generation_default_uses_same_target_and_exact_team_scop
         )
 
     monkeypatch.setattr(
-        sharing,
-        "resolve_chat_target",
+        "tldw_Server_API.app.core.Chat.chat_target_resolution.resolve_chat_target",
         lambda **kwargs: ResolvedChatTarget("openai", "gpt-default"),
         raising=False,
     )
     monkeypatch.setattr(
-        sharing, "resolve_byok_credentials", _resolve_credentials, raising=False
+        "tldw_Server_API.app.core.Provider_Credentials.byok_runtime.resolve_byok_credentials", _resolve_credentials, raising=False
     )
     monkeypatch.setattr(
-        sharing, "provider_requires_api_key", lambda provider: True, raising=False
+        "tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda provider: True, raising=False
     )
 
     payload = await sharing._resolve_recipient_generation_default(_share_context())
@@ -532,16 +531,15 @@ async def test_bootstrap_generation_default_uses_exact_org_scope(monkeypatch) ->
         return _Credentials(api_key="secret", source="org")
 
     monkeypatch.setattr(
-        sharing,
-        "resolve_chat_target",
+        "tldw_Server_API.app.core.Chat.chat_target_resolution.resolve_chat_target",
         lambda **kwargs: ResolvedChatTarget("openai", "gpt-default"),
         raising=False,
     )
     monkeypatch.setattr(
-        sharing, "resolve_byok_credentials", _resolve_credentials, raising=False
+        "tldw_Server_API.app.core.Provider_Credentials.byok_runtime.resolve_byok_credentials", _resolve_credentials, raising=False
     )
     monkeypatch.setattr(
-        sharing, "provider_requires_api_key", lambda provider: True, raising=False
+        "tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda provider: True, raising=False
     )
 
     await sharing._resolve_recipient_generation_default(
@@ -558,14 +556,12 @@ async def test_bootstrap_allows_local_provider_without_api_key(monkeypatch) -> N
     from tldw_Server_API.app.core.Chat.chat_target_resolution import ResolvedChatTarget
 
     monkeypatch.setattr(
-        sharing,
-        "resolve_chat_target",
+        "tldw_Server_API.app.core.Chat.chat_target_resolution.resolve_chat_target",
         lambda **kwargs: ResolvedChatTarget("llama.cpp", "local-model"),
         raising=False,
     )
     monkeypatch.setattr(
-        sharing,
-        "resolve_byok_credentials",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_runtime.resolve_byok_credentials",
         lambda *args, **kwargs: pytest.fail("async stub must be installed"),
         raising=False,
     )
@@ -574,10 +570,10 @@ async def test_bootstrap_allows_local_provider_without_api_key(monkeypatch) -> N
         return _Credentials(api_key=None, source="server_default")
 
     monkeypatch.setattr(
-        sharing, "resolve_byok_credentials", _local_credentials, raising=False
+        "tldw_Server_API.app.core.Provider_Credentials.byok_runtime.resolve_byok_credentials", _local_credentials, raising=False
     )
     monkeypatch.setattr(
-        sharing, "provider_requires_api_key", lambda provider: False, raising=False
+        "tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda provider: False, raising=False
     )
 
     payload = await sharing._resolve_recipient_generation_default(_share_context())
@@ -596,16 +592,15 @@ async def test_bootstrap_fails_closed_when_required_credentials_are_absent(
         return _Credentials(api_key=None, app_config={"credential_source": "hidden"})
 
     monkeypatch.setattr(
-        sharing,
-        "resolve_chat_target",
+        "tldw_Server_API.app.core.Chat.chat_target_resolution.resolve_chat_target",
         lambda **kwargs: ResolvedChatTarget("openai", "gpt-default"),
         raising=False,
     )
     monkeypatch.setattr(
-        sharing, "resolve_byok_credentials", _missing_credentials, raising=False
+        "tldw_Server_API.app.core.Provider_Credentials.byok_runtime.resolve_byok_credentials", _missing_credentials, raising=False
     )
     monkeypatch.setattr(
-        sharing, "provider_requires_api_key", lambda provider: True, raising=False
+        "tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda provider: True, raising=False
     )
 
     payload = await sharing._resolve_recipient_generation_default(_share_context())
@@ -625,7 +620,7 @@ async def test_bootstrap_fails_closed_without_configured_target(monkeypatch) -> 
     def _unavailable(**kwargs):
         raise ChatConfigurationError(message="private adapter diagnostics")
 
-    monkeypatch.setattr(sharing, "resolve_chat_target", _unavailable, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_target_resolution.resolve_chat_target", _unavailable, raising=False)
 
     payload = await sharing._resolve_recipient_generation_default(_share_context())
 
@@ -648,7 +643,7 @@ async def test_bootstrap_reports_stable_unready_for_disabled_adapter(
         "get_registry",
         lambda: _Registry("openai", unavailable={"openai"}),
     )
-    monkeypatch.setattr(sharing, "resolve_chat_target", target_module.resolve_chat_target)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_target_resolution.resolve_chat_target", target_module.resolve_chat_target)
 
     payload = await sharing._resolve_recipient_generation_default(_share_context())
 

@@ -36,7 +36,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_active_document_version_uuid,
     get_document_version,
     get_full_media_details_rich,
-    list_document_versions,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     ConflictError,
@@ -48,6 +47,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.safe_metadata_write
 )
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Utils.metadata_utils import normalize_safe_metadata
+import tldw_Server_API.app.core.DB_Management.media_db.api as _api
 
 router = APIRouter(tags=["Media Versioning"])
 
@@ -124,7 +124,7 @@ async def list_versions(
                 detail="Media item not found or deleted",
             )
 
-        raw_rows = list_document_versions(
+        raw_rows = _api.list_document_versions(
             db,
             media_id,
             include_content=include_content,

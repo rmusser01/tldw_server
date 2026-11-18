@@ -1,9 +1,22 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Storage } from '../extension/shims/plasmo-storage';
+
+const originalLocks = Object.getOwnPropertyDescriptor(navigator, 'locks');
 
 beforeEach(() => {
   localStorage.clear();
   vi.resetModules();
+  const queues = new Map<string, Promise<unknown>>();
+  const request = (name: string, work: () => Promise<unknown>) => {
+    const next = (queues.get(name) ?? Promise.resolve()).catch(() => {}).then(work);
+    queues.set(name, next);
+    return next;
+  };
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
+});
+afterEach(() => {
+  if (originalLocks) Object.defineProperty(navigator, 'locks', originalLocks);
+  else Reflect.deleteProperty(navigator, 'locks');
 });
 const record = (clipId: string) => ({
   ownerScope: 'alice',

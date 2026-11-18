@@ -177,7 +177,7 @@ def test_draft_source_test_returns_fetch_failure_diagnostics(client_with_user: T
         raise RuntimeError("upstream timeout")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.watchlists.fetch_site_items_with_rules",
+        "tldw_Server_API.app.core.Watchlists.fetchers.fetch_site_items_with_rules",
         fail_fetch,
         raising=True,
     )
@@ -213,7 +213,7 @@ def test_draft_source_test_returns_fetch_status_diagnostics(client_with_user: Te
         return []
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.watchlists.fetch_site_items_with_rules",
+        "tldw_Server_API.app.core.Watchlists.fetchers.fetch_site_items_with_rules",
         status_fetch,
         raising=True,
     )
@@ -252,7 +252,7 @@ def test_draft_source_test_preserves_fetch_status_when_fetcher_raises(
         raise RuntimeError("connection reset")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.watchlists.fetch_site_items_with_rules",
+        "tldw_Server_API.app.core.Watchlists.fetchers.fetch_site_items_with_rules",
         status_then_fail,
         raising=True,
     )

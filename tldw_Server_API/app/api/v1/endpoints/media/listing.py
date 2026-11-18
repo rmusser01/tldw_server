@@ -35,10 +35,7 @@ from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     count_trashed_media,
     fetch_keywords_for_media_batch,
-    get_paginated_files,
-    get_paginated_trash_files,
     list_trashed_media_ids,
-    search_media,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
@@ -50,6 +47,7 @@ from tldw_Server_API.app.core.Utils.metadata_utils import normalize_safe_metadat
 from .....core.DB_Management.media_db.legacy_maintenance import (
     permanently_delete_item,
 )
+import tldw_Server_API.app.core.DB_Management.media_db.api as _api
 
 router = APIRouter(tags=["Media Management"])
 _NOT_MODIFIED_OPENAPI_RESPONSE = {
@@ -333,7 +331,7 @@ async def list_media_endpoint(
         except _MEDIA_LISTING_NONCRITICAL_EXCEPTIONS:
             pass
 
-        rows, total_pages, current_page, total_items = get_paginated_files(
+        rows, total_pages, current_page, total_items = _api.get_paginated_files(
             db,
             page=page,
             results_per_page=results_per_page,
@@ -517,7 +515,7 @@ async def list_media_trash_endpoint(
         except _MEDIA_LISTING_NONCRITICAL_EXCEPTIONS:
             pass
 
-        rows, total_pages, current_page, total_items = get_paginated_trash_files(
+        rows, total_pages, current_page, total_items = _api.get_paginated_trash_files(
             db,
             page=page,
             results_per_page=results_per_page,
@@ -1127,7 +1125,7 @@ async def search_media_items(
                     }
                 )
         else:
-            items_data, total_items = search_media(
+            items_data, total_items = _api.search_media(
                 db,
                 search_query=query_text_for_match,
                 search_fields=search_params.fields,

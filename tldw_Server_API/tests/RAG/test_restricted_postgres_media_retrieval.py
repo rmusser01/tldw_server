@@ -317,7 +317,7 @@ def authenticated_media_client(restricted_media_store, monkeypatch):
                        rag_unified.get_collections_db_for_user):
         app.dependency_overrides[dependency] = unused_db
     app.dependency_overrides[check_rate_limit] = unused_db
-    monkeypatch.setattr(item, "delete_media_vectors", no_vectors)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.rag_cache.delete_media_vectors", no_vectors)
     monkeypatch.setattr(rag_unified, "_build_credential_runtime", lambda *_args: None)
     monkeypatch.setattr(rag_unified, "generate_streaming_response", generate)
     try:

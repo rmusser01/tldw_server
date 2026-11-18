@@ -374,7 +374,7 @@ def test_first_run_mcp_tools_catalog_after_completion_requires_system_configure(
     async def _admin_without_system_configure(_request):
         return SimpleNamespace(is_admin=True, permissions=[])
 
-    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _admin_without_system_configure)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", _admin_without_system_configure)
 
     response = setup_client.get("/api/v1/setup/first-run/mcp-tools/catalog")
 
@@ -434,7 +434,7 @@ def test_first_run_mcp_tools_apply_persists_numeric_profile_and_assignment(
     async def _fail_auth_resolution(_request):
         pytest.fail("auth principal should not be resolved during incomplete first-run setup")
 
-    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _fail_auth_resolution)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", _fail_auth_resolution)
 
     response = setup_client.post(
         "/api/v1/setup/first-run/mcp-tools/apply",
@@ -526,7 +526,7 @@ def test_first_run_mcp_tools_apply_after_completion_rejects_before_service_call(
         auth_calls.append(request.url.path)
         return SimpleNamespace(is_admin=True, permissions=["system.configure"])
 
-    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _admin_principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", _admin_principal)
 
     response = setup_client.post(
         "/api/v1/setup/first-run/mcp-tools/apply",
@@ -563,7 +563,7 @@ def test_first_run_mcp_tools_apply_after_completion_requires_admin_auth(
         auth_calls.append(request.url.path)
         return None
 
-    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _missing_principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", _missing_principal)
 
     response = setup_client.post(
         "/api/v1/setup/first-run/mcp-tools/apply",
@@ -590,7 +590,7 @@ def test_first_run_mcp_tools_apply_after_completion_records_actor_id(
     async def _admin_principal(_request):
         return SimpleNamespace(user_id=42, permissions=["system.configure"])
 
-    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _admin_principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", _admin_principal)
 
     response = setup_client.post(
         "/api/v1/setup/first-run/mcp-tools/apply",
@@ -777,7 +777,7 @@ def test_first_run_mcp_tools_validate_after_completion_without_auth_returns_403(
         auth_calls.append(request.url.path)
         return None
 
-    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _missing_principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", _missing_principal)
     service = _FakeMcpToolsService(validate_result=_fake_mcp_validation_result())
     _override_mcp_tools_service(monkeypatch, service)
 
@@ -843,7 +843,7 @@ def test_admin_mcp_tools_validate_after_completion_requires_system_configure(
     async def _non_admin_principal(_request):
         return SimpleNamespace(is_admin=False, permissions=[])
 
-    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _non_admin_principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", _non_admin_principal)
 
     response = setup_client.post("/api/v1/setup/admin/mcp-tools/validate", json={})
 
@@ -882,7 +882,7 @@ def test_admin_mcp_tools_status_and_validate_reject_admin_without_system_configu
     async def _admin_without_system_configure(_request):
         return SimpleNamespace(is_admin=True, permissions=[])
 
-    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _admin_without_system_configure)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", _admin_without_system_configure)
 
     status_response = setup_client.get("/api/v1/setup/admin/mcp-tools/status")
     validate_response = setup_client.post("/api/v1/setup/admin/mcp-tools/validate", json={})
@@ -1213,8 +1213,7 @@ def test_first_run_provider_save_refreshes_runtime_config_cache(
 
     monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", _capture_update_config)
     monkeypatch.setattr(
-        setup_endpoint,
-        "clear_config_cache",
+        "tldw_Server_API.app.core.config.clear_config_cache",
         lambda: refresh_calls.append(True),
         raising=False,
     )
@@ -1246,7 +1245,7 @@ def test_first_run_provider_save_requires_restart_when_cache_refresh_fails(
     def _raise_refresh_failure():
         raise RuntimeError("raw refresh failure")
 
-    monkeypatch.setattr(setup_endpoint, "clear_config_cache", _raise_refresh_failure, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.clear_config_cache", _raise_refresh_failure, raising=False)
 
     response = setup_client.post(
         "/api/v1/setup/first-run/providers",
@@ -1284,7 +1283,7 @@ def test_first_run_first_chat_endpoint_records_success_on_ready_response(
             "message": None,
         }
 
-    monkeypatch.setattr(setup_endpoint, "verify_first_chat", _fake_verify_first_chat, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.first_chat_verifier.verify_first_chat", _fake_verify_first_chat, raising=False)
 
     response = setup_client.post(
         "/api/v1/setup/first-run/first-chat",
@@ -1309,7 +1308,7 @@ def test_first_run_first_chat_preserves_local_model_identifier(
     async def resolve_principal(request):
         return SimpleNamespace(permissions=["system.configure"])
 
-    monkeypatch.setattr(setup_endpoint, "get_auth_principal", resolve_principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", resolve_principal)
     state_path = tmp_path / "first_run_state.json"
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
     _setup_needs_setup(monkeypatch)
@@ -1318,7 +1317,7 @@ def test_first_run_first_chat_preserves_local_model_identifier(
         return {"status": "ready", "provider": provider, "model": model,
                 "response_id": "chatcmpl-local", "response_text": "Hello."}
 
-    monkeypatch.setattr(setup_endpoint, "verify_first_chat", verify_model)
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.first_chat_verifier.verify_first_chat", verify_model)
     response = setup_client.post(
         "/api/v1/setup/first-run/first-chat",
         json={"provider": "llamacpp", "model": model},
@@ -1388,7 +1387,7 @@ def test_first_run_first_chat_endpoint_rejects_unsafe_provider_or_model_before_v
     async def _fake_verify_first_chat(**_kwargs):
         pytest.fail("unsafe first-chat metadata should be rejected before verification")
 
-    monkeypatch.setattr(setup_endpoint, "verify_first_chat", _fake_verify_first_chat, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.first_chat_verifier.verify_first_chat", _fake_verify_first_chat, raising=False)
 
     response = setup_client.post("/api/v1/setup/first-run/first-chat", json=payload)
 
@@ -1914,7 +1913,7 @@ def test_first_run_provider_validate_returns_typed_response_without_token_echo(
             models=["local-model"],
         )
 
-    monkeypatch.setattr(setup_endpoint, "validate_local_openai_endpoint", _fake_validate)
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.provider_validation.validate_local_openai_endpoint", _fake_validate)
 
     response = setup_client.post(
         "/api/v1/setup/first-run/providers/validate",
@@ -1963,10 +1962,9 @@ def test_first_run_kobold_provider_validate_uses_native_validator(
             status="ready",
         )
 
-    monkeypatch.setattr(setup_endpoint, "validate_local_openai_endpoint", _fail_openai_validate)
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.provider_validation.validate_local_openai_endpoint", _fail_openai_validate)
     monkeypatch.setattr(
-        setup_endpoint,
-        "validate_native_kobold_endpoint",
+        "tldw_Server_API.app.core.Setup.provider_validation.validate_native_kobold_endpoint",
         _fake_kobold_validate,
         raising=False,
     )
@@ -2000,8 +1998,8 @@ def test_remote_provider_validation_guard_precedes_scope_and_network(monkeypatch
     async def network_must_not_run(*_args, **_kwargs):
         pytest.fail("provider validation network I/O must not run before authorization")
 
-    monkeypatch.setattr(setup_endpoint, "ConfiguredEndpointScope", ScopeMustNotBeCreated)
-    monkeypatch.setattr(setup_endpoint, "validate_local_openai_endpoint", network_must_not_run)
+    monkeypatch.setattr("tldw_Server_API.app.core.Utils.egress.ConfiguredEndpointScope", ScopeMustNotBeCreated)
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.provider_validation.validate_local_openai_endpoint", network_must_not_run)
 
     client = TestClient(app, client=("203.0.113.10", 50000))
     try:
@@ -2326,8 +2324,7 @@ def test_setup_config_refreshes_runtime_config_cache_after_write(
 
     monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", lambda updates: tmp_path / "config.bak")
     monkeypatch.setattr(
-        setup_endpoint,
-        "clear_config_cache",
+        "tldw_Server_API.app.core.config.clear_config_cache",
         lambda: refresh_calls.append(True),
         raising=False,
     )
@@ -2727,7 +2724,7 @@ def test_first_run_provider_model_identifier_roundtrips_path_like_ids(monkeypatc
         if not authenticated:
             raise HTTPException(401, "Not authenticated")
         return SimpleNamespace(permissions=["system.configure"] if authenticated is True else ["notes.read"])
-    monkeypatch.setattr(setup_endpoint, "get_auth_principal", resolve_principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", resolve_principal)
     state_path = tmp_path / "first_run_state.json"
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
     _setup_needs_setup(monkeypatch)
@@ -2884,7 +2881,7 @@ def test_first_run_provider_progress_preserves_local_model_identifier(
     async def resolve_principal(request):
         return SimpleNamespace(permissions=["system.configure"])
 
-    monkeypatch.setattr(setup_endpoint, "get_auth_principal", resolve_principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", resolve_principal)
     state_path = tmp_path / "first_run_state.json"
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
     _setup_needs_setup(monkeypatch)

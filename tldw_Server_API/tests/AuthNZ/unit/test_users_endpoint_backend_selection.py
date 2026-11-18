@@ -50,7 +50,7 @@ async def test_fetch_password_hash_sqlite_path_uses_execute(
     async def _fake_is_postgres_backend() -> bool:
         return False
 
-    monkeypatch.setattr(users_endpoint, "is_postgres_backend", _fake_is_postgres_backend)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.is_postgres_backend", _fake_is_postgres_backend)
     db = _SQLiteConnWithFetchvalTrap()
 
     value = await users_endpoint._fetch_password_hash_for_user(db, 7)
@@ -68,7 +68,7 @@ async def test_fetch_password_hash_postgres_path_uses_fetchval(
     async def _fake_is_postgres_backend() -> bool:
         return True
 
-    monkeypatch.setattr(users_endpoint, "is_postgres_backend", _fake_is_postgres_backend)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.is_postgres_backend", _fake_is_postgres_backend)
     db = _PostgresConnWithExecuteTrap()
 
     value = await users_endpoint._fetch_password_hash_for_user(db, 42)

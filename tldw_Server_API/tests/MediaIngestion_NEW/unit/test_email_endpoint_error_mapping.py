@@ -97,7 +97,7 @@ async def test_list_email_sources_backend_error_log_is_sanitized(monkeypatch, ca
     async def _raise_list_sources(_db, _user_id):
         raise RuntimeError("connector backend failed at /private/connectors.db")
 
-    monkeypatch.setattr(email_endpoint, "list_connector_sources", _raise_list_sources)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.list_sources", _raise_list_sources)
 
     with pytest.raises(HTTPException) as exc_info:
         await list_email_sources(
@@ -128,8 +128,8 @@ async def test_trigger_email_source_sync_backend_error_log_is_sanitized(monkeypa
     async def _raise_import_job(_user_id, _source_id, *, request_id=None):
         raise RuntimeError("queue backend failed at /private/connectors.db")
 
-    monkeypatch.setattr(email_endpoint, "get_source_by_id", _get_source)
-    monkeypatch.setattr(email_endpoint, "create_import_job", _raise_import_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_id", _get_source)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_import_job", _raise_import_job)
 
     with pytest.raises(HTTPException) as exc_info:
         await trigger_email_source_sync(
@@ -175,7 +175,7 @@ async def test_list_email_sources_sync_state_log_is_sanitized(monkeypatch, captu
             }
         ]
 
-    monkeypatch.setattr(email_endpoint, "list_connector_sources", _list_sources)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.list_sources", _list_sources)
 
     response = await list_email_sources(
         db=object(),

@@ -99,7 +99,7 @@ def _build_app_with_overrides(
             return None
 
     # Avoid invoking the real WorkflowEngine; use a lightweight stub instead.
-    monkeypatch.setattr(workflows_mod, "WorkflowEngine", _FakeEngine, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Workflows.WorkflowEngine", _FakeEngine, raising=True)
 
     return app
 

@@ -45,7 +45,7 @@ async def rotation_http_context(
     app.include_router(admin_api_keys.router, prefix="/api/v1/admin")
     app.add_exception_handler(Exception, global_unhandled_exception_handler)
     app.dependency_overrides[get_auth_principal] = lambda: principal
-    monkeypatch.setattr(users_endpoint, "get_api_key_manager", AsyncMock(return_value=manager))
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.api_key_manager.get_api_key_manager", AsyncMock(return_value=manager))
     monkeypatch.setattr(admin_api_keys_service, "get_api_key_manager", AsyncMock(return_value=manager))
     prefix = "/api/v1/users" if request.param == "self" else f"/api/v1/admin/users/{user_id}"
     return app, manager, user_id, prefix

@@ -259,7 +259,7 @@ def test_notification_snooze_reconciles_scheduler(notifications_app, monkeypatch
         async def reconcile_task(self, *, task_id: str, user_id: int) -> None:
             reconcile_calls.append((task_id, user_id))
 
-    monkeypatch.setattr(notifications_endpoint, "get_reminders_scheduler", lambda: _FakeScheduler(), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.services.reminders_scheduler.get_reminders_scheduler", lambda: _FakeScheduler(), raising=False)
 
     with TestClient(notifications_app) as client:
         response = client.post(f"/api/v1/notifications/{source.id}/snooze", json={"minutes": 15})
@@ -298,7 +298,7 @@ def test_notification_snooze_persists_archived_state_and_supports_cancel(notific
         async def unschedule_task(self, task_id: str) -> None:
             unschedule_calls.append(task_id)
 
-    monkeypatch.setattr(notifications_endpoint, "get_reminders_scheduler", lambda: _FakeScheduler(), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.services.reminders_scheduler.get_reminders_scheduler", lambda: _FakeScheduler(), raising=False)
 
     with TestClient(notifications_app) as client:
         snooze_response = client.post(f"/api/v1/notifications/{source.id}/snooze", json={"minutes": 15})
@@ -344,7 +344,7 @@ async def test_reconcile_snooze_task_warning_log_is_sanitized(monkeypatch):
             raise RuntimeError("notifications backend exploded /private/tmp/notifications.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(notifications_endpoint, "get_reminders_scheduler", lambda: _FailingScheduler(), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.services.reminders_scheduler.get_reminders_scheduler", lambda: _FailingScheduler(), raising=False)
     monkeypatch.setattr(notifications_endpoint, "logger", logger_stub, raising=True)
 
     await notifications_endpoint._reconcile_snooze_task_best_effort(task_id="task-private-123", user_id=881)
@@ -361,7 +361,7 @@ async def test_unschedule_snooze_task_warning_log_is_sanitized(monkeypatch):
             raise RuntimeError("notifications backend exploded /private/tmp/notifications.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(notifications_endpoint, "get_reminders_scheduler", lambda: _FailingScheduler(), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.services.reminders_scheduler.get_reminders_scheduler", lambda: _FailingScheduler(), raising=False)
     monkeypatch.setattr(notifications_endpoint, "logger", logger_stub, raising=True)
 
     await notifications_endpoint._unschedule_snooze_task_best_effort(task_id="task-private-123")
@@ -401,7 +401,7 @@ def test_duplicate_notifications_keep_distinct_snooze_tasks(notifications_app, m
         async def unschedule_task(self, task_id: str) -> None:
             unschedule_calls.append(task_id)
 
-    monkeypatch.setattr(notifications_endpoint, "get_reminders_scheduler", lambda: _FakeScheduler(), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.services.reminders_scheduler.get_reminders_scheduler", lambda: _FakeScheduler(), raising=False)
 
     with TestClient(notifications_app) as client:
         first_snooze = client.post(f"/api/v1/notifications/{first.id}/snooze", json={"minutes": 15})
@@ -461,7 +461,7 @@ def test_notifications_only_snoozed_query_excludes_active_rows(notifications_app
         async def reconcile_task(self, *, task_id: str, user_id: int) -> None:
             return None
 
-    monkeypatch.setattr(notifications_endpoint, "get_reminders_scheduler", lambda: _FakeScheduler(), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.services.reminders_scheduler.get_reminders_scheduler", lambda: _FakeScheduler(), raising=False)
 
     with TestClient(notifications_app) as client:
         snooze_response = client.post(f"/api/v1/notifications/{snoozed.id}/snooze", json={"minutes": 15})

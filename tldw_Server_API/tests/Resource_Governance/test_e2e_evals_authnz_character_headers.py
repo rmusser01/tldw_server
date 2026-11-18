@@ -194,36 +194,8 @@ async def test_e2e_authnz_debug_deny_headers_retry_after(monkeypatch, tmp_path, 
 
     monkeypatch.setenv("RG_ENABLED", "1")
 
-    # Stub out heavy AuthNZ budget helpers so the debug endpoint does not hit DBs.
-    import tldw_Server_API.app.api.v1.endpoints.authnz_debug as authnz_debug_ep
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
     from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-
-    async def _fake_resolve_api_key(api_key: str):
-        _ = api_key
-        return None
-
-    async def _fake_get_key_limits(key_id: int):
-        _ = key_id
-        return {}
-
-    async def _fake_summarize_usage_for_key_day(key_id: int):
-        _ = key_id
-        return {}
-
-    async def _fake_summarize_usage_for_key_month(key_id: int):
-        _ = key_id
-        return {}
-
-    async def _fake_is_key_over_budget(key_id: int):
-        _ = key_id
-        return {"over": False, "reasons": []}
-
-    monkeypatch.setattr(authnz_debug_ep, "resolve_api_key_by_hash", _fake_resolve_api_key)
-    monkeypatch.setattr(authnz_debug_ep, "get_key_limits", _fake_get_key_limits)
-    monkeypatch.setattr(authnz_debug_ep, "summarize_usage_for_key_day", _fake_summarize_usage_for_key_day)
-    monkeypatch.setattr(authnz_debug_ep, "summarize_usage_for_key_month", _fake_summarize_usage_for_key_month)
-    monkeypatch.setattr(authnz_debug_ep, "is_key_over_budget", _fake_is_key_over_budget)
 
     from tldw_Server_API.app.main import app
 

@@ -61,14 +61,10 @@ async def test_tts_usage_event_logged(monkeypatch):
         _ = args, kwargs
         return (1, {}, None)
 
-    def _shim_attr(name: str):
-        if name == "_sanitize_speech_request":
-            return lambda *args, **kwargs: "openai"
-        if name == "_resolve_tts_byok":
-            return _resolve_tts_byok
-        raise NameError(name)
-
-    monkeypatch.setattr(audio_tts, "_audio_shim_attr", _shim_attr, raising=True)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *args, **kwargs: "openai"
+    )
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _resolve_tts_byok)
 
     response = await audio_tts.create_speech(
         OpenAISpeechRequest(

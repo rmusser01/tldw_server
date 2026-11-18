@@ -43,10 +43,10 @@ async def test_admin_root_postgres_alias_uses_pool_state(monkeypatch) -> None:
     async def _fake_sqlite_pool():
         return _Pool(None)
 
-    monkeypatch.setattr(admin_mod, "get_db_pool", _fake_pg_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_pg_pool)
     assert await admin_mod._is_postgres_backend() is True
 
-    monkeypatch.setattr(admin_mod, "get_db_pool", _fake_sqlite_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_sqlite_pool)
     assert await admin_mod._is_postgres_backend() is False
 
 
@@ -59,7 +59,7 @@ async def test_admin_root_postgres_alias_sanitizes_pool_fallback_log(monkeypatch
     async def _raise_pool_error():
         raise RuntimeError("pool exploded at /private/users.db")
 
-    monkeypatch.setattr(admin_mod, "get_db_pool", _raise_pool_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _raise_pool_error)
     monkeypatch.setattr(
         admin_mod.logger,
         "debug",
@@ -79,7 +79,7 @@ async def test_admin_root_ensure_sqlite_ready_sanitizes_outer_fallback_log(monke
     def _raise_test_mode_error() -> bool:
         raise RuntimeError("test-mode detection exploded at /private/authnz.db")
 
-    monkeypatch.setattr(admin_mod, "is_test_mode", _raise_test_mode_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", _raise_test_mode_error)
     monkeypatch.setattr(
         admin_mod.logger,
         "debug",
@@ -123,7 +123,7 @@ async def test_admin_root_ensure_sqlite_ready_sanitizes_table_check_log(
     def _fake_ensure_authnz_tables(path):
         ensured_paths.append(path)
 
-    monkeypatch.setattr(admin_mod, "is_test_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: True)
     monkeypatch.setattr(authnz_database, "get_db_pool", _fake_get_db_pool)
     monkeypatch.setattr(authnz_migrations, "ensure_authnz_tables", _fake_ensure_authnz_tables)
     monkeypatch.setattr(
@@ -165,7 +165,7 @@ async def test_admin_root_ensure_sqlite_ready_sanitizes_mkdir_log(
     def _fake_ensure_authnz_tables(path):
         ensured_paths.append(path)
 
-    monkeypatch.setattr(admin_mod, "is_test_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: True)
     monkeypatch.setattr(authnz_database, "get_db_pool", _fake_get_db_pool)
     monkeypatch.setattr(authnz_migrations, "ensure_authnz_tables", _fake_ensure_authnz_tables)
     monkeypatch.setattr(

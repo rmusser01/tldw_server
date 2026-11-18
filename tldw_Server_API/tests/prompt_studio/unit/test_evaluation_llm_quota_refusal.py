@@ -91,8 +91,8 @@ async def test_background_evaluation_does_not_raise_the_refusal(monkeypatch: pyt
         async def close(self) -> None:
             return None
 
-    monkeypatch.setattr(eval_endpoint, "EvaluationManager", _Manager)
-    monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager.EvaluationManager", _Manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda _provider: False)
     handle = SimpleNamespace(api_key=None, app_config={}, credentials_resolved=True)
     db = _EvaluationDb()
 
