@@ -842,57 +842,16 @@ describe("WorkspaceHeader workspace browser modal", () => {
     vi.stubGlobal("fetch", fetchMockState.fetch)
   })
 
-  it("stacks compact context and actions into bounded mobile rows", () => {
+  it("opens server context details from a compact status control", async () => {
     render(
-      <WorkspaceHeader
-        leftPaneOpen={true}
-        rightPaneOpen={true}
-        onToggleLeftPane={vi.fn()}
-        onToggleRightPane={vi.fn()}
-        hideToggles
-      />
+      <WorkspaceHeader leftPaneOpen rightPaneOpen hideToggles
+        onToggleLeftPane={vi.fn()} onToggleRightPane={vi.fn()} />
     )
 
-    expect(screen.getByTestId("workspace-header")).toHaveClass(
-      "min-w-0",
-      "flex-wrap"
-    )
-    expect(screen.getByRole("heading", { name: "Alpha Research" })).toHaveClass(
-      "truncate"
-    )
-    const serverContext = screen.getByTestId(
-      "workspace-server-context-indicator"
-    )
-    expect(serverContext).toHaveClass(
-      "order-last",
-      "basis-full",
-      "lg:order-none",
-      "lg:basis-auto"
-    )
-    expect(within(serverContext).getByText("Server Workspace")).toHaveClass(
-      "sr-only",
-      "lg:not-sr-only",
-      "lg:inline"
-    )
-    expect(within(serverContext).getByText("Canonical Alpha")).toHaveClass(
-      "sr-only",
-      "lg:not-sr-only",
-      "lg:inline"
-    )
-    expect(screen.getByTestId("workspace-header-actions")).toHaveClass(
-      "min-w-0",
-      "basis-full",
-      "flex-none",
-      "flex-nowrap",
-      "lg:basis-auto",
-      "lg:flex-1",
-      "lg:flex-wrap",
-      "overflow-hidden"
-    )
-    expect(screen.getByTestId("workspace-workspaces-button")).toHaveClass(
-      "min-w-0",
-      "max-w-full"
-    )
+    expect(screen.queryByText("Canonical Alpha")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Server context ready/i }))
+    expect(await screen.findByText("Canonical Alpha")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Alpha Research" })).toBeVisible()
   })
 
   it("shows feedback when replaying the workspace tour from the header", () => {
@@ -955,6 +914,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
       />
     )
 
+    fireEvent.click(screen.getByTestId("workspace-server-context-indicator"))
     expect(
       await screen.findByText("Server Workspace")
     ).toBeInTheDocument()
@@ -982,6 +942,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
       />
     )
 
+    fireEvent.click(screen.getByTestId("workspace-server-context-indicator"))
     expect(
       await screen.findByText("Server Workspace")
     ).toBeInTheDocument()
@@ -1018,14 +979,11 @@ describe("WorkspaceHeader workspace browser modal", () => {
       />
     )
 
+    fireEvent.click(screen.getByTestId("workspace-server-context-indicator"))
     const recoveryMessage = await screen.findByText(
       "Server Workspace context is unavailable right now."
     )
-    expect(recoveryMessage).toHaveClass(
-      "sr-only",
-      "lg:not-sr-only",
-      "lg:inline"
-    )
+    expect(recoveryMessage).toBeInTheDocument()
     expect(
       screen.getByRole("link", { name: "Open Workspaces" })
     ).toHaveAttribute("href", "#/workspaces")

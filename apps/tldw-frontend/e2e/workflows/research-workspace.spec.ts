@@ -7,6 +7,7 @@ import { test, expect, assertNoCriticalErrors } from "../utils/fixtures"
 import { seedAuth } from "../utils/helpers"
 import { ResearchWorkspacePage } from "../utils/page-objects"
 import type { Locator, Page } from "@playwright/test"
+import servicePromptFixture from "../../../packages/ui/src/utils/__fixtures__/service-prompt-rendering.json"
 
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 }
 const SUMMARY_TEST_MODEL = "gpt-4o-mini"
@@ -109,6 +110,20 @@ test.describe("Research Workspace Workflow", () => {
       })
     })
 
+    const ragPrompts = (["chat.rag.answer", "chat.rag.question_rewrite"] as const).map((id) => {
+      const parts = servicePromptFixture.defaults[id]
+      const variables = id === "chat.rag.answer" ? ["context", "question"] : ["chat_history", "question"]
+      return {
+        id, label: id, description: id, affected_workflows: [],
+        parts: [{ key: "template", label: "Template", mode: "template", required_variables: variables }],
+        default_parts: parts, effective_parts: parts, saved_parts: null, source: "packaged", revision: null
+      }
+    })
+    await page.route("**/api/v1/service-prompts", (route) => route.fulfill({ json: ragPrompts }))
+    for (const prompt of ragPrompts) {
+      await page.route(`**/api/v1/service-prompts/${prompt.id}`, (route) => route.fulfill({ json: prompt }))
+    }
+
     await page.route("**/api/v1/chat/commands**", async (route) => {
       await route.fulfill({
         status: 200,
@@ -117,20 +132,28 @@ test.describe("Research Workspace Workflow", () => {
       })
     })
 
+    const chatId = "workspace-grounded-chat"
+    let chat: Record<string, unknown> | null = null
+    const messages: Record<string, unknown>[] = []
     await page.route("**/api/v1/chats**", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ items: [], total: 0 })
-      })
-    })
-
-    await page.route("**/api/v1/chats/**", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ items: [], total: 0 })
-      })
+      const request = route.request()
+      const path = new URL(request.url()).pathname.replace(/\/$/, "")
+      if (path === "/api/v1/chats" && request.method() === "POST") {
+        chat = { ...request.postDataJSON(), id: chatId, version: 1, created_at: new Date().toISOString() }
+        await route.fulfill({ json: chat })
+      } else if (path === `/api/v1/chats/${chatId}`) {
+        await route.fulfill({ json: chat })
+      } else if (path.endsWith("/settings")) {
+        await route.fulfill({ json: { chat_id: chatId, settings: {}, version: 1 } })
+      } else if (path.endsWith("/messages") && request.method() === "POST") {
+        const message = { ...request.postDataJSON(), chat_id: chatId, id: `message-${messages.length + 1}`, version: 1 }
+        messages.push(message)
+        await route.fulfill({ json: message })
+      } else if (path.endsWith("/messages")) {
+        await route.fulfill({ json: { items: messages, total: messages.length } })
+      } else {
+        await route.fulfill({ json: { items: chat ? [chat] : [], total: chat ? 1 : 0 } })
+      }
     })
 
     await page.route("**/api/v1/chat/conversations**", async (route) => {
@@ -216,6 +239,11 @@ test.describe("Research Workspace Workflow", () => {
             capabilities: {}
           })
         })
+        return
+      }
+
+      if (method === "GET" && path.endsWith("/source-views")) {
+        await route.fulfill({ json: { items: [] } })
         return
       }
 
@@ -400,13 +428,11 @@ test.describe("Research Workspace Workflow", () => {
 
     const getRenderedSourceTitles = async (): Promise<string[]> =>
       workspacePage.sourcesPanel
-        .locator("[data-source-id]")
-        .evaluateAll((rows) =>
-          rows
-            .map((row) => row.querySelector("p")?.textContent?.trim() || "")
-            .filter(Boolean)
-        )
+        .getByTestId(/^preview-source-/)
+        .evaluateAll((entries) => entries.map((entry) => entry.getAttribute("aria-label") ?? ""))
 
+    const organizer = workspacePage.sourcesPanel.getByRole("button", { name: "Organize sources" })
+    await organizer.click()
     await workspacePage.sourcesPanel
       .getByRole("button", { name: "Advanced" })
       .click()
@@ -427,12 +453,12 @@ test.describe("Research Workspace Workflow", () => {
       workspacePage.sourcesPanel.getByText("Status=Ready · Sort: Name (A-Z)")
     ).toBeVisible()
 
+    await organizer.click()
     await workspacePage.hideSourcesPane()
     await workspacePage.showSourcesPane()
 
-    await expect(
-      workspacePage.sourcesPanel.getByText("Status=Ready · Sort: Name (A-Z)")
-    ).toBeVisible()
+    await expect(workspacePage.sourcesPanel.getByRole("status")).toContainText("Status=Ready · Sort: Name (A-Z)")
+    await organizer.click()
     await workspacePage.sourcesPanel
       .getByRole("button", { name: "Advanced" })
       .click()
@@ -597,7 +623,15 @@ test.describe("Research Workspace Workflow", () => {
 
     await workspacePage.selectSourceById(sourceId!)
     await workspacePage.expectSourceSelected(sourceId!)
-    await expect(workspacePage.sourcesPanel.getByText(/^1 selected$/)).toBeVisible()
+    await expect(workspacePage.sourcesPanel.getByRole("status")).toHaveText("1 selected")
+    const sourceTitle = sourceRow.getByRole("button", { name: librarySource.title })
+    await sourceTitle.press("Enter")
+    const preview = authedPage.getByRole("dialog", { name: "Source preview and annotations" })
+    await expect(preview).toBeVisible()
+    await expect(preview.getByRole("button", { name: "Remove", exact: true })).toBeVisible()
+    await authedPage.keyboard.press("Escape")
+    await expect(preview).toBeHidden()
+    await expect(sourceTitle).toBeFocused()
     await expect
       .poll(() => keywordUpdates[0]?.mode || null, { timeout: 10_000 })
       .toBe("add")
@@ -702,7 +736,7 @@ test.describe("Research Workspace Workflow", () => {
     await workspacePage.selectSourceById(sourceId)
     await workspacePage.expectSourceSelected(sourceId)
     await expect(
-      workspacePage.chatPanel.getByText("Answers will be grounded in your selected sources")
+      workspacePage.chatPanel.getByText("1 source selected", { exact: true })
     ).toBeVisible()
 
     const chatInput = workspacePage.chatPanel.getByPlaceholder(/ask about your sources/i)
@@ -752,7 +786,47 @@ test.describe("Research Workspace Workflow", () => {
       })
       .toContain("ring-2")
 
+    await authedPage.setViewportSize({ width: 900, height: 844 })
+    const chatTab = authedPage.getByRole("tab", { name: /^Chat/i })
+    await chatTab.click()
+    await chatInput.fill("Follow up on this evidence.")
+    await assistantMessage.locator("summary").filter({ hasText: "Workspace Grounded Source" }).click()
+    const preview = authedPage.getByRole("dialog", { name: "Source preview and annotations" })
+    await expect(preview).toBeVisible()
+    await expect(preview.locator("blockquote")).toHaveText(
+      "A source excerpt about handling evidence carefully and citing your sources."
+    )
+    await authedPage.keyboard.press("Escape")
+    await expect(preview).toBeHidden()
+    await expect(authedPage.getByRole("tab", { name: /^Sources/i })).toHaveAttribute("aria-selected", "true")
+    await chatTab.click()
+    await expect(chatInput).toHaveValue("Follow up on this evidence.")
+    await expect(assistantMessage).toBeVisible()
+
     await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("uses readable theme colors for chat text and its placeholder", async ({ authedPage }) => {
+    const workspace = new ResearchWorkspacePage(authedPage)
+    await workspace.goto()
+    await workspace.waitForReady()
+    const chatInput = workspace.getChatInput()
+    const themeButton = authedPage.getByRole("button", { name: /Switch to (light|dark) theme/ })
+    const checkColors = async () => {
+      const colors = await chatInput.evaluate((input) => {
+        const style = getComputedStyle(input)
+        const rgb = (token: string) => `rgb(${style.getPropertyValue(token).trim().split(/\s+/).join(", ")})`
+        return { text: rgb("--color-text"), placeholder: rgb("--color-text-muted") }
+      })
+      await expect(chatInput).toHaveCSS("color", colors.text)
+      await expect.poll(() => chatInput.evaluate((input) => getComputedStyle(input, "::placeholder").color))
+        .toBe(colors.placeholder)
+    }
+    await checkColors()
+    const current = await themeButton.getAttribute("aria-label")
+    await themeButton.click()
+    await expect(themeButton).not.toHaveAttribute("aria-label", current!)
+    await checkColors()
   })
 
   test("supports keyboard-only source selection and grounded chat submission", async ({
@@ -871,7 +945,7 @@ test.describe("Research Workspace Workflow", () => {
 
     await authedPage.keyboard.press("Space")
     await workspacePage.expectSourceSelected(sourceId)
-    await expect(workspacePage.getSelectedSourceTag(sourceTitle)).toBeVisible()
+    await expect(workspacePage.chatPanel.getByText("1 source selected", { exact: true })).toBeVisible()
 
     const chatInput = workspacePage.chatPanel.getByPlaceholder(/ask about your sources/i)
     await pressTabUntilFocused(authedPage, chatInput, 80)
@@ -975,17 +1049,14 @@ test.describe("Research Workspace Workflow", () => {
       .toBe(2)
 
     const sourceIds = await workspacePage.getSourceIds()
-    const compareButton = workspacePage.studioPanel.getByRole("button", {
-      name: /^Compare Sources$/i
-    })
-
     await workspacePage.selectSourceById(sourceIds[0])
     await workspacePage.expectSourceSelected(sourceIds[0])
+    const compareButton = await workspacePage.revealStudioOutput("Compare Sources")
     await expect(compareButton).toBeDisabled()
 
     await workspacePage.selectSourceById(sourceIds[1])
     await workspacePage.expectSourceSelected(sourceIds[1])
-    await expect(workspacePage.sourcesPanel.getByText(/^2 selected$/)).toBeVisible()
+    await expect(workspacePage.sourcesPanel.getByRole("status")).toHaveText("2 selected")
     await expect(compareButton).toBeEnabled()
 
     await compareButton.click()
@@ -1023,6 +1094,18 @@ test.describe("Research Workspace Workflow", () => {
     ).toBeVisible({ timeout: 10_000 })
 
     await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("opens collapsed Quick Notes and focuses the title from the new-note shortcut", async ({ authedPage }) => {
+    const workspacePage = new ResearchWorkspacePage(authedPage)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+    await expect(workspacePage.studioPanel.getByRole("button", { name: "Quick Notes" }))
+      .toHaveAttribute("aria-expanded", "false")
+
+    await authedPage.keyboard.press("Alt+n")
+
+    await expect(workspacePage.studioPanel.getByRole("textbox", { name: "Note title" })).toBeFocused()
   })
 
   test("cancels in-flight summary generation and marks the artifact failed", async ({
@@ -1073,9 +1156,8 @@ test.describe("Research Workspace Workflow", () => {
     await workspacePage.selectSourceById(sourceId)
     await workspacePage.expectSourceSelected(sourceId)
 
-    await workspacePage.studioPanel
-      .getByRole("button", { name: /^Summary$/i })
-      .click()
+    const summaryButton = await workspacePage.revealStudioOutput("Summary")
+    await summaryButton.click()
 
     await mediaDetailsRequested.promise
     await expect(
@@ -1150,9 +1232,8 @@ test.describe("Research Workspace Workflow", () => {
     await workspacePage.selectSourceById(sourceId)
     await workspacePage.expectSourceSelected(sourceId)
 
-    await workspacePage.studioPanel
-      .getByRole("button", { name: /^Summary$/i })
-      .click()
+    const summaryButton = await workspacePage.revealStudioOutput("Summary")
+    await summaryButton.click()
 
     await mediaDetailsRequested.promise
     await expect(
@@ -1162,15 +1243,17 @@ test.describe("Research Workspace Workflow", () => {
       workspacePage.studioPanel.locator('[data-testid^="studio-artifact-card-"]')
     ).toHaveCount(1)
 
-    await authedPage.reload({ waitUntil: "domcontentloaded" })
+    await authedPage.reload({ waitUntil: "commit" })
     releaseMediaDetails.resolve()
     await workspacePage.waitForReady()
 
-    await expect(
-      workspacePage.studioPanel.getByText(
-        "Generation was interrupted. Click regenerate to try again."
-      )
-    ).toBeVisible({ timeout: 10_000 })
+    const recoveredCard = workspacePage.getStudioArtifactCards()
+    await expect(recoveredCard).toHaveCount(1)
+    // A graceful reload persists cancellation. A pending write is recovered on rehydration.
+    await expect(recoveredCard).toContainText(
+      /Generation was interrupted\. Click regenerate to try again\.|Generation canceled before completion\./
+    )
+    await expect(recoveredCard.getByRole("button", { name: "Retry", exact: true })).toBeEnabled()
     await expect(
       workspacePage.studioPanel.getByRole("button", { name: /^Cancel$/i })
     ).toHaveCount(0)

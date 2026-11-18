@@ -31,11 +31,11 @@ import {
   ChevronDown,
   ChevronUp,
   Settings2,
+  Plus,
   PanelRightClose
 } from "lucide-react"
 import {
   Button,
-  Empty,
   Tooltip,
   Input,
   Modal,
@@ -879,7 +879,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
   // Collapsible sections
   const [studioOptionsExpanded, setStudioOptionsExpanded] = useState(false)
-  const [studioExpanded, setStudioExpanded] = useState(true)
+  const [studioExpanded, setStudioExpanded] = useState(false)
   const [outputsExpanded, setOutputsExpanded] = useState(true)
   const [notesExpanded, setNotesExpanded] = useState(false)
   const outputListContainerRef = useRef<HTMLDivElement | null>(null)
@@ -921,6 +921,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   )
   const hasSelectedSources = selectedMediaIds.length > 0
   const hasSelectedSourceIntent = effectiveSelectedSources.length > 0
+  const createOutputExpanded = studioExpanded && hasSelectedSourceIntent
   const selectedMediaCount = selectedMediaIds.length
   const selectedReadySourceCount = effectiveSelectedSources.filter(
     (source) => getStudioWorkspaceSourceStatus(source) === "ready"
@@ -1792,17 +1793,23 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
       {contextHolder}
       {artifactModalContextHolder}
 
-      {/* Header */}
-      <div className="flex items-start justify-between border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold text-text">
-            {t("playground:studio.title", "Studio")}
-          </h2>
-          <p className="mt-0.5 text-xs text-text-muted">
-            {t("playground:studio.subtitle", "Generate outputs from your sources")}
-          </p>
-        </div>
+      <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-border px-4">
+        <h2 className="text-sm font-semibold text-text">
+          {t("playground:studio.title", "Studio")}
+        </h2>
         <div className="flex items-center gap-1">
+          <Tooltip title={t("playground:studio.studioOptions", "Studio Options")}>
+            <button
+              type="button"
+              aria-label={t("playground:studio.studioOptions", "Studio Options")}
+              aria-expanded={studioOptionsExpanded}
+              aria-controls="studio-options-section"
+              onClick={() => setStudioOptionsExpanded(!studioOptionsExpanded)}
+              className="flex h-9 w-9 items-center justify-center rounded text-text-muted transition hover:bg-surface2 hover:text-text"
+            >
+              <Settings2 className="h-4 w-4" />
+            </button>
+          </Tooltip>
           <Tooltip
             title={t(
               "playground:studio.startWorkspaceTask",
@@ -1837,29 +1844,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         </div>
       </div>
 
-      {/* Studio Options Section - Collapsible */}
-      <div className="border-b border-border">
-        <button
-          type="button"
-          onClick={() => setStudioOptionsExpanded(!studioOptionsExpanded)}
-          aria-expanded={studioOptionsExpanded}
-          aria-controls="studio-options-section"
-          className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-surface2/50"
-        >
-          <h3 className="text-xs font-semibold uppercase text-text-muted">
-            {t("playground:studio.studioOptions", "Studio Options")}
-          </h3>
-          {studioOptionsExpanded ? (
-            <ChevronUp className="h-4 w-4 text-text-muted" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-text-muted" />
-          )}
-        </button>
-        <div
-          id="studio-options-section"
-          hidden={!studioOptionsExpanded}
-          className="px-4 pb-4"
-        >
+      <div id="studio-options-section" hidden={!studioOptionsExpanded} className="border-b border-border p-3">
+        {studioOptionsExpanded && (
           <div
             data-testid="studio-options-accordion"
             className="space-y-4 rounded border border-border bg-surface2/30 p-3"
@@ -2147,34 +2133,60 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
               </div>
             </section>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Studio Section - Collapsible */}
-      <div className="border-b border-border">
+      <div className="shrink-0 px-4 pt-3">
         <button
           type="button"
           onClick={() => setStudioExpanded(!studioExpanded)}
-          aria-expanded={studioExpanded}
+          disabled={!hasSelectedSourceIntent}
+          aria-expanded={createOutputExpanded}
           aria-controls="studio-output-types-section"
-          className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-surface2/50"
+          aria-describedby={!hasSelectedSourceIntent ? "studio-source-readiness" : undefined}
+          className="flex min-h-10 w-full items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-left text-sm font-medium text-text transition hover:border-primary/50 hover:bg-surface2 disabled:cursor-not-allowed disabled:text-text-muted"
         >
-          <h3 className="text-xs font-semibold uppercase text-text-muted">
-            {t("playground:studio.outputTypes", "Output Types")}
-          </h3>
-          {studioExpanded ? (
-            <ChevronUp className="h-4 w-4 text-text-muted" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-text-muted" />
-          )}
+          <Plus className="h-4 w-4" />
+          {t("playground:studio.createOutput", "Create output")}
+          <ChevronDown className={`ml-auto h-4 w-4 text-text-muted ${createOutputExpanded ? "rotate-180" : ""}`} />
         </button>
-        <div
-          id="studio-output-types-section"
-          hidden={!studioExpanded}
-          className="px-4 pb-4"
-        >
+
+        {!hasSelectedSourceIntent && (
+          <div className="mt-2 text-xs text-text-muted" data-testid="studio-source-readiness">
+            <p id="studio-source-readiness">
+              {t("playground:studio.selectSourcesHint", getWorkspaceStudioNoSourcesHint(isMobile))}
+            </p>
+            {onRequestSources && (
+              <button
+                type="button"
+                className="py-1 font-medium text-primary hover:underline"
+                onClick={onRequestSources}
+              >
+                {t("playground:studio.openSourcesCta", isMobile ? "Open Sources tab" : "Open Sources pane")}
+              </button>
+            )}
+          </div>
+        )}
+        {hasSelectedSourceIntent && (selectedSourceReadinessNotice || modelPrerequisiteMessage) && (
+          <div
+            data-testid="studio-prerequisite-warning"
+            className="mt-2 space-y-1 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
+          >
+            {selectedSourceReadinessNotice && (
+              <div>
+                <p className="font-semibold">
+                  {selectedSourceReadinessNotice.title}
+                </p>
+                <p>{selectedSourceReadinessNotice.description}</p>
+              </div>
+            )}
+            {modelPrerequisiteMessage && (
+              <p>{modelPrerequisiteMessage}</p>
+            )}
+          </div>
+        )}
         {isGeneratingOutput && (
-          <div className="mb-3 space-y-2">
+          <div className="my-3 space-y-2">
             {/* Multi-phase progress indicator */}
             <div className="flex items-center gap-2">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
@@ -2257,7 +2269,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
           </div>
         )}
         {unsavedArtifact && (
-          <div role="alert" className="rounded border border-warning/40 bg-warning/10 p-3 text-sm">
+          <div role="alert" className="my-2 rounded border border-warning/40 bg-warning/10 p-3 text-sm">
             <p>{t("playground:studio.outputSaveFailed",
               "Output is generated but could not be saved. Retry saving without generating again.")}</p>
             <Button size="small" loading={isSavingArtifact} onClick={() => void handleRetryArtifactSave()}>
@@ -2265,7 +2277,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             </Button>
           </div>
         )}
-        {(() => {
+        <div id="studio-output-types-section" hidden={!createOutputExpanded} className="mt-3">
+        {createOutputExpanded && (() => {
           const primaryButtons = OUTPUT_BUTTONS.filter((b) => PRIMARY_OUTPUT_TYPES.has(b.type))
           const secondaryButtons = OUTPUT_BUTTONS.filter((b) => !PRIMARY_OUTPUT_TYPES.has(b.type))
 
@@ -2382,46 +2395,6 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             )
           }
 
-          if (!hasSelectedSourceIntent) {
-            return (
-              <div
-                data-testid="studio-source-readiness"
-                className="rounded-md border border-border bg-surface2/40 p-3"
-              >
-                <div className="flex items-start gap-2">
-                  <FileText className="mt-0.5 h-4 w-4 flex-none text-text-muted" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold text-text">
-                      {t(
-                        "playground:studio.sourceReadinessTitle",
-                        "Select sources to generate work products"
-                      )}
-                    </p>
-                    <p className="mt-1 text-xs leading-snug text-text-muted">
-                      {t(
-                        "playground:studio.selectSourcesHint",
-                        getWorkspaceStudioNoSourcesHint(isMobile)
-                      )}
-                    </p>
-                    {onRequestSources && (
-                      <Button
-                        size="small"
-                        type="primary"
-                        className="mt-3"
-                        onClick={onRequestSources}
-                      >
-                        {t(
-                          "playground:studio.openSourcesCta",
-                          isMobile ? "Open Sources tab" : "Open Sources pane"
-                        )}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          }
-
           const primaryVisibleTypes = new Set(
             primaryButtons.map((button) => button.type)
           )
@@ -2461,24 +2434,6 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
           return (
             <div className="space-y-2">
-              {(selectedSourceReadinessNotice || modelPrerequisiteMessage) && (
-                <div
-                  data-testid="studio-prerequisite-warning"
-                  className="space-y-1 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
-                >
-                  {selectedSourceReadinessNotice && (
-                    <div>
-                      <p className="font-semibold">
-                        {selectedSourceReadinessNotice.title}
-                      </p>
-                      <p>{selectedSourceReadinessNotice.description}</p>
-                    </div>
-                  )}
-                  {modelPrerequisiteMessage && (
-                    <p>{modelPrerequisiteMessage}</p>
-                  )}
-                </div>
-              )}
               {capabilityNotices.length > 0 && (
                 <div
                   data-testid="studio-capability-warning"
@@ -2556,7 +2511,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
           )
         })()}
 
-        {hasSelectedSources && (
+        {createOutputExpanded && hasSelectedSources && (
           <div className="contents">
             <div className="mt-4 rounded border border-border bg-surface2/30 p-3">
           <div className="flex items-start justify-between gap-3">
@@ -2852,34 +2807,35 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         </div>
       </div>
 
-      {/* Generated Outputs Section - Collapsible */}
-      <div className="border-b border-border">
-        <button
-          type="button"
-          onClick={() => setOutputsExpanded(!outputsExpanded)}
-          aria-expanded={outputsExpanded}
-          aria-controls="studio-generated-outputs-section"
-          className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-surface2/50"
-        >
-          <h3 className="text-xs font-semibold uppercase text-text-muted">
-            {t("playground:studio.generatedOutputs", "Generated Outputs")}
-            {generatedArtifacts.length > 0 && (
-              <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                {generatedArtifacts.length}
-              </span>
+      <div className="shrink-0 border-b border-border">
+        <h3>
+          <button
+            type="button"
+            onClick={() => setOutputsExpanded(!outputsExpanded)}
+            aria-expanded={outputsExpanded}
+            aria-controls="studio-generated-outputs-section"
+            className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-surface2/50"
+          >
+            <span className="text-sm font-semibold text-text">
+              {t("playground:studio.savedOutputs", "Saved outputs")}
+              {generatedArtifacts.length > 0 && (
+                <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                  {generatedArtifacts.length}
+                </span>
+              )}
+            </span>
+            {outputsExpanded ? (
+              <ChevronUp className="h-4 w-4 text-text-muted" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-text-muted" />
             )}
-          </h3>
-          {outputsExpanded ? (
-            <ChevronUp className="h-4 w-4 text-text-muted" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-text-muted" />
-          )}
-        </button>
+          </button>
+        </h3>
         <div
           id="studio-generated-outputs-section"
           ref={outputListContainerRef}
           hidden={!outputsExpanded}
-          className="custom-scrollbar min-h-[10rem] overflow-y-auto px-4 pb-4"
+          className="custom-scrollbar overflow-y-auto px-4 pb-3"
           style={{ maxHeight: "40vh" }}
           onScroll={(event) => {
             if (!useVirtualizedOutputs) return
@@ -2892,27 +2848,10 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
               : "generated-outputs-standard"
           }
         >
-          {generatedArtifacts.length > 0 && (
-            <div className="mb-2 rounded border border-border bg-surface/60 px-2.5 py-2 text-[11px] text-text-muted">
-              {t(
-                "playground:studio.usageSummary",
-                "Estimated workspace usage: {{tokens}} tokens • ${{cost}}",
-                {
-                  tokens: Math.round(cumulativeUsage.tokens).toLocaleString(),
-                  cost: cumulativeUsage.costUsd.toFixed(3)
-                }
-              )}
-            </div>
-          )}
           {generatedArtifacts.length === 0 ? (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={
-                <span className="text-xs text-text-muted">
-                  {t("playground:studio.noOutputs", "No outputs generated yet")}
-                </span>
-              }
-            />
+            <p className="text-xs text-text-muted">
+              {t("playground:studio.noSavedOutputs", "No saved outputs yet.")}
+            </p>
           ) : (
             <div
               className="space-y-2"
@@ -3260,24 +3199,39 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
               })}
             </div>
           )}
-          </div>
+        </div>
+        {outputsExpanded && generatedArtifacts.length > 0 && (
+          <p className="px-4 pb-3 text-[11px] text-text-muted">
+            {t(
+              "playground:studio.usageSummary",
+              "Estimated workspace usage: {{tokens}} tokens • ${{cost}}",
+              {
+                tokens: Math.round(cumulativeUsage.tokens).toLocaleString(),
+                cost: cumulativeUsage.costUsd.toFixed(3)
+              }
+            )}
+          </p>
+        )}
       </div>
 
-      {/* Quick Notes Section - Collapsible, fills remaining height */}
-      <div className="flex min-h-[220px] flex-1 flex-col">
+      <div className={notesExpanded ? "flex min-h-[220px] flex-1 flex-col" : "shrink-0"}>
         {notesExpanded ? (
           renderQuickNotesSection(() => setNotesExpanded(false))
         ) : (
-          <button
-            type="button"
-            onClick={() => setNotesExpanded(true)}
-            className="flex w-full items-center justify-between border-t border-border px-4 py-3 text-left transition hover:bg-surface2/50"
-          >
-            <h3 className="text-xs font-semibold uppercase text-text-muted">
-              {t("playground:studio.quickNotes", "Quick Notes")}
-            </h3>
-            <ChevronDown className="h-4 w-4 text-text-muted" />
-          </button>
+          <h3>
+            <button
+              type="button"
+              onClick={() => setNotesExpanded(true)}
+              aria-expanded={false}
+              className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-surface2/50"
+            >
+              <span className="flex items-center gap-2 text-xs font-medium text-text-muted">
+                <StickyNote className="h-4 w-4" />
+                {t("playground:studio.quickNotes", "Quick Notes")}
+              </span>
+              <ChevronDown className="h-4 w-4 text-text-muted" />
+            </button>
+          </h3>
         )}
       </div>
     </div>

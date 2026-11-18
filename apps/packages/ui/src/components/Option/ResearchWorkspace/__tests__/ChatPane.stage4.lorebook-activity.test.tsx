@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
@@ -247,12 +247,34 @@ describe("ChatPane Stage 4 lorebook activity", () => {
 
     renderChatPane()
 
-    expect(await screen.findByText("Lorebook Activity")).toBeInTheDocument()
+    const disclosure = screen.getByRole("button", { name: "Lorebook Activity" })
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByRole("link", { name: "Open full lorebook diagnostics" })).toBeNull()
+    fireEvent.click(disclosure)
     expect(await screen.findByText("Turn 12: 2 entries fired")).toBeInTheDocument()
     expect(screen.getByText("Assistant summary for turn 12")).toBeInTheDocument()
     expect(
       screen.getByText("Showing 2 of 5 turns with diagnostics.")
     ).toBeInTheDocument()
+  })
+
+  it("keeps the reopened diagnostics when an earlier load returns late", async () => {
+    const first = createDeferred<{ turns: [] }>()
+    tldwClientMock.getChatLorebookDiagnostics
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce({
+        turns: [{ turn_number: 2, diagnostics: [{ entry_id: 2 }] }]
+      })
+    renderChatPane()
+    const disclosure = screen.getByRole("button", { name: "Lorebook Activity" })
+    fireEvent.click(disclosure)
+    fireEvent.click(disclosure)
+    fireEvent.click(disclosure)
+    expect(await screen.findByText("Turn 2: 1 entries fired")).toBeVisible()
+    await act(async () => first.resolve({ turns: [] }))
+    expect(screen.getByText("Turn 2: 1 entries fired")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Export" })).toBeEnabled()
   })
 
   it("hides detailed diagnostics when diagnostics API is forbidden", async () => {
@@ -261,6 +283,7 @@ describe("ChatPane Stage 4 lorebook activity", () => {
     )
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Lorebook Activity" }))
 
     expect(
       await screen.findByText("Lorebook activity is unavailable for this account.")
@@ -285,6 +308,7 @@ describe("ChatPane Stage 4 lorebook activity", () => {
     )
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Lorebook Activity" }))
 
     expect(
       await screen.findByText("Loading lorebook activity…")

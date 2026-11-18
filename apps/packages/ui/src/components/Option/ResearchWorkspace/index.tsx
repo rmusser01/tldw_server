@@ -8,7 +8,7 @@ import { useResearchWebCapture } from "@/utils/use-research-web-capture"
 import { WebArticleCaptureModal } from "./SourcesPane/WebArticleCaptureModal"
 import React, { Suspense, useEffect } from "react"
 import { useTranslation } from "react-i18next"
-import { Drawer, Tabs, Modal, Input, Empty, Skeleton, Button, message } from "antd"
+import { Modal, Input, Empty, Skeleton, Button, message } from "antd"
 import type { InputRef } from "antd"
 import {
   AlertTriangle,
@@ -87,6 +87,7 @@ import {
 } from "./SourcesPane/source-list-view"
 import {
   PaneResizer,
+  MIN_RIGHT_WIDTH,
   DEFAULT_LEFT_WIDTH,
   DEFAULT_RIGHT_WIDTH
 } from "./PaneResizer"
@@ -107,7 +108,6 @@ import {
   getResearchWorkspaceSearchFromLocation,
   getResearchWorkspaceTabFromSearch,
   isResearchWorkspaceDeepResearchReturnForWorkspace,
-  parseResearchWorkspaceTab,
   RESEARCH_WORKSPACE_DEFAULT_TAB,
   readResearchWorkspaceLastMobileTab,
   writeResearchWorkspaceLastMobileTab,
@@ -515,11 +515,16 @@ const buildWorkspaceNotesSearchPath = (workspaceTag: string): AllowedPath => {
 const buildWorkspaceNotePath = (noteId: string | number): AllowedPath =>
   `/api/v1/notes/${encodeURIComponent(String(noteId))}` as AllowedPath
 
-const isDesktopLayout = (): boolean => {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    return true
-  }
-  return window.matchMedia("(min-width: 1024px)").matches
+// Keep drafts, running generators and pane scroll positions when the layout changes.
+const VisitedPane: React.FC<React.PropsWithChildren<{ visible: boolean }>> = ({
+  visible,
+  children
+}) => {
+  const [visited, setVisited] = React.useState(visible)
+  React.useEffect(() => {
+    if (visible) setVisited(true)
+  }, [visible])
+  return visible || visited ? <>{children}</> : null
 }
 
 const estimateUtf8ByteLength = (value: string): number => {
@@ -1104,19 +1109,19 @@ class ResearchWorkspaceErrorBoundary extends React.Component<
 /**
  * ResearchWorkspace - NotebookLM-style three-pane research interface
  *
- * Layout at different breakpoints:
- * - lg+ (1024px+): Full three-pane layout
- * - md (768-1023px): Chat main, Sources/Studio as slide-out drawers
- * - sm (<768px): Bottom tab navigation between panes
+ * The available workspace width determines whether panes share a row or use tabs.
+ * Tablet users can also open a side pane alongside Chat.
  *
  * Features:
  * - Sources Pane (left): Add and manage research sources
  * - Chat Pane (middle): RAG-powered conversation with selected sources
  * - Studio Pane (right): Generate outputs (summaries, quizzes, flashcards, etc.)
  */
-const ResearchWorkspaceBody: React.FC = () => {
+const ResearchWorkspaceBody: React.FC<{ availableWidth: number }> = ({ availableWidth }) => {
   const { t } = useTranslation(["playground", "option", "common"])
   const isMobile = useMobile()
+  const tabbed = isMobile || availableWidth < 1024
+  const canCompare = tabbed && !isMobile && availableWidth >= 768
   const [messageApi, messageContextHolder] = message.useMessage()
   const [provenanceFlagEnabled] = useFeatureFlag(
     FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1
@@ -1144,9 +1149,9 @@ const ResearchWorkspaceBody: React.FC = () => {
       ? ""
       : getResearchWorkspaceSearchFromLocation(window.location)
 
-  // Mobile drawer state
-  const [leftDrawerOpen, setLeftDrawerOpen] = React.useState(false)
-  const [rightDrawerOpen, setRightDrawerOpen] = React.useState(false)
+  const [citationPreviewRequest, setCitationPreviewRequest] =
+    React.useState<{ sourceId: string; excerpt?: string } | null>(null)
+  const [comparisonPane, setComparisonPane] = React.useState<"sources" | "studio" | null>(null)
 
   const initialRouteSearchRef = React.useRef(
     getResearchWorkspaceSearchFromLocation(
@@ -1175,6 +1180,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   )
   const setActiveMobileTab = React.useCallback(
     (tab: WorkspaceTabKey) => {
+      setComparisonPane(null)
       setActiveTab(tab)
       writeResearchWorkspaceLastMobileTab(tab)
     },
@@ -1324,6 +1330,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   const generatingOutputType = useWorkspaceStore((s) => s.generatingOutputType)
   const currentNote = useWorkspaceStore((s) => s.currentNote)
   const workspaceChatSessions = useWorkspaceStore((s) => s.workspaceChatSessions)
+  const addSourceModalOpen = useWorkspaceStore(s => s.addSourceModalOpen)
   const focusSourceById = useWorkspaceStore((s) => s.focusSourceById)
   const focusChatMessageById = useWorkspaceStore((s) => s.focusChatMessageById)
   const focusWorkspaceNote = useWorkspaceStore((s) => s.focusWorkspaceNote)
@@ -1580,11 +1587,21 @@ const ResearchWorkspaceBody: React.FC = () => {
       readyEffectiveSelectedSourceEntries.length
   )
 
-  const [leftPaneWidth, setLeftPaneWidth] = React.useState(DEFAULT_LEFT_WIDTH)
-  const [rightPaneWidth, setRightPaneWidth] = React.useState(DEFAULT_RIGHT_WIDTH)
+  const [requestedLeftWidth, setLeftPaneWidth] = React.useState(DEFAULT_LEFT_WIDTH)
+  const [requestedRightWidth, setRightPaneWidth] = React.useState(DEFAULT_RIGHT_WIDTH)
 
   const leftPaneOpen = !leftPaneCollapsed
   const rightPaneOpen = !rightPaneCollapsed
+  // Reserve a readable chat column, including space for both handles or restore rails.
+  const paneBudget = availableWidth - 384 - (leftPaneOpen ? 8 : 44) - (rightPaneOpen ? 8 : 44)
+  const leftPaneWidth = Math.min(
+    requestedLeftWidth,
+    tabbed ? DEFAULT_LEFT_WIDTH : paneBudget - (rightPaneOpen ? MIN_RIGHT_WIDTH : 0)
+  )
+  const rightPaneWidth = Math.min(
+    requestedRightWidth,
+    tabbed ? DEFAULT_RIGHT_WIDTH : paneBudget - (leftPaneOpen ? leftPaneWidth : 0)
+  )
   const desktopChatContentWidthMode: "comfortable" | "expanded" | "full" =
     leftPaneOpen && rightPaneOpen
       ? "comfortable"
@@ -2404,12 +2421,10 @@ const ResearchWorkspaceBody: React.FC = () => {
   const focusWorkspacePane = React.useCallback(
     (pane: WorkspaceTabKey) => {
       if (pane === "sources") {
-        if (isMobile) {
+        if (tabbed) {
           setActiveMobileTab("sources")
-        } else if (isDesktopLayout()) {
-          setLeftPaneCollapsed(false)
         } else {
-          setLeftDrawerOpen(true)
+          setLeftPaneCollapsed(false)
         }
 
         window.setTimeout(() => {
@@ -2423,12 +2438,10 @@ const ResearchWorkspaceBody: React.FC = () => {
       }
 
       if (pane === "studio") {
-        if (isMobile) {
+        if (tabbed) {
           setActiveMobileTab("studio")
-        } else if (isDesktopLayout()) {
-          setRightPaneCollapsed(false)
         } else {
-          setRightDrawerOpen(true)
+          setRightPaneCollapsed(false)
         }
 
         window.setTimeout(() => {
@@ -2441,7 +2454,7 @@ const ResearchWorkspaceBody: React.FC = () => {
         return
       }
 
-      if (isMobile) {
+      if (tabbed) {
         setActiveMobileTab("chat")
       }
       window.setTimeout(() => {
@@ -2459,7 +2472,7 @@ const ResearchWorkspaceBody: React.FC = () => {
         firstFocusable?.focus()
       }, 0)
     },
-    [isMobile, setActiveMobileTab, setLeftPaneCollapsed, setRightPaneCollapsed]
+    [tabbed, setActiveMobileTab, setLeftPaneCollapsed, setRightPaneCollapsed]
   )
 
   React.useEffect(() => {
@@ -2774,12 +2787,10 @@ const ResearchWorkspaceBody: React.FC = () => {
       closeGlobalSearch()
 
       if (result.domain === "source" && result.sourceId) {
-        if (isMobile) {
+        if (tabbed) {
           setActiveMobileTab("sources")
-        } else if (isDesktopLayout()) {
-          setLeftPaneCollapsed(false)
         } else {
-          setLeftDrawerOpen(true)
+          setLeftPaneCollapsed(false)
         }
 
         window.setTimeout(() => {
@@ -2789,7 +2800,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       }
 
       if (result.domain === "chat" && result.chatMessageId) {
-        if (isMobile) {
+        if (tabbed) {
           setActiveMobileTab("chat")
         }
         window.setTimeout(() => {
@@ -2799,12 +2810,10 @@ const ResearchWorkspaceBody: React.FC = () => {
       }
 
       if (result.domain === "note") {
-        if (isMobile) {
+        if (tabbed) {
           setActiveMobileTab("studio")
-        } else if (isDesktopLayout()) {
-          setRightPaneCollapsed(false)
         } else {
-          setRightDrawerOpen(true)
+          setRightPaneCollapsed(false)
         }
 
         window.setTimeout(() => {
@@ -2817,7 +2826,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       focusChatMessageById,
       focusSourceById,
       hydrateAndFocusNote,
-      isMobile,
+      tabbed,
       setActiveMobileTab,
       setLeftPaneCollapsed,
       setRightPaneCollapsed
@@ -3373,17 +3382,12 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
   }, [])
 
-  const handleToggleLeftPane = () => {
-    if (isMobile) {
-      setLeftDrawerOpen(!leftDrawerOpen)
-    } else {
+  const togglePane = (pane: "sources" | "studio") => {
+    if (canCompare) {
+      setActiveMobileTab("chat")
+      setComparisonPane(comparisonPane === pane ? null : pane)
+    } else if (pane === "sources") {
       setLeftPaneCollapsed(leftPaneOpen)
-    }
-  }
-
-  const handleToggleRightPane = () => {
-    if (isMobile) {
-      setRightDrawerOpen(!rightDrawerOpen)
     } else {
       setRightPaneCollapsed(rightPaneOpen)
     }
@@ -3452,106 +3456,34 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
   }
 
-  // Mobile tab items with badges
-  const mobileTabItems = [
+  const paneTabs = [
     {
       key: "sources",
-      label: (
-        <span className="flex items-center gap-1.5">
-          <FileText className="h-4 w-4" />
-          <span>{t("playground:sources.title", "Sources")}</span>
-          {selectedSourceIds.length > 0 && (
-            <span className="ml-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-xs text-text">
-              {selectedSourceIds.length}
-            </span>
-          )}
-        </span>
-      ),
-      children: renderSourcesPane()
+      id: "workspace-sources-panel",
+      label: t("playground:sources.title", "Sources"),
+      Icon: FileText,
+      count: selectedSourceIds.length
     },
     {
       key: "chat",
-      label: (
-        <span className="flex items-center gap-1.5">
-          <MessageSquare className="h-4 w-4" />
-          <span>{t("playground:chat.title", "Chat")}</span>
-        </span>
-      ),
-      children: (
-        <ChatPane
-          provenanceEnabled={provenanceEnabled}
-          statusGuardrailsEnabled={statusGuardrailsEnabled}
-          contentWidthMode="full"
-          researchWorkspaceCapabilities={researchWorkspaceCapabilities}
-          workspaceCapabilities={workspaceCapabilities}
-          researchWorkspaceCapabilitiesStale={isResearchWorkspaceCapabilitiesStale(
-            researchWorkspaceCapabilities,
-            researchWorkspaceCapabilitiesFetchedAt
-          )}
-          onRefreshResearchWorkspaceCapabilities={
-            refreshResearchWorkspaceCapabilitiesIfStale
-          }
-          onStartWorkspaceTask={openWorkspaceAgentTask}
-        />
-      )
+      id: "workspace-main-content",
+      label: t("playground:chat.title", "Chat"),
+      Icon: MessageSquare,
+      count: 0
     },
     {
       key: "studio",
-      label: (
-        <span className="flex items-center gap-1.5">
-          <Sparkles className="h-4 w-4" />
-          <span>{t("playground:studio.title", "Studio")}</span>
-          {generatedArtifacts.length > 0 && (
-            <span className="ml-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-xs text-text">
-              {generatedArtifacts.length}
-            </span>
-          )}
-        </span>
-      ),
-      children: renderStudioPane()
+      id: "workspace-studio-panel",
+      label: t("playground:studio.title", "Studio"),
+      Icon: Sparkles,
+      count: generatedArtifacts.length
     }
-  ]
-
-  function renderSourcesPane(options?: { onHide?: () => void }) {
-    return (
-      <Suspense
-        fallback={<WorkspacePaneFallback testId="workspace-sources-pane" />}
-      >
-        <SourcesPane
-          onCaptureArticle={webCapture.open}
-          onHide={options?.onHide}
-          onOpenTransferSources={openTransferSourcesModal}
-          sourceListViewState={sourceListViewState}
-          onPatchSourceListViewState={patchSourceListViewState}
-          onApplySourceListViewState={applySourceListViewState}
-          onResetAdvancedSourceFilters={resetAdvancedSourceFilters}
-          sourceSavedViewsController={sourceSavedViewsController}
-          onOpenSourceViewOverlay={setSourceViewOverlayRequest}
-          statusGuardrailsEnabled={statusGuardrailsEnabled}
-          statusProjectionError={workspaceStatusProjectionError}
-          researchWorkspaceCapabilities={researchWorkspaceCapabilities}
-        />
-      </Suspense>
-    )
-  }
-
-  function renderStudioPane(options?: { onHide?: () => void }) {
-    return (
-      <Suspense
-        fallback={<WorkspacePaneFallback testId="workspace-studio-pane" />}
-      >
-        <StudioPane
-          onHide={options?.onHide}
-          onRequestSources={() => focusWorkspacePane("sources")}
-          researchWorkspaceCapabilities={researchWorkspaceCapabilities}
-          onRefreshResearchWorkspaceCapabilities={
-            refreshResearchWorkspaceCapabilitiesIfStale
-          }
-          onStartWorkspaceTask={openWorkspaceAgentTask}
-        />
-      </Suspense>
-    )
-  }
+  ] as const
+  const compare = canCompare && activeTab === "chat" ? comparisonPane : null
+  const closeComparison = compare ? () => setComparisonPane(null) : undefined
+  const showSources = tabbed ? activeTab === "sources" || compare === "sources" : leftPaneOpen
+  const showChat = !tabbed || activeTab === "chat"
+  const showStudio = tabbed ? activeTab === "studio" || compare === "studio" : rightPaneOpen
 
   const sessionSummaryItems = [
     {
@@ -3567,7 +3499,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   ]
 
   if (!isStoreHydrated) {
-    return <ResearchWorkspaceSkeleton isMobile={isMobile} />
+    return <ResearchWorkspaceSkeleton isMobile={tabbed} />
   }
 
   if (!workspaceId && workspaceRestoreError) {
@@ -3586,12 +3518,12 @@ const ResearchWorkspaceBody: React.FC = () => {
   }
 
   const tutorialPromptBanner = showTutorialPrompt ? (
-    <div className="mx-4 mt-2 flex flex-col gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm md:flex-row md:items-center md:justify-between">
+    <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border bg-surface2/60 px-3 py-1 text-sm">
       <div className="min-w-0">
-        <p className="font-semibold text-text">
+        <p className="sr-only">
           {t("playground:workspace.firstUseTitle", "Research Workspace")}
         </p>
-        <p className="text-xs text-text-muted">
+        <p className="hidden text-xs text-text-muted lg:block">
           {t(
             "playground:workspace.firstUseDescription",
             "Collect sources, ask questions, and turn findings into reusable outputs."
@@ -3760,7 +3692,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,var(--surface-2),var(--bg)_45%)] text-text">
+    <div className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-surface text-text">
       {messageContextHolder}
       <WebArticleCaptureModal capture={webCapture} />
       {(knowledgeImport.attached > 0 ||
@@ -3944,229 +3876,214 @@ const ResearchWorkspaceBody: React.FC = () => {
       )}
 
 
-      {/* Mobile vs desktop layout */}
-      {isMobile ? (
-        <>
-          <WorkspaceHeader
-            leftPaneOpen={false}
-            rightPaneOpen={false}
-            onToggleLeftPane={handleToggleLeftPane}
-            onToggleRightPane={handleToggleRightPane}
-            onOpenSearch={openGlobalSearch}
-            onOpenSplitWorkspace={handleOpenSplitWorkspace}
-            hideToggles
-            storageUsedBytes={workspaceStorageUsage.usedBytes}
-            storageQuotaBytes={workspaceStorageUsage.quotaBytes}
-            storageOriginUsedBytes={workspaceStorageUsage.originUsedBytes ?? undefined}
-            storageOriginQuotaBytes={workspaceStorageUsage.originQuotaBytes ?? undefined}
-            storageAccountUsedBytes={workspaceStorageUsage.accountUsedBytes ?? undefined}
-            storageAccountQuotaBytes={workspaceStorageUsage.accountQuotaBytes ?? undefined}
-            provenanceEnabled={provenanceEnabled}
-            statusGuardrailsEnabled={statusGuardrailsEnabled}
-            serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
-            agentTaskHandoffOpenSignal={agentTaskHandoffOpenSignal}
-            agentTaskPrefill={agentTaskPrefill}
-          />
+      <WorkspaceHeader
+        leftPaneOpen={leftPaneOpen}
+        rightPaneOpen={rightPaneOpen}
+        onToggleLeftPane={() => togglePane("sources")}
+        onToggleRightPane={() => togglePane("studio")}
+        onOpenSearch={openGlobalSearch}
+        onOpenSplitWorkspace={handleOpenSplitWorkspace}
+        hideToggles={tabbed}
+        canComparePanes={canCompare}
+        storageUsedBytes={workspaceStorageUsage.usedBytes}
+        storageQuotaBytes={workspaceStorageUsage.quotaBytes}
+        storageOriginUsedBytes={workspaceStorageUsage.originUsedBytes ?? undefined}
+        storageOriginQuotaBytes={workspaceStorageUsage.originQuotaBytes ?? undefined}
+        storageAccountUsedBytes={workspaceStorageUsage.accountUsedBytes ?? undefined}
+        storageAccountQuotaBytes={workspaceStorageUsage.accountQuotaBytes ?? undefined}
+        provenanceEnabled={provenanceEnabled}
+        statusGuardrailsEnabled={statusGuardrailsEnabled}
+        serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
+        agentTaskHandoffOpenSignal={agentTaskHandoffOpenSignal}
+        agentTaskPrefill={agentTaskPrefill}
+      />
 
-          <WorkspaceBanner
-            banner={workspaceBanner}
-            workspaceName={workspaceName}
-            isMobile
-          />
-          {deepResearchReturnBanner}
+      <WorkspaceBanner
+        banner={workspaceBanner}
+        workspaceName={workspaceName}
+        isMobile={tabbed}
+      />
+      {deepResearchReturnBanner}
 
-          {tutorialPromptBanner}
+      {tutorialPromptBanner}
 
-          <WorkspaceStatusBar
-            storageUsedBytes={workspaceStorageUsage.usedBytes}
-            storageQuotaBytes={workspaceStorageUsage.quotaBytes}
-            activeOperations={activeWorkspaceOperations}
-            statusMessages={workspaceMigrationStatusMessages}
-            statusAction={workspaceMigrationStatusAction}
-            statusGuardrailsEnabled={statusGuardrailsEnabled}
-            workspaceContextStatus={workspaceContextStatus}
-            compact
-          />
-
-          <Tabs
-            activeKey={activeTab}
-            onChange={(key) => {
-              const nextTab = parseResearchWorkspaceTab(key)
-              if (nextTab) {
-                setActiveMobileTab(nextTab)
-              }
-            }}
-            items={mobileTabItems}
-            centered
-            destroyOnHidden
-            className="flex-1 [&_.ant-tabs-content]:h-full [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-tabpane]:h-full"
-            tabBarStyle={{ marginBottom: 0, borderBottom: "1px solid var(--border)" }}
-          />
-        </>
-      ) : (
-        <>
-          <WorkspaceHeader
-            leftPaneOpen={!!leftPaneOpen}
-            rightPaneOpen={!!rightPaneOpen}
-            onToggleLeftPane={handleToggleLeftPane}
-            onToggleRightPane={handleToggleRightPane}
-            onOpenSearch={openGlobalSearch}
-            onOpenSplitWorkspace={handleOpenSplitWorkspace}
-            storageUsedBytes={workspaceStorageUsage.usedBytes}
-            storageQuotaBytes={workspaceStorageUsage.quotaBytes}
-            storageOriginUsedBytes={workspaceStorageUsage.originUsedBytes ?? undefined}
-            storageOriginQuotaBytes={workspaceStorageUsage.originQuotaBytes ?? undefined}
-            storageAccountUsedBytes={workspaceStorageUsage.accountUsedBytes ?? undefined}
-            storageAccountQuotaBytes={workspaceStorageUsage.accountQuotaBytes ?? undefined}
-            provenanceEnabled={provenanceEnabled}
-            statusGuardrailsEnabled={statusGuardrailsEnabled}
-            serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
-            agentTaskHandoffOpenSignal={agentTaskHandoffOpenSignal}
-            agentTaskPrefill={agentTaskPrefill}
-          />
-
-          <WorkspaceBanner
-            banner={workspaceBanner}
-            workspaceName={workspaceName}
-            isMobile={false}
-          />
-          {deepResearchReturnBanner}
-
-          {tutorialPromptBanner}
-
-          <div className="flex min-h-0 flex-1 gap-2 px-2 py-2">
-            {!leftPaneOpen && (
-              <WorkspaceRestoreRailButton
-                side="left"
-                label={t("playground:workspace.showSources", "Show sources")}
-                panelId="workspace-sources-panel"
-                testId="workspace-restore-sources"
-                onClick={handleRestoreLeftPane}
-              />
-            )}
-
-            {leftPaneOpen && (
-              <>
-                <aside
-                  id="workspace-sources-panel"
-                  role="complementary"
-                  aria-label={t("playground:workspace.sourcesPanel", "Sources panel")}
-                  tabIndex={-1}
-                  className="hidden shrink-0 overflow-hidden rounded-xl border border-border/80 bg-surface/90 shadow-card lg:flex lg:flex-col"
-                  style={{ width: leftPaneWidth }}
-                >
-                  {renderSourcesPane({
-                    onHide: () => setLeftPaneCollapsed(true)
-                  })}
-                </aside>
-                <PaneResizer
-                  pane="left"
-                  width={leftPaneWidth}
-                  onResize={setLeftPaneWidth}
-                  onReset={() => setLeftPaneWidth(DEFAULT_LEFT_WIDTH)}
-                />
-              </>
-            )}
-            <Drawer
-              title={
-                <span className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  {t("playground:sources.title", "Sources")}
-                </span>
-              }
-              placement="left"
-              onClose={() => setLeftDrawerOpen(false)}
-              open={leftDrawerOpen}
-              mask={false}
-              className="lg:hidden"
-              styles={{ wrapper: { width: 320 }, body: { padding: 0 } }}
-            >
-              {renderSourcesPane()}
-            </Drawer>
-
-            <main
-              id="workspace-main-content"
-              tabIndex={-1}
-              className="flex min-w-0 flex-1 overflow-hidden rounded-xl border border-border/80 bg-surface/90 shadow-card"
-            >
-              <ChatPane
-                provenanceEnabled={provenanceEnabled}
-                statusGuardrailsEnabled={statusGuardrailsEnabled}
-                contentWidthMode={desktopChatContentWidthMode}
-                researchWorkspaceCapabilities={researchWorkspaceCapabilities}
-                workspaceCapabilities={workspaceCapabilities}
-                researchWorkspaceCapabilitiesStale={isResearchWorkspaceCapabilitiesStale(
-                  researchWorkspaceCapabilities,
-                  researchWorkspaceCapabilitiesFetchedAt
-                )}
-                onRefreshResearchWorkspaceCapabilities={
-                  refreshResearchWorkspaceCapabilitiesIfStale
+      {tabbed && (
+        <div
+          role="tablist"
+          aria-label={t("playground:workspace.panes", "Workspace panes")}
+          data-testid="workspace-mobile-tabs"
+          data-active-key={activeTab}
+          className="grid shrink-0 grid-cols-3 border-b border-border bg-surface p-1"
+        >
+          {paneTabs.map(({ key, id, label, Icon, count }, index) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              id={`workspace-tab-${key}`}
+              data-testid={`tab-label-${key}`}
+              aria-selected={activeTab === key}
+              aria-controls={id}
+              tabIndex={activeTab === key ? 0 : -1}
+              className={`flex min-h-10 items-center justify-center gap-1.5 rounded-md text-sm font-medium focus-visible:ring-2 focus-visible:ring-primary ${activeTab === key ? "bg-primary/10 text-primary" : "text-text-muted hover:bg-surface2"}`}
+              onClick={() => setActiveMobileTab(key)}
+              onKeyDown={(event) => {
+                const adjacent: Record<string, number> = {
+                  ArrowLeft: (index + paneTabs.length - 1) % paneTabs.length,
+                  ArrowRight: (index + 1) % paneTabs.length,
+                  Home: 0,
+                  End: paneTabs.length - 1
                 }
+                const next = adjacent[event.key]
+                if (next === undefined) return
+                event.preventDefault()
+                const target = paneTabs[next].key
+                setActiveMobileTab(target)
+                document.getElementById(`workspace-tab-${target}`)?.focus()
+              }}
+            >
+              <Icon className="h-4 w-4" aria-hidden="true" />
+              {label}
+              {count > 0 && (
+                <span className="rounded bg-surface2 px-1.5 text-xs text-text">{count}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="flex min-h-0 min-w-0 flex-1">
+        {!tabbed && !leftPaneOpen && (
+          <WorkspaceRestoreRailButton
+            side="left"
+            label={t("playground:workspace.showSources", "Show sources")}
+            panelId="workspace-sources-panel"
+            testId="workspace-restore-sources"
+            onClick={handleRestoreLeftPane}
+          />
+        )}
+        <aside
+          id="workspace-sources-panel"
+          tabIndex={-1}
+          role={tabbed && compare !== "sources" ? "tabpanel" : "complementary"}
+          aria-label={t("playground:workspace.sourcesPanel", "Sources panel")}
+          aria-labelledby={tabbed && compare !== "sources" ? "workspace-tab-sources" : undefined}
+          hidden={!showSources}
+          className={`min-h-0 min-w-0 flex-col overflow-hidden bg-surface2/40 ${showSources ? "flex" : "hidden"} ${tabbed && !compare ? "flex-1" : "shrink-0 border-r border-border"}`}
+          style={tabbed && !compare ? undefined : { width: leftPaneWidth }}
+        >
+          <VisitedPane visible={showSources || addSourceModalOpen}>
+            <Suspense fallback={<WorkspacePaneFallback testId="workspace-sources-pane" />}>
+              <SourcesPane
+                onCaptureArticle={webCapture.open}
+                citationPreviewRequest={citationPreviewRequest}
+                onCitationPreviewOpened={() => setCitationPreviewRequest(null)}
+                onHide={tabbed ? closeComparison : () => setLeftPaneCollapsed(true)}
+                onOpenTransferSources={openTransferSourcesModal}
+                sourceListViewState={sourceListViewState}
+                onPatchSourceListViewState={patchSourceListViewState}
+                onApplySourceListViewState={applySourceListViewState}
+                onResetAdvancedSourceFilters={resetAdvancedSourceFilters}
+                sourceSavedViewsController={sourceSavedViewsController}
+                onOpenSourceViewOverlay={setSourceViewOverlayRequest}
+                statusGuardrailsEnabled={statusGuardrailsEnabled}
+                statusProjectionError={workspaceStatusProjectionError}
+                researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+              />
+            </Suspense>
+          </VisitedPane>
+        </aside>
+        {!tabbed && leftPaneOpen && (
+          <PaneResizer
+            pane="left"
+            width={leftPaneWidth}
+            onResize={(width) =>
+              setLeftPaneWidth(Math.min(width, paneBudget - (rightPaneOpen ? rightPaneWidth : 0)))
+            }
+            onReset={() => setLeftPaneWidth(DEFAULT_LEFT_WIDTH)}
+          />
+        )}
+        <main
+          id="workspace-main-content"
+          tabIndex={-1}
+          role={tabbed ? "tabpanel" : undefined}
+          aria-labelledby={tabbed ? "workspace-tab-chat" : undefined}
+          hidden={!showChat}
+          className={`min-w-0 flex-1 overflow-hidden bg-surface ${showChat ? "flex" : "hidden"}`}
+        >
+          <ChatPane
+            onRequestChat={tabbed ? () => focusWorkspacePane("chat") : undefined}
+            provenanceEnabled={provenanceEnabled}
+            statusGuardrailsEnabled={statusGuardrailsEnabled}
+            contentWidthMode={tabbed ? "full" : desktopChatContentWidthMode}
+            onOpenCitationSource={(sourceId, excerpt) => {
+              if (tabbed) setActiveMobileTab("sources")
+              else setLeftPaneCollapsed(false)
+              setCitationPreviewRequest({ sourceId, excerpt })
+            }}
+            researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+            workspaceCapabilities={workspaceCapabilities}
+            researchWorkspaceCapabilitiesStale={isResearchWorkspaceCapabilitiesStale(
+              researchWorkspaceCapabilities,
+              researchWorkspaceCapabilitiesFetchedAt
+            )}
+            onRefreshResearchWorkspaceCapabilities={refreshResearchWorkspaceCapabilitiesIfStale}
+            onStartWorkspaceTask={openWorkspaceAgentTask}
+          />
+        </main>
+        {!tabbed && !rightPaneOpen && (
+          <WorkspaceRestoreRailButton
+            side="right"
+            label={t("playground:workspace.showStudio", "Show studio")}
+            panelId="workspace-studio-panel"
+            testId="workspace-restore-studio"
+            onClick={handleRestoreRightPane}
+          />
+        )}
+        {!tabbed && rightPaneOpen && (
+          <PaneResizer
+            pane="right"
+            width={rightPaneWidth}
+            onResize={(width) =>
+              setRightPaneWidth(Math.min(width, paneBudget - (leftPaneOpen ? leftPaneWidth : 0)))
+            }
+            onReset={() => setRightPaneWidth(DEFAULT_RIGHT_WIDTH)}
+          />
+        )}
+        <aside
+          id="workspace-studio-panel"
+          tabIndex={-1}
+          role={tabbed && compare !== "studio" ? "tabpanel" : "complementary"}
+          aria-label={t("playground:workspace.studioPanel", "Studio panel")}
+          aria-labelledby={tabbed && compare !== "studio" ? "workspace-tab-studio" : undefined}
+          hidden={!showStudio}
+          className={`min-h-0 min-w-0 flex-col overflow-hidden bg-surface2/40 ${showStudio ? "flex" : "hidden"} ${tabbed && !compare ? "flex-1" : "shrink-0 border-l border-border"}`}
+          style={tabbed && !compare ? undefined : { width: rightPaneWidth }}
+        >
+          <VisitedPane visible={showStudio}>
+            <Suspense fallback={<WorkspacePaneFallback testId="workspace-studio-pane" />}>
+              <StudioPane
+                onHide={tabbed ? closeComparison : () => setRightPaneCollapsed(true)}
+                onRequestSources={() => focusWorkspacePane("sources")}
+                researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+                onRefreshResearchWorkspaceCapabilities={refreshResearchWorkspaceCapabilitiesIfStale}
                 onStartWorkspaceTask={openWorkspaceAgentTask}
               />
-            </main>
+            </Suspense>
+          </VisitedPane>
+        </aside>
+      </div>
 
-            {!rightPaneOpen && (
-              <WorkspaceRestoreRailButton
-                side="right"
-                label={t("playground:workspace.showStudio", "Show studio")}
-                panelId="workspace-studio-panel"
-                testId="workspace-restore-studio"
-                onClick={handleRestoreRightPane}
-              />
-            )}
-
-            {rightPaneOpen && (
-              <>
-                <PaneResizer
-                  pane="right"
-                  width={rightPaneWidth}
-                  onResize={setRightPaneWidth}
-                  onReset={() => setRightPaneWidth(DEFAULT_RIGHT_WIDTH)}
-                />
-                <aside
-                  id="workspace-studio-panel"
-                  role="complementary"
-                  aria-label={t("playground:workspace.studioPanel", "Studio panel")}
-                  tabIndex={-1}
-                  className="hidden min-h-0 shrink-0 overflow-hidden rounded-xl border border-border/80 bg-surface/90 shadow-card lg:flex lg:flex-col"
-                  style={{ width: rightPaneWidth }}
-                >
-                  {renderStudioPane({
-                    onHide: () => setRightPaneCollapsed(true)
-                  })}
-                </aside>
-              </>
-            )}
-            <Drawer
-              title={
-                <span className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4" />
-                  {t("playground:studio.title", "Studio")}
-                </span>
-              }
-              placement="right"
-              onClose={() => setRightDrawerOpen(false)}
-              open={rightDrawerOpen}
-              mask={false}
-              className="lg:hidden"
-              styles={{ wrapper: { width: 360 }, body: { padding: 0 } }}
-            >
-              {renderStudioPane()}
-            </Drawer>
-          </div>
-
-          <WorkspaceStatusBar
-            storageUsedBytes={workspaceStorageUsage.usedBytes}
-            storageQuotaBytes={workspaceStorageUsage.quotaBytes}
-            activeOperations={activeWorkspaceOperations}
-            statusMessages={workspaceMigrationStatusMessages}
-            statusAction={workspaceMigrationStatusAction}
-            statusGuardrailsEnabled={statusGuardrailsEnabled}
-            workspaceContextStatus={workspaceContextStatus}
-          />
-        </>
-      )}
+      <WorkspaceStatusBar
+        storageUsedBytes={workspaceStorageUsage.usedBytes}
+        storageQuotaBytes={workspaceStorageUsage.quotaBytes}
+        activeOperations={activeWorkspaceOperations}
+        statusMessages={workspaceMigrationStatusMessages}
+        statusAction={workspaceMigrationStatusAction}
+        statusGuardrailsEnabled={statusGuardrailsEnabled}
+        workspaceContextStatus={workspaceContextStatus}
+        compact={tabbed}
+      />
 
       <Modal
         title={
@@ -4195,7 +4112,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             onChange={(event) => setGlobalSearchQuery(event.target.value)}
             onKeyDown={handleSearchInputKeyDown}
             placeholder={t(
-              "playground:search.placeholder",
+              "playground:search.workspacePlaceholder",
               "Search sources, chat, and notes..."
             )}
             prefix={<Search className="h-4 w-4 text-text-muted" />}
@@ -4492,10 +4409,34 @@ const ResearchWorkspaceBody: React.FC = () => {
   )
 }
 
-export const ResearchWorkspace: React.FC = () => (
-  <ResearchWorkspaceErrorBoundary>
-    <ResearchWorkspaceBody />
-  </ResearchWorkspaceErrorBoundary>
-)
+export const ResearchWorkspace: React.FC = () => {
+  const container = React.useRef<HTMLDivElement>(null)
+  const [availableWidth, setAvailableWidth] = React.useState(() =>
+    typeof window === "undefined" ? 1024 : window.innerWidth
+  )
+  React.useLayoutEffect(() => {
+    const node = container.current
+    if (!node) return
+    const measure = () => {
+      const width = node.getBoundingClientRect().width
+      if (width > 0) setAvailableWidth(width)
+    }
+    measure()
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure)
+      return () => window.removeEventListener("resize", measure)
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <div ref={container} className="h-full min-h-0 w-full min-w-0 flex-1">
+      <ResearchWorkspaceErrorBoundary>
+        <ResearchWorkspaceBody availableWidth={availableWidth} />
+      </ResearchWorkspaceErrorBoundary>
+    </div>
+  )
+}
 
 export default ResearchWorkspace

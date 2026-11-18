@@ -644,6 +644,13 @@ describe("useSourceSavedViews", () => {
     expect(result.current.currentSignature).not.toBeNull();
   });
 
+  it("keeps the source pane usable when the server omits the saved-view list", async () => {
+    api.listWorkspaceSourceViews.mockResolvedValueOnce({});
+    const { result } = setup("ws-a", localState());
+    await waitFor(() => expect(result.current.listError?.retryable).toBe(true));
+    expect(result.current.views).toEqual([]);
+  });
+
   it("reconciles all rows after a create supersedes the initial load", async () => {
     const initialLoad = deferred<{ items: ReturnType<typeof validView>[] }>();
     const reconciliation = deferred<{

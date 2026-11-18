@@ -237,7 +237,7 @@ vi.mock("antd", async () => {
 })
 
 const expandOutputTypesSection = () => {
-  const toggle = screen.getByRole("button", { name: /Output Types/i })
+  const toggle = screen.getByRole("button", { name: /Create output/i })
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }

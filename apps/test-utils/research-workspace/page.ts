@@ -202,14 +202,13 @@ export class ResearchWorkspaceParityPage {
     await expect(this.studioPanel).toBeVisible({ timeout: 10_000 })
   }
 
-  async openOutputTypesSection(): Promise<void> {
+  async expectCreateOutputNeedsSources(): Promise<void> {
     const toggle = this.studioPanel
       .locator('button[aria-controls="studio-output-types-section"]')
       .first()
     await expect(toggle).toBeVisible({ timeout: 15_000 })
-    if ((await toggle.getAttribute("aria-expanded")) === "false") {
-      await toggle.click({ force: true })
-    }
+    await expect(toggle).toBeDisabled()
+    await expect(this.studioPanel.getByRole("button", { name: /open sources/i })).toBeVisible()
   }
 
   async openGeneratedOutputsSection(): Promise<void> {

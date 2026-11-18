@@ -197,4 +197,19 @@ describe("source-list-view", () => {
     expect(summary).toContain("Lifecycle=Partially queryable")
     expect(summary).toContain("Sort: Added date")
   })
+
+  it("describes date, metadata and numeric predicates while the organizer is closed", () => {
+    const summary = buildSourceFilterSummary({
+      ...baseViewState,
+      dateField: "sourceCreatedAt",
+      dateFrom: "2026-01-01",
+      requireUrl: true,
+      pageCountMin: 0,
+      pageCountMax: 12
+    })
+
+    expect(summary).toContain("Source date ≥ 2026-01-01")
+    expect(summary).toContain("Has URL")
+    expect(summary).toContain("Pages 0–12")
+  })
 })

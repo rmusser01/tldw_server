@@ -20,6 +20,8 @@ try {
   const input = page.getByRole('textbox', { name: 'View name', exact: true });
   const modal = input.locator('xpath=ancestor::*[@role="dialog"][1]');
   const cancel = modal.getByRole('button', { name: 'Cancel', exact: true });
+  const organizer = page.getByRole('button', { name: /organize sources/i });
+  if ((await organizer.getAttribute('aria-expanded')) === 'false') await organizer.click();
   const open = async () => {
     await page.getByRole('button', { name: 'Save source view', exact: true }).click();
     await input.waitFor();

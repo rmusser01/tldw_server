@@ -16,7 +16,7 @@ export async function runResearchWorkspaceParityContract(
   await workspacePage.hideStudioPane()
   await workspacePage.restoreStudioPane()
 
-  await workspacePage.openOutputTypesSection()
+  await workspacePage.expectCreateOutputNeedsSources()
   await workspacePage.openGeneratedOutputsSection()
   await workspacePage.seedDeterministicArtifact()
 

@@ -404,14 +404,14 @@ const expandStudioOptionsSection = () => {
 }
 
 const expandOutputTypesSection = () => {
-  const toggle = screen.getByRole("button", { name: /Output Types/i })
+  const toggle = screen.getByRole("button", { name: /Create output/i })
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
 }
 
 const expandGeneratedOutputsSection = () => {
-  const toggle = screen.getByRole("button", { name: /Generated Outputs/i })
+  const toggle = screen.getByRole("button", { name: /Saved outputs/i })
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
@@ -1354,7 +1354,37 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     expect(speedSlider?.className).toContain("[&_.ant-slider-handle]:!h-5")
   })
 
-  it("exposes aria-expanded metadata for collapsible studio sections", () => {
+  it("opens collapsed Quick Notes when the workspace requests note focus", async () => {
+    const view = render(<StudioPane />)
+    expect(screen.getByRole("button", { name: "Quick Notes" })).toHaveAttribute("aria-expanded", "false")
+
+    workspaceStoreState.noteFocusTarget = { field: "content", token: 1 }
+    view.rerender(<StudioPane />)
+
+    expect(await screen.findByTestId("quick-notes")).toBeVisible()
+  })
+
+  it("offers source recovery and setup while creation is unavailable", () => {
+    workspaceStoreState.selectedSourceIds = []
+    const onRequestSources = vi.fn()
+    render(<StudioPane onRequestSources={onRequestSources} />)
+
+    expect(screen.getByRole("button", { name: "Create output" })).toBeDisabled()
+    expect(screen.getByText("No saved outputs yet.")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Studio Options" })).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: "Open Sources pane" }))
+    expect(onRequestSources).toHaveBeenCalledOnce()
+  })
+
+  it("shows saved outputs before opening creation and advanced controls", () => {
+    workspaceStoreState.generatedArtifacts = [{
+      id: "first",
+      type: "summary",
+      title: "Saved research summary",
+      status: "completed",
+      content: "Summary",
+      createdAt: new Date("2026-02-18T10:00:00.000Z")
+    }]
     const { container } = render(<StudioPane />)
 
     const studioOptionsToggle = screen.getByRole("button", {
@@ -1367,16 +1397,18 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     )
 
     const outputTypesToggle = screen.getByRole("button", {
-      name: /Output Types/
+      name: /Create output/
     })
-    expect(outputTypesToggle).toHaveAttribute("aria-expanded", "true")
+    expect(outputTypesToggle).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByText("Saved research summary")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Summary" })).toBeNull()
     expect(outputTypesToggle).toHaveAttribute(
       "aria-controls",
       "studio-output-types-section"
     )
 
     const outputsToggle = screen.getByRole("button", {
-      name: /Generated Outputs/
+      name: /Saved outputs/
     })
     expect(outputsToggle).toHaveAttribute("aria-expanded", "true")
     expect(outputsToggle).toHaveAttribute(
@@ -1405,9 +1437,6 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     fireEvent.click(studioOptionsToggle)
     expect(studioOptionsToggle).toHaveAttribute("aria-expanded", "false")
     expect(container.querySelector("#studio-options-section")).toHaveAttribute("hidden")
-
-    fireEvent.click(outputTypesToggle)
-    expect(outputTypesToggle).toHaveAttribute("aria-expanded", "false")
 
     fireEvent.click(outputTypesToggle)
     expect(outputTypesToggle).toHaveAttribute("aria-expanded", "true")

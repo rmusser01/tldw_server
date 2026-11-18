@@ -458,9 +458,8 @@ const generateAndDownloadOutput = async (
         )
       : null
 
-  const outputButton = workspacePage.getStudioOutputButton(output.label)
   await disableNextJsPortalPointerInterception(page)
-  await expect(outputButton).toBeVisible({ timeout: 15_000 })
+  const outputButton = await workspacePage.revealStudioOutput(output.label)
   await expect(outputButton).toBeEnabled({ timeout: 15_000 })
   await outputButton.scrollIntoViewIfNeeded()
   await activateButton(page, outputButton)

@@ -437,9 +437,7 @@ export class ResearchWorkspacePage {
       .getByRole("dialog")
       .filter({ hasText: /search workspace/i })
       .first()
-    this.globalSearchInput = this.globalSearchModal.getByPlaceholder(
-      /search sources, chat, and notes/i
-    )
+    this.globalSearchInput = this.globalSearchModal.getByRole("textbox", { name: "Search workspace" })
     this.addSourceModal = page
       .getByRole("dialog")
       .filter({ hasText: /add sources/i })
@@ -826,7 +824,7 @@ export class ResearchWorkspacePage {
   }
 
   async openGlobalSearchWithShortcut(): Promise<void> {
-    await this.page.locator("body").click()
+    await this.headerTitle.click()
     await expect
       .poll(
         async () => {
@@ -1027,8 +1025,12 @@ export class ResearchWorkspacePage {
     await expect(row.locator('input[type="checkbox"]')).toBeChecked()
   }
 
-  getSelectedSourceTag(title: string): Locator {
-    return this.chatPanel.locator(".ant-tag").filter({ hasText: title }).first()
+  async expectChatSourceInSettings(title: string): Promise<void> {
+    await this.chatPanel.getByRole("button", { name: "Response settings" }).click()
+    const settings = this.page.getByRole("dialog", { name: "Response settings" })
+    await expect(settings.getByText(title, { exact: true })).toBeVisible()
+    await settings.getByRole("button", { name: "Done" }).click()
+    await expect(settings).toBeHidden()
   }
 
   getChatInput(): Locator {
@@ -1046,8 +1048,19 @@ export class ResearchWorkspacePage {
     return this.globalSearchModal.getByRole("button").filter({ hasText: text }).first()
   }
 
-  getStudioOutputButton(label: string): Locator {
-    return this.studioPanel.getByRole("button", { name: label, exact: true })
+  async revealStudioOutput(label: string): Promise<Locator> {
+    const create = this.studioPanel.getByRole("button", { name: "Create output", exact: true })
+    if ((await create.getAttribute("aria-expanded")) === "false") {
+      await create.click()
+    }
+    const choices = this.studioPanel.locator("#studio-output-types-section")
+    await expect(choices).toBeVisible()
+    const output = choices.getByRole("button", { name: label, exact: true })
+    if (!(await output.count())) {
+      await choices.getByRole("button", { name: /^More outputs/i }).click()
+    }
+    await expect(output).toBeVisible()
+    return output
   }
 
   getStudioArtifactCards(): Locator {

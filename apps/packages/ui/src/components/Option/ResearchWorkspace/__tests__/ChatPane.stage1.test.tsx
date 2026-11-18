@@ -431,6 +431,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       }
     ])
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
     fireEvent.click(screen.getByTestId("model-selector"))
     await screen.findByText("Default model")
     expect(mockSetSelectedModel).not.toHaveBeenCalled()
@@ -449,6 +450,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
 
   it("names only the server connection when selected-model readiness is unknown", () => {
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     const selector = screen.getByTestId("model-selector")
     expect(selector).toHaveTextContent("Server connected")
@@ -460,6 +462,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     connectionStoreState.state.errorKind = "partial"
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     const selector = screen.getByTestId("model-selector")
     expect(selector).toHaveTextContent(registryLabels.degraded)
@@ -535,6 +538,36 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     )
   })
 
+  it.each(["workspaceId", "workspaceChatReferenceId"] as const)(
+    "isolates an unsent draft and agent task prefill when %s changes",
+    (field) => {
+      const onStartWorkspaceTask = vi.fn()
+      const view = renderChatPane({ onStartWorkspaceTask })
+      fireEvent.change(screen.getByLabelText("Chat message"), { target: { value: "Private draft A" } })
+      workspaceStoreState[field] = "another-session"
+      view.rerender(<MemoryRouter><ChatPane onStartWorkspaceTask={onStartWorkspaceTask} /></MemoryRouter>)
+      expect(screen.getByLabelText("Chat message")).toHaveValue("")
+      fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+      expect(onStartWorkspaceTask.mock.calls[0][0].description).not.toContain("Private draft A")
+    }
+  )
+
+  it("keeps a late failed send from restoring its draft into another chat", async () => {
+    let fail!: (value: { status: "failed" }) => void
+    mockOnSubmit.mockReturnValueOnce(new Promise((resolve) => { fail = resolve }))
+    const onStartWorkspaceTask = vi.fn()
+    const view = renderChatPane({ onStartWorkspaceTask })
+    fireEvent.change(screen.getByLabelText("Chat message"), { target: { value: "Pending draft A" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+    workspaceStoreState.workspaceChatReferenceId = "session-b"
+    view.rerender(<MemoryRouter><ChatPane onStartWorkspaceTask={onStartWorkspaceTask} /></MemoryRouter>)
+    await act(async () => { fail({ status: "failed" }) })
+    expect(screen.getByLabelText("Chat message")).toHaveValue("")
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+    expect(onStartWorkspaceTask.mock.calls[0][0].description).not.toContain("Pending draft A")
+  })
+
   it("caps selected source ids in chat workspace task metadata", () => {
     const onStartWorkspaceTask = vi.fn()
     workspaceStoreState.sources = Array.from({ length: 6 }, (_, index) => ({
@@ -588,6 +621,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     fireEvent.change(textarea, { target: { value: "Summarize this source" } })
 
     expect(textarea).not.toBeDisabled()
+    expect(screen.getByTestId("model-selector")).toBeVisible()
     expect(
       screen.getByText("Select a chat model before sending.")
     ).toBeInTheDocument()
@@ -601,6 +635,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
   it("puts empty-state prompt chips into the composer and focuses it", async () => {
     renderChatPane()
 
+    fireEvent.click(screen.getByText("More ways to start"))
     fireEvent.click(screen.getByTestId("workspace-chat-empty-prompt-chip-0"))
 
     const textarea = screen.getByPlaceholderText("Type a message...")
@@ -629,6 +664,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     const ragModeButton = screen.getByRole("button", { name: "RAG mode" })
     expect(ragModeButton).toBeDisabled()
@@ -638,6 +674,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     )
     expect(mockSetRagMediaIds).toHaveBeenLastCalledWith([42])
 
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
     const textarea = screen.getByPlaceholderText("Ask about your sources...")
     fireEvent.change(textarea, { target: { value: "What evidence supports this?" } })
 
@@ -667,6 +704,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     fireEvent.click(screen.getByRole("button", { name: "Advanced RAG settings" }))
 
@@ -694,6 +732,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     workspaceStoreState.getEffectiveSelectedMediaIds = () => []
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     expect(screen.getByText("Processing Notebook Export")).toBeInTheDocument()
     expect(screen.getByText("Processing")).toBeInTheDocument()
@@ -709,6 +748,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     )
     expect(mockSetRagMediaIds).toHaveBeenLastCalledWith(null)
 
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
     const textarea = screen.getByPlaceholderText("Type a message...")
     fireEvent.change(textarea, { target: { value: "Can you help me plan questions?" } })
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
@@ -746,6 +786,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     expect(screen.getByText("Queryable Paper")).toBeInTheDocument()
     expect(screen.getByText("Processing Notebook Export")).toBeInTheDocument()
@@ -793,6 +834,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     workspaceStoreState.getEffectiveSelectedMediaIds = () => [72]
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     expect(screen.getByText("Partial Text Source")).toBeInTheDocument()
     expect(screen.queryByText("Processing")).not.toBeInTheDocument()
@@ -820,6 +862,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     workspaceStoreState.getEffectiveSelectedMediaIds = () => []
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     expect(screen.getByText("Failed Notebook Export")).toBeInTheDocument()
     expect(screen.getByText("Failed")).toBeInTheDocument()
@@ -870,6 +913,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     })
 
     expect(textarea).toHaveValue(draft)
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
     expect(screen.getByRole("button", { name: "RAG mode" })).toHaveAttribute(
       "aria-pressed",
       "true"
@@ -1273,6 +1317,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
         "Chat is unavailable because the model provider is unavailable. Open model settings or retry status."
       )
     ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open model settings" })).toHaveAttribute("href", "/settings/tldw")
     expect(screen.getByRole("textbox")).toBeDisabled()
   })
 
@@ -1301,6 +1346,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
 
     renderChatPane({ researchWorkspaceCapabilities: capabilities })
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     expect(screen.getByRole("button", { name: "RAG mode" })).toBeDisabled()
     expect(
@@ -1508,6 +1554,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
 
     renderChatPane()
 
+    fireEvent.click(screen.getByRole("button", { name: "Lorebook Activity" }))
     const link = screen.getByRole("link", {
       name: "Open full lorebook diagnostics"
     })

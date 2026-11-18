@@ -1,10 +1,11 @@
 import { useStartTutorial } from "@/hooks/useStartTutorial"
 import React from "react"
-import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
+import { useBuddyManagementStore } from "@/store/buddy-management"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import {
   Tooltip,
+  Popover,
   Input,
   Dropdown,
   Modal,
@@ -13,6 +14,11 @@ import {
   type MenuProps
 } from "antd"
 import {
+  Users,
+  NotebookTabs,
+  CircleCheck,
+  Info,
+  LoaderCircle,
   FlaskConical,
   PanelLeftOpen,
   PanelRightOpen,
@@ -131,6 +137,7 @@ interface WorkspaceHeaderProps {
   onOpenSplitWorkspace?: () => void
   /** Hide pane toggle buttons (for mobile layout) */
   hideToggles?: boolean
+  canComparePanes?: boolean
   /** Approximate persisted workspace payload bytes in local storage */
   storageUsedBytes?: number
   /** Estimated available local storage budget for workspace payload data */
@@ -301,6 +308,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   onOpenSearch,
   onOpenSplitWorkspace,
   hideToggles = false,
+  canComparePanes = false,
   storageUsedBytes,
   storageQuotaBytes,
   storageOriginUsedBytes,
@@ -313,7 +321,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   agentTaskHandoffOpenSignal = 0,
   agentTaskPrefill = null
 }) => {
-  const { t } = useTranslation(["playground", "option", "common"])
+  const { t } = useTranslation(["playground", "option", "common", "sidepanel"])
   const navigate = useNavigate()
   const startTutorial = useStartTutorial()
   const [messageApi, messageContextHolder] = message.useMessage()
@@ -2039,6 +2047,13 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     !serverWorkspaceContextLoading &&
     serverWorkspaceRecovery.reasonCode !== "allowed" &&
     Boolean(serverWorkspaceRecovery.message)
+  const ContextIcon = serverWorkspaceContextLoading
+    ? LoaderCircle
+    : showServerWorkspaceRecovery
+      ? ShieldAlert
+      : serverWorkspaceContext.state === "ready"
+        ? CircleCheck
+        : Info
 
   // ── Workspace Switcher dropdown: recent/pinned workspaces + navigation ──
   const workspaceSwitcherItems: MenuProps["items"] = [
@@ -2148,8 +2163,20 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       onClick: handleOpenWorkspacesManager
     },
     { type: "divider" as const, key: "divider-workspaces-manager" },
+    ...(canComparePanes ? [
+      { key: "compare-sources", icon: <PanelLeftOpen className="h-4 w-4" />,
+        label: t("playground:workspace.sourcesBesideChat", "Sources beside chat"), onClick: onToggleLeftPane },
+      { key: "compare-studio", icon: <PanelRightOpen className="h-4 w-4" />,
+        label: t("playground:workspace.studioBesideChat", "Studio beside chat"), onClick: onToggleRightPane }
+    ] : []),
     ...(workspaceId
       ? [
+          {
+            key: "buddy-persona",
+            icon: <Users className="h-4 w-4" />,
+            label: t("sidepanel:buddyManagement.entry", "Buddy & Persona"),
+            onClick: () => useBuddyManagementStore.getState().show({ scope_type: "workspace", scope_id: workspaceId })
+          },
           {
             key: "create-agent-task",
             icon: <Bot className="h-4 w-4" />,
@@ -2371,19 +2398,16 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   return (
     <header
       data-testid="workspace-header"
-      className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-[linear-gradient(90deg,var(--surface)_0%,var(--surface-2)_100%)] px-4 py-3.5"
+      className="flex min-h-12 min-w-0 shrink-0 items-center justify-between gap-1 border-b border-border bg-surface px-2 py-1.5 sm:gap-3 sm:px-4"
     >
       {messageContextHolder}
-      {workspaceId ? (
-        <BuddyManagementButton target={{ scope_type: "workspace", scope_id: workspaceId }} />
-      ) : null}
-      <div className="flex min-w-0 basis-full flex-wrap items-center gap-2 lg:basis-auto lg:flex-1 lg:flex-nowrap lg:gap-3">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
-          <FlaskConical className="h-4 w-4 text-primary" />
+      <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-2">
+        <span className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary sm:inline-flex">
+          <NotebookTabs className="h-4 w-4" aria-hidden="true" />
         </span>
         <div className="flex min-w-0 items-center gap-2">
           {isEditing ? (
-            <div className="flex items-center gap-1">
+            <div className="flex min-w-0 items-center gap-1">
               <Input
                 aria-label={t(
                   "playground:workspace.nameInputLabel",
@@ -2394,7 +2418,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
                 onKeyDown={handleKeyDown}
                 autoFocus
                 size="small"
-                className="w-48"
+                className="min-w-0 max-w-48"
                 placeholder={t(
                   "playground:workspace.namePlaceholder",
                   "Workspace name"
@@ -2419,14 +2443,14 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             </div>
           ) : (
             <div className="flex min-w-0 items-center gap-2">
-              <h1 className="truncate text-lg font-semibold text-text">
+              <h1 className="truncate text-base font-semibold text-text">
                 {workspaceName || t("playground:workspace.title", "Research Workspace")}
               </h1>
               <Tooltip title={t("playground:workspace.rename", "Rename workspace")}>
                 <button
                   type="button"
                   onClick={handleStartEdit}
-                  className="flex h-9 w-9 items-center justify-center rounded text-text-muted opacity-40 transition hover:bg-surface2 hover:text-text hover:opacity-100"
+                  className="flex h-8 w-6 shrink-0 items-center justify-center rounded text-text-muted transition hover:bg-surface2 hover:text-text"
                   aria-label={t("playground:workspace.rename", "Rename workspace")}
                 >
                   <Pencil className="h-3.5 w-3.5" />
@@ -2435,43 +2459,51 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             </div>
           )}
         </div>
-        <div
-          data-testid="workspace-server-context-indicator"
-          className="order-last flex min-w-0 max-w-full basis-full flex-wrap items-center gap-1.5 rounded-md border border-border bg-surface/80 px-2 py-1 text-xs text-text-muted lg:order-none lg:basis-auto"
-        >
-          <span className="sr-only font-medium text-text lg:not-sr-only lg:inline">
-            {t("playground:workspace.serverWorkspace", "Server Workspace")}
-          </span>
-          <span className="sr-only max-w-[14rem] truncate lg:not-sr-only lg:inline">
-            {serverWorkspaceContextLabel}
-          </span>
-          <span className="rounded bg-surface2 px-1.5 py-0.5">
-            {t(
-              serverWorkspaceContextStatusCopy.key,
-              serverWorkspaceContextStatusCopy.fallback
-            )}
-          </span>
-          {showServerWorkspaceRecovery && (
-            <span className="sr-only min-w-0 lg:not-sr-only lg:inline">
-              {serverWorkspaceRecovery.message}
+        <Popover
+          trigger="click"
+          placement="bottomLeft"
+          destroyOnHidden
+          title={
+            <span className="text-text">
+              {t("playground:workspace.serverWorkspace", "Server Workspace")}
             </span>
-          )}
-          {showServerWorkspaceRecovery &&
-            serverWorkspaceRecovery.nextStepHref &&
-            serverWorkspaceRecovery.nextStepLabel && (
-              <a
-                href={serverWorkspaceRecovery.nextStepHref}
-                className="font-medium text-primary hover:text-primary/80"
-              >
-                {serverWorkspaceRecovery.nextStepLabel}
-              </a>
-            )}
-        </div>
+          }
+          content={
+            <div className="max-w-64 space-y-1 text-sm text-text">
+              <p className="break-words font-medium">{serverWorkspaceContextLabel}</p>
+              {showServerWorkspaceRecovery && <p>{serverWorkspaceRecovery.message}</p>}
+              {showServerWorkspaceRecovery &&
+                serverWorkspaceRecovery.nextStepHref &&
+                serverWorkspaceRecovery.nextStepLabel && (
+                  <a
+                    className="font-medium text-primary underline"
+                    href={serverWorkspaceRecovery.nextStepHref}
+                  >
+                    {serverWorkspaceRecovery.nextStepLabel}
+                  </a>
+                )}
+            </div>
+          }
+        >
+          <button
+            type="button"
+            data-testid="workspace-server-context-indicator"
+            className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded px-1 text-xs text-text-muted hover:bg-surface2"
+          >
+            <ContextIcon
+              className={`h-4 w-4 ${showServerWorkspaceRecovery ? "text-warning" : ""}`}
+              aria-hidden="true"
+            />
+            <span className="sr-only lg:not-sr-only">
+              {t(serverWorkspaceContextStatusCopy.key, serverWorkspaceContextStatusCopy.fallback)}
+            </span>
+          </button>
+        </Popover>
       </div>
 
       <div
         data-testid="workspace-header-actions"
-        className="flex w-full min-w-0 max-w-full flex-none basis-full flex-nowrap items-center justify-end gap-2 overflow-hidden lg:w-auto lg:basis-auto lg:flex-1 lg:flex-wrap"
+        className="flex shrink-0 items-center justify-end gap-0.5 sm:gap-1.5"
       >
         {/* Left pane expand button (only shown when collapsed) */}
         {!hideToggles && !leftPaneOpen && (
@@ -2540,7 +2572,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
               <span className="hidden sm:inline">
                 {t("playground:workspace.search", "Search")}
               </span>
-              <kbd className="rounded bg-surface2 px-1 py-0.5 text-[10px] font-semibold leading-none text-text-muted">
+              <kbd className="hidden rounded bg-surface2 px-1 py-0.5 text-[10px] font-semibold leading-none text-text-muted xl:inline">
                 {shortcutModifierLabel}+K
               </kbd>
             </button>
@@ -2563,12 +2595,14 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           <button
             type="button"
             data-testid="workspace-workspaces-button"
+            aria-label={t("playground:workspace.workspaces", "Workspaces")}
             className="flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text transition hover:bg-surface2"
           >
-            <span className="truncate">
+            <FolderOpen className="h-4 w-4 sm:hidden" aria-hidden="true" />
+            <span className="hidden truncate sm:inline">
               {t("playground:workspace.workspaces", "Workspaces")}
             </span>
-            <ChevronDown className="h-4 w-4 text-text-muted" />
+            <ChevronDown className="hidden h-4 w-4 text-text-muted sm:block" />
           </button>
         </Dropdown>
 
@@ -2591,7 +2625,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             type="button"
             data-testid="workspace-help-tour-button"
             onClick={handleStartWorkspaceTour}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text"
+            className="hidden sm:inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text"
             aria-label={t("playground:workspace.takeTour", "Take a tour of the workspace")}
           >
             <CircleHelp className="h-4 w-4" />

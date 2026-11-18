@@ -2,8 +2,8 @@ import React from "react"
 
 const MIN_LEFT_WIDTH = 200
 const MIN_RIGHT_WIDTH = 240
-const DEFAULT_LEFT_WIDTH = 288
-const DEFAULT_RIGHT_WIDTH = 320
+const DEFAULT_LEFT_WIDTH = 240
+const DEFAULT_RIGHT_WIDTH = 264
 
 interface PaneResizerProps {
   /** Which pane this resizer controls */

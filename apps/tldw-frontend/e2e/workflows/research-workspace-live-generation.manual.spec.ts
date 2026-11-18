@@ -342,12 +342,11 @@ test.describe("Research Workspace live provider generation (manual)", () => {
     await workspacePage.seedSources([source])
     await workspacePage.selectSourceByTitle(source.title)
     await workspacePage.expectSourceSelectedByTitle(source.title)
-    await expect(
-      workspacePage.getStudioOutputButton("Summary")
-    ).toBeEnabled({ timeout: 10_000 })
+    const summaryButton = await workspacePage.revealStudioOutput("Summary")
+    await expect(summaryButton).toBeEnabled({ timeout: 10_000 })
 
     const chatCall = await waitForChatCompletionCall(authedPage, async () => {
-      await workspacePage.getStudioOutputButton("Summary").click()
+      await summaryButton.click()
     })
     expect(chatCall.status).toBe(200)
     expect(chatCall.model).toBeTruthy()

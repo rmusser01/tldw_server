@@ -231,6 +231,17 @@ const defaultWireState = (): WorkspaceSourceSavedViewStateV1 => {
   return serialized.state;
 };
 
+async function fetchSavedViews(
+  workspaceId: string,
+  options: ScopedRequestOptions,
+): Promise<WorkspaceSourceSavedViewResponse[]> {
+  const response = await tldwClient.listWorkspaceSourceViews(workspaceId, options);
+  if (!Array.isArray(response?.items)) {
+    throw new Error("The server returned an invalid saved view list.");
+  }
+  return response.items;
+}
+
 export const useSourceSavedViews = (
   workspaceId: string | null,
   workspaceExists: boolean,
@@ -365,7 +376,7 @@ export const useSourceSavedViews = (
         return prepare ? prepare(loadingState) : loadingState;
       });
       try {
-        const response = await tldwClient.listWorkspaceSourceViews(
+        const views = await fetchSavedViews(
           targetWorkspaceId,
           token.requestOptions,
         );
@@ -373,7 +384,7 @@ export const useSourceSavedViews = (
         hasAuthoritativeViewsRef.current = true;
         commitOperation(token, (current) => ({
           ...current,
-          views: response.items,
+          views,
           loading: false,
           listError: null,
         }));
@@ -405,7 +416,7 @@ export const useSourceSavedViews = (
         listError: null,
       }));
       try {
-        const response = await tldwClient.listWorkspaceSourceViews(
+        const views = await fetchSavedViews(
           targetWorkspaceId,
           token.requestOptions,
         );
@@ -413,7 +424,7 @@ export const useSourceSavedViews = (
         hasAuthoritativeViewsRef.current = true;
         commitOperation(token, (current) => ({
           ...current,
-          views: response.items,
+          views,
           loading: false,
           listError: null,
         }));

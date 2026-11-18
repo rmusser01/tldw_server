@@ -379,7 +379,7 @@ Object.defineProperty(HTMLMediaElement.prototype, "pause", {
 })
 
 const expandOutputTypesSection = (container: HTMLElement) => {
-  const toggle = within(container).getByRole("button", { name: /Output Types/i });
+  const toggle = within(container).getByRole("button", { name: /Create output/i });
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
@@ -387,7 +387,7 @@ const expandOutputTypesSection = (container: HTMLElement) => {
 
 const expandGeneratedOutputsSection = (container: HTMLElement) => {
   const toggle = within(container).getByRole("button", {
-    name: /Generated Outputs/i,
+    name: /Saved outputs/i,
   });
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
@@ -403,10 +403,12 @@ const expandMoreOutputsSection = (container: HTMLElement) => {
   }
 }
 
+const renderSavedOutputs = () => render(
+  <ConfigProvider theme={{ token: { motion: false } }}><StudioPane /></ConfigProvider>
+)
+
 const renderStudioPane = () => {
-  const renderResult = render(
-    <ConfigProvider theme={{ token: { motion: false } }}><StudioPane /></ConfigProvider>
-  )
+  const renderResult = renderSavedOutputs()
   expandOutputTypesSection(renderResult.container);
   expandGeneratedOutputsSection(renderResult.container);
   return renderResult
@@ -2173,7 +2175,7 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     ]
 
-    renderStudioPane()
+    renderSavedOutputs()
     fireEvent.click(screen.getByRole("button", { name: "View" }))
 
     const dialog = (await screen.findByText("Mobile view content")).closest(".ant-modal")
@@ -2193,7 +2195,7 @@ describe("StudioPane Stage 2 workflows", () => {
     workspaceStoreState.generatedArtifacts = [original]
     let acknowledge!: (value: unknown) => void
     editIO.save.mockReset().mockImplementationOnce(() => new Promise(resolve => { acknowledge = resolve }))
-    renderStudioPane()
+    renderSavedOutputs()
     fireEvent.click(screen.getByTestId("studio-artifact-edit-canonical-edit"))
     const label = type === "flashcards" ? "Flashcard front 1" : "Question prompt 1"
     fireEvent.change(await screen.findByLabelText(label), { target: { value: "Revised study text" } })
@@ -2216,7 +2218,7 @@ describe("StudioPane Stage 2 workflows", () => {
       data: { flashcards: [{ front: "Old front", back: "Old back" }] }, createdAt: new Date(),
     } as GeneratedArtifact, "server:alice", "workspace-a")]
     editIO.save.mockReset().mockRejectedValueOnce(new Error("This saved draft changed. Reload it before saving another revision."))
-    renderStudioPane()
+    renderSavedOutputs()
     fireEvent.click(screen.getByTestId("studio-artifact-edit-edit-conflict"))
     fireEvent.change(await screen.findByLabelText("Flashcard front 1"), { target: { value: "Keep my unsaved edit" } })
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
@@ -2238,7 +2240,7 @@ describe("StudioPane Stage 2 workflows", () => {
     workspaceStoreState.generatedArtifacts = [original]
     let acknowledge!: (value: unknown) => void
     editIO.save.mockReset().mockImplementationOnce(() => new Promise(resolve => { acknowledge = resolve }))
-    const view = renderStudioPane()
+    const view = renderSavedOutputs()
     fireEvent.click(screen.getByTestId("studio-artifact-edit-retired-editor"))
     fireEvent.change(await screen.findByLabelText("Flashcard front 1"), { target: { value: "Private unsaved edit" } })
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
@@ -2262,7 +2264,7 @@ describe("StudioPane Stage 2 workflows", () => {
       data: { flashcards: [{ front: "Old front", back: "Old back" }] }, createdAt: new Date(),
     }]
     editIO.save.mockReset()
-    renderStudioPane()
+    renderSavedOutputs()
     fireEvent.click(screen.getByTestId("studio-artifact-edit-unverified-editor"))
     fireEvent.change(await screen.findByLabelText("Flashcard front 1"), { target: { value: "Keep my draft edit" } })
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))

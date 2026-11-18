@@ -1218,9 +1218,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
 
       await workspacePage.selectSourceByTitle(selectedSource.title)
       await workspacePage.expectSourceSelectedByTitle(selectedSource.title)
-      await expect(workspacePage.getSelectedSourceTag(selectedSource.title)).toBeVisible({
-        timeout: 10_000
-      })
+      await workspacePage.expectChatSourceInSettings(selectedSource.title)
 
       const ragCall = await waitForRagSearchCall(authedPage, async () => {
         await workspacePage.sendChatMessage(question)
@@ -1292,13 +1290,12 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       await workspacePage.selectSourceByTitle(rightSource.title)
       await workspacePage.expectSourceSelectedByTitle(leftSource.title)
       await workspacePage.expectSourceSelectedByTitle(rightSource.title)
-      await expect(
-        workspacePage.getStudioOutputButton("Compare Sources")
-      ).toBeEnabled({ timeout: 10_000 })
+      const compareButton = await workspacePage.revealStudioOutput("Compare Sources")
+      await expect(compareButton).toBeEnabled({ timeout: 10_000 })
 
       const beforeCount = await workspacePage.getStudioArtifactCards().count()
       const chatCall = await waitForChatCompletionCall(authedPage, async () => {
-        await workspacePage.getStudioOutputButton("Compare Sources").click()
+        await compareButton.click()
       })
 
       expect(chatCall.status).toBe(200)
@@ -1453,7 +1450,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
 
       const beforeArtifacts = await workspacePage.getStudioArtifactCards().count()
       await disableNextJsPortalPointerInterception(authedPage)
-      await clickActionable(workspacePage.getStudioOutputButton("Quiz"))
+      await clickActionable(await workspacePage.revealStudioOutput("Quiz"))
 
       await expect(workspacePage.getStudioArtifactCards()).toHaveCount(
         beforeArtifacts + 1,
@@ -1618,7 +1615,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
 
       const beforeArtifacts = await workspacePage.getStudioArtifactCards().count()
       await disableNextJsPortalPointerInterception(authedPage)
-      await clickActionable(workspacePage.getStudioOutputButton("Flashcards"))
+      await clickActionable(await workspacePage.revealStudioOutput("Flashcards"))
 
       await expect(workspacePage.getStudioArtifactCards()).toHaveCount(
         beforeArtifacts + 1,

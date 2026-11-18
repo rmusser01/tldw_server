@@ -4916,5 +4916,98 @@
   },
   "regions_artifactsShort": {
     "message": "Artifacts"
+  },
+  "workspace_panes": {
+    "message": "Workspace panes"
+  },
+  "workspace_sourcesBesideChat": {
+    "message": "Sources beside chat"
+  },
+  "workspace_studioBesideChat": {
+    "message": "Studio beside chat"
+  },
+  "studio_createOutput": {
+    "message": "Create output"
+  },
+  "studio_savedOutputs": {
+    "message": "Saved outputs"
+  },
+  "studio_noSavedOutputs": {
+    "message": "No saved outputs yet."
+  },
+  "sources_organize": {
+    "message": "Organize sources"
+  },
+  "sources_sourceDate": {
+    "message": "Source date"
+  },
+  "sources_addedDate": {
+    "message": "Added date"
+  },
+  "sources_fileSizeBytes": {
+    "message": "File size (bytes)"
+  },
+  "sources_durationSeconds": {
+    "message": "Duration (seconds)"
+  },
+  "sources_pages": {
+    "message": "Pages"
+  },
+  "sources_hasUrl": {
+    "message": "Has URL"
+  },
+  "sources_hasFileSize": {
+    "message": "Has file size"
+  },
+  "sources_hasDuration": {
+    "message": "Has duration"
+  },
+  "sources_hasPageCount": {
+    "message": "Has page count"
+  },
+  "sources_modifiedView": {
+    "message": "Modified"
+  },
+  "sources_addSources": {
+    "message": "Add sources"
+  },
+  "chat_emptyQuestionTitle": {
+    "message": "What would you like to find out?"
+  },
+  "chat_emptyNotebookHint": {
+    "message": "Add a source for grounded answers, or start with a general question."
+  },
+  "chat_emptySelectedHint": {
+    "message": "Ask a question about the selected sources."
+  },
+  "chat_emptyUnselectedHint": {
+    "message": "Select a source for grounded answers, or start with a general question."
+  },
+  "chat_emptyGeneralHint": {
+    "message": "Ask a general question."
+  },
+  "chat_addFirstSource": {
+    "message": "Add your first source"
+  },
+  "chat_moreWaysToStart": {
+    "message": "More ways to start"
+  },
+  "chat_sourcesSelected_one": {
+    "message": "1 source selected"
+  },
+  "chat_sourcesSelected_other": {
+    "message": "{{count}} sources selected"
+  },
+  "chat_lorebookActivity": {
+    "message": "Lorebook Activity"
+  },
+  "chat_generalModeWithFullSourcesHint": {
+    "message": "Full source text is included. Retrieval is off."
+  },
+  "sources_citedPassage": {
+    "message": "Cited passage"
+  },
+  "search_workspacePlaceholder": {
+    "message": "Search sources, chat, and notes..."
   }
 }
