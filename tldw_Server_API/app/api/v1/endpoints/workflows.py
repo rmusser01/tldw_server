@@ -106,7 +106,7 @@ from tldw_Server_API.app.core.Usage.quota_checks import (
     workflows_runs_consume,
 )
 from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
-from tldw_Server_API.app.core.Workflows import RunMode, WorkflowScheduler
+from tldw_Server_API.app.core.Workflows import RunMode, WorkflowEngine, WorkflowScheduler
 from tldw_Server_API.app.core.Workflows.adapters._common import artifacts_base_dir, is_subpath
 from tldw_Server_API.app.core.Workflows.adapters._registry import get_parallelizable
 from tldw_Server_API.app.core.Workflows.adapters.research._config import (

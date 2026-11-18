@@ -1430,6 +1430,7 @@ async def get_optimization_history(
 
 from pydantic import BaseModel, Field
 import tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps as _prompt_studio_deps
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio.jobs_adapter import PromptStudioJobsAdapter
 import tldw_Server_API.app.core.Prompt_Management.prompt_studio.jobs_adapter as _jobs_adapter
 import tldw_Server_API.app.core.Prompt_Management.prompt_studio.monitoring as _monitoring
 

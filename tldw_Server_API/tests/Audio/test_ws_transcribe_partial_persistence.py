@@ -52,7 +52,6 @@ if "transformers" not in sys.modules:
     _fake_tf.Qwen2AudioForConditionalGeneration = _StubModel
     sys.modules["transformers"] = _fake_tf
 
-from tldw_Server_API.app.api.v1.endpoints import audio
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_streaming
 from tldw_Server_API.app.core import config as config_module
 
