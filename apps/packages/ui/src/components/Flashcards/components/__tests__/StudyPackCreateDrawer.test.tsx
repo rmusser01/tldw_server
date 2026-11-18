@@ -1,6 +1,7 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { StudyPackCreateDrawer } from "../StudyPackCreateDrawer"
@@ -133,9 +134,9 @@ describe("StudyPackCreateDrawer", () => {
     vi.spyOn(tldwClient, "listMedia").mockResolvedValue({
       items: [{ id: 7, title: "Recent lecture", type: "video" }]
     })
-    vi.spyOn(tldwClient, "searchMedia").mockResolvedValue({
-      results: [{ id: 42, title: "Routing protocols", type: "pdf" }]
-    })
+    vi.spyOn(tldwClient, "searchMedia")
+      .mockResolvedValueOnce({ results: [] })
+      .mockResolvedValueOnce({ results: [{ id: 42, title: "Routing protocols", type: "pdf" }] })
     createStudyPackJobMock.mockResolvedValue({ job: { id: 91 } })
 
     renderDrawer(<StudyPackCreateDrawer open onClose={vi.fn()} />)
@@ -143,6 +144,10 @@ describe("StudyPackCreateDrawer", () => {
     const picker = screen.getByRole("combobox", { name: "Search media library" })
     fireEvent.mouseDown(picker)
     expect(await screen.findByText("Recent lecture")).toBeInTheDocument()
+
+    fireEvent.change(picker, { target: { value: "NoSuchTitle" } })
+    expect(await screen.findByText("No matching media.")).toBeInTheDocument()
+    expect(screen.queryByText("Recent lecture")).not.toBeInTheDocument()
 
     fireEvent.change(picker, { target: { value: "Routing" } })
     fireEvent.click(await screen.findByText("Routing protocols"))
@@ -178,6 +183,53 @@ describe("StudyPackCreateDrawer", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument())
     if (picker.getAttribute("aria-expanded") === "false") fireEvent.mouseDown(picker)
     expect(await screen.findByText("Your media library is empty.")).toBeInTheDocument()
+  })
+
+  it("keeps the search term after a failed search and retries the same request", async () => {
+    vi.spyOn(tldwClient, "listMedia").mockResolvedValue({
+      items: [{ id: 7, title: "Recent lecture", type: "video" }]
+    })
+    const searchMedia = vi.spyOn(tldwClient, "searchMedia")
+      .mockRejectedValueOnce(new Error("search failed"))
+      .mockResolvedValueOnce({ results: [{ id: 42, title: "Routing protocols", type: "pdf" }] })
+    const user = userEvent.setup()
+
+    renderDrawer(<StudyPackCreateDrawer open onClose={vi.fn()} />)
+    const picker = screen.getByRole("combobox", { name: "Search media library" })
+    await user.click(picker)
+    expect(await screen.findByText("Recent lecture")).toBeInTheDocument()
+
+    await user.type(picker, "Routing")
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load media.")
+    expect(picker).toHaveValue("Routing")
+
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(searchMedia).toHaveBeenCalledTimes(2))
+    expect(searchMedia.mock.calls.map(([request]) => request.query)).toEqual(["Routing", "Routing"])
+    expect(picker).toHaveValue("Routing")
+    if (picker.getAttribute("aria-expanded") === "false") await user.click(picker)
+    expect(await screen.findByText("Routing protocols")).toBeInTheDocument()
+  })
+
+  it("distinguishes same-title media and discloses a truncated result set", async () => {
+    vi.spyOn(tldwClient, "listMedia").mockResolvedValue({
+      items: [{ id: 7, title: "Lecture" }, { id: 8, title: "Lecture" }],
+      pagination: { total_items: 54 }
+    })
+    createStudyPackJobMock.mockResolvedValue({ job: { id: 91 } })
+    renderDrawer(<StudyPackCreateDrawer open onClose={vi.fn()} />)
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Search media library" }))
+
+    expect(await screen.findByText("Showing 2 of 54 media items. Try a more specific search.")).toBeVisible()
+    expect(screen.getByText("Lecture (ID 7)")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("Lecture (ID 8)"))
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Networks" } })
+    fireEvent.click(screen.getByRole("button", { name: "Create study pack" }))
+    await waitFor(() => expect(createStudyPackJobMock).toHaveBeenCalledWith({
+      title: "Networks",
+      source_items: [{ source_type: "media", source_id: "8", source_title: "Lecture" }],
+      deck_mode: "new"
+    }))
   })
 
   it("requires a title and at least one source before enabling submit", () => {

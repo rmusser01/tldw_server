@@ -11,6 +11,7 @@ import {
 } from "@/components/Option/ResearchWorkspace/SourcesPane/media-library-normalization"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useDebounce } from "@/hooks/useDebounce"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { tldwClient } from "@/services/tldw"
 import type {
   StudyPackSourceSelection,
@@ -69,7 +70,8 @@ const StudyPackMediaPicker = ({ onSelect }: { onSelect: (media: MediaOption) => 
         ? await tldwClient.searchMedia({ query: term }, page, { signal })
         : await tldwClient.listMedia(page, { signal })
       signal.throwIfAborted()
-      return normalizeMediaLibraryResponse(response).items.flatMap((item): MediaOption[] => {
+      const { items, totalCount } = normalizeMediaLibraryResponse(response)
+      const options = items.flatMap((item): MediaOption[] => {
         const id = getMediaLibraryItemKey(item)
         if (!id) return []
         const rawTitle = (item as { title?: unknown }).title
@@ -83,10 +85,23 @@ const StudyPackMediaPicker = ({ onSelect }: { onSelect: (media: MediaOption) => 
           title
         }]
       })
+      return {
+        totalCount,
+        options: options.map((option) =>
+          options.some((other) => other.value !== option.value && other.label === option.label)
+            ? { ...option, label: t("option:flashcards.studyPackMediaTitleWithId", {
+                defaultValue: "{{title}} (ID {{id}})",
+                title: option.label,
+                id: option.value
+              }) }
+            : option
+        )
+      }
     }
   })
 
   const loading = isDebouncing || (opened && media.isFetching && !media.data)
+  const result = loading || media.isError ? undefined : media.data
   const searchLabel = t("option:flashcards.studyPackMediaSearch", {
     defaultValue: "Search media library"
   })
@@ -96,23 +111,39 @@ const StudyPackMediaPicker = ({ onSelect }: { onSelect: (media: MediaOption) => 
 
   return (
     <div className="mb-3">
-      <Select<string, MediaOption>
+      <Select<string[], MediaOption>
         aria-label={searchLabel}
         placeholder={searchLabel}
         className="w-full"
-        value={null}
-        showSearch={{ searchValue: search, onSearch: setSearch, filterOption: false }}
+        mode="multiple"
+        value={[]}
+        showSearch={{
+          searchValue: search,
+          onSearch: setSearch,
+          filterOption: false,
+          // Keep the failed term visible when Retry takes focus.
+          autoClearSearchValue: false
+        }}
         onOpenChange={(isOpen) => { if (isOpen) setOpened(true) }}
         onSelect={(_, option) => {
           onSelect(option)
           setSearch("")
         }}
         loading={loading}
-        options={loading || media.isError ? [] : media.data ?? []}
+        options={result?.options ?? []}
         notFoundContent={loading
           ? t("option:flashcards.studyPackMediaLoading", { defaultValue: "Loading media…" })
           : media.isError ? null : emptyText}
       />
+      {result && result.options.length > 0 && result.options.length < result.totalCount ? (
+        <Text type="secondary" className="mt-1 block">
+          {t("option:flashcards.studyPackMediaResultLimit", {
+            defaultValue: "Showing {{shown}} of {{total}} media items. Try a more specific search.",
+            shown: result.options.length,
+            total: result.totalCount
+          })}
+        </Text>
+      ) : null}
       {!isDebouncing && media.isError ? (
         <Space className="mt-1">
           <Text role="alert">
@@ -194,6 +225,13 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
     setJobId(null)
     handledTerminalJobIdRef.current = null
   }, [initialIntent, open])
+
+  React.useEffect(() => {
+    if (!open) return
+    return watchChatAccountChanges((invalidated) => {
+      if (invalidated) onClose()
+    })
+  }, [open, onClose])
 
   React.useEffect(() => {
     const response = jobQuery.data

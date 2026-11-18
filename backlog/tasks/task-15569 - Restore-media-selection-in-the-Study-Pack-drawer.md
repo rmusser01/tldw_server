@@ -1,7 +1,7 @@
 ---
 id: TASK-15569
 title: Restore media selection in the Study Pack drawer
-status: Done
+status: In Progress
 labels:
 - flashcards
 - webui
@@ -27,6 +27,8 @@ The Flashcards Study Pack drawer only accepts manual source IDs or handoffs. A u
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR required: no. The picker uses existing media APIs, Study Pack source references, and the Flashcards account lifecycle. Both new tests reproduced the missing picker on public dev b7d0b2d and passed after the fix. The 62 focused tests, all 857 Flashcards and Media search tests, and the WebUI typecheck passed on the frozen dev lockfile. The guide documents creating a Study Pack from Media. Bandit has no applicable code because the implementation and tests are TypeScript. Live browser smoke is unverified. The draft PR requires a human-written Change summary before merge.
+Owner requested independent review and follow-up corrections on PR #3504.
+Addressed the independent review. The drawer now clears on extension account changes even when initial identity lookup failed. A failed keyword search keeps its term and can retry the same request. Duplicate media titles show their IDs, and a result-limit message shows how many items are available. Updated the guide to include Create cards. The new failure cases reproduced before the fixes and the 65 focused tests passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

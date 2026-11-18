@@ -32,7 +32,7 @@ Why the 8 KB field limit did not increase:
 
 ## Create a Study Pack from Media
 
-1. In Flashcards, open **Import / Export** and choose **Create study pack** in the **Study packs** card.
+1. In Flashcards, open **Import / Export** and select **Create cards**. Then choose **Create study pack** in the **Study packs** card.
 2. Open **Search media library** to see recent items. Type a search term to look across the library, then select an item to add it. Repeat for each source.
 3. Enter a title and select **Create study pack**. Flashcards opens the review deck when generation finishes.
 
