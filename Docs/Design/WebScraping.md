@@ -9,9 +9,9 @@
 - multi-provider web search and result aggregation.
 
 Phase 4 made the single-page path canonical without removing the Phase 3
-pre-scrape analyzer or the legacy compatibility surface. Enhanced crawling and
-web search remain distinct because their retry, queue, scoring, and provider
-contracts differ from single-page article orchestration.
+pre-scrape analyzer or the legacy compatibility surface. Phase 5 composes crawl
+and process-local job ownership around that same page route. Web search remains
+distinct; provider decomposition and broad compatibility cleanup are deferred.
 
 ## Package Ownership
 
@@ -21,12 +21,14 @@ contracts differ from single-page article orchestration.
 | `selectors` | Canonical selector models, catalog loading, and selector resolution. |
 | `safe_regex.py` | Bounded regular-expression execution and stable regex failures. |
 | `extraction` | Extraction strategies, strategy ordering, caches, traces, and normalized results. |
-| `orchestration` | Immutable article plans, policy admission, optional preflight, HTTP/browser acquisition, extraction offload, and public article results. |
+| `orchestration` | Article plans, policy/preflight, acquisition, extraction offload, and composition of crawl and job capabilities through the canonical `article.start_page` route. |
 | `runtime` | Shared request, timeout, fetch, browser, and policy protocols used by orchestration. |
 | `preflight` | Governed advisory analyzers, scoring, recommendations, and advice precedence. |
-| `enhanced_web_scraping.py` | Crawl-oriented sessions, queues, retries, scoring, and deduplication. |
+| `crawl` | Immutable profiles/limits, bounded discovery/frontier, traversal, and versioned continuation; injected acquisition/policy ports, never service or wrapper imports. |
+| `jobs` | Bounded process-local admission, retries, cancellation, physical drain and safe polling/history; injected page executor, never orchestration or service imports. |
+| `enhanced_web_scraping.py` | Public compatibility adapters, cookie/session capabilities, deduplication and instance/service composition. |
 | `WebSearch_APIs.py` | Search-provider dispatch, normalization, review, relevance analysis, and aggregation. |
-| `Article_Extractor_Lib.py` | Compatibility exports plus crawl, sitemap, batching, ingestion, and other responsibilities deferred to later phases. |
+| `Article_Extractor_Lib.py` | Compatibility exports and legacy crawl/sitemap/URL-level adapters; bookmark, source-file and ingestion conveniences remain supported. |
 
 Internal consumers should import moved single-page responsibilities from
 `content`, `extraction`, or `orchestration`. Legacy imports remain supported for
@@ -279,9 +281,84 @@ rather than closing executor internals directly.
 ## Enhanced Crawling And Web Search
 
 The enhanced scraper retains rate limiting, prioritized jobs, cookie/session
-management, content deduplication, and best-first crawl scoring. Crawl discovery,
-sitemap processing, recursive traversal, crawl budgets, progress, and queue/job
-state are deferred to Phase 5.
+management, content deduplication, and best-first crawl scoring. `orchestration.crawl`
+composes `crawl.engine.run_crawl` with the canonical page attempt. Direct and queued
+attempts use the same admission, preflight analysis/advice, acquisition, extraction,
+discovery and result conversion. Discovery retains the acquired document's request,
+final and parent URLs without a second unauthenticated fetch.
+
+### Phase 5 Ownership And Limits
+
+The seven profiles remain distinct: `legacy_recursive`, `enhanced_recursive`,
+`legacy_sitemap`, `enhanced_sitemap`, `legacy_url_level`, `enhanced_url_level`, and
+`enhanced_batch`. The legacy synchronous recursive entry preserves its sync
+envelope. Page-cap meanings, ordering, filters/scoring, cookies, analyzer advice,
+public extraction fields and non-secret nested extra fields remain profile-specific.
+
+Trusted composition-time `CrawlLimits` defaults are 1,000 page attempts, 20,000
+network requests, 1,000 browser attempts, 2,000 active probes, 1,073,741,824 transfer
+bytes, 50,000 discovered candidates, 65,536 bytes per URL, 67,108,864 total discovered
+URL bytes, 10,000 frontier entries, and 1,800 execution seconds. They are finite,
+validated safety allowances, not new public request settings. Redirects, retries,
+robots, discovery, subresources and probes consume their actual allowances once;
+byte limits apply while receiving data. Policy-denied requests never dispatch.
+The actual lazy batch producer bounds and charges each consumed URL before job
+creation, not on queue-pressure retries. Controlled acquisition checks initial,
+redirect (raw and resolved) and final URLs even when discovery is disabled.
+
+`QueueLimits` defaults are 128 pending and 256 live jobs, 262,144 bytes per private
+normalized payload, 16,777,216 aggregate payload bytes, and 67,108,864 history bytes.
+`max_concurrent` remains separate; default completed retention is 1,000 records.
+Admission is immediate and atomic across priorities. Overload, oversized payload
+and stopping reject before acceptance. Retry uses the original reservation;
+bounded batch producers do not create an unbounded external waiter population.
+
+Logical completion/cancellation is not physical drain. A live extraction thread
+keeps its executor permit, queue reservation and checkpoint exclusion until actual
+return, and its late result cannot install into a stopped crawl. Service startup
+and entered shutdown are serialized and owned independently of cancelled waiters.
+Native browser guards remain installed until the owned browser actually exits.
+Browser-scope Fetch interception uses the existing public Playwright connection;
+it does not require startup hooks, private library patches or a second connection.
+Preflight adapts browser-scope Fetch into its existing route/control ports before
+creating contexts; context routing retains resource blocks but does not duplicate
+dispatch admission. Its finite callbacks and native commands remain owned until
+actual browser retirement and command drain. Controlled direct article browsers
+reuse existing Fetch admission while retaining direct cookies and serialization.
+
+### Outcomes And Recovery
+
+The canonical `CrawlReport` distinguishes completed, partial, failed and cancelled
+outcomes. Normal completion reasons are `frontier_exhausted` and `page_cap_reached`.
+Services consume the report before summary/storage and carry `crawl_outcome` through
+responses, progress, ephemeral results and persistent/ingestion receipts. Storage
+disposition is separate. A later postprocessing cancellation cannot rewrite an
+already published crawl outcome or roll back committed ingestion.
+
+Direct list APIs preserve normal lists and established structured failure lists.
+An otherwise ambiguous interruption raises `CrawlInterrupted` with its report and
+partial articles; cancellation remains the original `CancelledError`, carrying
+its finalized report through adapters and service progress. Watchlists sitemap
+discovery propagates those parent stops without fallback/refetch; ordinary
+recoverable errors keep the existing `[base_url]` fallback. It is not appropriate
+to add `CrawlInterrupted` to the noncritical catch tuple.
+
+Versioned checkpoints bind owner/crawl/profile/options and spent budgets, re-admit
+restored work under current policy, and retain unfinished work on interruption.
+Secure service roots validate bounded input, path/descriptor capabilities and
+single-writer exclusion, including same-process and inherited descriptors. Legacy
+trusted-local checkpoints remain supported; unsupported secure-root capabilities
+fail closed. Native Windows trusted-local behavior has not been certified here.
+Legacy recursive periodic saves retain the literal modulo-ten successful-page
+counter condition after atomic disposition, including zero and failed pages at a
+multiple of ten (except the transport-unavailable break). Active saves use the
+execution deadline and existing owned file operations. Their `stop_reason=None`
+snapshots retain known counters/duration but conservatively mark resume history
+incomplete, without invalidating live accounting. Finalization waits behind any
+still-running file operation before another save/close and retains writer exclusion
+through actual page/file drain. These remain best-effort, not crash-proof recovery.
+Quiesce admission and drain owned work before rollback; an older binary is not
+assumed to read Phase 5 checkpoints, and deleting data is not recovery.
 
 `WebSearch_APIs.py` retains provider adapters, subquery generation, normalized
 results, optional callback-based review, relevance analysis, and final
@@ -316,24 +393,22 @@ To add or extend a provider:
 
 ### Enhanced Scraper Extension Point
 
-Add crawl-specific acquisition, queue, retry, scoring, cookie, or deduplication
-behavior to `EnhancedWebScraper`, expose the operation through
-`WebScrapingService`, and add a management endpoint only when remote control is
-required. Keep service lifecycle and job state in those owners. Do not bypass
-canonical target admission or move canonical single-page behavior into the
-enhanced scraper before the Phase 5 migration design.
+Extend the existing `crawl`/`jobs` owners through their injected protocols, and
+compose capabilities in `orchestration` or the compatibility/service adapter.
+Expose service operations through `WebScrapingService` when remote control is
+required. Never import orchestration, services or wrappers into `crawl`/`jobs`,
+introduce a second page implementation, or bypass canonical target admission.
 
 ## Compatibility And Follow-On Work
 
 `Article_Extractor_Lib.py` remains importable and re-exports canonical Phase 4
-APIs. It also owns deferred crawl, sitemap, bookmark, source-file, ingestion,
-batching, and progress behavior until those responsibilities move. Do not remove
+APIs. Its crawl/sitemap/URL-level adapters now compose the canonical crawl owner;
+bookmark, source-file and ingestion conveniences remain supported. Do not remove
 these exports or migrate mixed consumers solely to reduce inventory counts.
 
-After Phase 4, Phase 5 moves crawl discovery, sitemap processing, recursive
-traversal, budgets, cancellation, progress, and queue/job state into explicit
-`crawl` and `jobs` packages that call the canonical article orchestrator for
-each page. Phase 6 WebSearch migration is explicitly deferred: it will move
+Phase 5 does not migrate to central Jobs or claim recursive throughput parity;
+direct recursive traversal remains sequential. Phase 6 WebSearch migration is
+explicitly deferred: it will move
 WebSearch workflows, provider adapters, and provider result parsers. Phase 7
 compatibility-wrapper and proven dead-code removal is also deferred until its
 inventory-backed migration and deprecation gates are satisfied.
@@ -368,6 +443,17 @@ Focused coverage is organized as follows:
   `tldw_Server_API/tests/Web_Scraping/test_websearch_*.py`;
 - import compatibility:
   `tldw_Server_API/tests/WebScraping/test_refactor_import_inventory.py`.
+- Phase 5 architecture, forbidden-import/cycle negative fixtures, consumer stop
+  contracts and package discovery: `test_phase5_architecture.py`,
+  `test_phase4_consumer_imports.py`, `test_phase5_crawl_packaging.py` under
+  `tldw_Server_API/tests/Web_Scraping`, plus the import inventory suite above;
+- combined native crawl/queue/executor/checkpoint/service lifecycle:
+  `tldw_Server_API/tests/WebScraping/integration/test_phase5_crawl_lifecycle.py`
+  and `test_phase5_enhanced_browser_native.py` in that directory. Run alongside
+  the Phase 3 preflight and Phase 4 article smokes with Chromium; skips are not
+  native certification. True selector/regex/checkpoint fork assertions execute
+  directly in bounded fresh single-thread subprocesses with native-fork warnings
+  promoted to errors; executor fork-state unit checks remain distinct.
 
 Broad regression coverage lives under `tldw_Server_API/tests/Web_Scraping` and
 `tldw_Server_API/tests/WebScraping`. Cross-consumer certification includes
@@ -377,6 +463,9 @@ services.
 ## References
 
 - `Docs/Design/WebScraping_Refactor_Import_Inventory.md`
+- [Accepted Phase 5 ownership ADR](../ADR/096-web-scraping-crawl-and-process-local-job-ownership.md)
+- [Phase 5 design](../superpowers/specs/2026-10-04-web-scraping-phase-5-crawl-process-local-jobs-design.md)
+- [Phase 5 execution plan](../superpowers/plans/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs.md)
 - `Docs/superpowers/specs/2026-07-26-web-scraping-phase-4-extraction-article-orchestration-design.md`
 - `Docs/superpowers/plans/2026-07-27-web-scraping-phase-4-extraction-article-orchestration.md`
 - `Docs/Product/Completed/WebCrawl_Priority_BFS.md`

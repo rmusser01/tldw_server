@@ -26,9 +26,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     attach_chunking_plan_to_result,
 )
 from tldw_Server_API.app.core.Web_Scraping.summary_prompts import resolve_web_summary_overrides
-from tldw_Server_API.app.services.web_scraping_service import (
-    ingest_web_content_orchestrate,
-)
+from tldw_Server_API.app.services import web_scraping_service
 
 router = APIRouter()
 
@@ -89,7 +87,7 @@ async def ingest_web_content(
             system_prompt=request.system_prompt,
             custom_prompt=request.custom_prompt,
         )
-        helper_results = await ingest_web_content_orchestrate(
+        helper_results = await web_scraping_service.ingest_web_content_orchestrate(
             request=request,
             db=db,
             usage_log=usage_log,
@@ -100,12 +98,22 @@ async def ingest_web_content(
         # parsing / validation) so client-facing 4xx semantics are not
         # converted into generic 500s.
         raise
-    except Exception:  # noqa: BLE001
+    except Exception as error:  # noqa: BLE001 - sanitize receipt failures but retain their terminal crawl fact
         logger.error("Web content ingestion failed")
+        outcome = getattr(error, "crawl_outcome", None)
         raise HTTPException(
             status_code=500,
-            detail="Failed to ingest web content",
+            detail=(
+                {"message": "Failed to ingest web content", "crawl_outcome": outcome}
+                if outcome is not None
+                else "Failed to ingest web content"
+            ),
         ) from None
+    crawl_outcome = getattr(helper_results, "crawl_outcome", None)
+    crawl_fields = {"crawl_outcome": crawl_outcome} if crawl_outcome is not None else {}
+    service_status = getattr(helper_results, "service_status", None)
+    if service_status is not None:
+        crawl_fields["service_status"] = service_status
     if helper_results:
         raw_results.extend(helper_results)
 
@@ -121,6 +129,7 @@ async def ingest_web_content(
             "status": "warning",
             "message": "No articles were successfully scraped for this request.",
             "results": [],
+            **crawl_fields,
         }
 
     # Optional translation stub (kept for behavioural parity with legacy).
@@ -157,6 +166,7 @@ async def ingest_web_content(
         "message": "Web content processed",
         "count": len(raw_results),
         "results": raw_results,
+        **crawl_fields,
     }
 
 

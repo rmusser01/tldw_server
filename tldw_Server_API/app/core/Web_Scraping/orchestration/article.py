@@ -46,7 +46,11 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import (
     FetchResponse,
     RuntimeRequestContext,
 )
+from tldw_Server_API.app.core.Web_Scraping.runtime.controls import ParentStop
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import DEFAULT_HANDLER, ScraperRouter
+
+from ..contracts.execution import DiscoveryResult, PageData
+from ..runtime.controls import PageControls, ParentControls, PhysicalWork, WorkHandle, owned_to_thread, physical_work
 
 _FETCH_TIMEOUT_SECONDS = 15.0
 _BLOCKING_FETCH_TIMEOUT_SECONDS = 30.0
@@ -59,7 +63,7 @@ _SAFE_POLICY_FAILURE = "policy_error"
 _RESPONSE_TOO_LARGE_MESSAGE = "Response exceeds max_response_bytes limit"
 ACTIVE_EVENT_LOOP_ERROR = "Synchronous article scraping cannot run while an event loop is active in this thread"
 BLOCKING_ARTICLE_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 _ARTICLE_LOG_STAGES = frozenset(
     {
@@ -151,6 +155,16 @@ class ArticleDependencies:
     log: Callable[..., None]
     policy_checker: Any = None
     backend_setting: Callable[[ArticlePlan], str] | None = None
+    parent: ParentControls | None = None
+    request_context: RuntimeRequestContext | None = None
+    supplied_plan: ArticlePlan | None = None
+    acquired: Callable[[str, str, str], None] | None = None
+    discovery_on_success: bool = False
+    discovery_gate: Callable[[Mapping[str, Any]], bool] | None = None
+    method_intent: str = "auto"
+    http_only: bool = False
+    http_failure: Callable[[str, Exception], dict[str, Any]] | None = None
+    browser_http_fallback: Callable[[], bool] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +177,7 @@ class _PreparedArticle:
     cookies: Mapping[str, str]
     policy_config: Mapping[str, Any]
     preflight_payload: dict[str, Any] | None
+    http_only: bool = False
 
 
 class _RedirectPolicyBlocked(Exception):
@@ -262,6 +277,13 @@ def _policy_blocked_result(url: str, decision: Any) -> dict[str, Any]:
 def _failure_result(url: str, failure: ArticleFailure | str) -> dict[str, Any]:
     captured = failure if isinstance(failure, ArticleFailure) else ArticleFailure(failure, "article")
     return {"url": url, **article_failure_result(captured)}
+
+
+def _http_failure_result(dependencies: ArticleDependencies, url: str, error: Exception) -> dict[str, Any]:
+    """Keep HTTP-only compatibility failures within their original result contract."""
+    if dependencies.http_failure is not None:
+        return dependencies.http_failure(url, error)
+    return _failure_result(url, "fetch_error")
 
 
 def _attach_preflight(result: Mapping[str, Any], payload: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -406,7 +428,14 @@ def _log_failure(
 
 
 async def _fetch_response(dependencies: ArticleDependencies, request: FetchRequest) -> FetchResponse:
-    return await asyncio.to_thread(dependencies.fetch_client.fetch, request)
+    if dependencies.parent is not None:
+        dependencies.parent.check()
+        request = replace(
+            request,
+            timeout=dependencies.parent.cap_timeout(request.timeout),
+            context=replace(dependencies.request_context, stage="fetch"),
+        )
+    return await owned_to_thread(dependencies.fetch_client.fetch, request)
 
 
 def _response_too_large_error(exc: ValueError) -> ArticleFailure | None:
@@ -423,9 +452,15 @@ def _redirect_location(response: FetchResponse) -> str | None:
     return None
 
 
-def _redirect_target(current_url: str, response: FetchResponse, location: str) -> str:
+def _redirect_target(
+    current_url: str, response: FetchResponse, location: str, parent: ParentControls | None = None
+) -> str:
     try:
-        target = urljoin(response.url or current_url, location)
+        target = (
+            parent.resolve_url(response.url or current_url, location)
+            if parent is not None
+            else urljoin(response.url or current_url, location)
+        )
         parsed = urlsplit(target)
         if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
             raise ValueError
@@ -506,13 +541,15 @@ async def _fetch_lightweight(
                     raise overflow from None
                 raise
 
+            if dependencies.parent is not None:
+                dependencies.parent.check_url(response.url or current_url)
             location = _redirect_location(response)
             if response.status not in _REDIRECT_STATUSES or location is None:
                 return response, _bounded_backend(response.backend)
             if redirect_count == DEFAULT_MAX_REDIRECTS:
                 raise ArticleFailure("fetch_error", "redirect")
 
-            target_url = _redirect_target(current_url, response, location)
+            target_url = _redirect_target(current_url, response, location, dependencies.parent)
             if target_url in seen_urls:
                 raise ArticleFailure("fetch_error", "redirect")
             seen_urls.add(target_url)
@@ -522,11 +559,17 @@ async def _fetch_lightweight(
                     target_url,
                     respect_robots=plan.respect_robots,
                     user_agent=current_headers.get("User-Agent") or plan.browser.user_agent,
-                    request_context=RuntimeRequestContext(source=source, stage="redirect"),
+                    request_context=(
+                        replace(dependencies.request_context, stage="redirect")
+                        if dependencies.request_context
+                        else RuntimeRequestContext(source=source, stage="redirect")
+                    ),
                     config=policy_config,
                     policy_checker=dependencies.policy_checker,
                 )
             except asyncio.CancelledError:
+                raise
+            except ParentStop:
                 raise
             except Exception as exc:  # noqa: BLE001 - redirect policy failures are fail-closed
                 raise ArticleFailure(_SAFE_POLICY_FAILURE, "redirect") from exc
@@ -547,6 +590,8 @@ async def _fetch_lightweight(
             return await fetch_backend("curl")
         except asyncio.CancelledError:
             raise
+        except ParentStop:
+            raise
         except _RedirectPolicyBlocked:
             raise
         except ArticleFailure:
@@ -565,7 +610,14 @@ async def _extract(
     *,
     allow_llm_extraction: bool,
     use_route_handler: bool = True,
+    final_url: str | None = None,
 ) -> dict[str, Any]:
+    if dependencies.parent is not None:
+        dependencies.parent.check()
+        dependencies.parent.check_url(final_url or url)
+    deferred_discovery = dependencies.discovery_on_success or dependencies.discovery_gate is not None
+    if dependencies.acquired is not None and not deferred_discovery:
+        dependencies.acquired(html, url, final_url or url)
     handler = dependencies.resolve_handler(plan.handler) if use_route_handler and plan.handler else None
     result = await dependencies.executor.run(
         dependencies.extract,
@@ -582,6 +634,15 @@ async def _extract(
     if not isinstance(result, Mapping):
         raise ArticleFailure("extraction_error", "result")
     copied = dict(result)
+    if (
+        deferred_discovery
+        and dependencies.acquired is not None
+        and (not dependencies.discovery_on_success or copied.get("extraction_successful"))
+        and (dependencies.discovery_gate is None or dependencies.discovery_gate(copied))
+    ):
+        if dependencies.parent is not None:
+            dependencies.parent.check()
+        dependencies.acquired(html, url, final_url or url)
     if copied.get("extraction_successful") and handler is None and copied.get("content"):
         copied["content"] = dependencies.convert_content(str(copied["content"]))
     return copied
@@ -612,6 +673,7 @@ async def _run_article(
     cookies = prepared.cookies
     policy_config = prepared.policy_config
     preflight_payload = prepared.preflight_payload
+    http_only = dependencies.http_only or prepared.http_only
 
     if advised_backend != _PLAYWRIGHT and advised_method != _PLAYWRIGHT:
         started = dependencies.clock()
@@ -628,6 +690,8 @@ async def _run_article(
             )
         except asyncio.CancelledError:
             raise
+        except ParentStop:
+            raise
         except _RedirectPolicyBlocked as exc:
             decision = exc.decision
             if str(getattr(decision, "reason", "")).startswith("robots_"):
@@ -643,6 +707,8 @@ async def _run_article(
                 "scrape_fetch_total",
                 {"backend": fetch_metric_backend, "outcome": "error"},
             )
+            if http_only:
+                return _attach_preflight(_http_failure_result(dependencies, url, exc), preflight_payload)
             _record_counter(dependencies, "scrape_playwright_fallback_total", {"reason": "error"})
         except Exception as exc:  # noqa: BLE001 - browser fallback remains eligible
             _log_failure(dependencies, exc, code="fetch_error", stage="fetch", url=url)
@@ -651,6 +717,8 @@ async def _run_article(
                 "scrape_fetch_total",
                 {"backend": fetch_metric_backend, "outcome": "error"},
             )
+            if http_only:
+                return _attach_preflight(_http_failure_result(dependencies, url, exc), preflight_payload)
             _record_counter(dependencies, "scrape_playwright_fallback_total", {"reason": "error"})
         else:
             _record_histogram(
@@ -659,8 +727,12 @@ async def _run_article(
                 max(0.0, dependencies.clock() - started),
                 {"backend": backend_used},
             )
-            if response.status < 400 and response.text:
-                if dependencies.js_required(response.text, response.headers, url):
+            if http_only and not 200 <= response.status < 300:
+                error = ValueError(f"Article retrieval failed: HTTP {response.status} (expected terminal 2xx response)")
+                _record_counter(dependencies, "scrape_fetch_total", {"backend": backend_used, "outcome": "error"})
+                return _attach_preflight(_http_failure_result(dependencies, url, error), preflight_payload)
+            if response.status < 400 and (response.text or http_only):
+                if not http_only and dependencies.js_required(response.text, response.headers, url):
                     _record_counter(
                         dependencies,
                         "scrape_playwright_fallback_total",
@@ -674,8 +746,11 @@ async def _run_article(
                             response.text,
                             url,
                             allow_llm_extraction=allow_llm_extraction,
+                            final_url=response.url or url,
                         )
                     except asyncio.CancelledError:
+                        raise
+                    except ParentStop:
                         raise
                     except Exception as exc:  # noqa: BLE001 - browser fallback remains eligible
                         _log_failure(dependencies, exc, code="extraction_error", stage="extract", url=url)
@@ -684,6 +759,8 @@ async def _run_article(
                             "scrape_fetch_total",
                             {"backend": backend_used, "outcome": "error"},
                         )
+                        if http_only:
+                            return _attach_preflight(_http_failure_result(dependencies, url, exc), preflight_payload)
                         _record_counter(
                             dependencies,
                             "scrape_playwright_fallback_total",
@@ -709,6 +786,8 @@ async def _run_article(
                             "scrape_fetch_total",
                             {"backend": backend_used, "outcome": "no_extract"},
                         )
+                        if http_only:
+                            return _attach_preflight(final_extraction, preflight_payload)
                         _record_counter(
                             dependencies,
                             "scrape_playwright_fallback_total",
@@ -730,6 +809,8 @@ async def _run_article(
     try:
         html = await dependencies.browser.acquire(url, plan.direct_browser, plan.limits)
     except asyncio.CancelledError:
+        raise
+    except ParentStop:
         raise
     except ArticleFailure as exc:
         _record_histogram(
@@ -766,8 +847,11 @@ async def _run_article(
             html,
             url,
             allow_llm_extraction=allow_llm_extraction,
+            final_url=getattr(dependencies.browser, "final_url", None) or url,
         )
     except asyncio.CancelledError:
+        raise
+    except ParentStop:
         raise
     except ArticleFailure as exc:
         _record_counter(dependencies, "scrape_fetch_total", {"backend": _PLAYWRIGHT, "outcome": "error"})
@@ -803,18 +887,22 @@ async def _prepare_article(
     """Load, snapshot, admit, and preflight one request before acquisition."""
     config: Mapping[str, Any]
     try:
-        config = _snapshot_config(await asyncio.to_thread(dependencies.load_config))
+        config = _snapshot_config(await owned_to_thread(dependencies.load_config))
     except asyncio.CancelledError:
+        raise
+    except ParentStop:
         raise
     except Exception as exc:  # noqa: BLE001 - config loading has one safe empty fallback
         _log_failure(dependencies, exc, code="fetch_error", stage="config", url=url)
         config = MappingProxyType({})
 
     try:
-        plan = await asyncio.to_thread(dependencies.resolve_plan, url, config)
+        plan = dependencies.supplied_plan or await owned_to_thread(dependencies.resolve_plan, url, config)
         if not isinstance(plan, ArticlePlan):
             raise TypeError("resolve_plan must return ArticlePlan")
     except asyncio.CancelledError:
+        raise
+    except ParentStop:
         raise
     except Exception as exc:  # noqa: BLE001 - route loading preserves the config snapshot
         _log_failure(dependencies, exc, code="fetch_error", stage="plan", url=url)
@@ -826,7 +914,11 @@ async def _prepare_article(
     values = _web_scraper_values(config)
     policy_config = MappingProxyType({"web_scraper": values})
     effective_user_agent = plan.headers.get("User-Agent") or plan.browser.user_agent
-    request_context = RuntimeRequestContext(source=source, stage="pre_fetch")
+    request_context = (
+        replace(dependencies.request_context, stage="pre_fetch")
+        if dependencies.request_context
+        else RuntimeRequestContext(source=source, stage="pre_fetch")
+    )
     preflight_payload: dict[str, Any] | None = None
     try:
         target = await dependencies.evaluate_target(
@@ -838,6 +930,8 @@ async def _prepare_article(
             policy_checker=dependencies.policy_checker,
         )
     except asyncio.CancelledError:
+        raise
+    except ParentStop:
         raise
     except Exception as exc:  # noqa: BLE001 - public policy failures are stable
         _log_failure(dependencies, exc, code=_SAFE_POLICY_FAILURE, stage="pre_fetch", url=url)
@@ -856,9 +950,12 @@ async def _prepare_article(
                 target,
                 options,
                 policy_checker=dependencies.policy_checker,
+                **({"parent": dependencies.parent} if dependencies.parent is not None else {}),
             )
             preflight_result = await dependencies.run_preflight(target, options, context)
         except asyncio.CancelledError:
+            raise
+        except ParentStop:
             raise
         except Exception as exc:  # noqa: BLE001 - the analyzer is intentionally fail-open
             _log_failure(dependencies, exc, code="fetch_error", stage="preflight", url=url)
@@ -875,12 +972,16 @@ async def _prepare_article(
         advised_backend, advised_method, advised_result = dependencies.apply_preflight_advice(
             preflight_result,
             backend=backend,
-            method=_AUTO_BACKEND,
+            method=dependencies.method_intent,
             backend_setting=backend_setting,
         )
+    except asyncio.CancelledError:
+        raise
+    except ParentStop:
+        raise
     except Exception as exc:  # noqa: BLE001 - failed advice retains the snapshotted route
         _log_failure(dependencies, exc, code="fetch_error", stage="preflight_advice", url=url)
-        advised_backend, advised_method, advised_result = backend, _AUTO_BACKEND, None
+        advised_backend, advised_method, advised_result = backend, dependencies.method_intent, None
 
     if not automatic_backend:
         advised_backend = backend
@@ -889,8 +990,24 @@ async def _prepare_article(
             advised_result,
             bool(getattr(options, "include_results", False)),
         )
+    except asyncio.CancelledError:
+        raise
+    except ParentStop:
+        raise
     except Exception as exc:  # noqa: BLE001 - payload creation is optional observability
         _log_failure(dependencies, exc, code="fetch_error", stage="preflight_payload", url=url)
+
+    fallback = False
+    if (advised_backend == _PLAYWRIGHT or advised_method == _PLAYWRIGHT) and dependencies.browser_http_fallback:
+        if dependencies.parent is not None:
+            dependencies.parent.check()
+        try:
+            fallback = dependencies.browser_http_fallback()
+        except ArticleFailure as failure:
+            return _attach_preflight(_failure_result(url, failure), preflight_payload)
+        if fallback:
+            advised_backend, advised_method = "httpx", "trafilatura"
+            plan = replace(plan, proxies={}, impersonate=None)
 
     cookies: dict[str, str] = {}
     for cookie in custom_cookies or ():
@@ -904,6 +1021,7 @@ async def _prepare_article(
         cookies=MappingProxyType(cookies),
         policy_config=policy_config,
         preflight_payload=preflight_payload,
+        http_only=fallback,
     )
 
 
@@ -976,6 +1094,8 @@ async def _run_blocking_article(
             )
         except asyncio.CancelledError:
             raise
+        except ParentStop:
+            raise
         except _RedirectPolicyBlocked as exc:
             decision = exc.decision
             if str(getattr(decision, "reason", "")).startswith("robots_"):
@@ -1003,6 +1123,8 @@ async def _run_blocking_article(
             )
         except asyncio.CancelledError:
             raise
+        except ParentStop:
+            raise
         except ArticleFailure as exc:
             return _attach_preflight(_failure_result(url, exc), prepared.preflight_payload)
         except Exception:  # noqa: BLE001 - guarded browser failures are stable
@@ -1021,6 +1143,8 @@ async def _run_blocking_article(
             prepared.preflight_payload,
         )
     except asyncio.CancelledError:
+        raise
+    except ParentStop:
         raise
     except Exception:  # noqa: BLE001 - preserve the compact historical blocking failure shape
         return _attach_preflight(_blocking_failure_result(url), prepared.preflight_payload)
@@ -1058,6 +1182,8 @@ async def _run_raw_browser_article(
             prepared.plan.limits,
         )
     except asyncio.CancelledError:
+        raise
+    except ParentStop:
         raise
     except ArticleFailure as exc:
         return _raw_failure_result(url, exc)
@@ -1136,6 +1262,139 @@ def _build_default_dependencies(
         policy_checker=DefaultWebOutboundPolicyChecker(credential_free=credential_free),
         backend_setting=lambda plan: resolved_backend_settings.get(id(plan), plan.backend),
     )
+
+
+def start_page(
+    url: str,
+    custom_cookies: list[dict[str, Any]] | None,
+    *,
+    controls: ParentControls,
+    request_context: RuntimeRequestContext,
+    discover: Callable[[str, str, str], DiscoveryResult],
+    plan: ArticlePlan | None = None,
+    allow_llm_extraction: bool = True,
+    discovery_on_success: bool = False,
+    configuration: Mapping[str, Any] | None = None,
+    discovery_gate: Callable[[Mapping[str, Any]], bool] | None = None,
+    prepare_plan: Callable[[ArticlePlan], ArticlePlan] | None = None,
+    transform: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
+    method_intent: str = "auto",
+    dependencies: ArticleDependencies | None = None,
+    browser_http_fallback: Callable[[], bool] | None = None,
+) -> WorkHandle[PageData]:
+    """Start one canonical page attempt with private discovery and physical drain."""
+    loop = asyncio.get_running_loop()
+    owner = PhysicalWork()
+    if transform is not None:
+        owner.drained.add_done_callback(lambda _done, callback=transform: None)
+    parent = PageControls(controls)
+    cookies = _snapshot_cookies(custom_cookies)
+    configuration = _snapshot_config(configuration) if configuration is not None else None
+    supplied_dependencies = dependencies
+
+    async def run() -> PageData:
+        token = physical_work.set(owner)
+        try:
+            parent.check_url(url)
+            reservation = parent.reserve("page_attempts")
+            try:
+                reservation.commit()
+            finally:
+                reservation.close()
+            dependencies = supplied_dependencies or _build_default_dependencies(cookies)
+            if browser_http_fallback is not None:
+                dependencies = replace(dependencies, browser_http_fallback=browser_http_fallback)
+            if configuration is not None:
+                dependencies = replace(dependencies, load_config=lambda: configuration)
+            if prepare_plan is not None:
+                original_resolve = dependencies.resolve_plan
+                original_backend = dependencies.backend_setting
+                resolved_settings: dict[int, str] = {}
+
+                def resolve_page(target: str, config: Mapping[str, Any]) -> ArticlePlan:
+                    resolved = original_resolve(target, config)
+                    prepared = prepare_plan(resolved)
+                    # Header-only preparation must not erase raw-route advice
+                    # precedence. An explicit backend change remains explicit.
+                    resolved_settings[id(prepared)] = (
+                        prepared.backend
+                        if prepared.backend != resolved.backend
+                        else original_backend(resolved)
+                        if original_backend
+                        else resolved.backend
+                    )
+                    return prepared
+
+                dependencies = replace(
+                    dependencies,
+                    resolve_plan=resolve_page,
+                    backend_setting=lambda value: resolved_settings.get(id(value), value.backend),
+                )
+            # Bind live controls only to this private dependency graph, never request metadata.
+            if isinstance(dependencies.fetch_client, DefaultFetchClient):
+                dependencies = replace(dependencies, fetch_client=DefaultFetchClient(parent))
+            if isinstance(dependencies.browser, GuardedArticleBrowser):
+                dependencies.browser.bind_parent(parent, request_context)
+            if isinstance(dependencies.policy_checker, DefaultWebOutboundPolicyChecker):
+                dependencies = replace(dependencies, policy_checker=DefaultWebOutboundPolicyChecker(parent=parent))
+            sidecar = DiscoveryResult(url, url, ())
+            document = None
+
+            def acquired(document: str, request_url: str, final_url: str) -> None:
+                nonlocal sidecar
+                parent.check()
+                sidecar = discover(document, request_url, final_url)
+                parent.check()
+
+            def deferred_acquired(html: str, request_url: str, final_url: str) -> None:
+                nonlocal document
+                document = (html, request_url, final_url)
+
+            dependencies = replace(
+                dependencies,
+                parent=parent,
+                request_context=request_context,
+                supplied_plan=plan,
+                acquired=acquired if transform is None else deferred_acquired,
+                discovery_on_success=discovery_on_success if transform is None else False,
+                discovery_gate=discovery_gate if transform is None else None,
+                method_intent=method_intent,
+            )
+            timeout = preflight_facade._execution_timeout(parent.cap_timeout(None))
+            try:
+                async with timeout:
+                    result = await _run_article(url, cookies, allow_llm_extraction, dependencies=dependencies)
+                    parent.check()
+                    if transform is not None:
+                        original = result
+                        result = transform(url, result)
+                        if "preflight_analysis" in original:
+                            result.setdefault("preflight_analysis", original["preflight_analysis"])
+                        parent.check()
+                        if (
+                            document is not None
+                            and (not discovery_on_success or result.get("extraction_successful"))
+                            and (discovery_gate is None or discovery_gate(result))
+                        ):
+                            acquired(*document)
+                    return PageData(result, sidecar)
+            except TimeoutError:
+                if timeout.expired():
+                    parent.check()
+                    raise ParentStop("deadline_exhausted") from None
+                raise
+        finally:
+            parent.cancel()
+            physical_work.reset(token)
+
+    task = loop.create_task(run(), name="controlled-article-page")
+    task.add_done_callback(lambda _done: owner.finish())
+
+    def cancel() -> None:
+        parent.cancel()
+        loop.call_soon_threadsafe(task.cancel)
+
+    return WorkHandle(task, owner.drained, cancel)
 
 
 async def scrape_article(

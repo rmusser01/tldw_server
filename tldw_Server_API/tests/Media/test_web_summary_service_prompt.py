@@ -1,6 +1,5 @@
 """Owner web-summary instructions through real HTTP, storage and model assembly."""
 
-import asyncio
 import json
 import threading
 from collections.abc import Iterator
@@ -22,6 +21,7 @@ from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summ
 from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as scraper_mod
+from tldw_Server_API.app.core.Web_Scraping.contracts.execution import CrawlOutcome, CrawlReport
 from tldw_Server_API.app.services import enhanced_web_scraping_service as enhanced
 from tldw_Server_API.app.services import web_scraping_service as service
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
@@ -73,18 +73,18 @@ def context(
         state.reads.append(owner.id)
         return state.databases[owner.id]
 
-    async def queue(job: Any) -> asyncio.Future:
+    async def queue(job: Any) -> dict[str, Any]:
         """Complete the external fetch job with an extracted page."""
         state.fetches.append(job.url)
         state.metadata.append(json.loads(json.dumps(job.metadata)))
-        future = asyncio.get_running_loop().create_future()
-        future.set_result(article(job.url))
-        return future
+        return article(job.url)
 
-    async def pages(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    async def pages(*args: Any, **kwargs: Any) -> CrawlReport:
         """Replace remote discovery and extraction for crawl methods."""
         state.fetches.append(args[0] if args else kwargs["base_url"])
-        return [article(), article("https://example.com/b")]
+        return CrawlReport(
+            (article(), article("https://example.com/b")), CrawlOutcome("completed", "frontier_exhausted", False)
+        )
 
     async def page(url: str, **kwargs: Any) -> dict[str, Any]:
         """Replace the legacy external article fetch."""
@@ -104,9 +104,8 @@ def context(
     monkeypatch.setattr(ingest_endpoint, "get_prompts_db_for_user", database, raising=False)
     monkeypatch.setattr(scraper_mod, "get_database_dir", lambda: str(tmp_path))
     state.scraper = scraper_mod.EnhancedWebScraper({})
-    monkeypatch.setattr(state.scraper.job_queue, "add_job", queue)
-    monkeypatch.setattr(state.scraper, "scrape_sitemap", pages)
-    monkeypatch.setattr(state.scraper, "recursive_scrape", pages)
+    monkeypatch.setattr(state.scraper.job_queue, "_execute_job", queue)
+    monkeypatch.setattr(state.scraper, "_crawl_report", pages)
     monkeypatch.setattr(state.scraper, "save_progress", progress)
     state.service = enhanced.WebScrapingService()
     state.service.scraper = state.scraper
@@ -114,12 +113,12 @@ def context(
     monkeypatch.setattr(service, "get_web_scraping_service", lambda: state.service)
     monkeypatch.setattr(legacy, "scrape_article", page)
     monkeypatch.setattr(service, "scrape_article", page)
-    def sitemap(url: str, **kwargs: Any) -> list[dict[str, Any]]:
-        """Replace the legacy sitemap fetch; it runs in a worker thread."""
-        state.fetches.append(url)
-        return [article(), article("https://example.com/b")]
 
-    monkeypatch.setattr(service, "scrape_from_sitemap", sitemap)
+    async def sitemap(request: Any, **kwargs: Any) -> CrawlReport:
+        """Replace only canonical discovery/acquisition, before list conversion."""
+        return await pages(request.base_url)
+
+    monkeypatch.setattr(service, "execute_crawl", sitemap)
     monkeypatch.setattr(summary, "loaded_config_data", {"openai_api": {"model": "test-model"}})
     monkeypatch.setattr(
         prompt_loader, "_prompts_dir", lambda: str(Path(__file__).resolve().parents[2] / "Config_Files" / "Prompts")
@@ -183,9 +182,7 @@ def ingest(context: SimpleNamespace, method: str = "individual", **options: Any)
 
 
 @pytest.mark.parametrize("method", INGEST_METHODS)
-def test_ingest_saved_pair_and_real_crawl_results(
-    context: SimpleNamespace, method: str
-) -> None:
+def test_ingest_saved_pair_and_real_crawl_results(context: SimpleNamespace, method: str) -> None:
     """Saved owner instructions must reach every article, including stored crawl results."""
     save(context, 1)
     save(context, 2)
@@ -329,9 +326,9 @@ def test_owner_isolation(context: SimpleNamespace) -> None:
 def test_snapshot_survives_mid_request_edit(context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     """All pages use the revision captured before the first fetch."""
     row = save(context)
-    original = context.scraper.job_queue.add_job
+    original = context.scraper.job_queue._execute_job
 
-    async def edit(job: Any) -> asyncio.Future:
+    async def edit(job: Any) -> dict[str, Any]:
         """Edit settings while external scraping is in progress."""
         if not context.fetches:
             db = context.databases[1]
@@ -342,7 +339,7 @@ def test_snapshot_survives_mid_request_edit(context: SimpleNamespace, monkeypatc
             context.owner = 2
         return await original(job)
 
-    monkeypatch.setattr(context.scraper.job_queue, "add_job", edit)
+    monkeypatch.setattr(context.scraper.job_queue, "_execute_job", edit)
     process(context)
     assert context.reads == [1]
     assert {call["system_message"] for call in context.calls} == {"Owner 1 system {literal}"}
@@ -438,9 +435,7 @@ def test_reset_restores_builtin_defaults(context: SimpleNamespace, method: str) 
         expected_system = "Summarize this article concisely."
         expected_user = "Article facts."
     else:
-        expected_system = (
-            "You are a professional summarizer who produces accurate, concise summaries of web content."
-        )
+        expected_system = "You are a professional summarizer who produces accurate, concise summaries of web content."
         expected_user = (
             "Article facts.\n\n\n\n"
             "Summarize this article concisely. Focus on the main points, facts, and any actionable insights."
@@ -538,7 +533,12 @@ def test_persistence_uses_authenticated_prompt_owner(
 WEB_SUMMARY_REQUESTS = [
     pytest.param(
         "/api/v1/media/ingest-web-content",
-        {"urls": ["https://example.com/a"], "scrape_method": "individual", "api_name": "openai", "perform_chunking": False},
+        {
+            "urls": ["https://example.com/a"],
+            "scrape_method": "individual",
+            "api_name": "openai",
+            "perform_chunking": False,
+        },
         "perform_analysis",
         id="ingest-web-content",
     ),

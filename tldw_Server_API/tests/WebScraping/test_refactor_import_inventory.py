@@ -37,10 +37,7 @@ def test_scan_file_finds_direct_imports(tmp_path: Path) -> None:
 
     records = scan_file(source, project_root=tmp_path, targets=TARGET_MODULES)
 
-    assert [
-        (record.target_name, record.module, record.imported_name, record.line)
-        for record in records
-    ] == [
+    assert [(record.target_name, record.module, record.imported_name, record.line) for record in records] == [
         (
             "Article_Extractor_Lib",
             "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
@@ -98,10 +95,7 @@ def test_scan_file_sorts_mixed_import_forms_without_type_error(tmp_path: Path) -
 
     records = scan_file(source, project_root=tmp_path, targets=TARGET_MODULES)
 
-    assert [
-        (record.target_name, record.module, record.imported_name, record.line)
-        for record in records
-    ] == [
+    assert [(record.target_name, record.module, record.imported_name, record.line) for record in records] == [
         (
             "ua_profiles",
             "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
@@ -125,10 +119,7 @@ def test_scan_file_resolves_relative_imports_for_web_scraping_modules(tmp_path: 
 
     records = scan_file(module_path, project_root=tmp_path, targets=TARGET_MODULES)
 
-    assert [
-        (record.target_name, record.module, record.imported_name, record.line)
-        for record in records
-    ] == [
+    assert [(record.target_name, record.module, record.imported_name, record.line) for record in records] == [
         (
             "ua_profiles",
             "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
@@ -139,9 +130,7 @@ def test_scan_file_resolves_relative_imports_for_web_scraping_modules(tmp_path: 
 
 
 @pytest.mark.unit
-def test_main_resolves_relative_output_paths_against_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_resolves_relative_output_paths_against_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project_root = tmp_path / "repo"
     external_cwd = tmp_path / "cwd"
     project_root.mkdir()
@@ -200,7 +189,9 @@ def test_new_internal_packages_constant_excludes_legacy_wrappers() -> None:
 
 @pytest.mark.unit
 def test_import_inventory_artifact_matches_current_import_surface(tmp_path: Path) -> None:
-    assert INVENTORY_JSON.exists(), "Run Helper_Scripts/web_scraping_refactor_inventory.py to create the inventory artifact"
+    assert INVENTORY_JSON.exists(), (
+        "Run Helper_Scripts/web_scraping_refactor_inventory.py to create the inventory artifact"
+    )
     assert INVENTORY_MARKDOWN.exists(), (
         "Run Helper_Scripts/web_scraping_refactor_inventory.py to create the Markdown inventory artifact"
     )
@@ -282,3 +273,53 @@ def test_new_internal_web_scraping_packages_do_not_import_legacy_wrappers() -> N
             violations.append(f"{record.path}:{record.line} imports {record.module}")
 
     assert violations == []  # nosec B101
+
+
+@pytest.mark.unit
+def test_phase5_manifest_expands_actual_crawl_imports_without_rewriting_inventory() -> None:
+    from tldw_Server_API.tests.Web_Scraping.phase5_fakes import (
+        ENHANCED,
+        LEGACY,
+        PROFILE_MANIFEST,
+        SERVICE,
+        current_crawl_inventory,
+    )
+
+    inventory = current_crawl_inventory()
+    assert inventory.crawl_entrypoints == PROFILE_MANIFEST.entrypoints
+    assert len(inventory.crawl_entrypoints) == 8  # Seven profiles plus the legacy sync entry.
+    assert (
+        "tldw_Server_API/app/services/web_scraping_service.py"
+        not in inventory.consumers[f"{LEGACY}.scrape_from_sitemap"]
+    )
+    assert "tldw_Server_API/app/core/Watchlists/fetchers.py" in inventory.consumers[f"{ENHANCED}.scrape_sitemap"]
+    assert (
+        "tldw_Server_API/tests/Web_Scraping/test_crawl_config_precedence.py"
+        in inventory.consumers[f"{SERVICE}._scrape_by_url_level"]
+    )
+
+
+@pytest.mark.unit
+def test_phase5_execution_packages_are_discovered_and_imported_from_this_checkout() -> None:
+    import importlib
+
+    import tomllib
+    from setuptools import find_packages
+
+    configuration = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["tool"]["setuptools"]["packages"]["find"]
+    packages = {
+        package
+        for directory in configuration["where"]
+        for package in find_packages(
+            where=str(REPO_ROOT / directory), include=configuration["include"], exclude=configuration["exclude"]
+        )
+    }
+    for relative in ("crawl", "jobs", "orchestration", "contracts", "runtime"):
+        name = f"tldw_Server_API.app.core.Web_Scraping.{relative}"
+        assert name in packages
+        imported = importlib.import_module(name)
+        assert Path(imported.__file__).resolve() == NEW_PACKAGE_ROOT / relative / "__init__.py"
+        for path in sorted((NEW_PACKAGE_ROOT / relative).glob("*.py")):
+            if path.stem != "__init__":
+                module = importlib.import_module(f"{name}.{path.stem}")
+                assert Path(module.__file__).resolve() == path
