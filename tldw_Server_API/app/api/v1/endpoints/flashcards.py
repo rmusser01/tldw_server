@@ -76,6 +76,7 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
     StudyAssistantContextResponse,
     StudyAssistantRespondRequest,
     StudyAssistantRespondResponse,
+    StudyPackDeckCardsResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
     StudyPackCreateJobRequest,
@@ -137,6 +138,7 @@ from tldw_Server_API.app.core.Flashcards.structured_qa_import import parse_struc
 from tldw_Server_API.app.core.Flashcards.verification import build_flashcard_verification_units
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
+from tldw_Server_API.app.core.StudyPacks.chapter_browser import browse_deck_cards
 from tldw_Server_API.app.core.StudyPacks.jobs import (
     STUDY_PACKS_DOMAIN,
     STUDY_PACKS_JOB_TYPE,
@@ -150,7 +152,7 @@ from tldw_Server_API.app.core.StudyPacks.media_sections import (
     section_passages,
 )
 from tldw_Server_API.app.core.StudyPacks.source_resolver import StudySourceResolver, _max_evidence_chars_per_source
-from tldw_Server_API.app.core.StudyPacks.types import SECTION_FAILURE_MESSAGES
+from tldw_Server_API.app.core.StudyPacks.types import CHAPTER_ID_PATTERN, SECTION_FAILURE_MESSAGES
 from tldw_Server_API.app.core.StudySuggestions.jobs import (
     STUDY_SUGGESTIONS_DOMAIN,
     STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
@@ -2424,6 +2426,34 @@ async def get_study_pack_job_status(
         study_pack=study_pack,
         error=error,
     )
+
+
+@router.get(
+    "/study-packs/decks/{deck_id}/cards",
+    response_model=StudyPackDeckCardsResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
+def browse_study_pack_deck_cards(
+    deck_id: int,
+    chapter_id: str | None = Query(None, pattern=CHAPTER_ID_PATTERN),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> StudyPackDeckCardsResponse:
+    try:
+        deck = db.get_deck(deck_id)
+        if deck is None or deck["deleted"]:
+            raise HTTPException(status_code=404, detail="Deck not found")
+        page = browse_deck_cards(db, deck_id, chapter_id=chapter_id, limit=limit, offset=offset)
+        return StudyPackDeckCardsResponse(
+            **page,
+            count=len(page["items"]),
+            pagination=build_offset_pagination_meta(
+                total=page["total"], limit=limit, offset=offset, count=len(page["items"]),
+            ),
+        )
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to browse the deck's cards") from exc
 
 
 @router.get("/study-packs/{pack_id}", response_model=StudyPackSummaryResponse)

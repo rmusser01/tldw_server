@@ -38990,6 +38990,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError:  # noqa: TRY203
             raise
 
+    def list_flashcard_chapter_rows(self, deck_id: int) -> list[dict[str, Any]]:
+        """Read active cards and their saved chapter locators from one owner-scoped deck."""
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        citation_owner_join = "AND c.client_id = f.client_id" if owner_params else ""
+        query = f"""
+            SELECT f.uuid, c.source_id, c.locator
+              FROM flashcards f
+              LEFT JOIN flashcard_citations c
+                ON c.flashcard_uuid = f.uuid
+               {citation_owner_join}
+               AND c.deleted = FALSE
+               AND c.source_type = 'media'
+               AND c.locator LIKE ?
+             WHERE f.deck_id = ? AND f.deleted = FALSE{owner_filter}
+             ORDER BY f.id, c.ordinal, c.id
+        """  # nosec B608 - Fixed owner predicate; data values remain bound.
+        cursor = self.execute_query(query, ('%"study_pack_chapter"%', deck_id, *owner_params), read_only=True)
+        return [dict(row) for row in cursor.fetchall()]
+
     def get_flashcards_by_uuids(self, uuids: list[str]) -> list[dict[str, Any]]:
         """Fetch multiple flashcards by UUIDs in one query. Order is not guaranteed; caller can reorder."""
         if not uuids:

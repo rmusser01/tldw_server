@@ -10,6 +10,7 @@ import pytest
 from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobRequest, StudyPackSourceSelection
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.StudyPacks.chapter_browser import browse_deck_cards
 from tldw_Server_API.app.core.StudyPacks.jobs import extract_study_pack_source_items
 from tldw_Server_API.app.core.StudyPacks.media_sections import plan_media_sections
 
@@ -629,7 +630,29 @@ async def test_whole_media_pack_generates_cited_cards_through_the_end(
     citation = db.list_flashcard_citations(result.card_uuids[-1])[0]
     assert citation["citation_text"] == final_chapter  # nosec B101
     saved_locator = json.loads(citation["locator"])
-    assert set(saved_locator) == {"media_id", "start_char", "end_char"}  # nosec B101
+    assert saved_locator["study_pack_chapter"] == {  # nosec B101
+        "section_index": 1,
+        "section_revision": revision,
+        "title": final_chapter,
+        "source_title": "A study guide to plants",
+    }
+    assert "chunk_index" not in saved_locator and "timestamp_seconds" not in saved_locator  # nosec B101
+
+    if selection_mode == "all":
+        # The first chapter crosses the prompt size limit, so two passes generated its cards.
+        assert len(passages) == 3  # nosec B101
+        first_set_id = f"{media_id}:0:{revision}"
+        all_cards = browse_deck_cards(db, result.deck_id, chapter_id=None, limit=20, offset=0)
+        assert all_cards["all_cards_count"] == all_cards["total"] == 3  # nosec B101
+        assert [(chapter["title"], chapter["card_count"]) for chapter in all_cards["chapters"]] == [  # nosec B101
+            (first_chapter, 2),
+            (final_chapter, 1),
+        ]
+        assert [card["uuid"] for card in all_cards["items"]] == result.card_uuids  # nosec B101
+        first_set = browse_deck_cards(db, result.deck_id, chapter_id=first_set_id, limit=20, offset=0)
+        assert [card["uuid"] for card in first_set["items"]] == result.card_uuids[:2]  # nosec B101
+        assert all(card["deck_id"] == result.deck_id for card in all_cards["items"])  # nosec B101
+
     pack = db.get_study_pack(result.pack_id)
     snapshot = pack["source_bundle_json"]
     if isinstance(snapshot, str):

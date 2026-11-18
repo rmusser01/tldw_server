@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.StudyPacks.source_resolver import (
 )
 from tldw_Server_API.app.core.StudyPacks.study_pack_schemas import StudyPackCreateJobRequest
 from tldw_Server_API.app.core.StudyPacks.types import (
+    CHAPTER_LOCATOR_KEY,
     StudyCitationDraft,
     StudyPackCardDraft,
     StudyPackCreationResult,
@@ -249,6 +250,12 @@ def _plan_generation_bundles(bundle: StudySourceBundle) -> tuple[StudySourceBund
                     item, evidence_text=passage, label=f"{item.label} · {section.title}", locator={
                         "media_id": item.locator["media_id"],
                         "start_char": start, "end_char": end,
+                        CHAPTER_LOCATOR_KEY: {
+                            "section_index": index,
+                            "section_revision": revision,
+                            "title": section.title,
+                            "source_title": item.label,
+                        },
                     },
                 )]))
 
@@ -687,6 +694,8 @@ class StudyPackGenerationService:
             for key, value in raw_locator.items():
                 if value not in (None, "", [], {}):
                     key_text = str(key)
+                    if key_text == CHAPTER_LOCATOR_KEY:
+                        continue
                     existing_value = locator.get(key_text)
                     if key_text not in locator or existing_value in (None, "", [], {}):
                         locator[key_text] = value

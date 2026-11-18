@@ -38,6 +38,8 @@ Why the 8 KB field limit did not increase:
 
 Use **Add a source by ID** when you already have a media, note, or message ID.
 
+To browse cards by chapter, select the deck on the **Study** tab and choose **Browse cards**. Pick **All cards** or a chapter from **Card set**. The number beside each set is its current card count.
+
 ## Extension Selected-Text Capture
 
 Use this path when you find useful passages while browsing and want to save editable flashcards, generate a small draft batch without leaving the sidepanel, apply existing templates to drafts, review due cards quickly, or send selected text directly to full Flashcards generation.
