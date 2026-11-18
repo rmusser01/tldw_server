@@ -169,6 +169,60 @@ def test_get_study_pack_detail_returns_persisted_pack(
     assert body["title"] == "Routing Basics"  # nosec B101
 
 
+def test_browse_study_pack_deck_cards_pages_live_chapter_sets(client: TestClient, db: CharactersRAGDB):
+    _, deck_id = _seed_pack(db)
+    original_revision = "a" * 64
+    edited_revision = "b" * 64
+    chapter_cards = []
+    for front, chapter_title, revision in (
+        ("First card", "Chapter 1", original_revision),
+        ("Second card", "Chapter 1", original_revision),
+        ("Deleted card", "Chapter 1", original_revision),
+        ("Intro card", "Introduction", edited_revision),
+    ):
+        uuid = db.add_flashcard({"deck_id": deck_id, "front": front, "back": "Answer"})
+        chapter_cards.append(uuid)
+        db.add_flashcard_citations(uuid, [{
+            "source_type": "media",
+            "source_id": "7",
+            "locator": {"study_pack_chapter": {
+                "section_index": 0,
+                "section_revision": revision,
+                "title": chapter_title,
+                "source_title": "Book",
+            }},
+        }])
+    db.soft_delete_flashcard(chapter_cards[2], expected_version=1)
+    other_device = CharactersRAGDB(db.db_path, client_id="another-device")
+    try:
+        other_device.update_flashcard(chapter_cards[0], {"front": "First card edited"})
+    finally:
+        other_device.close_connection()
+    db.add_flashcard({"deck_id": deck_id, "front": "Uncategorized card", "back": "Answer"})
+    db.add_flashcard({"deck_id": db.add_deck("Other deck"), "front": "Other card", "back": "Answer"})
+
+    path = f"/api/v1/flashcards/study-packs/decks/{deck_id}/cards"
+    response = client.get(path)
+    assert response.status_code == 200  # nosec B101
+    body = response.json()
+    assert body["all_cards_count"] == body["total"] == 4  # nosec B101
+    assert [card["front"] for card in body["items"]] == [  # nosec B101
+        "First card edited", "Second card", "Intro card", "Uncategorized card",
+    ]
+    first_chapter_id = f"7:0:{original_revision}"
+    assert [(c["id"], c["title"], c["card_count"]) for c in body["chapters"]] == [  # nosec B101
+        (first_chapter_id, "Chapter 1", 2),
+        (f"7:0:{edited_revision}", "Introduction", 1),
+    ]
+
+    response = client.get(path, params={"chapter_id": first_chapter_id, "limit": 1, "offset": 1})
+    assert response.status_code == 200  # nosec B101
+    body = response.json()
+    assert (body["count"], body["total"], body["all_cards_count"]) == (1, 2, 4)  # nosec B101
+    assert [card["front"] for card in body["items"]] == ["Second card"]  # nosec B101
+    assert client.get("/api/v1/flashcards/study-packs/decks/9999/cards").status_code == 404  # nosec B101
+
+
 def test_regenerate_study_pack_job_uses_stored_source_bundle(
     client: TestClient,
     db: CharactersRAGDB,

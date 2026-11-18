@@ -6,6 +6,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+CHAPTER_LOCATOR_KEY = "study_pack_chapter"
+CHAPTER_ID_PATTERN = r"^[0-9]{1,19}:[0-9]{1,3}:[0-9a-f]{64}$"
+
 SECTION_FAILURE_MESSAGES = {
     "study_pack_sections_changed": "The saved source changed. Review its sections again before creating a Study Pack.",
     "study_pack_sections_invalid": "Select at least one available Study Pack section.",

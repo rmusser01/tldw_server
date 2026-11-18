@@ -33,6 +33,12 @@ Reference:
 - `apps/packages/ui/src/components/Flashcards/components/FlashcardEditDrawer.tsx`
 - `apps/packages/ui/src/components/Flashcards/tabs/ManageTab.tsx`
 
+### Study Pack Chapter Sets
+
+The Study tab opens **Browse cards** for the selected deck. **All cards** includes every active card in the deck. The same drawer lists generated chapter sets and their current counts. Browsing leaves the review session and ratings intact.
+
+Each generated passage carries the media ID, section plan revision, and section index in its saved citation. Every pass of a chapter shares this identity. The picker uses the saved heading as the chapter label. Counts follow the cards when they move between decks.
+
 ### Guardrails
 
 - Tab naming and create-entry routing:  

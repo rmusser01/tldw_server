@@ -505,6 +505,17 @@ export type FlashcardListResponse = {
   total?: number | null
 }
 
+export type StudyPackDeckCardsResponse = FlashcardListResponse & {
+  chapters: Array<{
+    id: string
+    title: string
+    source_id: string
+    source_title?: string | null
+    card_count: number
+  }>
+  all_cards_count: number
+}
+
 export type FlashcardReviewRequest = {
   card_uuid: string
   rating: number // 0-5
@@ -1199,6 +1210,17 @@ export async function getStudyPackMediaSections(
     path: `/api/v1/flashcards/study-packs/media/${encodeURIComponent(mediaId)}/sections`,
     method: "GET",
     abortSignal: options?.signal
+  })
+}
+
+export async function getStudyPackDeckCards(
+  deckId: number,
+  { chapter_id, limit, offset, signal }: { chapter_id?: string; limit: number; offset: number; signal?: AbortSignal }
+): Promise<StudyPackDeckCardsResponse> {
+  return await bgRequest<StudyPackDeckCardsResponse, AllowedPath, "GET">({
+    path: `/api/v1/flashcards/study-packs/decks/${deckId}/cards${buildQuery({ chapter_id, limit, offset })}`,
+    method: "GET",
+    abortSignal: signal
   })
 }
 

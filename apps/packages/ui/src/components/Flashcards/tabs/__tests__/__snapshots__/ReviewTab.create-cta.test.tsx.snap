@@ -80,6 +80,14 @@ exports[`ReviewTab create CTA visibility > matches baseline snapshot for active 
       </span>
     </div>
   </div>
+  <button
+    class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"
+    type="button"
+  >
+    <span>
+      Browse cards
+    </span>
+  </button>
   <div
     aria-label="segmented control"
     aria-orientation="horizontal"
@@ -404,6 +412,14 @@ exports[`ReviewTab create CTA visibility > matches baseline snapshot for caught-
       </span>
     </div>
   </div>
+  <button
+    class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"
+    type="button"
+  >
+    <span>
+      Browse cards
+    </span>
+  </button>
   <div
     aria-label="segmented control"
     aria-orientation="horizontal"
