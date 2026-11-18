@@ -107,6 +107,8 @@ import {
   useWorkspaceStore,
 } from "@/store/workspace";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
+import { materializeWorkspaceOutputs } from "@/services/workspace-artifact-catalog";
+import type { WorkspaceArtifactRevision } from "@/services/tldw/domains/workspace-api";
 import { mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader";
 import { WorkspacesManagerPage } from "../../Workspaces/WorkspacesManagerPage";
 import { ResearchWorkspaceRouteGate } from "../ResearchWorkspaceRouteGate";
@@ -197,7 +199,7 @@ const reply = async ({ path }: { path: string }) => {
   if (path.startsWith("/api/v1/chats/?")) return { chats: [], total: 0 };
   if (path === `/api/v1/workspaces/${TARGET}/context`) return canonical();
   if (
-    path === `/api/v1/workspaces/${TARGET}/artifacts` ||
+    path === `/api/v1/workspaces/${TARGET}/artifact-revisions` ||
     path === `/api/v1/workspaces/${TARGET}/notes`
   )
     return [];
@@ -324,6 +326,35 @@ it("opens a direct server-only target without initializing another workspace", a
   ).toBe("Keep unsaved Beta");
 });
 
+it("opens the target from its catalog and fetches only the selected output", async () => {
+  prepare(false);
+  const base = `/api/v1/workspaces/${TARGET}`;
+  const rows: WorkspaceArtifactRevision[] = ["first", "second"].map(id => ({
+    id, workspace_id: TARGET, display_id: id, version: 1, display_version: 1,
+    artifact_type: "summary", title: id, status: "complete", defer_detail: true,
+    created_at: "2026-10-01T00:00:00Z", imported: false, model: null, provider: null,
+  }));
+  boundary.request.mockImplementation(async request => {
+    if (request.path === `${base}/artifact-revisions`) return rows;
+    if (request.path === `${base}/artifacts/second`) return { ...rows[1], content: "Saved second output" };
+    return reply(request);
+  });
+  const artifactRequests = () => boundary.request.mock.calls
+    .map(([request]) => request.path).filter(path => path.startsWith(`${base}/artifact`));
+
+  await mount(`/research-workspace?source_workspace_id=${TARGET}`);
+  await screen.findByTestId("opened-sources");
+  const [first, second] = useWorkspaceStore.getState().generatedArtifacts;
+  expect([first.id, second.id]).toEqual(["first", "second"]);
+  expect(artifactRequests()).toEqual([`${base}/artifact-revisions`]);
+
+  await act(async () => { await materializeWorkspaceOutputs(TARGET, second); });
+  expect(artifactRequests()).toEqual([`${base}/artifact-revisions`, `${base}/artifacts/second`]);
+  const saved = useWorkspaceStore.getState().generatedArtifacts;
+  expect(saved[0]).toBe(first);
+  expect(saved[1].content).toBe("Saved second output");
+});
+
 it.each([
   ["canonical UUID only", [`workspace:${TARGET}`]],
   ["historical name and canonical UUID", ["workspace:alpha", `workspace:${TARGET}`]],
@@ -346,11 +377,14 @@ it.each([
   }));
 });
 
-it("keeps the current workspace and draft when the target is unavailable", async () => {
+it.each(["context", "artifact-revisions"])("keeps the current workspace and draft when the target %s is unavailable", async (resource) => {
   prepare(false);
-  boundary.request.mockRejectedValue(
-    Object.assign(new Error("Unavailable"), { status: 404 }),
-  );
+  boundary.request.mockImplementation(async request => {
+    if (request.path === `/api/v1/workspaces/${TARGET}/${resource}`) {
+      throw Object.assign(new Error("Unavailable"), { status: resource === "context" ? 404 : 503 });
+    }
+    return reply(request);
+  });
   await mount(`/research-workspace?source_workspace_id=${TARGET}`);
   await screen.findByRole("alert");
   expect(useWorkspaceStore.getState().workspaceId).toBe(PREVIOUS);
@@ -360,6 +394,9 @@ it("keeps the current workspace and draft when the target is unavailable", async
   expect(
     useWorkspaceStore.getState().workspaceSnapshots[TARGET],
   ).toBeUndefined();
+  expect(boundary.request).not.toHaveBeenCalledWith(expect.objectContaining({
+    path: `/api/v1/workspaces/${TARGET}/artifacts`,
+  }));
 });
 
 it.each(["account", "workspace", "unmount"] as const)(
