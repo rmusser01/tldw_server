@@ -5,8 +5,7 @@ def test_list_ocr_backends_includes_mineru_capabilities(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import ocr as ocr_mod
 
     monkeypatch.setattr(
-        ocr_mod,
-        "_list_backends",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry.list_backends",
         lambda: {"tesseract": {"available": True}},
     )
     monkeypatch.setattr(
@@ -40,8 +39,7 @@ def test_list_ocr_backends_returns_safe_mineru_stub_on_describe_error(monkeypatc
         raise ValueError("bad MinerU command")
 
     monkeypatch.setattr(
-        ocr_mod,
-        "_list_backends",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry.list_backends",
         lambda: {"tesseract": {"available": True}},
     )
     monkeypatch.setattr(

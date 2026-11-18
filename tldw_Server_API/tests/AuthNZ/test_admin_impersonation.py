@@ -75,12 +75,11 @@ def _install_endpoint_stubs(
             raise audit_error
 
     monkeypatch.setattr(
-        admin_impersonation,
-        "AuthnzUsersRepo",
+        "tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo",
         SimpleNamespace(from_pool=_from_pool),
     )
     monkeypatch.setattr(app_services(), "jwt_service", _StubJWTService())
-    monkeypatch.setattr(admin_impersonation, "_emit_admin_account_audit_event", _emit, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_audit_service.emit_admin_account_audit_event", _emit, raising=False)
     return jwt_calls, audit_calls
 
 
@@ -269,8 +268,7 @@ class TestCreateImpersonationToken:
             raise RuntimeError("impersonation backend exploded at /private/impersonation.db")
 
         monkeypatch.setattr(
-            admin_impersonation,
-            "AuthnzUsersRepo",
+            "tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo",
             SimpleNamespace(from_pool=_failing_from_pool),
         )
 

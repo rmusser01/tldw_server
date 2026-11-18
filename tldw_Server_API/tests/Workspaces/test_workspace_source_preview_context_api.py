@@ -231,8 +231,7 @@ def test_workspace_context_combines_sources_readiness_capabilities_and_preview_r
     monkeypatch,
 ):
     monkeypatch.setattr(
-        workspaces_endpoint,
-        "collect_workspace_service_capabilities",
+        "tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities",
         _provider_ready_service_capabilities,
         raising=True,
     )
@@ -299,8 +298,7 @@ def test_workspace_context_includes_attached_primary_root(
         }
 
     monkeypatch.setattr(
-        workspaces_endpoint,
-        "collect_workspace_service_capabilities",
+        "tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities",
         _service_capabilities,
         raising=True,
     )

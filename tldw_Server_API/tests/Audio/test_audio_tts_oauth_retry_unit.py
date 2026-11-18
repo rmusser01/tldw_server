@@ -249,23 +249,19 @@ def _request_data() -> OpenAISpeechRequest:
     )
 
 
-def _patch_audio_shim(monkeypatch, resolve_tts_byok):
+def _patch_tts_collaborators(monkeypatch, resolve_tts_byok):
     async def _unused_save_and_register_tts_audio(**kwargs):  # pragma: no cover - defensive fallback
         _ = kwargs
         return {"id": None}
 
-    shim_map = {
-        "_sanitize_speech_request": lambda *args, **kwargs: "openai",
-        "_resolve_tts_byok": resolve_tts_byok,
-        "save_and_register_tts_audio": _unused_save_and_register_tts_audio,
-    }
-
-    def _shim_attr(name: str):
-        if name not in shim_map:
-            raise NameError(name)
-        return shim_map[name]
-
-    monkeypatch.setattr(audio_tts, "_audio_shim_attr", _shim_attr, raising=True)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *args, **kwargs: "openai"
+    )
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", resolve_tts_byok)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Storage.generated_file_helpers.save_and_register_tts_audio",
+        _unused_save_and_register_tts_audio,
+    )
 
 
 class _SuccessfulTTSService:
@@ -372,7 +368,7 @@ async def test_audio_speech_invalid_voice_to_voice_header_log_is_sanitized(monke
         _ = args, kwargs
         return (1, {}, None)
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
 
@@ -403,7 +399,7 @@ async def test_audio_speech_request_state_failure_log_is_sanitized(monkeypatch):
         _ = args, kwargs
         return (1, {}, None)
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
 
@@ -427,7 +423,7 @@ async def test_audio_speech_usage_log_failure_log_is_sanitized(monkeypatch):
         _ = args, kwargs
         return (1, {}, None)
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
 
@@ -451,7 +447,7 @@ async def test_audio_metadata_usage_log_failure_log_is_sanitized(monkeypatch):
         _ = args, kwargs
         return (1, {}, None)
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
 
@@ -478,11 +474,11 @@ async def test_audio_speech_history_hash_failure_log_is_sanitized(monkeypatch):
         _ = args, kwargs
         raise RuntimeError("history hash leaked /private/tts-history-hash.json")
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
     monkeypatch.setattr(audio_tts, "_tts_history_config", lambda: {"enabled": True, "store_text": True, "store_failed": True, "hash_key": None})
-    monkeypatch.setattr(audio_tts, "compute_tts_history_text_hash", _fail_text_hash)
+    monkeypatch.setattr("tldw_Server_API.app.core.TTS.utils.compute_tts_history_text_hash", _fail_text_hash)
 
     response = await audio_tts.create_speech(
         _request_data(),
@@ -508,11 +504,11 @@ async def test_audio_speech_history_write_failure_log_is_sanitized(monkeypatch):
         def create_tts_history_entry(self, **kwargs):  # noqa: ARG002
             raise RuntimeError("history write leaked /private/tts-history-write.json")
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
     monkeypatch.setattr(audio_tts, "_tts_history_config", lambda: {"enabled": True, "store_text": True, "store_failed": True, "hash_key": None})
-    monkeypatch.setattr(audio_tts, "compute_tts_history_text_hash", lambda *args, **kwargs: "safe-hash")
+    monkeypatch.setattr("tldw_Server_API.app.core.TTS.utils.compute_tts_history_text_hash", lambda *args, **kwargs: "safe-hash")
 
     response = await audio_tts.create_speech(
         _request_data(),
@@ -538,7 +534,7 @@ async def test_audio_speech_byok_touch_failure_log_is_sanitized(monkeypatch):
         _ = args, kwargs
         return (1, {}, _FailingTouchByokResolution(api_key="byok-key", auth_source="byok"))
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
 
@@ -565,7 +561,7 @@ async def test_audio_speech_streaming_byok_touch_failure_log_is_sanitized(monkey
     request_data = _request_data()
     request_data.stream = True
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
 
@@ -593,7 +589,7 @@ async def test_audio_metadata_byok_touch_failure_log_is_sanitized(monkeypatch):
         _ = args, kwargs
         return (1, {}, _FailingTouchByokResolution(api_key="byok-key", auth_source="byok"))
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
 
@@ -619,7 +615,7 @@ async def test_audio_speech_alignment_header_failure_log_is_sanitized(monkeypatc
     request_data = _request_data()
     object.__setattr__(request_data, "_tts_metadata", {"alignment": {"bad": object()}})
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
 
@@ -651,7 +647,7 @@ async def test_audio_speech_openai_oauth_auth_failure_retries_once(monkeypatch):
         )
         return (1, {"api_key": resolution.api_key}, resolution)
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
 
     tts_service = _AuthRetryTTSService(failures_before_success=1)
     response = await audio_tts.create_speech(
@@ -680,18 +676,13 @@ async def test_audio_speech_download_link_sanitizes_storage_error(monkeypatch):
         _ = kwargs
         raise StorageError("storage backend exploded at /private/generated/audio.mp3")
 
-    shim_map = {
-        "_sanitize_speech_request": lambda *args, **kwargs: "kitten_tts",
-        "_resolve_tts_byok": _resolve_tts_byok,
-        "save_and_register_tts_audio": _raise_storage_error,
-    }
-
-    def _shim_attr(name: str):
-        if name not in shim_map:
-            raise NameError(name)
-        return shim_map[name]
-
-    monkeypatch.setattr(audio_tts, "_audio_shim_attr", _shim_attr, raising=True)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *args, **kwargs: "kitten_tts"
+    )
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _resolve_tts_byok)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Storage.generated_file_helpers.save_and_register_tts_audio", _raise_storage_error
+    )
     request_data = _request_data()
     request_data.return_download_link = True
 
@@ -720,7 +711,7 @@ async def test_audio_speech_openai_oauth_second_auth_failure_propagates_original
         )
         return (1, {"api_key": resolution.api_key}, resolution)
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
 
     with pytest.raises(HTTPException) as exc:
         await audio_tts.create_speech(
@@ -751,7 +742,7 @@ async def test_audio_metadata_openai_oauth_auth_failure_retries_once(monkeypatch
         )
         return (1, {"api_key": resolution.api_key}, resolution)
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
 
     response = await audio_tts.create_speech_metadata(
         _request_data(),
@@ -801,7 +792,7 @@ async def test_audio_metadata_oauth_retry_touches_only_refreshed_completion(
 
             return _generate()
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
     response = await audio_tts.create_speech_metadata(
         _request_data(),
         _make_request(path="/api/v1/audio/speech/metadata"),
@@ -827,7 +818,7 @@ async def test_audio_metadata_openai_oauth_second_auth_failure_propagates_origin
         )
         return (1, {"api_key": resolution.api_key}, resolution)
 
-    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, _resolve_tts_byok)
 
     with pytest.raises(HTTPException) as exc:
         await audio_tts.create_speech_metadata(
@@ -853,7 +844,7 @@ async def test_audio_speech_streaming_concurrent_oauth_401s_coalesce_refresh_gen
     resolver = _CoalescingOAuthResolver()
     service = _ConcurrentAuthRetryTTSService()
     fake_logger = MagicMock()
-    _patch_audio_shim(monkeypatch, resolver)
+    _patch_tts_collaborators(monkeypatch, resolver)
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
 
     async def _request_speech():
@@ -899,7 +890,7 @@ async def test_audio_metadata_concurrent_oauth_401s_coalesce_refresh_generation(
     resolver = _CoalescingOAuthResolver()
     service = _ConcurrentAuthRetryTTSService()
     fake_logger = MagicMock()
-    _patch_audio_shim(monkeypatch, resolver)
+    _patch_tts_collaborators(monkeypatch, resolver)
     monkeypatch.setattr(audio_tts, "logger", fake_logger)
 
     async def _request_metadata():

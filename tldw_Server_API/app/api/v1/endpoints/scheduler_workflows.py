@@ -10,13 +10,15 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, ge
 
 from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.Scheduler import SchedulerError, get_global_scheduler
+from tldw_Server_API.app.core.Scheduler import SchedulerError
 from tldw_Server_API.app.services.workflows_scheduler import (
     build_schedule_payload,
     ensure_schedule_queue_worker,
     get_workflows_scheduler,
     resolve_schedule_submission_target,
 )
+import tldw_Server_API.app.core.Scheduler as _Scheduler
+import tldw_Server_API.app.services.workflows_scheduler as _workflows_scheduler
 
 router = APIRouter(prefix="/api/v1/scheduler/workflows", tags=["scheduler", "workflows"])
 
@@ -141,7 +143,7 @@ async def create_schedule(
     current_user: User = Depends(get_request_user),
 ):
     _validate_cron_or_422(body.cron, body.timezone)
-    svc = get_workflows_scheduler()
+    svc = _workflows_scheduler.get_workflows_scheduler()
     tenant_id = _tenant_id_for_user(current_user)
     sid = svc.create(
         tenant_id=tenant_id,
@@ -181,7 +183,7 @@ async def admin_rescan(
     admin principal. Returns the number of registered APScheduler jobs after
     rescan.
     """
-    svc = get_workflows_scheduler()
+    svc = _workflows_scheduler.get_workflows_scheduler()
     try:
         await svc._rescan_once()  # type: ignore[attr-defined]
     except Exception as e:
@@ -206,7 +208,7 @@ async def list_schedules(
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_request_user),
 ):
-    svc = get_workflows_scheduler()
+    svc = _workflows_scheduler.get_workflows_scheduler()
     tenant_id = _tenant_id_for_user(current_user)
     is_admin = _is_scheduler_admin_user(current_user)
     user_filter: str | None = None
@@ -258,7 +260,7 @@ async def get_schedule(
     schedule_id: str,
     current_user: User = Depends(get_request_user),
 ):
-    svc = get_workflows_scheduler()
+    svc = _workflows_scheduler.get_workflows_scheduler()
     s = svc.get(schedule_id)
     if not s:
         raise HTTPException(status_code=404, detail="Not found")
@@ -320,7 +322,7 @@ async def update_schedule(
     body: ScheduleUpdateRequest,
     current_user: User = Depends(get_request_user),
 ):
-    svc = get_workflows_scheduler()
+    svc = _workflows_scheduler.get_workflows_scheduler()
     s = svc.get(schedule_id)
     if not s:
         raise HTTPException(status_code=404, detail="Not found")
@@ -368,7 +370,7 @@ async def delete_schedule(
     schedule_id: str,
     current_user: User = Depends(get_request_user),
 ):
-    svc = get_workflows_scheduler()
+    svc = _workflows_scheduler.get_workflows_scheduler()
     s = svc.get(schedule_id)
     if not s:
         return {"ok": False}
@@ -388,7 +390,7 @@ async def run_now(
     schedule_id: str,
     current_user: User = Depends(get_request_user),
 ):
-    svc = get_workflows_scheduler()
+    svc = _workflows_scheduler.get_workflows_scheduler()
     s = svc.get(schedule_id)
     if not s:
         raise HTTPException(status_code=404, detail="Not found")
@@ -399,7 +401,7 @@ async def run_now(
     payload = build_schedule_payload(s)
     handler_name, queue_name = resolve_schedule_submission_target(payload)
     # Use the global scheduler instance to avoid duplicate worker pools
-    core = await get_global_scheduler()
+    core = await _Scheduler.get_global_scheduler()
     try:
         await ensure_schedule_queue_worker(core, queue_name)
     except SchedulerError as exc:

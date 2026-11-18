@@ -87,7 +87,7 @@ def test_users_me_update_returns_404_when_update_affects_no_rows(auth_headers, m
         return True
 
     monkeypatch.setattr(users_endpoints, "_resolve_user_context", _fake_resolve_user_context)
-    monkeypatch.setattr(users_endpoints, "is_postgres_backend", _is_postgres_backend)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.is_postgres_backend", _is_postgres_backend)
     with _dependency_override_scope(
         {get_db_transaction: _fake_get_db_transaction}
     ):
@@ -158,7 +158,7 @@ def test_users_me_update_succeeds_when_row_is_updated(auth_headers, monkeypatch)
         return True
 
     monkeypatch.setattr(users_endpoints, "_resolve_user_context", _fake_resolve_user_context)
-    monkeypatch.setattr(users_endpoints, "is_postgres_backend", _is_postgres_backend)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.is_postgres_backend", _is_postgres_backend)
     with _dependency_override_scope(
         {get_db_transaction: _fake_get_db_transaction}
     ):
@@ -212,7 +212,7 @@ def test_users_me_update_delegates_email_write_to_db_management(
         calls.append((connection, backend, user_id, email))
 
     monkeypatch.setattr(users_endpoints, "_resolve_user_context", _fake_resolve_user_context)
-    monkeypatch.setattr(users_endpoints, "is_postgres_backend", _is_postgres_backend)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.is_postgres_backend", _is_postgres_backend)
     monkeypatch.setattr(users_endpoints, "update_user_email", _update_user_email)
     with _dependency_override_scope(
         {get_db_transaction: _fake_get_db_transaction}

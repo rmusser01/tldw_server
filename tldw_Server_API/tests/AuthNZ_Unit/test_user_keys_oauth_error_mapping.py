@@ -20,7 +20,7 @@ async def test_openai_oauth_token_exchange_sanitizes_provider_error(monkeypatch:
     async def _fake_http_afetch(**_kwargs):
         return _FakeResponse()
 
-    monkeypatch.setattr(user_keys_endpoint, "_http_afetch", _fake_http_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", _fake_http_afetch)
 
     with pytest.raises(HTTPException) as exc_info:
         await user_keys_endpoint._openai_oauth_token_exchange(

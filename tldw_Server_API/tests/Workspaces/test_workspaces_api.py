@@ -428,8 +428,7 @@ def test_delete_workspace_invokes_sharing_cleanup_hook(
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     monkeypatch.setattr(
-        workspaces_endpoint,
-        "on_workspace_deleted",
+        "tldw_Server_API.app.core.Sharing.workspace_deletion_hook.on_workspace_deleted",
         _record_cleanup,
         raising=False,
     )
@@ -462,7 +461,7 @@ def test_delete_workspace_cleanup_failure_log_includes_context(
     workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=1, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
-    monkeypatch.setattr(workspaces_endpoint, "on_workspace_deleted", _fail_cleanup)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sharing.workspace_deletion_hook.on_workspace_deleted", _fail_cleanup)
     monkeypatch.setattr(workspaces_endpoint, "logger", fake_logger)
     try:
         with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
@@ -3007,7 +3006,7 @@ def test_delete_workspace_validates_sharing_owner_before_mutation(workspace_fast
     workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=owner_id, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = allow_rate_limit
-    monkeypatch.setattr(workspaces_endpoint, "on_workspace_deleted", record_cleanup)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sharing.workspace_deletion_hook.on_workspace_deleted", record_cleanup)
     try:
         with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
             response = client.delete(f"/api/v1/workspaces/{workspace_id}")

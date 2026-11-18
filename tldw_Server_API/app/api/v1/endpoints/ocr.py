@@ -6,10 +6,8 @@ from fastapi import APIRouter, Depends
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user
 from tldw_Server_API.app.api.v1.schemas.ocr_schemas import OCRBackendsResponse
-from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry import (
-    list_backends as _list_backends,
-)
-from tldw_Server_API.app.core.Utils.Utils import logging
+import tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry as _registry
+import tldw_Server_API.app.core.Utils.Utils as _Utils
 
 # Applied at the router rather than per route: both routes need it, and a
 # route added here later inherits it instead of being public by omission.
@@ -60,7 +58,7 @@ def _record_backend_discovery_error(
     backend_name: str,
     _exc: Exception,
 ) -> None:
-    logging.error("OCR backend discovery failed for {}", backend_name)
+    _Utils.logging.error("OCR backend discovery failed for {}", backend_name)
     out.setdefault(backend_name, {})
     out[backend_name]["error"] = f"{backend_name} backend discovery failed"
 
@@ -68,7 +66,7 @@ def _record_backend_discovery_error(
 @router.get("/backends", response_model=OCRBackendsResponse)
 def list_ocr_backends() -> dict[str, Any]:
     """List available OCR backends with lightweight health information."""
-    out = _list_backends()
+    out = _registry.list_backends()
     try:
         out["mineru"] = _describe_mineru_backend()
     except _OCR_NONCRITICAL_EXCEPTIONS as exc:
@@ -264,5 +262,5 @@ def preload_points_transformers() -> dict[str, Any]:
         _load_transformers()
         return {"status": "ok", "mode": "transformers"}
     except _OCR_NONCRITICAL_EXCEPTIONS:
-        logging.error("POINTS transformers preload failed")
+        _Utils.logging.error("POINTS transformers preload failed")
         return {"status": "error", "error": "POINTS OCR preload failed"}

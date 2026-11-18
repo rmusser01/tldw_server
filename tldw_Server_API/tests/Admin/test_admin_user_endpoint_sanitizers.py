@@ -58,7 +58,7 @@ async def test_list_users_sanitizes_generic_failure_log(monkeypatch: pytest.Monk
         raise RuntimeError("list users endpoint exploded at /private/users.db")
 
     monkeypatch.setattr(admin_user, "logger", logger_stub)
-    monkeypatch.setattr(admin_user, "is_test_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: False)
     monkeypatch.setattr(admin_user.admin_users_service, "list_users", _raise_list_users)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -94,7 +94,7 @@ async def test_list_users_real_logger_does_not_attach_private_exception(monkeypa
         raise RuntimeError("private-database-password-sentinel")
 
     monkeypatch.setattr(admin_user, "logger", logger)
-    monkeypatch.setattr(admin_user, "is_test_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: False)
     monkeypatch.setattr(admin_user.admin_users_service, "list_users", fail_listing)
     sink = logger.add(
         records.append,
@@ -132,7 +132,7 @@ async def test_list_users_sanitizes_http_exception_header_assignment_log(
         raise HTTPException(status_code=409, detail="conflict")
 
     monkeypatch.setattr(admin_user, "logger", logger_stub)
-    monkeypatch.setattr(admin_user, "is_test_mode", lambda: next(is_test_mode_calls))
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: next(is_test_mode_calls))
     monkeypatch.setattr(admin_user.admin_users_service, "list_users", _raise_http_exception)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -166,7 +166,7 @@ async def test_list_users_sanitizes_generic_header_assignment_log(
         raise RuntimeError("list users endpoint exploded at /private/users.db")
 
     monkeypatch.setattr(admin_user, "logger", logger_stub)
-    monkeypatch.setattr(admin_user, "is_test_mode", lambda: next(is_test_mode_calls))
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: next(is_test_mode_calls))
     monkeypatch.setattr(admin_user.admin_users_service, "list_users", _raise_list_users)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -206,8 +206,8 @@ async def test_list_users_sanitizes_test_mode_diagnostic_log(
         return [], 0
 
     monkeypatch.setattr(admin_user, "logger", logger_stub)
-    monkeypatch.setattr(admin_user, "is_test_mode", lambda: True)
-    monkeypatch.setattr(admin_user, "get_db_pool", _raise_get_db_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _raise_get_db_pool)
     monkeypatch.setattr(admin_user.admin_users_service, "list_users", _list_users)
 
     response = await admin_user.list_users(
@@ -284,8 +284,8 @@ async def test_invite_user_sanitizes_email_failure_warning(
         fake_email_module,
     )
     monkeypatch.setattr(admin_user, "logger", logger_stub)
-    monkeypatch.setattr(admin_user, "svc_create_invitation", _create_invitation)
-    monkeypatch.setattr(admin_user, "svc_update_invitation_email_status", _update_invitation_email_status)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.create_invitation", _create_invitation)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.update_invitation_email_status", _update_invitation_email_status)
 
     response = await admin_user.invite_user(
         payload=admin_user.InviteUserRequest(
@@ -335,8 +335,8 @@ async def test_resend_user_invitation_sanitizes_email_failure_warning(
         fake_email_module,
     )
     monkeypatch.setattr(admin_user, "logger", logger_stub)
-    monkeypatch.setattr(admin_user, "svc_resend_invitation", _resend_invitation)
-    monkeypatch.setattr(admin_user, "svc_update_invitation_email_status", _update_invitation_email_status)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.resend_invitation", _resend_invitation)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.update_invitation_email_status", _update_invitation_email_status)
 
     response = await admin_user.resend_user_invitation(
         invitation_id="inv-secret",
@@ -379,7 +379,7 @@ async def test_list_user_invitations_sanitizes_invalid_record_warning(
         ]
 
     monkeypatch.setattr(admin_user, "logger", logger_stub)
-    monkeypatch.setattr(admin_user, "svc_list_invitations", _list_invitations)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.list_invitations", _list_invitations)
 
     response = await admin_user.list_user_invitations(
         principal=object(),

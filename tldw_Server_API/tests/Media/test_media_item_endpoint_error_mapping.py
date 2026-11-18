@@ -243,14 +243,12 @@ async def test_update_media_item_delegates_fields_and_uses_returned_rag_effect(
     invalidations: list[tuple[object, int]] = []
 
     monkeypatch.setattr(
-        media_item_endpoint,
-        "get_full_media_details_rich",
+        "tldw_Server_API.app.core.DB_Management.media_db.api.get_full_media_details_rich",
         lambda *_args, **_kwargs: _media_detail_payload(),
         raising=True,
     )
     monkeypatch.setattr(
-        media_item_endpoint,
-        "invalidate_rag_caches",
+        "tldw_Server_API.app.api.v1.utils.rag_cache.invalidate_rag_caches",
         lambda user, *, media_id: invalidations.append((user, media_id)),
         raising=True,
     )
@@ -399,8 +397,7 @@ async def test_permanently_delete_media_item_maps_db_errors(
 @pytest.mark.asyncio
 async def test_get_media_item_maps_database_error(monkeypatch):
     monkeypatch.setattr(
-        media_item_endpoint,
-        "get_full_media_details_rich",
+        "tldw_Server_API.app.core.DB_Management.media_db.api.get_full_media_details_rich",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(DatabaseError("driver failed")),
         raising=True,
     )
@@ -425,8 +422,7 @@ async def test_get_media_item_maps_database_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_update_media_keywords_maps_not_found_input_error(monkeypatch):
     monkeypatch.setattr(
-        media_item_endpoint,
-        "fetch_keywords_for_media",
+        "tldw_Server_API.app.core.DB_Management.media_db.api.fetch_keywords_for_media",
         lambda *_args, **_kwargs: ["alpha"],
         raising=True,
     )
@@ -446,8 +442,7 @@ async def test_update_media_keywords_maps_not_found_input_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_update_media_keywords_maps_database_error(monkeypatch):
     monkeypatch.setattr(
-        media_item_endpoint,
-        "fetch_keywords_for_media",
+        "tldw_Server_API.app.core.DB_Management.media_db.api.fetch_keywords_for_media",
         lambda *_args, **_kwargs: ["alpha"],
         raising=True,
     )
@@ -468,8 +463,7 @@ async def test_update_media_keywords_maps_database_error(monkeypatch):
 async def test_get_media_item_sanitizes_unexpected_error_log(monkeypatch):
     logger_stub = _patch_endpoint_logger(monkeypatch)
     monkeypatch.setattr(
-        media_item_endpoint,
-        "get_full_media_details_rich",
+        "tldw_Server_API.app.core.DB_Management.media_db.api.get_full_media_details_rich",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(_unexpected_failure("detail")),
         raising=True,
     )
@@ -497,7 +491,7 @@ async def test_get_media_item_sanitizes_unexpected_error_log(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_media_item_auth_header_diagnostic_failure_log_is_sanitized(monkeypatch):
-    monkeypatch.setattr(media_item_endpoint, "is_test_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: True)
     logger_stub = _patch_endpoint_logger(monkeypatch)
 
     class ExplodingHeaders:
@@ -512,14 +506,12 @@ async def test_get_media_item_auth_header_diagnostic_failure_log_is_sanitized(mo
             return self._details
 
     monkeypatch.setattr(
-        media_item_endpoint,
-        "get_full_media_details_rich",
+        "tldw_Server_API.app.core.DB_Management.media_db.api.get_full_media_details_rich",
         lambda *_args, **_kwargs: {"id": 42, "title": "test item"},
         raising=True,
     )
     monkeypatch.setattr(
-        media_item_endpoint,
-        "MediaDetailResponse",
+        "tldw_Server_API.app.api.v1.schemas.media_response_models.MediaDetailResponse",
         FakeMediaDetailResponse,
         raising=True,
     )
@@ -657,8 +649,7 @@ async def test_update_media_item_sanitizes_unexpected_error_log(monkeypatch):
 async def test_update_media_keywords_sanitizes_unexpected_error_log(monkeypatch):
     logger_stub = _patch_endpoint_logger(monkeypatch)
     monkeypatch.setattr(
-        media_item_endpoint,
-        "fetch_keywords_for_media",
+        "tldw_Server_API.app.core.DB_Management.media_db.api.fetch_keywords_for_media",
         lambda *_args, **_kwargs: ["alpha"],
         raising=True,
     )

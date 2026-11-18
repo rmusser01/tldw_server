@@ -15,15 +15,9 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
 )
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import StandardResponse
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.Jobs.queue_stats import (
-    get_avg_processing_time_seconds as _get_avg_processing_time_seconds,
-    get_by_status as _get_by_status,
-    get_by_type_and_status as _get_by_type_and_status,
-    get_lease_stats as _get_lease_stats,
-    get_success_rate as _get_success_rate,
-)
-from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.monitoring import prompt_studio_metrics
+import tldw_Server_API.app.core.Jobs.queue_stats as _queue_stats
+import tldw_Server_API.app.core.Metrics.metrics_manager as _metrics_manager
 
 _PROMPT_STUDIO_DOMAIN = "prompt_studio"
 
@@ -91,31 +85,31 @@ async def get_prompt_studio_status(
             owner_user_id=owner_user_id,
         )
         try:
-            by_status = _get_by_status(
+            by_status = _queue_stats.get_by_status(
                 jm,
                 domain=_PROMPT_STUDIO_DOMAIN,
                 queue=queue,
                 owner_user_id=owner_user_id,
             )
-            by_type, queued_by_type, processing_by_type = _get_by_type_and_status(
+            by_type, queued_by_type, processing_by_type = _queue_stats.get_by_type_and_status(
                 jm,
                 domain=_PROMPT_STUDIO_DOMAIN,
                 queue=queue,
                 owner_user_id=owner_user_id,
             )
-            avg_processing_time_seconds = _get_avg_processing_time_seconds(
+            avg_processing_time_seconds = _queue_stats.get_avg_processing_time_seconds(
                 jm,
                 domain=_PROMPT_STUDIO_DOMAIN,
                 queue=queue,
                 owner_user_id=owner_user_id,
             )
-            success_rate = _get_success_rate(
+            success_rate = _queue_stats.get_success_rate(
                 jm,
                 domain=_PROMPT_STUDIO_DOMAIN,
                 queue=queue,
                 owner_user_id=owner_user_id,
             )
-            leases = _get_lease_stats(
+            leases = _queue_stats.get_lease_stats(
                 jm,
                 domain=_PROMPT_STUDIO_DOMAIN,
                 queue=queue,
@@ -137,7 +131,7 @@ async def get_prompt_studio_status(
         # Prometheus hook: export gauges for queue/lease metrics
         try:
             backend_label = jm.backend or "unknown"
-            reg = get_metrics_registry()
+            reg = _metrics_manager.get_metrics_registry()
             reg.set_gauge("prompt_studio_queue_depth", float(data["queue_depth"]), labels={"backend": backend_label})
             reg.set_gauge("prompt_studio_processing", float(data["processing"]), labels={"backend": backend_label})
             reg.set_gauge("prompt_studio_leases_active", float(leases.get("active", 0)), labels={"backend": backend_label})

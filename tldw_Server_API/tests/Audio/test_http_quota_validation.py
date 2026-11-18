@@ -36,8 +36,6 @@ def _upload(filename: str, content: bytes) -> UploadFile:
 
 
 def _patch_audio_quota(monkeypatch, *, can_start: bool, max_file_size_mb: int = 1) -> None:
-    original_shim = audio_transcriptions._audio_shim_attr
-
     async def _get_limits_for_user(user_id: int):
         _ = user_id
         return {
@@ -56,18 +54,12 @@ def _patch_audio_quota(monkeypatch, *, can_start: bool, max_file_size_mb: int = 
     async def _noop_async(*args, **kwargs):
         _ = args, kwargs
 
-    def _shim_attr(name: str):
-        if name == "get_limits_for_user":
-            return _get_limits_for_user
-        if name == "can_start_job":
-            return _can_start_job
-        if name in {"increment_jobs_started", "finish_job"}:
-            return _noop_async
-        if name == "get_job_heartbeat_interval_seconds":
-            return lambda: 0
-        return original_shim(name)
-
-    monkeypatch.setattr(audio_transcriptions, "_audio_shim_attr", _shim_attr, raising=True)
+    quota = "tldw_Server_API.app.core.Usage.audio_quota"
+    monkeypatch.setattr(f"{quota}.get_limits_for_user", _get_limits_for_user)
+    monkeypatch.setattr(f"{quota}.can_start_job", _can_start_job)
+    monkeypatch.setattr(f"{quota}.increment_jobs_started", _noop_async)
+    monkeypatch.setattr(f"{quota}.finish_job", _noop_async)
+    monkeypatch.setattr(f"{quota}.get_job_heartbeat_interval_seconds", lambda: 0)
 
 
 @pytest.mark.asyncio

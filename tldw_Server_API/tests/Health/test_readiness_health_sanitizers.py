@@ -30,7 +30,7 @@ async def test_readyz_sanitizes_workflows_db_check_failure(monkeypatch):
     def _raise_backend_error():
         raise RuntimeError("workflow db exploded at /private/workflows.db")
 
-    monkeypatch.setattr(health_mod, "get_content_backend_instance", _raise_backend_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.DB_Manager.get_content_backend_instance", _raise_backend_error)
 
     with _capture_health_logs() as messages:
         body = health_mod._check_workflows_db()

@@ -37,9 +37,10 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     add_media_persist,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.research_discovery_handoff import (
-    add_research_discovery_pdfs,
     is_research_discovery_handoff,
 )
+import tldw_Server_API.app.core.Ingestion_Media_Processing.persistence as _persistence
+import tldw_Server_API.app.core.Ingestion_Media_Processing.research_discovery_handoff as _research_discovery_handoff
 
 router = APIRouter()
 
@@ -94,7 +95,7 @@ async def add_media(
 
     if research_handoff:
         try:
-            result = await add_research_discovery_pdfs(
+            result = await _research_discovery_handoff.add_research_discovery_pdfs(
                 background_tasks=background_tasks,
                 form_data=form_data,
                 files=files,
@@ -109,7 +110,7 @@ async def add_media(
             raise HTTPException(status_code=422, detail=exc.public_detail) from exc
 
     else:
-        result = await add_media_persist(
+        result = await _persistence.add_media_persist(
             background_tasks=background_tasks,
             form_data=form_data,
             files=files,

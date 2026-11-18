@@ -60,12 +60,9 @@ async def _submit_job_and_convert(
             conversion_required=False,
         )
 
-    shim_map = {
-        "_sanitize_speech_request": lambda *_args, **_kwargs: None,
-        "_resolve_tts_byok": _resolve_tts_byok,
-    }
-    monkeypatch.setattr(audio_tts, "_audio_shim_attr", shim_map.__getitem__)
-    monkeypatch.setattr(audio_tts, "preflight_gateway_speech", _preflight_gateway_speech)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", _resolve_tts_byok)
+    monkeypatch.setattr("tldw_Server_API.app.core.TTS.gateway_preflight.preflight_gateway_speech", _preflight_gateway_speech)
     job_manager = _CapturingJobManager()
 
     await audio_tts.create_speech_job(
@@ -161,10 +158,15 @@ async def test_malformed_backend_header_fails_before_sanitization_or_credentials
 ) -> None:
     request_data = OpenAISpeechRequest(model="Vendor/Expressive-TTS", input="Hello")
 
-    def fail_if_called(_name: str):
+    def fail_if_called(*_args, **_kwargs):
         raise AssertionError("backend validation must run before provider or credential resolution")
 
-    monkeypatch.setattr(audio_tts, "_audio_shim_attr", fail_if_called)
+    for target in (
+        "tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request",
+        "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok",
+        "tldw_Server_API.app.core.Storage.generated_file_helpers.save_and_register_tts_audio",
+    ):
+        monkeypatch.setattr(target, fail_if_called)
 
     with pytest.raises(HTTPException) as exc_info:
         await audio_tts.create_speech_job(
@@ -181,13 +183,9 @@ async def test_malformed_backend_header_fails_before_sanitization_or_credentials
 async def test_explicit_speech_rejects_authority_extra_params_before_synthesis(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        audio_tts,
-        "_audio_shim_attr",
-        lambda name: (lambda *_args, **_kwargs: None)
-        if name == "_sanitize_speech_request"
-        else MagicMock(),
-    )
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.tts_service._sanitize_speech_request", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", MagicMock())
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.generated_file_helpers.save_and_register_tts_audio", MagicMock())
     tts_service = MagicMock()
 
     with pytest.raises(HTTPException) as exc_info:

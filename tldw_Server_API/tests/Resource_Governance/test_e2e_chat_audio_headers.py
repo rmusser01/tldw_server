@@ -397,15 +397,11 @@ async def test_e2e_audio_websocket_streams_limit(monkeypatch, tmp_path, rg_backe
     # Allow streaming quotas at the module level to avoid DB/Redis dependencies
     import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
 
-    async def _noop(*args, **kwargs):
-        return None
-
-    async def _allow_minutes(user_id: int, minutes: float):
+    async def _allow_minutes(user_id: int, minutes: float, **_kwargs):
         _ = (user_id, minutes)
         return True, 0
 
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_minutes)
-    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_minutes)
 
     from tldw_Server_API.app.main import app
 
@@ -487,14 +483,13 @@ async def test_e2e_audio_transcriptions_headers_and_mocked_stt(monkeypatch, tmp_
     async def _noop(*args, **kwargs):
         return None
 
-    async def _allow_minutes(user_id: int, minutes: float):
+    async def _allow_minutes(user_id: int, minutes: float, **_kwargs):
         _ = (user_id, minutes)
         return True, 0
 
-    monkeypatch.setattr(audio_ep, "can_start_job", _ok_job)
-    monkeypatch.setattr(audio_ep, "finish_job", _noop)
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_minutes)
-    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_job", _ok_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_job", _noop)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_minutes)
 
     import numpy as np
 
@@ -511,7 +506,7 @@ async def test_e2e_audio_transcriptions_headers_and_mocked_stt(monkeypatch, tmp_
             sr = 16000
             return data, sr
 
-    monkeypatch.setattr(audio_ep, "sf", _FakeSoundFile(), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions.sf", _FakeSoundFile(), raising=False)
 
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as tl
 

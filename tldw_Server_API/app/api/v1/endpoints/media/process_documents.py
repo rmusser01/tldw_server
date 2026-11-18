@@ -25,7 +25,6 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
-from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
@@ -46,21 +45,18 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     resolve_chunking_options_and_plan,
     uses_hierarchical_chunking,
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils import (
-    download_url_async as core_download_url_async,
-)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     first_saved_filename,
-)
-from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
-    save_uploaded_files as core_save_uploaded_files,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
     ProcessItem,
     run_batch_processor,
 )
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
+import tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps as _Prompts_DB_Deps
+import tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils as _download_utils
+import tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing as _input_sourcing
 
 router = APIRouter()
 
@@ -158,7 +154,7 @@ async def process_documents_endpoint(
     if system_prompt is None and (await request.form()).get("system_prompt") == "":
         system_prompt = ""
     if form_data.perform_analysis and form_data.api_name and system_prompt is None:
-        prompts_db = await get_prompts_db_for_user(request, current_user)
+        prompts_db = await _Prompts_DB_Deps.get_prompts_db_for_user(request, current_user)
 
         def resolve_system_prompt() -> str:
             """Resolve the request snapshot and release this worker's connection."""
@@ -194,7 +190,7 @@ async def process_documents_endpoint(
         if files:
             # Preserve test-time monkeypatching of `media.file_validator_instance`
             # while using the canonical core upload helper.
-            save_uploaded_files = core_save_uploaded_files
+            save_uploaded_files = _input_sourcing.save_uploaded_files
             validator = getattr(
                 media_mod,
                 "file_validator_instance",
@@ -256,7 +252,7 @@ async def process_documents_endpoint(
 
             allowed_ext_set = set(ALLOWED_DOC_EXTENSIONS)
 
-            download_url_async = core_download_url_async
+            download_url_async = _download_utils.download_url_async
 
             download_tasks = [
                 download_url_async(

@@ -72,8 +72,8 @@ def _install_common_patches(monkeypatch) -> None:
     monkeypatch.setattr(routes, "_require_byok_enabled", lambda: None)
     monkeypatch.setattr(routes, "_require_org_manager", _allow_scope)
     monkeypatch.setattr(routes, "_require_team_manager", _allow_scope)
-    monkeypatch.setattr(routes, "is_provider_allowlisted", lambda _provider: True)
-    monkeypatch.setattr(routes, "is_trusted_base_url_request", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.is_trusted_base_url_request", lambda *_args, **_kwargs: True)
 
 
 async def _repo() -> _SharedRepo:
@@ -108,10 +108,10 @@ async def test_scoped_shared_key_upsert_maps_stale_scope_to_sanitized_404(
         return "validated"
 
     _install_common_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(routes, "test_provider_credentials", _provider_ok)
-    monkeypatch.setattr(routes, "encrypt_byok_payload", lambda _payload: {})
-    monkeypatch.setattr(routes, "dumps_envelope", lambda _envelope: "encrypted")
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.encrypt_byok_payload", lambda _payload: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.dumps_envelope", lambda _envelope: "encrypted")
     monkeypatch.setattr(routes, "_get_shared_byok_repo", _missing_scope_repo)
 
     endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
@@ -150,10 +150,10 @@ async def test_scoped_shared_key_upsert_maps_alias_conflict_to_409(
         return "validated"
 
     _install_common_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(routes, "test_provider_credentials", _provider_ok)
-    monkeypatch.setattr(routes, "encrypt_byok_payload", lambda _payload: {})
-    monkeypatch.setattr(routes, "dumps_envelope", lambda _envelope: "encrypted")
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.encrypt_byok_payload", lambda _payload: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.dumps_envelope", lambda _envelope: "encrypted")
     monkeypatch.setattr(routes, "_get_shared_byok_repo", _alias_conflict_repo)
 
     endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
@@ -255,10 +255,10 @@ async def test_scoped_shared_key_upsert_passes_persisted_authorization_context(
         return "validated"
 
     _install_common_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(routes, "test_provider_credentials", _provider_ok)
-    monkeypatch.setattr(routes, "encrypt_byok_payload", lambda _payload: {})
-    monkeypatch.setattr(routes, "dumps_envelope", lambda _envelope: "encrypted")
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.encrypt_byok_payload", lambda _payload: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.dumps_envelope", lambda _envelope: "encrypted")
     monkeypatch.setattr(routes, "_get_shared_byok_repo", _capturing_repo)
 
     endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
@@ -321,7 +321,7 @@ async def test_scoped_shared_key_upsert_sanitizes_credential_validation(
         raise ValueError(f"shared credential token at {raw_token}")
 
     _install_common_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", fail_validate)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", fail_validate)
 
     endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
     kwargs = {"org_id": 42} if scope == "org" else {"team_id": 42}
@@ -364,7 +364,7 @@ async def test_scoped_shared_key_upsert_sanitizes_provider_validation(
         raise ValueError(f"shared provider token at {raw_token}")
 
     _install_common_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(routes, "test_provider_credentials", fail_provider_test)
 
     endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
@@ -399,7 +399,7 @@ async def test_scoped_shared_key_upsert_detaches_unexpected_provider_validation_
         raise RuntimeError(sentinel)
 
     _install_common_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(routes, "test_provider_credentials", fail_provider_test)
 
     endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
@@ -434,7 +434,7 @@ async def test_scoped_shared_key_upsert_sanitizes_chat_provider_error_context(
         )
 
     _install_common_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(routes, "test_provider_credentials", fail_provider_test)
 
     endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
@@ -467,9 +467,9 @@ async def test_scoped_shared_key_upsert_detaches_encryption_failure(
         raise ValueError(sentinel)
 
     _install_common_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(routes, "test_provider_credentials", pass_provider_test)
-    monkeypatch.setattr(routes, "encrypt_byok_payload", fail_encrypt)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.encrypt_byok_payload", fail_encrypt)
 
     endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
     kwargs = {"org_id": 42} if scope == "org" else {"team_id": 42}
@@ -504,9 +504,9 @@ async def test_scoped_shared_key_test_sanitizes_stored_credential_validation(
 
     _install_common_patches(monkeypatch)
     monkeypatch.setattr(routes, "_get_shared_byok_repo", _repo)
-    monkeypatch.setattr(routes, "loads_envelope", lambda _blob: {})
-    monkeypatch.setattr(routes, "decrypt_byok_payload", _stored_payload)
-    monkeypatch.setattr(routes, "validate_credential_fields", fail_validate)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.loads_envelope", lambda _blob: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.decrypt_byok_payload", _stored_payload)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", fail_validate)
 
     endpoint = routes.test_org_shared_key if scope == "org" else routes.test_team_shared_key
     kwargs = {"org_id": 42} if scope == "org" else {"team_id": 42}
@@ -546,9 +546,9 @@ async def test_scoped_shared_key_test_sanitizes_provider_validation(
 
     _install_common_patches(monkeypatch)
     monkeypatch.setattr(routes, "_get_shared_byok_repo", _repo)
-    monkeypatch.setattr(routes, "loads_envelope", lambda _blob: {})
-    monkeypatch.setattr(routes, "decrypt_byok_payload", _stored_payload)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.loads_envelope", lambda _blob: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.decrypt_byok_payload", _stored_payload)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(routes, "test_provider_credentials", fail_provider_test)
 
     endpoint = routes.test_org_shared_key if scope == "org" else routes.test_team_shared_key

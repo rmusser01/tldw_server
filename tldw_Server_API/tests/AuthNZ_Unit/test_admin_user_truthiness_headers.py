@@ -57,7 +57,7 @@ async def test_admin_list_users_test_mode_headers_accept_tldw_single_letter_y(
         _ = (args, kwargs)
         return [], 0
 
-    monkeypatch.setattr(admin_user_mod, "get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
     monkeypatch.setattr(admin_user_mod.admin_users_service, "list_users", _fake_list_users)
 
     response = Response()
@@ -90,7 +90,7 @@ async def test_admin_list_users_error_header_set_in_test_mode_y(
         _ = (args, kwargs)
         raise HTTPException(status_code=403, detail="forbidden")
 
-    monkeypatch.setattr(admin_user_mod, "get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
     monkeypatch.setattr(admin_user_mod.admin_users_service, "list_users", _failing_list_users)
 
     response = Response()

@@ -220,7 +220,7 @@ def test_process_emails_first_filename_failure_log_is_sanitized(client_user_only
         }
 
     monkeypatch.setattr(process_emails_mod, "logger", logger_stub)
-    monkeypatch.setattr(process_emails_mod, "save_uploaded_files", fake_save_uploaded_files)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing.save_uploaded_files", fake_save_uploaded_files)
     monkeypatch.setattr(process_emails_mod.email_lib, "process_email_task", stub_process_email_task)
 
     files = {

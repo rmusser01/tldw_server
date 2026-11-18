@@ -72,7 +72,7 @@ from tldw_Server_API.app.core.TTS.gateway_preflight import (
     preflight_gateway_speech,
     reject_gateway_persistence_authority,
 )
-from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
+import tldw_Server_API.app.core.TTS.tts_config as _tts_config
 
 router = APIRouter(prefix="/audiobooks", tags=["audiobooks"])
 
@@ -198,7 +198,7 @@ def _preflight_audiobook_gateway_routes(payload: dict[str, Any]) -> None:
 
     try:
         reject_gateway_persistence_authority(payload)
-        specs = get_tts_config_manager().get_gateway_specs()
+        specs = _tts_config.get_tts_config_manager().get_gateway_specs()
 
         def resolve_record(
             record: dict[str, Any],

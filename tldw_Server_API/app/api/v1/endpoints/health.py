@@ -10,11 +10,12 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
 from tldw_Server_API.app.api.v1.schemas.health_schemas import ReadinessResponse
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
-from tldw_Server_API.app.core.DB_Management.DB_Manager import create_workflows_database, get_content_backend_instance
+from tldw_Server_API.app.core.DB_Management.DB_Manager import create_workflows_database
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from tldw_Server_API.app.core.Workflows.engine import WorkflowScheduler
 from tldw_Server_API.app.services import readiness_service
+import tldw_Server_API.app.core.DB_Management.DB_Manager as _DB_Manager
 
 _HEALTH_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -62,7 +63,7 @@ def _check_workflows_db() -> dict:
     """Basic connectivity and schema readiness for workflows DB."""
     status = {"ok": False, "backend": None, "schema_version": None, "expected_version": None}
     try:
-        backend = get_content_backend_instance()
+        backend = _DB_Manager.get_content_backend_instance()
         db: WorkflowsDatabase = create_workflows_database(backend=backend)
         status["backend"] = backend.backend_type.name if backend else "sqlite"
         status.update(db.health_probe())

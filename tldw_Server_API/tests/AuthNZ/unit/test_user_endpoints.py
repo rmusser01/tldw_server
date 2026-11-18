@@ -79,7 +79,7 @@ class TestUserEndpoints:
 
         assert test_db_pool.pool is not None
         monkeypatch.setattr(users_repo, "get_db_pool", AsyncMock(return_value=test_db_pool))
-        monkeypatch.setattr(users_endpoint, "is_postgres_backend", AsyncMock(return_value=True))
+        monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.is_postgres_backend", AsyncMock(return_value=True))
 
         async def current_principal():
             return AuthPrincipal(
@@ -562,13 +562,13 @@ async def test_change_password_repo_lookup_log_is_sanitized(monkeypatch):
     db = _Db()
     monkeypatch.setattr(users, "_require_principal_active_verified", _fake_require_principal_active_verified)
     monkeypatch.setattr(users, "_fetch_password_hash_for_user", _fake_fetch_password_hash_for_user)
-    monkeypatch.setattr(users, "AuthnzUsersRepo", _FailingUsersRepo)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo", _FailingUsersRepo)
     monkeypatch.setattr(users, "logger", logger_stub)
 
     async def _sqlite_backend() -> bool:
         return False
 
-    monkeypatch.setattr(users, "is_postgres_backend", _sqlite_backend)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.is_postgres_backend", _sqlite_backend)
 
     response = await users.change_password(
         request=PasswordChangeRequest(

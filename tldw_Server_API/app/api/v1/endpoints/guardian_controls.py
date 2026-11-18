@@ -27,7 +27,6 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.guardian_deps import (
     get_guardian_db_for_user,
-    get_guardian_db_for_user_id,
 )
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.guardian_schemas import (
@@ -45,9 +44,8 @@ from tldw_Server_API.app.api.v1.schemas.guardian_schemas import (
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB
-from tldw_Server_API.app.core.Moderation.family_wizard_materializer import (
-    materialize_pending_plans_for_relationship,
-)
+import tldw_Server_API.app.api.v1.API_Deps.guardian_deps as _guardian_deps
+import tldw_Server_API.app.core.Moderation.family_wizard_materializer as _family_wizard_materializer
 
 router = APIRouter()
 
@@ -182,8 +180,8 @@ def accept_relationship(
         raise HTTPException(status_code=400, detail="Cannot accept (may already be active or dissolved)")
     materialization_db = db
     if rel.guardian_user_id != _user_id(user):
-        materialization_db = get_guardian_db_for_user_id(rel.guardian_user_id)
-    materialization_result = materialize_pending_plans_for_relationship(
+        materialization_db = _guardian_deps.get_guardian_db_for_user_id(rel.guardian_user_id)
+    materialization_result = _family_wizard_materializer.materialize_pending_plans_for_relationship(
         db=materialization_db,
         relationship_id=relationship_id,
         actor_user_id=_user_id(user),

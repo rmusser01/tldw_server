@@ -347,7 +347,7 @@ async def test_raw_route_disconnect_retires_runtime_operation_monitor_and_real_s
     )
     async with upstream(hold=True) as (url, received, closed, payloads):
         config = {"llama_api": {"api_ip": url}}
-        monkeypatch.setattr(moderation, "load_server_config_snapshot", lambda: config)
+        monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot", lambda: config)
 
         async def resolve(provider, **_):
             return ResolvedByokCredentials(
@@ -369,7 +369,7 @@ async def test_raw_route_disconnect_retires_runtime_operation_monitor_and_real_s
                 super().__init__(resolver=resolve, **kwargs)
                 runtimes.append(self)
 
-        monkeypatch.setattr(moderation, "ProviderCredentialRuntime", Runtime)
+        monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", Runtime)
         app = FastAPI()
         app.add_middleware(SlidesGenerationDisconnectMiddleware)
         app.include_router(moderation.router, prefix="/api/v1")

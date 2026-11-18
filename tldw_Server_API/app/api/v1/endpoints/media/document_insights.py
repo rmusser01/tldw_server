@@ -12,7 +12,6 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.schemas.document_insights import (
     DocumentInsightsResponse,
     GenerateInsightsRequest,
@@ -21,23 +20,24 @@ from tldw_Server_API.app.api.v1.schemas.document_insights import (
 )
 from tldw_Server_API.app.api.v1.utils.cache import (
     cache_response,
-    get_cached_response,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
-from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
-from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
-from tldw_Server_API.app.core.config import load_and_log_configs
-from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_latest_transcription,
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
-from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     parse_structured_output,
 )
 from tldw_Server_API.app.core.Prompt_Management.document_insights import prepare_document_insights_prompt
+import tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps as _Prompts_DB_Deps
+import tldw_Server_API.app.api.v1.utils.cache as _cache
+import tldw_Server_API.app.core.Chat.chat_helpers as _chat_helpers
+import tldw_Server_API.app.core.Chat.chat_service as _chat_service
+import tldw_Server_API.app.core.LLM_Calls.provider_metadata as _provider_metadata
+import tldw_Server_API.app.core.config as _config
+import tldw_Server_API.app.core.config_llm_providers as _config_llm_providers
 
 router = APIRouter(tags=["Document Workspace"])
 
@@ -190,7 +190,7 @@ async def generate_document_insights(
 
     # Resolve before cache lookup so edits cannot reuse old-guidance results.
     try:
-        prompts_db = await get_prompts_db_for_user(http_request, current_user)
+        prompts_db = await _Prompts_DB_Deps.get_prompts_db_for_user(http_request, current_user)
 
         system_prompt, prompt_fingerprint = await asyncio.to_thread(prepare_document_insights_prompt, prompts_db)
     except HTTPException:
@@ -213,7 +213,7 @@ async def generate_document_insights(
         prompt_fingerprint=prompt_fingerprint,
     )
     if not request.force:
-        cached = get_cached_response(cache_key)
+        cached = _cache.get_cached_response(cache_key)
         if cached is not None:
             _etag, payload = cached
             logger.debug("Returning cached insights for media_id={}", media_id)
@@ -275,9 +275,9 @@ async def generate_document_insights(
 {category_instruction}"""
 
     # 4. Resolve provider and credentials
-    provider = (get_default_provider() or "openai").strip().lower()
-    api_key, _debug = resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
-    if provider_requires_api_key(provider) and not api_key:
+    provider = (_config_llm_providers.get_default_provider() or "openai").strip().lower()
+    api_key, _debug = _chat_service.resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
+    if _provider_metadata.provider_requires_api_key(provider) and not api_key:
         logger.error("No API key available for configured provider")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -293,7 +293,7 @@ async def generate_document_insights(
 
     def _call_llm():
         adapter = _get_adapter(provider)
-        app_config = load_and_log_configs() or {}
+        app_config = _config.load_and_log_configs() or {}
         model_to_use = _resolve_model(provider, request.model, app_config)
         if model_to_use is None:
             raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
@@ -339,7 +339,7 @@ async def generate_document_insights(
 
     # 6. Parse response
     try:
-        content_text = extract_response_content(raw_response)
+        content_text = _chat_helpers.extract_response_content(raw_response)
         payload = parse_structured_output(
             content_text if content_text is not None else raw_response,
             options=StructuredOutputOptions(parse_mode="lenient", strip_think_tags=True),

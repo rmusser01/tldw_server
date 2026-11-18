@@ -101,7 +101,7 @@ def test_process_code_sanitizes_read_failure(client_with_single_user, monkeypatc
     def fail_read_text_safe(_path):
         raise RuntimeError("read failed at /private/source.py")
 
-    monkeypatch.setattr(process_code_mod, "read_text_safe", fail_read_text_safe)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.code_utils.read_text_safe", fail_read_text_safe)
 
     files = [("files", ("script.py", b"print('hi')\n", "text/x-python"))]
     response = client.post(
@@ -127,7 +127,7 @@ def test_process_code_sanitizes_url_download_failure(client_with_single_user, mo
     async def fail_download_url_async(*_args, **_kwargs):
         raise RuntimeError("download failed at /private/cache/snippet.py")
 
-    monkeypatch.setattr(process_code_mod, "download_url_async", fail_download_url_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils.download_url_async", fail_download_url_async)
 
     response = client.post(
         "/api/v1/media/process-code",
@@ -255,7 +255,7 @@ def test_process_code_read_error_test_mode_log_is_sanitized(
         raise RuntimeError("read failed at /private/source.py")
 
     monkeypatch.setattr(process_code_mod, "logger", logger_stub)
-    monkeypatch.setattr(process_code_mod, "read_text_safe", fail_read_text_safe)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.code_utils.read_text_safe", fail_read_text_safe)
 
     files = [("files", ("script.py", b"print('hi')\n", "text/x-python"))]
     response = client.post(
@@ -282,7 +282,7 @@ def test_process_code_read_error_diagnostic_failure_log_is_sanitized(
         raise RuntimeError("read failed at /private/source.py")
 
     monkeypatch.setattr(process_code_mod, "logger", logger_stub)
-    monkeypatch.setattr(process_code_mod, "read_text_safe", fail_read_text_safe)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.code_utils.read_text_safe", fail_read_text_safe)
 
     files = [("files", ("script.py", b"print('hi')\n", "text/x-python"))]
     response = client.post(

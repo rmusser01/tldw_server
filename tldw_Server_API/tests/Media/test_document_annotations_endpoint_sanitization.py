@@ -234,8 +234,7 @@ def _patch_repository(monkeypatch: pytest.MonkeyPatch, repo: _RepositoryStub) ->
             return repo
 
     monkeypatch.setattr(
-        annotations_endpoint,
-        "DocumentWorkspaceRepository",
+        "tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository.DocumentWorkspaceRepository",
         RepositoryFactory,
         raising=False,
     )

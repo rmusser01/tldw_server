@@ -18,9 +18,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
-    get_or_create_audit_service_for_user_id_optional,
-)
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.schemas.user_keys import (
     OpenAICredentialSourceSwitchRequest,
@@ -47,19 +44,13 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.exceptions import raise_detached_error
-from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy, afetch as _http_afetch
+from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
-from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     derive_trusted_credential_scope,
-    get_byok_gateway_spec,
     is_byok_enabled,
-    is_provider_allowlisted,
-    is_trusted_base_url_request,
-    resolve_byok_allowlist,
     resolve_server_default_key,
     validate_base_url_override,
-    validate_credential_fields,
 )
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
@@ -67,9 +58,7 @@ from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     openai_oauth_refresh_state_generation,
 )
 from tldw_Server_API.app.core.Provider_Credentials.byok_testing import (
-    probe_gateway_credentials,
     provider_validation_public_error,
-    test_provider_credentials,
 )
 from tldw_Server_API.app.core.Provider_Credentials.repos.byok_oauth_state_repo import AuthnzByokOAuthStateRepo
 from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_repo import (
@@ -81,12 +70,16 @@ from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_r
 from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
     build_secret_payload,
-    decrypt_byok_payload,
     dumps_envelope,
-    encrypt_byok_payload,
     key_hint_for_api_key,
-    loads_envelope,
 )
+import tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps as _Audit_DB_Deps
+import tldw_Server_API.app.core.Metrics as _Metrics
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
+import tldw_Server_API.app.core.Provider_Credentials.byok_runtime as _byok_runtime
+import tldw_Server_API.app.core.Provider_Credentials.byok_testing as _byok_testing
+import tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets as _user_provider_secrets
+import tldw_Server_API.app.core.http_client as _http_client
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -220,7 +213,7 @@ async def _openai_mutation_repo(
 ) -> AsyncIterator[AuthnzUserProviderSecretsRepo]:
     """Yield the repository bound to the shared OpenAI row-mutation lock."""
     try:
-        async with openai_credential_mutation_lock(
+        async with _byok_runtime.openai_credential_mutation_lock(
             user_id=user_id,
             provider=_OPENAI_PROVIDER,
         ) as locked_repo:
@@ -283,7 +276,7 @@ def _record_openai_oauth_counter(
     value: float = 1,
 ) -> None:
     try:
-        increment_counter(metric_name, value=value, labels=labels or {})
+        _Metrics.increment_counter(metric_name, value=value, labels=labels or {})
     except Exception:
         logger.debug("OpenAI OAuth metric emission failed")
 
@@ -295,7 +288,7 @@ def _record_openai_oauth_histogram(
     labels: dict[str, str] | None = None,
 ) -> None:
     try:
-        observe_histogram(metric_name, value=value, labels=labels or {})
+        _Metrics.observe_histogram(metric_name, value=value, labels=labels or {})
     except Exception:
         logger.debug("OpenAI OAuth histogram emission failed")
 
@@ -314,7 +307,7 @@ async def _emit_openai_oauth_audit_event(
         return
 
     try:
-        audit_service = await get_or_create_audit_service_for_user_id_optional(user_id)
+        audit_service = await _Audit_DB_Deps.get_or_create_audit_service_for_user_id_optional(user_id)
         correlation_id = None
         request_id = ""
         ip_address = None
@@ -505,7 +498,7 @@ def _extract_payload_from_row(row: dict[str, Any] | None) -> dict[str, Any] | No
     if not encrypted_blob:
         return None
     try:
-        payload = decrypt_byok_payload(loads_envelope(encrypted_blob))
+        payload = _user_provider_secrets.decrypt_byok_payload(_user_provider_secrets.loads_envelope(encrypted_blob))
     except Exception:
         logger.warning("Failed to decrypt BYOK payload for provider row")
         return None
@@ -807,7 +800,7 @@ def _extract_positive_int(value: Any) -> int | None:
 
 def _require_openai_oauth_settings() -> Any:
     _require_byok_enabled()
-    if not is_provider_allowlisted(_OPENAI_PROVIDER):
+    if not _byok_helpers.is_provider_allowlisted(_OPENAI_PROVIDER):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Provider not allowed for BYOK",
@@ -865,7 +858,7 @@ async def _openai_oauth_token_exchange(
     token_url: str,
     form_data: dict[str, Any],
 ) -> dict[str, Any]:
-    response = await _http_afetch(
+    response = await _http_client.afetch(
         method="POST",
         url=token_url,
         headers={
@@ -943,12 +936,12 @@ async def upsert_user_provider_key(
 ) -> UserProviderKeyResponse:
     _require_byok_enabled()
     provider_norm = canonical_provider_name(payload.provider)
-    if not is_provider_allowlisted(provider_norm):
+    if not _byok_helpers.is_provider_allowlisted(provider_norm):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Provider not allowed for BYOK",
         )
-    gateway_spec = get_byok_gateway_spec(provider_norm)
+    gateway_spec = _byok_helpers.get_byok_gateway_spec(provider_norm)
     _validate_gateway_metadata(provider_norm, payload.metadata)
 
     api_key = (payload.api_key or "").strip()
@@ -958,7 +951,7 @@ async def upsert_user_provider_key(
             detail="api_key is required",
         )
 
-    allow_base_url = is_trusted_base_url_request(request, principal=principal)
+    allow_base_url = _byok_helpers.is_trusted_base_url_request(request, principal=principal)
     raw_fields = payload.credential_fields or {}
     if isinstance(raw_fields, dict) and "base_url" in raw_fields and not allow_base_url:
         raise HTTPException(
@@ -967,7 +960,7 @@ async def upsert_user_provider_key(
         )
 
     try:
-        credential_fields = validate_credential_fields(
+        credential_fields = _byok_helpers.validate_credential_fields(
             provider_norm,
             payload.credential_fields,
             allow_base_url=allow_base_url,
@@ -985,7 +978,7 @@ async def upsert_user_provider_key(
 
     verification_status: str | None = None
     if _is_named_user_key_gateway(provider_norm, gateway_spec):
-        verification_status = await probe_gateway_credentials(
+        verification_status = await _byok_testing.probe_gateway_credentials(
             spec=gateway_spec,
             api_key=api_key,
         )
@@ -996,7 +989,7 @@ async def upsert_user_provider_key(
             )
     else:
         try:
-            await test_provider_credentials(
+            await _byok_testing.test_provider_credentials(
                 provider=provider_norm,
                 api_key=api_key,
                 credential_fields=credential_fields,
@@ -1048,7 +1041,7 @@ async def upsert_user_provider_key(
             secret_payload["active_auth_source"] = _OPENAI_SOURCE_API_KEY
             key_hint = key_hint_for_api_key(api_key)
             try:
-                envelope = encrypt_byok_payload(secret_payload)
+                envelope = _user_provider_secrets.encrypt_byok_payload(secret_payload)
             except ValueError as exc:
                 del exc
                 raise_detached_error(
@@ -1090,7 +1083,7 @@ async def upsert_user_provider_key(
         secret_payload = build_secret_payload(api_key, fields_to_store or None)
         key_hint = key_hint_for_api_key(api_key)
         try:
-            envelope = encrypt_byok_payload(secret_payload)
+            envelope = _user_provider_secrets.encrypt_byok_payload(secret_payload)
         except ValueError as exc:
             del exc
             raise_detached_error(
@@ -1125,7 +1118,7 @@ async def list_user_provider_keys(
 ) -> UserProviderKeysResponse:
     _require_byok_enabled()
     user_id = _principal_user_id(principal)
-    allowlist = resolve_byok_allowlist()
+    allowlist = _byok_helpers.resolve_byok_allowlist()
 
     user_repo = await _get_user_repo()
     org_repo = await _get_org_repo()
@@ -1248,7 +1241,7 @@ async def list_user_provider_keys(
             continue
 
         if provider.startswith("gateway:"):
-            gateway_spec = get_byok_gateway_spec(provider)
+            gateway_spec = _byok_helpers.get_byok_gateway_spec(provider)
             server_default_key = _coerce_nonempty_string(
                 getattr(gateway_spec, "api_key", None)
             )
@@ -1284,12 +1277,12 @@ async def test_user_provider_key(
 ) -> ProviderKeyTestResponse:
     _require_byok_enabled()
     provider_norm = canonical_provider_name(payload.provider)
-    if not is_provider_allowlisted(provider_norm):
+    if not _byok_helpers.is_provider_allowlisted(provider_norm):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Provider not allowed for BYOK",
         )
-    gateway_spec = get_byok_gateway_spec(provider_norm)
+    gateway_spec = _byok_helpers.get_byok_gateway_spec(provider_norm)
 
     user_id = _principal_user_id(principal)
     repo = await _get_user_repo()
@@ -1307,7 +1300,7 @@ async def test_user_provider_key(
 
     verification_status: str | None = None
     if _is_named_user_key_gateway(provider_norm, gateway_spec):
-        verification_status = await probe_gateway_credentials(
+        verification_status = await _byok_testing.probe_gateway_credentials(
             spec=gateway_spec,
             api_key=api_key,
         )
@@ -1318,7 +1311,7 @@ async def test_user_provider_key(
             )
         model_used = None
     else:
-        allow_base_url = is_trusted_base_url_request(request, principal=principal)
+        allow_base_url = _byok_helpers.is_trusted_base_url_request(request, principal=principal)
         credential_fields_raw = stored_payload.get("credential_fields") or {}
         if (
             isinstance(credential_fields_raw, dict)
@@ -1329,7 +1322,7 @@ async def test_user_provider_key(
             credential_fields_raw.pop("base_url", None)
 
         try:
-            credential_fields = validate_credential_fields(
+            credential_fields = _byok_helpers.validate_credential_fields(
                 provider_norm,
                 credential_fields_raw,
                 allow_base_url=allow_base_url,
@@ -1348,7 +1341,7 @@ async def test_user_provider_key(
             )
 
         try:
-            model_used = await test_provider_credentials(
+            model_used = await _byok_testing.test_provider_credentials(
                 provider=provider_norm,
                 api_key=api_key,
                 credential_fields=credential_fields,
@@ -1407,7 +1400,7 @@ async def authorize_openai_oauth(
     auth_payload = payload or OpenAIOAuthAuthorizeRequest()
 
     try:
-        credential_fields = validate_credential_fields(
+        credential_fields = _byok_helpers.validate_credential_fields(
             _OPENAI_PROVIDER,
             auth_payload.credential_fields,
             allow_base_url=False,
@@ -1450,7 +1443,7 @@ async def authorize_openai_oauth(
     if credential_fields:
         state_blob["credential_fields"] = copy.deepcopy(credential_fields)
     try:
-        encrypted_state_blob = dumps_envelope(encrypt_byok_payload(state_blob))
+        encrypted_state_blob = dumps_envelope(_user_provider_secrets.encrypt_byok_payload(state_blob))
     except ValueError as exc:
         del exc
         raise_detached_error(
@@ -1593,7 +1586,7 @@ async def callback_openai_oauth(
             )
 
         try:
-            state_secret = decrypt_byok_payload(loads_envelope(encrypted_pkce_blob))
+            state_secret = _user_provider_secrets.decrypt_byok_payload(_user_provider_secrets.loads_envelope(encrypted_pkce_blob))
         except Exception as exc:
             failure_reason = "state_verifier_decrypt_failed"
             del exc
@@ -1621,7 +1614,7 @@ async def callback_openai_oauth(
 
         try:
             failure_reason = "invalid_state_credential_fields"
-            state_credential_fields = validate_credential_fields(
+            state_credential_fields = _byok_helpers.validate_credential_fields(
                 _OPENAI_PROVIDER,
                 state_secret.get("credential_fields"),
                 allow_base_url=False,
@@ -1678,7 +1671,7 @@ async def callback_openai_oauth(
 
         try:
             failure_reason = "provider_test_failed"
-            await test_provider_credentials(
+            await _byok_testing.test_provider_credentials(
                 provider=_OPENAI_PROVIDER,
                 api_key=access_token,
                 credential_fields=state_credential_fields,
@@ -1739,7 +1732,7 @@ async def callback_openai_oauth(
             metadata_to_store = _row_metadata(existing_row)
             try:
                 failure_reason = "payload_encrypt_failed"
-                envelope = encrypt_byok_payload(merged_payload)
+                envelope = _user_provider_secrets.encrypt_byok_payload(merged_payload)
             except ValueError as exc:
                 del exc
                 raise_detached_error(
@@ -1975,7 +1968,7 @@ async def refresh_openai_oauth(
                 metadata_to_store = _row_metadata(row)
                 key_hint = _payload_key_hint(merged_payload) or row.get("key_hint") or _OPENAI_OAUTH_HINT
                 try:
-                    envelope = encrypt_byok_payload(merged_payload)
+                    envelope = _user_provider_secrets.encrypt_byok_payload(merged_payload)
                 except ValueError as exc:
                     del exc
                     raise_detached_error(
@@ -2093,7 +2086,7 @@ async def disconnect_openai_oauth(
             metadata_to_store = _row_metadata(row)
             key_hint = _payload_key_hint(merged_payload) or row.get("key_hint") or ""
             try:
-                envelope = encrypt_byok_payload(merged_payload)
+                envelope = _user_provider_secrets.encrypt_byok_payload(merged_payload)
             except ValueError as exc:
                 del exc
                 raise_detached_error(
@@ -2184,7 +2177,7 @@ async def switch_openai_credential_source(
         now = datetime.now(timezone.utc)
 
         try:
-            envelope = encrypt_byok_payload(merged_payload)
+            envelope = _user_provider_secrets.encrypt_byok_payload(merged_payload)
         except ValueError as exc:
             del exc
             raise_detached_error(

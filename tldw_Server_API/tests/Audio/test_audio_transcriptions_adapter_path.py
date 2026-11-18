@@ -103,11 +103,10 @@ def test_audio_transcriptions_uses_adapter_base_dir(
         def get_adapter(self, _provider: object) -> _StubAdapter:
             return _StubAdapter()
 
-    monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
-    monkeypatch.setattr(audio_ep, "increment_jobs_started", _noop_async)
-    monkeypatch.setattr(audio_ep, "finish_job", _noop_async)
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_job)
-    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_job", _allow_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.increment_jobs_started", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_job", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_job)
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
 
     captured_conversion: dict[str, Any] = {}
@@ -191,9 +190,9 @@ def test_audio_transcriptions_minutes_op_id_ignores_client_request_id(
             return _StubAdapter()
 
     for name in ("can_start_job", "check_daily_minutes_allow"):
-        monkeypatch.setattr(audio_ep, name, _allow_job)
+        monkeypatch.setattr(f"tldw_Server_API.app.core.Usage.audio_quota.{name}", _allow_job)
     for name in ("increment_jobs_started", "finish_job", "add_daily_minutes"):
-        monkeypatch.setattr(audio_ep, name, _noop_async)
+        monkeypatch.setattr(f"tldw_Server_API.app.core.Usage.audio_quota.{name}", _noop_async)
     monkeypatch.setattr(audio_tx, "_consume_daily_minutes", _capture_consume)
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
     monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *_a, **_k: path)
@@ -288,11 +287,10 @@ async def test_audio_cpp_transcription_uses_real_registry_without_fallback(
             ),
         )
 
-    monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
-    monkeypatch.setattr(audio_ep, "increment_jobs_started", _noop_async)
-    monkeypatch.setattr(audio_ep, "finish_job", _noop_async)
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_job)
-    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_job", _allow_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.increment_jobs_started", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_job", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_job)
     monkeypatch.setattr(registry, "get_adapter", _trace_adapter_lookup)
     monkeypatch.setattr(
         stt_adapter,
@@ -415,11 +413,10 @@ def test_audio_transcriptions_derives_suffix_for_extensionless_upload(
         def get_adapter(self, _provider):
             return _StubAdapter()
 
-    monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
-    monkeypatch.setattr(audio_ep, "increment_jobs_started", _noop_async)
-    monkeypatch.setattr(audio_ep, "finish_job", _noop_async)
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_job)
-    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_job", _allow_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.increment_jobs_started", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_job", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_job)
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
 
     captured = {}
@@ -486,11 +483,10 @@ def test_audio_transcriptions_returns_503_when_provider_disabled(
         def get_adapter(self, _provider):
             pytest.fail("get_adapter should not be called for disabled providers")
 
-    monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
-    monkeypatch.setattr(audio_ep, "increment_jobs_started", _noop_async)
-    monkeypatch.setattr(audio_ep, "finish_job", _noop_async)
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_job)
-    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_job", _allow_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.increment_jobs_started", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_job", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_job)
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
     monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *args, **kwargs: path)
 
@@ -562,11 +558,10 @@ def test_audio_transcriptions_prevents_cross_provider_fallback(
         def get_adapter(self, _provider):
             return _MismatchedAdapter()
 
-    monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
-    monkeypatch.setattr(audio_ep, "increment_jobs_started", _noop_async)
-    monkeypatch.setattr(audio_ep, "finish_job", _noop_async)
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_job)
-    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_job", _allow_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.increment_jobs_started", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_job", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_job)
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
     monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *args, **kwargs: path)
 
@@ -633,11 +628,10 @@ def test_audio_transcriptions_rejects_upload_when_wav_conversion_fails(
     def _fail_convert(*_args: object, **_kwargs: object) -> None:
         raise atlib.ConversionError("ffmpeg failed")
 
-    monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
-    monkeypatch.setattr(audio_ep, "increment_jobs_started", _noop_async)
-    monkeypatch.setattr(audio_ep, "finish_job", _noop_async)
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_job)
-    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_job", _allow_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.increment_jobs_started", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_job", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_job)
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
     monkeypatch.setattr(atlib, "convert_to_wav", _fail_convert)
 
@@ -698,11 +692,10 @@ def test_audio_transcriptions_rejects_spoofed_wav_output(
         def get_adapter(self, _provider: object) -> _StubAdapter:
             return _StubAdapter()
 
-    monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
-    monkeypatch.setattr(audio_ep, "increment_jobs_started", _noop_async)
-    monkeypatch.setattr(audio_ep, "finish_job", _noop_async)
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_job)
-    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_job", _allow_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.increment_jobs_started", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_job", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_job)
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
     monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *args, **kwargs: path)
 
@@ -777,11 +770,10 @@ def test_audio_transcriptions_rejects_unusable_conversion_output(
         bad_output.write_bytes(b"still compressed")
         conversion_output = str(bad_output)
 
-    monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
-    monkeypatch.setattr(audio_ep, "increment_jobs_started", _noop_async)
-    monkeypatch.setattr(audio_ep, "finish_job", _noop_async)
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_job)
-    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_job", _allow_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.increment_jobs_started", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.finish_job", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _allow_job)
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
     monkeypatch.setattr(atlib, "convert_to_wav", lambda *args, **kwargs: conversion_output)
 

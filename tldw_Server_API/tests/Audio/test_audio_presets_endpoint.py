@@ -293,8 +293,7 @@ def test_gateway_tts_preset_round_trips_config_resolved_identity(
         },
     )
     monkeypatch.setattr(
-        audio_presets,
-        "get_tts_config_manager",
+        "tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager",
         lambda: type("Manager", (), {"get_gateway_specs": lambda self: specs})(),
     )
 
@@ -351,8 +350,7 @@ def test_gateway_tts_preset_rejects_route_authority_fields(
         },
     )
     monkeypatch.setattr(
-        audio_presets,
-        "get_tts_config_manager",
+        "tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager",
         lambda: type("Manager", (), {"get_gateway_specs": lambda self: specs})(),
     )
 

@@ -27,25 +27,14 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     UserUpdateRequest,
 )
 from tldw_Server_API.app.api.v1.schemas.auth_schemas import MessageResponse
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services import admin_users_service
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    create_invitation as svc_create_invitation,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    list_invitations as svc_list_invitations,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    resend_invitation as svc_resend_invitation,
-)
 from tldw_Server_API.app.services.admin_system_ops_service import (
     revoke_invitation as svc_revoke_invitation,
 )
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    update_invitation_email_status as svc_update_invitation_email_status,
-)
+import tldw_Server_API.app.core.AuthNZ.database as _database
+import tldw_Server_API.app.core.testing as _testing
+import tldw_Server_API.app.services.admin_system_ops_service as _admin_system_ops_service
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Invitation Schemas
@@ -126,9 +115,9 @@ async def list_users(
         Paginated list of users
     """
     # TEST_MODE diagnostics: annotate DB backend and admin dependency success
-    if is_test_mode():
+    if _testing.is_test_mode():
         try:
-            pool = await get_db_pool()
+            pool = await _database.get_db_pool()
             db_backend = "postgres" if getattr(pool, "pool", None) is not None else "sqlite"
             response.headers["X-TLDW-Admin-DB"] = db_backend
             response.headers["X-TLDW-Admin-Req"] = "ok"
@@ -168,7 +157,7 @@ async def list_users(
         )
     except HTTPException as e:
         try:
-            if is_test_mode():
+            if _testing.is_test_mode():
                 response.headers["X-TLDW-Admin-Error"] = str(e)
         except Exception:
             logger.debug("TEST_MODE header assignment failed")
@@ -182,7 +171,7 @@ async def list_users(
             type(e).__name__,
         )
         try:
-            if is_test_mode():
+            if _testing.is_test_mode():
                 response.headers["X-TLDW-Admin-Error"] = str(e)
         except Exception:
             logger.debug("TEST_MODE header assignment failed")
@@ -264,7 +253,7 @@ async def invite_user(
     actor = getattr(principal, "username", None) or str(getattr(principal, "user_id", "admin"))
 
     try:
-        invitation = svc_create_invitation(
+        invitation = _admin_system_ops_service.create_invitation(
             email=payload.email,
             role=payload.role,
             invited_by=actor,
@@ -306,7 +295,7 @@ async def invite_user(
         email_error = str(exc)
         logger.warning("Failed to send invitation email")
 
-    svc_update_invitation_email_status(
+    _admin_system_ops_service.update_invitation_email_status(
         invitation_id=invitation["id"],
         email_sent=email_sent,
         email_error=email_error,
@@ -331,7 +320,7 @@ async def list_user_invitations(
     invitation_status: str | None = Query(None, alias="status"),
 ) -> InvitationListResponse:
     """List all user invitations with optional status filter."""
-    invitations = svc_list_invitations(status=invitation_status)
+    invitations = _admin_system_ops_service.list_invitations(status=invitation_status)
     items = []
     for inv in invitations:
         try:
@@ -384,7 +373,7 @@ async def resend_user_invitation(
     Rate-limited to 3 resends per invitation.
     """
     try:
-        invitation = svc_resend_invitation(invitation_id=invitation_id)
+        invitation = _admin_system_ops_service.resend_invitation(invitation_id=invitation_id)
     except ValueError as exc:
         error_key = str(exc)
         if error_key == "not_found":
@@ -426,7 +415,7 @@ async def resend_user_invitation(
         email_error = str(exc)
         logger.warning("Failed to resend invitation email")
 
-    svc_update_invitation_email_status(
+    _admin_system_ops_service.update_invitation_email_status(
         invitation_id=invitation["id"],
         email_sent=email_sent,
         email_error=email_error,

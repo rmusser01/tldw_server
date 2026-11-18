@@ -111,7 +111,7 @@ async def test_connectors_admin_policy_200_for_admin_with_perm(monkeypatch: pyte
     async def _fake_get_policy(db, org_id):
         return {"org_id": org_id, "source": "test"}
 
-    monkeypatch.setattr(connectors_mod, "get_policy", _fake_get_policy)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_policy", _fake_get_policy)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/connectors/admin/policy", params={"org_id": 1})

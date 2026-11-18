@@ -32,12 +32,8 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     get_prompt_studio_user,
     get_security_config,
     require_project_access,
-    require_project_write_access,
 )
 from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
-from tldw_Server_API.app.api.v1.utils.prompt_studio_resource_binding import (
-    authoritative_prompt_project,
-)
 
 # Local imports
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import (
@@ -65,7 +61,6 @@ from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import (
     ConflictError,
     DatabaseError,
     InputError,
-    _prepare_prompt_record_fields,
 )
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
@@ -77,8 +72,6 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
     PromptDefinition,
     SingleTextRecipeDefinitionV2,
     StructuredPromptAssemblyError,
-    assemble_prompt_definition,
-    convert_legacy_prompt_to_definition,
     extract_legacy_prompt_variables,
     render_legacy_snapshot,
 )
@@ -100,6 +93,10 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
     mark_provider_credential_used,
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
+import tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps as _prompt_studio_deps
+import tldw_Server_API.app.api.v1.utils.prompt_studio_resource_binding as _prompt_studio_resource_binding
+import tldw_Server_API.app.core.DB_Management.PromptStudioDatabase as _PromptStudioDatabase
+import tldw_Server_API.app.core.Prompt_Management.structured_prompts as _structured_prompts
 
 ########################################################################################################################
 # Router Setup
@@ -333,7 +330,7 @@ def _validate_prompt_content(
     validation_definition = definition.model_copy(
         update={"variables": [variable.model_copy(update={"required": False}) for variable in definition.variables]}
     )
-    assembly = assemble_prompt_definition(
+    assembly = _structured_prompts.assemble_prompt_definition(
         validation_definition,
         _validation_variables(validation_definition),
         extras=extras,
@@ -370,7 +367,7 @@ def _coerce_preview_definition(
         )
         return definition, "structured", definition_schema_version
 
-    definition = convert_legacy_prompt_to_definition(
+    definition = _structured_prompts.convert_legacy_prompt_to_definition(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
     )
@@ -469,7 +466,7 @@ async def create_prompt(
     try:
         if not isinstance(idempotency_key, str):
             idempotency_key = None
-        normalized_prompt_fields = _prepare_prompt_record_fields(
+        normalized_prompt_fields = _PromptStudioDatabase._prepare_prompt_record_fields(
             prompt_format=prompt_data.prompt_format,
             prompt_schema_version=prompt_data.prompt_schema_version,
             prompt_definition=prompt_data.prompt_definition,
@@ -483,7 +480,7 @@ async def create_prompt(
         )
 
         # Ensure write access to the project
-        await require_project_write_access(prompt_data.project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_write_access(prompt_data.project_id, user_context=user_context, db=db)
         signature = _get_signature_for_project(
             db=db,
             project_id=prompt_data.project_id,
@@ -508,7 +505,7 @@ async def create_prompt(
                 schema_version=normalized_prompt_fields["prompt_schema_version"],
             )
         else:
-            definition = convert_legacy_prompt_to_definition(
+            definition = _structured_prompts.convert_legacy_prompt_to_definition(
                 system_prompt=normalized_prompt_fields["system_prompt"],
                 user_prompt=normalized_prompt_fields["user_prompt"],
             )
@@ -722,8 +719,8 @@ async def execute_prompt_simple(
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import PromptExecutor
 
     prompt_id = int(payload.prompt_id)
-    _, project_id = authoritative_prompt_project(db, prompt_id)
-    await require_project_access(project_id, user_context=user_context, db=db)
+    _, project_id = _prompt_studio_resource_binding.authoritative_prompt_project(db, prompt_id)
+    await _prompt_studio_deps.require_project_access(project_id, user_context=user_context, db=db)
 
     try:
         normalized_payload = ExecutePromptSimpleRequest.model_validate(
@@ -906,7 +903,7 @@ async def preview_prompt(
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import PromptExecutor
 
     try:
-        await require_project_access(payload.project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_access(payload.project_id, user_context=user_context, db=db)
         definition, prompt_format, prompt_schema_version = _coerce_preview_definition(
             prompt_format=payload.prompt_format,
             prompt_schema_version=payload.prompt_schema_version,
@@ -919,7 +916,7 @@ async def preview_prompt(
             "few_shot_examples": [model_dump_compat(example) for example in (payload.few_shot_examples or [])],
             "modules_config": [model_dump_compat(module) for module in (payload.modules_config or [])],
         }
-        assembly = assemble_prompt_definition(definition, payload.variables, extras=extras)
+        assembly = _structured_prompts.assemble_prompt_definition(definition, payload.variables, extras=extras)
         if isinstance(assembly, SingleTextRecipeRenderResult):
             messages: list[dict[str, str]] = []
             legacy = assembly.legacy
@@ -980,8 +977,8 @@ async def convert_prompt(
     db: PromptStudioDatabase = Depends(get_prompt_studio_db),
     user_context: dict = Depends(get_prompt_studio_user),
 ) -> StandardResponse:
-    await require_project_access(payload.project_id, user_context=user_context, db=db)
-    definition = convert_legacy_prompt_to_definition(
+    await _prompt_studio_deps.require_project_access(payload.project_id, user_context=user_context, db=db)
+    definition = _structured_prompts.convert_legacy_prompt_to_definition(
         system_prompt=payload.system_prompt,
         user_prompt=payload.user_prompt,
     )
@@ -1137,7 +1134,7 @@ async def update_prompt(
             signature_id=current_prompt.get("signature_id"),
         )
 
-        normalized_prompt_fields = _prepare_prompt_record_fields(
+        normalized_prompt_fields = _PromptStudioDatabase._prepare_prompt_record_fields(
             prompt_format=updates.prompt_format,
             prompt_schema_version=updates.prompt_schema_version,
             prompt_definition=updates.prompt_definition,
@@ -1170,7 +1167,7 @@ async def update_prompt(
                 schema_version=normalized_prompt_fields["prompt_schema_version"],
             )
         else:
-            definition = convert_legacy_prompt_to_definition(
+            definition = _structured_prompts.convert_legacy_prompt_to_definition(
                 system_prompt=normalized_prompt_fields["system_prompt"],
                 user_prompt=normalized_prompt_fields["user_prompt"],
             )
@@ -1249,7 +1246,7 @@ async def get_prompt_history(
                 detail=f"Prompt {prompt_id} not found"
             )
         project_id = prompt["project_id"]
-        await require_project_access(project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_access(project_id, user_context=user_context, db=db)
 
         versions = [
             PromptVersion(**version)
@@ -1306,7 +1303,7 @@ async def revert_prompt(
                 detail=f"Prompt {prompt_id} not found"
             )
         project_id = current_prompt["project_id"]
-        await require_project_write_access(project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_write_access(project_id, user_context=user_context, db=db)
 
         new_prompt = db.revert_prompt_to_version(
             prompt_id,

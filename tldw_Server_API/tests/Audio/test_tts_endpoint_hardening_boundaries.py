@@ -89,16 +89,12 @@ def _speech_request(
     )
 
 
-def _patch_shim(monkeypatch: pytest.MonkeyPatch, resolver: Any) -> None:
+def _patch_tts_collaborators(monkeypatch: pytest.MonkeyPatch, resolver: Any) -> None:
     async def _unused_save(**_kwargs: Any) -> dict[str, Any]:
         return {"id": None}
 
-    mapping = {
-        "_sanitize_speech_request": tts_core._sanitize_speech_request,
-        "_resolve_tts_byok": resolver,
-        "save_and_register_tts_audio": _unused_save,
-    }
-    monkeypatch.setattr(audio_tts, "_audio_shim_attr", mapping.__getitem__)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts._resolve_tts_byok", resolver)
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.generated_file_helpers.save_and_register_tts_audio", _unused_save)
 
 
 def _exception_graph_contains(
@@ -167,7 +163,7 @@ async def test_tts_job_persists_only_active_credential_authorization_context(
             captured.update(kwargs)
             return {"id": 41, "status": "queued"}
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
     request = _make_request("/api/v1/audio/speech/jobs")
     request.state.auth = AuthContext(
         principal=AuthPrincipal(
@@ -239,7 +235,7 @@ async def test_trusted_tts_job_without_custom_byok_base_url_persists_false(
             captured.update(kwargs)
             return {"id": 42, "status": "queued"}
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
     request = _make_request("/api/v1/audio/speech/jobs")
     request.state.auth = AuthContext(
         principal=AuthPrincipal(
@@ -304,7 +300,7 @@ async def test_tts_job_projects_only_the_resolved_credential_source_scope(
             captured.update(kwargs)
             return {"id": 43, "status": "queued"}
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
     request = _make_request("/api/v1/audio/speech/jobs")
     request.state.auth = AuthContext(
         principal=AuthPrincipal(
@@ -366,7 +362,7 @@ async def test_tts_job_rejects_shared_source_without_matching_active_scope(
             queued = True
             return {"id": 44, "status": "queued"}
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
     request = _make_request("/api/v1/audio/speech/jobs")
     request.state.auth = AuthContext(
         principal=AuthPrincipal(
@@ -413,7 +409,7 @@ async def test_tts_job_rejects_resolver_owner_mismatch_before_queueing(
             queued = True
             return {"id": 45, "status": "queued"}
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
     request = _make_request("/api/v1/audio/speech/jobs")
     request.state.auth = AuthContext(
         principal=AuthPrincipal(
@@ -455,7 +451,7 @@ async def test_tts_job_rejects_mismatched_principal_owner_before_queueing(
             queued = True
             return {"id": 41, "status": "queued"}
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
     request = _make_request("/api/v1/audio/speech/jobs")
     request.state.auth = AuthContext(
         principal=AuthPrincipal(
@@ -502,7 +498,7 @@ async def test_tts_job_rejects_service_principal_before_resolution_or_queueing(
             queued = True
             return {"id": 46, "status": "queued"}
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
     request = _make_request("/api/v1/audio/speech/jobs")
     request.state.auth = AuthContext(
         principal=AuthPrincipal(
@@ -546,7 +542,7 @@ async def test_direct_tts_rejects_nested_credentials_before_resolution_or_histor
         def generate_speech(self, *_args: Any, **_kwargs: Any) -> Any:
             raise AssertionError("credential-bearing request reached dispatch")
 
-    _patch_shim(monkeypatch, _unexpected_resolver)
+    _patch_tts_collaborators(monkeypatch, _unexpected_resolver)
     request_data = _speech_request(
         extra_params={"nested": {"api_key": _SECRET}},
     )
@@ -600,7 +596,7 @@ async def test_unknown_model_cannot_reach_credentials_or_cached_openai_adapter(
             dispatched = True
             raise AssertionError("unknown model reached cached OpenAI adapter")
 
-    _patch_shim(monkeypatch, _unexpected_resolver)
+    _patch_tts_collaborators(monkeypatch, _unexpected_resolver)
 
     with pytest.raises(HTTPException) as exc_info:
         await audio_tts.create_speech(
@@ -729,7 +725,7 @@ async def test_concurrent_speech_validation_failures_are_bounded_and_single_term
 
     monkeypatch.setattr(tts_core, "get_tts_config", lambda: _Config())
     monkeypatch.setattr(tts_core, "TTSInputValidator", _FailingValidator)
-    _patch_shim(monkeypatch, _unexpected_resolver)
+    _patch_tts_collaborators(monkeypatch, _unexpected_resolver)
 
     from tldw_Server_API.app import main as app_main
 
@@ -859,7 +855,7 @@ async def test_public_tts_serializer_drops_credential_bearing_endpoint_frames_co
         def generate_speech(self, *_args: Any, **_kwargs: Any) -> Any:
             raise TTSNetworkError("TTS request failed")
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
 
     async def _observing_handler(request: Request, exc: HTTPException):
         case_id = request.headers["x-test-case"]
@@ -990,7 +986,7 @@ async def test_public_tts_serializer_drops_byok_resolution_snapshot_frames(
         lambda *_args: None,
     )
     monkeypatch.setattr(audio_core, "resolve_byok_credentials", _failing_resolver)
-    _patch_shim(monkeypatch, audio_core._resolve_tts_byok)
+    _patch_tts_collaborators(monkeypatch, audio_core._resolve_tts_byok)
 
     from tldw_Server_API.app import main as app_main
 
@@ -1093,7 +1089,7 @@ async def test_concurrent_streams_touch_their_own_snapshot_on_first_audio_and_re
 
             return _generate()
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
     monkeypatch.setattr(
         audio_tts,
         "_tts_history_config",
@@ -1187,7 +1183,7 @@ async def test_asgi_stream_failure_after_response_start_does_not_retain_credenti
 
             return _generate()
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
     from tldw_Server_API.app import main as app_main
 
     registered_handler = app_main.app.exception_handlers[TTSPublicHTTPException]
@@ -1243,7 +1239,7 @@ async def test_nonstream_failure_after_first_audio_still_touches_once(
 
             return _generate()
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
 
     with pytest.raises(HTTPException) as exc_info:
         await audio_tts.create_speech(
@@ -1281,7 +1277,7 @@ async def test_metadata_cancellation_before_completion_does_not_touch_credential
 
             return _generate()
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
     task = asyncio.create_task(
         audio_tts.create_speech_metadata(
             _speech_request(),
@@ -1319,7 +1315,7 @@ async def test_empty_metadata_generation_does_not_touch_credentials(
 
             return _generate()
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
     response = await audio_tts.create_speech_metadata(
         _speech_request(),
         _make_request("/api/v1/audio/speech/metadata"),
@@ -1357,7 +1353,7 @@ async def test_metadata_only_completion_mapping_touches_credentials_once(
 
             return _generate()
 
-    _patch_shim(monkeypatch, _resolver)
+    _patch_tts_collaborators(monkeypatch, _resolver)
     response = await audio_tts.create_speech_metadata(
         _speech_request(),
         _make_request("/api/v1/audio/speech/metadata"),

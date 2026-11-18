@@ -14,7 +14,6 @@ from starlette.concurrency import run_in_threadpool
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import try_get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import try_get_watchlists_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Workflows_DB_Deps import try_get_workflows_db_for_user
@@ -99,7 +98,6 @@ from tldw_Server_API.app.core.Research_Workspace.output_jobs import (
 )
 from tldw_Server_API.app.core.Sandbox.store import get_store as get_sandbox_store
 from tldw_Server_API.app.core.Sandbox.workspace_volumes import SandboxWorkspaceVolumeService
-from tldw_Server_API.app.core.Sharing.workspace_deletion_hook import on_workspace_deleted
 from tldw_Server_API.app.core.Workspaces.activity_index import WorkspaceActivityIndexService
 from tldw_Server_API.app.core.Workspaces.assistant_defaults import (
     WorkspacePersonaProfileCache,
@@ -143,9 +141,6 @@ from tldw_Server_API.app.core.Workspaces.runtime_bindings import (
 from tldw_Server_API.app.core.Workspaces.sandbox_root_provisioning import (
     provision_and_attach_sandbox_root,
 )
-from tldw_Server_API.app.core.Workspaces.service_capabilities import (
-    collect_workspace_service_capabilities,
-)
 from tldw_Server_API.app.core.Workspaces.source_jobs import (
     enqueue_workspace_source_ingest_job,
 )
@@ -159,6 +154,9 @@ from tldw_Server_API.app.core.Workspaces.status_projection import (
 from tldw_Server_API.app.core.Workspaces.workspace_artifact_exports import (
     export_workspace_artifact_version,
 )
+import tldw_Server_API.app.api.v1.API_Deps.jobs_deps as _jobs_deps
+import tldw_Server_API.app.core.Sharing.workspace_deletion_hook as _workspace_deletion_hook
+import tldw_Server_API.app.core.Workspaces.service_capabilities as _service_capabilities
 
 router = APIRouter()
 
@@ -998,7 +996,7 @@ def _non_negative_int(value: Any, *, default: int) -> int:
 def try_get_workspace_job_manager() -> JobManager | None:
     """Resolve the Jobs manager for workspace views without blocking workspace reads/writes."""
     try:
-        return try_get_job_manager()
+        return _jobs_deps.try_get_job_manager()
     except _JOB_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Workspace Jobs manager unavailable: {}", exc)
         return None
@@ -1226,7 +1224,7 @@ async def delete_workspace(
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace") from exc
     try:
-        await on_workspace_deleted(workspace_id, owner_user_id)
+        await _workspace_deletion_hook.on_workspace_deleted(workspace_id, owner_user_id)
     except (ImportError, OSError, RuntimeError):
         logger.warning(
             "Workspace sharing cleanup hook failed after workspace deletion; "
@@ -1803,7 +1801,7 @@ async def get_workspace_capabilities(
     payload = build_workspace_capability_projection(
         workspace=workspace_projection,
         status_projection=status_payload,
-        service_capabilities=await collect_workspace_service_capabilities(
+        service_capabilities=await _service_capabilities.collect_workspace_service_capabilities(
             workspace_id=workspace_id,
             user_id=getattr(current_user, "id", None),
         ),
@@ -1849,7 +1847,7 @@ async def get_workspace_context(
     capability_payload = build_workspace_capability_projection(
         workspace=workspace_projection,
         status_projection=status_payload,
-        service_capabilities=await collect_workspace_service_capabilities(
+        service_capabilities=await _service_capabilities.collect_workspace_service_capabilities(
             workspace_id=workspace_id,
             user_id=getattr(current_user, "id", None),
         ),

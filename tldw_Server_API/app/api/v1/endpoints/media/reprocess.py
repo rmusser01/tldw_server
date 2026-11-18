@@ -13,9 +13,7 @@ from tldw_Server_API.app.core.Embeddings import ChromaDB_Library, media_embeddin
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ReprocessMediaRequest
 from tldw_Server_API.app.api.v1.schemas.media_response_models import ReprocessMediaResponse
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.api.v1.utils.rag_cache import invalidate_rag_caches
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_UPDATE
-from tldw_Server_API.app.core.Chunking import improved_chunking_process
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.Chunking.templates import TemplateClassifier
 from tldw_Server_API.app.core.config import settings
@@ -26,9 +24,12 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     InputError,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
-    apply_chunking_template_if_any,
     prepare_chunking_options_dict,
 )
+import tldw_Server_API.app.api.v1.utils.rag_cache as _rag_cache
+import tldw_Server_API.app.core.Chunking as _Chunking
+import tldw_Server_API.app.core.DB_Management.DB_Manager as _DB_Manager
+import tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options as _chunking_options
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
@@ -99,7 +100,7 @@ def _normalize_chunks(raw_chunks: list[Any]) -> list[dict[str, Any]]:
 async def _mark_embeddings_complete_with_retry(*, db: MediaDatabase, media_id: int, context: str) -> bool:
     for attempt in range(1, _MARK_PROCESSED_CONFLICT_RETRIES + 1):
         try:
-            mark_media_as_processed(db_instance=db, media_id=media_id)
+            _DB_Manager.mark_media_as_processed(db_instance=db, media_id=media_id)
             return True
         except ConflictError as exc:
             if attempt >= _MARK_PROCESSED_CONFLICT_RETRIES:
@@ -176,7 +177,7 @@ async def _generate_embeddings(
         else:
             error_detail = str(result.get("error") or result.get("message") or "Embedding generation failed")
             raise RuntimeError(error_detail)
-        invalidate_rag_caches(None, namespaces=cache_namespaces, media_id=media_id)
+        _rag_cache.invalidate_rag_caches(None, namespaces=cache_namespaces, media_id=media_id)
     except Exception:
         logger.error("Embeddings regeneration failed")
         try:
@@ -234,7 +235,7 @@ async def reprocess_media_item(
         chunk_request.url = media_item.get("url")
 
         chunk_options = prepare_chunking_options_dict(chunk_request)
-        chunk_options = apply_chunking_template_if_any(
+        chunk_options = _chunking_options.apply_chunking_template_if_any(
             chunk_request,
             db,
             chunk_options,
@@ -264,7 +265,7 @@ async def reprocess_media_item(
                     ),
                 )
             else:
-                raw_chunks = improved_chunking_process(content, chunk_options)
+                raw_chunks = _Chunking.improved_chunking_process(content, chunk_options)
         except Exception as exc:
             logger.error(
                 "Chunking failed for media {}",
@@ -348,7 +349,7 @@ async def reprocess_media_item(
     if payload.generate_embeddings:
         message = "Reprocess completed; embeddings regeneration started."
 
-    invalidate_rag_caches(current_user, media_id=media_id)
+    _rag_cache.invalidate_rag_caches(current_user, media_id=media_id)
 
     return ReprocessMediaResponse(
         media_id=media_id,

@@ -22,7 +22,6 @@ from tldw_Server_API.app.api.v1.utils.chatops.discord_support import (
     _oauth_state_ttl_seconds as _discord_oauth_state_ttl_seconds,
     _set_discord_policy,
 )
-from tldw_Server_API.app.api.v1.utils.chatops.slack_oauth_admin import slack_oauth_start_impl
 from tldw_Server_API.app.api.v1.utils.chatops.slack_support import (
     _coerce_nonempty_string,
     _decrypt_slack_payload,
@@ -74,6 +73,7 @@ from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_re
 from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
 from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import key_hint_for_api_key
 from tldw_Server_API.app.services.integrations_control_plane_service import IntegrationsControlPlaneService
+import tldw_Server_API.app.api.v1.utils.chatops.slack_oauth_admin as _slack_oauth_admin
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
@@ -249,7 +249,7 @@ async def _start_personal_integration_connect_flow(
     workspace_org_id: int,
 ) -> PersonalIntegrationConnectResponse:
     if provider == "slack":
-        response = await slack_oauth_start_impl(
+        response = await _slack_oauth_admin.slack_oauth_start_impl(
             user=user,
             workspace_org_id=workspace_org_id,
             oauth_client_id=_slack_oauth_client_id,

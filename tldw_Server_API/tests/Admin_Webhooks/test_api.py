@@ -413,9 +413,9 @@ def _client(
     delivery_service = _FakeDeliveryService()
     mandatory_audit = AsyncMock()
     read_audit = AsyncMock()
-    monkeypatch.setattr(admin_webhooks, "get_admin_webhook_control_plane", AsyncMock(return_value=service))
+    monkeypatch.setattr("tldw_Server_API.app.core.Admin_Webhooks.control_plane.get_admin_webhook_control_plane", AsyncMock(return_value=service))
     monkeypatch.setattr(admin_webhooks, "_require_platform_admin", require_platform_admin)
-    monkeypatch.setattr(admin_webhooks, "emit_mandatory_webhook_audit", mandatory_audit)
+    monkeypatch.setattr("tldw_Server_API.app.core.Admin_Webhooks.audit.emit_mandatory_webhook_audit", mandatory_audit)
     monkeypatch.setattr(admin_webhooks, "_emit_admin_audit_event", read_audit)
     app.dependency_overrides[admin_webhooks.get_auth_principal] = auth_dependency
     if hasattr(admin_webhooks, "get_admin_webhook_delivery_service"):
@@ -1043,8 +1043,7 @@ def test_control_plane_factory_failure_is_read_audited(
 ) -> None:
     client, _, _, read_audit = _client(monkeypatch)
     monkeypatch.setattr(
-        admin_webhooks,
-        "get_admin_webhook_control_plane",
+        "tldw_Server_API.app.core.Admin_Webhooks.control_plane.get_admin_webhook_control_plane",
         AsyncMock(side_effect=WebhookError(WebhookErrorCode.KEY_UNAVAILABLE)),
     )
 
@@ -1083,13 +1082,12 @@ def _delivery_client(
     read_audit = AsyncMock()
     monkeypatch.setattr(admin_webhooks, "_require_platform_admin", lambda _value: None)
     monkeypatch.setattr(
-        admin_webhooks,
-        "emit_mandatory_webhook_delivery_audit",
+        "tldw_Server_API.app.core.Admin_Webhooks.audit.emit_mandatory_webhook_delivery_audit",
         mandatory_audit,
         raising=False,
     )
     monkeypatch.setattr(admin_webhooks, "_emit_admin_audit_event", read_audit)
-    monkeypatch.setattr(admin_webhooks, "check_rate_limit", rate_limit_dependency)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.check_rate_limit", rate_limit_dependency)
     app.dependency_overrides[admin_webhooks.get_auth_principal] = auth_dependency
     assert hasattr(admin_webhooks, "get_admin_webhook_delivery_service"), (
         "Task 10 delivery-service dependency is missing"
@@ -1133,8 +1131,7 @@ def _unexpected_error_client(
         return _principal()
 
     monkeypatch.setattr(
-        admin_webhooks,
-        "get_admin_webhook_control_plane",
+        "tldw_Server_API.app.core.Admin_Webhooks.control_plane.get_admin_webhook_control_plane",
         AsyncMock(return_value=UnexpectedControlPlane()),
     )
     monkeypatch.setattr(

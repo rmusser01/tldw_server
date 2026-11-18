@@ -257,18 +257,17 @@ def _setup_stubbed_audio_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
         def get_adapter(self, _provider: str) -> _StubAdapter:
             return _StubAdapter()
 
-    shim_values: dict[str, Any] = {
+    quota_fakes: dict[str, Any] = {
         "can_start_job": _allow_job,
         "increment_jobs_started": _noop_async,
         "finish_job": _noop_async,
-        "check_daily_minutes_allow": _allow_job,
-        "add_daily_minutes": _noop_async,
+        "consume_daily_minutes": _allow_job,
         "get_limits_for_user": _get_limits_for_user,
         "get_job_heartbeat_interval_seconds": _heartbeat_interval_seconds,
         "heartbeat_jobs": _noop_async,
-        "sf": sf,
     }
-    monkeypatch.setattr(audio_ep, "_audio_shim_attr", lambda name: shim_values[name])
+    for name, fake in quota_fakes.items():
+        monkeypatch.setattr(f"tldw_Server_API.app.core.Usage.audio_quota.{name}", fake)
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
 
     audio_router = audio_ep.router

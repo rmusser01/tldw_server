@@ -273,8 +273,7 @@ async def test_simple_submission_uses_prompt_project_not_compatibility_project_i
     jobs = _capture_jobs(monkeypatch)
     require_write = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         require_write,
         raising=True,
     )
@@ -323,8 +322,7 @@ async def test_admin_submission_tenants_core_job_to_project_owner_and_keeps_acto
     db = _CapturingDb()
     jobs = _capture_jobs(monkeypatch)
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         AsyncMock(return_value=True),
         raising=True,
     )
@@ -388,8 +386,7 @@ async def test_optimization_submission_rejects_cross_project_test_cases(
     db = _CrossProjectDb()
     jobs = _capture_jobs(monkeypatch)
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         AsyncMock(return_value=True),
         raising=True,
     )
@@ -463,8 +460,7 @@ async def test_optimization_submission_rejects_empty_test_cases_before_side_effe
     db = _CapturingDb()
     jobs = _capture_jobs(monkeypatch)
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         AsyncMock(return_value=True),
         raising=True,
     )
@@ -758,8 +754,7 @@ async def test_sensitive_fields_never_cross_db_or_jobs_durable_boundaries(
         return None
 
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write,
         raising=True,
     )
@@ -822,8 +817,7 @@ async def test_conventional_secret_aliases_never_reach_actual_prompt_or_jobs_dat
         return None
 
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write,
         raising=True,
     )
@@ -985,8 +979,7 @@ async def test_simple_endpoint_persists_the_same_canonical_config_to_db_and_jobs
         return None
 
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write,
         raising=True,
     )
@@ -1030,8 +1023,7 @@ async def test_full_create_endpoint_persists_the_same_canonical_config_to_db_and
         return None
 
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write,
         raising=True,
     )
@@ -1079,8 +1071,7 @@ async def test_compare_endpoint_persists_the_same_canonical_config_to_db_and_job
         return None
 
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write,
         raising=True,
     )

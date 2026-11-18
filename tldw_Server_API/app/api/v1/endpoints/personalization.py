@@ -33,7 +33,7 @@ from tldw_Server_API.app.api.v1.utils.pagination import (
     build_page_pagination_meta,
 )
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB, SemanticMemory
-from tldw_Server_API.app.core.feature_flags import is_personalization_enabled
+import tldw_Server_API.app.core.feature_flags as _feature_flags
 
 router = APIRouter()
 
@@ -85,7 +85,7 @@ async def personalization_opt_in(
     log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> PersonalizationProfile:
     """Enable/disable personalization for current user."""
-    if not is_personalization_enabled():
+    if not _feature_flags.is_personalization_enabled():
         raise HTTPException(status_code=404, detail="Personalization disabled")
     logger.info(f"Personalization opt-in called: enabled={payload.enabled}")
     try:
@@ -104,7 +104,7 @@ async def personalization_purge(
     log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> PurgeResponse:
     """Purge all personalization data for the user."""
-    if not is_personalization_enabled():
+    if not _feature_flags.is_personalization_enabled():
         raise HTTPException(status_code=404, detail="Personalization disabled")
     logger.info("Personalization purge called")
     try:
@@ -126,7 +126,7 @@ async def personalization_profile(
     log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> PersonalizationProfile:
     """Get current personalization profile."""
-    if not is_personalization_enabled():
+    if not _feature_flags.is_personalization_enabled():
         raise HTTPException(status_code=404, detail="Personalization disabled")
     prof = db.get_or_create_profile(log.user_id)
     out = _profile_from_dict(prof, db, log.user_id)
@@ -141,7 +141,7 @@ async def personalization_preferences(
     log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> PersonalizationProfile:
     """Update personalization weights/preferences."""
-    if not is_personalization_enabled():
+    if not _feature_flags.is_personalization_enabled():
         raise HTTPException(status_code=404, detail="Personalization disabled")
     fields = update.model_dump(exclude_none=True)
     # Map quiet_hours dict to individual columns
@@ -180,7 +180,7 @@ async def list_memories(
     db: PersonalizationDB = Depends(get_personalization_db_for_user),
     log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> MemoryListResponse:
-    if not is_personalization_enabled():
+    if not _feature_flags.is_personalization_enabled():
         raise HTTPException(status_code=404, detail="Personalization disabled")
     offset = (page - 1) * size
     # Only semantic implemented; episodic not yet
@@ -211,7 +211,7 @@ async def export_memories(
     log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> dict:
     """Export all memories as JSON."""
-    if not is_personalization_enabled():
+    if not _feature_flags.is_personalization_enabled():
         raise HTTPException(status_code=404, detail="Personalization disabled")
     items = db.export_all_memories(log.user_id)
     log.log_event("personalization.memories.export", metadata={"count": len(items)})
@@ -225,7 +225,7 @@ async def get_memory(
     log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> MemoryItem:
     """Get a specific memory by ID."""
-    if not is_personalization_enabled():
+    if not _feature_flags.is_personalization_enabled():
         raise HTTPException(status_code=404, detail="Personalization disabled")
     mem = db.get_memory(memory_id, log.user_id)
     if mem is None:
@@ -240,7 +240,7 @@ async def add_memory(
     log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> MemoryItem:
     """Add a semantic memory."""
-    if not is_personalization_enabled():
+    if not _feature_flags.is_personalization_enabled():
         raise HTTPException(status_code=404, detail="Personalization disabled")
     mem = SemanticMemory(user_id=log.user_id, content=item.content, tags=item.tags, pinned=item.pinned)
     mid = db.add_semantic_memory(mem)
@@ -255,7 +255,7 @@ async def update_memory(
     log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> MemoryItem:
     """Update a memory (content, pinned, hidden, tags)."""
-    if not is_personalization_enabled():
+    if not _feature_flags.is_personalization_enabled():
         raise HTTPException(status_code=404, detail="Personalization disabled")
     fields = update.model_dump(exclude_none=True)
     result = db.update_memory(memory_id, log.user_id, **fields)
@@ -271,7 +271,7 @@ async def delete_memory(
     log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> DetailResponse:
     """Delete memory by id."""
-    if not is_personalization_enabled():
+    if not _feature_flags.is_personalization_enabled():
         raise HTTPException(status_code=404, detail="Personalization disabled")
     ok = db.delete_memory(memory_id, log.user_id)
     return DetailResponse(detail="ok: deleted" if ok else "no-op: not found")
@@ -284,7 +284,7 @@ async def validate_memories(
     log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> DetailResponse:
     """Batch validate memories (mark as last_validated)."""
-    if not is_personalization_enabled():
+    if not _feature_flags.is_personalization_enabled():
         raise HTTPException(status_code=404, detail="Personalization disabled")
     count = db.validate_memories(log.user_id, payload.memory_ids)
     return DetailResponse(detail=f"ok: validated {count} memories")
@@ -297,7 +297,7 @@ async def import_memories(
     log: UsageEventLogger = Depends(get_usage_event_logger),
 ) -> DetailResponse:
     """Import memories from JSON."""
-    if not is_personalization_enabled():
+    if not _feature_flags.is_personalization_enabled():
         raise HTTPException(status_code=404, detail="Personalization disabled")
     count = db.bulk_add_memories(log.user_id, payload.memories)
     log.log_event("personalization.memories.import", metadata={"count": count})

@@ -602,8 +602,7 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(byok_helpers, "get_byok_gateway_specs", lambda: specs)
     monkeypatch.setattr(
-        user_keys_endpoints,
-        "get_byok_gateway_spec",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.get_byok_gateway_spec",
         lambda provider: specs.get(provider),
         raising=False,
     )
@@ -620,8 +619,7 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
         return "verified"
 
     monkeypatch.setattr(
-        user_keys_endpoints,
-        "probe_gateway_credentials",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_testing.probe_gateway_credentials",
         _fake_probe,
         raising=False,
     )
@@ -650,8 +648,7 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
         return model or "openrouter/default-model"
 
     monkeypatch.setattr(
-        user_keys_endpoints,
-        "test_provider_credentials",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_testing.test_provider_credentials",
         _fake_generic_test,
     )
 
@@ -1119,12 +1116,11 @@ async def test_openai_oauth_endpoints_sqlite(tmp_path, monkeypatch):
             payload={"error": "unsupported_grant_type"},
         )
 
-    monkeypatch.setattr(user_keys_endpoints, "_http_afetch", _fake_http_afetch)
-    monkeypatch.setattr(user_keys_endpoints, "increment_counter", _fake_increment_counter)
-    monkeypatch.setattr(user_keys_endpoints, "observe_histogram", _fake_observe_histogram)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.afetch", _fake_http_afetch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.increment_counter", _fake_increment_counter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.observe_histogram", _fake_observe_histogram)
     monkeypatch.setattr(
-        user_keys_endpoints,
-        "get_or_create_audit_service_for_user_id_optional",
+        "tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps.get_or_create_audit_service_for_user_id_optional",
         _fake_get_audit_service_for_user_id_optional,
     )
 
@@ -1615,11 +1611,10 @@ async def test_runtime_openai_refresh_serializes_user_row_mutations_sqlite(
 
     monkeypatch.setattr(byok_runtime, "_openai_oauth_token_refresh", runtime_token_refresh)
     monkeypatch.setattr(user_keys_endpoints, "_get_user_repo", get_user_repo)
-    monkeypatch.setattr(user_keys_endpoints, "test_provider_credentials", accept_provider_credentials)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_testing.test_provider_credentials", accept_provider_credentials)
     monkeypatch.setattr(user_keys_endpoints, "_emit_openai_oauth_audit_event", ignore_audit_event)
     monkeypatch.setattr(
-        user_keys_endpoints,
-        "openai_credential_mutation_lock",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_runtime.openai_credential_mutation_lock",
         tracked_mutation_lock,
     )
 
@@ -1816,11 +1811,10 @@ async def test_openai_callback_final_merge_serializes_with_api_key_edit_sqlite(
     monkeypatch.setattr(user_keys_endpoints, "_get_user_repo", get_user_repo)
     monkeypatch.setattr(user_keys_endpoints, "_get_oauth_state_repo", get_state_repo)
     monkeypatch.setattr(user_keys_endpoints, "_openai_oauth_token_exchange", exchange_token)
-    monkeypatch.setattr(user_keys_endpoints, "test_provider_credentials", accept_provider_credentials)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_testing.test_provider_credentials", accept_provider_credentials)
     monkeypatch.setattr(user_keys_endpoints, "_emit_openai_oauth_audit_event", ignore_audit_event)
     monkeypatch.setattr(
-        user_keys_endpoints,
-        "openai_credential_mutation_lock",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_runtime.openai_credential_mutation_lock",
         tracked_mutation_lock,
     )
 

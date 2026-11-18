@@ -83,13 +83,13 @@ def ingestion_sources_policy_client(monkeypatch):
         source_state[source_id] = row
         return dict(row)
 
-    monkeypatch.setattr(ep, "get_db_pool", _fake_get_db_pool)
-    monkeypatch.setattr(ep, "ensure_ingestion_sources_schema", _fake_ensure_schema)
-    monkeypatch.setattr(ep, "create_source", _fake_create_source)
-    monkeypatch.setattr(ep, "get_source_by_id", _fake_get_source_by_id)
-    monkeypatch.setattr(ep, "update_source", _fake_update_source)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Sources.service.ensure_ingestion_sources_schema", _fake_ensure_schema)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Sources.service.create_source", _fake_create_source)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Sources.service.get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Sources.service.update_source", _fake_update_source)
     monkeypatch.setattr(ep, "validate_local_directory_source", lambda config: config["path"])
-    monkeypatch.setattr(ep, "validate_git_repository_source", lambda config: dict(config))
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Sources.git_repository.validate_git_repository_source", lambda config: dict(config))
     monkeypatch.setattr(access_policy, "is_single_user_mode", lambda: False)
     monkeypatch.setattr(access_policy, "list_feature_flags", lambda: list(feature_flags))
 

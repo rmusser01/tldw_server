@@ -29,7 +29,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
 )
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
-from tldw_Server_API.app.core.Audio.tts_service import _raise_for_tts_error, _sanitize_speech_request
+from tldw_Server_API.app.core.Audio.tts_service import _raise_for_tts_error
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, StorageError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.config import settings
@@ -39,16 +39,11 @@ from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
-from tldw_Server_API.app.core.Storage.generated_file_helpers import (
-    save_and_register_tts_audio,
-)
 from tldw_Server_API.app.core.TTS.adapter_registry import canonicalize_tts_backend
 from tldw_Server_API.app.core.TTS.gateway_preflight import (
     gateway_route_provenance,
-    preflight_gateway_speech,
     reject_gateway_persistence_authority,
 )
-from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSAuthenticationError,
     TTSError,
@@ -66,13 +61,17 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import (
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2, get_tts_service_v2
 from tldw_Server_API.app.core.TTS.utils import (
     build_tts_segments_payload,
-    compute_tts_history_text_hash,
     contains_tts_credential_fields,
     parse_bool,
     tts_history_text_length,
     tts_jobs_queue,
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
+import tldw_Server_API.app.core.Audio.tts_service as _tts_service
+import tldw_Server_API.app.core.Storage.generated_file_helpers as _generated_file_helpers
+import tldw_Server_API.app.core.TTS.gateway_preflight as _gateway_preflight
+import tldw_Server_API.app.core.TTS.tts_config as _tts_config
+import tldw_Server_API.app.core.TTS.utils as _utils
 
 _AUDIO_TTS_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -107,21 +106,11 @@ def get_job_manager() -> JobManager:
     return _get_job_manager()
 
 
-def _audio_shim_attr(name: str):
-    defaults: dict[str, Any] = {
-        "_sanitize_speech_request": _sanitize_speech_request,
-        "save_and_register_tts_audio": save_and_register_tts_audio,
-    }
-    try:
-        from tldw_Server_API.app.api.v1.endpoints import audio as audio_shim
+async def _resolve_tts_byok(**kwargs):
+    """TTS credentials from ``audio.audio._resolve_tts_byok``, imported at call time: that module imports this one."""
+    from tldw_Server_API.app.api.v1.endpoints.audio.audio import _resolve_tts_byok as resolve_tts_byok
 
-        if hasattr(audio_shim, name):
-            return getattr(audio_shim, name)
-    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
-        pass
-    if name in defaults:
-        return defaults[name]
-    raise NameError(name)
+    return await resolve_tts_byok(**kwargs)
 
 
 def _resolve_tts_backend_mirror(
@@ -606,7 +595,7 @@ async def create_speech_job(
     """Submit a long-form TTS job and return job id."""
     request_id = ensure_request_id(request)
     explicit_backend = _resolve_tts_backend_mirror(request_data, request)
-    provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
+    provider_hint = _tts_service._sanitize_speech_request(request_data, request_id=request_id)
     speech_request_payload = model_dump_compat(request_data, exclude_unset=True)
     if contains_tts_credential_fields(speech_request_payload):
         raise HTTPException(
@@ -623,7 +612,7 @@ async def create_speech_job(
     if explicit_backend is not None:
         supplied_fields = frozenset(getattr(request_data, "model_fields_set", set()) or ())
         try:
-            resolved = preflight_gateway_speech(
+            resolved = _gateway_preflight.preflight_gateway_speech(
                 backend=explicit_backend,
                 model=request_data.model,
                 voice=request_data.voice,
@@ -631,7 +620,7 @@ async def create_speech_job(
                 response_format=request_data.response_format,
                 allow_fallback=request_data.allow_fallback,
                 supplied_fields=supplied_fields,
-                gateway_specs=get_tts_config_manager().get_gateway_specs(),
+                gateway_specs=_tts_config.get_tts_config_manager().get_gateway_specs(),
                 speed=request_data.speed,
                 lang_code=request_data.lang_code,
                 language=request_data.language,
@@ -654,7 +643,7 @@ async def create_speech_job(
             "speech_request": speech_request_payload,
         }
     else:
-        resolved_user_id, _, resolution = await _audio_shim_attr("_resolve_tts_byok")(
+        resolved_user_id, _, resolution = await _resolve_tts_byok(
             provider_hint=provider_hint,
             model=request_data.model,
             current_user=current_user,
@@ -793,7 +782,7 @@ async def create_speech(
     request_id = ensure_request_id(request)
 
     explicit_backend = _resolve_tts_backend_mirror(request_data, request)
-    provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
+    provider_hint = _tts_service._sanitize_speech_request(request_data, request_id=request_id)
     if explicit_backend is not None:
         try:
             reject_gateway_persistence_authority(request_data.extra_params or {})
@@ -813,7 +802,7 @@ async def create_speech(
         tts_overrides = None
         byok_tts_resolution = None
     else:
-        user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
+        user_id_int, tts_overrides, byok_tts_resolution = await _resolve_tts_byok(
             provider_hint=tts_provider_hint,
             model=request_data.model,
             current_user=current_user,
@@ -925,7 +914,7 @@ async def create_speech(
         if media_db is None:
             return
         try:
-            text_hash = compute_tts_history_text_hash(request_data.input, history_cfg.get("hash_key"))
+            text_hash = _utils.compute_tts_history_text_hash(request_data.input, history_cfg.get("hash_key"))
         except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
             logger.debug("TTS history: failed to compute text hash")
             return
@@ -1057,7 +1046,7 @@ async def create_speech(
     async def _refresh_openai_oauth_and_rebuild_iter() -> None:
         nonlocal user_id_int, tts_overrides, byok_tts_resolution, speech_iter
         rejected_credentials = byok_tts_resolution
-        user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
+        user_id_int, tts_overrides, byok_tts_resolution = await _resolve_tts_byok(
             provider_hint=tts_provider_hint,
             model=request_data.model,
             current_user=current_user,
@@ -1275,7 +1264,7 @@ async def create_speech(
     artifact_ids: list[Any] | None = None
     if request_data.return_download_link:
         try:
-            file_record = await _audio_shim_attr("save_and_register_tts_audio")(
+            file_record = await _generated_file_helpers.save_and_register_tts_audio(
                 user_id=user_id_int,
                 audio_bytes=audio_bytes,
                 audio_format=request_data.response_format,
@@ -1350,9 +1339,9 @@ async def create_speech_metadata(
 ):
     request_id = ensure_request_id(request)
     _resolve_tts_backend_mirror(request_data, request)
-    provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
+    provider_hint = _tts_service._sanitize_speech_request(request_data, request_id=request_id)
     tts_provider_hint = provider_hint
-    user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
+    user_id_int, tts_overrides, byok_tts_resolution = await _resolve_tts_byok(
         provider_hint=tts_provider_hint,
         model=request_data.model,
         current_user=current_user,
@@ -1456,7 +1445,7 @@ async def create_speech_metadata(
     async def _refresh_openai_oauth_and_rebuild_iter() -> None:
         nonlocal user_id_int, tts_overrides, byok_tts_resolution, speech_iter
         rejected_credentials = byok_tts_resolution
-        user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
+        user_id_int, tts_overrides, byok_tts_resolution = await _resolve_tts_byok(
             provider_hint=tts_provider_hint,
             model=request_data.model,
             current_user=current_user,

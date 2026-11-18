@@ -64,10 +64,10 @@ def test_ws_quota_close_code_toggle_to_1008(monkeypatch, toggle_value):
     monkeypatch.setenv("AUDIO_WS_QUOTA_CLOSE_1008", toggle_value)
 
     # Force daily-minutes check to immediately deny
-    async def _deny(user_id: int, minutes_requested: float):
+    async def _deny(user_id: int, minutes_requested: float, **_kwargs):
         return False, 0.0
 
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _deny)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _deny)
 
     settings = get_settings()
     token = settings.SINGLE_USER_API_KEY

@@ -133,8 +133,8 @@ async def test_project_websocket_resolves_database_after_authentication(monkeypa
         return False
 
     monkeypatch.setattr(ws_mod, "_allow_prompt_studio_cookie_websocket", allow_auth)
-    monkeypatch.setattr(ws_mod, "managed_prompt_studio_db", get_db)
-    monkeypatch.setattr(ws_mod, "require_project_access", require_access)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.managed_prompt_studio_db", get_db)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access", require_access)
     monkeypatch.setattr(ws_mod, "_guard_prompt_studio_websocket_start", stop_before_accept)
 
     await ws_mod.websocket_endpoint(websocket, 7)
@@ -186,13 +186,12 @@ async def test_project_authorization_uses_managed_database_scope(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        ws_mod,
-        "managed_prompt_studio_db",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.managed_prompt_studio_db",
         managed_db,
         raising=False,
     )
     monkeypatch.setattr(ws_mod, "get_prompt_studio_db", unmanaged_db)
-    monkeypatch.setattr(ws_mod, "require_project_access", require_access)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access", require_access)
 
     authorized = await ws_mod._authorize_prompt_studio_project(
         websocket,
@@ -235,7 +234,7 @@ async def test_base_websocket_authorizes_and_joins_requested_project_scope(monke
     monkeypatch.setattr(ws_mod, "_allow_prompt_studio_cookie_websocket", allow_auth)
     monkeypatch.setattr(ws_mod, "_authorize_prompt_studio_project", authorize)
     monkeypatch.setattr(ws_mod.connection_manager, "connect", connect)
-    monkeypatch.setattr(ws_mod, "WebSocketStream", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr("tldw_Server_API.app.core.Streaming.streams.WebSocketStream", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         ws_mod,
         "_guard_prompt_studio_websocket_start",
@@ -291,7 +290,7 @@ async def test_base_websocket_keeps_projectless_subscribe_in_owner_global_scope(
     monkeypatch.setattr(ws_mod.connection_manager, "connect", connect)
     monkeypatch.setattr(ws_mod.connection_manager, "rebind", rebind)
     monkeypatch.setattr(ws_mod.connection_manager, "disconnect", disconnect)
-    monkeypatch.setattr(ws_mod, "WebSocketStream", lambda *_args, **_kwargs: _Stream())
+    monkeypatch.setattr("tldw_Server_API.app.core.Streaming.streams.WebSocketStream", lambda *_args, **_kwargs: _Stream())
     monkeypatch.setattr(
         ws_mod,
         "_guard_prompt_studio_websocket_start",
@@ -372,7 +371,7 @@ async def test_broadcast_to_client_sanitizes_send_failure_log(monkeypatch):
 async def test_legacy_sse_stream_sanitizes_error_log(monkeypatch):
     fake_logger = MagicMock()
     monkeypatch.setattr(ws_mod, "logger", fake_logger)
-    monkeypatch.setattr(ws_mod, "env_flag_enabled", lambda _name: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.env_flag_enabled", lambda _name: False)
 
     async def _failing_sleep(_seconds: int) -> None:
         raise RuntimeError("legacy SSE loop leaked /private/prompt-studio-sse.json")

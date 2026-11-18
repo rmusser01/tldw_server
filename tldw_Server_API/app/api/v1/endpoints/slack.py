@@ -28,14 +28,10 @@ from tldw_Server_API.app.api.v1.utils.chatops.slack_support import (
     _RATE_LIMITER,
     _coerce_nonempty_string,
     _command_fingerprint,
-    _decrypt_slack_payload,
     _dedupe_ttl_seconds,
-    _encrypt_slack_payload,
     _error_response,
     _evaluate_slack_policy,
     _get_job_manager,
-    _get_oauth_state_repo,
-    _get_user_secret_repo,
     _ingress_rate_limit_per_minute,
     _is_bot_event,
     _normalize_installations_payload,
@@ -67,6 +63,7 @@ from tldw_Server_API.app.core.AuthNZ.repos import (
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
+import tldw_Server_API.app.api.v1.utils.chatops.slack_support as _slack_support
 
 router = APIRouter(prefix="/slack", tags=["slack"])
 
@@ -358,8 +355,8 @@ async def slack_oauth_start(
         oauth_client_id=_oauth_client_id,
         oauth_redirect_uri=_oauth_redirect_uri,
         oauth_state_ttl_seconds=_oauth_state_ttl_seconds,
-        get_oauth_state_repo=_get_oauth_state_repo,
-        encrypt_slack_payload=_encrypt_slack_payload,
+        get_oauth_state_repo=_slack_support._get_oauth_state_repo,
+        encrypt_slack_payload=_slack_support._encrypt_slack_payload,
         oauth_auth_url=_oauth_auth_url,
         oauth_scopes=_oauth_scopes,
         urlencode_fn=urlencode,
@@ -375,17 +372,17 @@ async def slack_oauth_callback(
         code=code,
         state=state,
         coerce_nonempty_string=_coerce_nonempty_string,
-        get_oauth_state_repo=_get_oauth_state_repo,
+        get_oauth_state_repo=_slack_support._get_oauth_state_repo,
         oauth_client_id=_oauth_client_id,
         oauth_client_secret=_oauth_client_secret,
         oauth_token_url=_oauth_token_url,
-        slack_oauth_token_exchange=_slack_oauth_token_exchange,
-        get_user_secret_repo=_get_user_secret_repo,
+        slack_oauth_token_exchange=_slack_support._slack_oauth_token_exchange,
+        get_user_secret_repo=_slack_support._get_user_secret_repo,
         get_workspace_provider_installations_repo=_get_workspace_provider_installations_repo,
         resolve_workspace_org_id=lambda user_id: _resolve_workspace_org_id(None, user_id),
-        decrypt_slack_payload=_decrypt_slack_payload,
+        decrypt_slack_payload=_slack_support._decrypt_slack_payload,
         normalize_installations_payload=_normalize_installations_payload,
-        encrypt_slack_payload=_encrypt_slack_payload,
+        encrypt_slack_payload=_slack_support._encrypt_slack_payload,
     )
 
 
@@ -424,8 +421,8 @@ async def slack_admin_list_installations(
 ):
     return await slack_admin_list_installations_impl(
         user=user,
-        get_user_secret_repo=_get_user_secret_repo,
-        decrypt_slack_payload=_decrypt_slack_payload,
+        get_user_secret_repo=_slack_support._get_user_secret_repo,
+        decrypt_slack_payload=_slack_support._decrypt_slack_payload,
         normalize_installations_payload=_normalize_installations_payload,
         public_installation_record=_public_installation_record,
     )
@@ -441,12 +438,12 @@ async def slack_admin_delete_installation(
         team_id=team_id,
         user=user,
         coerce_nonempty_string=_coerce_nonempty_string,
-        get_user_secret_repo=_get_user_secret_repo,
+        get_user_secret_repo=_slack_support._get_user_secret_repo,
         get_workspace_provider_installations_repo=_get_workspace_provider_installations_repo,
         resolve_workspace_org_id=lambda resolved_user_id: _resolve_workspace_org_id(request, resolved_user_id),
-        decrypt_slack_payload=_decrypt_slack_payload,
+        decrypt_slack_payload=_slack_support._decrypt_slack_payload,
         normalize_installations_payload=_normalize_installations_payload,
-        encrypt_slack_payload=_encrypt_slack_payload,
+        encrypt_slack_payload=_slack_support._encrypt_slack_payload,
     )
 
 
@@ -462,10 +459,10 @@ async def slack_admin_set_installation_state(
         payload=payload,
         user=user,
         coerce_nonempty_string=_coerce_nonempty_string,
-        get_user_secret_repo=_get_user_secret_repo,
+        get_user_secret_repo=_slack_support._get_user_secret_repo,
         get_workspace_provider_installations_repo=_get_workspace_provider_installations_repo,
         resolve_workspace_org_id=lambda resolved_user_id: _resolve_workspace_org_id(request, resolved_user_id),
-        decrypt_slack_payload=_decrypt_slack_payload,
+        decrypt_slack_payload=_slack_support._decrypt_slack_payload,
         normalize_installations_payload=_normalize_installations_payload,
-        encrypt_slack_payload=_encrypt_slack_payload,
+        encrypt_slack_payload=_slack_support._encrypt_slack_payload,
     )

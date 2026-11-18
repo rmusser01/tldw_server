@@ -20,7 +20,8 @@ from tldw_Server_API.app.api.v1.schemas.feedback_schemas import (
     FeedbackUpdateRequest,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
-from tldw_Server_API.app.core.RAG.rag_service.analytics_system import UnifiedFeedbackSystem, UserFeedbackStore
+from tldw_Server_API.app.core.RAG.rag_service.analytics_system import UserFeedbackStore
+import tldw_Server_API.app.core.RAG.rag_service.analytics_system as _analytics_system
 
 router = APIRouter()
 
@@ -229,7 +230,7 @@ async def submit_explicit_feedback(
             merged_issues = _merge_issues(existing.issues, issues)
             updated_notes = existing.user_notes if payload.user_notes is None else payload.user_notes
             if existing.feedback_id and not existing.pending:
-                collector = UnifiedFeedbackSystem(chacha_db=db)
+                collector = _analytics_system.UnifiedFeedbackSystem(chacha_db=db)
                 if collector.user_feedback:
                     try:
                         await collector.user_feedback.merge_feedback_update(
@@ -246,7 +247,7 @@ async def submit_explicit_feedback(
             await _update_idempotency_record(db, dedupe_key, merged_issues, updated_notes)
         return ExplicitFeedbackResponse(ok=True, feedback_id=existing.feedback_id)
 
-    collector = UnifiedFeedbackSystem(chacha_db=db)
+    collector = _analytics_system.UnifiedFeedbackSystem(chacha_db=db)
     try:
         result = await collector.submit_feedback(
             conversation_id=resolved_conversation_id or "",
@@ -333,7 +334,7 @@ async def list_feedback(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
         _ensure_conversation_owner(conversation, current_user)
 
-        store = UnifiedFeedbackSystem(chacha_db=db)
+        store = _analytics_system.UnifiedFeedbackSystem(chacha_db=db)
         if not store.user_feedback:
             return FeedbackListResponse(ok=True, feedback=[])
 
@@ -365,7 +366,7 @@ async def get_feedback(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> FeedbackRecord:
-    store = UnifiedFeedbackSystem(chacha_db=db)
+    store = _analytics_system.UnifiedFeedbackSystem(chacha_db=db)
     if not store.user_feedback:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
 
@@ -403,7 +404,7 @@ async def delete_feedback(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> FeedbackDeleteResponse:
     try:
-        store = UnifiedFeedbackSystem(chacha_db=db)
+        store = _analytics_system.UnifiedFeedbackSystem(chacha_db=db)
         if not store.user_feedback:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
 
@@ -447,7 +448,7 @@ async def update_feedback(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> ExplicitFeedbackResponse:
     try:
-        store = UnifiedFeedbackSystem(chacha_db=db)
+        store = _analytics_system.UnifiedFeedbackSystem(chacha_db=db)
         if not store.user_feedback:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
 

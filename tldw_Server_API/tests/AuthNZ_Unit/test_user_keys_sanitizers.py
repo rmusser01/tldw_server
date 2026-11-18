@@ -133,8 +133,8 @@ async def _skip_oauth_audit(**_kwargs) -> None:
 
 def _install_user_key_patches(monkeypatch) -> None:
     monkeypatch.setattr(routes, "_require_byok_enabled", lambda: None)
-    monkeypatch.setattr(routes, "is_provider_allowlisted", lambda _provider: True)
-    monkeypatch.setattr(routes, "is_trusted_base_url_request", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.is_trusted_base_url_request", lambda *_args, **_kwargs: True)
 
 
 def _install_oauth_patches(monkeypatch) -> None:
@@ -147,10 +147,9 @@ def _install_oauth_patches(monkeypatch) -> None:
 
     monkeypatch.setattr(routes, "_require_openai_oauth_settings", _oauth_settings)
     monkeypatch.setattr(routes, "_get_oauth_state_repo", _oauth_state_repo)
-    monkeypatch.setattr(routes, "loads_envelope", lambda _blob: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.loads_envelope", lambda _blob: {})
     monkeypatch.setattr(
-        routes,
-        "decrypt_byok_payload",
+        "tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.decrypt_byok_payload",
         lambda *_args, **_kwargs: {
             "pkce_verifier": "verifier",
             "credential_fields": {"project_id": "proj_test"},
@@ -231,9 +230,9 @@ async def test_user_key_routes_map_alias_conflicts_to_detached_409(
     _install_user_key_patches(monkeypatch)
     _install_oauth_patches(monkeypatch)
     monkeypatch.setattr(routes, "_get_user_repo", conflict_repo)
-    monkeypatch.setattr(routes, "resolve_byok_allowlist", lambda: {"openai"})
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(routes, "test_provider_credentials", _pass_provider_test)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.resolve_byok_allowlist", lambda: {"openai"})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_testing.test_provider_credentials", _pass_provider_test)
     monkeypatch.setattr(routes, "_emit_openai_oauth_audit_event", _skip_oauth_audit)
     principal = _principal()
     request = SimpleNamespace()
@@ -342,7 +341,7 @@ async def test_user_key_upsert_sanitizes_credential_validation(monkeypatch) -> N
         raise ValueError("user credential token at /private/user-key-credentials.json")
 
     _install_user_key_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", fail_validate)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", fail_validate)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.upsert_user_provider_key(
@@ -370,8 +369,8 @@ async def test_user_key_upsert_sanitizes_provider_validation(monkeypatch) -> Non
         raise ValueError("user provider token at /private/user-key-provider.json")
 
     _install_user_key_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(routes, "test_provider_credentials", fail_provider_test)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_testing.test_provider_credentials", fail_provider_test)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.upsert_user_provider_key(
@@ -399,8 +398,8 @@ async def test_user_key_upsert_detaches_unexpected_provider_validation_failure(
         raise RuntimeError(sentinel)
 
     _install_user_key_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(routes, "test_provider_credentials", fail_provider_test)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_testing.test_provider_credentials", fail_provider_test)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.upsert_user_provider_key(
@@ -427,8 +426,8 @@ async def test_user_key_upsert_sanitizes_chat_provider_error_context(monkeypatch
         )
 
     _install_user_key_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(routes, "test_provider_credentials", fail_provider_test)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_testing.test_provider_credentials", fail_provider_test)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.upsert_user_provider_key(
@@ -449,9 +448,9 @@ async def test_user_key_test_sanitizes_stored_credential_validation(monkeypatch)
 
     _install_user_key_patches(monkeypatch)
     monkeypatch.setattr(routes, "_get_user_repo", _user_repo)
-    monkeypatch.setattr(routes, "loads_envelope", lambda _blob: {})
-    monkeypatch.setattr(routes, "decrypt_byok_payload", _stored_payload)
-    monkeypatch.setattr(routes, "validate_credential_fields", fail_validate)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.loads_envelope", lambda _blob: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.decrypt_byok_payload", _stored_payload)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", fail_validate)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.test_user_provider_key(
@@ -476,10 +475,10 @@ async def test_user_key_test_sanitizes_provider_validation(monkeypatch) -> None:
 
     _install_user_key_patches(monkeypatch)
     monkeypatch.setattr(routes, "_get_user_repo", _user_repo)
-    monkeypatch.setattr(routes, "loads_envelope", lambda _blob: {})
-    monkeypatch.setattr(routes, "decrypt_byok_payload", _stored_payload)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(routes, "test_provider_credentials", fail_provider_test)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.loads_envelope", lambda _blob: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.decrypt_byok_payload", _stored_payload)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_testing.test_provider_credentials", fail_provider_test)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.test_user_provider_key(
@@ -503,7 +502,7 @@ async def test_openai_oauth_authorize_sanitizes_credential_validation(monkeypatc
         raise ValueError("oauth authorize token at /private/oauth-authorize.json")
 
     _install_oauth_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", fail_validate)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", fail_validate)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.authorize_openai_oauth(
@@ -527,7 +526,7 @@ async def test_openai_oauth_callback_sanitizes_state_credential_validation(monke
         raise ValueError("oauth state token at /private/oauth-state.json")
 
     _install_oauth_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", fail_validate)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", fail_validate)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.callback_openai_oauth(
@@ -551,8 +550,8 @@ async def test_openai_oauth_callback_sanitizes_provider_validation(monkeypatch) 
         raise ValueError("oauth provider token at /private/oauth-provider.json")
 
     _install_oauth_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(routes, "test_provider_credentials", fail_provider_test)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_testing.test_provider_credentials", fail_provider_test)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.callback_openai_oauth(
@@ -580,9 +579,9 @@ async def test_user_key_upsert_detaches_encryption_failure(monkeypatch, provider
 
     _install_user_key_patches(monkeypatch)
     _install_openai_repo_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(routes, "test_provider_credentials", _pass_provider_test)
-    monkeypatch.setattr(routes, "encrypt_byok_payload", fail_encrypt)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_testing.test_provider_credentials", _pass_provider_test)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.encrypt_byok_payload", fail_encrypt)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.upsert_user_provider_key(
@@ -604,8 +603,8 @@ async def test_openai_oauth_authorize_detaches_state_encryption_failure(monkeypa
         raise ValueError(sentinel)
 
     _install_oauth_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(routes, "encrypt_byok_payload", fail_encrypt)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.encrypt_byok_payload", fail_encrypt)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.authorize_openai_oauth(
@@ -627,7 +626,7 @@ async def test_openai_oauth_callback_detaches_state_decryption_failure(monkeypat
         raise ValueError(sentinel)
 
     _install_oauth_patches(monkeypatch)
-    monkeypatch.setattr(routes, "decrypt_byok_payload", fail_decrypt)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.decrypt_byok_payload", fail_decrypt)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.callback_openai_oauth(
@@ -650,9 +649,9 @@ async def test_openai_oauth_callback_detaches_token_encryption_failure(monkeypat
 
     _install_oauth_patches(monkeypatch)
     _install_openai_repo_patches(monkeypatch)
-    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(routes, "test_provider_credentials", _pass_provider_test)
-    monkeypatch.setattr(routes, "encrypt_byok_payload", fail_encrypt)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_testing.test_provider_credentials", _pass_provider_test)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.encrypt_byok_payload", fail_encrypt)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.callback_openai_oauth(
@@ -675,7 +674,7 @@ async def test_openai_oauth_refresh_detaches_token_encryption_failure(monkeypatc
 
     _install_oauth_patches(monkeypatch)
     _install_openai_repo_patches(monkeypatch)
-    monkeypatch.setattr(routes, "encrypt_byok_payload", fail_encrypt)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.encrypt_byok_payload", fail_encrypt)
     monkeypatch.setattr(routes, "_emit_openai_oauth_audit_event", _skip_oauth_audit)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -698,7 +697,7 @@ async def test_openai_oauth_disconnect_detaches_fallback_encryption_failure(monk
 
     _install_oauth_patches(monkeypatch)
     _install_openai_repo_patches(monkeypatch)
-    monkeypatch.setattr(routes, "encrypt_byok_payload", fail_encrypt)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.encrypt_byok_payload", fail_encrypt)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.disconnect_openai_oauth(
@@ -720,7 +719,7 @@ async def test_openai_source_switch_detaches_encryption_failure(monkeypatch) -> 
 
     _install_oauth_patches(monkeypatch)
     _install_openai_repo_patches(monkeypatch)
-    monkeypatch.setattr(routes, "encrypt_byok_payload", fail_encrypt)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.encrypt_byok_payload", fail_encrypt)
 
     with pytest.raises(HTTPException) as exc_info:
         await routes.switch_openai_credential_source(
@@ -739,7 +738,7 @@ def test_openai_oauth_counter_failure_log_is_sanitized(monkeypatch) -> None:
         raise RuntimeError("oauth counter failed at /private/openai-oauth-metrics.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(routes, "increment_counter", fail_increment_counter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.increment_counter", fail_increment_counter)
     monkeypatch.setattr(routes, "logger", logger_stub)
 
     routes._record_openai_oauth_counter(
@@ -759,7 +758,7 @@ def test_openai_oauth_histogram_failure_log_is_sanitized(monkeypatch) -> None:
         raise RuntimeError("oauth histogram failed at /private/openai-oauth-metrics.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(routes, "observe_histogram", fail_observe_histogram)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.observe_histogram", fail_observe_histogram)
     monkeypatch.setattr(routes, "logger", logger_stub)
 
     routes._record_openai_oauth_histogram(
@@ -781,7 +780,7 @@ async def test_openai_oauth_audit_failure_log_is_sanitized(monkeypatch) -> None:
         raise RuntimeError("oauth audit failed at /private/openai-oauth-audit.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(routes, "get_or_create_audit_service_for_user_id_optional", fail_audit_service)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps.get_or_create_audit_service_for_user_id_optional", fail_audit_service)
     monkeypatch.setattr(routes, "logger", logger_stub)
 
     await routes._emit_openai_oauth_audit_event(
@@ -800,8 +799,8 @@ def test_extract_payload_from_row_decrypt_failure_log_is_sanitized(monkeypatch) 
         raise RuntimeError("BYOK decrypt failed at /private/user-provider-secret.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(routes, "loads_envelope", lambda _blob: {"ciphertext": "encrypted-secret"})
-    monkeypatch.setattr(routes, "decrypt_byok_payload", fail_decrypt_byok_payload)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.loads_envelope", lambda _blob: {"ciphertext": "encrypted-secret"})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets.decrypt_byok_payload", fail_decrypt_byok_payload)
     monkeypatch.setattr(routes, "logger", logger_stub)
 
     payload = routes._extract_payload_from_row({"encrypted_blob": "encrypted-secret"})

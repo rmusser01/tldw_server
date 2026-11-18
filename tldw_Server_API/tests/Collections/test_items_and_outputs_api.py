@@ -191,7 +191,7 @@ def test_items_endpoint_maps_media_input_error_to_400(client_with_user, monkeypa
         _ = (args, kwargs)
         raise InputError("invalid items query")
 
-    monkeypatch.setattr(items_endpoint, "search_media", _raise_input_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.search_media", _raise_input_error)
 
     r = client.get("/api/v1/items", params={"q": "budget"})
     assert r.status_code == 400, r.text
@@ -206,7 +206,7 @@ def test_items_get_by_id_maps_media_input_error_to_400(client_with_user, monkeyp
         _ = (args, kwargs)
         raise InputError("invalid item lookup")
 
-    monkeypatch.setattr(items_endpoint, "search_media", _raise_input_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.search_media", _raise_input_error)
 
     r = client.get("/api/v1/items/99999")
     assert r.status_code == 400, r.text
@@ -261,7 +261,7 @@ async def test_items_list_media_fallback_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(items_endpoint, "logger", logger)
-    monkeypatch.setattr(items_endpoint, "search_media", _raise_runtime_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.search_media", _raise_runtime_error)
 
     with pytest.raises(HTTPException) as exc_info:
         await items_endpoint.list_items(
@@ -358,7 +358,7 @@ async def test_items_get_media_fetch_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(items_endpoint, "logger", logger)
-    monkeypatch.setattr(items_endpoint, "search_media", _raise_runtime_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.search_media", _raise_runtime_error)
 
     with pytest.raises(HTTPException) as exc_info:
         await items_endpoint.get_item(

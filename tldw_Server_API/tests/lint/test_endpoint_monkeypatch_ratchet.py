@@ -542,6 +542,21 @@ def test_no_module_copies_the_default_sandbox_service() -> None:
     assert sandbox_service_copies() == []
 
 
+def test_audio_endpoints_hold_no_shim_lookups() -> None:
+    """A by-name lookup on the package lets a test patch hide behind a string; collaborators come from their home."""
+    root = APP_ROOT / "api" / "v1" / "endpoints" / "audio"
+    endpoints = "tldw_Server_API.app.api.v1.endpoints"
+    hits = []
+    for path in sorted(root.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_bytes())):
+            if isinstance(node, ast.FunctionDef) and node.name == "_audio_shim_attr":
+                hits.append(f"{path.name}:{node.lineno} def")
+            elif isinstance(node, ast.ImportFrom) and node.col_offset > 0 and node.module in {endpoints, f"{endpoints}.audio"} \
+                    and any(alias.name == "audio" for alias in node.names):
+                hits.append(f"{path.name}:{node.lineno} import")
+    assert hits == []
+
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["--summary"]:
         print(summary(measure_endpoint_patches()))

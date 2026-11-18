@@ -91,7 +91,7 @@ def context(
         return "Report due Friday."
 
     monkeypatch.setitem(client.app.dependency_overrides, get_request_user, current_user)
-    monkeypatch.setattr(endpoint, "get_prompts_db_for_user", get_db, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps.get_prompts_db_for_user", get_db, raising=False)
     monkeypatch.setattr(audio, "speech_to_text", transcribe)
     monkeypatch.setattr(audio, "check_transcription_model_status", lambda _: {"available": True, "usable": True})
     monkeypatch.setattr(summary, "_summarize_via_adapter", adapter)

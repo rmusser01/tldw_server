@@ -252,8 +252,7 @@ def _install_config_validation_adapter_boundary(
         raising=False,
     )
     monkeypatch.setattr(
-        config_info_mod,
-        "load_server_config_snapshot",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot",
         snapshot_loader,
         raising=False,
     )
@@ -1666,8 +1665,7 @@ class TestValidateProviderKey:
             calls=http_calls,
         )
         monkeypatch.setattr(
-            config_info_mod,
-            "load_server_config_snapshot",
+            "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot",
             lambda: {
                 "openai_api": {
                     "api_key": "sk-server-key-must-not-dispatch",

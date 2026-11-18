@@ -212,15 +212,14 @@ async def slack_oauth_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fr
             {"org_id": selected_org_id, "status": "active"},
         ]
 
-    monkeypatch.setattr(slack_endpoint, "_get_oauth_state_repo", _get_state_repo)
-    monkeypatch.setattr(slack_endpoint, "_get_user_secret_repo", _get_user_repo)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.slack_support._get_oauth_state_repo", _get_state_repo)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.slack_support._get_user_secret_repo", _get_user_repo)
     monkeypatch.setattr(slack_endpoint, "_get_workspace_provider_installations_repo", _get_registry_repo, raising=False)
-    monkeypatch.setattr(slack_endpoint, "_slack_oauth_token_exchange", _token_exchange)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.slack_support._slack_oauth_token_exchange", _token_exchange)
     monkeypatch.setattr(slack_endpoint, "list_org_memberships_for_user", _list_org_memberships_for_user, raising=False)
-    monkeypatch.setattr(slack_endpoint, "_encrypt_slack_payload", lambda payload: json.dumps(payload))
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.slack_support._encrypt_slack_payload", lambda payload: json.dumps(payload))
     monkeypatch.setattr(
-        slack_endpoint,
-        "_decrypt_slack_payload",
+        "tldw_Server_API.app.api.v1.utils.chatops.slack_support._decrypt_slack_payload",
         lambda encrypted_blob: json.loads(encrypted_blob) if encrypted_blob else None,
     )
 
@@ -295,15 +294,14 @@ async def discord_oauth_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, 
             {"org_id": selected_org_id, "status": "active"},
         ]
 
-    monkeypatch.setattr(discord_endpoint, "_get_oauth_state_repo", _get_state_repo)
-    monkeypatch.setattr(discord_endpoint, "_get_user_secret_repo", _get_user_repo)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.discord_support._get_oauth_state_repo", _get_state_repo)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.discord_support._get_user_secret_repo", _get_user_repo)
     monkeypatch.setattr(discord_endpoint, "_get_workspace_provider_installations_repo", _get_registry_repo, raising=False)
-    monkeypatch.setattr(discord_endpoint, "_discord_oauth_token_exchange", _token_exchange)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.discord_support._discord_oauth_token_exchange", _token_exchange)
     monkeypatch.setattr(discord_endpoint, "list_org_memberships_for_user", _list_org_memberships_for_user, raising=False)
-    monkeypatch.setattr(discord_endpoint, "_encrypt_discord_payload", lambda payload: json.dumps(payload))
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.discord_support._encrypt_discord_payload", lambda payload: json.dumps(payload))
     monkeypatch.setattr(
-        discord_endpoint,
-        "_decrypt_discord_payload",
+        "tldw_Server_API.app.api.v1.utils.chatops.discord_support._decrypt_discord_payload",
         lambda encrypted_blob: json.loads(encrypted_blob) if encrypted_blob else None,
     )
 

@@ -432,7 +432,7 @@ def test_docs_info_never_attests_resume_without_an_owner(monkeypatch, kind, owne
     async def principal(_request):
         return AuthPrincipal(kind=kind, user_id=owner)
 
-    monkeypatch.setattr(config_info, "get_auth_principal", principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", principal)
     request = _resume_docs_request()
     response = asyncio.run(config_info.get_documentation_config(request=request, response=Response()))
     assert "roleplay_resume_contract_version" not in response["capabilities"]
@@ -445,7 +445,7 @@ def test_docs_info_preserves_canonical_auth_failures(monkeypatch, status_code):
     async def principal(_request):
         raise HTTPException(status_code=status_code, detail="canonical-auth-failure")
 
-    monkeypatch.setattr(config_info, "get_auth_principal", principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", principal)
     request = _resume_docs_request()
     with pytest.raises(HTTPException) as failure:
         asyncio.run(config_info.get_documentation_config(request=request, response=Response()))
@@ -458,7 +458,7 @@ def test_docs_info_does_not_swallow_unexpected_auth_errors(monkeypatch):
     async def principal(_request):
         raise RuntimeError("unexpected-auth-failure")
 
-    monkeypatch.setattr(config_info, "get_auth_principal", principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", principal)
     request = _resume_docs_request()
     with pytest.raises(RuntimeError, match="unexpected-auth-failure"):
         asyncio.run(config_info.get_documentation_config(request=request, response=Response()))
@@ -472,7 +472,7 @@ def test_docs_info_attests_headerless_authenticated_owner(monkeypatch):
     async def principal(_request):
         return AuthPrincipal(kind="user", user_id=1)
 
-    monkeypatch.setattr(config_info, "get_auth_principal", principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", principal)
     response = Response()
     payload = asyncio.run(config_info.get_documentation_config(request=_resume_docs_request(), response=response))
     assert payload["capabilities"]["roleplay_resume_contract_version"] == 1

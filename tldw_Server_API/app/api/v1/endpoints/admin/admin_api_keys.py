@@ -32,8 +32,8 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.services import admin_api_keys_service
 from tldw_Server_API.app.services.admin_system_ops_service import (
     get_api_key_usage as svc_get_api_key_usage,
-    list_api_key_usage as svc_list_api_key_usage,
 )
+import tldw_Server_API.app.services.admin_system_ops_service as _admin_system_ops_service
 
 router = APIRouter()
 
@@ -169,7 +169,7 @@ async def admin_get_top_api_key_usage(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> ApiKeyUsageTopResponse:
     """Return top API keys ranked by total token consumption (admin)."""
-    items_raw = await asyncio.to_thread(svc_list_api_key_usage, limit=limit)
+    items_raw = await asyncio.to_thread(_admin_system_ops_service.list_api_key_usage, limit=limit)
     items = [
         ApiKeyUsageTopItem(
             key_id=str(item.get("key_id", "")),

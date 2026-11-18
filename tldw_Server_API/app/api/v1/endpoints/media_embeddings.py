@@ -18,12 +18,12 @@ from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_
 
 # Local imports
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.utils.rag_cache import invalidate_rag_caches
 from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_id
-from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
-from tldw_Server_API.app.core.Embeddings.jobs_adapter import EmbeddingsJobsAdapter
 from tldw_Server_API.app.core.Embeddings import media_embeddings as _media_embeddings
 from tldw_Server_API.app.core.Embeddings.media_embeddings import _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS
+import tldw_Server_API.app.api.v1.utils.rag_cache as _rag_cache
+import tldw_Server_API.app.core.Embeddings.ChromaDB_Library as _ChromaDB_Library
+import tldw_Server_API.app.core.Embeddings.jobs_adapter as _jobs_adapter
 
 router = APIRouter(prefix="/media", tags=["media-embeddings"])
 
@@ -147,7 +147,7 @@ async def get_embeddings_status(
             current_user,
             error_status=http_status.HTTP_400_BAD_REQUEST,
         )
-        manager = ChromaDBManager(user_id=user_id, user_embedding_config=_media_embeddings._user_embedding_config())
+        manager = _ChromaDB_Library.ChromaDBManager(user_id=user_id, user_embedding_config=_media_embeddings._user_embedding_config())
         collection_name = f"user_{user_id}_media_embeddings"
 
         has_embeddings = False
@@ -220,7 +220,7 @@ async def generate_embeddings(
                 detail="Embeddings jobs backend is unavailable",
             )
 
-        adapter = EmbeddingsJobsAdapter()
+        adapter = _jobs_adapter.EmbeddingsJobsAdapter()
         media_item = get_media_by_id(db, media_id)
         if not media_item:
             raise HTTPException(
@@ -307,7 +307,7 @@ async def generate_embeddings_batch(
             detail="Embeddings jobs backend is unavailable",
         )
 
-    adapter = EmbeddingsJobsAdapter()
+    adapter = _jobs_adapter.EmbeddingsJobsAdapter()
     job_ids: list[str] = []
     failed_media_ids: list[int] = []
     failure_reasons: list[str] = []
@@ -413,7 +413,7 @@ async def search_embeddings(
     if not query_embeddings or not query_embeddings[0]:
         return EmbeddingsSearchResponse(results=[], count=0)
 
-    manager = ChromaDBManager(user_id=user_id, user_embedding_config=_media_embeddings._user_embedding_config())
+    manager = _ChromaDB_Library.ChromaDBManager(user_id=user_id, user_embedding_config=_media_embeddings._user_embedding_config())
     collection_name = request.collection or f"user_{user_id}_media_embeddings"
 
     try:
@@ -487,7 +487,7 @@ async def delete_embeddings(
             current_user,
             error_status=http_status.HTTP_400_BAD_REQUEST,
         )
-        manager = ChromaDBManager(user_id=user_id, user_embedding_config=_media_embeddings._user_embedding_config())
+        manager = _ChromaDB_Library.ChromaDBManager(user_id=user_id, user_embedding_config=_media_embeddings._user_embedding_config())
         collection_name = f"user_{user_id}_media_embeddings"
         collection = manager.get_or_create_collection(collection_name)
         try:
@@ -508,7 +508,7 @@ async def delete_embeddings(
         except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
             logger.warning("Failed to verify embeddings delete")
 
-        invalidate_rag_caches(current_user, media_id=media_id)
+        _rag_cache.invalidate_rag_caches(current_user, media_id=media_id)
 
         return {
             "status": "success",
@@ -536,7 +536,7 @@ async def get_media_embedding_job(
         current_user,
         error_status=http_status.HTTP_400_BAD_REQUEST,
     )
-    adapter = EmbeddingsJobsAdapter()
+    adapter = _jobs_adapter.EmbeddingsJobsAdapter()
     rec = adapter.get_job(job_id, user_id)
     if not rec:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Job not found")
@@ -557,7 +557,7 @@ async def list_media_embedding_jobs(
         current_user,
         error_status=http_status.HTTP_400_BAD_REQUEST,
     )
-    adapter = EmbeddingsJobsAdapter()
+    adapter = _jobs_adapter.EmbeddingsJobsAdapter()
     fetched = adapter.list_jobs(user_id=user_id, status=status, limit=limit + 1, offset=offset)
     rows = fetched[:limit]
     has_more = len(fetched) > limit

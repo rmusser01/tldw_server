@@ -132,7 +132,7 @@ def test_reading_tts_requires_explicit_model(reading_app):
         item_id = r.json()["id"]
 
         monkeypatch = pytest.MonkeyPatch()
-        monkeypatch.setattr(reading_endpoint, "get_tts_service_v2", fake_get_tts_service)
+        monkeypatch.setattr("tldw_Server_API.app.core.TTS.tts_service_v2.get_tts_service_v2", fake_get_tts_service)
         try:
             r = client.post(
                 f"/api/v1/reading/items/{item_id}/tts",
@@ -575,11 +575,11 @@ def test_reading_summarize_and_tts(reading_app, monkeypatch):
         return FakeTTSService()
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.reading.summarize_analyze",
+        "tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze",
         fake_analyze,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.reading.get_tts_service_v2",
+        "tldw_Server_API.app.core.TTS.tts_service_v2.get_tts_service_v2",
         fake_get_tts_service,
     )
 

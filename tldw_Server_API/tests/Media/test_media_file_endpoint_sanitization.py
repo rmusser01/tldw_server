@@ -60,7 +60,7 @@ async def test_get_media_file_sanitizes_empty_storage_path_log(monkeypatch) -> N
 async def test_get_media_file_sanitizes_storage_existence_error_log(monkeypatch) -> None:
     fake_logger = MagicMock()
     monkeypatch.setattr(file_mod, "logger", fake_logger)
-    monkeypatch.setattr(file_mod, "get_storage_backend", lambda: _ExistenceErrorStorage())
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.get_storage_backend", lambda: _ExistenceErrorStorage())
 
     with pytest.raises(HTTPException) as exc_info:
         await file_mod.get_media_file(

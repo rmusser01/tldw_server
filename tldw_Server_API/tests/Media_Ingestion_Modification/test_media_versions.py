@@ -509,8 +509,7 @@ class TestMediaVersionEndpoints:
             ]
 
         monkeypatch.setattr(
-            media_versions_endpoint,
-            "list_document_versions",
+            "tldw_Server_API.app.core.DB_Management.media_db.api.list_document_versions",
             _fake_list_document_versions,
             raising=False,
         )

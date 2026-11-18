@@ -28,7 +28,7 @@ async def test_ws_concurrent_streams_denied(monkeypatch):
         return False, "Concurrent streams limit reached (1)"
 
     # Force can_start_stream denial
-    monkeypatch.setattr(audio_ep, "can_start_stream", _can_start_stream)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.can_start_stream", _can_start_stream)
 
     settings = get_settings()
     token = settings.SINGLE_USER_API_KEY

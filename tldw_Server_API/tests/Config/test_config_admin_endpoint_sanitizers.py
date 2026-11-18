@@ -70,7 +70,7 @@ def test_build_config_txt_values_sanitizes_section_read_log(monkeypatch: pytest.
             raise configparser.Error("config backend leaked /private/config.txt")
 
     monkeypatch.setattr(config_admin, "logger", logger_stub)
-    monkeypatch.setattr(config_admin, "load_comprehensive_config", lambda: _Parser())
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: _Parser())
 
     assert config_admin._build_config_txt_values() == {}
 
@@ -89,7 +89,7 @@ def test_build_config_txt_values_sanitizes_item_read_log(monkeypatch: pytest.Mon
             raise configparser.Error("config backend leaked /private/config.txt")
 
     monkeypatch.setattr(config_admin, "logger", logger_stub)
-    monkeypatch.setattr(config_admin, "load_comprehensive_config", lambda: _Parser())
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: _Parser())
 
     assert config_admin._build_config_txt_values() == {}
 

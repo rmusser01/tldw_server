@@ -287,7 +287,7 @@ async def test_update_feed_subscription_tags_failure_log_is_sanitized(monkeypatc
 
     fake_logger = MagicMock()
     monkeypatch.setattr(collections_feeds, "logger", fake_logger)
-    monkeypatch.setattr(collections_feeds, "record_watchlist_source_updated", lambda **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Personalization.record_watchlist_source_updated", lambda **_kwargs: None)
 
     response = await collections_feeds.update_feed_subscription(
         feed_id=7,
@@ -328,7 +328,7 @@ async def test_update_feed_subscription_job_failure_log_is_sanitized(monkeypatch
 
     fake_logger = MagicMock()
     monkeypatch.setattr(collections_feeds, "logger", fake_logger)
-    monkeypatch.setattr(collections_feeds, "record_watchlist_source_updated", lambda **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Personalization.record_watchlist_source_updated", lambda **_kwargs: None)
 
     response = await collections_feeds.update_feed_subscription(
         feed_id=7,
@@ -381,7 +381,7 @@ async def test_create_feed_subscription_first_run_failure_log_is_sanitized(monke
     monkeypatch.setattr(collections_feeds, "logger", fake_logger)
     monkeypatch.setattr(collections_feeds, "_compute_next_run", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(collections_feeds, "_register_schedule", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(collections_feeds, "record_watchlist_source_created", lambda **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Personalization.record_watchlist_source_created", lambda **_kwargs: None)
     monkeypatch.setattr(pipeline_module, "run_watchlist_job", _raise_first_run)
 
     response = await collections_feeds.create_feed_subscription(

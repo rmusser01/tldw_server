@@ -32,7 +32,6 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
-from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
@@ -58,6 +57,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     first_saved_filename,
     save_uploaded_files,
 )
+import tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps as _Prompts_DB_Deps
 
 router = APIRouter()
 
@@ -140,7 +140,7 @@ async def process_videos_endpoint(
         await admit_media_analysis(current_user.id, form_data)
 
     final_summary_prompt = await resolve_video_summary_prompts(
-        form_data, lambda: get_prompts_db_for_user(request, current_user)
+        form_data, lambda: _Prompts_DB_Deps.get_prompts_db_for_user(request, current_user)
     )
 
     batch_result: dict[str, Any] = {

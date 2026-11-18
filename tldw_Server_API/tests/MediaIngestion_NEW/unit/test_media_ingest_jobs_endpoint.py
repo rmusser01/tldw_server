@@ -315,8 +315,7 @@ def test_submit_media_ingest_jobs_sanitizes_upload_staging_failure(
 
     monkeypatch.setattr(ingest_jobs, "logger", logger_stub)
     monkeypatch.setattr(
-        ingest_jobs,
-        "save_uploaded_files",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing.save_uploaded_files",
         fake_save_uploaded_files,
         raising=True,
     )

@@ -77,11 +77,10 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     WORKFLOWS_RUNS_READ,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.websocket_principal import auth_subprotocol, resolve_ws_principal
+from tldw_Server_API.app.core.AuthNZ.websocket_principal import auth_subprotocol
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     create_workflows_database,
-    get_content_backend_instance,
 )
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.exceptions import (
@@ -90,7 +89,6 @@ from tldw_Server_API.app.core.exceptions import (
     RetryExhaustedError,
 )
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
-from tldw_Server_API.app.core.http_client import afetch as _http_afetch
 from tldw_Server_API.app.core.Security.egress import (
     ALLOWED_PORTS_ENV,
     DEFAULT_ALLOWED_PORTS,
@@ -220,7 +218,7 @@ router = APIRouter(prefix="/api/v1/workflows", tags=["workflows"])
 
 
 def _get_db() -> WorkflowsDatabase:
-    backend = get_content_backend_instance()
+    backend = _DB_Manager.get_content_backend_instance()
     return create_workflows_database(backend=backend)
 
 
@@ -1662,6 +1660,10 @@ async def workflows_virtual_key(
 
 
 import contextlib
+import tldw_Server_API.app.core.AuthNZ.websocket_principal as _websocket_principal
+import tldw_Server_API.app.core.DB_Management.DB_Manager as _DB_Manager
+import tldw_Server_API.app.core.Workflows as _Workflows
+import tldw_Server_API.app.core.http_client as _http_client
 
 
 @router.post(
@@ -1774,11 +1776,11 @@ async def run_saved(
                         )
     except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"Workflows endpoint: inline fallback check failed: {e}")
-    engine = WorkflowEngine(db)
+    engine = _Workflows.WorkflowEngine(db)
     # Inject scoped secrets (not persisted)
     try:
         if body and getattr(body, "secrets", None):
-            WorkflowEngine.set_run_secrets(run_id, body.secrets)
+            _Workflows.WorkflowEngine.set_run_secrets(run_id, body.secrets)
     except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"Workflows endpoint(adhoc): inline fallback check failed: {e}")
     run_mode = RunMode.ASYNC if str(mode).lower() == "async" else RunMode.SYNC
@@ -2206,10 +2208,10 @@ async def run_adhoc(
         session_id=body.session_id,
         validation_mode=(body.validation_mode if getattr(body, "validation_mode", None) else "block"),
     )
-    engine = WorkflowEngine(db)
+    engine = _Workflows.WorkflowEngine(db)
     try:
         if body and getattr(body, "secrets", None):
-            WorkflowEngine.set_run_secrets(run_id, body.secrets)
+            _Workflows.WorkflowEngine.set_run_secrets(run_id, body.secrets)
     except _WORKFLOWS_NONCRITICAL_EXCEPTIONS:
         pass
     run_mode = RunMode.ASYNC if str(mode).lower() == "async" else RunMode.SYNC
@@ -2685,7 +2687,7 @@ async def replay_webhook_dlq(
             headers["X-Workflows-Signature"] = sig
             headers["X-Hub-Signature-256"] = f"sha256={sig}"
         timeout = float(_os.getenv("WORKFLOWS_WEBHOOK_TIMEOUT", "10"))
-        resp = await _http_afetch(
+        resp = await _http_client.afetch(
             method="POST",
             url=url,
             data=raw,
@@ -3474,7 +3476,7 @@ async def control_run(
     is_admin = _is_workflows_admin_user(current_user)
     if str(run.user_id) != str(current_user.id) and not is_admin:
         raise HTTPException(status_code=404, detail="Run not found")
-    engine = WorkflowEngine(db)
+    engine = _Workflows.WorkflowEngine(db)
     # Admin impersonation audit trail (header opt-in)
     try:
         imp = str(request.headers.get("x-impersonate-user", "")).strip()
@@ -4143,7 +4145,7 @@ async def get_workflows_config(
         return is_truthy(v)
 
     backend_type = "sqlite"
-    backend = get_content_backend_instance()
+    backend = _DB_Manager.get_content_backend_instance()
     if backend is not None and getattr(backend, "backend_type", None) == BackendType.POSTGRESQL:
         backend_type = "postgres"
 
@@ -4209,7 +4211,7 @@ async def retry_run(
     is_admin = _is_workflows_admin_user(current_user)
     if str(run.user_id) != str(current_user.id) and not is_admin:
         raise HTTPException(status_code=404, detail="Run not found")
-    engine = WorkflowEngine(db)
+    engine = _Workflows.WorkflowEngine(db)
     result = engine.retry(run_id)
     return {"ok": True, "result": result}
 
@@ -4319,7 +4321,7 @@ async def approve_step(
     except _WORKFLOWS_NONCRITICAL_EXCEPTIONS:
         next_step_id = None
     # Resume run from next step
-    engine = WorkflowEngine(db)
+    engine = _Workflows.WorkflowEngine(db)
     # Pass edited fields as last outputs override
     last_outputs = payload.edited_fields or {}
     last_outputs.setdefault("decision", "approved")
@@ -4537,7 +4539,7 @@ async def reject_step(
                 },
             ) from exc
     if failure_next:
-        engine = WorkflowEngine(db)
+        engine = _Workflows.WorkflowEngine(db)
         last_outputs = payload.edited_fields or {}
         last_outputs.setdefault("decision", "rejected")
         if payload.comment:
@@ -4621,7 +4623,7 @@ async def workflows_ws(
     db: WorkflowsDatabase = Depends(_get_db),
 ):
     try:
-        principal = await resolve_ws_principal(websocket, required_scope="read")
+        principal = await _websocket_principal.resolve_ws_principal(websocket, required_scope="read")
     except WebSocketException as exc:
         await _close_workflows_websocket(websocket, exc.code, exc.reason)
         return

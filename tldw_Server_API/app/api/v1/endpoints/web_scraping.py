@@ -12,7 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
-from tldw_Server_API.app.services.enhanced_web_scraping_service import get_web_scraping_service
+import tldw_Server_API.app.services.enhanced_web_scraping_service as _enhanced_web_scraping_service
 
 router = APIRouter(
     prefix="/web-scraping",
@@ -47,7 +47,7 @@ async def get_scraping_service_status(
         - Rate limiting configuration
     """
     try:
-        service = get_web_scraping_service()
+        service = _enhanced_web_scraping_service.get_web_scraping_service()
         return service.get_service_status()
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:
         logger.error("Failed to get scraping service status")
@@ -69,7 +69,7 @@ async def get_scraping_job_status(
         Job details including status, progress, and results
     """
     try:
-        service = get_web_scraping_service()
+        service = _enhanced_web_scraping_service.get_web_scraping_service()
         return await service.get_job_status(job_id, current_user)
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:
         logger.error("Failed to get scraping job status")
@@ -91,7 +91,7 @@ async def cancel_scraping_job(
         Cancellation status
     """
     try:
-        service = get_web_scraping_service()
+        service = _enhanced_web_scraping_service.get_web_scraping_service()
         return await service.cancel_job(job_id, current_user)
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:
         logger.error("Failed to cancel scraping job")
@@ -108,7 +108,7 @@ async def initialize_scraping_service(
     This starts the worker pool and prepares the service for scraping.
     """
     try:
-        service = get_web_scraping_service()
+        service = _enhanced_web_scraping_service.get_web_scraping_service()
         await service.initialize()
         return {
             "status": "success",
@@ -130,7 +130,7 @@ async def shutdown_scraping_service(
     This stops all workers and cleans up resources.
     """
     try:
-        service = get_web_scraping_service()
+        service = _enhanced_web_scraping_service.get_web_scraping_service()
         await service.shutdown()
         return {
             "status": "success",
@@ -158,7 +158,7 @@ async def get_scraping_progress(
         Progress information including pages scraped, remaining, current URL, etc.
     """
     try:
-        service = get_web_scraping_service()
+        service = _enhanced_web_scraping_service.get_web_scraping_service()
         if not service._initialized:
             raise HTTPException(status_code=503, detail="Service not initialized")
 
@@ -195,7 +195,7 @@ async def get_cookies_for_domain(
         List of cookies for the domain
     """
     try:
-        service = get_web_scraping_service()
+        service = _enhanced_web_scraping_service.get_web_scraping_service()
         if not service._initialized:
             await service.initialize()
 
@@ -230,7 +230,7 @@ async def set_cookies_for_domain(
         Success status
     """
     try:
-        service = get_web_scraping_service()
+        service = _enhanced_web_scraping_service.get_web_scraping_service()
         if not service._initialized:
             await service.initialize()
 
@@ -268,7 +268,7 @@ async def check_url_duplicate(
             get_metrics_registry().increment("security_ssrf_block_total", 1)
             raise
 
-        service = get_web_scraping_service()
+        service = _enhanced_web_scraping_service.get_web_scraping_service()
         if not service._initialized:
             await service.initialize()
 

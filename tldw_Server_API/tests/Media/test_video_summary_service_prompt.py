@@ -80,7 +80,7 @@ def context(
         return {"choices": [{"message": {"role": "assistant", "content": "Report summary."}, "finish_reason": "stop"}]}
 
     monkeypatch.setitem(client.app.dependency_overrides, get_request_user, current_user)
-    monkeypatch.setattr(endpoint, "get_prompts_db_for_user", get_db, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps.get_prompts_db_for_user", get_db, raising=False)
     monkeypatch.setattr(video, "perform_transcription", transcribe)
     monkeypatch.setattr(OpenAIAdapter, "chat", adapter)
     monkeypatch.setattr(summary, "load_and_log_configs", lambda: {"openai_api": {"model": "test-model"}})
