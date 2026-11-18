@@ -494,7 +494,7 @@ def _mandatory_audit_unavailable_detail() -> dict[str, str]:
 # Load configuration values from config
 import contextlib
 
-from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.config import chat_queued_execution_enabled, load_comprehensive_config
 import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
 import tldw_Server_API.app.api.v1.API_Deps.billing_deps as _billing_deps
 import tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps as _usage_quota_deps
@@ -650,7 +650,7 @@ def _cfg_bool_cmds(env_name: str, cfg_key: str, fallback: bool) -> bool:
 
 # Feature flag: queued execution of chat calls via workers (default disabled)
 try:
-    QUEUED_EXECUTION: bool = __config.chat_queued_execution_enabled(_chat_config)
+    QUEUED_EXECUTION: bool = chat_queued_execution_enabled(_chat_config)
 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
     QUEUED_EXECUTION = False
 
