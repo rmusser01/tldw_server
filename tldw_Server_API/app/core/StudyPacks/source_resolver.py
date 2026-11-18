@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 
 from .types import (
+    StudyPackSectionError,
     StudySourceBundle,
     StudySourceBundleItem,
     StudySourceSelection,
@@ -158,9 +159,12 @@ def _prepare_evidence(
 class StudySourceResolver:
     """Resolves supported workspace objects into stable study-pack evidence bundles."""
 
-    def __init__(self, *, db: Any | None = None, media_db: Any | None = None):
+    def __init__(
+        self, *, db: Any | None = None, media_db: Any | None = None, expand_whole_media: bool = False
+    ):
         self.db = db
         self.media_db = media_db
+        self.expand_whole_media = expand_whole_media
 
     def resolve(
         self,
@@ -256,6 +260,11 @@ class StudySourceResolver:
         label = selection.label or _clean_text(media.get("title")) or f"Media {media_id}"
         locator = dict(selection.locator)
         chunk_index = locator.get("chunk_index")
+        timestamp_value = locator.get("timestamp_seconds")
+        whole_media = chunk_index is None and timestamp_value is None and selection.excerpt_text is None
+        section_locator = {key: locator[key] for key in ("section_indices", "section_revision") if key in locator}
+        if section_locator and not whole_media:
+            raise StudyPackSectionError("study_pack_sections_conflict")
         if chunk_index is not None:
             chunk_index = _parse_non_negative_int(chunk_index, "chunk_index")
             try:
@@ -297,7 +306,6 @@ class StudySourceResolver:
                     locator=normalized_locator,
                 )
 
-        timestamp_value = locator.get("timestamp_seconds")
         transcript = _clean_text(get_latest_transcription(self.media_db, media_id))
         normalized_locator: dict[str, Any] = {"media_id": media_id}
         if timestamp_value is not None:
@@ -305,15 +313,16 @@ class StudySourceResolver:
                 timestamp_value,
                 "timestamp_seconds",
             )
-        evidence_text, normalized_locator = _prepare_evidence(
-            selection,
-            normalized_locator,
-            transcript,
-            media.get("content") if timestamp_value is None else None,
+        evidence_text = _pick_evidence_text(
+            selection, transcript, media.get("content") if timestamp_value is None else None
         )
         if not evidence_text:
             evidence_kind = "transcript" if timestamp_value is not None else "text"
             raise ValueError(f"Media {media_id} has no {evidence_kind} evidence to resolve")
+        if self.expand_whole_media and whole_media:
+            normalized_locator.update(section_locator)
+        else:
+            evidence_text, normalized_locator = _bounded_evidence_text(evidence_text, normalized_locator)
 
         return StudySourceBundleItem(
             source_type="media",

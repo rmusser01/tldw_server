@@ -12,6 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_owner
 from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobRequest
 from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import get_chacha_db_for_user_id
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.StudyPacks.generation_service import StudyPackGenerationService
@@ -61,7 +62,7 @@ async def handle_study_pack_job(job: dict[str, Any]) -> dict[str, Any]:
     if expected_version is not None:
         expected_version = int(expected_version)
 
-    with chacha_operation(independent=True):
+    with scoped_context(user_id=int(owner_user_id), is_admin=False), chacha_operation(independent=True):
         note_db = None
         media_db = None
         try:

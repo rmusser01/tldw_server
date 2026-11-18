@@ -7,6 +7,7 @@ import json
 import os
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -19,17 +20,28 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     normalize_provider,
     resolve_provider_model,
 )
+from tldw_Server_API.app.core.StudyPacks.media_sections import (
+    MAX_STUDY_PACK_PASSES,
+    plan_media_sections,
+    section_passages,
+    selected_section_indices,
+)
 from tldw_Server_API.app.core.StudyPacks.provenance import (
     FlashcardProvenanceStore,
     normalize_citations_for_persistence,
 )
-from tldw_Server_API.app.core.StudyPacks.source_resolver import StudySourceResolver
+from tldw_Server_API.app.core.StudyPacks.source_resolver import (
+    StudySourceResolver,
+    _bounded_evidence_text,
+    _max_evidence_chars_per_source,
+)
 from tldw_Server_API.app.core.StudyPacks.study_pack_schemas import StudyPackCreateJobRequest
 from tldw_Server_API.app.core.StudyPacks.types import (
     StudyCitationDraft,
     StudyPackCardDraft,
     StudyPackCreationResult,
     StudyPackGenerationResult,
+    StudyPackSectionError,
     StudySourceBundle,
     StudySourceBundleItem,
 )
@@ -59,6 +71,10 @@ class StudyPackMalformedResponseError(StudyPackGenerationError):
 
 class StudyPackValidationError(StudyPackGenerationError):
     """Raised when parsed cards fail the strict study-pack validation rules."""
+
+
+class StudyPackNoCardsError(StudyPackValidationError):
+    """The model returned valid JSON with no cards."""
 
 
 def _clean_text(value: Any) -> str:
@@ -194,6 +210,53 @@ def _resolve_generation_provider_and_model(
     return resolved_provider, resolved_model, app_config
 
 
+def _plan_generation_bundles(bundle: StudySourceBundle) -> tuple[StudySourceBundle, list[StudySourceBundle]]:
+    limit = _max_evidence_chars_per_source()
+    if not any(
+        item.source_type == "media"
+        and (len(item.evidence_text) > limit or "section_indices" in item.locator or "section_revision" in item.locator)
+        for item in bundle.items
+    ):
+        return bundle, [bundle]
+
+    snapshots = []
+    batches = []
+    for item in bundle.items:
+        if item.source_type != "media":
+            snapshots.append(item)
+            batches.append(StudySourceBundle(items=[item]))
+            continue
+
+        revision, sections = plan_media_sections(item.evidence_text, limit)
+        indices = selected_section_indices(item.locator, revision, sections)
+        if not sections:
+            snapshots.append(item)
+            batches.append(StudySourceBundle(items=[item]))
+            continue
+
+        first = sections[indices[0]]
+        snapshot, locator = _bounded_evidence_text(
+            item.evidence_text[first.start:first.end],
+            {**item.locator, "section_revision": revision, "section_indices": indices},
+        )
+        snapshots.append(replace(item, evidence_text=snapshot, locator=locator))
+        for index in indices:
+            section = sections[index]
+            for start, end, passage in section_passages(item.evidence_text, section, limit):
+                if len(batches) >= MAX_STUDY_PACK_PASSES:
+                    raise StudyPackSectionError("study_pack_section_budget")
+                batches.append(StudySourceBundle(items=[replace(
+                    item, evidence_text=passage, label=f"{item.label} · {section.title}", locator={
+                        "media_id": item.locator["media_id"],
+                        "start_char": start, "end_char": end,
+                    },
+                )]))
+
+    if len(batches) > MAX_STUDY_PACK_PASSES:
+        raise StudyPackSectionError("study_pack_section_budget")
+    return StudySourceBundle(items=snapshots), batches
+
+
 class StudyPackGenerationService:
     """Generates validated flashcards from a resolved study source bundle and persists them atomically."""
 
@@ -208,7 +271,7 @@ class StudyPackGenerationService:
         self.note_db = note_db
         self.media_db = media_db
         self.provider, self.model, self.app_config = _resolve_generation_provider_and_model(provider, model)
-        self.source_resolver = StudySourceResolver(db=note_db, media_db=media_db)
+        self.source_resolver = StudySourceResolver(db=note_db, media_db=media_db, expand_whole_media=True)
         self.provenance_store = FlashcardProvenanceStore(note_db)
 
     async def create_from_request(
@@ -218,8 +281,23 @@ class StudyPackGenerationService:
         regenerate_from_pack_id: int | None = None,
         expected_regenerate_version: int | None = None,
     ) -> StudyPackCreationResult:
-        bundle = await asyncio.to_thread(self.source_resolver.resolve, request.source_items)
-        generated = await self.generate_validated_cards(bundle, request)
+        resolved = await asyncio.to_thread(self.source_resolver.resolve, request.source_items)
+        bundle, batches = await asyncio.to_thread(_plan_generation_bundles, resolved)
+        if bundle is resolved:
+            generated = await self.generate_validated_cards(bundle, request)
+        else:
+            results = []
+            for batch in batches:
+                try:
+                    results.append(await self.generate_validated_cards(batch, request, allow_empty=True))
+                except StudyPackNoCardsError:
+                    continue
+            if not results:
+                raise StudyPackSectionError("study_pack_sections_no_cards")
+            generated = StudyPackGenerationResult(
+                cards=[card for result in results for card in result.cards],
+                repair_attempted=any(result.repair_attempted for result in results),
+            )
         return self._persist_generated_cards(
             bundle=bundle,
             request=request,
@@ -232,8 +310,12 @@ class StudyPackGenerationService:
         self,
         bundle: StudySourceBundle,
         request: StudyPackCreateJobRequest,
+        *,
+        allow_empty: bool = False,
     ) -> StudyPackGenerationResult:
         system_prompt = self._build_generation_system_prompt(request)
+        if allow_empty:
+            system_prompt += "\nUse an empty cards array when this passage contains no material worth studying."
         user_prompt = self._build_generation_user_prompt(bundle=bundle, request=request)
         raw_response = await self._call_generation_model(
             system_prompt=system_prompt,
@@ -243,6 +325,8 @@ class StudyPackGenerationService:
             cards = self._parse_and_validate_response(raw_response, bundle=bundle)
             return StudyPackGenerationResult(cards=cards, raw_response=raw_response, repair_attempted=False)
         except (StudyPackMalformedResponseError, StudyPackValidationError) as exc:
+            if allow_empty and isinstance(exc, StudyPackNoCardsError):
+                raise
             logger.warning(
                 "Study-pack generation output failed strict validation, attempting a single repair pass: {}",
                 exc,
@@ -253,7 +337,10 @@ class StudyPackGenerationService:
             bundle=bundle,
             request=request,
         )
-        cards = self._parse_and_validate_response(repaired_response, bundle=bundle)
+        try:
+            cards = self._parse_and_validate_response(repaired_response, bundle=bundle)
+        except StudyPackNoCardsError as exc:
+            raise StudyPackValidationError("Study Pack response repair returned no cards.") from exc
         return StudyPackGenerationResult(cards=cards, raw_response=repaired_response, repair_attempted=True)
 
     def _persist_generated_cards(
@@ -491,7 +578,7 @@ class StudyPackGenerationService:
         if not isinstance(raw_cards, list):
             raise StudyPackMalformedResponseError("Study-pack response must include a cards array")
         if not raw_cards:
-            raise StudyPackValidationError("Study-pack generation returned no cards")
+            raise StudyPackNoCardsError("Study-pack generation returned no cards")
 
         bundle_lookup = {
             _bundle_item_key(item.source_type, item.source_id): item
@@ -594,6 +681,8 @@ class StudyPackGenerationService:
         raw_locator: Any,
     ) -> dict[str, Any]:
         locator = dict(bundle_item.locator)
+        if bundle_item.source_type == "media" and "start_char" in locator and "end_char" in locator:
+            return locator
         if isinstance(raw_locator, Mapping):
             for key, value in raw_locator.items():
                 if value not in (None, "", [], {}):

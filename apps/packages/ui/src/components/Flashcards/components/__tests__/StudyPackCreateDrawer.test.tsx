@@ -1,10 +1,11 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { StudyPackCreateDrawer } from "../StudyPackCreateDrawer"
+import { bgRequest } from "@/services/background-proxy"
 import { tldwClient } from "@/services/tldw"
 import type { StudyPackIntent } from "@/services/tldw/study-pack-handoff"
 
@@ -50,6 +51,11 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/hooks/useAntdMessage", () => ({
   useAntdMessage: () => messageSpies
+}))
+
+vi.mock("@/services/background-proxy", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/background-proxy")>(),
+  bgRequest: vi.fn()
 }))
 
 vi.mock("../../hooks", async () => {
@@ -166,6 +172,267 @@ describe("StudyPackCreateDrawer", () => {
         source_items: [{ source_type: "media", source_id: "42", source_title: "Routing protocols" }],
         deck_mode: "new"
       })
+    })
+  })
+
+  it("submits only the checked sections and blocks an empty selection", async () => {
+    vi.mocked(bgRequest).mockResolvedValue({
+      revision: "current-media",
+      sections: [
+        { index: 0, title: "Chapter one", character_count: 5000 },
+        { index: 1, title: "Chapter two", character_count: 5600 }
+      ]
+    })
+    createStudyPackJobMock.mockResolvedValue({ job: { id: 91 } })
+    const user = userEvent.setup()
+    renderDrawer(
+      <StudyPackCreateDrawer
+        open
+        onClose={vi.fn()}
+        initialIntent={{
+          title: "Networks",
+          sourceItems: [{ sourceType: "media", sourceId: "42", sourceTitle: "Networking textbook" }]
+        }}
+      />
+    )
+
+    const create = screen.getByRole("button", { name: "Create study pack" })
+    expect(bgRequest).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Review sections" }))
+    const first = await screen.findByRole("checkbox", { name: "Chapter one" })
+    const second = screen.getByRole("checkbox", { name: "Chapter two" })
+    expect(first).toBeChecked()
+    expect(second).toBeChecked()
+    expect(bgRequest).toHaveBeenCalledWith({
+      method: "GET",
+      path: "/api/v1/flashcards/study-packs/media/42/sections",
+      abortSignal: expect.any(AbortSignal)
+    })
+
+    await user.click(first)
+    await user.click(second)
+    expect(create).toBeDisabled()
+    await user.click(second)
+    await user.click(screen.getByRole("button", { name: "Review sections" }))
+    await user.click(create)
+    expect(createStudyPackJobMock).toHaveBeenCalledWith({
+      title: "Networks",
+      source_items: [{
+        source_type: "media",
+        source_id: "42",
+        source_title: "Networking textbook",
+        locator: { section_indices: [1], section_revision: "current-media" }
+      }],
+      deck_mode: "new"
+    })
+  })
+
+  it("offers section review only for a whole media source", () => {
+    renderDrawer(
+      <StudyPackCreateDrawer
+        open
+        onClose={vi.fn()}
+        initialIntent={{
+          title: "Networks",
+          sourceItems: [
+            { sourceType: "media", sourceId: "1", locator: { timestamp_seconds: 0 } },
+            { sourceType: "media", sourceId: "2", locator: { chunk_index: 0 } },
+            { sourceType: "media", sourceId: "3", excerptText: "An extract" },
+            { sourceType: "note", sourceId: "4" },
+            { sourceType: "message", sourceId: "5" },
+            { sourceType: "media", sourceId: "6" }
+          ]
+        }}
+      />
+    )
+
+    expect(screen.getAllByRole("button", { name: "Review sections" })).toHaveLength(1)
+    expect(screen.getByTestId("study-pack-source-5")).toContainElement(
+      screen.getByRole("button", { name: "Review sections" })
+    )
+  })
+
+  it("requires a fresh section choice when the media revision changes", async () => {
+    const sections = [
+      { index: 0, title: "Chapter one", character_count: 5000 },
+      { index: 1, title: "Chapter two", character_count: 5600 }
+    ]
+    vi.mocked(bgRequest)
+      .mockResolvedValueOnce({ revision: "old-media", sections })
+      .mockResolvedValueOnce({
+        revision: "new-media",
+        sections: [sections[0], { ...sections[1], title: "Revised chapter" }]
+      })
+    createStudyPackJobMock.mockResolvedValue({ job: { id: 91 } })
+    const user = userEvent.setup()
+    renderDrawer(
+      <StudyPackCreateDrawer
+        open
+        onClose={vi.fn()}
+        initialIntent={{
+          title: "Networks",
+          sourceItems: [{ sourceType: "media", sourceId: "42" }]
+        }}
+      />
+    )
+
+    const review = screen.getByRole("button", { name: "Review sections" })
+    await user.click(review)
+    await user.click(await screen.findByRole("checkbox", { name: "Chapter one" }))
+    await user.click(review)
+    await user.click(review)
+
+    const revised = await screen.findByRole("checkbox", { name: "Revised chapter" })
+    expect(revised).not.toBeChecked()
+    expect(screen.getByRole("checkbox", { name: "Chapter one" })).not.toBeChecked()
+    expect(screen.getByText("This media changed. Choose its sections again.")).toBeVisible()
+    const create = screen.getByRole("button", { name: "Create study pack" })
+    expect(create).toBeDisabled()
+    await user.click(revised)
+    await user.click(create)
+    expect(createStudyPackJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      source_items: [expect.objectContaining({
+        locator: { section_indices: [1], section_revision: "new-media" }
+      })]
+    }))
+  })
+
+  it("requires an explicit choice to use the whole source when its sections disappear", async () => {
+    vi.mocked(bgRequest)
+      .mockResolvedValueOnce({
+        revision: "old-media",
+        sections: [
+          { index: 0, title: "Chapter one", character_count: 5000 },
+          { index: 1, title: "Chapter two", character_count: 5600 }
+        ]
+      })
+      .mockResolvedValueOnce({ revision: "short-media", sections: [] })
+    createStudyPackJobMock.mockResolvedValue({ job: { id: 91 } })
+    const user = userEvent.setup()
+    renderDrawer(
+      <StudyPackCreateDrawer
+        open
+        onClose={vi.fn()}
+        initialIntent={{
+          title: "Networks",
+          sourceItems: [{ sourceType: "media", sourceId: "42" }]
+        }}
+      />
+    )
+
+    const review = screen.getByRole("button", { name: "Review sections" })
+    await user.click(review)
+    await user.click(await screen.findByRole("checkbox", { name: "Chapter one" }))
+    await user.click(review)
+    await user.click(review)
+    const useWhole = await screen.findByRole("button", { name: "Use whole source" })
+    const create = screen.getByRole("button", { name: "Create study pack" })
+    expect(create).toBeDisabled()
+    await user.click(useWhole)
+    await user.click(create)
+    expect(createStudyPackJobMock).toHaveBeenCalledWith({
+      title: "Networks",
+      source_items: [{ source_type: "media", source_id: "42", locator: undefined }],
+      deck_mode: "new"
+    })
+  })
+
+  it("requires narrowing the selection when previewed sources exceed the pack pass budget", async () => {
+    vi.mocked(bgRequest)
+      .mockResolvedValueOnce({
+        revision: "long-media",
+        max_generation_passes: 3,
+        sections: [
+          { index: 0, title: "Chapter one", character_count: 5000, generation_passes: 2 },
+          { index: 1, title: "Chapter two", character_count: 5600, generation_passes: 1 }
+        ]
+      })
+      .mockResolvedValueOnce({ revision: "short-media", max_generation_passes: 3, sections: [] })
+    createStudyPackJobMock.mockResolvedValue({ job: { id: 91 } })
+    const user = userEvent.setup()
+    renderDrawer(
+      <StudyPackCreateDrawer
+        open
+        onClose={vi.fn()}
+        initialIntent={{
+          title: "Networks",
+          sourceItems: [
+            { sourceType: "media", sourceId: "42" },
+            { sourceType: "media", sourceId: "7" }
+          ]
+        }}
+      />
+    )
+
+    const longSource = within(screen.getByTestId("study-pack-source-0"))
+    const shortSource = within(screen.getByTestId("study-pack-source-1"))
+    await user.click(longSource.getByRole("button", { name: "Review sections" }))
+    const chapterTwo = await longSource.findByRole("checkbox", { name: "Chapter two" })
+    expect(chapterTwo).toBeChecked()
+    expect(await screen.findByText(/needs 4 generation passes.*limit is 3.*Uncheck sections/)).toBeVisible()
+    await user.click(shortSource.getByRole("button", { name: "Review sections" }))
+    expect(await screen.findByText(/needs 4 generation passes.*limit is 3.*Uncheck sections/)).toBeVisible()
+    const create = screen.getByRole("button", { name: "Create study pack" })
+    expect(create).toBeDisabled()
+
+    await user.click(chapterTwo)
+    await user.click(create)
+    expect(createStudyPackJobMock).toHaveBeenCalledWith({
+      title: "Networks",
+      source_items: [
+        { source_type: "media", source_id: "42", locator: { section_indices: [0], section_revision: "long-media" } },
+        { source_type: "media", source_id: "7", locator: undefined }
+      ],
+      deck_mode: "new"
+    })
+  })
+
+  it("aborts a section preview when the authenticated account changes", async () => {
+    vi.mocked(bgRequest).mockImplementationOnce(() => new Promise(() => {}))
+    const onClose = vi.fn()
+    renderDrawer(
+      <StudyPackCreateDrawer
+        open
+        onClose={onClose}
+        initialIntent={{
+          title: "Networks",
+          sourceItems: [{ sourceType: "media", sourceId: "42" }]
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Review sections" }))
+    await waitFor(() => expect(bgRequest).toHaveBeenCalledTimes(1))
+    const signal = vi.mocked(bgRequest).mock.calls[0][0].abortSignal
+    expect(signal?.aborted).toBe(false)
+    fireEvent(window, new Event("tldw:auth-principal-changed"))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(signal?.aborted).toBe(true)
+    expect(screen.queryByRole("button", { name: "Review sections" })).not.toBeInTheDocument()
+  })
+
+  it("keeps a short media source whole when the preview has no sections", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({ revision: "short-media", sections: [] })
+    createStudyPackJobMock.mockResolvedValue({ job: { id: 91 } })
+    renderDrawer(
+      <StudyPackCreateDrawer
+        open
+        onClose={vi.fn()}
+        initialIntent={{
+          title: "Networks",
+          sourceItems: [{ sourceType: "media", sourceId: "42" }]
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Review sections" }))
+    expect(await screen.findByText("This media will be used as a single source.")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Create study pack" }))
+    expect(createStudyPackJobMock).toHaveBeenCalledWith({
+      title: "Networks",
+      source_items: [{ source_type: "media", source_id: "42", locator: undefined }],
+      deck_mode: "new"
     })
   })
 

@@ -8,11 +8,13 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import flashcards as flashcards_endpoints
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 pytestmark = pytest.mark.integration
@@ -227,9 +229,18 @@ def test_regenerate_study_pack_returns_400_when_job_payload_is_too_large(
     assert "too large" in response.json()["detail"]  # nosec B101
 
 
+@pytest.mark.parametrize(
+    ("error_code", "expected"),
+    [
+        (None, "Study pack generation failed."),
+        ("study_pack_sections_changed", "The saved source changed. Review its sections again before creating a Study Pack."),
+    ],
+)
 def test_failed_study_pack_jobs_return_diagnostics_without_partial_pack(
     client: TestClient,
     jobs_db_path: Path,
+    error_code: str | None,
+    expected: str,
 ):
     jm = _jobs_manager(jobs_db_path)
     job = jm.create_job(
@@ -249,6 +260,7 @@ def test_failed_study_pack_jobs_return_diagnostics_without_partial_pack(
     jm.fail_job(
         int(job["id"]),
         error="llm exploded",
+        error_code=error_code,
         retryable=False,
         worker_id="study-pack-test",
         lease_id=str(acquired["lease_id"]),
@@ -259,7 +271,7 @@ def test_failed_study_pack_jobs_return_diagnostics_without_partial_pack(
     assert response.status_code == 200  # nosec B101
     body = response.json()
     assert body["job"]["status"] == "failed"  # nosec B101
-    assert body["error"] == "Study pack generation failed."  # nosec B101
+    assert body["error"] == expected  # nosec B101
     assert body["study_pack"] is None  # nosec B101
 
 
@@ -372,3 +384,23 @@ def test_admin_job_status_reads_completed_pack_from_owner_database(
         app.dependency_overrides.clear()
         admin_db.close_connection()
         owner_db.close_connection()
+
+
+def test_preview_saved_media_sections_returns_titles_without_book_text(client: TestClient, tmp_path, monkeypatch):
+    monkeypatch.setenv("STUDY_PACK_MAX_EVIDENCE_CHARS_PER_SOURCE", "80")
+    media_db = MediaDatabase(db_path=str(tmp_path / "preview.db"), client_id="study-pack-preview")
+    title = "Study guide"
+    book = "# Introduction\nIntroductory material.\nChapter 1: Seedlings\n" + "Seeds germinate with water. " * 8
+    media_id, _, _ = media_db.add_media_with_keywords(title=title, content=book, media_type="ebook", keywords=[])
+    client.app.dependency_overrides[get_media_db_for_user] = lambda: media_db
+    try:
+        response = client.get(f"/api/v1/flashcards/study-packs/media/{media_id}/sections")
+    finally:
+        media_db.close_connection()
+
+    assert response.status_code == 200  # nosec B101
+    preview = response.json()
+    assert [section["title"] for section in preview["sections"]] == ["Introduction", "Chapter 1: Seedlings"]  # nosec B101
+    assert all(section["character_count"] > 0 for section in preview["sections"])  # nosec B101
+    assert "Seeds germinate with water" not in response.text  # nosec B101
+    assert len(preview["revision"]) == 64  # nosec B101

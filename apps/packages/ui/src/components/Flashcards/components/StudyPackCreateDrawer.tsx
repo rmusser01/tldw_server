@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Drawer, Input, Select, Space, Typography } from "antd"
+import { Button, Checkbox, Drawer, Input, Select, Space, Typography } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronDown, ChevronRight, FileText, Film, MessageSquare, Trash2 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
@@ -13,10 +13,12 @@ import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useDebounce } from "@/hooks/useDebounce"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { tldwClient } from "@/services/tldw"
-import type {
-  StudyPackSourceSelection,
-  StudyPackSourceType,
-  StudyPackSummaryResponse
+import {
+  getStudyPackMediaSections,
+  type StudyPackMediaSectionsResponse,
+  type StudyPackSourceSelection,
+  type StudyPackSourceType,
+  type StudyPackSummaryResponse
 } from "@/services/flashcards"
 import type { StudyPackIntent } from "@/services/tldw/study-pack-handoff"
 import { useStudyPackCreateMutation, useStudyPackJobQuery } from "../hooks"
@@ -52,6 +54,147 @@ const normalizeIntentSources = (
     : []
 
 type MediaOption = { value: string; label: string; title?: string }
+
+type SourceRow = {
+  rowId: number
+  item: StudyPackSourceSelection
+  sectionPreview?: StudyPackMediaSectionsResponse
+  needsSectionReview?: boolean
+}
+type SectionSelection = { section_indices: number[]; section_revision: string }
+
+const withSectionSelection = (item: StudyPackSourceSelection, selection: SectionSelection | null) => {
+  const locator = { ...item.locator, ...selection }
+  if (!selection) {
+    delete locator.section_indices
+    delete locator.section_revision
+  }
+  return { ...item, locator: Object.keys(locator).length ? locator : undefined }
+}
+
+const isWholeMedia = (source: StudyPackSourceSelection) =>
+  source.source_type === "media" &&
+  !source.excerpt_text?.trim() &&
+  source.locator?.timestamp_seconds == null &&
+  source.locator?.chunk_index == null
+
+const StudyPackMediaSections = ({
+  rowId,
+  item,
+  sectionPreview,
+  needsSectionReview,
+  accountScope,
+  onPreview,
+  onChange
+}: SourceRow & {
+  accountScope: string
+  onPreview: (rowId: number, result: StudyPackMediaSectionsResponse) => void
+  onChange: (rowId: number, selection: SectionSelection | null) => void
+}) => {
+  const { t } = useTranslation(["option", "common"])
+  const disclosureId = React.useId()
+  const [expanded, setExpanded] = React.useState(false)
+  const preview = useQuery({
+    queryKey: ["flashcards:study-packs:media-sections", accountScope, item.source_id],
+    enabled: expanded,
+    gcTime: 0,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      const response = await getStudyPackMediaSections(item.source_id, { signal })
+      signal.throwIfAborted()
+      return response
+    }
+  })
+  const reviewLabel = t("option:flashcards.studyPackReviewSections", {
+    defaultValue: "Review sections"
+  })
+  const result = preview.isError ? undefined : sectionPreview
+  const fetched = preview.isError ? undefined : preview.data
+  React.useEffect(() => {
+    if (expanded && fetched) onPreview(rowId, fetched)
+  }, [expanded, fetched, onPreview, rowId])
+
+  const storedIndices = item.locator?.section_indices
+  const storedSelection = Array.isArray(storedIndices) ? storedIndices : undefined
+  const sectionStatus = needsSectionReview
+    ? sectionPreview?.sections.length
+      ? t("option:flashcards.studyPackSectionsChanged", {
+          defaultValue: "This media changed. Choose its sections again."
+        })
+      : t("option:flashcards.studyPackSectionsNoLongerAvailable", {
+          defaultValue: "This media changed and no longer has sections to choose."
+        })
+    : storedSelection?.length === 0
+      ? t("option:flashcards.studyPackSectionsRequired", { defaultValue: "Select at least one section." })
+      : null
+
+  return (
+    <>
+      <button
+        type="button"
+        className="mt-1 inline-flex items-center gap-1 text-sm text-text-muted hover:text-text"
+        aria-expanded={expanded}
+        aria-controls={disclosureId}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        {expanded ? (
+          <ChevronDown className="size-4" aria-hidden="true" />
+        ) : (
+          <ChevronRight className="size-4" aria-hidden="true" />
+        )}
+        {reviewLabel}
+      </button>
+      {sectionStatus ? (
+        <Text type="danger" role="status" className="block">
+          {sectionStatus}
+        </Text>
+      ) : null}
+      <div id={disclosureId} hidden={!expanded}>
+        {expanded && (
+          preview.isError ? (
+            <Space className="mt-1" wrap>
+              <Text role="alert">
+                {t("option:flashcards.studyPackSectionsError", {
+                  defaultValue: "Could not load sections."
+                })}
+              </Text>
+              <Button size="small" onClick={() => void preview.refetch()} loading={preview.isFetching}>
+                {t("common:retry", { defaultValue: "Retry" })}
+              </Button>
+            </Space>
+          ) : !result ? (
+            <Text type="secondary" role="status" className="block">
+              {t("option:flashcards.studyPackSectionsLoading", { defaultValue: "Loading sections…" })}
+            </Text>
+          ) : result.sections.length === 0 ? (
+            needsSectionReview ? (
+              <Button size="small" className="mt-1" onClick={() => onChange(rowId, null)}>
+                {t("option:flashcards.studyPackUseWholeSource", { defaultValue: "Use whole source" })}
+              </Button>
+            ) : (
+              <Text type="secondary" role="status" className="block">
+                {t("option:flashcards.studyPackSectionsWholeSource", {
+                  defaultValue: "This media will be used as a single source."
+                })}
+              </Text>
+            )
+          ) : (
+            <Checkbox.Group<number>
+              aria-label={reviewLabel}
+              className="mt-1 flex-col"
+              options={result.sections.map(({ index, title }) => ({ label: title, value: index }))}
+              value={storedSelection ?? []}
+              onChange={(indices) => onChange(rowId, {
+                section_revision: result.revision,
+                section_indices: indices
+              })}
+            />
+          )
+        )}
+      </div>
+    </>
+  )
+}
 
 const StudyPackMediaPicker = ({ onSelect }: { onSelect: (media: MediaOption) => void }) => {
   const { t } = useTranslation(["option", "common"])
@@ -171,7 +314,15 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
   const handledTerminalJobIdRef = React.useRef<number | null>(null)
 
   const [title, setTitle] = React.useState("")
-  const [sourceItems, setSourceItems] = React.useState<StudyPackSourceSelection[]>([])
+  const [sources, setSources] = React.useState<SourceRow[]>([])
+  const nextSourceRowId = React.useRef(0)
+  const makeSourceRow = React.useCallback(
+    (item: StudyPackSourceSelection): SourceRow => ({ rowId: nextSourceRowId.current++, item }),
+    []
+  )
+  const [accountEpoch, setAccountEpoch] = React.useState(0)
+  // Cache only within this drawer and its current account session.
+  const accountScope = `${React.useId()}:${accountEpoch}`
   const [sourceType, setSourceType] = React.useState<StudyPackSourceType>(DEFAULT_SOURCE_TYPE)
   const [sourceId, setSourceId] = React.useState("")
   const [sourceTitle, setSourceTitle] = React.useState("")
@@ -217,19 +368,22 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
     if (!open) return
     setTitle(initialIntent?.title ?? "")
     const intentSources = normalizeIntentSources(initialIntent)
-    setSourceItems(intentSources)
+    setSources(intentSources.map(makeSourceRow))
     setManualEntryOpen(intentSources.length === 0)
     setSourceType(DEFAULT_SOURCE_TYPE)
     setSourceId("")
     setSourceTitle("")
     setJobId(null)
     handledTerminalJobIdRef.current = null
-  }, [initialIntent, open])
+  }, [initialIntent, makeSourceRow, open])
 
   React.useEffect(() => {
     if (!open) return
     return watchChatAccountChanges((invalidated) => {
-      if (invalidated) onClose()
+      if (!invalidated) return
+      setAccountEpoch((current) => current + 1)
+      setSources([])
+      onClose()
     })
   }, [open, onClose])
 
@@ -274,9 +428,37 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
   const trimmedSourceId = sourceId.trim()
   const trimmedSourceTitle = sourceTitle.trim()
   const hasPendingJob = jobId != null
+  let maxPasses = Infinity
+  let selectedPasses = 0
+  for (const { item, sectionPreview, needsSectionReview } of sources) {
+    if (!sectionPreview) {
+      selectedPasses += 1
+      continue
+    }
+    if (sectionPreview.sections.length > 0) {
+      maxPasses = Math.min(maxPasses, sectionPreview.max_generation_passes ?? Infinity)
+    }
+    if (needsSectionReview) continue
+    if (sectionPreview.sections.length === 0) {
+      selectedPasses += 1
+    } else {
+      const indices = item.locator?.section_indices
+      if (!Array.isArray(indices)) continue
+      for (const section of sectionPreview.sections) {
+        if (indices.includes(section.index)) selectedPasses += section.generation_passes ?? 1
+      }
+    }
+  }
+  const exceedsPassBudget = selectedPasses > maxPasses
   const canSubmit =
     trimmedTitle.length > 0 &&
-    sourceItems.length > 0 &&
+    sources.length > 0 &&
+    !exceedsPassBudget &&
+    sources.every(({ item, needsSectionReview }) => {
+      if (needsSectionReview) return false
+      const indices = item.locator?.section_indices
+      return !isWholeMedia(item) || !Array.isArray(indices) || indices.length > 0
+    }) &&
     !createMutation.isPending &&
     !hasPendingJob
   const pendingJobMessage = jobQuery.isError
@@ -298,29 +480,66 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
   const handleAddSource = React.useCallback(() => {
     if (!trimmedSourceId) return
 
-    setSourceItems((current) => [
-      ...current,
-      {
-        source_type: sourceType,
-        source_id: trimmedSourceId,
-        source_title: trimmedSourceTitle || undefined
-      }
-    ])
+    const source = makeSourceRow({
+      source_type: sourceType,
+      source_id: trimmedSourceId,
+      source_title: trimmedSourceTitle || undefined
+    })
+    setSources((current) => [...current, source])
     setSourceId("")
     setSourceTitle("")
-  }, [sourceType, trimmedSourceId, trimmedSourceTitle])
+  }, [makeSourceRow, sourceType, trimmedSourceId, trimmedSourceTitle])
 
   const handleSelectMedia = ({ value, title }: MediaOption) => {
-    setSourceItems((current) =>
-      current.some((source) => source.source_type === "media" && source.source_id === value)
+    const source = makeSourceRow({ source_type: "media", source_id: value, source_title: title })
+    setSources((current) =>
+      current.some(({ item }) => item.source_type === "media" && item.source_id === value)
         ? current
-        : [...current, { source_type: "media", source_id: value, source_title: title }]
+        : [...current, source]
     )
   }
 
-  const handleRemoveSource = React.useCallback((index: number) => {
-    setSourceItems((current) => current.filter((_, currentIndex) => currentIndex !== index))
+  const handleRemoveSource = React.useCallback((rowId: number) => {
+    setSources((current) => current.filter((source) => source.rowId !== rowId))
   }, [])
+
+  const updateSource = React.useCallback((rowId: number, update: (source: SourceRow) => SourceRow) => {
+    setSources((current) => current.map((source) => source.rowId === rowId ? update(source) : source))
+  }, [])
+
+  const handleSectionPreview = React.useCallback((rowId: number, sectionPreview: StudyPackMediaSectionsResponse) => {
+    updateSource(rowId, (source) => {
+      if (source.sectionPreview === sectionPreview) return source
+      const locator = source.item.locator
+      const hasSectionScope = locator?.section_revision != null || Array.isArray(locator?.section_indices)
+      const scopeChanged = hasSectionScope && (
+        sectionPreview.sections.length === 0 ||
+        locator?.section_revision !== sectionPreview.revision ||
+        (source.needsSectionReview && source.sectionPreview?.sections.length === 0)
+      )
+      const updated = {
+        ...source,
+        sectionPreview,
+        needsSectionReview: Boolean(scopeChanged || source.needsSectionReview)
+      }
+      if (sectionPreview.sections.length === 0 || (hasSectionScope && !scopeChanged)) return updated
+      return {
+        ...updated,
+        item: withSectionSelection(source.item, {
+          section_revision: sectionPreview.revision,
+          section_indices: scopeChanged ? [] : sectionPreview.sections.map(({ index }) => index)
+        })
+      }
+    })
+  }, [updateSource])
+
+  const handleSectionSelection = React.useCallback((rowId: number, selection: SectionSelection | null) => {
+    updateSource(rowId, (source) => ({
+      ...source,
+      item: withSectionSelection(source.item, selection),
+      needsSectionReview: source.needsSectionReview && selection?.section_indices.length === 0
+    }))
+  }, [updateSource])
 
   const handleSubmit = React.useCallback(async () => {
     if (!canSubmit) return
@@ -328,7 +547,7 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
     try {
       const accepted = await createMutation.mutateAsync({
         title: trimmedTitle,
-        source_items: sourceItems,
+        source_items: sources.map(({ item }) => item),
         deck_mode: "new"
       })
       setJobId(accepted.job.id)
@@ -347,7 +566,7 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
           })
       )
     }
-  }, [canSubmit, createMutation, message, sourceItems, t, trimmedTitle])
+  }, [canSubmit, createMutation, message, sources, t, trimmedTitle])
 
   const drawerTitle = t("option:flashcards.studyPackDrawerTitle", {
     defaultValue: "Create study pack"
@@ -408,12 +627,12 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
             <Text type="secondary">
               {t("option:flashcards.studyPackSourcesCount", {
                 defaultValue: "{{count}} selected",
-                count: sourceItems.length
+                count: sources.length
               })}
             </Text>
           </div>
 
-          {open ? <StudyPackMediaPicker onSelect={handleSelectMedia} /> : null}
+          {open ? <StudyPackMediaPicker key={accountScope} onSelect={handleSelectMedia} /> : null}
 
           <button
             type="button"
@@ -480,7 +699,7 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
           </div>
 
           <div className="mt-3 space-y-2">
-            {sourceItems.length === 0 ? (
+            {sources.length === 0 ? (
               <Text type="secondary">
                 {t("option:flashcards.studyPackSourcesEmpty", {
                   defaultValue:
@@ -488,13 +707,14 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
                 })}
               </Text>
             ) : (
-              sourceItems.map((item, index) => {
+              sources.map((source, index) => {
+                const { rowId, item } = source
                 const TypeIcon = SOURCE_TYPE_ICONS[item.source_type] ?? FileText
                 const typeLabel = sourceTypeLabel(item.source_type)
                 const title = item.source_title?.trim()
                 return (
                   <div
-                    key={`${item.source_type}-${item.source_id}-${index}`}
+                    key={rowId}
                     className="flex items-start justify-between gap-3 rounded border border-border bg-background p-2"
                     data-testid={`study-pack-source-${index}`}
                   >
@@ -511,19 +731,36 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
                             {typeLabel}
                           </Text>
                         ) : null}
+                        {open && isWholeMedia(item) ? (
+                          <StudyPackMediaSections
+                            {...source}
+                            accountScope={accountScope}
+                            onPreview={handleSectionPreview}
+                            onChange={handleSectionSelection}
+                          />
+                        ) : null}
                       </div>
                     </div>
                     <Button
                       type="text"
                       aria-label={t("common:remove", { defaultValue: "Remove" })}
                       icon={<Trash2 className="size-4" />}
-                      onClick={() => handleRemoveSource(index)}
+                      onClick={() => handleRemoveSource(rowId)}
                     />
                   </div>
                 )
               })
             )}
           </div>
+          {exceedsPassBudget ? (
+            <Text type="danger" role="status" className="mt-2 block">
+              {t("option:flashcards.studyPackSectionsPassBudget", {
+                defaultValue: "Your selection needs {{used}} generation passes. The limit is {{limit}}. Uncheck sections or remove a source.",
+                used: selectedPasses,
+                limit: maxPasses
+              })}
+            </Text>
+          ) : null}
         </div>
       </div>
     </Drawer>

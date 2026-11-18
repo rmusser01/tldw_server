@@ -11,9 +11,9 @@ import pytest
 
 from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobRequest, StudyPackSourceSelection
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
-
 
 pytestmark = pytest.mark.asyncio
 
@@ -117,7 +117,12 @@ async def test_handle_study_pack_job_rolls_back_late_persistence_failures(
         return db, SimpleNamespace()
 
     monkeypatch.setattr(worker_mod, "_get_databases_for_user", fake_get_databases_for_user)
-    monkeypatch.setattr(generation_mod.StudySourceResolver, "resolve", lambda self, selections: _bundle(types_mod))
+    def resolve_in_worker_thread(self, selections):
+        scope = get_scope()
+        assert scope is not None and scope.user_id == 1 and not scope.is_admin  # nosec B101
+        return _bundle(types_mod)
+
+    monkeypatch.setattr(generation_mod.StudySourceResolver, "resolve", resolve_in_worker_thread)
 
     async def fake_generate_validated_cards(self, resolved_bundle: Any, request: Any):
         return _generation_result(types_mod)
