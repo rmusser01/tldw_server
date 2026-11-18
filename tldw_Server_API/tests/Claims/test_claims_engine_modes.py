@@ -573,6 +573,41 @@ async def test_claim_provider_timeout_and_cancellation_hold_capacity_until_actua
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("label", "status"),
+    [("supported", "verified"), ("refuted", "refuted"), ("nei", "unverified")],
+)
+async def test_hybrid_confirms_document_only_refutations_against_all_excerpts(label, status):
+    """A local contradiction against one excerpt cannot decide a cross-source claim."""
+    from tldw_Server_API.app.core.Claims_Extraction.claims_engine import HybridClaimVerifier
+
+    def judge(_provider, _claim, prompt, *_args, **_kwargs):
+        assert "[doc:spring] The spring survey counted 37 herons." in prompt  # nosec B101
+        assert "[doc:autumn] The autumn survey counted 24 herons." in prompt  # nosec B101
+        return f'{{"label":"{label}","confidence":0.95}}'
+
+    def one_excerpt_nli(payload):
+        decision = "contradiction" if "spring" in payload["text"] else "neutral"
+        return [[{"label": decision, "score": 0.99 if decision == "contradiction" else 0.8}]]
+
+    verifier = HybridClaimVerifier(judge)
+    verifier._nli = one_excerpt_nli
+    result = await verifier.verify(
+        claim=Claim(id="c1", text="The lower count belongs to the autumn survey, not the spring survey."),
+        query="Which survey counted fewer herons?",
+        base_documents=[
+            Doc("spring", "The spring survey counted 37 herons.", 0.9),
+            Doc("autumn", "The autumn survey counted 24 herons.", 0.9),
+        ],
+        mode="hybrid",
+        doc_only_mode=True,
+    )
+    assert result.status.value == status  # nosec B101
+    assert result.confidence == pytest.approx(0.95)  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_local_nli_verification_does_not_consume_provider_capacity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

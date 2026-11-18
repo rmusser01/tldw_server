@@ -1175,9 +1175,11 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       expect(ragCall.requestBody.include_media_ids).toEqual([selectedSource.mediaId])
       expect(ragCall.requestBody.sources).toEqual(["media_db"])
       expect(String(ragCall.requestBody.query ?? "")).toContain(probeToken)
-      await expect(workspacePage.chatPanel.getByText(question)).toBeVisible({
-        timeout: 10_000
-      })
+      await expect(
+        workspacePage.chatPanel
+          .getByRole("article", { name: /user message/i })
+          .getByText(question, { exact: true })
+      ).toBeVisible({ timeout: 10_000 })
       const reply = workspacePage.chatPanel.getByRole("article", { name: /assistant message/i }).last()
       await expect(reply.locator("p").filter({ hasText: /\b37\b|\bthirty[- ]seven\b/i }).first()).toBeVisible({
         timeout: 90_000
@@ -1365,14 +1367,17 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     const chatModelId = requireRealBackendChatModel(serverInfo)
 
     const fixtureId = generateTestId("workspace-study-quiz")
-    const probeToken = `${fixtureId}-quiz-token`
     const selectedSource = await seedLiveWorkspaceDocument(
       `WS ${fixtureId} Quiz`,
-      `Workspace quiz source for ${probeToken}. The source is intentionally specific so the generated study artifact has stable content.`
+      "North Marsh spring survey. Observers counted 37 blue herons on May 12. " +
+        "The team used four observation posts along the eastern reed beds. " +
+        "The count began at 06:00 and ended at 08:00."
     )
     const companionSource = await seedLiveWorkspaceDocument(
       `WS ${fixtureId} Quiz Companion`,
-      `Workspace quiz companion source for ${probeToken}-companion. The second source keeps the generation path aligned with the existing workspace output matrix.`
+      "South Marsh autumn survey. Observers counted 24 blue herons on October 14. " +
+        "The team used three observation posts along the western inlet. " +
+        "The count began at 16:00 and ended at 18:00."
     )
 
     const tracker = trackChatBootstrapResponses(authedPage)

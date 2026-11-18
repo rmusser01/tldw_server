@@ -1225,6 +1225,8 @@ const ResearchWorkspaceBody: React.FC<{ availableWidth: number }> = ({ available
     React.useState<WorkspaceSourceStatusListResponse | null>(null)
   const [workspaceCapabilities, setWorkspaceCapabilities] =
     React.useState<WorkspaceCapabilitiesResponse | null>(null)
+  const [workspaceSourceReconcileVersion, setWorkspaceSourceReconcileVersion] =
+    React.useState(0)
   const [, setWorkspaceStatusProjectionLoading] = React.useState(false)
   const [workspaceStatusProjectionError, setWorkspaceStatusProjectionError] =
     React.useState<string | null>(null)
@@ -1344,6 +1346,7 @@ const ResearchWorkspaceBody: React.FC<{ availableWidth: number }> = ({ available
   const workspaceStatusInFlightRef = React.useRef(false)
   const workspaceServerReconcileRequestSeqRef = React.useRef(0)
   const workspaceServerReconcileSignatureRef = React.useRef<string | null>(null)
+  const workspaceServerReconcileQueueRef = React.useRef<Promise<void> | null>(null)
   const [serverWorkspaceIdentity, setServerWorkspaceIdentity] =
     React.useState<string | null>(null)
   const isMountedRef = React.useRef(false)
@@ -1447,27 +1450,34 @@ const ResearchWorkspaceBody: React.FC<{ availableWidth: number }> = ({ available
 
     let cancelled = false
     const requestSeq = ++workspaceServerReconcileRequestSeqRef.current
+    workspaceServerReconcileSignatureRef.current = null
     if (statusGuardrailsEnabled) {
       setWorkspaceStatusProjectionLoading(true)
       setWorkspaceStatusProjectionError(null)
     }
 
-    void reconcileResearchWorkspaceServerState({
-      client: tldwClient,
-      workspaceId: activeWorkspaceId,
-      workspaceName,
-      sources: workspaceServerSourcesRef.current,
-      selectedSourceIds,
-      onWorkspaceReady: () => {
-        if (
-          !cancelled &&
-          requestSeq === workspaceServerReconcileRequestSeqRef.current
-        ) {
-          setServerWorkspaceIdentity(activeWorkspaceId)
+    // A superseded reconciliation may already be writing to the server.
+    const previousReconcile = workspaceServerReconcileQueueRef.current
+    const currentReconcile = (previousReconcile ?? Promise.resolve())
+      .then(async () => {
+        if (cancelled || requestSeq !== workspaceServerReconcileRequestSeqRef.current) {
+          return
         }
-      }
-    })
-      .then((reconcileResult) => {
+        const reconcileResult = await reconcileResearchWorkspaceServerState({
+          client: tldwClient,
+          workspaceId: activeWorkspaceId,
+          workspaceName,
+          sources: workspaceServerSourcesRef.current,
+          selectedSourceIds,
+          onWorkspaceReady: () => {
+            if (
+              !cancelled &&
+              requestSeq === workspaceServerReconcileRequestSeqRef.current
+            ) {
+              setServerWorkspaceIdentity(activeWorkspaceId)
+            }
+          }
+        })
         if (
           cancelled ||
           requestSeq !== workspaceServerReconcileRequestSeqRef.current
@@ -1476,6 +1486,13 @@ const ResearchWorkspaceBody: React.FC<{ availableWidth: number }> = ({ available
         }
         if (reconcileResult.errors.length === 0 && reconcileResult.workspaceReady) {
           workspaceServerReconcileSignatureRef.current = reconcileSignature
+          // The initial context can arrive before source rows and selection are saved.
+          if (
+            statusGuardrailsEnabled &&
+            (reconcileResult.sourceSelectionChanged || previousReconcile !== null)
+          ) {
+            setWorkspaceSourceReconcileVersion((version) => version + 1)
+          }
           return
         }
         if (statusGuardrailsEnabled) {
@@ -1495,6 +1512,12 @@ const ResearchWorkspaceBody: React.FC<{ availableWidth: number }> = ({ available
           setWorkspaceStatusProjectionLoading(false)
         }
       })
+    workspaceServerReconcileQueueRef.current = currentReconcile
+    void currentReconcile.then(() => {
+      if (workspaceServerReconcileQueueRef.current === currentReconcile) {
+        workspaceServerReconcileQueueRef.current = null
+      }
+    })
 
     return () => {
       cancelled = true
@@ -2170,6 +2193,7 @@ const ResearchWorkspaceBody: React.FC<{ availableWidth: number }> = ({ available
     selectedSourceIds,
     workspaceId,
     workspaceName,
+    workspaceSourceReconcileVersion,
     workspaceServerSelectedSourceSignature,
     workspaceServerSourceSignature
   ])

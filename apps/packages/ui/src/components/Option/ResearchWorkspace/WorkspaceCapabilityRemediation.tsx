@@ -269,6 +269,9 @@ const buildGroundedAnswersItem = (
     (sourceSummary?.total ?? 0) > 0 || (sourceSummary?.selected ?? 0) > 0
 
   if (!hasSources || !action || action.allowed) return null
+  if (action.reason_code === "no_queryable_sources" && !sourceSummary?.selected) {
+    return null
+  }
 
   const reasonLabel = getReasonLabel(action.reason_code) ?? "Not ready"
   const guidance =
@@ -344,7 +347,7 @@ export const WorkspaceCapabilityRemediation: React.FC<
           />
           <span className="font-semibold text-text">Workspace readiness</span>
           <span className="truncate text-text-muted">
-            {summaryLabel} affect tools, agents, sandbox, or grounded answers.
+            {summaryLabel}
           </span>
         </span>
       </summary>

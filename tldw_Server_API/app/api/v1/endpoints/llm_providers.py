@@ -133,6 +133,7 @@ async def llm_health():
     from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
     from tldw_Server_API.app.core.Chat.rate_limiter import get_rate_limiter
     from tldw_Server_API.app.core.Chat.request_queue import get_request_queue
+    from tldw_Server_API.app.core.config import chat_queued_execution_enabled
 
     health: dict[str, Any] = {
         "service": "llm_inference",
@@ -162,7 +163,8 @@ async def llm_health():
         rq = get_request_queue()
         if rq is None:
             health["components"]["queue"] = {"initialized": False}
-            health["status"] = "degraded"
+            if chat_queued_execution_enabled():
+                health["status"] = "degraded"
         else:
             q_status = rq.get_queue_status()
             health["components"]["queue"] = {"initialized": True, **q_status}

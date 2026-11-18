@@ -489,6 +489,7 @@ async def _collect_llm_health() -> Mapping[str, Any]:
         from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
         from tldw_Server_API.app.core.Chat.rate_limiter import get_rate_limiter
         from tldw_Server_API.app.core.Chat.request_queue import get_request_queue
+        from tldw_Server_API.app.core.config import chat_queued_execution_enabled
 
         health: dict[str, Any] = {"status": "healthy", "components": {}}
         provider_manager = get_provider_manager()
@@ -513,7 +514,8 @@ async def _collect_llm_health() -> Mapping[str, Any]:
         request_queue = get_request_queue()
         if request_queue is None:
             health["components"]["queue"] = {"initialized": False}
-            health["status"] = "degraded"
+            if chat_queued_execution_enabled():
+                health["status"] = "degraded"
         else:
             queue_status = request_queue.get_queue_status()
             health["components"]["queue"] = {"initialized": True, **queue_status}

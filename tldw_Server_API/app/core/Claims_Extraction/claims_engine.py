@@ -529,11 +529,28 @@ def _contains_any(hay: str, needles: list[str]) -> bool:
     return any(n.lower() in hay_l for n in needles if n)
 
 
-def _first_n_snippets(docs: list[Document], n: int = 3, snippet_len: int = 480) -> list[Evidence]:
+def _evidence_snippets(
+    docs: list[Document], n: int = 3, snippet_len: int = 480, *, claim_text: str = ""
+) -> list[Evidence]:
+    """Select bounded excerpts, ranking overlapping windows for semantic claims."""
+    term_pattern = r"\w{3,}|\d+"
+    claim_terms = set(re.findall(term_pattern, claim_text.casefold()))
     out: list[Evidence] = []
     for d in docs[:n]:
         txt = d.content or ""
-        snip = txt[:snippet_len] + ("..." if len(txt) > snippet_len else "")
+        start = 0
+        if claim_terms and len(txt) > snippet_len:
+            last_start = len(txt) - snippet_len
+            starts = list(range(0, last_start, max(1, snippet_len // 2)))
+            starts.append(last_start)
+            start = max(
+                starts,
+                key=lambda pos: len(
+                    claim_terms.intersection(re.findall(term_pattern, txt[pos : pos + snippet_len].casefold()))
+                ),
+            )
+        end = start + snippet_len
+        snip = txt[start:end] + ("..." if len(txt) > end else "")
         authority = classify_source_authority(d)
         out.append(Evidence(
             doc_id=getattr(d, "id", ""),
@@ -1064,7 +1081,11 @@ class HybridClaimVerifier:
             return score + bonus
 
         candidate_docs = sorted(candidate_docs, key=_score_doc, reverse=True)
-        evidence_snips = _first_n_snippets(candidate_docs, n=min(3, top_k))
+        evidence_snips = _evidence_snippets(
+            candidate_docs,
+            n=min(3, top_k),
+            claim_text=claim_text if claim.requires_semantic_verification else "",
+        )
         evidence_text = "\n\n".join([f"[doc:{e.doc_id}] {e.snippet}" for e in evidence_snips])
         # Map doc_id -> full text for citation offsets
         _doc_map: dict[str, str] = {}
@@ -1076,6 +1097,7 @@ class HybridClaimVerifier:
 
         # NLI verification path (optional depending on mode)
         nli = None
+        check_refutation_against_full_evidence = False
         if mode in ("hybrid", "nli"):
             nli = await self._get_nli()
             nli_decision: tuple[str, float, int] | None = None
@@ -1088,15 +1110,25 @@ class HybridClaimVerifier:
                             lab, sc = self._nli_best_label(scores[0])
                             if sc > best_tuple[1]:
                                 best_tuple = (lab, sc, i)
-                    if best_tuple[1] >= conf_threshold:
+                    check_refutation_against_full_evidence = (
+                        best_tuple[0] == "refuted"
+                        and best_tuple[1] >= conf_threshold
+                        and mode == "hybrid"
+                        and doc_only_mode
+                        and len(evidence_snips) > 1
+                    )
+                    if (
+                        best_tuple[0] in {"supported", "refuted"}
+                        and best_tuple[1] >= conf_threshold
+                        and not check_refutation_against_full_evidence
+                    ):
                         # Populate citations only for supported/refuted with best-effort exact offsets
                         cit: list[dict[str, Any]] = []
                         nli_status = VerificationStatus.VERIFIED if best_tuple[0] == "supported" else VerificationStatus.REFUTED
-                        if best_tuple[0] in {"supported", "refuted"}:
-                            for ev in evidence_snips:
-                                full = _doc_map.get(ev.doc_id, "")
-                                s, e = _find_offsets(full, claim_text, ev.snippet)
-                                cit.append({"doc_id": ev.doc_id, "start": int(s), "end": int(e)})
+                        for ev in evidence_snips:
+                            full = _doc_map.get(ev.doc_id, "")
+                            s, e = _find_offsets(full, claim_text, ev.snippet)
+                            cit.append({"doc_id": ev.doc_id, "start": int(s), "end": int(e)})
                         # Classify match level
                         best_ev_text = evidence_snips[best_tuple[2]].snippet if best_tuple[2] >= 0 else ""
                         match_lvl, _ = classify_match_confidence(claim_text, best_ev_text, best_tuple[1])
@@ -1351,6 +1383,12 @@ class HybridClaimVerifier:
         if label in {"supported", "refuted"} and confidence > decision_conf:
             status = VerificationStatus.VERIFIED if label == "supported" else VerificationStatus.REFUTED
             decision_rationale = rationale or decision_rationale
+            decision_conf = confidence
+        if check_refutation_against_full_evidence and (
+            label == "nei" or confidence < conf_threshold
+        ):
+            status = VerificationStatus.UNVERIFIED
+            decision_rationale = "The full evidence did not resolve the local contradiction"
             decision_conf = confidence
 
         # Construct citations for traceability (doc IDs with snippet offsets)

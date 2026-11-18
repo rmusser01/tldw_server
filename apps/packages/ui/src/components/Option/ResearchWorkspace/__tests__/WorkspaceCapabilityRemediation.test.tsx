@@ -208,6 +208,32 @@ describe("WorkspaceCapabilityRemediation", () => {
     )
   })
 
+  it("leaves source setup to the composer when no sources are selected", () => {
+    renderRemediation(
+      makeCapabilities({
+        source_summary: {
+          total: 2,
+          selected: 0,
+          queryable: 2,
+          partially_queryable: 0,
+          processing: 0,
+          failed: 0,
+          missing: 0
+        },
+        allowed_actions: {
+          ask_grounded_questions: {
+            allowed: false,
+            reason_code: "no_queryable_sources"
+          }
+        }
+      })
+    )
+
+    const panel = screen.getByTestId("workspace-capability-remediation")
+    expect(within(panel).queryByText("No queryable sources")).not.toBeInTheDocument()
+    expect(within(panel).getByText("MCP Hub")).toBeInTheDocument()
+  })
+
   it("renders grounded-answer remediation when selected sources are not queryable", () => {
     renderRemediation(
       makeCapabilities({
