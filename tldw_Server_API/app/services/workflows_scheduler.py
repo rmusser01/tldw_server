@@ -17,9 +17,8 @@ import builtins
 import contextlib
 import json
 import os
-import secrets
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -180,8 +179,11 @@ class _WFRecurringScheduler:
         leadership = self._core_scheduler.leader_election if self._core_scheduler else None
         if self._aps is None or leadership is None:
             return False
-        if not await leadership.acquire_leadership(_CRON_LEASE):
+        if self._aps.state == STATE_RUNNING:
+            if await leadership.is_leader(_CRON_LEASE):
+                return True
             self._aps.pause()
+        if not await leadership.acquire_leadership(_CRON_LEASE):
             return False
         if self._aps.state == STATE_PAUSED:
             self._aps.remove_all_jobs()
@@ -193,7 +195,7 @@ class _WFRecurringScheduler:
         if self._aps is None or self._aps.state != STATE_RUNNING:
             return False
         leadership = self._core_scheduler.leader_election if self._core_scheduler else None
-        return leadership is not None and await leadership.acquire_leadership(_CRON_LEASE)
+        return leadership is not None and await leadership.is_leader(_CRON_LEASE)
 
     async def stop(self) -> None:
         async with self._lock:
@@ -399,36 +401,16 @@ class _WFRecurringScheduler:
 
             # Persist jitter metadata for watchlist schedules
             try:
-                if jitter_sec > 0:
+                if jitter_sec != schedule.jitter_sec:
                     self._get_db(effective_uid).update_schedule(schedule.id, {"jitter_sec": jitter_sec})
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Workflows scheduler: failed to persist jitter for {schedule.id}: {e}")
 
             trigger.jitter = jitter_sec or None
-            if not self._register_cron_job(
-                schedule.id, effective_uid, self._run_schedule, trigger,
+            self._register_cron_job(
+                schedule, effective_uid, self._run_schedule, trigger,
                 max_instances=max_instances, coalesce=coalesce, misfire_grace_time=misfire_grace_time,
-            ):
-                return
-
-            # Compute and persist next run time
-            try:
-                now = datetime.now(trigger.timezone)
-                nxt = trigger.get_next_fire_time(None, now)
-                # Mild UI jitter for watchlists to avoid synchronized display
-                next_dt = nxt
-                try:
-                    if jitter_sec > 0:
-                        ui_jitter = int(os.getenv("WATCHLISTS_NEXT_RUN_UI_JITTER_SEC", "60") or 60)
-                        if ui_jitter > 0 and next_dt is not None:
-                            delta = secrets.randbelow(ui_jitter * 2 + 1) - ui_jitter
-                            next_dt = next_dt + timedelta(seconds=delta)
-                except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
-                    logger.debug(f"Workflows scheduler: UI jitter calc failed for {schedule.id}: {e}")
-                next_iso = next_dt.isoformat() if next_dt else None
-                self._get_db(effective_uid).set_history(schedule.id, next_run_at=next_iso)
-            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Workflows scheduler: failed to set next_run_at for {schedule.id}: {e}")
+            )
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Failed to add schedule job {schedule.id}: {e}")
 
@@ -465,59 +447,62 @@ class _WFRecurringScheduler:
             misfire_grace_time = 300 if schedule.misfire_grace_sec is None else int(schedule.misfire_grace_sec)
             effective_uid = user_id if user_id is not None else int(schedule.user_id)
 
-            if not self._register_cron_job(
-                schedule.id, effective_uid, self._run_acp_schedule, trigger,
+            self._register_cron_job(
+                schedule, effective_uid, self._run_acp_schedule, trigger,
                 max_instances=max_instances, coalesce=coalesce, misfire_grace_time=misfire_grace_time,
-            ):
-                return
-
-            # Compute and persist next run time
-            try:
-                now = datetime.now(trigger.timezone)
-                nxt = trigger.get_next_fire_time(None, now)
-                next_iso = nxt.isoformat() if nxt else None
-                self._get_db(effective_uid).set_history(schedule.id, next_run_at=next_iso)
-            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Workflows scheduler: failed to set next_run_at for ACP schedule {schedule.id}: {e}")
+            )
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Failed to add ACP schedule job {schedule.id}: {e}")
 
+    @staticmethod
+    def _cron_definition(schedule: WorkflowSchedule) -> tuple[str, str | None, bool]:
+        return schedule.cron, schedule.timezone, bool(schedule.acp_config_json)
+
     def _register_cron_job(
-        self, schedule_id: str, user_id: int, callback: Callable[..., Awaitable[None]],
+        self, schedule: WorkflowSchedule, user_id: int, callback: Callable[..., Awaitable[None]],
         trigger: CronTrigger, *, max_instances: int, coalesce: bool, misfire_grace_time: int,
-    ) -> bool:
+    ) -> None:
         if self._aps is None:
-            return False
-        existing = self._aps.get_job(schedule_id)
+            return
+        job = self._aps.get_job(schedule.id)
+        args = (schedule.id, user_id)
+        kwargs = {"expected_cron": self._cron_definition(schedule)}
         options = {"max_instances": max_instances, "coalesce": coalesce, "misfire_grace_time": misfire_grace_time}
         if (
-            existing is not None
-            and existing.func == callback
-            and existing.args == (schedule_id, user_id)
-            and isinstance(existing.trigger, CronTrigger)
-            and str(existing.trigger) == str(trigger)
-            and existing.trigger.timezone == trigger.timezone
-            and existing.trigger.jitter == trigger.jitter
+            job is not None
+            and job.args == args
+            and job.kwargs == kwargs
+            and isinstance(job.trigger, CronTrigger)
+            and job.trigger.timezone == trigger.timezone
+            and job.trigger.jitter == trigger.jitter
         ):
             # Preserve the pending occurrence whenever the trigger is unchanged.
-            if any(getattr(existing, key) != value for key, value in options.items()):
-                existing.modify(**options)
-            return False
-        self._aps.add_job(
-            callback, trigger=trigger, id=schedule_id, args=(schedule_id, user_id),
-            kwargs={"require_cron_owner": True}, replace_existing=True, **options,
-        )
-        return True
+            if any(getattr(job, key) != value for key, value in options.items()):
+                job.modify(**options)
+        else:
+            job = self._aps.add_job(
+                callback, trigger=trigger, id=schedule.id, args=args, kwargs=kwargs,
+                replace_existing=True, **options,
+            )
+        try:
+            next_run = job.next_run_time
+            stored_next = schedule.next_run_at
+            if isinstance(stored_next, str):
+                stored_next = datetime.fromisoformat(stored_next)
+            if next_run is not None and next_run != stored_next:
+                self._get_db(user_id).set_history(schedule.id, next_run_at=next_run.isoformat())
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
+            logger.debug(f"Workflows scheduler: failed to set next_run_at for {schedule.id}: {e}")
 
     async def _run_acp_schedule(
-        self, schedule_id: str, user_id: int, *, require_cron_owner: bool = False
+        self, schedule_id: str, user_id: int, *, expected_cron: tuple[str, str | None, bool] | None = None
     ) -> None:
         """Execute an ACP schedule by submitting an ``acp_run`` task."""
         import json as _json
 
         db = self._get_db(user_id)
         s = db.get_schedule(schedule_id)
-        if not s:
+        if not s or (expected_cron is not None and expected_cron != self._cron_definition(s)):
             return
         if not s.enabled:
             try:
@@ -560,7 +545,7 @@ class _WFRecurringScheduler:
             if self._core_scheduler is None:
                 logger.warning("Core Scheduler not initialized; skipping ACP schedule run")
                 return
-            if require_cron_owner and not await self._may_submit_cron():
+            if expected_cron is not None and not await self._may_submit_cron():
                 return
             task_id = await self._core_scheduler.submit(
                 handler="acp_run",
@@ -581,7 +566,7 @@ class _WFRecurringScheduler:
                 logger.debug(f"Workflows scheduler: failed to set error status for ACP schedule {schedule_id}: {e2}")
 
     async def _run_schedule(
-        self, schedule_id: str, user_id: int | None = None, *, require_cron_owner: bool = False
+        self, schedule_id: str, user_id: int | None = None, *, expected_cron: tuple[str, str | None, bool] | None = None
     ) -> None:
         # Fetch latest schedule in case it was modified
         # Backward compatibility: determine user_id from stored schedule when not provided
@@ -597,7 +582,7 @@ class _WFRecurringScheduler:
                 db = self._get_db(int(s.user_id))
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
                 db = self._db
-        if not s or not s.enabled:
+        if not s or not s.enabled or (expected_cron is not None and expected_cron != self._cron_definition(s)):
             return
         try:
             fallback_owner_id = (
@@ -660,7 +645,7 @@ class _WFRecurringScheduler:
                 return
             handler_name, queue_name = resolve_schedule_submission_target(payload)
             await ensure_schedule_queue_worker(self._core_scheduler, queue_name)
-            if require_cron_owner and not await self._may_submit_cron():
+            if expected_cron is not None and not await self._may_submit_cron():
                 return
             task_id = await self._core_scheduler.submit(
                 handler=handler_name,

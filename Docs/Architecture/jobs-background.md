@@ -52,7 +52,9 @@ The recurring Workflows scheduler starts by default and runs enabled Watchlist
 and workflow schedules. API workers must share the core Scheduler database so
 only the worker holding the recurring dispatch lease submits runs. Schedule
 edits made through another worker are discovered on the next rescan, every 30
-seconds by default. Set `WORKFLOWS_SCHEDULER_ENABLED=false` to opt out.
+seconds by default. After an unclean stop, another worker takes over when the
+lease expires (300 seconds by default). Dispatch resumes at the next future
+occurrence. Set `WORKFLOWS_SCHEDULER_ENABLED=false` to opt out.
 
 On PostgreSQL, re-save existing Watchlist monitors that show a next run but have
 never run. This registers schedules whose writes failed before the boolean fix.

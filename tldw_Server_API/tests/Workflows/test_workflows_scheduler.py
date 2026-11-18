@@ -297,15 +297,22 @@ async def test_persisted_schedule_dispatch_has_one_owner_and_can_fail_over(monke
         first._aps.modify_job(schedule_id, next_run_time=pending)
         await first._rescan_once()
         assert first._aps.get_job(schedule_id).next_run_time == pending
-        second.update(schedule_id, {"cron": "*/10 * * * *"})
+        due = datetime.now(timezone.utc) + timedelta(milliseconds=100)
+        first._aps.modify_job(schedule_id, next_run_time=due)
+        assert second.update(schedule_id, {"cron": "*/10 * * * *"})
+        await asyncio.sleep(0.25)
+        assert [len(core.submissions) for core in cores] == [0, 0]
         await first._rescan_once()
         assert "*/10" in str(first._aps.get_job(schedule_id).trigger)
         await second._rescan_once()
-        due = datetime.now(timezone.utc) + timedelta(milliseconds=80)
+        due = datetime.now(timezone.utc) + timedelta(milliseconds=100)
         for service in (first, second):
-            service._aps.reschedule_job(schedule_id, trigger="date", run_date=due)
-        await asyncio.sleep(0.2)
+            service._aps.modify_job(schedule_id, next_run_time=due)
+        first._get_db(1).set_history(schedule_id, next_run_at=due.isoformat())
+        await asyncio.sleep(0.25)
         assert [len(core.submissions) for core in cores] == [1, 0]
+        await first._rescan_once()
+        assert datetime.fromisoformat(first.get(schedule_id).next_run_at) > due
 
         await first.stop()
         assert await second._refresh_cron_owner()

@@ -51,6 +51,7 @@ Regressions reproduced the hidden hosted shortcuts, disabled default scheduler, 
 
 Verification was scoped to the changed navigation and scheduler paths. GitHub review and required CI are tracked on the PR.
 Rebased on dev b7d0b2d and addressed review findings. The APScheduler holding the shared scheduler lease is the only instance that submits cron occurrences. Reconciliations keep pending jobs when their triggers are unchanged, and PostgreSQL uses one schedule database handle per process. The canonical Backlog check and isolated database regression passed.
+Re-review fixes reject stale cron callbacks after a schedule edit, publish the actual next occurrence, and renew the current owner without competing for PostgreSQL acquisition. SQLite renewal now checks the owner in the same update. Verified 47 backend tests (including PostgreSQL 18, SQLite, and independent cron workers), 35 frontend tests, public/private documentation boundaries, and zero Bandit findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
