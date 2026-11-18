@@ -3395,9 +3395,8 @@ def test_chat_billing_exit_and_runtime_cleanup_respect_stream_ownership(
             "execute_streaming_call",
             AsyncMock(return_value=StreamingResponse(successful_stream())),
         ) as execute_stream,
-        patch.object(
-            chat_endpoint,
-            "execute_non_stream_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             AsyncMock(return_value={"choices": [{"message": {"role": "assistant", "content": "ok"}}]}),
         ) as execute_non_stream,
         patch.dict(app.dependency_overrides, {chat_endpoint.get_billing_org_id: lambda: 7}),

@@ -4,17 +4,11 @@ import {
   retainResearchWebCapturePins,
 } from "@/utils/research-workspace-prefill";
 import { normalizeNoteKeyword } from "@/services/note-keywords";
-import { resolveKnowledgeNoteProvenance, knowledgeNoteHead, retainKnowledgeNoteProvenance, type KnowledgeNoteHead } from "@/utils/knowledge-note-provenance";
-import { bgRequest } from "@/services/background-proxy";
+import { resolveKnowledgeNoteProvenance, knowledgeNoteHead, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance";
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts";
 import { rememberCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
-import { requestScopeFields } from "@/services/tldw/domains/service-prompts";
-import type {
-  WorkspaceArtifactApiResponse,
-  WorkspaceContextResponse,
-  WorkspaceListApiResponse,
-  WorkspaceNoteApiResponse,
-} from "@/services/tldw/domains/workspace-api";
+import { workspaceRestoreRequests } from "@/services/workspace-restore-requests";
+import type { WorkspaceContextResponse } from "@/services/tldw/domains/workspace-api";
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error";
 import { hydrateWorkspaceFromServer, type LocalWorkspaceState } from "@/store/workspace-api";
 import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
@@ -110,31 +104,17 @@ export const hydrateCanonicalWorkspaceNote = async (
 ): Promise<void> => {
   const workspaceId = local.id;
   const workspaceTag = `workspace:${createSlug(local.name) || workspaceId.slice(0, 8)}`;
-  const found = await bgRequest<{
-    notes?: Array<KnowledgeNoteHead & {
-      id: string;
-      title: string;
-      content: string;
-      keywords?: unknown[];
-      version: number;
-    }>;
-  }>({
-    method: "GET",
+  const request = {
+    requestScope: scope.requestScope,
     abortSignal: signal,
-    ...requestScopeFields(scope.requestScope),
-    path: `/api/v1/notes/search/?tokens=${encodeURIComponent(`workspace:${workspaceId}`)}&limit=100&include_keywords=true`,
-  });
+  };
+  const found = await workspaceRestoreRequests.searchNotes(workspaceId, request);
   signal.throwIfAborted();
   let canonical: NonNullable<typeof found.notes>[number] | undefined;
   for (const candidate of found.notes || []) {
     if (typeof candidate.id !== "string") continue;
     // Search rows may omit metadata or truncate content. Resolve the exact owned head.
-    const full = await bgRequest<NonNullable<typeof found.notes>[number]>({
-      method: "GET",
-      abortSignal: signal,
-      ...requestScopeFields(scope.requestScope),
-      path: `/api/v1/notes/${encodeURIComponent(candidate.id)}`,
-    });
+    const full = await workspaceRestoreRequests.getNote(candidate.id, request);
     signal.throwIfAborted();
     if (full.id !== candidate.id) throw new Error("Research note identity changed");
     if (typeof full.content !== "string") continue;
@@ -185,9 +165,8 @@ export const restoreMigratedResearchWorkspace = async (options: {
       throw new DOMException("Workspace restoration cancelled", "AbortError");
   };
   const request = {
-    method: "GET" as const,
+    requestScope: scope.requestScope,
     abortSignal: scope.scopeSignal,
-    ...requestScopeFields(scope.requestScope),
   };
   try {
     assertCurrent();
@@ -195,10 +174,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
     if (!receipt) {
       const unbound = receipts.filter((value) => !value.scopeKey);
       if (!unbound.length) return false;
-      const listed = await bgRequest<WorkspaceListApiResponse>({
-        ...request,
-        path: "/api/v1/workspaces/",
-      });
+      const listed = await workspaceRestoreRequests.listWorkspaces(request);
       assertCurrent();
       if (!Array.isArray(listed.items))
         throw new Error("The current account's workspaces could not be listed");
@@ -221,14 +197,9 @@ export const restoreMigratedResearchWorkspace = async (options: {
       );
       return false;
     };
-    const path =
-      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}` as const;
     let context: WorkspaceContextResponse;
     try {
-      context = await bgRequest<WorkspaceContextResponse>({
-        ...request,
-        path: `${path}/context`,
-      });
+      context = await workspaceRestoreRequests.getContext(workspaceId, request);
     } catch (error) {
       assertCurrent();
       if ((error as { status?: number } | null)?.status === 404)
@@ -255,16 +226,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
     ) {
       throw new Error("The server workspace could not be restored completely");
     }
-    const [artifacts, notes] = await Promise.all([
-      bgRequest<WorkspaceArtifactApiResponse[]>({
-        ...request,
-        path: `${path}/artifacts`,
-      }),
-      bgRequest<WorkspaceNoteApiResponse[]>({
-        ...request,
-        path: `${path}/notes`,
-      }),
-    ]);
+    const [artifacts, notes] = await workspaceRestoreRequests.getContents(workspaceId, request);
     assertCurrent();
     if (
       artifacts.some((artifact) => artifact.workspace_id !== workspaceId) ||

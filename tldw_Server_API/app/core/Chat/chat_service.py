@@ -24,7 +24,7 @@ import uuid as _uuid
 from collections.abc import AsyncIterator, Awaitable, Iterator, Mapping
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
@@ -3151,6 +3151,236 @@ def _normalize_history_overlap_content(value: Any, *, assistant: bool) -> Any:
     return value
 
 
+async def _prepare_versioned_history_context(
+    *,
+    chat_db: Any,
+    request_data: Any,
+    final_conversation_id: str,
+    history_runtime: dict[str, Any],
+    history_selection: Any,
+    server_existing_input: Any,
+    turn_spec: Any,
+    durable_history: Any,
+    regenerate_reply_id: str | None,
+    continue_reply_id: str | None,
+    continued_reply_prefix: Callable[[Mapping[str, Any]], str],
+) -> tuple[
+    HistorySelectionSnapshotV1,
+    tuple[dict[str, Any], ...],
+    dict[str, Any] | None,
+    dict[str, Any],
+    tuple[dict[str, Any] | None, int | None, dict[str, Any]],
+    str | None,
+]:
+    """Validate and admit versioned history within one owner-bound transaction."""
+    selected_durable = durable_history is not None
+    from tldw_Server_API.app.core.Chat.history_context import (
+        project_history_context,
+        selected_unanswered_text_question,
+    )
+
+    if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
+        raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_context_prompt_template"})
+    selection_model = history_selection
+    if selected_durable:
+        selection_model = durable_history.selection if durable_history.kind == "selection" else None
+    selection = selection_model.model_dump(mode="json") if selection_model is not None else None
+    edit_target = getattr(request_data, "tldw_history_edit_v1", None)
+    edit_target = edit_target.model_dump(mode="json") if edit_target is not None else None
+    owner = history_runtime["history_owner_key"]
+    continuation_holder: dict[str, str] = {}
+
+    def accept_history() -> tuple[
+        HistorySelectionSnapshotV1,
+        tuple[dict[str, Any], ...],
+        dict[str, Any] | None,
+        dict[str, Any],
+        tuple[dict[str, Any] | None, int | None, dict[str, Any]],
+    ]:
+        with chat_db.transaction() as conn:
+            owner_client_id = history_runtime["history_owner_client_id"]
+            state = chat_db.get_roleplay_resume_state(
+                final_conversation_id, conn=conn, lock_for_update=True, owner_client_id=owner_client_id,
+            )
+            if selected_durable:
+                conversation = state["conversation"]
+                scope = {key: conversation.get(key) for key in ("scope_type", "workspace_id")}
+                if scope != history_runtime["history_scope"]:
+                    raise HistorySelectionError("owner_conversation_mismatch")
+                if conversation.get("scope_type") == "workspace" and not any(
+                    conversation.get(key) for key in ("character_id", "assistant_kind", "assistant_id")
+                ):
+                    workspace = chat_db.get_workspace(conversation["workspace_id"], conn=conn, for_update=True)
+                    if workspace and (workspace.get("assistant_defaults_json") is not None or workspace.get("_assistant_defaults_invalid")):
+                        raise HistorySelectionError("unsupported_history_context_inherited_assistant")
+                context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
+                # Native prompt effects must not silently disappear from the finalized durable request.
+                if context[2].get("history_dictionary_plan") is not None:
+                    raise HistorySelectionError("unsupported_history_context_dictionaries")
+                if context[2].get("history_world_book_plan") is not None:
+                    raise HistorySelectionError("unsupported_history_context_world_books")
+                for field, value in context[2].get("history_sampling", {}).items():
+                    if field not in request_data.model_fields_set or getattr(request_data, field, None) != value:
+                        raise HistorySelectionError("unsupported_history_context_sampling_mismatch")
+                current_user = next(message for message in request_data.messages if message.role == "user")
+                intent = {"id": str(turn_spec.user_message_id), "sender": "user", "content": current_user.content}
+                retained_selection = selection
+                if durable_history.kind == "admission":
+                    reference = durable_history.admission.model_dump(mode="json")
+                    store = chat_db.message_store
+                    accepted = store._verified_history_input(final_conversation_id, intent["id"],
+                        owner_client_id=owner_client_id, owner_key=owner, conn=conn)
+                    authority = store._validate_history_parent(final_conversation_id, reference,
+                        owner_client_id=owner_client_id, owner_key=owner, conn=conn)
+                    if authority["scope"] != scope or store._history_intent_digest(intent) != authority["intent_digest"]:
+                        raise HistorySelectionError("message_id_conflict")
+                    retained_selection = authority["selection"]
+                snap, content = chat_db.validate_history_selection(final_conversation_id, retained_selection,
+                    owner_client_id=owner_client_id, owner_key=owner, conn=conn)
+                for item in content:
+                    extra = item.get("extra_metadata") or {}
+                    _saved_image_details(extra, len(item["images"]))
+                    if (item["images"] or item.get("tool_calls") is not None
+                            or extra.get("sender_role") in {"tool", "function"}
+                            or any(extra.get(key) is not None
+                                for key in ("function_call", "tool_call_id", "content_placeholder_reason"))):
+                        raise HistorySelectionError("unsupported_history_context_selected_assets_or_tools")
+                if durable_history.kind == "selection":
+                    accepted = chat_db.append_selected_history_input(final_conversation_id, selection, intent,
+                        owner_client_id=owner_client_id, owner_key=owner, conn=conn)
+                return snap, content, accepted, conversation, context
+
+            snap, content = chat_db.validate_history_selection(
+                final_conversation_id,
+                selection,
+                owner_client_id=history_runtime["history_owner_client_id"],
+                owner_key=owner,
+                conn=conn,
+                history_edit=edit_target,
+            )
+            question = (selected_unanswered_text_question(snap, content, selection)
+                if server_existing_input is not None else None)
+            context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
+            dictionary_plan = context[2].pop("history_dictionary_plan", None)
+            if dictionary_plan is not None:
+                from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import (
+                    transform_frozen_user_content,
+                )
+                from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+
+                try:
+                    context[2]["history_dictionary_user_content"] = transform_frozen_user_content(
+                        ([{"role": "user", "content": question["message"]}] if question is not None
+                            else [message.model_dump(exclude_none=True) for message in request_data.messages]), dictionary_plan,
+                    )
+                except InputError as exc:
+                    raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
+            _format_selected_history_messages(snap, content, context[0] or {})
+            reused_reply_id = regenerate_reply_id if regenerate_reply_id is not None else continue_reply_id
+            unsupported_code = (
+                "unsupported_history_continuation" if continue_reply_id is not None
+                else "unsupported_history_regeneration"
+            )
+            if server_existing_input is not None:
+                accepted = None
+            elif reused_reply_id is not None:
+                if getattr(request_data, "tldw_history_branch", None) is not True:
+                    raise reply_action_refusal(unsupported_code, REPLY_ACTION_REFUSED_REQUEST)
+                inputs = [
+                    message.model_dump(exclude_none=True)
+                    for message in request_data.messages
+                    if message.role != "system"
+                ]
+                if len(inputs) != 1 or inputs[0].get("role") != "user":
+                    raise HistorySelectionError("invalid_regeneration_input")
+                try:
+                    accepted = chat_db.reuse_selected_history_admission(
+                        final_conversation_id,
+                        selection,
+                        reused_reply_id,
+                        owner_client_id=history_runtime["history_owner_client_id"],
+                        owner_key=owner,
+                        conn=conn,
+                    )
+                except HistorySelectionError as exc:
+                    if exc.code == "unsupported_history_regeneration":
+                        raise HistorySelectionError(unsupported_code, details=exc.details) from exc
+                    raise
+                original = next(item for item in content if item["id"] == accepted["input_message_id"])
+                extra = original.get("extra_metadata") or {}
+                if (
+                    original.get("tool_calls") is not None
+                    or extra.get("function_call") is not None
+                    or extra.get("tool_call_id") is not None
+                ):
+                    raise reply_action_refusal(unsupported_code, REPLY_ACTION_REFUSED_QUESTION)
+                text = _saved_image_text(
+                    {
+                        "sender": "user",
+                        "version": original["_message_version"],
+                        "content": original["message"],
+                        "images": original["images"],
+                    },
+                    extra,
+                )
+                details = _saved_image_details(extra, len(original["images"]))
+                parts = ([{"type": "text", "text": text}] if text else []) + [
+                    {"type": "image_url", "image_url": {"url": image, "detail": detail}}
+                    for image, detail in zip(original["images"], details)
+                ]
+                if (
+                    _retry_content_components(inputs[0].get("content")) != _retry_content_components(parts)
+                    or any(
+                        inputs[0].get(key) is not None for key in ("tool_calls", "function_call", "tool_call_id")
+                    )
+                    or inputs[0].get("name") not in (None, extra.get("sender_name"))
+                ):
+                    raise HistorySelectionError("regeneration_input_changed")
+                if continue_reply_id is not None:
+                    # Continue keeps the saved reply as the final context message.
+                    continuation_holder["prefix"] = continued_reply_prefix(
+                        next(item for item in content if item["id"] == continue_reply_id)
+                    )
+                else:
+                    content = tuple(item for item in content if item["id"] != regenerate_reply_id)
+            else:
+                accepted = chat_db.append_selected_history_inputs(
+                    final_conversation_id,
+                    selection,
+                    history_runtime["history_inputs"],
+                    owner_client_id=history_runtime["history_owner_client_id"],
+                    owner_key=owner,
+                    conn=conn,
+                    history_branch=getattr(request_data, "tldw_history_branch", None),
+                    history_edit=edit_target,
+                )
+            return snap, content, accepted, state["conversation"], context
+
+    try:
+        history_snapshot, selected_content, admission, existing_conversation, context = await asyncio.to_thread(accept_history)
+    except HistorySelectionError as exc:
+        failure = (
+            "unsupported_history_capability"
+            if (exc.code.startswith("unsupported_history_context")
+                or exc.code in {"unsupported_history_regeneration", "unsupported_history_continuation"})
+            else "stale_selection"
+        )
+        raise HTTPException(409, detail={"status": failure, "code": exc.code, **exc.details}) from exc
+    continue_prefix = continuation_holder.get("prefix")
+    character_card, character_db_id, assistant_context = context
+    for field, value in assistant_context.pop("history_sampling", {}).items():
+        if not selected_durable and field not in request_data.model_fields_set:
+            setattr(request_data, field, value)
+    return (
+        history_snapshot,
+        selected_content,
+        admission,
+        existing_conversation,
+        (character_card, character_db_id, assistant_context),
+        continue_prefix,
+    )
+
+
 async def build_context_and_messages(
     chat_db: Any,
     request_data: Any,
@@ -3232,203 +3462,27 @@ async def build_context_and_messages(
     history_snapshot = None
     admission = None
     if versioned:
-        from tldw_Server_API.app.core.Chat.history_context import (
-            project_history_context,
-            selected_unanswered_text_question,
+        (
+            history_snapshot,
+            selected_content,
+            admission,
+            existing_conversation,
+            context,
+            continue_prefix,
+        ) = await _prepare_versioned_history_context(
+            chat_db=chat_db,
+            request_data=request_data,
+            final_conversation_id=final_conversation_id,
+            history_runtime=history_runtime,
+            history_selection=history_selection,
+            server_existing_input=server_existing_input,
+            turn_spec=turn_spec,
+            durable_history=durable_history,
+            regenerate_reply_id=regenerate_reply_id,
+            continue_reply_id=continue_reply_id,
+            continued_reply_prefix=continued_reply_prefix,
         )
-
-        if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
-            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_context_prompt_template"})
-        selection_model = history_selection
-        if selected_durable:
-            selection_model = durable_history.selection if durable_history.kind == "selection" else None
-        selection = selection_model.model_dump(mode="json") if selection_model is not None else None
-        edit_target = getattr(request_data, "tldw_history_edit_v1", None)
-        edit_target = edit_target.model_dump(mode="json") if edit_target is not None else None
-        owner = history_runtime["history_owner_key"]
-        continuation_holder: dict[str, str] = {}
-
-        def accept_history() -> tuple[
-            HistorySelectionSnapshotV1,
-            tuple[dict[str, Any], ...],
-            dict[str, Any] | None,
-            dict[str, Any],
-            tuple[dict[str, Any] | None, int | None, dict[str, Any]],
-        ]:
-            with chat_db.transaction() as conn:
-                owner_client_id = history_runtime["history_owner_client_id"]
-                state = chat_db.get_roleplay_resume_state(
-                    final_conversation_id, conn=conn, lock_for_update=True, owner_client_id=owner_client_id,
-                )
-                if selected_durable:
-                    conversation = state["conversation"]
-                    scope = {key: conversation.get(key) for key in ("scope_type", "workspace_id")}
-                    if scope != history_runtime["history_scope"]:
-                        raise HistorySelectionError("owner_conversation_mismatch")
-                    if conversation.get("scope_type") == "workspace" and not any(
-                        conversation.get(key) for key in ("character_id", "assistant_kind", "assistant_id")
-                    ):
-                        workspace = chat_db.get_workspace(conversation["workspace_id"], conn=conn, for_update=True)
-                        if workspace and (workspace.get("assistant_defaults_json") is not None or workspace.get("_assistant_defaults_invalid")):
-                            raise HistorySelectionError("unsupported_history_context_inherited_assistant")
-                    context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
-                    # Native prompt effects must not silently disappear from the finalized durable request.
-                    if context[2].get("history_dictionary_plan") is not None:
-                        raise HistorySelectionError("unsupported_history_context_dictionaries")
-                    if context[2].get("history_world_book_plan") is not None:
-                        raise HistorySelectionError("unsupported_history_context_world_books")
-                    for field, value in context[2].get("history_sampling", {}).items():
-                        if field not in request_data.model_fields_set or getattr(request_data, field, None) != value:
-                            raise HistorySelectionError("unsupported_history_context_sampling_mismatch")
-                    current_user = next(message for message in request_data.messages if message.role == "user")
-                    intent = {"id": str(turn_spec.user_message_id), "sender": "user", "content": current_user.content}
-                    retained_selection = selection
-                    if durable_history.kind == "admission":
-                        reference = durable_history.admission.model_dump(mode="json")
-                        store = chat_db.message_store
-                        accepted = store._verified_history_input(final_conversation_id, intent["id"],
-                            owner_client_id=owner_client_id, owner_key=owner, conn=conn)
-                        authority = store._validate_history_parent(final_conversation_id, reference,
-                            owner_client_id=owner_client_id, owner_key=owner, conn=conn)
-                        if authority["scope"] != scope or store._history_intent_digest(intent) != authority["intent_digest"]:
-                            raise HistorySelectionError("message_id_conflict")
-                        retained_selection = authority["selection"]
-                    snap, content = chat_db.validate_history_selection(final_conversation_id, retained_selection,
-                        owner_client_id=owner_client_id, owner_key=owner, conn=conn)
-                    for item in content:
-                        extra = item.get("extra_metadata") or {}
-                        _saved_image_details(extra, len(item["images"]))
-                        if (item["images"] or item.get("tool_calls") is not None
-                                or extra.get("sender_role") in {"tool", "function"}
-                                or any(extra.get(key) is not None
-                                    for key in ("function_call", "tool_call_id", "content_placeholder_reason"))):
-                            raise HistorySelectionError("unsupported_history_context_selected_assets_or_tools")
-                    if durable_history.kind == "selection":
-                        accepted = chat_db.append_selected_history_input(final_conversation_id, selection, intent,
-                            owner_client_id=owner_client_id, owner_key=owner, conn=conn)
-                    return snap, content, accepted, conversation, context
-
-                snap, content = chat_db.validate_history_selection(
-                    final_conversation_id,
-                    selection,
-                    owner_client_id=history_runtime["history_owner_client_id"],
-                    owner_key=owner,
-                    conn=conn,
-                    history_edit=edit_target,
-                )
-                question = (selected_unanswered_text_question(snap, content, selection)
-                    if server_existing_input is not None else None)
-                context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
-                dictionary_plan = context[2].pop("history_dictionary_plan", None)
-                if dictionary_plan is not None:
-                    from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import (
-                        transform_frozen_user_content,
-                    )
-                    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
-
-                    try:
-                        context[2]["history_dictionary_user_content"] = transform_frozen_user_content(
-                            ([{"role": "user", "content": question["message"]}] if question is not None
-                                else [message.model_dump(exclude_none=True) for message in request_data.messages]), dictionary_plan,
-                        )
-                    except InputError as exc:
-                        raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
-                _format_selected_history_messages(snap, content, context[0] or {})
-                reused_reply_id = regenerate_reply_id if regenerate_reply_id is not None else continue_reply_id
-                unsupported_code = (
-                    "unsupported_history_continuation" if continue_reply_id is not None
-                    else "unsupported_history_regeneration"
-                )
-                if server_existing_input is not None:
-                    accepted = None
-                elif reused_reply_id is not None:
-                    if getattr(request_data, "tldw_history_branch", None) is not True:
-                        raise reply_action_refusal(unsupported_code, REPLY_ACTION_REFUSED_REQUEST)
-                    inputs = [
-                        message.model_dump(exclude_none=True)
-                        for message in request_data.messages
-                        if message.role != "system"
-                    ]
-                    if len(inputs) != 1 or inputs[0].get("role") != "user":
-                        raise HistorySelectionError("invalid_regeneration_input")
-                    try:
-                        accepted = chat_db.reuse_selected_history_admission(
-                            final_conversation_id,
-                            selection,
-                            reused_reply_id,
-                            owner_client_id=history_runtime["history_owner_client_id"],
-                            owner_key=owner,
-                            conn=conn,
-                        )
-                    except HistorySelectionError as exc:
-                        if exc.code == "unsupported_history_regeneration":
-                            raise HistorySelectionError(unsupported_code, details=exc.details) from exc
-                        raise
-                    original = next(item for item in content if item["id"] == accepted["input_message_id"])
-                    extra = original.get("extra_metadata") or {}
-                    if (
-                        original.get("tool_calls") is not None
-                        or extra.get("function_call") is not None
-                        or extra.get("tool_call_id") is not None
-                    ):
-                        raise reply_action_refusal(unsupported_code, REPLY_ACTION_REFUSED_QUESTION)
-                    text = _saved_image_text(
-                        {
-                            "sender": "user",
-                            "version": original["_message_version"],
-                            "content": original["message"],
-                            "images": original["images"],
-                        },
-                        extra,
-                    )
-                    details = _saved_image_details(extra, len(original["images"]))
-                    parts = ([{"type": "text", "text": text}] if text else []) + [
-                        {"type": "image_url", "image_url": {"url": image, "detail": detail}}
-                        for image, detail in zip(original["images"], details)
-                    ]
-                    if (
-                        _retry_content_components(inputs[0].get("content")) != _retry_content_components(parts)
-                        or any(
-                            inputs[0].get(key) is not None for key in ("tool_calls", "function_call", "tool_call_id")
-                        )
-                        or inputs[0].get("name") not in (None, extra.get("sender_name"))
-                    ):
-                        raise HistorySelectionError("regeneration_input_changed")
-                    if continue_reply_id is not None:
-                        # Continue keeps the saved reply as the final context message.
-                        continuation_holder["prefix"] = continued_reply_prefix(
-                            next(item for item in content if item["id"] == continue_reply_id)
-                        )
-                    else:
-                        content = tuple(item for item in content if item["id"] != regenerate_reply_id)
-                else:
-                    accepted = chat_db.append_selected_history_inputs(
-                        final_conversation_id,
-                        selection,
-                        history_runtime["history_inputs"],
-                        owner_client_id=history_runtime["history_owner_client_id"],
-                        owner_key=owner,
-                        conn=conn,
-                        history_branch=getattr(request_data, "tldw_history_branch", None),
-                        history_edit=edit_target,
-                    )
-                return snap, content, accepted, state["conversation"], context
-
-        try:
-            history_snapshot, selected_content, admission, existing_conversation, context = await asyncio.to_thread(accept_history)
-        except HistorySelectionError as exc:
-            failure = (
-                "unsupported_history_capability"
-                if (exc.code.startswith("unsupported_history_context")
-                    or exc.code in {"unsupported_history_regeneration", "unsupported_history_continuation"})
-                else "stale_selection"
-            )
-            raise HTTPException(409, detail={"status": failure, "code": exc.code, **exc.details}) from exc
-        continue_prefix = continuation_holder.get("prefix")
         character_card, character_db_id, assistant_context = context
-        for field, value in assistant_context.pop("history_sampling", {}).items():
-            if not selected_durable and field not in request_data.model_fields_set:
-                setattr(request_data, field, value)
     else:
         # Assistant context
         (
@@ -4451,6 +4505,34 @@ def _extract_previous_prompt_guardrail_fingerprints(
     return None
 
 
+async def _await_mandatory_moderation_audits(
+    tasks: list[asyncio.Task[Any]],
+    stream_mod_state: dict[str, Any],
+    conversation_id: str,
+) -> None:
+    from tldw_Server_API.app.core.Chat.streaming_utils import StopStreamWithError
+
+    pending_tasks = list(tasks)
+    tasks.clear()
+    if pending_tasks:
+        results = await asyncio.gather(*pending_tasks, return_exceptions=True)
+        failures = [result for result in results if isinstance(result, BaseException)]
+        if failures:
+            for failure in failures:
+                logger.error(
+                    "Mandatory moderation audit task failed for {} error_type={}",
+                    conversation_id,
+                    type(failure).__name__,
+                )
+            raise StopStreamWithError(
+                message="Mandatory audit persistence unavailable",
+                error_type="audit_persistence_failure",
+            ) from failures[0]
+    pending_stopper = stream_mod_state.pop("pending_stop_error", None)
+    if pending_stopper is not None:
+        raise pending_stopper
+
+
 async def execute_streaming_call(
     *,
     current_loop: Any,
@@ -4489,9 +4571,8 @@ async def execute_streaming_call(
     continuation_metadata: dict[str, Any] | None = None,
     queue_request_id: str | None = None,
     provider_factory_timeout: float | None = None,
-    native_persistence: NativeStreamPersistence | None = None,
+    native_persistence: NativeStreamPersistence | Literal["selected_durable_text"] | None = None,
     forward_usage_chunk: bool = False,
-    selected_durable_text_only: bool = False,
 ) -> StreamingResponse:
     """Execute a streaming LLM call with queue, failover, moderation, and persistence.
 
@@ -4505,6 +4586,7 @@ async def execute_streaming_call(
     save_message_fn. Only return an ID from it after verifying the receipt.
     """
     llm_start_time = time.time()
+    selected_durable_text_only = native_persistence == "selected_durable_text"
     usage_credential_source = call_credential_source(cleaned_args)  # whose key the reply ran on, for the usage row
     factory_budget_seconds = (
         PROVIDER_STREAM_FACTORY_TIMEOUT_SECONDS
@@ -5691,31 +5773,6 @@ async def execute_streaming_call(
                 stream_holdback = ""
                 return out
 
-            async def _await_mandatory_moderation_audits() -> None:
-                pending_tasks = list(mandatory_moderation_audit_tasks)
-                mandatory_moderation_audit_tasks.clear()
-                failures: list[BaseException] = []
-                if pending_tasks:
-                    results = await asyncio.gather(
-                        *pending_tasks,
-                        return_exceptions=True,
-                    )
-                    failures = [result for result in results if isinstance(result, BaseException)]
-                if failures:
-                    for failure in failures:
-                        logger.error(
-                            "Mandatory moderation audit task failed for {} error_type={}",
-                            final_conversation_id,
-                            type(failure).__name__,
-                        )
-                    raise StopStreamWithError(
-                        message="Mandatory audit persistence unavailable",
-                        error_type="audit_persistence_failure",
-                    ) from failures[0]
-                pending_stopper = stream_mod_state.pop("pending_stop_error", None)
-                if pending_stopper is not None:
-                    raise pending_stopper
-
             def _out_transform(s: str) -> str:
                 nonlocal chunk_seq, stream_holdback
                 if stream_mod_state.get("pending_stop_error") is not None:
@@ -5911,7 +5968,12 @@ async def execute_streaming_call(
                     idle_timeout=CHAT_IDLE_TIMEOUT,
                     heartbeat_interval=CHAT_HEARTBEAT_INTERVAL,
                     text_transform=_out_transform,
-                    before_success_callback=_await_mandatory_moderation_audits,
+                    before_success_callback=partial(
+                        _await_mandatory_moderation_audits,
+                        mandatory_moderation_audit_tasks,
+                        stream_mod_state,
+                        final_conversation_id,
+                    ),
                     system_message_id=system_message_id,
                     user_message_id=user_message_id,
                     continuation_metadata=normalized_continuation_metadata,
@@ -6014,6 +6076,29 @@ async def execute_streaming_call(
     )
 
 
+async def _audit_non_stream_success(
+    service: Any,
+    context: Any,
+    conversation_id: str,
+    provider: str,
+    model: str,
+) -> None:
+    if service and context:
+        with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+            await service.log_event(
+                event_type=AuditEventType.API_RESPONSE,
+                context=context,
+                action="chat_completion_success",
+                result="success",
+                metadata={
+                    "conversation_id": conversation_id,
+                    "provider": provider,
+                    "model": model,
+                    "streaming": False,
+                },
+            )
+
+
 async def _execute_non_stream_call_impl(
     *,
     current_loop: Any,
@@ -6033,8 +6118,7 @@ async def _execute_non_stream_call_impl(
     save_message_fn: Callable[..., Any],
     system_message_id: str | None = None,
     user_message_id: str | None = None,
-    audit_service: Any | None,
-    audit_context: Any | None,
+    audit: tuple[Any | None, Any | None],
     client_id: str,
     queue_execution_enabled: bool,
     enable_provider_fallback: bool,
@@ -6052,6 +6136,7 @@ async def _execute_non_stream_call_impl(
 
     Returns the encoded payload (dict) ready to be wrapped by JSONResponse.
     """
+    audit_service, audit_context = audit
     llm_start_time = time.time()
     structured_metadata: dict[str, Any] | None = None
     normalized_continuation_metadata = (
@@ -7056,21 +7141,7 @@ async def _execute_non_stream_call_impl(
                 prompt_guardrail_decision.to_response_metadata()
             )
 
-    # Audit success
-    if audit_service and audit_context:
-        with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-            await audit_service.log_event(
-                event_type=AuditEventType.API_RESPONSE,
-                context=audit_context,
-                action="chat_completion_success",
-                result="success",
-                metadata={
-                    "conversation_id": final_conversation_id,
-                    "provider": selected_provider,
-                    "model": model,
-                    "streaming": False,
-                },
-            )
+    await _audit_non_stream_success(audit_service, audit_context, final_conversation_id, selected_provider, model)
 
     # Retry best-effort accounting if an earlier touch failed transiently.
     await _record_provider_use(selected_provider)
@@ -7085,5 +7156,7 @@ def get_chat_completion_pipeline() -> ChatCompletionPipeline:
     )
 
 
-async def execute_non_stream_call(**kwargs: Any) -> dict[str, Any]:
-    return await get_chat_completion_pipeline().execute_non_stream(**kwargs)
+async def execute_non_stream_call(
+    *, audit_service: Any | None, audit_context: Any | None, **kwargs: Any
+) -> dict[str, Any]:
+    return await get_chat_completion_pipeline().execute_non_stream(audit=(audit_service, audit_context), **kwargs)

@@ -1,11 +1,12 @@
 
 # PostgreSQL Content Migration Guide
 
-This document explains how to migrate existing SQLite content databases to PostgreSQL using the
-built-in migration tooling (`migration_tools.py`). The script copies Media, analytics,
-ChaChaNotes, **workflows**, and related metadata while preserving UUIDs, timestamps, and
-soft-delete flags so you can switch the backend without re-ingesting content or re-running
-workflow jobs.
+This guide covers the PostgreSQL ChaChaNotes schema upgrade and the separate
+offline SQLite-to-PostgreSQL copy for Media. The bulk importer
+(`migration_tools.py`) also has analytics and workflow targets. It does not
+support copying a normal ChaChaNotes database with cyclic foreign keys. Keep
+the SQLite original intact; the in-place SQLite schema upgrade is not an
+engine conversion.
 
 ## Prerequisites
 
@@ -13,16 +14,30 @@ workflow jobs.
 - Install PostgreSQL and ensure the target database is accessible (local host or remote).
 - Install the Python dependency `psycopg` (listed under pyproject extras, e.g., `.[multiplayer]`). For convenience use the binary extra:
   - pip install "psycopg[binary]"
-- Configure the server once against PostgreSQL so the schema exists. The easiest option is to set
-  `TLDW_CONTENT_DB_BACKEND=postgresql` temporarily and start the API; it will create all tables and
-  FTS artefacts, then shut the server down before migrating data.
+- Prepare the target PostgreSQL schemas in maintenance before copying data and keep the API offline
+  during the copy. Run the ChaChaNotes schema upgrade as its owner, not as the restricted runtime
+  role, as described below.
+- Prepare Media separately using the application's `DB_Manager.create_media_database` initializer
+  with the PostgreSQL content configuration pointed at the target and the Media schema owner.
+  Verify the Media tables and constraints exist before copying. The policy installer below does
+  not create them, and the bulk copier expects them to exist.
 
 `USER_DB_BASE_DIR` is defined in `tldw_Server_API.app.core.config` (defaults to `Databases/user_databases/` under the project root). Override via environment variable or `Config_Files/config.txt` as needed.
 Replace `<content-db>.db` with your configured per-user content DB filename in the examples below.
 
 ### ChaChaNotes schema 92 with a separate runtime role
 
-Run the schema upgrade as the content schema owner before restarting the API.
+With the API offline, run the repository's PostgreSQL policy installer
+(`python -m Helper_Scripts.DB-Related.pg_apply_rls_policies --apply`) using the
+maintenance shell configuration for the intended content database. This initializes or
+upgrades both Prompt Studio and ChaChaNotes before applying row policies.
+Use an authorized schema owner for every affected table, including any
+existing Media claims publication tables. Check the configured target first:
+`DATABASE_URL` takes precedence over the individual database settings for this
+command. Do not depend on per-user API warm-up to upgrade the schema. Confirm
+`SELECT version FROM db_schema_version WHERE schema_name = 'rag_char_chat_schema';`
+returns 92 in the ChaChaNotes schema before proceeding.
+
 If the API connects as a separate role, the owner must grant that existing role
 access to the new message insertion-order ledger and its owned sequence. Use the
 schema that contains the ChaChaNotes tables and replace `content_runtime` below
@@ -43,67 +58,52 @@ before restoring traffic.
 
 ## Step 1 - Prepare connection details
 
-Collect the PostgreSQL host, port, database, username, and password. These map directly onto the
-CLI arguments and `DatabaseConfig` fields inside the migration utility.
+Collect the PostgreSQL host, port, database, and credentials authorized for the
+offline copy. These map to the import CLI arguments. The importer deletes existing
+rows and updates sequences; its permissions are different from the API runtime
+grants above. It does not establish per-tenant ChaChaNotes session context. Use it
+only for an offline target where the configured maintenance login is already
+authorized for the copy. Do not disable row policies or broaden the API login to
+make the import work.
 
 ```bash
 export PGHOST=localhost
 export PGPORT=5432
 export PGDATABASE=tldw_content
-export PGUSER=tldw_user
-export PGPASSWORD=super-secret
+export PGUSER=tldw_migration
+export PGPASSWORD='<migration password>'
 ```
 
 ## Step 2 - Run the migration utility
 
-Invoke the migration module with paths to your existing SQLite databases. Provide `--content-sqlite`
-for the main media database and optionally pass `--chacha-sqlite`, `--analytics-sqlite`, and
-`--workflows-sqlite` if you want to migrate user notes, analytics data, and workflow runs in the
-same pass.
+For the Media-only copy, pass the source file as `--content-sqlite`. Do not
+pass `--chacha-sqlite` for a standard installation: the generic importer
+rejects cyclic table dependencies such as the references between
+conversations and messages. If the importer rejects the Media source schema,
+stop and retain the source. Do not remove tables or constraints to force it.
+
+The example imports one source into a dedicated target. Do not repeat it for
+multiple users against the same target: without a tenant-scoped import procedure,
+the next copy can delete rows loaded by the previous one.
 
 ```bash
-# Repeat per user_id (single-user installs typically use the fixed default user_id).
-if [ -z "${USER_DB_BASE_DIR}" ]; then
-  echo "Error: USER_DB_BASE_DIR is not set." >&2
-  exit 1
-fi
-if [ ! -d "${USER_DB_BASE_DIR}" ]; then
-  echo "Error: USER_DB_BASE_DIR (${USER_DB_BASE_DIR}) is not a directory." >&2
+user_path="${USER_DB_BASE_DIR:?set the source DB directory}/${MIGRATION_USER_ID:?set the source user ID}"
+content_db="${user_path}/${CONTENT_DB_NAME:?set the source content DB filename}"
+if [ ! -r "$content_db" ]; then
+  echo "Error: the source content database must be readable." >&2
   exit 1
 fi
 
-for user_path in "${USER_DB_BASE_DIR}"/*; do
-  [ -d "${user_path}" ] || { echo "Skipping non-directory entry: ${user_path}" >&2; continue; }
-  user_id="$(basename "${user_path}")"
-  CONTENT_DB_NAME="${CONTENT_DB_NAME:?set CONTENT_DB_NAME to your configured per-user content DB filename}"
-  content_db="${user_path}/${CONTENT_DB_NAME}"
-  chacha_db="${user_path}/ChaChaNotes.db"
-
-  if [ ! -r "${content_db}" ]; then
-    echo "Warning: missing or unreadable content DB for user ${user_id} (${content_db}). Skipping." >&2
-    continue
-  fi
-
-  migration_args=(
-    --content-sqlite "${content_db}"
-    --analytics-sqlite Databases/Analytics.db
-    --workflows-sqlite Databases/workflows.db
-    --pg-host "$PGHOST"
-    --pg-port "$PGPORT"
-    --pg-database "$PGDATABASE"
-    --pg-user "$PGUSER"
-    --pg-password "$PGPASSWORD"
-    --batch-size 500
-  )
-  if [ -r "${chacha_db}" ]; then
-    migration_args+=(--chacha-sqlite "${chacha_db}")
-  else
-    echo "Warning: missing or unreadable ChaChaNotes.db for user ${user_id} (${chacha_db}). Skipping." >&2
-    continue
-  fi
-
-  python -m tldw_Server_API.app.core.DB_Management.migration_tools "${migration_args[@]}"
-done
+python -m tldw_Server_API.app.core.DB_Management.migration_tools \
+  --content-sqlite "$content_db" \
+  --pg-host "$PGHOST" \
+  --pg-port "$PGPORT" \
+  --pg-database "$PGDATABASE" \
+  --pg-user "$PGUSER" \
+  --pg-password "$PGPASSWORD" \
+  --skip-table db_schema_version \
+  --skip-table schema_version \
+  --batch-size 500
 ```
 
 The script performs the following actions for each supplied database:
@@ -116,6 +116,9 @@ The script performs the following actions for each supplied database:
    events, and artifacts) so you can compare the SQLite and Postgres totals at a glance.
 
 Use `--skip-table <table_name>` to omit auxiliary tables (for example, to skip large log tables).
+Keep the schema-version tables excluded: source SQLite versions are not
+PostgreSQL migration receipts. Keep the target's existing migration records
+and verify the PostgreSQL versions again after the copy.
 
 ## Step 3 - Validate the migration
 
@@ -137,6 +140,11 @@ Use `--skip-table <table_name>` to omit auxiliary tables (for example, to skip l
   done
   sqlite3 Databases/workflows.db 'SELECT COUNT(*) FROM workflow_runs;'
   ```
+
+- Before cutover, verify representative migrated records and their owners
+  through the restricted runtime in the isolated target. The intended
+  principal must see the records; a different tenant must not. Row counts
+  alone cannot validate ownership or access.
 
 - Run the dual-backend regression tests to ensure the application-level routines behave correctly (requires a Postgres instance with `POSTGRES_TEST_*` env vars):
 
@@ -164,22 +172,32 @@ Use `--skip-table <table_name>` to omit auxiliary tables (for example, to skip l
 
 ## Step 4 - Switch the application configuration
 
-1. Update environment variables or `Config_Files/config.txt`:
+The backend switch is shared by the content stores; the Media-only copy does
+not preserve Chats or Notes. Keep the SQLite deployment in place until all
+required content and its owner-scoped access are verified on the new backend.
+
+1. Configure the deployment's API runtime credentials in the service environment
+   or `Config_Files/config.txt`. Do not launch the API from the import shell or
+   inherit its `PGUSER`, `PGPASSWORD`, or migration DSN. Check any configured
+   PostgreSQL connection strings as well as the individual fields. Replace or
+   remove maintenance values in `TLDW_CONTENT_PG_DSN`, `TLDW_CONTENT_PG_*`, and
+   `[Database] pg_connection_string`; these can override the fallback settings:
 
    ```bash
    export TLDW_CONTENT_DB_BACKEND=postgresql
-   export TLDW_PG_HOST=$PGHOST
-   export TLDW_PG_PORT=$PGPORT
-   export TLDW_PG_DATABASE=$PGDATABASE
-   export TLDW_PG_USER=$PGUSER
-   export TLDW_PG_PASSWORD=$PGPASSWORD
+   export TLDW_PG_HOST="${CONTENT_RUNTIME_PG_HOST:?set the API database host}"
+   export TLDW_PG_PORT="${CONTENT_RUNTIME_PG_PORT:?set the API database port}"
+   export TLDW_PG_DATABASE="${CONTENT_RUNTIME_PG_DATABASE:?set the API database name}"
+   export TLDW_PG_USER="${CONTENT_RUNTIME_PG_USER:?set the API runtime login}"
+   export TLDW_PG_PASSWORD="${CONTENT_RUNTIME_PG_PASSWORD:?set the API runtime password}"
    # Optional overrides for workflow connection pooling
     export TLDW_WORKFLOW_DB_POOL_SIZE=15
     export TLDW_WORKFLOW_DB_MAX_OVERFLOW=30
     export TLDW_WORKFLOW_DB_TIMEOUT=30
    ```
 
-2. Remove or archive the old SQLite files once you are confident the migration succeeded.
+2. Retain the original SQLite files and backups until the cutover and rollback
+   procedure have been verified.
 
 3. Restart the API/frontend stack. On startup the service should log that it is using PostgreSQL for
    Media, ChaChaNotes, Analytics, and Workflows. Monitor `/api/v1/workflows/status` to ensure the
@@ -187,8 +205,8 @@ Use `--skip-table <table_name>` to omit auxiliary tables (for example, to skip l
 
 ## Troubleshooting
 
-- **Foreign-key errors during copy** - ensure the PostgreSQL schema was created by running the API
-  once before migrating. The script expects tables and constraints to exist.
+- **Foreign-key errors during copy** - verify the target tables and constraints
+  were created during maintenance before copying.
 - **Sequence mismatch** - rerun the migration with `--batch-size 1` for the affected database to
   recompute the sequence state, or run the generated `SELECT setval(...)` statements manually.
 - **Large datasets** - increase `--batch-size` (default 500) to improve throughput, or run per

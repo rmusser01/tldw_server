@@ -4342,10 +4342,6 @@ export class TldwApiClientBase {
 
 
 
-  normalizeChatSummary(input: unknown): ServerChatSummary {
-    return chatRagMethods.normalizeChatSummary(input)
-  }
-
   async listChats(
     params?: Record<string, any>,
     options?: { signal?: AbortSignal; scope?: ChatScope }
@@ -4374,7 +4370,7 @@ export class TldwApiClientBase {
       }
     }
 
-    return list.map((c) => this.normalizeChatSummary(c))
+    return list.map((c) => chatRagMethods.normalizeChatSummary(c))
   }
 
   async listChatsWithMeta(
@@ -4557,7 +4553,7 @@ export class TldwApiClientBase {
       headers: { ...scopeFields.headers, "Content-Type": "application/json" },
       body: payload
     })
-    return this.normalizeChatSummary(res)
+    return chatRagMethods.normalizeChatSummary(res)
   }
 
   async deleteChat(
@@ -4603,7 +4599,7 @@ export class TldwApiClientBase {
       path: `/api/v1/chats/${cid}/restore${query}`,
       method: "POST"
     })
-    return this.normalizeChatSummary(res)
+    return chatRagMethods.normalizeChatSummary(res)
   }
 
   async createConversationShareLink(
@@ -5593,6 +5589,7 @@ type TldwDomainMethodOverride =
   | keyof TldwApiClientBase
   | "normalizeCharacterListResponse"
   | "getCharacterListIdentity"
+  | "normalizeChatSummary"
 type TldwDomainMethods<T> = Omit<T, TldwDomainMethodOverride>
 
 // Shared helpers that live in domain mixins but are referenced through the
@@ -5600,6 +5597,7 @@ type TldwDomainMethods<T> = Omit<T, TldwDomainMethodOverride>
 export interface TldwApiClientCharacterHelpers {
   normalizeCharacterListResponse: (typeof characterMethods)["normalizeCharacterListResponse"]
   getCharacterListIdentity: (typeof characterMethods)["getCharacterListIdentity"]
+  normalizeChatSummary: (typeof chatRagMethods)["normalizeChatSummary"]
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging, no-redeclare

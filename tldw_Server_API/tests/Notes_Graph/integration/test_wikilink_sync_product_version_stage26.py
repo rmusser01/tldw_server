@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Notes.wikilink_rename import (
     rewrite_title_links,
 )
 from tldw_Server_API.app.core.Notes.wikilinks import WikilinkTokenReplacement
+from tldw_Server_API.app.core.Sync.v2 import server_origin
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
@@ -64,7 +65,7 @@ def notes_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             device_name="Stage26",
             requested_domains=["notes.note"],
         )
-        monkeypatch.setattr(notes_endpoint, "get_active_server_origin_sync_service_for_user", lambda user_id: service)
+        monkeypatch.setattr(server_origin, "get_active_server_origin_sync_service_for_user", lambda user_id: service)
         yield db, service, profile.dataset.dataset_id
     finally:
         db.close_connection()
@@ -101,7 +102,7 @@ def test_sync_wikilink_save_skips_edit_between_read_and_capture(notes_sync, monk
         return capture_server_origin_mutation(*args, **kwargs)
 
     # Finite interleaving at the actual capture boundary, after the core version read.
-    monkeypatch.setattr(notes_endpoint, "capture_server_origin_mutation", edit_then_capture)
+    monkeypatch.setattr(server_origin, "capture_server_origin_mutation", edit_then_capture)
     save = notes_endpoint._wikilink_rename_saver(db, User(id=1, username="stage26", is_active=True))
     if operation == "rewrite":
         results = rewrite_title_links(

@@ -190,6 +190,9 @@ async def test_recovery_listing_rejects_transformed_or_deleted_views(listing_sta
             "include_history_recovery_v1": "true", "render_placeholders": "false", **incompatible,
         })
     assert response.status_code == 422
+    assert response.json() == {
+        "detail": "History recovery requires exact nondeleted, unformatted stored messages.",
+    }
 
 
 @pytest.mark.integration

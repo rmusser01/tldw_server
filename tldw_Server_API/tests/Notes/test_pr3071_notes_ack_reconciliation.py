@@ -9,6 +9,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.api.v1.endpoints import notes as endpoint
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Sync.v2 import server_origin
 from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
 from tldw_Server_API.app.core.Sync.v2.materializers import NotesMaterializer, NotesOrganizationMaterializer
 from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, NOTES_ORGANIZATION_DOMAINS, SyncDatasetCreate
@@ -251,7 +252,7 @@ def test_omitted_provenance_replay_does_not_cross_owner(active, sync_service, ch
 
     active.app.dependency_overrides[endpoint.get_chacha_db_for_user] = foreign_db
     active.app.dependency_overrides[endpoint.get_request_user] = foreign_user
-    monkeypatch.setattr(endpoint, "get_active_server_origin_sync_service_for_user", lambda _: foreign_service)
+    monkeypatch.setattr(server_origin, "get_active_server_origin_sync_service_for_user", lambda _: foreign_service)
     try:
         denied = getattr(active, method)(path, headers=headers, json=body)
         assert denied.status_code == 404, denied.text

@@ -11,6 +11,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+from tldw_Server_API.app.core.Utils.chat_sender import USER_SENDER_ALIASES
 
 # Default placeholder names used across Character_Chat helpers
 DEFAULT_CHARACTER_NAME = "Character"
@@ -151,9 +152,6 @@ def sanitize_sender_name(name: Optional[str]) -> str:
 
 # --- Sender alias constants (centralized for reuse) ---
 # Expose canonical alias sets for consistent sender-role handling across modules.
-USER_SENDER_ALIASES = {
-    "user", "you", "human", "player", "speaker", "speaker1", "speaker 1", "speaker-1"
-}
 CHAR_SENDER_ALIASES = {"assistant", "bot", "ai", "character"}
 SYSTEM_ALIASES = {"system", "narrator", "commentary", "metadata"}
 TOOL_ALIASES = {"tool", "assistant_tool", "function"}

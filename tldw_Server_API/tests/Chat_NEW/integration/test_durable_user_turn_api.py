@@ -1,15 +1,14 @@
 """Real storage and HTTP integration with provider, command, macro, and tool doubles."""
 
 import json
-from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.core.Chat import chat_service, command_router
 from tldw_Server_API.app.core.Chat.tool_auto_exec import ToolExecutionBatchResult, ToolExecutionRecord
+from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -152,6 +151,21 @@ def test_durable_receipts_and_assistant_parent_on_repeated_http_attempts(
         client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
 
 
+@pytest.fixture
+def slash_guard_boundaries(monkeypatch):
+    """Fail at the first attempted command, macro, or provider side effect."""
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("durable slash refusal must precede command, macro, and provider execution")
+
+    async def forbidden_dispatch(*args, **kwargs):
+        forbidden(*args, **kwargs)
+
+    monkeypatch.setattr(command_router, "async_dispatch_command", forbidden_dispatch)
+    # Readiness is the first macro storage operation, before service construction.
+    monkeypatch.setattr(ChatMacroRepository, "ensure_ready", forbidden)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", forbidden)
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("text_parts", [False, True])
@@ -170,6 +184,7 @@ def test_durable_turn_rejects_enabled_slash_candidates_before_execution(
     populated_chacha_db,
     auth_headers,
     monkeypatch,
+    slash_guard_boundaries,
     stream,
     text_parts,
     text,
@@ -178,25 +193,6 @@ def test_durable_turn_rejects_enabled_slash_candidates_before_execution(
     client, db = credentialed_test_client, populated_chacha_db
     cid, uid = db.add_conversation({"title": "Rejected slash turn"}), str(uuid4())
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
-    dispatch = AsyncMock(return_value=command_router.CommandResult(
-        ok=True, command="time", content="Command output", metadata={},
-    ))
-    macro_service = Mock(return_value=object())
-    macro_item = Mock(return_value=object())
-    completion = {
-        "id": "chatmacro-test",
-        "object": "chat.completion",
-        "created": 1,
-        "model": "gpt-4o-mini",
-        "choices": [{"message": {"role": "assistant", "content": "Answer", "metadata": {}}}],
-    }
-    macro_run = Mock(return_value=completion)
-    provider = Mock(wraps=chat_endpoint.perform_chat_api_call)
-    monkeypatch.setattr(command_router, "async_dispatch_command", dispatch)
-    monkeypatch.setattr(chat_endpoint, "_build_chat_macro_service", macro_service)
-    monkeypatch.setattr(chat_endpoint, "_find_enabled_chat_macro", macro_item)
-    monkeypatch.setattr(chat_endpoint, "_create_chat_macro_run_payload", macro_run)
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", provider)
     content = [{"type": "text", "text": text}, {"type": "text", "text": "More context"}] if text_parts else text
     client.app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     try:
@@ -216,11 +212,6 @@ def test_durable_turn_rejects_enabled_slash_candidates_before_execution(
         assert response.status_code == 422, response.text
         detail = response.json()["detail"]
         assert "tldw_turn" in detail["message"] and "slash" in detail["message"].lower()
-        dispatch.assert_not_called()
-        macro_service.assert_not_called()
-        macro_item.assert_not_called()
-        macro_run.assert_not_called()
-        provider.assert_not_called()
         assert db.get_message_by_id(uid) is None
         assert db.get_messages_for_conversation(cid) == []
     finally:
@@ -262,7 +253,14 @@ def test_durable_turn_accepts_disabled_slash_commands_as_literal_text(
         client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
 
 
+@pytest.fixture
+def enabled_tool_auto_continuation(monkeypatch):
+    monkeypatch.setenv("CHAT_AUTO_EXECUTE_TOOLS", "1")
+    monkeypatch.setenv("CHAT_TOOL_AUTO_CONTINUE_ONCE", "1")
+
+
 @pytest.mark.integration
+@pytest.mark.usefixtures("enabled_tool_auto_continuation")
 @pytest.mark.parametrize("turn_mode", ["ordinary", "durable", "branch"])
 def test_nonstream_tool_auto_continuation_preserves_turn_parent(
     credentialed_test_client,
@@ -273,21 +271,34 @@ def test_nonstream_tool_auto_continuation_preserves_turn_parent(
 ):
     client, db = credentialed_test_client, populated_chacha_db
     cid, uid = db.add_conversation({"title": "Tool continuation"}), str(uuid4())
-    monkeypatch.setenv("CHAT_AUTO_EXECUTE_TOOLS", "1")
-    monkeypatch.setenv("CHAT_TOOL_AUTO_CONTINUE_ONCE", "1")
     tool_call = {"id": "call-1", "type": "function", "function": {"name": "notes.search", "arguments": "{}"}}
     initial = {"choices": [{"message": {"role": "assistant", "content": "Searching", "tool_calls": [tool_call]}, "finish_reason": "tool_calls"}]}
     followup = {"choices": [{"message": {"role": "assistant", "content": "Final answer"}, "finish_reason": "stop"}]}
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", Mock(return_value=initial))
-    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", AsyncMock(return_value=followup))
-    monkeypatch.setattr(chat_service, "execute_assistant_tool_calls", AsyncMock(return_value=ToolExecutionBatchResult(
-        requested_calls=1,
-        processed_calls=1,
-        execution_attempts=1,
-        executed_calls=1,
-        truncated=False,
-        results=[ToolExecutionRecord(tool_call_id="call-1", tool_name="notes.search", ok=True, content="Tool result")],
-    )))
+
+    async def continue_chat(*, messages_payload, streaming, **_kwargs):
+        assert streaming is False
+        assert messages_payload[-2]["tool_calls"] == [tool_call]
+        assert messages_payload[-1] == {
+            "role": "tool", "tool_call_id": "call-1", "content": "Tool result", "name": "notes.search",
+        }
+        return followup
+
+    async def execute_tool(*, tool_calls, **_kwargs):
+        assert tool_calls == [tool_call]
+        return ToolExecutionBatchResult(
+            requested_calls=1,
+            processed_calls=1,
+            execution_attempts=1,
+            executed_calls=1,
+            truncated=False,
+            results=[
+                ToolExecutionRecord(tool_call_id="call-1", tool_name="notes.search", ok=True, content="Tool result"),
+            ],
+        )
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", lambda **_kwargs: initial)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", continue_chat)
+    monkeypatch.setattr(chat_service, "execute_assistant_tool_calls", execute_tool)
     body = {
         "model": "gpt-4o-mini",
         "conversation_id": cid,
@@ -336,7 +347,7 @@ def test_empty_provider_failure_then_retry_keeps_committed_user(
         text = "" if len(calls) == 1 else "Recovered answer"
         return {"choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": "stop"}]}
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", provider)
     client.app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     body = {
         "model": "gpt-4o-mini",

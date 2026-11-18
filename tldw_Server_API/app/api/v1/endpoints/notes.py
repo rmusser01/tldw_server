@@ -111,6 +111,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NotesExportResponse,
     NotesForKeywordResponse,
     NotesImportFileResult,
+    NotesImportItem,
     NotesImportRequest,
     NotesImportResponse,
     NotesListResponse,
@@ -3166,7 +3167,7 @@ def _wikilink_rename_saver(db: CharactersRAGDB, current_user: User) -> SaveNoteC
         if sync_service is not None:
             payload = _note_payload_from_row(note)
             payload["content"] = content
-            capture_server_origin_mutation(
+            _server_origin.capture_server_origin_mutation(
                 sync_service,
                 user_id=str(current_user.id),
                 domain="notes.note",
@@ -3669,6 +3670,37 @@ async def export_notes_post_csv(
         handle_db_errors(e, "notes export (POST csv)")
 
 
+def _parse_notes_import_file(
+    item: NotesImportItem, file_result: NotesImportFileResult,
+) -> list[dict[str, Any]]:
+    """Parse one upload, retaining per-row failures for the import result."""
+    fallback_title = _fallback_title_from_filename(item.file_name)
+    parsed_notes: list[dict[str, Any]] = []
+
+    try:
+        if item.format == "json":
+            raw_payload = json.loads(item.content)
+            raw_rows = _extract_json_note_rows(raw_payload)
+            file_result.detected_notes = len(raw_rows)
+            for row_index, row in enumerate(raw_rows, start=1):
+                try:
+                    parsed_notes.append(_normalize_import_note_row(row, fallback_title=fallback_title))
+                except _NOTES_NONCRITICAL_EXCEPTIONS as row_err:
+                    file_result.failed_count += 1
+                    file_result.errors.append(f"Row {row_index}: {row_err}")
+        else:
+            file_result.detected_notes = 1
+            parsed_notes = [_parse_markdown_import_note(item.content, fallback_title=fallback_title)]
+    except json.JSONDecodeError as decode_err:
+        file_result.failed_count += 1
+        file_result.errors.append(f"JSON parse error: {decode_err.msg}")
+    except _NOTES_NONCRITICAL_EXCEPTIONS as parse_err:
+        file_result.failed_count += 1
+        file_result.errors.append(f"Could not parse import content: {parse_err}")
+
+    return parsed_notes
+
+
 @router.post(
     "/import",
     response_model=NotesImportResponse,
@@ -3724,29 +3756,7 @@ async def import_notes(
                 file_name=item.file_name,
                 source_format=item.format,
             )
-            fallback_title = _fallback_title_from_filename(item.file_name)
-            parsed_notes: list[dict[str, Any]] = []
-
-            try:
-                if item.format == "json":
-                    raw_payload = json.loads(item.content)
-                    raw_rows = _extract_json_note_rows(raw_payload)
-                    file_result.detected_notes = len(raw_rows)
-                    for row_index, row in enumerate(raw_rows, start=1):
-                        try:
-                            parsed_notes.append(_normalize_import_note_row(row, fallback_title=fallback_title))
-                        except _NOTES_NONCRITICAL_EXCEPTIONS as row_err:
-                            file_result.failed_count += 1
-                            file_result.errors.append(f"Row {row_index}: {row_err}")
-                else:
-                    file_result.detected_notes = 1
-                    parsed_notes = [_parse_markdown_import_note(item.content, fallback_title=fallback_title)]
-            except json.JSONDecodeError as decode_err:
-                file_result.failed_count += 1
-                file_result.errors.append(f"JSON parse error: {decode_err.msg}")
-            except _NOTES_NONCRITICAL_EXCEPTIONS as parse_err:
-                file_result.failed_count += 1
-                file_result.errors.append(f"Could not parse import content: {parse_err}")
+            parsed_notes = _parse_notes_import_file(item, file_result)
 
             for note_index, parsed_note in enumerate(parsed_notes, start=1):
                 try:

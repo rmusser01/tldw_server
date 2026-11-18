@@ -679,7 +679,7 @@ export const chatRagMethods = {
       }
     }
 
-    return list.map((c) => this.normalizeChatSummary(c))
+    return list.map((c) => chatRagMethods.normalizeChatSummary(c))
   },
 
   async listChatsWithMeta(
@@ -724,7 +724,7 @@ export const chatRagMethods = {
       !(typeof row.id === "string" && row.id.trim() ||
         typeof row.id === "number" && Number.isSafeInteger(row.id) && row.id > 0)))
       throw new Error("The saved chat list response could not be verified.")
-    const chats = list.map((c) => this.normalizeChatSummary(c))
+    const chats = list.map((c) => chatRagMethods.normalizeChatSummary(c))
     return {
       chats,
       total: typeof total === "number" ? total : chats.length
@@ -771,7 +771,7 @@ export const chatRagMethods = {
       }
     }
 
-    const chats = list.map((item) => this.normalizeChatSummary(item))
+    const chats = list.map((item) => chatRagMethods.normalizeChatSummary(item))
     return {
       chats,
       total: typeof total === "number" ? total : chats.length
@@ -810,7 +810,7 @@ export const chatRagMethods = {
         ? { servicePromptConfig: scopeFields.servicePromptConfig }
         : {})
     })
-    return this.normalizeChatSummary(res)
+    return chatRagMethods.normalizeChatSummary(res)
   },
 
   async appendRoleplayResumeInput(
@@ -929,7 +929,7 @@ export const chatRagMethods = {
         (key === "state" && !CONVERSATION_STATE_VALUES.includes(res[key])) ||
         (res[key] !== null && (key === "rating" ? !Number.isInteger(res[key]) || res[key] < 1 || res[key] > 5 : typeof res[key] !== "string")))))
       throw new Error("The conversation metadata could not be verified. Reload before saving.")
-    return this.normalizeChatSummary(res)
+    return chatRagMethods.normalizeChatSummary(res)
   },
 
   async getChatSettings(
@@ -1113,7 +1113,7 @@ export const chatRagMethods = {
       !Number.isSafeInteger(res.version) || res.version <= expectedVersion! ||
       Object.entries(patch).some(([key, value]) => !Object.prototype.hasOwnProperty.call(res, key) || res[key] !== value))
       throw new Error("The server did not confirm these conversation changes. Reload before retrying.")
-    return this.normalizeChatSummary(res)
+    return chatRagMethods.normalizeChatSummary(res)
   },
 
   async deleteChat(
@@ -1190,7 +1190,7 @@ export const chatRagMethods = {
           path: `/api/v1/chats/${cid}/restore${query}`,
           method: "POST"
         })
-        return this.normalizeChatSummary(res)
+        return chatRagMethods.normalizeChatSummary(res)
       } catch (error) {
         if (hasRetried || !this.isVersionConflictError(error)) {
           throw error

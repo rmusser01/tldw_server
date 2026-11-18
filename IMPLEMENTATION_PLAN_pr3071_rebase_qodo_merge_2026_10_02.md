@@ -4144,9 +4144,149 @@ the published successor. Live PostgreSQL and native acceptance are separate.
    failed hosted UI manifests plus connected callers, not the entire
    hosted pipeline. Production Turbopack, token sync and unchanged bundle
    budgets passed on the same 8,129 tracked app inputs; no artifact served.
-5. Pending: Exact-tree preflight and normal publication. Actual current-head
-   hosted, PostgreSQL and applicable acceptance remain required before
-   normal landing; no cleanup yet.
+5. Done: Exact-tree preflight passed on 431 paths and the normal merge
+   checkpoint was published as `d20e80d624`. Current-hosted, PostgreSQL,
+   and applicable acceptance still govern landing; no cleanup yet.
 
 ADR assessment: ADR-049 and ADR-059 already govern the behavior and work
 record. The changes add no persistence format, provider policy or API rule.
+
+## Stage 52: Docs and Character Readiness Recovery
+
+**Goal**: Resolve the two exact-head hosted failures without editing either
+database upgrade implementation or weakening the Character journey.
+**Success Criteria**: The published guide matches the canonical source, the
+chat loader releases only its own loading state, and the combined candidate
+passes scoped review, tests, build, and normal preflight.
+**Tests**: Official docs refresh, connected mocked chat runtime, current
+incoming Telegram test shard, and the existing production build and budgets.
+**Status**: In Progress
+
+1. Done: Main CI job 134789469077 failed two published-doc parity tests
+   because only the generated PostgreSQL migration guide lacked the schema
+   92 section. Regenerate the guide and separate owner-led in-place
+   upgrades, the restricted service login, and conditional offline
+   Media copy. Do not advertise a ChaChaNotes cross-engine copy with the
+   generic importer. Keep the SQLite original and PostgreSQL version
+   records, existing runtime ledger grants, and forced row policies.
+2. Done: E2E job 134787476882 recorded one saved Character reply and
+   captured history after Send, followed by a readiness panel stuck for 30
+   seconds. The finite real-store regression reproduces orphaned loading
+   after overlapping turn settlement. Keep the existing live-send guard,
+   then retire only the settled loader's flag. Additional red cases cover
+   standalone 404, same-chat replacement before and after the deferred
+   check and teardown, and a late rejection after a newer selection intent.
+   No E2E assertion, timeout, API contract, or persistence path changed.
+3. Done: The final connected chat selection passed 966 cases in 11 files.
+   The exact production build, types, token sync and unchanged budgets
+   passed; the artifact was not served. The incoming `a6669cf8` preview
+   passed 61 Telegram cases with fixture-owned SQLite and in-process
+   transport. Its first combined run also had two docs setup failures
+   because the snapshot had no Git index; a separate indexed docs run
+   passed all 34. The official coverage guard found no newly unassigned
+   files. Keep all earlier red executions and the no-reproduction attempt.
+4. Pending: Normal aggregate preflight and publication. Fresh hosted gates,
+   actual PostgreSQL owning jobs, and applicable acceptance remain required
+   before landing. No live PostgreSQL, browser, native input, or merge here.
+
+ADR assessment: no new durable decision. ADR-020 and ADR-080 govern existing
+backend and role separation; ADR-049 and ADR-059 govern selection ownership
+and the work record.
+
+## Stage 53: Current-Head Hosted Guard Repair
+**Goal**: Fix the current CI failures against latest dev without loosening guards.
+**Success Criteria**: The exact candidate clears the owning runtime and static
+checks, normal preflight, then fresh hosted and applicable acceptance gates.
+**Tests**: Core architecture and endpoint guards; focused Notes and chat
+recovery; owning UI and unchanged production bundle budgets.
+**Status**: In Progress
+
+1. Done: The current `d20e80d6` core-tools shard reported six failed static
+   checks. The private candidate removes the sender-role import cycle and
+   reuses receipt schemas and shared generation metadata without changes
+   to schemas, migration code, checkouts, or owner validation. Both import
+   gates and 22 metadata tests passed; seven finite SQLite chat tests passed.
+2. Done: Extracted the per-file Notes parser only. Four import tests passed;
+   Notes disappeared from both size reports. The aggregate size checks still
+   fail on other functions. Bandit reported zero findings in these changes.
+3. Done: After disk recovery, the unchanged host production build, token
+   sync and bundle budgets passed. Neither incomplete sandbox artifact was
+   reused. The passing artifact was not served.
+4. Pending: The saved-chat Playground test distinguishes background Stop
+   follow from foreground selection, but cannot yet find the expected
+   virtual history row. Keep failed runs and the attempted fixture separate;
+   do not repeat the same probe. Review the render and capture boundary.
+5. Pending: Database surface counts, endpoint patch owners and remaining
+   function ceilings. Do not change migrations speculatively. Keep the
+   gate baselines unchanged, finish aggregate qualification on latest dev,
+   then publish normally. No merge, live PostgreSQL, or native acceptance.
+
+ADR assessment: existing dependency direction and wire/persistence
+contracts remain in force; this stage adds no durable architecture rule.
+ADR-049, ADR-059 and ADR-080 remain applicable.
+
+## Stage 54: Endpoint and UI Ownership Repairs
+**Goal**: Resolve the confirmed endpoint and UI ownership failures privately.
+**Success Criteria**: Existing guard ceilings still pass for the corrected
+groups; the owning finite suites pass; no new merge or native claims.
+**Tests**: Endpoint patch guard, client ownership and scope, Notes and chat
+fixtures, Character Messages/OpenAPI, and interrupted replies/document reads.
+**Status**: In Progress
+
+1. Done: Removed the duplicate base-prototype chat-summary wrapper. The
+   Chat/RAG domain remains the only normalizer and retains the composed API.
+   The prior ownership guard failed; 130 connected tests, TypeScript, and
+   the host production build/token/unchanged budgets passed afterward.
+2. Done: Rebound endpoint fixtures to the collaborators they exercise. The
+   original endpoint patch ceilings pass (7 guard cases pass, 1 skipped
+   in the scratch run), and test quality found no new offenses. Finite
+   verification passed 5 setup, 67 Notes, and 38 chat cases.
+3. Done: Character Messages only moves completion formatting. Its route
+   shrank from 405 to 291 lines. Removed its obsolete ceiling, kept all other
+   limits, and verified the unchanged route AST and 39 finite/OpenAPI cases.
+4. Done: The Playground fixture waits separately for background follow and
+   explicit selection of the same saved cursor, using bounded jsdom
+   geometry. All 30 cases passed. A private diagnostic reproduced the
+   document logout failure when two reads shared a promise. Split retired
+   and renewed responses only where the fixture renews; all four cases pass.
+5. Pending: Database facade surface and the other chat function ceilings;
+   recheck exact hosted CI and applicable acceptance before publication
+   or landing. No migration, live PostgreSQL, native Send, or merge here.
+
+ADR assessment: these repairs follow existing ownership and migration
+contracts; no new durable rule. ADR-049, ADR-059 and ADR-080 still apply.
+
+## Stage 55: Catalog Reconciliation and Chat Runtime
+**Goal**: Preserve both catalog upgrade lineages and clear the remaining
+database facade and chat size guards without raising their ceilings.
+**Success Criteria**: Existing SQL and lock ownership are unchanged; explicit
+SQLite upgrade/rollback, recorded PostgreSQL, and finite chat selections pass.
+**Tests**: Catalog reconciliation, historical order migrations, selected
+history, persona, moderation, message edits, and static ownership guards.
+**Status**: In Progress
+
+1. Done privately: Moved five catalog helpers out of the facade. The SQLite
+   step resolves its backend only when invoked; both Postgres startup paths
+   keep their existing schema-lock/transaction connection. The 33 SQL and
+   message literals are byte-identical, with no new backfill, grant, or
+   catalog version. Pin edits keep conversation, message, and metadata lock
+   order. The final explicit selection passed all 28 cases: SQLite both
+   lineages, rollback/reopen, and PostgreSQL recording doubles (not live PG).
+2. Done privately: Moved exemplar and versioned history context preparation
+   to helpers. Kept selected streaming text-only mode mutually exclusive
+   with legacy retained-reasoning mode, preserved audit/settlement order,
+   and kept the public non-stream audit keywords. The focused chat runtime
+   selection passed 67 cases against private fixtures and provider doubles.
+   The later SQLite dispatch-only adjustment is covered by the final
+   migration run. No exact-current hosted execution is implied.
+3. Done privately: The five existing static guard suites passed 68 cases
+   with five scratch-specific skips. The three reproduced red guard cases
+   now pass without raising a ceiling. Both independent scoped reviews
+   found no actionable P1/P2; production Bandit reported zero findings.
+4. Pending: Finish source/policy and latest-dev reconciliation for a
+   publication candidate; verify the successor's actual hosted checks and
+   live PostgreSQL before considering a normal merge. Native acceptance
+   remains separate. No PR head, protected checkout, or service changed.
+
+ADR assessment: no new durable rule. This keeps existing migration, lock,
+wire, and audit ownership under the existing ADR-049, ADR-059 and ADR-080.

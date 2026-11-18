@@ -317,7 +317,7 @@ describe("selected normal send admission boundary", () => {
   it("provider failure retains admission and does not invoke legacy error user persistence", async () => {
     const turn = makeTurn()
     mocks.stream.mockImplementation(async function* () {
-      throw new Error("provider down")
+      yield Promise.reject(new Error("provider down"))
     })
     const errorSave = vi.fn()
     await invoke(turn, { saveMessageOnError: errorSave })
@@ -430,6 +430,7 @@ describe("selected durable server settlement", () => {
       turn.canUpdateView = () => false
       options.onDispatch()
       dispatch()
+      yield* []
     })
     const result = await invoke(turn, { tldwTurn: { user_message_id: inputId }, userMessageId: inputId })
     expect(result).toEqual({ status: "skipped", reason: "Conversation changed" })

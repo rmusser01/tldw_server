@@ -2,15 +2,6 @@
 # introduction. The guard stays green on these but fails on a NEWLY
 # unshared test. Shrink this list by assigning files to ci.yml shards.
 # Regenerate with: python Helper_Scripts/ci/check_shard_coverage.py --write-baseline
-tldw_Server_API/tests/Telegram/test_telegram_admin_api.py
-tldw_Server_API/tests/Telegram/test_telegram_admin_link_inventory.py
-tldw_Server_API/tests/Telegram/test_telegram_approvals.py
-tldw_Server_API/tests/Telegram/test_telegram_commands.py
-tldw_Server_API/tests/Telegram/test_telegram_jobs_and_delivery.py
-tldw_Server_API/tests/Telegram/test_telegram_linking_and_policy.py
-tldw_Server_API/tests/Telegram/test_telegram_schemas.py
-tldw_Server_API/tests/Telegram/test_telegram_session_mapper.py
-tldw_Server_API/tests/Telegram/test_telegram_webhook.py
 tldw_Server_API/tests/VN_Scripts/test_vn_script_authoring_catalog.py
 tldw_Server_API/tests/VN_Scripts/test_vn_script_authoring_graph.py
 tldw_Server_API/tests/VN_Scripts/test_vn_script_playtest.py

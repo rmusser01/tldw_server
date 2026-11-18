@@ -130,6 +130,7 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noq
     transform_sqlite_query_for_postgres,
 )
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.chacha import message_order_schema as _message_order_schema  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (  # noqa: E402
     ChaChaOperation,
     ClosedChaChaOperationError,
@@ -9927,8 +9928,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 steps[version] = method
         from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import migrate_sqlite_transcripts
 
+        def migrate_chat_catalog(conn: sqlite3.Connection) -> None:
+            _message_order_schema.migrate_sqlite_chat_catalog(
+                conn,
+                backend=self.backend,
+                fingerprint_sql=self._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_SQLITE,
+                schema_name=self._SCHEMA_NAME,
+                get_version=self._get_db_version,
+            )
+
         steps[84] = bind_migration(migrate_sqlite_transcripts, schema_name=self._SCHEMA_NAME, get_version=self._get_db_version)
-        steps[85] = self._migrate_from_v85_to_v86
+        steps[85] = migrate_chat_catalog
         return steps
     def _run_sqlite_linear_migration_step(
         self,
@@ -19241,151 +19251,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 76:
             raise SchemaError("Native fork PostgreSQL migration V75->V76 failed version verification.")  # noqa: TRY003
 
-    def _ensure_message_order_and_create_fingerprint_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Reconcile the two V75 catalogs without reconstructing old rows."""
-        columns = {column["name"] for column in self.backend.get_table_info("conversations", connection=conn)}
-        if "create_request_fingerprint" not in columns:
-            conn.execute(self._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_SQLITE)
-        # The statement splitter does not parse SQLite trigger BEGIN/END blocks.
-        statements = (
-            """
-            CREATE TABLE message_insertion_order (
-                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-                message_id TEXT UNIQUE NOT NULL REFERENCES messages(id) ON DELETE CASCADE
-            )
-            """,
-            """
-            CREATE TRIGGER messages_record_insertion_order AFTER INSERT ON messages
-            BEGIN
-                INSERT INTO message_insertion_order(message_id) VALUES (NEW.id);
-            END
-            """,
-            """
-            CREATE TRIGGER message_insertion_order_immutable BEFORE UPDATE ON message_insertion_order
-            BEGIN
-                SELECT RAISE(ABORT, 'Message insertion order is immutable.');
-            END
-            """,
-        )
-        if not self.backend.table_exists("message_insertion_order", connection=conn):
-            for statement in statements:
-                conn.execute(statement)
-
-    def _ensure_message_order_and_create_fingerprint_postgres(self, conn: Any) -> None:
-        """Reconcile V79 catalogs while retaining serialized writers and forced RLS."""
-        columns = {column["name"] for column in self.backend.get_table_info("conversations", connection=conn)}
-        if "create_request_fingerprint" not in columns:
-            self.backend.execute(self._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES, connection=conn)
-        sql = """
-            CREATE TABLE message_insertion_order (
-                sequence BIGSERIAL PRIMARY KEY,
-                message_id TEXT UNIQUE NOT NULL REFERENCES messages(id) ON DELETE CASCADE
-            );
-            ALTER TABLE message_insertion_order ENABLE ROW LEVEL SECURITY;
-            ALTER TABLE message_insertion_order FORCE ROW LEVEL SECURITY;
-            CREATE POLICY message_insertion_order_tenant_isolation ON message_insertion_order
-                USING (EXISTS (
-                    SELECT 1 FROM messages AS message
-                    WHERE message.id = message_insertion_order.message_id
-                        AND message.client_id = current_setting('app.current_user_id', true)
-                ))
-                WITH CHECK (EXISTS (
-                    SELECT 1 FROM messages AS message
-                    WHERE message.id = message_insertion_order.message_id
-                        AND message.client_id = current_setting('app.current_user_id', true)
-                ));
-            CREATE FUNCTION messages_lock_insertion_order() RETURNS TRIGGER AS $$
-            BEGIN
-                PERFORM id FROM conversations WHERE id = NEW.conversation_id FOR UPDATE;
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql;
-            CREATE TRIGGER messages_lock_insertion_order BEFORE INSERT ON messages
-                FOR EACH ROW EXECUTE FUNCTION messages_lock_insertion_order();
-            CREATE FUNCTION messages_record_insertion_order() RETURNS TRIGGER AS $$
-            BEGIN
-                INSERT INTO message_insertion_order(message_id) VALUES (NEW.id);
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql;
-            CREATE TRIGGER messages_record_insertion_order AFTER INSERT ON messages
-                FOR EACH ROW EXECUTE FUNCTION messages_record_insertion_order();
-            CREATE FUNCTION message_insertion_order_immutable() RETURNS TRIGGER AS $$
-            BEGIN
-                RAISE EXCEPTION 'Message insertion order is immutable.';
-            END;
-            $$ LANGUAGE plpgsql;
-            CREATE TRIGGER message_insertion_order_immutable BEFORE UPDATE ON message_insertion_order
-                FOR EACH ROW EXECUTE FUNCTION message_insertion_order_immutable();
-        """
-        if not self.backend.table_exists("message_insertion_order", connection=conn):
-            for statement in split_sql_statements(sql):
-                self.backend.execute(statement, connection=conn)
-
-    def _migrate_from_v85_to_v86(self, conn: sqlite3.Connection) -> None:
-        """Complete missing catalog pieces without deriving history or quota identities."""
-        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import (
-            notes_provenance_receipts_schema_sql,
-            notes_provenance_schema_sql,
-        )
-        from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
-            workspace_chat_startup_schema_statements,
-        )
-
-        if not self.backend.table_exists("workspace_chat_startup_receipts", connection=conn):
-            for statement in workspace_chat_startup_schema_statements(postgres=False):
-                conn.execute(statement)
-        self._ensure_message_order_and_create_fingerprint_sqlite(conn)
-        conn.execute(notes_provenance_schema_sql(postgres=False))
-        conn.execute(notes_provenance_receipts_schema_sql())
-        columns = self.backend.get_table_info("native_chat_quota_intents", connection=conn)
-        if not any(column["name"] == "quota_owner_json" for column in columns):
-            conn.execute("ALTER TABLE native_chat_quota_intents ADD COLUMN quota_owner_json TEXT")
-        conn.execute(
-            "UPDATE db_schema_version SET version = 86 WHERE schema_name = ? AND version = 85", (self._SCHEMA_NAME,)
-        )
-        if self._get_db_version(conn) != 86:
-            raise SchemaError("Chat/provenance catalog SQLite migration failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v91_to_v92_postgres(self, conn: Any) -> None:
-        """Complete both catalogs under the schema lock with forced owner RLS."""
-        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
-            build_notes_provenance_receipts_rls_sql,
-            build_notes_provenance_rls_sql,
-            build_workspace_chat_startup_rls_sql,
-        )
-        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import (
-            notes_provenance_receipts_schema_sql,
-            notes_provenance_schema_sql,
-        )
-        from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
-            workspace_chat_startup_schema_statements,
-        )
-
-        if not self.backend.table_exists("workspace_chat_startup_receipts", connection=conn):
-            for statement in (
-                *workspace_chat_startup_schema_statements(postgres=True),
-                *build_workspace_chat_startup_rls_sql(),
-            ):
-                self.backend.execute(statement, connection=conn)
-        self._ensure_message_order_and_create_fingerprint_postgres(conn)
-        for statement in (
-            notes_provenance_schema_sql(postgres=True),
-            notes_provenance_receipts_schema_sql(),
-            *build_notes_provenance_rls_sql(),
-            *build_notes_provenance_receipts_rls_sql(),
-        ):
-            self.backend.execute(statement, connection=conn)
-        columns = self.backend.get_table_info("native_chat_quota_intents", connection=conn)
-        if not any(column["name"] == "quota_owner_json" for column in columns):
-            self.backend.execute("ALTER TABLE native_chat_quota_intents ADD COLUMN quota_owner_json TEXT", connection=conn)
-        self.backend.execute(
-            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 91",
-            (92, self._SCHEMA_NAME), connection=conn,
-        )
-        if self._get_schema_version_postgres(conn) != 92:
-            raise SchemaError("Chat/provenance catalog PostgreSQL migration failed version verification.")  # noqa: TRY003
-
     def _migrate_from_v80_to_v81(self, conn: sqlite3.Connection) -> None:
         """Issue private row identity independently of copied IDs and journal retention."""
         conn.execute("ALTER TABLE conversations ADD COLUMN source_incarnation_id TEXT")
@@ -19618,7 +19483,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # The prior native V74 installed ordering instead of startup receipts.
         if not self.backend.table_exists("workspace_chat_startup_receipts", connection=conn):
             self._migrate_from_v73_to_v74(conn)
-        self._ensure_message_order_and_create_fingerprint_sqlite(conn)
+        _message_order_schema.ensure_message_order_sqlite(
+            self.backend, conn, self._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_SQLITE
+        )
         conn.execute(
             "UPDATE db_schema_version SET version = 75 WHERE schema_name = ? AND version = 74",
             (self._SCHEMA_NAME,),
@@ -19631,7 +19498,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # The prior native V78 installed ordering instead of startup receipts.
         if not self.backend.table_exists("workspace_chat_startup_receipts", connection=conn):
             self._migrate_from_v77_to_v78_postgres(conn)
-        self._ensure_message_order_and_create_fingerprint_postgres(conn)
+        _message_order_schema.ensure_message_order_postgres(
+            self.backend, conn, self._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES
+        )
         self.backend.execute(
             "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s",
             (79, self._SCHEMA_NAME, 78),
@@ -27273,35 +27142,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error("Failed rebuilding character_cards_fts: {}", exc)
             raise SchemaError(f"Failed rebuilding character_cards_fts: {exc}") from exc  # noqa: TRY003
 
-    def _verify_message_order_privileges_postgres(self, conn: Any) -> None:
-        """Fail at startup if a separate runtime role cannot use the order ledger."""
-        allowed = self.backend.execute(
-            """SELECT (
-                NOT has_any_column_privilege(current_user, 'messages', 'SELECT,INSERT')
-                OR (
-                    has_table_privilege(current_user, 'message_insertion_order', 'SELECT')
-                    AND has_column_privilege(current_user, 'messages', 'id', 'SELECT')
-                    AND has_column_privilege(current_user, 'messages', 'client_id', 'SELECT')
-                )
-            ) AND (
-                NOT has_any_column_privilege(current_user, 'messages', 'INSERT')
-                OR (
-                    has_column_privilege(current_user, 'message_insertion_order', 'message_id', 'INSERT')
-                    AND COALESCE(has_sequence_privilege(
-                        current_user, pg_get_serial_sequence('message_insertion_order', 'sequence'), 'USAGE'
-                    ), false)
-                    AND has_column_privilege(current_user, 'conversations', 'id', 'SELECT')
-                    AND has_any_column_privilege(current_user, 'conversations', 'UPDATE')
-                )
-            )""",
-            connection=conn,
-        ).scalar
-        if not allowed:
-            raise SchemaError(  # noqa: TRY003
-                "Ask the PostgreSQL schema owner to grant runtime access to message insertion order "
-                "before enabling Chat reads or writes."
-            )
-
     def _postgres_schema_is_current(self, conn: Any) -> bool:
         """Verify the current completed schema without replaying migration writes.
 
@@ -27354,7 +27194,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self.backend, getattr(conn, "_connection", conn), self._normalize_postgres_catalog_expression
             )
         if current_version >= 92:
-            self._verify_message_order_privileges_postgres(conn)
+            _message_order_schema.verify_postgres_message_order_privileges(self.backend, conn)
         for fts_table, source_table, _ in self._FTS_CONFIG:
             # Required PostgreSQL capability stays lazy and bound before mapping each source.
             register_fts_table: Callable[[str, str], None] = getattr(self.backend, "register_fts_table")  # noqa: B009
@@ -27495,7 +27335,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._migrate_from_v90_to_v91_postgres(conn)
                     current_version = 91
                 if target_version >= 92 and current_version < 92:
-                    self._migrate_from_v91_to_v92_postgres(conn)
+                    _message_order_schema.migrate_postgres_chat_catalog(
+                        conn,
+                        backend=self.backend,
+                        fingerprint_sql=self._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES,
+                        schema_name=self._SCHEMA_NAME,
+                        get_version=self._get_schema_version_postgres,
+                    )
                     current_version = 92
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
@@ -27902,7 +27748,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._runtime_schema_version = 91
                 current_version = 91
             if target_version >= 92 and current_version < 92:
-                self._migrate_from_v91_to_v92_postgres(conn)
+                _message_order_schema.migrate_postgres_chat_catalog(
+                    conn,
+                    backend=self.backend,
+                    fingerprint_sql=self._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES,
+                    schema_name=self._SCHEMA_NAME,
+                    get_version=self._get_schema_version_postgres,
+                )
                 self._runtime_schema_version = 92
                 current_version = 92
 
@@ -47718,8 +47570,6 @@ for _character_store_method in (
 for _message_store_method in (
     "add_message",
     "insert_or_validate_user_turn",
-    "lock_message_for_edit",
-    "lock_message_metadata_for_edit",
     "get_conversation_history_snapshot",
     "get_conversation_history_selected_content",
     "confirm_legacy_history_projection",

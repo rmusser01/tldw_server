@@ -145,6 +145,7 @@ def test_versioned_completion_never_discovers_mutable_skills(
 ):
     from tldw_Server_API.app.api.v1.endpoints import chat as endpoint
     from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.Skills.skills_service import SkillsService
 
     client, db = credentialed_test_client, populated_chacha_db
@@ -190,7 +191,7 @@ def test_versioned_completion_never_discovers_mutable_skills(
             raise AssertionError("Versioned endpoint must never construct SkillsService")
 
         monkeypatch.setattr(SkillsService, "__init__", forbid_service)
-        monkeypatch.setattr(endpoint.DatabasePaths, "get_user_base_directory", lambda *_: tmp_path)
+        monkeypatch.setattr(DatabasePaths, "get_user_base_directory", lambda *_: tmp_path)
         seen_tools = []
         original_builder = endpoint._build_context_and_messages_compat
 

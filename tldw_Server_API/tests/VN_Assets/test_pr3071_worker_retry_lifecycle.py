@@ -230,25 +230,57 @@ async def test_service_queued_retry_does_not_run_terminal_callback(
     assert outcome["outcome_status"] == "planned" and outcome["claim_lease_id"] == acquired["lease_id"]
 
 
-async def quarantined_claim(
+def quarantined_claim(
     harness: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[int, dict[str, Any]]:
-    """Retain a real terminal Jobs row before invoking its VN callback."""
+    """Settle the Jobs row while its matching VN claim still needs the callback."""
     monkeypatch.setenv("JOBS_QUARANTINE_THRESHOLD", "1")
-
-    class FailingAdapter(FakeImageAdapter):
-        def generate(self, request: Any) -> Any:
-            self.requests.append(request)
-            raise RuntimeError("finite terminal disposition")
-
-    harness.worker.image_registry = FakeImageRegistry(FailingAdapter())
     batch_id = harness.start()
-    acquired = await deliver(harness, bind_completion_token=True)
+    worker_id = "pr3071-finite-worker"
+    acquired = harness.jobs.acquire_next_job(
+        domain="vn_assets",
+        queue=vn_asset_generation_jobs_queue(),
+        worker_id=worker_id,
+        lease_seconds=120,
+        job_type="vn_asset_generate_variant",
+    )
+    assert acquired is not None
+    lease_id = acquired["lease_id"]
+    harness.repo.claim_variant(
+        batch_id=batch_id,
+        slot_id=harness.slot.id,
+        variant_index=0,
+        lease_id=lease_id,
+        attempt_token=uuid4().hex,
+        item_fields={"pack_id": harness.pack.id, "generation_job_id": str(acquired["id"])},
+        validate_authority=lambda: harness.worker._require_current_job_lease(acquired, user_id=1),
+    )
+    assert harness.jobs.fail_job(
+        acquired["id"],
+        error="finite terminal disposition",
+        worker_id=worker_id,
+        lease_id=lease_id,
+        enforce=True,
+        completion_token=lease_id,
+        expected_uuid=acquired["uuid"],
+    )
     stored = harness.jobs.get_job(acquired["id"])
-    assert stored["status"] == "quarantined" and stored["completion_token"] == acquired["lease_id"]
-    assert harness.repo.get_variant_outcome(batch_id, harness.slot.id, 0)["outcome_status"] == "planned"
+    assert stored["status"] == "quarantined" and stored["completion_token"] == lease_id
+    outcome = harness.repo.get_variant_outcome(batch_id, harness.slot.id, 0)
+    assert outcome["outcome_status"] == "planned" and outcome["claim_lease_id"] == lease_id
     return batch_id, acquired
+
+
+async def test_terminal_callback_settles_matching_pending_claim(
+    lifecycle: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A matching Jobs completion token is sufficient to settle a pending VN claim."""
+    batch_id, acquired = quarantined_claim(lifecycle, monkeypatch)
+    await lifecycle.worker.handle_failed_job(acquired, RuntimeError("delayed callback"))
+    assert lifecycle.repo.get_variant_outcome(batch_id, lifecycle.slot.id, 0)["outcome_status"] == "failed"
+    assert lifecycle.repo.get_batch(batch_id)["status"] == "failed"
 
 
 @pytest.mark.parametrize(
@@ -277,7 +309,7 @@ async def test_terminal_callback_rejects_changed_jobs_authority(
     replacement: Any,
 ) -> None:
     """A terminal Jobs read is not authority unless every delivery fence still matches."""
-    batch_id, acquired = await quarantined_claim(lifecycle, monkeypatch)
+    batch_id, acquired = quarantined_claim(lifecycle, monkeypatch)
     original_read = lifecycle.jobs.get_job_or_archived_by_uuid
     before_batch = lifecycle.repo.get_batch(batch_id)
     before_outcome = lifecycle.repo.get_variant_outcome(batch_id, lifecycle.slot.id, 0)
@@ -298,7 +330,7 @@ async def test_terminal_callback_rechecks_claim_under_write_admission(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Cancellation between callback preparation and VN admission cannot be overwritten."""
-    batch_id, acquired = await quarantined_claim(lifecycle, monkeypatch)
+    batch_id, acquired = quarantined_claim(lifecycle, monkeypatch)
     original_fail = lifecycle.repo.fail_variant
 
     def cancel_before_admission(**kwargs: Any) -> None:
@@ -359,7 +391,7 @@ async def test_terminal_callback_rejects_foreign_payload_owner_before_opening_da
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The service callback keeps its existing owner-to-payload database boundary."""
-    batch_id, acquired = await quarantined_claim(lifecycle, monkeypatch)
+    batch_id, acquired = quarantined_claim(lifecycle, monkeypatch)
     acquired["owner_user_id"] = "2"
 
     async def unexpected_database(*_args: Any, **_kwargs: Any) -> None:
@@ -380,33 +412,30 @@ async def test_cancelled_sibling_storage_is_cleaned_before_queued_delivery_is_ca
     unlink_outage: bool,
 ) -> None:
     """A different child cannot cancel the sole retry path for a charged hidden reservation."""
-    original_attach = lifecycle.repo.update_item_storage
-
     def unavailable(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("finite attachment outage")
 
-    monkeypatch.setattr(lifecycle.repo, "update_item_storage", unavailable)
-    batch_id = lifecycle.start(variant_count=2)
-    first = await deliver(lifecycle, backoff=60)
-    assert lifecycle.jobs.get_job(first["id"])["status"] == "queued"
-    assert lifecycle.storage.usage == len(b"fake-png")
-    monkeypatch.setattr(lifecycle.repo, "update_item_storage", original_attach)
+    with monkeypatch.context() as attachment:
+        attachment.setattr(lifecycle.repo, "update_item_storage", unavailable)
+        batch_id = lifecycle.start(variant_count=2)
+        first = await deliver(lifecycle, backoff=60)
+        assert lifecycle.jobs.get_job(first["id"])["status"] == "queued"
+        assert lifecycle.storage.usage == len(b"fake-png")
     lifecycle.repo.cancel_batch(batch_id)
     terminal_batch = lifecycle.repo.get_batch(batch_id)
-    original_unlink = worker_module.unlink_vn_asset_storage_file
-    if unlink_outage:
 
-        def unavailable_unlink(**_kwargs: Any) -> bool:
-            raise PermissionError("finite unlink outage")
+    def unavailable_unlink(**_kwargs: Any) -> bool:
+        raise PermissionError("finite unlink outage")
 
-        monkeypatch.setattr(worker_module, "unlink_vn_asset_storage_file", unavailable_unlink)
-    sibling = await deliver(lifecycle)
+    with monkeypatch.context() as unlink:
+        if unlink_outage:
+            unlink.setattr(worker_module, "unlink_vn_asset_storage_file", unavailable_unlink)
+        sibling = await deliver(lifecycle)
     assert sibling["id"] != first["id"]
     if unlink_outage:
         assert lifecycle.jobs.get_job(first["id"])["status"] == "queued"
         assert lifecycle.jobs.get_job(sibling["id"])["status"] == "queued"
         assert lifecycle.storage.usage == len(b"fake-png")
-        monkeypatch.setattr(worker_module, "unlink_vn_asset_storage_file", original_unlink)
         assert (await deliver(lifecycle))["id"] == sibling["id"]
     assert lifecycle.jobs.get_job(first["id"])["status"] == "cancelled"
     assert lifecycle.storage.records == {}

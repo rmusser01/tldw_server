@@ -2224,6 +2224,171 @@ def _resolve_effective_persona_budget_tokens(
     return max(1, base_budget), False, None
 
 
+async def _apply_completion_persona_exemplars(
+    *,
+    request_data: ChatCompletionRequest,
+    chat_db: CharactersRAGDB,
+    user_id: str | None,
+    final_system_message: str | None,
+    templated_llm_payload: list[dict[str, Any]],
+    assistant_context: dict[str, Any] | None,
+    persona_strategy: str,
+    is_persona_backed_chat: bool,
+    persona_assistant_id: str,
+    character_db_id_for_context: int | None,
+    uses_versioned_history: bool,
+    persona_debug_meta: dict[str, Any] | None,
+    persona_budget_tokens_used: int,
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """Apply exemplar guidance and populate debug metadata when requested."""
+    persona_selected_exemplars: list[dict[str, Any]] = []
+    persona_budget_auto_adjusted = False
+    persona_budget_adjustment_reason: str | None = None
+
+    if persona_strategy != "off" and is_persona_backed_chat:
+        persona_exemplars = await asyncio.to_thread(
+            chat_db.list_persona_exemplars,
+            user_id=str(user_id),
+            persona_id=persona_assistant_id,
+            include_disabled=False,
+            include_deleted=False,
+            limit=50,
+            offset=0,
+        )
+        runtime_guidance = _assemble_persona_runtime_guidance(
+            system_message=final_system_message,
+            assistant_context=assistant_context,
+            exemplars=persona_exemplars,
+            current_turn_text=_extract_latest_user_turn_text(templated_llm_payload),
+        )
+        final_system_message = runtime_guidance["system_message"]
+        persona_selected_exemplars = list(runtime_guidance["selected_exemplars"])
+
+        if persona_debug_meta is not None:
+            persona_debug_meta["source"] = "persona_profile"
+            persona_debug_meta["applied"] = bool(runtime_guidance["applied"])
+            persona_debug_meta["reason"] = (
+                "selected"
+                if runtime_guidance["applied"]
+                else ("no_exemplars_selected" if persona_exemplars else "no_enabled_exemplars")
+            )
+            persona_debug_meta["selection"] = {
+                "selected_count": len(runtime_guidance["selected_exemplars"]),
+                "selected_exemplar_ids": [
+                    str(item.get("id"))
+                    for item in runtime_guidance["selected_exemplars"]
+                    if item.get("id")
+                ],
+                "budget_tokens_used": sum(int(section[2]) for section in runtime_guidance["sections"]),
+                "coverage": {
+                    "boundary": sum(
+                        1
+                        for item in runtime_guidance["selected_exemplars"]
+                        if str(item.get("kind") or "") == "boundary"
+                    ),
+                    "style_like": sum(
+                        1
+                        for item in runtime_guidance["selected_exemplars"]
+                        if str(item.get("kind") or "") != "boundary"
+                    ),
+                },
+            }
+            persona_debug_meta["assembly_sections"] = [
+                str(name) for name, _, _ in runtime_guidance["sections"]
+            ]
+            persona_debug_meta["rejected_exemplars"] = [
+                {
+                    "id": str(item.get("id") or ""),
+                    "reason": str(item.get("reason") or ""),
+                }
+                for item in runtime_guidance["rejected_exemplars"]
+            ]
+    elif persona_strategy != "off" and character_db_id_for_context is not None and not uses_versioned_history:
+        user_turn_text = _extract_latest_user_turn_text(getattr(request_data, "messages", []))
+        if user_turn_text:
+            budget_override = getattr(request_data, "persona_exemplar_budget_tokens", None)
+            budget_tokens, persona_budget_auto_adjusted, persona_budget_adjustment_reason = (
+                _resolve_effective_persona_budget_tokens(
+                    budget_override=budget_override,
+                    user_id=user_id,
+                    character_id=character_db_id_for_context,
+                )
+            )
+            persona_budget_tokens_used = int(budget_tokens)
+            if persona_budget_auto_adjusted:
+                logger.info(
+                    "Persona budget auto-adjust applied user_id={} character_id={} base={} adjusted={} reason={}",
+                    str(user_id or "unknown"),
+                    character_db_id_for_context,
+                    int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET),
+                    int(budget_tokens),
+                    persona_budget_adjustment_reason or "unspecified",
+                )
+            selector_config = PersonaExemplarSelectorConfig(
+                budget_tokens=max(1, budget_tokens),
+                max_exemplar_tokens=120,
+                mmr_lambda=0.7,
+            )
+            embedding_callback = None
+            if persona_strategy in {"hybrid", "embeddings"}:
+
+                def _embedding_callback(turn_text: str, candidates: list[dict[str, Any]]) -> dict[str, float]:
+                    return _persona_exemplar_embeddings.score_exemplars_with_embeddings(
+                        turn_text,
+                        candidates,
+                        user_id=user_id,
+                        character_id=character_db_id_for_context,
+                    )
+
+                embedding_callback = _embedding_callback
+
+            selected_result = select_character_exemplars(
+                db=chat_db,
+                character_id=character_db_id_for_context,
+                user_turn=user_turn_text,
+                config=selector_config,
+                embedding_score_fn=embedding_callback,
+            )
+            persona_selected_exemplars = list(selected_result.selected)
+            persona_guidance_block = _format_persona_exemplar_guidance(selected_result.selected)
+            if persona_guidance_block:
+                if final_system_message and final_system_message.strip():
+                    final_system_message = f"{final_system_message.rstrip()}\n\n{persona_guidance_block}"
+                else:
+                    final_system_message = persona_guidance_block
+
+            if persona_debug_meta is not None:
+                persona_debug_meta["applied"] = bool(persona_guidance_block)
+                persona_debug_meta["reason"] = "selected" if persona_guidance_block else "no_exemplars_selected"
+                persona_debug_meta["selection"] = {
+                    "selected_count": len(selected_result.selected),
+                    "selected_exemplar_ids": [
+                        str(item.get("id")) for item in selected_result.selected if item.get("id")
+                    ],
+                    "budget_tokens_used": selected_result.budget_tokens_used,
+                    "coverage": selected_result.coverage,
+                }
+                persona_debug_meta["budget_tokens"] = selector_config.budget_tokens
+                persona_debug_meta["budget_auto_adjusted"] = bool(persona_budget_auto_adjusted)
+                if persona_budget_adjustment_reason:
+                    persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
+        elif persona_debug_meta is not None:
+            persona_debug_meta["reason"] = "no_user_turn_text"
+    elif persona_debug_meta is not None:
+        if persona_strategy == "off":
+            persona_debug_meta["reason"] = "disabled_by_strategy"
+        elif character_db_id_for_context is None:
+            persona_debug_meta["reason"] = "character_context_unavailable"
+
+    if persona_debug_meta is not None and "budget_tokens" not in persona_debug_meta:
+        persona_debug_meta["budget_tokens"] = int(persona_budget_tokens_used)
+        persona_debug_meta["budget_auto_adjusted"] = bool(persona_budget_auto_adjusted)
+        if persona_budget_adjustment_reason:
+            persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
+
+    return final_system_message, persona_selected_exemplars
+
+
 def _extract_assistant_text_from_completion_payload(payload: dict[str, Any]) -> str:
     """Extract first assistant message text from a non-stream completion payload."""
     choices = payload.get("choices")
@@ -4745,10 +4910,7 @@ async def create_chat_completion(
             final_conversation_id: str | None = request_data.conversation_id
             persona_debug_requested = bool(getattr(request_data, "persona_debug", False))
             persona_debug_meta: dict[str, Any] | None = None
-            persona_selected_exemplars: list[dict[str, Any]] = []
             persona_budget_tokens_used = int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET)
-            persona_budget_auto_adjusted = False
-            persona_budget_adjustment_reason: str | None = None
             history_admission: dict[str, Any] | None = None
 
             try:
@@ -5106,146 +5268,21 @@ async def create_chat_completion(
                     is_persona_backed_chat or character_db_id_for_context is not None
                 )
 
-                if persona_strategy != "off" and is_persona_backed_chat:
-                    persona_exemplars = await asyncio.to_thread(
-                        chat_db.list_persona_exemplars,
-                        user_id=str(user_id),
-                        persona_id=persona_assistant_id,
-                        include_disabled=False,
-                        include_deleted=False,
-                        limit=50,
-                        offset=0,
-                    )
-                    runtime_guidance = _assemble_persona_runtime_guidance(
-                        system_message=final_system_message,
-                        assistant_context=assistant_context,
-                        exemplars=persona_exemplars,
-                        current_turn_text=_extract_latest_user_turn_text(templated_llm_payload),
-                    )
-                    final_system_message = runtime_guidance["system_message"]
-                    persona_selected_exemplars = list(runtime_guidance["selected_exemplars"])
-
-                    if persona_debug_meta is not None:
-                        persona_debug_meta["source"] = "persona_profile"
-                        persona_debug_meta["applied"] = bool(runtime_guidance["applied"])
-                        persona_debug_meta["reason"] = (
-                            "selected"
-                            if runtime_guidance["applied"]
-                            else ("no_exemplars_selected" if persona_exemplars else "no_enabled_exemplars")
-                        )
-                        persona_debug_meta["selection"] = {
-                            "selected_count": len(runtime_guidance["selected_exemplars"]),
-                            "selected_exemplar_ids": [
-                                str(item.get("id"))
-                                for item in runtime_guidance["selected_exemplars"]
-                                if item.get("id")
-                            ],
-                            "budget_tokens_used": sum(int(section[2]) for section in runtime_guidance["sections"]),
-                            "coverage": {
-                                "boundary": sum(
-                                    1
-                                    for item in runtime_guidance["selected_exemplars"]
-                                    if str(item.get("kind") or "") == "boundary"
-                                ),
-                                "style_like": sum(
-                                    1
-                                    for item in runtime_guidance["selected_exemplars"]
-                                    if str(item.get("kind") or "") != "boundary"
-                                ),
-                            },
-                        }
-                        persona_debug_meta["assembly_sections"] = [
-                            str(name) for name, _, _ in runtime_guidance["sections"]
-                        ]
-                        persona_debug_meta["rejected_exemplars"] = [
-                            {
-                                "id": str(item.get("id") or ""),
-                                "reason": str(item.get("reason") or ""),
-                            }
-                            for item in runtime_guidance["rejected_exemplars"]
-                        ]
-                elif persona_strategy != "off" and character_db_id_for_context is not None and not uses_versioned_history:
-                    user_turn_text = _extract_latest_user_turn_text(getattr(request_data, "messages", []))
-                    if user_turn_text:
-                        budget_override = getattr(request_data, "persona_exemplar_budget_tokens", None)
-                        budget_tokens, persona_budget_auto_adjusted, persona_budget_adjustment_reason = (
-                            _resolve_effective_persona_budget_tokens(
-                                budget_override=budget_override,
-                                user_id=user_id,
-                                character_id=character_db_id_for_context,
-                            )
-                        )
-                        persona_budget_tokens_used = int(budget_tokens)
-                        if persona_budget_auto_adjusted:
-                            logger.info(
-                                "Persona budget auto-adjust applied user_id={} character_id={} base={} adjusted={} reason={}",
-                                str(user_id or "unknown"),
-                                character_db_id_for_context,
-                                int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET),
-                                int(budget_tokens),
-                                persona_budget_adjustment_reason or "unspecified",
-                            )
-                        selector_config = PersonaExemplarSelectorConfig(
-                            budget_tokens=max(1, budget_tokens),
-                            max_exemplar_tokens=120,
-                            mmr_lambda=0.7,
-                        )
-                        embedding_callback = None
-                        if persona_strategy in {"hybrid", "embeddings"}:
-
-                            def _embedding_callback(turn_text: str, candidates: list[dict[str, Any]]) -> dict[str, float]:
-                                return _persona_exemplar_embeddings.score_exemplars_with_embeddings(
-                                    turn_text,
-                                    candidates,
-                                    user_id=user_id,
-                                    character_id=character_db_id_for_context,
-                                )
-
-                            embedding_callback = _embedding_callback
-
-                        selected_result = select_character_exemplars(
-                            db=chat_db,
-                            character_id=character_db_id_for_context,
-                            user_turn=user_turn_text,
-                            config=selector_config,
-                            embedding_score_fn=embedding_callback,
-                        )
-                        persona_selected_exemplars = list(selected_result.selected)
-                        persona_guidance_block = _format_persona_exemplar_guidance(selected_result.selected)
-                        if persona_guidance_block:
-                            if final_system_message and final_system_message.strip():
-                                final_system_message = f"{final_system_message.rstrip()}\n\n{persona_guidance_block}"
-                            else:
-                                final_system_message = persona_guidance_block
-
-                        if persona_debug_meta is not None:
-                            persona_debug_meta["applied"] = bool(persona_guidance_block)
-                            persona_debug_meta["reason"] = "selected" if persona_guidance_block else "no_exemplars_selected"
-                            persona_debug_meta["selection"] = {
-                                "selected_count": len(selected_result.selected),
-                                "selected_exemplar_ids": [
-                                    str(item.get("id")) for item in selected_result.selected if item.get("id")
-                                ],
-                                "budget_tokens_used": selected_result.budget_tokens_used,
-                                "coverage": selected_result.coverage,
-                            }
-                            persona_debug_meta["budget_tokens"] = selector_config.budget_tokens
-                            persona_debug_meta["budget_auto_adjusted"] = bool(persona_budget_auto_adjusted)
-                            if persona_budget_adjustment_reason:
-                                persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
-                    elif persona_debug_meta is not None:
-                        persona_debug_meta["reason"] = "no_user_turn_text"
-                elif persona_debug_meta is not None:
-                    if persona_strategy == "off":
-                        persona_debug_meta["reason"] = "disabled_by_strategy"
-                    elif character_db_id_for_context is None:
-                        persona_debug_meta["reason"] = "character_context_unavailable"
-
-                if persona_debug_meta is not None and "budget_tokens" not in persona_debug_meta:
-                    persona_debug_meta["budget_tokens"] = int(persona_budget_tokens_used)
-                    persona_debug_meta["budget_auto_adjusted"] = bool(persona_budget_auto_adjusted)
-                    if persona_budget_adjustment_reason:
-                        persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
+                final_system_message, persona_selected_exemplars = await _apply_completion_persona_exemplars(
+                    request_data=request_data,
+                    chat_db=chat_db,
+                    user_id=user_id,
+                    final_system_message=final_system_message,
+                    templated_llm_payload=templated_llm_payload,
+                    assistant_context=assistant_context,
+                    persona_strategy=persona_strategy,
+                    is_persona_backed_chat=is_persona_backed_chat,
+                    persona_assistant_id=persona_assistant_id,
+                    character_db_id_for_context=character_db_id_for_context,
+                    uses_versioned_history=uses_versioned_history,
+                    persona_debug_meta=persona_debug_meta,
+                    persona_budget_tokens_used=persona_budget_tokens_used,
+                )
 
                 if not uses_versioned_history and user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
                     final_system_message = await _context_integration.build_system_message_with_skills_async(
@@ -5824,10 +5861,9 @@ async def create_chat_completion(
                             character_card_for_context=character_card_for_context,
                             chat_db=chat_db,
                             save_message_fn=completion_save_message,
-                            selected_durable_text_only=selected_durable,
-                            native_persistence=native_stream_persistence(
+                            native_persistence="selected_durable_text" if selected_durable else native_stream_persistence(
                                 request_data,
-                                not selected_durable and (history_admission is not None or existing_input_selection is not None),
+                                history_admission is not None or existing_input_selection is not None,
                             ),
                             system_message_id=system_message_id,
                             user_message_id=continuation_runtime.get("user_message_id"),

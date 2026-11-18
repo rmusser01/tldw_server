@@ -23,6 +23,12 @@ from tldw_Server_API.app.core.Chat.history_selection import (
     resolve_parent_path,
     snapshot_to_wire,
 )
+from tldw_Server_API.app.core.Chat.history_selection_schemas import (
+    HistoryAdmissionReferenceV1,
+    HistoryAdmissionV1,
+    HistoryResultV1,
+    HistorySelectionV1,
+)
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
@@ -36,6 +42,11 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     logger,
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
+from tldw_Server_API.app.core.Utils.chat_sender import USER_SENDER_ALIASES
+from tldw_Server_API.app.core.Utils.generation_metadata import (
+    GENERATION_METADATA_KEYS,
+    validate_generation_metadata,
+)
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -1164,8 +1175,6 @@ class MessageStore:
         conn: Any | None = None,
     ) -> dict[str, Any]:
         """Bind an unchanged accepted input to this full capture under its owner fence."""
-        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistoryAdmissionReferenceV1
-
         binding = HistoryAdmissionReferenceV1.model_validate(reference).model_dump(mode="json")
         namespace = self._history_owner_key(owner_client_id, owner_key)
         if snapshot.owner_key != namespace or snapshot.conversation_id != conversation_id:
@@ -1372,10 +1381,6 @@ class MessageStore:
         owner_key: str, conn: Any,
     ) -> dict[str, Any]:
         """Validate protected text-input authority without adopting public metadata."""
-        from tldw_Server_API.app.core.Chat.history_selection_schemas import (
-            HistoryAdmissionV1, HistorySelectionV1,
-        )
-
         row = conn.execute(
             "SELECT id, sender, content, version, history_admission_json FROM messages "
             "WHERE id = ? AND conversation_id = ? AND deleted = FALSE",
@@ -1418,13 +1423,6 @@ class MessageStore:
         owner_key: str, conn: Any,
     ) -> dict[str, Any]:
         """Return a bounded receipt only after checking live protected input/result state."""
-        from tldw_Server_API.app.core.Chat.history_selection_schemas import (
-            HistoryAdmissionReferenceV1, HistoryResultV1,
-        )
-        from tldw_Server_API.app.core.Chat.generation_metadata import (
-            GENERATION_METADATA_KEYS, validate_generation_metadata,
-        )
-
         unverified = {"version": 1, "status": "unverified", "code": "no_protected_binding"}
         try:
             authority = json.loads(row.get("history_admission_json") or "null")
@@ -1801,8 +1799,6 @@ class MessageStore:
         """
         if not content or not owner_client_id or not user_message_id:
             raise InputError("A durable user turn requires an owner, ID, and text.")
-        from tldw_Server_API.app.core.Character_Chat.modules.character_utils import map_sender_to_role
-
         with self._db.transaction() as conn:
 
             def is_user_message(message_id: str, sender: str) -> bool:
@@ -1810,7 +1806,7 @@ class MessageStore:
                 extra = metadata.get("extra")
                 role = extra.get("sender_role") if isinstance(extra, dict) else None
                 if role not in {"user", "assistant", "system", "tool"}:
-                    role = map_sender_to_role(sender, None)
+                    return (sender or "").strip().lower() in USER_SENDER_ALIASES
                 return role == "user"
 
             state = self._db.get_roleplay_resume_state(

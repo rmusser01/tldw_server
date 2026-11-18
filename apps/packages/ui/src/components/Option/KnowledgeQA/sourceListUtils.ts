@@ -1,5 +1,7 @@
 import type { EvidenceOrigin, RagResult } from "./types"
 
+export { getOriginalResultIndex } from "@/utils/knowledge-qa-result-index"
+
 export type SourceSortMode = "relevance" | "title" | "date" | "cited"
 export type SourceDateFilter = "all" | "last_30d" | "last_365d" | "older_365d"
 export type SourceContentFacet =
@@ -15,17 +17,6 @@ export type SourceContentFacet =
 export type SourceListItem = {
   result: RagResult
   originalIndex: number
-}
-
-export function getOriginalResultIndex(
-  result: { metadata?: Record<string, unknown> },
-  fallbackIndex: number
-): number {
-  const rawIndex = result.metadata?.original_result_index
-  if (typeof rawIndex !== "number" || !Number.isFinite(rawIndex)) {
-    return fallbackIndex
-  }
-  return Math.max(0, Math.round(rawIndex))
 }
 
 export type CitationUsageAnchor = {

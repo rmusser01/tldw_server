@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import message_order_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements
 from tldw_Server_API.tests.DB_Management.test_conversation_assistant_startup import db_factory as db_factory
@@ -31,11 +32,15 @@ def _parent_order_migration(db, connection):
     postgres = db.backend_type.value == "postgresql"
     if postgres:
         version = db._get_schema_version_postgres(connection)
-        db._ensure_message_order_and_create_fingerprint_postgres(connection)
+        message_order_schema.ensure_message_order_postgres(
+            db.backend, connection, db._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES
+        )
         db._set_schema_version_postgres(connection, version + 1)
     else:
         version = db._get_db_version(connection)
-        db._ensure_message_order_and_create_fingerprint_sqlite(connection)
+        message_order_schema.ensure_message_order_sqlite(
+            db.backend, connection, db._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_SQLITE
+        )
         connection.execute(
             "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
             (version + 1, db._SCHEMA_NAME, version),
@@ -287,16 +292,16 @@ def test_union_migration_failure_rolls_back_catalog_and_reopens_old_lineage(db_f
     catalog, old, _, _ = released_catalog
     before = _catalog_rows(old)
     postgres = old.backend_type.value == "postgresql"
-    method = "_migrate_from_v91_to_v92_postgres" if postgres else "_migrate_from_v85_to_v86"
-    migrate = getattr(CharactersRAGDB, method)
+    method = "migrate_postgres_chat_catalog" if postgres else "migrate_sqlite_chat_catalog"
+    migrate = getattr(message_order_schema, method)
     old.close_all_connections()
 
-    def fail_after_union(db, connection):
-        migrate(db, connection)
+    def fail_after_union(*args, **kwargs):
+        migrate(*args, **kwargs)
         raise CharactersRAGDBError("injected union migration failure")
 
     with monkeypatch.context() as failure:
-        failure.setattr(CharactersRAGDB, method, fail_after_union)
+        failure.setattr(message_order_schema, method, fail_after_union)
         with pytest.raises(CharactersRAGDBError, match="injected union migration failure"):
             db_factory()
     with monkeypatch.context() as historical:
@@ -341,7 +346,13 @@ def test_pg_forward_migration_installs_only_the_missing_authority(dev_catalog, m
     monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _: 92)
     connection = object()
 
-    db._migrate_from_v91_to_v92_postgres(connection)
+    message_order_schema.migrate_postgres_chat_catalog(
+        connection,
+        backend=db.backend,
+        fingerprint_sql=db._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES,
+        schema_name=db._SCHEMA_NAME,
+        get_version=db._get_schema_version_postgres,
+    )
 
     calls = backend.execute.call_args_list
     assert all(call.kwargs["connection"] is connection for call in calls)
@@ -365,17 +376,13 @@ def test_pg_forward_migration_installs_only_the_missing_authority(dev_catalog, m
 def test_pg_runtime_requires_order_ledger_privileges(allowed):
     backend = Mock()
     backend.execute.return_value.scalar = allowed
-    db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db._local = SimpleNamespace()
-    db._backend = backend
-    db._uses_shared_content_backend = False
     connection = object()
 
     if allowed:
-        db._verify_message_order_privileges_postgres(connection)
+        message_order_schema.verify_postgres_message_order_privileges(backend, connection)
     else:
         with pytest.raises(CharactersRAGDBError, match="schema owner.*message insertion order"):
-            db._verify_message_order_privileges_postgres(connection)
+            message_order_schema.verify_postgres_message_order_privileges(backend, connection)
 
     backend.execute.assert_called_once()
     sql, = backend.execute.call_args.args

@@ -512,42 +512,92 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     }
   )
 
-  it("CS-04: a message sent while Stop's kept turn is still loading waits in the composer, then sends", async () => {
+  it("CS-04: a draft waits during an explicit history selection after Stop, then sends", async () => {
     const server = createFakeTldwServer()
+    server.seedChat({
+      id: "saved-chat",
+      title: "Saved topic",
+      turns: [
+        { role: "user", content: "Saved question" },
+        { role: "assistant", content: "Saved answer" }
+      ]
+    })
     server.planCompletion({ chunks: ["Never shown"], pauseAfterChunks: 0 })
-    // Hold the history selection reads once Stop is pressed, so the view that
-    // follows the stopped question stays "Loading selected history" (slow CI).
-    const selectionRead = deferred()
-    let holdSelectionReads = false
+    const backgroundRead = deferred()
+    const foregroundRead = deferred()
+    let heldRead: ReturnType<typeof deferred> | null = null
+    let backgroundReadStarted = false
+    let foregroundReadStarted = false
+    let questionId: string | undefined
     const serverFetch = server.fetch
     server.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
-      if (holdSelectionReads && /\/history\/selection$/.test(new URL(url, server.url).pathname)) {
-        await selectionRead.promise
+      if (heldRead && init?.method === "POST" && typeof init.body === "string" &&
+        new URL(url, server.url).pathname === "/api/v1/chat/conversations/saved-chat/history/selection") {
+        const cursor = JSON.parse(init.body)?.view?.cursor
+        if (cursor?.kind === "after_message" && cursor.message_id === questionId) {
+          if (heldRead === backgroundRead) backgroundReadStarted = true
+          if (heldRead === foregroundRead) foregroundReadStarted = true
+          await heldRead.promise
+        }
       }
       return serverFetch(input, init)
     }
-    const view = await renderPlayground({ server })
+    const view = await renderPlayground({
+      server,
+      extras: <SidebarServerChatButton chatId="saved-chat" title="Saved topic" />
+    })
+    await openSavedServerChat(view, { title: "Saved topic", lastMessage: "Saved answer" })
 
     await startSend(view, "Stop before any answer")
     await waitFor(() => expect(server.completionRequests()).toHaveLength(1), HARNESS_WAIT)
-    holdSelectionReads = true
-    await view.user.click(await screen.findByRole("button", { name: "Stop Streaming" }, HARNESS_WAIT))
-    await waitForChatIdle()
-    await screen.findByText("Loading selected history", {}, HARNESS_WAIT)
+    questionId = await waitFor(() => {
+      const id = server.chats.get("saved-chat")?.messages.find(
+        (message) => message.content === "Stop before any answer"
+      )?.id
+      expect(id).toBeTruthy()
+      return id
+    }, HARNESS_WAIT)
+    heldRead = backgroundRead
+    const geometry = [
+      vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(480),
+      vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(320)
+    ]
+    try {
+      await view.user.click(await screen.findByRole("button", { name: "Stop Streaming" }, HARNESS_WAIT))
+      await waitForChatIdle()
+      await waitFor(() => expect(backgroundReadStarted).toBe(true), HARNESS_WAIT)
+      expect(screen.queryByText("Loading selected history")).not.toBeInTheDocument()
 
-    // Sending now must not lose the message or fail with a raw error.
-    await view.user.click(view.composer)
-    await view.user.type(view.composer, "Ask again")
-    await view.user.keyboard("{Enter}")
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    expect(view.composer).toHaveValue("Ask again")
-    expect(screen.queryByText("history_selection_not_ready")).not.toBeInTheDocument()
-    expect(server.completionRequests()).toHaveLength(1)
-    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
+      heldRead = null
+      backgroundRead.resolve()
+      await view.user.click(await screen.findByRole("button", { name: "Review conversation history" }, HARNESS_WAIT))
+      const history = await screen.findByRole("list", { name: "All messages in this chat" }, HARNESS_WAIT)
+      const question = await waitFor(() => {
+        const rows = Array.from(history.querySelectorAll<HTMLElement>("[data-history-message-id]"))
+        const row = rows.find(item => item.dataset.historyMessageId === questionId)
+        expect(rows.map(item => item.dataset.historyMessageId)).toContain(questionId)
+        return row!
+      }, HARNESS_WAIT)
+      heldRead = foregroundRead
+      await view.user.click(within(question).getByRole("button", { name: "Continue after this message" }))
+      await waitFor(() => expect(foregroundReadStarted).toBe(true), HARNESS_WAIT)
+      await screen.findByText("Loading selected history", {}, HARNESS_WAIT)
 
-    holdSelectionReads = false
-    selectionRead.resolve()
+      await view.user.click(view.composer)
+      await view.user.type(view.composer, "Ask again")
+      await view.user.keyboard("{Enter}")
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(view.composer).toHaveValue("Ask again")
+      expect(screen.queryByText("history_selection_not_ready")).not.toBeInTheDocument()
+      expect(server.completionRequests()).toHaveLength(1)
+      expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
+    } finally {
+      geometry.forEach(spy => spy.mockRestore())
+      heldRead = null
+      backgroundRead.resolve()
+      foregroundRead.resolve()
+    }
     await waitFor(
       () => expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled(),
       HARNESS_WAIT
@@ -558,6 +608,8 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     await waitFor(
       () =>
         expect(transcript()).toEqual([
+          { role: "user", text: "Saved question" },
+          { role: "assistant", text: "Saved answer" },
           { role: "user", text: "Stop before any answer" },
           { role: "user", text: "Ask again" },
           { role: "assistant", text: "Harness reply" }

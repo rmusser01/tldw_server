@@ -8,6 +8,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import message_order_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, ConflictError
 
 
@@ -96,7 +97,7 @@ def test_postgres_insertion_order_is_owner_isolated(order_db):
         with backend.transaction() as conn:
             backend.execute(f"SET LOCAL ROLE {role}", connection=conn)
             with pytest.raises(CharactersRAGDBError, match="schema owner.*message insertion order"):
-                db._verify_message_order_privileges_postgres(conn)
+                message_order_schema.verify_postgres_message_order_privileges(backend, conn)
         with backend.transaction() as conn:
             backend.execute(f"GRANT SELECT ON message_insertion_order TO {role}", connection=conn)
             backend.execute(f"GRANT INSERT (message_id) ON message_insertion_order TO {role}", connection=conn)
@@ -104,13 +105,13 @@ def test_postgres_insertion_order_is_owner_isolated(order_db):
         with backend.transaction() as conn:
             backend.execute(f"SET LOCAL ROLE {role}", connection=conn)
             with pytest.raises(CharactersRAGDBError, match="schema owner.*message insertion order"):
-                db._verify_message_order_privileges_postgres(conn)
+                message_order_schema.verify_postgres_message_order_privileges(backend, conn)
         with backend.transaction() as conn:
             backend.execute(f"GRANT SELECT (client_id) ON messages TO {role}", connection=conn)
         with backend.transaction() as conn:
             backend.execute(f"SET LOCAL ROLE {role}", connection=conn)
             backend.execute("SELECT set_config('app.current_user_id', %s, true)", (db.client_id,), connection=conn)
-            db._verify_message_order_privileges_postgres(conn)
+            message_order_schema.verify_postgres_message_order_privileges(backend, conn)
             backend.execute(
                 "INSERT INTO messages(id, conversation_id, sender, content, timestamp, client_id) "
                 "VALUES (%s, %s, %s, %s, %s, %s)",

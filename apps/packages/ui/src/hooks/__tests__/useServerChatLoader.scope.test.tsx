@@ -98,7 +98,7 @@ vi.mock("@/store/option", async importOriginal => {
   return {
     useStoreMessageOption: Object.assign(
       (selector: (state: ReturnType<typeof getState>) => unknown) => selector(getState()),
-      { getState }
+      { getState, subscribe: actual.useStoreMessageOption.subscribe }
     )
   }
 })

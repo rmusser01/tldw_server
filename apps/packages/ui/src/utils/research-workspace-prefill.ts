@@ -1,6 +1,6 @@
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import type { KnowledgeNoteSource } from "./knowledge-note-provenance"
-import { getOriginalResultIndex } from "@/components/Option/KnowledgeQA/sourceListUtils"
+import { getOriginalResultIndex } from "./knowledge-qa-result-index"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"

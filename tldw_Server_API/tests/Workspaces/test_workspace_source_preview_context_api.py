@@ -276,6 +276,12 @@ def test_workspace_content_reads_accept_current_or_unasserted_user(
     suffix: str,
     expected_user_id: str | None,
 ):
+    workspace_preview_db.add_workspace_artifact(
+        "ws-preview", {"id": "draft", "title": "Workspace draft", "artifact_type": "summary"},
+    )
+    workspace_preview_db.add_workspace_note(
+        "ws-preview", {"title": "Workspace note", "content": "Evidence to review"},
+    )
     _install_overrides(workspace_preview_app, workspace_preview_db, _media_db())
     try:
         with TestClient(workspace_preview_app) as client:
@@ -285,6 +291,24 @@ def test_workspace_content_reads_accept_current_or_unasserted_user(
                 if expected_user_id is not None else {},
             )
         assert response.status_code == 200, response.text
+        payload = response.json()
+        if suffix == "":
+            assert (payload["id"], payload["name"]) == ("ws-preview", "Preview Workspace")
+        elif suffix == "/sources":
+            assert [source["id"] for source in payload] == ["src-ready", "src-pending", "src-missing"]
+        elif suffix == "/artifacts":
+            assert [artifact["title"] for artifact in payload] == ["Workspace draft"]
+        elif suffix == "/notes":
+            assert [note["content"] for note in payload] == ["Evidence to review"]
+        else:
+            assert (payload["workspace_id"], payload["source_id"], payload["media_id"]) == (
+                "ws-preview", "src-ready", 1,
+            )
+            assert payload["text_preview"].startswith("Research workspace captured content starts here.")
+            assert any(
+                snippet["kind"] == "chunk" and snippet["text"] == "First chunk with citeable evidence."
+                for snippet in payload["snippets"]
+            )
     finally:
         _clear_overrides(workspace_preview_app)
 

@@ -634,7 +634,10 @@ const resolveDeferredCharacterId = (value: string | number | null): number | nul
 // Loading is shared across loader instances; history-selection fences are not.
 let serverChatLoadingOwner: {
   controller: AbortController
+  chatId: string | null
   selectionIntent: ReturnType<typeof usePlaygroundSessionStore.getState>["serverChatSelectionIntent"]
+  deferredRelease?: true
+  stopWaitingForIdle?: () => void
 } | null = null
 
 export const useServerChatLoader = ({
@@ -660,14 +663,43 @@ export const useServerChatLoader = ({
     controller: AbortController | null,
     settledSelectionIntent?: ReturnType<typeof usePlaygroundSessionStore.getState>["serverChatSelectionIntent"]
   ) => {
-    if (!controller || serverChatLoadingOwner?.controller !== controller) return
+    const owner = serverChatLoadingOwner
+    if (!controller || owner?.controller !== controller) return
     const currentIntent = usePlaygroundSessionStore.getState().serverChatSelectionIntent
-    // Keep cleanup ownership while a newer selection is still debounced.
-    if (settledSelectionIntent !== undefined && currentIntent && currentIntent !== settledSelectionIntent) return
-    serverChatLoadingOwner = null
     const current = useStoreMessageOption.getState()
-    if (current.streaming || current.isProcessing) return
-    setIsLoading(false)
+    const deferredTeardown = settledSelectionIntent === undefined && owner.deferredRelease
+    const expectedIntent = deferredTeardown ? owner.selectionIntent : settledSelectionIntent
+    // Keep cleanup ownership while a newer selection is still debounced.
+    if (expectedIntent !== undefined && currentIntent && currentIntent !== expectedIntent) return
+    if (deferredTeardown && current.serverChatId !== owner.chatId) return
+    const finish = () => {
+      owner.stopWaitingForIdle?.()
+      serverChatLoadingOwner = null
+      setIsLoading(false)
+    }
+    if (!current.streaming && !current.isProcessing) {
+      finish()
+    } else if (!owner.stopWaitingForIdle) {
+      // Keep the loader's cleanup owned until the overlapping send settles.
+      owner.deferredRelease = true
+      const stopWaiting = useStoreMessageOption.subscribe((next, previous) => {
+        if (next.streaming || next.isProcessing || (!previous.streaming && !previous.isProcessing)) return
+        // Selection can reset activity before publishing its replacement intent.
+        queueMicrotask(() => {
+          if (serverChatLoadingOwner !== owner || owner.stopWaitingForIdle !== stopWaiting) return
+          const idle = useStoreMessageOption.getState()
+          if (idle.streaming || idle.isProcessing) return
+          const intent = usePlaygroundSessionStore.getState().serverChatSelectionIntent
+          if (idle.serverChatId === owner.chatId && (!intent || intent === owner.selectionIntent)) {
+            finish()
+          } else {
+            stopWaiting()
+            owner.stopWaitingForIdle = undefined
+          }
+        })
+      })
+      owner.stopWaitingForIdle = stopWaiting
+    }
   }, [setIsLoading])
   const messagesRef = React.useRef(messages)
   const streamingRef = React.useRef(streaming)
@@ -804,15 +836,18 @@ export const useServerChatLoader = ({
       const previousLoadingController = ownedLoadingControllerRef.current
       let selectionCurrent = selectionRef.current?.fence() || (() => true)
       let ownedSelectionRevision = getSelectedAssistantOperationRevision()
-      const canCommitCurrentLoad = () =>
-        selectionCurrent() &&
-        useStoreMessageOption.getState().serverChatId === serverChatId &&
-        shouldCommitServerChatLoadResult({
-          requestedChatId: serverChatId,
-          activeServerChatId: serverChatLoadRef.current.chatId,
-          requestController: controller,
-          activeController: serverChatLoadRef.current.controller
-        })
+      const canCommitCurrentLoad = () => {
+        const currentIntent = usePlaygroundSessionStore.getState().serverChatSelectionIntent
+        return (!currentIntent || currentIntent === selectionIntent) &&
+          selectionCurrent() &&
+          useStoreMessageOption.getState().serverChatId === serverChatId &&
+          shouldCommitServerChatLoadResult({
+            requestedChatId: serverChatId,
+            activeServerChatId: serverChatLoadRef.current.chatId,
+            requestController: controller,
+            activeController: serverChatLoadRef.current.controller
+          })
+      }
       const applyOwnedAssistantSelection = async (selection: Parameters<typeof setSelectedAssistant>[0]) => {
         // setSelectedAssistant persists to extension storage; temporary reads make no
         // durable writes (H1), so they keep whatever assistant is already selected.
@@ -841,11 +876,17 @@ export const useServerChatLoader = ({
         loaded: false
       }
 
+      const clearRejectedChat = () => {
+        // This loader, rather than a new selection, is clearing the chat ID.
+        if (serverChatLoadingOwner?.controller === controller) serverChatLoadingOwner.chatId = null
+        clearOwnedLoading(controller, selectionIntent)
+        setServerChatId(null)
+      }
       const rejectCurrentOwner = async (code: string) => {
         if (!canCommitCurrentLoad()) return
         const control = selectionRef.current
         if (!control) {
-          setServerChatId(null)
+          clearRejectedChat()
           return
         }
         const owner = control.getCurrent().owner
@@ -885,7 +926,8 @@ export const useServerChatLoader = ({
             if (control?.canAutomaticallyLoad?.() === false ||
                 nativeHistoryUnavailableForChat(control?.getCurrent(), serverChatId)) return
           }
-          serverChatLoadingOwner = { controller, selectionIntent }
+          serverChatLoadingOwner?.stopWaitingForIdle?.()
+          serverChatLoadingOwner = { controller, chatId: serverChatId, selectionIntent }
           ownedLoadingControllerRef.current = controller
           setIsLoading(true)
           if (deliberateSelection) {
@@ -984,8 +1026,7 @@ export const useServerChatLoader = ({
                 setMessages([])
                 setHistory([])
                 setServerChatTitle(null)
-                clearOwnedLoading(controller)
-                setServerChatId(null)
+                clearRejectedChat()
               }
               return
             }
@@ -1343,8 +1384,7 @@ export const useServerChatLoader = ({
               setHistory([])
               setServerChatTitle(null)
               updatePageTitle()
-              clearOwnedLoading(controller)
-              setServerChatId(null)
+              clearRejectedChat()
             }
             return
           }

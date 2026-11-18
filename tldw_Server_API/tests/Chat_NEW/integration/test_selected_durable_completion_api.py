@@ -8,24 +8,26 @@ from collections.abc import Mapping
 from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import chat as endpoint
+from tldw_Server_API.app.core.Chat import chat_service, rate_limiter
 from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
+from tldw_Server_API.app.core.Chat.history_selection_schemas import HistoryAdmissionReferenceV1
 from tldw_Server_API.app.core.Chat.history_wire import selected_durable_request_digest
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Moderation import moderation_service
+from tldw_Server_API.app.core.Resource_Governance import cost_units
+from tldw_Server_API.app.core.Usage import quota_checks
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
 def selected_api(credentialed_test_client, populated_chacha_db, auth_headers, monkeypatch):
-    from tldw_Server_API.app.core.Chat import rate_limiter
-
     # Capacity is not this suite's subject; retain an isolated, enabled limiter.
     monkeypatch.setenv("TEST_CHAT_TOKENS_PER_MINUTE", "1000000")
     monkeypatch.setattr(rate_limiter, "_rate_limiter", rate_limiter.get_rate_limiter())
@@ -50,9 +52,9 @@ def isolated_usage_api(selected_api, tmp_path, monkeypatch, test_openai_server_c
 
     client = selected_api[0]
     with monkeypatch.context() as usage_env:
+        usage_env.setenv("LLM_USAGE_ENABLED", "true")
         usage_env.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'usage.db'}")
         usage_env.setenv("OPENAI_API_KEY", "")
-        usage_env.setitem(endpoint.API_KEYS, "openai", None)
         reset_settings()
         client.portal.call(reset_db_pool)
 
@@ -67,6 +69,135 @@ def isolated_usage_api(selected_api, tmp_path, monkeypatch, test_openai_server_c
         finally:
             client.portal.call(reset_db_pool)
     reset_settings()
+
+
+@pytest.fixture
+def install_chat_governor(selected_api, monkeypatch):
+    """Run the real governor on a fixed clock and observe reservations and charges."""
+    from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor
+
+    def install(tokens_per_minute):
+        policy = {"tokens": {"per_min": tokens_per_minute, "burst": 1.0}, "scopes": ["global", "user"]}
+        reservations, commits = [], []
+
+        class RecordingGovernor(MemoryResourceGovernor):
+            async def reserve(self, req, op_id=None):
+                reservations.append(req.categories["tokens"]["units"])
+                return await super().reserve(req, op_id=op_id)
+
+            async def commit(self, handle_id, actuals=None, op_id=None):
+                commits.append(actuals)
+                return await super().commit(handle_id, actuals=actuals, op_id=op_id)
+
+        governor = RecordingGovernor(policies={"chat.default": policy}, time_source=lambda: 1000.0)
+        loader = SimpleNamespace(
+            get_policy=lambda _: policy,
+            get_snapshot=lambda: SimpleNamespace(route_map={"default": "chat.default"}),
+        )
+        state = selected_api[0].app.state
+        monkeypatch.setattr(state, "rg_governor", governor, raising=False)
+        monkeypatch.setattr(state, "rg_policy_loader", loader, raising=False)
+        return governor, reservations, commits
+
+    return install
+
+
+@pytest.fixture
+def recorded_usage(monkeypatch):
+    """Observe usage calls without suppressing their writes to the isolated ledger."""
+    usage = []
+    log_usage = chat_service.log_llm_usage
+
+    async def record_usage(**kwargs):
+        usage.append(kwargs)
+        await log_usage(**kwargs)
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", record_usage)
+    return usage
+
+
+@pytest.fixture
+def selected_stream_transport(monkeypatch, unified):
+    monkeypatch.setenv("STREAMS_UNIFIED", str(int(unified)))
+
+
+@pytest.fixture
+def receipt_only_stream_metadata(selected_stream_transport, monkeypatch):
+    from tldw_Server_API.app.core.Chat import streaming_utils
+
+    monkeypatch.setattr(chat_service, "CHAT_STREAM_INCLUDE_METADATA", False)
+    monkeypatch.setattr(streaming_utils, "CHAT_STREAM_INCLUDE_METADATA", False)
+
+
+@pytest.fixture
+def selected_single_append_api(selected_api, monkeypatch):
+    """Fence legacy and bulk persistence while allowing the protected single-input path."""
+    db = selected_api[1]
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("selected mode must not use legacy or plural admission")
+
+    monkeypatch.setattr(db, "insert_or_validate_user_turn", forbidden)
+    monkeypatch.setattr(db, "append_selected_history_inputs", forbidden)
+    return selected_api
+
+
+@pytest.fixture
+def selected_settlement_fault(selected_api, monkeypatch, fault):
+    """Inject a failure only at the durable result write or verification boundary."""
+    db = selected_api[1]
+    if fault == "metadata":
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("private metadata failure details")
+
+        monkeypatch.setattr(db.message_store, "_add_message_metadata_with_conn", fail)
+    elif fault == "unverified":
+        read = db.read_history_recovery_messages
+
+        def unverified(*args, **kwargs):
+            rows, total = read(*args, **kwargs)
+            rows[0]["tldw_history_recovery_v1"] = {"version": 1, "status": "unverified", "code": "live_state_mismatch"}
+            return rows, total
+
+        monkeypatch.setattr(db, "read_history_recovery_messages", unverified)
+
+
+@pytest.fixture
+def hosted_billing_accounting(isolated_usage_api, billing_repo_wired, monkeypatch):
+    """Use the hosted-plan guard and enforcer context with an isolated org accounting sink."""
+    from tldw_Server_API.app.core.Billing import enforcement
+
+    client = isolated_usage_api[0]
+    charges, ledger = [], []
+
+    async def check_limit(org_id, category, *, requested_units):
+        assert (org_id, category) == (42, enforcement.LimitCategory.LLM_TOKENS_MONTH)
+        assert requested_units > 0
+        return enforcement.LimitCheckResult(
+            category=category.value,
+            action=enforcement.EnforcementAction.ALLOW,
+            current=0,
+            limit=1000000,
+            percent_used=0.0,
+        )
+
+    def apply_usage_delta(org_id, category, tokens):
+        charges.append((org_id, category, tokens))
+        return True
+
+    async def record_cost_units(*, entity_scope, entity_value, tokens, **_kwargs):
+        ledger.append((entity_scope, entity_value, tokens))
+
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
+    monkeypatch.setenv("STREAMS_UNIFIED", "1")
+    monkeypatch.setenv("RG_ENABLED", "0")
+    monkeypatch.setattr(enforcement, "_billing_enforcer", SimpleNamespace(
+        check_limit=check_limit,
+        apply_usage_delta=apply_usage_delta,
+    ))
+    monkeypatch.setitem(client.app.dependency_overrides, endpoint.get_billing_org_id, lambda: 42)
+    monkeypatch.setattr(cost_units, "record_cost_units_for_entity", record_cost_units)
+    return charges, ledger
 
 
 def body_for(client, cid, headers, stream=False, sources=None, max_tokens=None, user_content=" original {{char}} "):
@@ -456,9 +587,9 @@ def test_monthly_token_admission_excludes_persistence_only_sources(selected_api,
     async def unused_month(_uid):
         return 0
 
-    monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.user_quota", allowance)
-    monkeypatch.setattr(endpoint, "llm_tokens_this_month", unused_month)
-    provider = endpoint.perform_chat_api_call
+    monkeypatch.setattr(quota_checks, "user_quota", allowance)
+    monkeypatch.setattr(quota_checks, "llm_tokens_this_month", unused_month)
+    provider = chat_service.perform_chat_api_call
     calls = []
 
     def record(*args, **kwargs):
@@ -469,7 +600,7 @@ def test_monthly_token_admission_excludes_persistence_only_sources(selected_api,
         calls.append(True)
         return provider(*args, **kwargs)
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", record)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", record)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 200, response.text
     assert calls == [True]
@@ -483,9 +614,11 @@ def test_monthly_token_admission_excludes_persistence_only_sources(selected_api,
 @pytest.mark.parametrize("gate", ["legacy", "rg"])
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("payload", ["plain", "citations", "large-prompt"])
-def test_finite_token_admission_charges_inference_not_receipts(selected_api, monkeypatch, gate, stream, payload):
+def test_finite_token_admission_charges_inference_not_receipts(
+    selected_api, install_chat_governor, monkeypatch, gate, stream, payload,
+):
     from tldw_Server_API.app.core.Chat.rate_limiter import ConversationRateLimiter, RateLimitConfig
-    from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor, RGRequest
+    from tldw_Server_API.app.core.Resource_Governance import RGRequest
 
     client, db, cid, headers = selected_api
     sources = receipt_sources() if payload == "citations" else []
@@ -499,39 +632,25 @@ def test_finite_token_admission_charges_inference_not_receipts(selected_api, mon
         user_content="inference " * 1600 if payload == "large-prompt" else " original {{char}} ",
     )
     monkeypatch.setenv("RG_ENABLED", "1" if gate == "rg" else "0")
-    policy = {"tokens": {"per_min": 3000, "burst": 1.0}, "scopes": ["global", "user"]}
-    governor = MemoryResourceGovernor(policies={"chat.default": policy}, time_source=lambda: 1000.0)
-    loader = SimpleNamespace(
-        get_policy=lambda _: policy,
-        get_snapshot=lambda: SimpleNamespace(route_map={"default": "chat.default"}),
-    )
-    monkeypatch.setattr(client.app.state, "rg_governor", governor, raising=False)
-    monkeypatch.setattr(client.app.state, "rg_policy_loader", loader, raising=False)
-    reservations = []
     if gate == "rg":
+        governor, reservations, _ = install_chat_governor(3000)
         # A partially consumed real bucket distinguishes prompt admission from capacity clamping.
         decision, _ = client.portal.call(
             governor.reserve,
             RGRequest(entity="user:1", categories={"tokens": {"units": 1000}}, tags={"policy_id": "chat.default"}),
         )
         assert decision.allowed
-        reserve = governor.reserve
-
-        async def record_reserve(req, op_id=None):
-            reservations.append(req.categories["tokens"]["units"])
-            return await reserve(req, op_id=op_id)
-
-        monkeypatch.setattr(governor, "reserve", record_reserve)
+        reservations.clear()
     limiter = ConversationRateLimiter(RateLimitConfig(per_user_tokens_per_minute=3000, burst_multiplier=1.0))
-    monkeypatch.setattr(endpoint, "get_rate_limiter", lambda: limiter)
-    provider = endpoint.perform_chat_api_call
+    monkeypatch.setattr(rate_limiter, "_rate_limiter", limiter)
+    provider = chat_service.perform_chat_api_call
     calls = []
 
     def record(*args, **kwargs):
         calls.append(True)
         return provider(*args, **kwargs)
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", record)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", record)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     if gate == "rg":
         assert len(reservations) == 1
@@ -549,17 +668,13 @@ def test_finite_token_admission_charges_inference_not_receipts(selected_api, mon
         assert db.count_messages_for_conversation(cid) == 2
 
 
-@pytest.mark.parametrize("execution", [False, True])
-@pytest.mark.parametrize("stream", [False, True])
-@pytest.mark.parametrize("cited", [False, True])
-def test_owned_queue_estimates_exclude_persistence_only_sources(selected_api, monkeypatch, execution, stream, cited):
-    from tldw_Server_API.app.core.Chat import chat_service
-    from tldw_Server_API.app.core.Chat.request_queue import RequestQueue
+@pytest.fixture
+def owned_queue_estimates(selected_api, monkeypatch, execution):
+    """Give both admission and execution paths the same running queue owner."""
+    from tldw_Server_API.app.core.Chat import request_queue
 
-    client, db, cid, headers = selected_api
-    sources = receipt_sources() if cited else []
-    body = body_for(client, cid, headers, stream, sources, max_tokens=32)
-    queue = RequestQueue(max_queue_size=2, max_concurrent=1, timeout=5)
+    client = selected_api[0]
+    queue = request_queue.RequestQueue(max_queue_size=2, max_concurrent=1, timeout=5)
     enqueue = queue.enqueue
     estimates = []
 
@@ -571,21 +686,30 @@ def test_owned_queue_estimates_exclude_persistence_only_sources(selected_api, mo
     monkeypatch.setenv("RG_ENABLED", "0")
     monkeypatch.setenv("FORCE_CHAT_QUEUE_IN_TESTS", "1")
     monkeypatch.setattr(endpoint, "QUEUED_EXECUTION", execution)
-    monkeypatch.setattr(endpoint, "get_request_queue", lambda: queue)
-    monkeypatch.setattr(chat_service, "get_request_queue", lambda: queue)
+    monkeypatch.setattr(request_queue, "_request_queue", queue)
     client.portal.call(queue.start)
     try:
-        response = client.post("/api/v1/chat/completions", headers=headers, json=body)
-        assert response.status_code == 200, response.text
-        assert len(estimates) == 1
-        assert 0 < estimates[0] < 3000
-        receipt = next(
-            event["tldw_history_result_v1"] for event in frames(response, stream) if "tldw_history_result_v1" in event
-        )
-        assert receipt["sources"] == sources
-        assert db.count_messages_for_conversation(cid) == 2
+        yield estimates
     finally:
         client.portal.call(queue.stop)
+
+
+@pytest.mark.parametrize("execution", [False, True])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("cited", [False, True])
+def test_owned_queue_estimates_exclude_persistence_only_sources(selected_api, owned_queue_estimates, stream, cited):
+    client, db, cid, headers = selected_api
+    sources = receipt_sources() if cited else []
+    body = body_for(client, cid, headers, stream, sources, max_tokens=32)
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert len(owned_queue_estimates) == 1
+    assert 0 < owned_queue_estimates[0] < 3000
+    receipt = next(
+        event["tldw_history_result_v1"] for event in frames(response, stream) if "tldw_history_result_v1" in event
+    )
+    assert receipt["sources"] == sources
+    assert db.count_messages_for_conversation(cid) == 2
 
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -601,7 +725,7 @@ def test_full_persistence_envelope_still_obeys_request_size_limit(selected_api, 
         calls.append(True)
         raise AssertionError("Size refusal must precede provider dispatch")
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", unexpected_provider)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", unexpected_provider)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 413, response.text
     assert calls == []
@@ -609,18 +733,17 @@ def test_full_persistence_envelope_still_obeys_request_size_limit(selected_api, 
 
 
 @pytest.mark.parametrize("invalid", ["text-parts", "image", "tool"])
-def test_rejected_projection_records_consumed_tokens_before_next_quota_check(isolated_usage_api, monkeypatch, invalid):
+def test_rejected_projection_records_consumed_tokens_before_next_quota_check(
+    isolated_usage_api, recorded_usage, monkeypatch, invalid,
+):
     """A rejected result cannot hide provider consumption from the monthly gate."""
-    from tldw_Server_API.app.core.Chat import chat_service
-
     client, db, cid, headers = isolated_usage_api
-    monkeypatch.setenv("LLM_USAGE_ENABLED", "true")
-    used_before = client.portal.call(endpoint.llm_tokens_this_month, 1)
+    used_before = client.portal.call(quota_checks.llm_tokens_this_month, 1)
 
     async def allowance(_uid, key):
         return used_before + 5000 if key == "limits.llm_tokens_per_month" else None
 
-    monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.user_quota", allowance)
+    monkeypatch.setattr(quota_checks, "user_quota", allowance)
     body = body_for(client, cid, headers)
     message = {"role": "assistant", "content": "Answer"}
     if invalid == "text-parts":
@@ -644,22 +767,14 @@ def test_rejected_projection_records_consumed_tokens_before_next_quota_check(iso
             "usage": {"prompt_tokens": 750000, "completion_tokens": 250000, "total_tokens": 1000000},
         }
 
-    recorded_usage = []
-    log_usage = chat_service.log_llm_usage
-
-    async def record_usage(**kwargs):
-        recorded_usage.append(kwargs)
-        await log_usage(**kwargs)
-
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
-    monkeypatch.setattr(chat_service, "log_llm_usage", record_usage)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", provider)
     rejected = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert rejected.status_code == 409, rejected.text
     assert rejected.json()["detail"]["code"] == "unsupported_history_result_projection"
     assert db.count_messages_for_conversation(cid) == 1
     assert len(recorded_usage) == 1
     assert recorded_usage[0]["total_tokens"] == 1000000
-    assert client.portal.call(endpoint.llm_tokens_this_month, 1) == used_before + 1000000
+    assert client.portal.call(quota_checks.llm_tokens_this_month, 1) == used_before + 1000000
 
     next_cid = db.add_conversation({"title": "Quota after rejected projection"})
     next_body = body_for(client, next_cid, headers)
@@ -677,15 +792,15 @@ def test_rejected_projection_records_consumed_tokens_before_next_quota_check(iso
     ids=["json", "legacy", "unified", "settled-legacy", "settled-unified"],
 )
 @pytest.mark.parametrize("cited", [False, True])
+@pytest.mark.usefixtures("receipt_only_stream_metadata")
 def test_receipt_is_server_owned_verified_atomic_result(
-    selected_api,
+    selected_single_append_api,
     monkeypatch,
     stream,
     cited,
-    unified,
     settled_before_admission,
 ):
-    client, db, cid, headers = selected_api
+    client, db, cid, headers = selected_single_append_api
     sources = (
         [
             {
@@ -703,16 +818,6 @@ def test_receipt_is_server_owned_verified_atomic_result(
     body = body_for(client, cid, headers, stream, sources)
     uid = body["tldw_turn"]["user_message_id"]
 
-    def forbidden(*args, **kwargs):
-        raise AssertionError("nested mode must not use legacy/plural admission or native intent preparation")
-
-    monkeypatch.setattr(db, "insert_or_validate_user_turn", forbidden)
-    monkeypatch.setattr(db, "append_selected_history_inputs", forbidden)
-    from tldw_Server_API.app.core.Chat import chat_service, streaming_utils
-
-    monkeypatch.setenv("STREAMS_UNIFIED", str(int(unified)))
-    monkeypatch.setattr(chat_service, "CHAT_STREAM_INCLUDE_METADATA", False)
-    monkeypatch.setattr(streaming_utils, "CHAT_STREAM_INCLUDE_METADATA", False)
     if settled_before_admission:
         prime = endpoint._prime_provider_stream_response
 
@@ -755,7 +860,7 @@ def test_receipt_is_server_owned_verified_atomic_result(
             ],
         }
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", provider)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 200, response.text
     events = frames(response, stream)
@@ -786,38 +891,9 @@ def test_receipt_is_server_owned_verified_atomic_result(
         assert "tldw_history_result_v1" not in events[0]
 
 
-@pytest.mark.parametrize("normalize", [False, True], ids=["raw", "normalized"])
-@pytest.mark.parametrize(
-    ("raw_text", "redacted_text"),
-    [
-        (" Raw answer [0]\n ", None),
-        ('{"tldw_message_id":"provider-fake","tldw_history_result_v1":{"forged":true}}', None),
-        (" secret answer [0]\n ", " [REDACTED] answer [0]\n "),
-    ],
-    ids=["text", "json-looking-text", "redaction"],
-)
-def test_raw_string_result_returns_verified_receipt_without_resettling(
-    selected_api,
-    monkeypatch,
-    normalize: bool,
-    raw_text: str,
-    redacted_text: str | None,
-) -> None:
-    """Return the exact output-safe text after one protected settlement."""
-    client, db, cid, headers = selected_api
-    sources = [
-        {
-            "name": "Paper",
-            "type": "pdf",
-            "mode": "rag",
-            "url": "provenance:paper",
-            "pageContent": "evidence",
-            "metadata": {"page": 2},
-        },
-    ]
-    body = body_for(client, cid, headers, sources=sources)
-    uid = body["tldw_turn"]["user_message_id"]
-    expected_text = raw_text if redacted_text is None else redacted_text
+@pytest.fixture
+def raw_output_moderation(monkeypatch, redacted_text):
+    """Exercise output redaction with the actual evaluator and a local-only policy."""
     if redacted_text is not None:
         from tldw_Server_API.app.core.Moderation.moderation_service import (
             ModerationPolicy,
@@ -842,9 +918,44 @@ def test_raw_string_result_returns_verified_receipt_without_resettling(
             per_user_overrides=False,
             block_patterns=[PatternRule(regex=re.compile("secret"), action="redact", phase="output")],
         )
-        monkeypatch.setattr(endpoint, "get_moderation_service", lambda: moderation)
+        monkeypatch.setattr(moderation_service, "get_moderation_service", lambda: moderation)
+
+
+@pytest.mark.parametrize("normalize", [False, True], ids=["raw", "normalized"])
+@pytest.mark.parametrize(
+    ("raw_text", "redacted_text"),
+    [
+        (" Raw answer [0]\n ", None),
+        ('{"tldw_message_id":"provider-fake","tldw_history_result_v1":{"forged":true}}', None),
+        (" secret answer [0]\n ", " [REDACTED] answer [0]\n "),
+    ],
+    ids=["text", "json-looking-text", "redaction"],
+)
+@pytest.mark.usefixtures("raw_output_moderation")
+def test_raw_string_result_returns_verified_receipt_without_resettling(
+    selected_api,
+    monkeypatch,
+    normalize: bool,
+    raw_text: str,
+    redacted_text: str | None,
+) -> None:
+    """Return the exact output-safe text after one protected settlement."""
+    client, db, cid, headers = selected_api
+    sources = [
+        {
+            "name": "Paper",
+            "type": "pdf",
+            "mode": "rag",
+            "url": "provenance:paper",
+            "pageContent": "evidence",
+            "metadata": {"page": 2},
+        },
+    ]
+    body = body_for(client, cid, headers, sources=sources)
+    uid = body["tldw_turn"]["user_message_id"]
+    expected_text = raw_text if redacted_text is None else redacted_text
     monkeypatch.setenv("CHAT_FORCE_NORMALIZE_STRING_RESPONSES", str(normalize).lower())
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", lambda *args, **kwargs: raw_text)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", lambda *args, **kwargs: raw_text)
     settle = db.settle_history_admission
     settled_ids = []
 
@@ -929,7 +1040,7 @@ def test_nonselected_raw_string_response_keeps_normalization_opt_in(selected_api
     body.pop("tldw_turn")
     body["save_to_db"] = False
     monkeypatch.setenv("CHAT_FORCE_NORMALIZE_STRING_RESPONSES", "false")
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", lambda *args, **kwargs: "legacy raw answer")
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", lambda *args, **kwargs: "legacy raw answer")
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 200, response.text
     assert response.json() == "legacy raw answer"
@@ -957,7 +1068,7 @@ def test_raw_digest_mismatch_rejects_before_any_write(selected_api, monkeypatch,
         raise AssertionError("mismatched digest must not reach admission/provider")
 
     monkeypatch.setattr(db, "append_selected_history_input", forbidden)
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", forbidden)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", forbidden)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 409, response.text
     assert response.json()["detail"]["code"] == "request_context_digest_mismatch"
@@ -967,20 +1078,20 @@ def test_raw_digest_mismatch_rejects_before_any_write(selected_api, monkeypatch,
 def test_resolved_inference_cannot_rewrite_finalized_wire(selected_api, monkeypatch):
     client, db, cid, headers = selected_api
     body = body_for(client, cid, headers)
-    original = endpoint.resolve_provider_and_model
+    original = chat_service.resolve_provider_and_model
 
     def rewrite(**kwargs):
         resolved = list(original(**kwargs))
         resolved[3] = "silently-changed-model"
         return tuple(resolved)
 
-    monkeypatch.setattr(endpoint, "resolve_provider_and_model", rewrite)
+    monkeypatch.setattr(chat_service, "resolve_provider_and_model", rewrite)
 
     def forbidden(*args, **kwargs):
         raise AssertionError("rewritten inference must not reach admission/provider")
 
     monkeypatch.setattr(db, "append_selected_history_input", forbidden)
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", forbidden)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", forbidden)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 409, response.text
     assert response.json()["detail"]["code"] == "resolved_inference_mismatch"
@@ -988,7 +1099,28 @@ def test_resolved_inference_cannot_rewrite_finalized_wire(selected_api, monkeypa
     assert db.get_conversation_settings(cid) is None
 
 
+@pytest.fixture
+def unsupported_owner_capability(selected_api, monkeypatch, guard):
+    if guard == "skills":
+        db = selected_api[1]
+        monkeypatch.setattr(db, "history_skills_may_be_visible", lambda: True)
+    elif guard == "sync":
+        from tldw_Server_API.app.core.Sync.v2 import factory
+
+        owner_id = str(selected_api[1].client_id)
+        service = SimpleNamespace(store=SimpleNamespace(
+            list_datasets_for_user=lambda user_id: [
+                SimpleNamespace(scope_type="personal", metadata={
+                    "default_personal": True, "client_family": "chatbook",
+                }),
+            ] if user_id == owner_id else [],
+        ))
+        monkeypatch.setattr(factory, "sync_v2_storage_exists_for_user", lambda user_id: user_id == owner_id)
+        monkeypatch.setattr(factory, "sync_v2_service_for_user", lambda _user_id: service)
+
+
 @pytest.mark.parametrize("guard", ["tools", "legacy", "top-level", "sync", "skills"])
+@pytest.mark.usefixtures("unsupported_owner_capability")
 def test_unsupported_combinations_stay_closed_before_admission(selected_api, monkeypatch, guard):
     client, db, cid, headers = selected_api
     body = body_for(client, cid, headers)
@@ -998,20 +1130,19 @@ def test_unsupported_combinations_stay_closed_before_admission(selected_api, mon
         body["metadata"] = {"tldw_retry_failed_turn": True}
     elif guard == "top-level":
         body["tldw_history_selection_v1"] = body["tldw_turn"]["history_v1"]["selection"]
-    elif guard == "skills":
-        monkeypatch.setattr(db, "history_skills_may_be_visible", lambda: True)
-    else:
-        from tldw_Server_API.app.api.v1.endpoints import character_messages
-
-        monkeypatch.setattr(character_messages, "_active_message_sync_service", lambda *args: object())
 
     def forbidden(*args, **kwargs):
         raise AssertionError("unsupported combinations cannot dispatch or append")
 
     monkeypatch.setattr(db, "append_selected_history_input", forbidden)
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", forbidden)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", forbidden)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == (409 if guard in {"skills", "sync"} else 422), response.text
+    if guard in {"skills", "sync"}:
+        assert response.json()["detail"] == {
+            "status": "unsupported_history_capability",
+            "code": "unsupported_history_context_skills_registry" if guard == "skills" else "sync_owner_unsupported",
+        }
     assert db.count_messages_for_conversation(cid) == 0
 
 
@@ -1019,7 +1150,7 @@ def test_unsupported_combinations_stay_closed_before_admission(selected_api, mon
 def test_accepted_reference_retry_uses_fresh_attempt_digest_without_second_user(selected_api, monkeypatch, stream):
     client, db, cid, headers = selected_api
     initial = body_for(client, cid, headers, stream)
-    provider = endpoint.perform_chat_api_call
+    provider = chat_service.perform_chat_api_call
     observed_messages = []
 
     def record(*args, **kwargs):
@@ -1027,7 +1158,7 @@ def test_accepted_reference_retry_uses_fresh_attempt_digest_without_second_user(
         observed_messages.append(deepcopy(messages))
         return provider(*args, **kwargs)
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", record)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", record)
     first = client.post("/api/v1/chat/completions", headers=headers, json=initial)
     assert first.status_code == 200, first.text
     first_result = next(
@@ -1097,15 +1228,15 @@ def test_transformative_input_moderation_rejects_before_selected_admission(selec
         moderation.redact_text(body["messages"][-1]["content"], moderation._global_policy)
         != body["messages"][-1]["content"]
     )
-    monkeypatch.setattr(endpoint, "get_moderation_service", lambda: moderation)
+    monkeypatch.setattr(moderation_service, "get_moderation_service", lambda: moderation)
     calls = []
-    provider = endpoint.perform_chat_api_call
+    provider = chat_service.perform_chat_api_call
 
     def record(*args, **kwargs):
         calls.append(True)
         return provider(*args, **kwargs)
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", record)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", record)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 409, response.text
     assert response.json()["detail"]["code"] == "selected_durable_input_transformation"
@@ -1156,7 +1287,7 @@ def test_raw_provider_projection_rejects_before_result_authority(selected_api, m
             "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
         }
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", provider)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     if stream:
         assert response.status_code == 200, response.text
@@ -1208,48 +1339,56 @@ def test_raw_byte_validation_fences_partial_result_authority(selected_api, monke
         else:
             raise RuntimeError("provider connection closed")
 
-    monkeypatch.setattr(
-        endpoint,
-        "perform_chat_api_call",
-        lambda *args, **kwargs: asynchronous_stream() if asynchronous else synchronous_stream(),
-    )
-    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    with monkeypatch.context() as provider:
+        provider.setattr(
+            chat_service,
+            "perform_chat_api_call",
+            lambda *args, **kwargs: asynchronous_stream() if asynchronous else synchronous_stream(),
+        )
+        response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 200, response.text
     events = frames(response, True)
     assert any(
         choice.get("delta", {}).get("content") == "prefix " for event in events for choice in event.get("choices", [])
     ), response.text
     assert any("error" in event for event in events), response.text
+    assert not any(event.get("success") is True for event in events)
+    assert not any(choice.get("finish_reason") == "stop" for event in events for choice in event.get("choices", []))
+    assert not any("tldw_history_result_v1" in event or "tldw_message_id" in event for event in events)
+    assert db.count_messages_for_conversation(cid) == 1
     if malformed:
-        assert not any(event.get("success") is True for event in events)
-        assert not any(choice.get("finish_reason") == "stop" for event in events for choice in event.get("choices", []))
-        assert not any("tldw_history_result_v1" in event or "tldw_message_id" in event for event in events)
-        assert db.count_messages_for_conversation(cid) == 1
-    else:
-        assert any("tldw_history_result_v1" in event for event in events), response.text
-        assert db.count_messages_for_conversation(cid) == 2
+        return
+
+    assert any(event.get("error", {}).get("code") == "provider_unavailable" for event in events), response.text
+    admission_event = next(
+        event["tldw_history_admission_v1"] for event in events if "tldw_history_admission_v1" in event
+    )
+    admission = {field: admission_event[field] for field in HistoryAdmissionReferenceV1.model_fields}
+    assert admission["input_message_id"] == body["tldw_turn"]["user_message_id"]
+    retry = deepcopy(body)
+    retry["tldw_turn"]["history_v1"] = {
+        "version": 1,
+        "kind": "admission",
+        "admission": admission,
+        "request_context_digest": selected_durable_request_digest(retry),
+    }
+    resumed = client.post("/api/v1/chat/completions", headers=headers, json=retry)
+    assert resumed.status_code == 200, resumed.text
+    results = [event["tldw_history_result_v1"] for event in frames(resumed, True) if "tldw_history_result_v1" in event]
+    assert results and all(result == results[0] for result in results), resumed.text
+    assert results[0]["admission"] == admission
+    rows = db.get_messages_for_conversation(cid)
+    assert [(row["sender"], row["id"]) for row in rows] == [
+        ("user", admission["input_message_id"]), ("assistant", results[0]["result_message_id"]),
+    ]
 
 
 @pytest.mark.parametrize("fault", ["metadata", "unverified"])
-def test_mandatory_sse_settlement_fault_is_an_explicit_unknown_terminal(selected_api, monkeypatch, fault):
+@pytest.mark.usefixtures("selected_settlement_fault")
+def test_mandatory_sse_settlement_fault_is_an_explicit_unknown_terminal(selected_api, fault):
     client, db, cid, headers = selected_api
     body = body_for(client, cid, headers, True)
     uid = body["tldw_turn"]["user_message_id"]
-    if fault == "metadata":
-
-        def fail(*args, **kwargs):
-            raise RuntimeError("private metadata failure details")
-
-        monkeypatch.setattr(db.message_store, "_add_message_metadata_with_conn", fail)
-    else:
-        read = db.read_history_recovery_messages
-
-        def unverified(*args, **kwargs):
-            rows, total = read(*args, **kwargs)
-            rows[0]["tldw_history_recovery_v1"] = {"version": 1, "status": "unverified", "code": "live_state_mismatch"}
-            return rows, total
-
-        monkeypatch.setattr(db, "read_history_recovery_messages", unverified)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 200, response.text
     events = frames(response, True)
@@ -1272,47 +1411,20 @@ def test_mandatory_sse_settlement_fault_is_an_explicit_unknown_terminal(selected
 
 @pytest.mark.parametrize("unified", [False, True])
 @pytest.mark.parametrize("fault", [None, "metadata", "unverified"])
+@pytest.mark.usefixtures("selected_stream_transport", "selected_settlement_fault")
 def test_completed_sse_consumption_is_accounted_once_even_if_settlement_fails(
-    isolated_usage_api, monkeypatch, unified, fault
+    isolated_usage_api, install_chat_governor, recorded_usage, monkeypatch, fault,
 ):
-    from tldw_Server_API.app.core.Chat import chat_service
-    from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor
-
     client, db, cid, headers = isolated_usage_api
-    monkeypatch.setenv("LLM_USAGE_ENABLED", "true")
-    monkeypatch.setenv("STREAMS_UNIFIED", "1" if unified else "0")
     monkeypatch.setenv("RG_ENABLED", "1")
-    used_before = client.portal.call(endpoint.llm_tokens_this_month, 1)
+    used_before = client.portal.call(quota_checks.llm_tokens_this_month, 1)
     limit = used_before + 5000
 
     async def allowance(_uid, key):
         return limit if key == "limits.llm_tokens_per_month" else None
 
-    monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.user_quota", allowance)
-    policy = {"tokens": {"per_min": 1000000, "burst": 1.0}, "scopes": ["global", "user"]}
-    governor = MemoryResourceGovernor(policies={"chat.default": policy}, time_source=lambda: 1000.0)
-    loader = SimpleNamespace(
-        get_policy=lambda _: policy,
-        get_snapshot=lambda: SimpleNamespace(route_map={"default": "chat.default"}),
-    )
-    monkeypatch.setattr(client.app.state, "rg_governor", governor, raising=False)
-    monkeypatch.setattr(client.app.state, "rg_policy_loader", loader, raising=False)
-    commits = []
-    commit = governor.commit
-
-    async def record_commit(handle_id, actuals=None, op_id=None):
-        commits.append((handle_id, actuals))
-        return await commit(handle_id, actuals=actuals, op_id=op_id)
-
-    monkeypatch.setattr(governor, "commit", record_commit)
-    usage = []
-    log_usage = chat_service.log_llm_usage
-
-    async def record_usage(**kwargs):
-        usage.append(kwargs)
-        await log_usage(**kwargs)
-
-    monkeypatch.setattr(chat_service, "log_llm_usage", record_usage)
+    monkeypatch.setattr(quota_checks, "user_quota", allowance)
+    _, _, commits = install_chat_governor(1000000)
     body = body_for(client, cid, headers, True)
     reply = "Answer " * 128
     calls = []
@@ -1326,22 +1438,7 @@ def test_completed_sse_consumption_is_accounted_once_even_if_settlement_fails(
             ]
         )
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
-    if fault == "metadata":
-
-        def fail(*args, **kwargs):
-            raise RuntimeError("private metadata failure details")
-
-        monkeypatch.setattr(db.message_store, "_add_message_metadata_with_conn", fail)
-    elif fault == "unverified":
-        read = db.read_history_recovery_messages
-
-        def unverified(*args, **kwargs):
-            rows, total = read(*args, **kwargs)
-            rows[0]["tldw_history_recovery_v1"] = {"version": 1, "status": "unverified", "code": "live_state_mismatch"}
-            return rows, total
-
-        monkeypatch.setattr(db, "read_history_recovery_messages", unverified)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", provider)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 200, response.text
     events = frames(response, True)
@@ -1356,14 +1453,13 @@ def test_completed_sse_consumption_is_accounted_once_even_if_settlement_fails(
         assert any("tldw_history_result_v1" in event for event in events)
     assert response.text.rstrip().endswith("data: [DONE]")
     assert db.count_messages_for_conversation(cid) == (1 if fault == "metadata" else 2)
-    assert len(usage) == 1
-    total = usage[0]["total_tokens"]
-    assert usage[0]["completion_tokens"] == len(reply) // 4
-    assert total == usage[0]["prompt_tokens"] + usage[0]["completion_tokens"]
+    [usage] = recorded_usage
+    total = usage["total_tokens"]
+    assert usage["completion_tokens"] == len(reply) // 4
+    assert total == usage["prompt_tokens"] + usage["completion_tokens"]
     assert total > 100
-    assert client.portal.call(endpoint.llm_tokens_this_month, 1) == used_before + total
-    assert len(commits) == 1
-    assert commits[0][1] == {"tokens": total}
+    assert client.portal.call(quota_checks.llm_tokens_this_month, 1) == used_before + total
+    assert commits == [{"tokens": total}]
 
     limit = used_before + total
     next_cid = db.add_conversation({"title": "Quota after streamed settlement"})
@@ -1372,44 +1468,19 @@ def test_completed_sse_consumption_is_accounted_once_even_if_settlement_fails(
     assert denied.status_code == 402, denied.text
     assert denied.json()["detail"]["category"] == "llm_tokens_month"
     assert calls == [True]
-    assert len(usage) == 1
-    assert [actuals for _, actuals in commits] == [{"tokens": total}, {"tokens": 0}]
+    assert len(recorded_usage) == 1
+    assert commits == [{"tokens": total}, {"tokens": 0}]
     assert db.count_messages_for_conversation(next_cid) == 0
 
 
-@pytest.mark.parametrize("stream,fault", [(False, False), (True, False), (True, True)])
-def test_completed_stream_billing_has_one_owner_even_before_preflight_returns(selected_api, monkeypatch, stream, fault):
-    from tldw_Server_API.app.api.v1.API_Deps import billing_deps
-    from tldw_Server_API.app.core.Billing.enforcement import EnforcementAction, LimitCheckResult
-    from tldw_Server_API.app.core.Chat import chat_service
-
-    client, db, cid, headers = selected_api
+@pytest.mark.parametrize("stream,fault", [(False, None), (True, None), (True, "metadata")])
+@pytest.mark.usefixtures("selected_settlement_fault")
+def test_completed_stream_billing_has_one_owner_even_before_preflight_returns(
+    isolated_usage_api, hosted_billing_accounting, recorded_usage, monkeypatch, stream, fault,
+):
+    client, db, cid, headers = isolated_usage_api
     body = body_for(client, cid, headers, stream)
-    monkeypatch.setenv("STREAMS_UNIFIED", "1")
-    monkeypatch.setenv("RG_ENABLED", "0")
-    enforcer = SimpleNamespace(
-        check_limit=AsyncMock(
-            return_value=LimitCheckResult(
-                category=endpoint.LimitCategory.LLM_TOKENS_MONTH.value,
-                action=EnforcementAction.ALLOW,
-                current=0,
-                limit=1000000,
-                percent_used=0.0,
-            )
-        ),
-        apply_usage_delta=Mock(return_value=True),
-        invalidate_cache=Mock(),
-    )
-    monkeypatch.setattr(endpoint, "enforcement_enabled", lambda: True)
-    monkeypatch.setattr(billing_deps, "enforcement_enabled", lambda: True)
-    monkeypatch.setattr(billing_deps, "billing_checks_active", AsyncMock(return_value=True))
-    monkeypatch.setattr(endpoint, "get_billing_enforcer", lambda: enforcer)
-    monkeypatch.setattr(billing_deps, "get_billing_enforcer", lambda: enforcer)
-    monkeypatch.setitem(client.app.dependency_overrides, endpoint.get_billing_org_id, lambda: 42)
-    ledger = AsyncMock()
-    monkeypatch.setattr(endpoint.cost_units, "record_cost_units_for_entity", ledger)
-    usage = AsyncMock()
-    monkeypatch.setattr(chat_service, "log_llm_usage", usage)
+    charges, ledger = hosted_billing_accounting
     prime = endpoint._prime_provider_stream_response
 
     async def prime_after_completion(response, error_state):
@@ -1422,7 +1493,7 @@ def test_completed_stream_billing_has_one_owner_even_before_preflight_returns(se
             return tuple(chunks), code, has_output, True
 
         result = await asyncio.wait_for(drain(), timeout=2)
-        assert ledger.await_count == 1
+        assert len(ledger) == 1
         return result
 
     monkeypatch.setattr(endpoint, "_prime_provider_stream_response", prime_after_completion)
@@ -1439,13 +1510,7 @@ def test_completed_stream_billing_has_one_owner_even_before_preflight_returns(se
             "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
         }
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
-    if fault:
-
-        def fail(*args, **kwargs):
-            raise RuntimeError("private metadata failure details")
-
-        monkeypatch.setattr(db.message_store, "_add_message_metadata_with_conn", fail)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", provider)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 200, response.text
     events = frames(response, stream)
@@ -1458,14 +1523,11 @@ def test_completed_stream_billing_has_one_owner_even_before_preflight_returns(se
     else:
         assert any("tldw_history_result_v1" in event for event in events)
     assert db.count_messages_for_conversation(cid) == (1 if fault else 2)
-    assert usage.await_count == 1
-    total = usage.await_args.kwargs["total_tokens"]
+    [usage] = recorded_usage
+    total = usage["total_tokens"]
     assert total > 0
-    enforcer.apply_usage_delta.assert_called_once_with(42, endpoint.LimitCategory.LLM_TOKENS_MONTH, total)
-    assert ledger.await_count == 1
-    assert ledger.await_args.kwargs["entity_scope"] == "org"
-    assert ledger.await_args.kwargs["entity_value"] == "42"
-    assert ledger.await_args.kwargs["tokens"] == total
+    assert charges == [(42, endpoint.LimitCategory.LLM_TOKENS_MONTH, total)]
+    assert ledger == [("org", "42", total)]
 
 
 def test_selected_durable_receipt_wrapper_preserves_sse_control_frames(selected_api, monkeypatch):
