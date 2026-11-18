@@ -1059,19 +1059,20 @@ class TestParameterValidation:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("window, stream, expected_status", [
-    (1_000_000, False, 200),
-    (1_000_000, True, 200),
-    (16_384, True, 413),
+@pytest.mark.parametrize("window, stream, source_length, expected_status, error_code", [
+    (1_000_000, False, 1_405_967, 200, None),
+    (1_000_000, True, 1_405_967, 200, None),
+    (16_384, True, 1_405_967, 413, "media_analysis_context_too_large"),
+    (1_000_000, True, 0, 422, "media_analysis_no_content"),
 ])
 def test_saved_media_analysis_dispatches_the_whole_book_only_when_it_fits(
-    monkeypatch, test_client, auth_headers, window, stream, expected_status
+    monkeypatch, test_client, auth_headers, window, stream, source_length, expected_status, error_code
 ):
     from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
     from tldw_Server_API.app.core.Chat import chat_service, rate_limiter
 
     monkeypatch.setattr(rate_limiter.get_rate_limiter().config, "per_user_tokens_per_minute", 1_000_000)
-    text = "x" * 1_405_967
+    text = "x" * source_length
     dispatched = []
 
     async def media_db(_request, current_user):
@@ -1112,5 +1113,5 @@ def test_saved_media_analysis_dispatches_the_whole_book_only_when_it_fits(
         )
         assert metadata["tldw_media_source_sha256"] == chat_endpoint.media_source_sha256(text)
     else:
-        assert response.json()["detail"]["code"] == "media_analysis_context_too_large"
+        assert response.json()["detail"]["code"] == error_code
         assert dispatched == []
