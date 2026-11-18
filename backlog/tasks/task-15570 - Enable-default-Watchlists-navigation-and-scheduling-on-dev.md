@@ -54,6 +54,7 @@ Rebased on dev b7d0b2d and addressed review findings. The APScheduler holding th
 Re-review fixes reject stale cron callbacks after a schedule edit, publish the actual next occurrence, and renew the current owner without competing for PostgreSQL acquisition. SQLite renewal now checks the owner in the same update. Verified 47 backend tests (including PostgreSQL 18, SQLite, and independent cron workers), 35 frontend tests, public/private documentation boundaries, and zero Bandit findings.
 Verified a PostgreSQL schedule API failure caused by native timestamp values. Normalize scheduler rows to ISO strings and cover get and both listing methods with the ACP response model on PostgreSQL and SQLite. The final 47 backend tests passed.
 Rebased PR #3505 onto dev 0e78a26. Dev claimed TASK-15563 for separate work, so the Watchlists task moved to TASK-15570. The repository Backlog ID and canonical format checks pass after the renumber.
+Fixed two CI regressions after the first hosted runs. Refreshed the line-number references for the two unchanged scheduler scope predicates. Isolated the core Scheduler database and payload directory in the shared disposable UAT backend profile used by Live Tier and onboarding. Reproduced both failures locally, then passed 76 UAT helper tests and 17 scope and Backlog tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
