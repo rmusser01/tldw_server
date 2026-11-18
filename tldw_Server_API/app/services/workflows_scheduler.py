@@ -18,10 +18,12 @@ import contextlib
 import json
 import os
 import secrets
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.base import STATE_PAUSED, STATE_RUNNING
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 
@@ -29,6 +31,7 @@ from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.config import settings as core_settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.backends.base import (
+    BackendType,
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import (
@@ -119,6 +122,9 @@ async def ensure_schedule_queue_worker(core: Scheduler, queue_name: str) -> None
             raise SchedulerError(f"No worker capacity for queue {queue_name}")
 
 
+_CRON_LEASE = "workflows:recurring-cron"
+
+
 class _WFRecurringScheduler:
     def __init__(self) -> None:
         self._core_scheduler: Scheduler | None = None
@@ -142,19 +148,25 @@ class _WFRecurringScheduler:
             # Start APScheduler for cron
             tz = os.getenv("WORKFLOWS_SCHEDULER_TZ", "UTC")
             self._aps = AsyncIOScheduler(timezone=tz)
-            self._aps.start()
-            # Load existing schedules
-            await self._load_all()
+            self._aps.start(paused=True)
+            await self._refresh_cron_owner()
             # Periodic rescan to pick up new/removed schedules
             try:
-                interval = int(os.getenv("WORKFLOWS_SCHEDULER_RESCAN_SEC", "600") or 600)
+                interval = max(1, int(os.getenv("WORKFLOWS_SCHEDULER_RESCAN_SEC", "30") or 30))
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
-                interval = 600
+                interval = 30
+            leadership = self._core_scheduler.leader_election
+            heartbeat = max(1, min(5, leadership.config.leader_ttl_seconds // 3)) if leadership else 5
+
             async def _rescan_loop():
+                loop = asyncio.get_running_loop()
+                next_scan = loop.time() + interval
                 while True:
                     try:
-                        await asyncio.sleep(interval)
-                        await self._rescan_once()
+                        await asyncio.sleep(min(interval, heartbeat))
+                        if await self._refresh_cron_owner() and loop.time() >= next_scan:
+                            await self._rescan_once()
+                            next_scan = loop.time() + interval
                     except asyncio.CancelledError:
                         break
                     except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
@@ -163,20 +175,28 @@ class _WFRecurringScheduler:
             self._started = True
             logger.info("Workflows recurring scheduler started")
 
+    async def _refresh_cron_owner(self) -> bool:
+        """Resume only the APScheduler holding the shared recurring-dispatch lease."""
+        leadership = self._core_scheduler.leader_election if self._core_scheduler else None
+        if self._aps is None or leadership is None:
+            return False
+        if not await leadership.acquire_leadership(_CRON_LEASE):
+            self._aps.pause()
+            return False
+        if self._aps.state == STATE_PAUSED:
+            self._aps.remove_all_jobs()
+            await self._load_all()
+            self._aps.resume()
+        return True
+
+    async def _may_submit_cron(self) -> bool:
+        if self._aps is None or self._aps.state != STATE_RUNNING:
+            return False
+        leadership = self._core_scheduler.leader_election if self._core_scheduler else None
+        return leadership is not None and await leadership.acquire_leadership(_CRON_LEASE)
+
     async def stop(self) -> None:
         async with self._lock:
-            try:
-                if self._aps:
-                    self._aps.shutdown(wait=False)
-            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Workflows scheduler: APS shutdown failed: {e}")
-            try:
-                if self._core_scheduler:
-                    await self._core_scheduler.stop()
-            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Workflows scheduler: core scheduler stop failed: {e}")
-            self._aps = None
-            self._core_scheduler = None
             try:
                 if self._rescan_task:
                     self._rescan_task.cancel()
@@ -185,6 +205,22 @@ class _WFRecurringScheduler:
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Workflows scheduler: rescan task cancel failed: {e}")
             self._rescan_task = None
+            try:
+                if self._aps:
+                    self._aps.pause()
+                    self._aps.shutdown(wait=False)
+            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
+                logger.debug(f"Workflows scheduler: APS shutdown failed: {e}")
+            try:
+                if self._core_scheduler:
+                    leadership = self._core_scheduler.leader_election
+                    if leadership is not None:
+                        await leadership.release_leadership(_CRON_LEASE)
+                    await self._core_scheduler.stop()
+            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
+                logger.debug(f"Workflows scheduler: core scheduler stop failed: {e}")
+            self._aps = None
+            self._core_scheduler = None
             # Ensure per-user DB handles are rebuilt on next start so tests/env
             # changes (e.g. USER_DB_BASE_DIR) do not leak stale scheduler paths.
             self._db_cache.clear()
@@ -196,24 +232,7 @@ class _WFRecurringScheduler:
         loaded = 0
         try:
             seen_schedule_ids: set[str] = set()
-            user_ids: set[int] = set()
-            try:
-                base = DatabasePaths.get_user_db_base_dir()
-                for p in base.iterdir():
-                    if p.is_dir():
-                        try:
-                            user_ids.add(int(p.name))
-                        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
-                            continue
-            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Workflows scheduler: failed to enumerate user dirs: {exc}")
-            # Always include single-user fixed ID
-            try:
-                user_ids.add(int(core_settings.get("SINGLE_USER_FIXED_ID", 1)))
-            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Workflows scheduler: invalid SINGLE_USER_FIXED_ID: {e}")
-
-            for uid in sorted(user_ids):
+            for uid in self._schedule_scan_user_ids():
                 try:
                     items = self._list_registered_schedules(uid)
                 except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
@@ -235,8 +254,27 @@ class _WFRecurringScheduler:
         if loaded:
             logger.info(f"Workflows scheduler: registered {loaded} schedule(s)")
 
+    def _schedule_scan_user_ids(self) -> list[int]:
+        fallback_user_id = DatabasePaths.get_single_user_id()
+        if self._db.backend.config.backend_type == BackendType.POSTGRESQL:
+            return [fallback_user_id]
+        user_ids = {fallback_user_id}
+        try:
+            base = DatabasePaths.get_user_db_base_dir()
+            for p in base.iterdir():
+                if p.is_dir():
+                    try:
+                        user_ids.add(int(p.name))
+                    except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+                        continue
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(f"Workflows scheduler: failed to enumerate user dirs: {exc}")
+        return sorted(user_ids)
+
     def _get_db(self, user_id: int) -> WorkflowsSchedulerDB:
-        """Return a cached scheduler DB handle for a user-specific database."""
+        """Reuse the shared PostgreSQL database or open the user’s SQLite database."""
+        if self._db.backend.config.backend_type == BackendType.POSTGRESQL:
+            return self._db
         if user_id not in self._db_cache:
             self._db_cache[user_id] = WorkflowsSchedulerDB(user_id=user_id)
         return self._db_cache[user_id]
@@ -285,22 +323,7 @@ class _WFRecurringScheduler:
         # Collect desired enabled schedule IDs from all users
         desired: set[str] = set()
         seen_schedule_ids: set[str] = set()
-        user_ids: set[int] = set()
-        try:
-            base = DatabasePaths.get_user_db_base_dir()
-            for p in base.iterdir():
-                if p.is_dir():
-                    try:
-                        user_ids.add(int(p.name))
-                    except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
-                        continue
-        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Workflows scheduler: failed to enumerate user dirs: {exc}")
-        try:
-            user_ids.add(int(core_settings.get("SINGLE_USER_FIXED_ID", 1)))
-        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Workflows scheduler: invalid SINGLE_USER_FIXED_ID: {e}")
-        for uid in sorted(user_ids):
+        for uid in self._schedule_scan_user_ids():
             try:
                 items = self._list_registered_schedules(uid)
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
@@ -333,17 +356,14 @@ class _WFRecurringScheduler:
         if not self._aps:
             return
         try:
-            # Remove existing job with same id
-            try:
-                self._aps.remove_job(schedule.id)
-            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Workflows scheduler: remove_job failed for {schedule.id}: {e}")
             tz = schedule.timezone or os.getenv("WORKFLOWS_SCHEDULER_TZ", "UTC")
             # Validate cron; provide feedback via logs on errors
             try:
                 trigger = CronTrigger.from_crontab(schedule.cron, timezone=tz)
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Invalid cron for schedule {schedule.id}: {e}")
+                if self._aps.get_job(schedule.id) is not None:
+                    self._aps.remove_job(schedule.id)
                 return
 
             # Per-job concurrency: skip vs queue
@@ -384,16 +404,12 @@ class _WFRecurringScheduler:
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Workflows scheduler: failed to persist jitter for {schedule.id}: {e}")
 
-            self._aps.add_job(
-                self._run_schedule,
-                trigger=trigger,
-                id=schedule.id,
-                args=[schedule.id, effective_uid],
-                max_instances=max_instances,
-                coalesce=coalesce,
-                misfire_grace_time=misfire_grace_time,
-                jitter=jitter_sec if jitter_sec > 0 else None,
-            )
+            trigger.jitter = jitter_sec or None
+            if not self._register_cron_job(
+                schedule.id, effective_uid, self._run_schedule, trigger,
+                max_instances=max_instances, coalesce=coalesce, misfire_grace_time=misfire_grace_time,
+            ):
+                return
 
             # Compute and persist next run time
             try:
@@ -428,17 +444,14 @@ class _WFRecurringScheduler:
         if not self._aps:
             return
         try:
-            # Remove existing job with same id
-            try:
-                self._aps.remove_job(schedule.id)
-            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Workflows scheduler: remove_job failed for {schedule.id}: {e}")
 
             tz = schedule.timezone or os.getenv("WORKFLOWS_SCHEDULER_TZ", "UTC")
             try:
                 trigger = CronTrigger.from_crontab(schedule.cron, timezone=tz)
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Invalid cron for ACP schedule {schedule.id}: {e}")
+                if self._aps.get_job(schedule.id) is not None:
+                    self._aps.remove_job(schedule.id)
                 return
 
             # Concurrency settings -- ACP jobs default to skip
@@ -452,15 +465,11 @@ class _WFRecurringScheduler:
             misfire_grace_time = 300 if schedule.misfire_grace_sec is None else int(schedule.misfire_grace_sec)
             effective_uid = user_id if user_id is not None else int(schedule.user_id)
 
-            self._aps.add_job(
-                self._run_acp_schedule,
-                trigger=trigger,
-                id=schedule.id,
-                args=[schedule.id, effective_uid],
-                max_instances=max_instances,
-                coalesce=coalesce,
-                misfire_grace_time=misfire_grace_time,
-            )
+            if not self._register_cron_job(
+                schedule.id, effective_uid, self._run_acp_schedule, trigger,
+                max_instances=max_instances, coalesce=coalesce, misfire_grace_time=misfire_grace_time,
+            ):
+                return
 
             # Compute and persist next run time
             try:
@@ -473,7 +482,36 @@ class _WFRecurringScheduler:
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Failed to add ACP schedule job {schedule.id}: {e}")
 
-    async def _run_acp_schedule(self, schedule_id: str, user_id: int) -> None:
+    def _register_cron_job(
+        self, schedule_id: str, user_id: int, callback: Callable[..., Awaitable[None]],
+        trigger: CronTrigger, *, max_instances: int, coalesce: bool, misfire_grace_time: int,
+    ) -> bool:
+        if self._aps is None:
+            return False
+        existing = self._aps.get_job(schedule_id)
+        options = {"max_instances": max_instances, "coalesce": coalesce, "misfire_grace_time": misfire_grace_time}
+        if (
+            existing is not None
+            and existing.func == callback
+            and existing.args == (schedule_id, user_id)
+            and isinstance(existing.trigger, CronTrigger)
+            and str(existing.trigger) == str(trigger)
+            and existing.trigger.timezone == trigger.timezone
+            and existing.trigger.jitter == trigger.jitter
+        ):
+            # Preserve the pending occurrence whenever the trigger is unchanged.
+            if any(getattr(existing, key) != value for key, value in options.items()):
+                existing.modify(**options)
+            return False
+        self._aps.add_job(
+            callback, trigger=trigger, id=schedule_id, args=(schedule_id, user_id),
+            kwargs={"require_cron_owner": True}, replace_existing=True, **options,
+        )
+        return True
+
+    async def _run_acp_schedule(
+        self, schedule_id: str, user_id: int, *, require_cron_owner: bool = False
+    ) -> None:
         """Execute an ACP schedule by submitting an ``acp_run`` task."""
         import json as _json
 
@@ -522,6 +560,8 @@ class _WFRecurringScheduler:
             if self._core_scheduler is None:
                 logger.warning("Core Scheduler not initialized; skipping ACP schedule run")
                 return
+            if require_cron_owner and not await self._may_submit_cron():
+                return
             task_id = await self._core_scheduler.submit(
                 handler="acp_run",
                 payload=payload,
@@ -540,7 +580,9 @@ class _WFRecurringScheduler:
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e2:
                 logger.debug(f"Workflows scheduler: failed to set error status for ACP schedule {schedule_id}: {e2}")
 
-    async def _run_schedule(self, schedule_id: str, user_id: int | None = None) -> None:
+    async def _run_schedule(
+        self, schedule_id: str, user_id: int | None = None, *, require_cron_owner: bool = False
+    ) -> None:
         # Fetch latest schedule in case it was modified
         # Backward compatibility: determine user_id from stored schedule when not provided
         db = None
@@ -618,6 +660,8 @@ class _WFRecurringScheduler:
                 return
             handler_name, queue_name = resolve_schedule_submission_target(payload)
             await ensure_schedule_queue_worker(self._core_scheduler, queue_name)
+            if require_cron_owner and not await self._may_submit_cron():
+                return
             task_id = await self._core_scheduler.submit(
                 handler=handler_name,
                 payload=payload,
@@ -704,13 +748,12 @@ class _WFRecurringScheduler:
         # Check default DB first
         try:
             found = self._db.get_schedule(schedule_id)
+            if found or self._db.backend.config.backend_type == BackendType.POSTGRESQL:
+                return found
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(
                 f"Workflows scheduler: default DB lookup failed for schedule {schedule_id}: {e}"
             )
-            found = None
-        if found:
-            return found
         # Scan per-user DBs
         try:
             base = DatabasePaths.get_user_db_base_dir()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -56,6 +57,8 @@ class _CoreSchedulerStub:
         self.submissions: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         self.stop_calls = 0
         self.worker_pool = self
+        self.leader_election = AsyncMock()
+        self.leader_election.config.leader_ttl_seconds = 60
 
     def get_status(self) -> dict[str, Any]:
         return {"workers_by_queue": {"workflows": 1, "watchlists": 1}}
@@ -255,6 +258,80 @@ def test_list_all_schedules_preserves_acp_config_json(monkeypatch, tmp_path):
 
     assert len(schedules) == 1
     assert schedules[0].acp_config_json == acp_config
+
+
+@pytest.mark.asyncio
+async def test_persisted_schedule_dispatch_has_one_owner_and_can_fail_over(monkeypatch, tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    from tldw_Server_API.app.core.Scheduler.backends.sqlite_backend import SQLiteBackend
+    from tldw_Server_API.app.core.Scheduler.config import SchedulerConfig
+    from tldw_Server_API.app.core.Scheduler.core.leader_election import LeaderElection
+
+    config = SchedulerConfig(database_url=f"sqlite:///{tmp_path / 'queue.db'}")
+    backends = [SQLiteBackend(config), SQLiteBackend(config)]
+    cores = [_CoreSchedulerStub(), _CoreSchedulerStub()]
+    for core, backend in zip(cores, backends, strict=True):
+        await backend.connect()
+        core.leader_election = LeaderElection(backend, config)
+    core_iter = iter(cores)
+
+    async def get_core():
+        return next(core_iter)
+
+    monkeypatch.setattr(workflows_scheduler_mod, "get_global_scheduler", get_core)
+    monkeypatch.setenv("WORKFLOWS_SCHEDULER_SQLITE_PATH", str(tmp_path / "scheduler.db"))
+    first = workflows_scheduler_mod._WFRecurringScheduler()
+    second = workflows_scheduler_mod._WFRecurringScheduler()
+
+    schedule_id = first.create(
+        tenant_id="default", user_id="1", workflow_id=None, name="Feed monitor",
+        cron="*/15 * * * *", timezone="UTC", inputs={"watchlist_job_id": 1},
+        run_mode="async", validation_mode="block", enabled=True,
+    )
+
+    try:
+        await first.start()
+        await second.start()
+        pending = datetime.now(timezone.utc) + timedelta(minutes=3, seconds=17)
+        first._aps.modify_job(schedule_id, next_run_time=pending)
+        await first._rescan_once()
+        assert first._aps.get_job(schedule_id).next_run_time == pending
+        second.update(schedule_id, {"cron": "*/10 * * * *"})
+        await first._rescan_once()
+        assert "*/10" in str(first._aps.get_job(schedule_id).trigger)
+        await second._rescan_once()
+        due = datetime.now(timezone.utc) + timedelta(milliseconds=80)
+        for service in (first, second):
+            service._aps.reschedule_job(schedule_id, trigger="date", run_date=due)
+        await asyncio.sleep(0.2)
+        assert [len(core.submissions) for core in cores] == [1, 0]
+
+        await first.stop()
+        assert await second._refresh_cron_owner()
+        due = datetime.now(timezone.utc) + timedelta(milliseconds=80)
+        second._aps.reschedule_job(schedule_id, trigger="date", run_date=due)
+        await asyncio.sleep(0.2)
+        assert [len(core.submissions) for core in cores] == [1, 1]
+    finally:
+        await first.stop()
+        await second.stop()
+        for backend in backends:
+            await backend.disconnect()
+
+
+def test_shared_postgres_scheduler_reuses_the_database_and_one_scan(monkeypatch):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+
+    config = SimpleNamespace(backend_type=BackendType.POSTGRESQL)
+    db = SimpleNamespace(backend=SimpleNamespace(config=config), get_schedule=lambda _: None)
+    monkeypatch.setattr(workflows_scheduler_mod, "WorkflowsSchedulerDB", lambda: db)
+    scheduler = workflows_scheduler_mod._WFRecurringScheduler()
+    assert scheduler._get_db(10) is scheduler._get_db(11) is db
+    assert len(scheduler._schedule_scan_user_ids()) == 1
+    assert scheduler.get("missing") is None
 
 
 def test_build_schedule_payload_defaults_malformed_inputs_to_empty_dict():

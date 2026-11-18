@@ -46,11 +46,12 @@ Add regression tests for navigation, startup gates, and database writes. Make fo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Regressions reproduced the hidden hosted shortcuts, disabled default scheduler, and PostgreSQL type mismatch. With the fix, 35 frontend and 42 backend tests passed, including the project PostgreSQL 18 fixture and SQLite. Bandit found no issues in the changed scope. Ruff reported the same three existing findings before and after the change.
 
 Verification was scoped to the changed navigation and scheduler paths. GitHub review and required CI are tracked on the PR.
-<!-- SECTION:NOTES:END -->
+Rebased on dev b7d0b2d and addressed review findings. The APScheduler holding the shared scheduler lease is the only instance that submits cron occurrences. Reconciliations keep pending jobs when their triggers are unchanged, and PostgreSQL uses one schedule database handle per process. The canonical Backlog check and isolated database regression passed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
