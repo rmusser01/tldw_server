@@ -97,10 +97,10 @@ describe("background proxy web token refresh", () => {
           entered = true
           await held
         } else {
-          vi.spyOn(response, "json").mockImplementation(async () => {
+          vi.spyOn(response, "text").mockImplementation(async () => {
             entered = true
             await held
-            return { private: "retired document" }
+            return JSON.stringify({ private: "retired document" })
           })
         }
         return response
@@ -240,10 +240,10 @@ describe("background proxy web token refresh", () => {
         vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
           signal = init?.signal
           const response = Response.json({ private: "retired direct body" })
-          vi.spyOn(response, "json").mockImplementation(async () => {
+          vi.spyOn(response, "text").mockImplementation(async () => {
             entered = true
             await held
-            return { private: "retired direct body" }
+            return JSON.stringify({ private: "retired direct body" })
           })
           return response
         }))
@@ -530,7 +530,7 @@ describe("background proxy web token refresh", () => {
         const error = new DOMException("Refresh cancelled", "AbortError")
         if (phase === "fetch") throw error
         const response = Response.json({})
-        vi.spyOn(response, "json").mockRejectedValueOnce(error)
+        vi.spyOn(response, "text").mockRejectedValueOnce(error)
         return response
       }
       return originalResponse
@@ -541,6 +541,7 @@ describe("background proxy web token refresh", () => {
       path: "/api/v1/chat/completions", method: "POST", body: { stream: true }
     }))).rejects.toMatchObject({ name: "AbortError" })
     expect(readResponse).not.toHaveBeenCalled()
+    expect(originalResponse.bodyUsed).toBe(false)
     expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 
@@ -715,11 +716,7 @@ describe("background proxy web token refresh", () => {
       expect(new Headers(fetchSpy.mock.calls[0][1].headers).get("Authorization")).toBe(`Bearer ${jwtForUser(42)}`)
     } else {
       await expect(request).rejects.toMatchObject(change === "cancelled" ? { name: "AbortError" } : { status: 412 })
-      if (change === "cancelled") {
-        expect(fetchSpy.mock.calls[0][1]?.signal?.aborted).toBe(true)
-      } else {
-        expect(fetchSpy).not.toHaveBeenCalled()
-      }
+      expect(fetchSpy).not.toHaveBeenCalled()
     }
   })
 
@@ -1619,7 +1616,7 @@ describe("background proxy web token refresh", () => {
         const refreshResponse = Response.json({ detail: status === 401 ? "Original refresh session revoked" : expectedMessage }, {
           status, headers: { "retry-after": "7", "x-original-refresh-response": "original-direct-refresh-response" }
         })
-        const readRefresh = vi.spyOn(refreshResponse, "json")
+        const readRefresh = vi.spyOn(refreshResponse, "text")
         let releaseRefresh!: () => void
         const heldRefresh = new Promise<void>(resolve => { releaseRefresh = resolve })
         const physical: { url: string; method?: string; authorization: string | null;
@@ -1666,6 +1663,7 @@ describe("background proxy web token refresh", () => {
             retryAfterMs: 7_000, headers: { "retry-after": "7", "x-original-refresh-response": "original-direct-refresh-response" }
           } })
           expect(readOriginal).not.toHaveBeenCalled()
+          expect(initialResponse.bodyUsed).toBe(false)
           expect(onDispatch).toHaveBeenCalledTimes(1)
           expect(onOpen).not.toHaveBeenCalled()
           expect(mocks.store.tldwConfig).toEqual(original)

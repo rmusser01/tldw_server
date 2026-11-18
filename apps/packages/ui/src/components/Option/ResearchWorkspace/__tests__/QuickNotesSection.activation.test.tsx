@@ -8,6 +8,7 @@ import { restoreMigratedResearchWorkspace } from "../workspace-server-restore"
 
 // Unit regression: real notes/store behavior, external requests and messages doubled.
 const boundary = vi.hoisted(() => ({ request: vi.fn(), keywords: vi.fn(), resolve: vi.fn() }))
+vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: boundary.request }))
 vi.mock("@/services/note-keywords", () => ({ getNoteKeywords: boundary.keywords }))
 vi.mock("@/services/service-prompts", () => ({
@@ -181,6 +182,6 @@ describe("canonical QuickNotes adapter (unit boundary doubles)", () => {
     await waitFor(() => expect(boundary.request).toHaveBeenCalledWith(expect.objectContaining({ method: "PUT" })))
     act(() => { useWorkspaceStore.getState().updateNoteContent("New unsaved edit") })
     await act(async () => resolve({ id: 7, title: "Draft", content: "First", version: 2 }))
-    expect(useWorkspaceStore.getState().currentNote).toMatchObject({ content: "New unsaved edit", isDirty: true })
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({ content: "New unsaved edit", version: 2, isDirty: true })
   })
 })

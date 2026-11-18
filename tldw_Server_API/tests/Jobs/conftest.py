@@ -14,26 +14,33 @@ def _truthy(v: str | None) -> bool:
     return bool(v and v.strip().lower() in _TRUTHY)
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def _bootstrap_jobs_routes_env():
-    """Session-scoped baseline env so Jobs admin routes are mounted eagerly.
+    """Module-scoped baseline env so Jobs admin routes are mounted eagerly.
 
-    Ensures that when `tldw_Server_API.app.main` is first imported during test
-    discovery or module import, the 'jobs' router is included regardless of the
-    order in which fixtures or tests import modules.
+    Ensures that when `tldw_Server_API.app.main` is first imported while a Jobs
+    module runs, the 'jobs' router is included regardless of the order in which
+    fixtures or tests import modules. Restored when the module ends (TASK-15497):
+    a session scope left these set for every later test in the worker.
     """
-    # Core test toggles applied as early as possible
-    os.environ.setdefault("TEST_MODE", "true")
-    os.environ.setdefault("MINIMAL_TEST_APP", "1")
-    os.environ.setdefault("ROUTES_STABLE_ONLY", "0")
+    mp = pytest.MonkeyPatch()
+    for key, value in (
+        ("TEST_MODE", "true"),
+        ("MINIMAL_TEST_APP", "1"),
+        ("ROUTES_STABLE_ONLY", "0"),
+        # Avoid privilege metadata validation aborts when config file is absent
+        ("PRIVILEGE_METADATA_VALIDATE_ON_STARTUP", "0"),
+    ):
+        if key not in os.environ:
+            mp.setenv(key, value)
     # Make sure 'jobs' is present in ROUTES_ENABLE for non-minimal codepaths
-    prev = os.environ.get("ROUTES_ENABLE", "")
-    parts = [p for p in prev.split(",") if p]
+    parts = [p for p in os.environ.get("ROUTES_ENABLE", "").split(",") if p]
     if "jobs" not in parts:
-        parts.append("jobs")
-        os.environ["ROUTES_ENABLE"] = ",".join(parts)
-    # Avoid privilege metadata validation aborts when config file is absent
-    os.environ.setdefault("PRIVILEGE_METADATA_VALIDATE_ON_STARTUP", "0")
+        mp.setenv("ROUTES_ENABLE", ",".join([*parts, "jobs"]))
+    try:
+        yield
+    finally:
+        mp.undo()
 
 
 @pytest.fixture(autouse=True)

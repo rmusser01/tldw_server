@@ -2,7 +2,6 @@ import React from "react"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { Modal } from "antd"
 import type {
   AudioGenerationSettings,
   GeneratedArtifact,
@@ -353,7 +352,7 @@ const expandGeneratedOutputsSection = () => {
 const openArtifactViewer = async (viewButton: HTMLElement) => {
   await act(async () => {
     fireEvent.click(viewButton)
-    // AntD static Modal.info queues its separate React root on a zero-delay timer.
+    // Let the AntD dialog commit before settling the lazy viewer below.
     await new Promise<void>((resolve) => setTimeout(resolve, 0))
   })
   // The modal commit starts React.lazy; settle that import inside act before asserting.
@@ -1901,10 +1900,6 @@ Proposal
   })
 
   it("exports structured literature tables as CSV and JSON without advertising XLSX", async () => {
-    const modalInfoSpy = vi.spyOn(Modal, "info").mockImplementation(() => ({
-      destroy: vi.fn(),
-      update: vi.fn()
-    }))
     const createObjectUrlSpy = vi
       .spyOn(URL, "createObjectURL")
       .mockReturnValue("blob:literature-table")
@@ -1937,27 +1932,17 @@ Proposal
     renderStudioPane()
     await openArtifactViewer(screen.getByRole("button", { name: "View" }))
 
-    await screen.findByRole("dialog");
-    await act(async () => {
-      await vi.dynamicImportSettled();
-    });
+    const dialog = await screen.findByRole("dialog")
+    const viewer = within(dialog)
+    expect(viewer.getByText("Literature Matrix", { selector: ".ant-modal-confirm-title" })).toBeInTheDocument()
 
-    expect(modalInfoSpy).toHaveBeenCalledTimes(1)
-    const modal = modalInfoSpy.mock.calls[0][0]
-    expect(modal.title).toBe("Literature Matrix")
-    // Keep the real lazy viewer in the controlled test root, not Modal.info's timer-owned root.
-    render(<>{modal.content}</>)
-    await act(async () => {
-      await import("../StudioPane/ArtifactModalContent")
-    })
-
-    expect(await screen.findByRole("button", { name: "Export CSV" }))
+    expect(await viewer.findByRole("button", { name: "Export CSV" }))
       .toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Export JSON" }))
+    expect(viewer.getByRole("button", { name: "Export JSON" }))
       .toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /xlsx/i })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+    fireEvent.click(viewer.getByRole("button", { name: "Export CSV" }));
     const csvBlob = createObjectUrlSpy.mock.calls.at(-1)?.[0] as Blob;
     expect(csvBlob.type).toBe("text/csv;charset=utf-8");
     const csvText = await new Promise<string>((resolve, reject) => {
@@ -1975,7 +1960,7 @@ Proposal
     expect(anchorClickSpy).toHaveBeenCalledTimes(1);
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:literature-table");
 
-    fireEvent.click(screen.getByRole("button", { name: "Export JSON" }))
+    fireEvent.click(viewer.getByRole("button", { name: "Export JSON" }))
 
     await waitFor(() => {
       expect(createObjectUrlSpy).toHaveBeenCalled()
@@ -2010,7 +1995,6 @@ Proposal
     createObjectUrlSpy.mockRestore()
     revokeObjectUrlSpy.mockRestore()
     anchorClickSpy.mockRestore()
-    modalInfoSpy.mockRestore()
   })
 
   it("surfaces Deep Research launch links for completed traceable matrix and gap artifacts", () => {

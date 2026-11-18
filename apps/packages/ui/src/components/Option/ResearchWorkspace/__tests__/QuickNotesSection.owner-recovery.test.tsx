@@ -15,6 +15,7 @@ const boundary = vi.hoisted(() => ({
   scope: { scopeKey: "owner-a", config: { serverUrl: "https://workspace.test", authMode: "multi-user" }, userId: "alice" },
   getWorkspace: vi.fn(), getWorkspaceSources: vi.fn(), getWorkspaceArtifacts: vi.fn(), getWorkspaceNotes: vi.fn()
 }))
+vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: boundary.request }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: boundary }))
 vi.mock("@/services/service-prompts", () => ({
@@ -154,6 +155,9 @@ describe("UUID Notes owner and canonical reopen boundaries", () => {
       <div data-testid="activated-note" />
     </ActivatedLocalWorkspace></MemoryRouter>)
     expect(await screen.findByRole("alert")).toBeVisible()
+    expect(boundary.request).toHaveBeenCalledWith(expect.objectContaining({
+      path: expect.stringContaining("/api/v1/notes/search/"), method: "GET"
+    }))
     expect(screen.queryByTestId("activated-note")).toBeNull()
     expect(useWorkspaceStore.getState().currentNote).toBe(before.currentNote)
     expect(useWorkspaceStore.getState().sources).toBe(before.sources)

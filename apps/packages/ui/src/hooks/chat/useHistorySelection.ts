@@ -77,7 +77,7 @@ type HistoryLoadTarget = {
   temporary?: boolean
   scope?: ChatScope
   bindUnbound?: boolean
-  isCurrent?: () => boolean
+  isCurrent?: (openingOwner?: HistoryOwnerV1) => boolean
   resetOnCancel?: boolean
   onDeviceScope?: import("@/db/dexie/history-selection").OnDeviceHistoryScope
   qualifyCapture?: (capture: HistoryCaptureResultV1, owner: HistoryOwnerV1) => void
@@ -987,7 +987,8 @@ export function useHistorySelection(
       reference?: HistorySelectionReference | null,
       onLoaded?: (receipt: HistoryLoadReceipt) => void
     ) => {
-      const isCurrent = () => target.isCurrent?.() !== false
+      const isCurrent = (openingOwner?: HistoryOwnerV1) => target.isCurrent?.(openingOwner) !== false
+      const openingIsCurrent = (owner: HistoryOwnerV1) => () => isCurrent(owner)
       if (!isCurrent()) return false
       let openedReceipt: HistoryLoadReceipt | undefined
       let openedEpoch: number | undefined
@@ -1080,7 +1081,7 @@ export function useHistorySelection(
           if (target.onDeviceScope && owner.profile_id !== target.onDeviceScope.profileId) return false
           // Profile qualification can await before open advances its operation epoch.
           const captureEpoch = epoch.current + 1
-          const opening = open(owner, reference, opened, isCurrent,
+          const opening = open(owner, reference, opened, openingIsCurrent(owner),
             target.onDeviceScope ? { profileId: target.onDeviceScope.profileId, installLease: () => {
               releaseOwnerLease.current?.(); releaseOwnerLease.current = null
             } } : undefined, target.qualifyCapture)
@@ -1152,7 +1153,7 @@ export function useHistorySelection(
           if (!valid || operation.epoch !== epoch.current || !isCurrent()) return false
           if (target.onDeviceScope && owner.profile_id !== target.onDeviceScope.profileId) return false
           capturedOwner = owner
-          return completed(await open(owner, reference, opened, isCurrent,
+          return completed(await open(owner, reference, opened, openingIsCurrent(owner),
             target.onDeviceScope ? {
               profileId: target.onDeviceScope.profileId,
               installLease: () => {
@@ -1171,7 +1172,7 @@ export function useHistorySelection(
           validate_lease: () => valid && isCurrent()
         }
         capturedOwner = owner
-        const result = await open(owner, reference, opened, isCurrent, undefined, target.qualifyCapture, target.resetOnCancel)
+        const result = await open(owner, reference, opened, openingIsCurrent(owner), undefined, target.qualifyCapture, target.resetOnCancel)
         // Only an explicit action plus an authorized owner capture can bind an old mirror.
         if (
           target.bindUnbound &&
@@ -1207,7 +1208,8 @@ export function useHistorySelection(
         return completed(result)
       } catch (error) {
         if (operation.epoch !== epoch.current || !isCurrent() || target.onDeviceScope) return false
-        return await open({ kind: "unavailable", code: errorCode(error) }, null, undefined, isCurrent, undefined, undefined, target.resetOnCancel)
+        const owner = { kind: "unavailable" as const, code: errorCode(error) }
+        return await open(owner, null, undefined, openingIsCurrent(owner), undefined, undefined, target.resetOnCancel)
       } finally {
         if (!isCurrent()) {
           if (openedReceipt && openedEpoch != null) retireCancelledLoad(openedEpoch, openedReceipt.owner, openedReceipt.view, target.resetOnCancel)

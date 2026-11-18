@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   bookmarks: new Map<string, unknown>(),
   listeners: new Set<() => void>(),
   scope: vi.fn(),
+  draftScope: vi.fn(),
   capture: vi.fn(),
   profile: vi.fn(),
   saveBookmark: vi.fn(),
@@ -53,7 +54,8 @@ vi.mock("@/services/chat-history-selection", () => ({
   confirmLegacyHistoryProjection: async () => {}
 }))
 vi.mock("@/services/service-prompts", () => ({
-  resolveServicePromptScope: (...args: unknown[]) => mocks.scope(...args),
+  // Draft-owner verification has no load signal and must not consume a checkpoint's one-shot result.
+  resolveServicePromptScope: (...args: unknown[]) => args.length ? mocks.scope(...args) : mocks.draftScope(),
   subscribeToServicePromptConfigChanges: (listener: () => void) => {
     mocks.listeners.add(listener)
     return () => { mocks.listeners.delete(listener) }
@@ -249,6 +251,7 @@ beforeEach(() => {
   mocks.bookmarks.clear()
   mocks.listeners.clear()
   mocks.scope.mockReset().mockResolvedValue(scope())
+  mocks.draftScope.mockReset().mockResolvedValue(scope())
   mocks.capture.mockReset().mockImplementation(capture)
   mocks.profile.mockReset().mockResolvedValue("profile")
   mocks.saveBookmark.mockReset().mockImplementation((scope, view) => mocks.bookmarks.set(bookmarkKey(scope, view), { ...scope, view }))
@@ -319,6 +322,22 @@ describe("qualified workspace checkpoint handoff", () => {
     expect(mocks.submit).not.toHaveBeenCalled()
   })
 
+  it("MR3 a restored native chat can change its H1 selection", async () => {
+    seed()
+    mount(true, undefined, true)
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("Draft A"))
+    clearResearchChat()
+    await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatId).toBe("chat-A"))
+    const owner = controller!.getCurrent().owner
+    expect(owner?.kind).toBe("native")
+    await act(async () => { expect(await controller!.choose({ kind: "empty" })).toBe(true) })
+    expect(controller!.getCurrent().owner).toBe(owner)
+    expect(controller!.getCurrent().status).toBe("ready")
+    expect(controller!.getCurrent().view?.cursor).toEqual({ kind: "empty" })
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
   it("MR3 failed undo retains the cleared checkpoint without cached rows", async () => {
     seed()
     mount(true, undefined, true)
@@ -366,6 +385,7 @@ describe("qualified workspace checkpoint handoff", () => {
     if (change === "workspace") changeWorkspace("B")
     if (change === "account") {
       mocks.scope.mockResolvedValue(scope(2))
+      mocks.draftScope.mockResolvedValue(scope(2))
       act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
     }
     if (change === "selection") await act(async () => {
@@ -439,13 +459,11 @@ describe("qualified workspace checkpoint handoff", () => {
     mocks.capture.mockClear()
     mocks.scope.mockResolvedValueOnce(scope(2))
     await act(async () => { expect(undoLatestWorkspaceAction()).toBe(true) })
-    await waitFor(() => {
-      const owner = controller!.getCurrent().owner
-      expect(owner?.kind).toBe("native")
-      if (owner?.kind === "native") expect(owner.request_scope.userId).toBe(2)
-    })
+    await waitFor(() => expect(controller!.getCurrent().status).toBe("stale_selection"))
+    await expect(mocks.scope.mock.results.at(-1)?.value).resolves.toEqual(scope(2))
     expect(mocks.capture).not.toHaveBeenCalled()
-    expect(controller!.getCurrent().owner?.kind === "native" && controller!.getCurrent().owner.validate_lease()).toBe(false)
+    expect(controller!.getCurrent().owner).toBeNull()
+    expect(controller!.getReference()).toBeNull()
     expect(useStoreMessageOption.getState().messages).toEqual([])
     expect(checkpoint()).toEqual(empty)
     expect(mocks.submit).not.toHaveBeenCalled()
@@ -657,7 +675,8 @@ describe("qualified workspace checkpoint handoff", () => {
     let completion: Promise<boolean | string> | undefined
     act(() => { completion = undo!() })
     await waitFor(() => expect(mocks.saveBookmark).toHaveBeenCalledTimes(2))
-    expect(controller!.getCurrent().capture?.status).toBe("captured")
+    expect(controller!.getCurrent().status).toBe("loading")
+    expect(controller!.getCurrent().capture).toBeNull()
     expect(useStoreMessageOption.getState().serverChatId).toBeNull()
     fireEvent.change(draft(), { target: { value: "Typed after capture before bookmark" } })
     surface.unmount()
@@ -686,6 +705,7 @@ describe("qualified workspace checkpoint handoff", () => {
     if (change === "workspace") changeWorkspace("B")
     if (change === "account") {
       mocks.scope.mockResolvedValue(scope(2))
+      mocks.draftScope.mockResolvedValue(scope(2))
       act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
     }
     if (change === "temporary") act(() => useStoreMessageOption.setState({ temporaryChat: true }))
@@ -760,18 +780,54 @@ describe("qualified workspace checkpoint handoff", () => {
     })
     try {
       await waitFor(() => expect(mocks.saveBookmark).toHaveBeenCalledTimes(2))
-      expect(controller!.getCurrent().capture?.status).toBe("captured")
+      expect(controller!.getCurrent().status).toBe("loading")
+      expect(controller!.getCurrent().capture).toBeNull()
       expect(useStoreMessageOption.getState().serverChatId).toBeNull()
       fireEvent.change(draft(), { target: { value: "Typed in newer pre-owner selection" } })
       expect(checkpoint().checkpoint?.draft).toBe("Draft A")
+      const replacementOwner = controller!.getCurrent().owner
+      await act(async () => { pendingScope.resolve(scope()); expect(await completion).toBe(false) })
+      expect(controller!.getCurrent().owner).toBe(replacementOwner)
     } finally {
       await act(async () => {
         pendingScope.resolve(scope())
         pendingBookmark.resolve()
-        await replacement
+        expect(await replacement).toBe(true)
         expect(await completion).toBe(false)
       })
     }
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
+  it("MR3 an older Undo cannot revoke the empty checkpoint granted by a newer Clear", async () => {
+    seed()
+    const surface = mount()
+    await waitFor(() => expect(draft()).toHaveValue("Draft A"))
+    let undo: ReturnType<NonNullable<typeof checkpointClear>>
+    act(() => { undo = checkpointClear!() })
+    const pendingScope = deferred<ReturnType<typeof scope>>()
+    mocks.scope.mockReturnValueOnce(pendingScope.promise)
+    let completion: Promise<boolean | string> | undefined
+    act(() => { completion = undo!() })
+    await waitFor(() => expect(mocks.scope).toHaveBeenCalledTimes(3))
+    try {
+      await act(async () => {
+        expect(await controller!.loadConversation({
+          serverChatId: "chat-B", scope: { type: "workspace", workspaceId: "workspace-A" }
+        })).toBe(true)
+        useStoreMessageOption.getState().setServerChatId("chat-B")
+      })
+      act(() => { expect(checkpointClear!()).toBeTypeOf("function") })
+      fireEvent.change(draft(), { target: { value: "Draft after the newer Clear" } })
+      expect(checkpoint().checkpoint?.draft).toBe("Draft after the newer Clear")
+      expect(checkpoint().checkpoint?.historySelectionReference).toBeNull()
+    } finally {
+      await act(async () => { pendingScope.resolve(scope()); expect(await completion).toBe(false) })
+    }
+    surface.unmount()
+    mount()
+    await waitFor(() => expect(draft()).toHaveValue("Draft after the newer Clear"))
+    expect(transcript()).toBe("")
     expect(mocks.submit).not.toHaveBeenCalled()
   })
 
@@ -1287,6 +1343,7 @@ describe("qualified workspace checkpoint handoff", () => {
     mocks.capture.mockRejectedValue(new Error("owner_conversation_mismatch"))
     if (change === "account") {
       mocks.scope.mockResolvedValue(scope(2))
+      mocks.draftScope.mockResolvedValue(scope(2))
       act(() => { mocks.listeners.forEach(listener => listener()) })
     } else changeWorkspace("B")
     await act(async () => { pending.resolve(capture(owner, view)) })

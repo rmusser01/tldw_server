@@ -148,11 +148,26 @@ describe("captured Notes wikilink resolve through guarded transport", () => {
     expect(boundary.fetch).not.toHaveBeenCalled()
   })
 
-  it("propagates an already aborted captured request to direct fetch", async () => {
+  it("rejects an already aborted captured request without dispatch", async () => {
     const controller = new AbortController()
     controller.abort()
     await expect(resolve(path, "POST", controller.signal)).rejects.toMatchObject({ name: "AbortError" })
+    expect(boundary.fetch).not.toHaveBeenCalled()
+    expect(boundary.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it("propagates abort to a captured request already in direct fetch", async () => {
+    const controller = new AbortController()
+    boundary.fetch.mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.signal?.aborted).toBe(false)
+      controller.abort()
+      init?.signal?.throwIfAborted()
+      throw new Error("Caller abort did not reach direct fetch")
+    })
+    await expect(resolve(path, "POST", controller.signal)).rejects.toMatchObject({ name: "AbortError" })
+    expect(boundary.fetch).toHaveBeenCalledOnce()
     expect(boundary.fetch.mock.calls[0][1].signal.aborted).toBe(true)
+    expect(boundary.sendMessage).not.toHaveBeenCalled()
   })
 
   it.each(["GET", "PUT", "PATCH", "DELETE"])("rejects resolve method %s", async (method) => {

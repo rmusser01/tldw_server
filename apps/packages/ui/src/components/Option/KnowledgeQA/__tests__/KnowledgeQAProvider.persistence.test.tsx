@@ -21,6 +21,10 @@ let storedPresetValue: unknown = undefined
 let storedSettingsValue: unknown = undefined
 let storedStreamingFlagValue: unknown = undefined
 
+vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: async () => ({ id: "test-owner", is_active: true }) },
+}))
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (key: string) => {
     if (key === "ragSearchPreset") return [storedPresetValue]
@@ -498,6 +502,7 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
       fireEvent.click(screen.getByRole("checkbox", { name: /I understand this unsupported draft/i }))
       let output: string
       if (format === "notes") {
+        await waitFor(() => expect(latestContext!.notesAuthorityScope).not.toBeNull())
         fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
         await screen.findByRole("link", { name: "Open saved note" })
         output = createNoteMock.mock.calls[0][0]

@@ -151,6 +151,10 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
     const search = route.current.search
     if (hasRouteIntent(search) && !latest.current.replaceRouteSearch) return null
     const target = { historyId: chat.historyId, serverChatId: chat.serverChatId }
+    if (owned.pendingUndo) {
+      owned.pendingUndo = undefined
+      setRestoring(false)
+    }
     controller.reset()
     const cleared = controller.fence()
     clearView(false)
@@ -189,18 +193,22 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
       }
       const isCurrent = () => lease.current === restoringLease && restoringLease.valid &&
         restoringLease.generation === generation.current && contextCurrent()
-      const loadIsCurrent = () => {
+      const loadIsCurrent = (openingOwner?: HistoryLoadReceipt["owner"]) => {
         const owner = controller.getCurrent().owner
-        if (!undoOwner && owner && (owner.kind === "unavailable" || owner.conversation_id === reference.conversation_id)) {
+        // A finalizer checking a stale load cannot adopt another load's same-chat owner.
+        if (!undoOwner && openingOwner && owner === openingOwner &&
+          (owner.kind === "unavailable" || owner.conversation_id === reference.conversation_id)) {
           undoOwner = owner
           undoFence = controller.fence()
         }
-        return isCurrent()
+        // The opening epoch fences Undo, not subsequent captures by the same restored owner.
+        return isCurrent() && (completed || operationCurrent())
       }
       const operationCurrent = () => (undoFence ?? preparingFence ?? cleared)()
       if (clearRoute.current?.origin === owned) clearRoute.current.isCurrent = () =>
         lease.current === owned && owned.valid && contextCurrent() && operationCurrent()
-      owned.pendingUndo = () => isCurrent() && operationCurrent()
+      const undoIsCurrent = () => isCurrent() && operationCurrent()
+      owned.pendingUndo = undoIsCurrent
       setRestoring(true)
       setRestoreError(null)
       try {
@@ -221,14 +229,17 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
       } catch {
         return isCurrent() && (!undoFence || undoFence()) ? "failed" : false
       } finally {
-        if (!completed && isCurrent() && undoFence?.() && controller.getCurrent().owner === undoOwner) {
-          controller.reset()
-          clearView(false)
-          undoOwner = null
-          undoFence = controller.fence()
+        if (owned.pendingUndo === undoIsCurrent) {
+          if (!completed && isCurrent() && undoFence?.() && controller.getCurrent().owner === undoOwner) {
+            controller.reset()
+            clearView(false)
+            undoOwner = null
+            undoFence = controller.fence()
+          }
+          if (!undoIsCurrent()) owned.allowEmpty = false
+          owned.pendingUndo = undefined
+          if (lease.current === restoringLease && restoringLease.generation === generation.current) setRestoring(false)
         }
-        owned.pendingUndo = undefined
-        if (lease.current === restoringLease && restoringLease.generation === generation.current) setRestoring(false)
       }
     }
   }, [clearView, fence, saveSession])
@@ -427,7 +438,10 @@ export function useWorkspaceChatCheckpoint(options: CheckpointOptions) {
     if (!control || !owned?.valid || owned.generation !== generation.current || !owned.writable ||
       workspaceId !== owned.qualification.workspaceId || referenceId !== owned.qualification.referenceId ||
       chat.temporaryChat) return
-    if (owned.pendingUndo?.() && owned.settled && owned.allowEmpty &&
+    const undoIsCurrent = owned.pendingUndo?.()
+    // A newer selection can earn its own save authority, but it cannot inherit Undo's empty checkpoint.
+    if (undoIsCurrent === false) owned.allowEmpty = false
+    if (undoIsCurrent && owned.settled && owned.allowEmpty &&
       owned.snapshot?.checkpoint?.historySelectionReference === null && !chat.historyId && !chat.serverChatId) {
       // Undo's partial capture grants no row/reference authority; retain only the cleared draft.
       owned.snapshot = { ...owned.snapshot, checkpoint: { ...owned.snapshot.checkpoint, draft } }

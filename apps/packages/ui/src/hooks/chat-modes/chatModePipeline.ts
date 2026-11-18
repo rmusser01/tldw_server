@@ -1421,9 +1421,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   } catch (caught) {
     const e = params.servicePromptSnapshot?.scopeInvalidatedSignal.aborted
       ? createServicePromptScopeChangedError("The server or authenticated account changed.") : caught
+    const scopeInvalidated = isRequestConfigScopeChangedError(e)
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
-    const isAbort = signal.aborted || isAbortLikeError(e)
+    const isAbort = !scopeInvalidated && (signal.aborted || isAbortLikeError(e))
     if (!dispatched && !historyTurn?.dispatched && !preparationIsCurrent()) {
       await historyTurn?.cancelPreparation?.()
       return chatSubmitSkipped("Conversation changed")
@@ -1436,13 +1437,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         // early, or finished after its view went away, stays in the
         // transcript (CS-04, #3104). Failures with nothing to show, and turns
         // whose account or server changed, stay in review.
-        const scopeInvalidated = Boolean(
-          params.servicePromptSnapshot?.scopeInvalidatedSignal?.aborted
-        )
         // A Stop before any text keeps the question for dev's saved-question
         // retry, instead of a kept turn with no reply to show (CM-02).
         const stoppedBeforeReply =
-          historyTurn.persistence !== "server" && Boolean(historyTurn.admission) &&
+          !scopeInvalidated && historyTurn.persistence !== "server" && Boolean(historyTurn.admission) &&
           !replyCompleted && !fullText.trim() && signal.aborted &&
           params.wasStoppedByUser?.() === true
         const outcome: HistoryTurnOutcome | undefined =
@@ -1563,7 +1561,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         e instanceof Error ? e.message : "History send failed"
       )
     }
-    if (isRequestConfigScopeChangedError(e)) {
+    if (scopeInvalidated) {
       setMessages(messages)
       setHistorySafely(history)
       return chatSubmitSkipped("Request scope changed")

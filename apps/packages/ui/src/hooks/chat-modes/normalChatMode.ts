@@ -1586,7 +1586,8 @@ const captureHistoryTurn = async (
         )
       )
       // Keep the admitted question selected so a deliberate no-output retry can reuse it.
-      if (turn.admission && !data.content && !data.outcome && !turn.existingSelection && canUpdateView()) {
+      if (turn.admission && !data.content && !data.outcome && !turn.existingSelection &&
+          !isRequestConfigScopeChangedError(error) && canUpdateView()) {
         const commandIsCurrent = captureChatDraftSource(authValid).isCurrent
         const following = controller.followResult(originView, turn.admission.input_message_id,
           () => commandIsCurrent() && navigationIsCurrent())

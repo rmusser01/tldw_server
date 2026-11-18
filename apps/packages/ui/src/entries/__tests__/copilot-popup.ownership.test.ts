@@ -551,7 +551,10 @@ const createBackground = (
       createSafeStorage: () => ({ get: async () => undefined })
     },
     "@/services/background-helpers": {
-      notify: (...args: unknown[]) => notifications.push(args)
+      notify: (...args: unknown[]) => notifications.push(args),
+      createBackgroundStatusBroadcaster: () => async () => {
+        throw new Error("Unexpected background status broadcast in Copilot ownership test")
+      }
     },
     "@/services/recipe-persistence-registry": {
       RecipePersistenceRegistry: class {}

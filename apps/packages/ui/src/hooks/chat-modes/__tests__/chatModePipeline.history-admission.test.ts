@@ -27,6 +27,7 @@ vi.mock("@/services/chat-history-selection", async (original) => ({
 import { runChatPipeline } from "../chatModePipeline"
 import { captureHistorySnapshot, historyAdmissionReference } from "@/services/chat-history-selection"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { inspectHistoryDurableRecovery, validateHistoryDurableAdmission } from "@/services/history-durable-turn"
 import { validateHistoryDurableResultReceipt } from "@/utils/history-durable-sources"
 import type { HistoryTurnRecovery } from "@/db/dexie/types"
@@ -172,6 +173,25 @@ beforeEach(() => {
   })
 })
 describe("selected normal send admission boundary", () => {
+  it("retains partial output for review when transport refuses the selected history scope", async () => {
+    const turn = makeTurn()
+    const scopeError = createServicePromptScopeChangedError()
+    const signal = new AbortController().signal
+    mocks.stream.mockImplementationOnce(async function* () {
+      yield "partial reply"
+      throw scopeError
+    })
+    const result = await invoke(turn, {}, mode, [], signal)
+    expect(signal.aborted).toBe(false)
+    expect(turn.admission?.input_message_id).toBe("user-new")
+    expect(turn.recover).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ content: "partial reply", outcome: undefined }),
+      scopeError
+    )
+    expect(turn.outcome).toBeUndefined()
+    expect(result).toEqual({ status: "failed", errorMessage: scopeError.message })
+  })
+
   it("rejects a server-owned durable turn before selected-history admission", async () => {
     const result = await invoke(makeTurn(), {
       tldwTurn: { user_message_id: "12409645-7bce-4cba-b03b-bc4b0b27cc68" }

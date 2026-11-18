@@ -4071,3 +4071,82 @@ check, frontend typecheck, production build, token check, and unchanged budgets.
 ADR assessment: no new durable architecture rule. ADR-059 governs task
 tracking, and the existing API artifact package follows the design recorded
 in proposed ADR-069. No new provider selection rule or persistence format.
+
+## Stage 50: Checkpoint CI Recovery
+
+**Goal**: Keep qualified chat, draft, and Undo ownership through the rebase.
+**Success Criteria**: Exact connected runtime and build checks pass; current
+hosted gates and applicable acceptance are verified before normal landing.
+**Tests**: The 18 files in the failed UI shard, connected shared history,
+runtime and storage suites, types, production build, and normal preflight.
+**Status**: In Progress
+
+1. Done: Stage 49 preflight passed on 449 paths and the branch was published
+   normally as `a1d96518`. Hosted job 134556484629 failed nine checkpoint
+   assertions. A private single-React reproduction failed the same nine;
+   retain the earlier invalid duplicate-React run separately.
+2. Done: Separate independent draft and checkpoint scope responses in tests.
+   Keep capture hidden until its bookmark persists and retire foreign owners.
+   A superseded Undo loses empty-draft save authority and can neither
+   adopt a replacement owner nor revoke a newer Clear. A completed Undo
+   leaves its verified owner eligible for later history changes. Three race
+   regressions failed before their fixes. The owning storage fixture now
+   waits for the existing persist queue; the heading fixture awaits the
+   real lazy Markdown loader after mounting. No deadlines or heading
+   assertions changed.
+3. Done: The final reviewed candidate passed 1,567 cases in 28 files, with
+   all previous case identities retained. Types and scoped lint passed, as
+   did the private production build, token sync and unchanged budgets.
+   Preserve the prior 1,566-pass/one-fail run separately. Preview onto
+   `0e78a26d` was clean; its test-only production-neutral delta includes
+   reload isolation. Nine isolated reload and guard cases passed in the
+   verified reverse order. No live PostgreSQL or native verification here.
+4. Done: The private checkpoint passed normal preflight on 431 paths,
+   the duplicate task check and the shard coverage guard; it was not
+   published because more hosted failures arrived. Stage 51 batches those
+   corrections on the same exact integration preview.
+
+ADR assessment: the corrections enforce existing ownership (ADR-049) and
+task tracking (ADR-059). No new durable persistence or runtime policy.
+
+## Stage 51: Complete Frontend CI Recovery
+
+**Goal**: Fix the remaining verified current-head frontend failures without
+weakening migration, owner, transport, or persistence checks.
+**Success Criteria**: The exact candidate passes the seven failed local
+UI shard selections, connected callers, types, production budgets, and
+normal source-bound preflight; then publish normally to the existing PR.
+**Tests**: Keep the original manifests, deadlines, and case identities.
+Use finite request/storage doubles only. Hosted gate checks still run on
+the published successor. Live PostgreSQL and native acceptance are separate.
+**Status**: In Progress
+
+1. Done: Current head `a1d96518` had seven failed frontend test shards
+   and three shared-UI coverage jobs duplicating failures documented in
+   the unit shards. Reproduced all 18 newly reported assertion failures,
+   then all nine from shard 6; the earlier nine checkpoints and six store
+   fixtures were already reproduced. Raw runs and failed outputs retained.
+2. Done: Account/scope invalidation, including a typed transport refusal
+   before the local watcher, stays distinct from Stop. Preserve the accepted
+   question and reviewable partial text without following the question or
+   automatically saving a partial reply, and do not alter verified receipt
+   handling. Two focused regressions failed before the guard, then passed.
+   The extension frame fixture keeps real dispatch but supplies the missing
+   status callback factory; Notes use the existing storage shim and verify
+   real owner/scoped read and retained-write guards.
+3. Done: Refresh tests hold the real text body reader, require no dispatch
+   on pre-abort, and verify the unauthorized body stays unread. Literature
+   uses the actual AntD instance and exact title inside the dialog, never
+   the obsolete static modal spy. Keep the original export/output checks,
+   scoped independent reviews, and all failed title fixtures separately.
+4. Done: Exactly 5,987 tests passed in 127 files, with zero failures or
+   skips and the earlier case identities retained. This is the seven
+   failed hosted UI manifests plus connected callers, not the entire
+   hosted pipeline. Production Turbopack, token sync and unchanged bundle
+   budgets passed on the same 8,129 tracked app inputs; no artifact served.
+5. Pending: Exact-tree preflight and normal publication. Actual current-head
+   hosted, PostgreSQL and applicable acceptance remain required before
+   normal landing; no cleanup yet.
+
+ADR assessment: ADR-049 and ADR-059 already govern the behavior and work
+record. The changes add no persistence format, provider policy or API rule.

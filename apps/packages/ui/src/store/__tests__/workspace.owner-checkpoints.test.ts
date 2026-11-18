@@ -36,6 +36,7 @@ describe.each([
   ["split", "1"]
 ])("workspace owner checkpoints (%s storage)", (_mode, splitFlag) => {
   let store: typeof import("../workspace").useWorkspaceStore
+  let flush: typeof import("../workspace").flushWorkspacePersistence
   let qualification: WorkspaceChatSessionQualification
   let sessionKey: string
 
@@ -77,7 +78,9 @@ describe.each([
     localStorage.setItem(
       "tldw:feature-rollout:workspace_indexeddb_offload_v1:enabled", "0"
     )
-    store = (await import("../workspace")).useWorkspaceStore
+    const workspace = await import("../workspace")
+    store = workspace.useWorkspaceStore
+    flush = workspace.flushWorkspacePersistence
     store.getState().initializeWorkspace("Checkpoint workspace")
     qualification = {
       ownerKey: "mirror-target-account-a",
@@ -87,8 +90,9 @@ describe.each([
     sessionKey = `${qualification.workspaceId}::reference-a`
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks()
+    await flush()
     localStorage.clear()
   })
 
@@ -214,6 +218,7 @@ describe.each([
     const session = makeSession()
     session.messages = Array.from({ length: 300 }, (_, index) => ({ ...message, message: `Message ${index + 1}` }))
     store.getState().saveWorkspaceChatSession(sessionKey, session)
+    await flush()
     const persisted = await store.persist.getOptions().storage!.getItem(WORKSPACE_STORAGE_KEY)
     const persistedSession = persisted!.state.workspaceChatSessions[sessionKey]
 
@@ -233,6 +238,7 @@ describe.each([
       checkpoint: { version: 1, ...qualification, historySelectionReference: null, draft: "Draft before first send" }
     }
     store.getState().saveWorkspaceChatSession(sessionKey, session)
+    await flush()
     await store.persist.rehydrate()
 
     expect(store.getState().getWorkspaceChatSession(sessionKey, qualification)).toEqual(session)
@@ -242,6 +248,7 @@ describe.each([
     const session = makeSession()
     session.checkpoint!.ownerKey = "mirror-target-account-b"
     store.getState().saveWorkspaceChatSession(sessionKey, session)
+    await flush()
     await store.persist.rehydrate()
 
     expectReadOnlyRejection()

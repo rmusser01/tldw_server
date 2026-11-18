@@ -1,6 +1,6 @@
 import React from "react"
 import { App, ConfigProvider } from "antd"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { TFunction } from "i18next"
 import { PlaygroundMessage } from "../Message"
@@ -39,37 +39,40 @@ describe.each(["safe_markdown", "st_compat"] as const)("Transcript heading propa
   })
 
   for (const component of ["Message", "MessageContent"] as const) {
-    const view = (message: string, headingOffset?: number, greeting = false) => render(
-      <ConfigProvider theme={{ token: { motion: false } }}>
-        <App>
-          <h1>Chat Workspace</h1>
-          {component === "Message"
-            ? <PlaygroundMessage {...messageProps} message={message} headingOffset={headingOffset} message_type={greeting ? "greeting" : undefined} openReasoning />
-            : <MessageContent {...contentProps} message={message} headingOffset={headingOffset} renderGreetingMarkdown={greeting} openReasoning />}
-        </App>
-      </ConfigProvider>
-    )
+    const view = async (message: string, headingOffset?: number, greeting = false) => {
+      render(
+        <ConfigProvider theme={{ token: { motion: false } }}>
+          <App>
+            <h1>Chat Workspace</h1>
+            {component === "Message"
+              ? <PlaygroundMessage {...messageProps} message={message} headingOffset={headingOffset} message_type={greeting ? "greeting" : undefined} openReasoning />
+              : <MessageContent {...contentProps} message={message} headingOffset={headingOffset} renderGreetingMarkdown={greeting} openReasoning />}
+          </App>
+        </ConfigProvider>
+      )
+      await act(async () => { await import("../../Markdown") })
+    }
 
     it(`${component} keeps default transcript H1 elsewhere`, async () => {
-      view("# Answer")
+      await view("# Answer")
       await screen.findByRole("heading", { level: 1, name: "Answer" })
       expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(2)
     })
 
     it(`${component} reserves H1 for the workspace page on answers`, async () => {
-      view("# Answer", 1)
+      await view("# Answer", 1)
       await screen.findByRole("heading", { level: 2, name: "Answer" })
       expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1)
     })
 
     it(`${component} offsets greeting headings`, async () => {
-      view("# Welcome", 1, true)
+      await view("# Welcome", 1, true)
       await screen.findByRole("heading", { level: 2, name: "Welcome" })
       expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1)
     })
 
     it(`${component} offsets expanded reasoning as well as the final answer`, async () => {
-      view("<think>\n# Reasoning\n</think>\n# Answer", 1)
+      await view("<think>\n# Reasoning\n</think>\n# Answer", 1)
       await screen.findByRole("heading", { level: 2, name: "Answer" })
       await screen.findByRole("heading", { level: 2, name: "Reasoning" })
       expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1)
