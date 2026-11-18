@@ -29,6 +29,8 @@ Not counted:
   * core/testing.py, which is the flag layer itself (its helpers still count at their callers);
   * writes (``os.environ[k] = v``, ``setdefault``), whole-environ copies and iteration;
   * a key built at run time that is not a helper parameter, and a mapping passed in as a parameter.
+  * indirect shapes, out of scope for an AST ceiling: ``os.environ.copy()[k]``, ``dict(os.environ).get(k)``,
+    ``getattr(os.environ, "get")(k)``, and an alias of an alias.
 
 Growth fails: read the setting through its typed section in core/config_sections (or the
 settings object that owns it). If growth is unavoidable, raise the count with a "reason"
@@ -112,8 +114,8 @@ class _Scope:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name == "os":
-                        self.os.add(alias.asname or "os")
+                    if alias.name == "os" or (alias.name.startswith("os.") and not alias.asname):
+                        self.os.add(alias.asname or "os")  # ``import os.path`` binds ``os`` too
                     if alias.asname:
                         self.modules[alias.asname] = alias.name
             elif isinstance(node, ast.ImportFrom):
@@ -455,6 +457,7 @@ SEED = {
                        'A = env_flag_enabled("FEATURE_X")\nB = env_flag_enabled("TESTING")\nC = is_test_mode()\n',
     "core/X/import_time.py": 'import os\n\n\ndef _limit():\n    return os.getenv("I1")\n\n\nLIMIT = _limit()\n\n\n'
                              'def later():\n    return os.getenv("I2")\n\n\nif __name__ == "__main__":\n    print(os.getenv("I3"))\n',
+    "core/X/os_sub.py": 'import os.path\nA = os.environ.get("S1")\n',
     "core/X/not_reads.py": 'import os\nos.environ["W1"] = "1"\nos.environ.setdefault("W2", "1")\nENV = dict(os.environ)\n'
                            'KEYS = [k for k in os.environ.keys() if k.startswith("TLDW_")]\n',
     "core/X/test_flags.py": 'import os\nA = os.getenv("TEST_MODE")\nB = os.getenv("TLDW_TEST_DB")\n',
@@ -482,6 +485,7 @@ def test_the_counter_counts_each_read_shape(tmp_path: Path) -> None:
         "core/X/helpers.py": {"reads": 8, "import_time": 2},  # 3 helper bodies + H1, H2, (H3, H4), H6 via _outer, H7 by keyword
         "core/X/import_time.py": {"reads": 3, "import_time": 1},  # I1 via LIMIT = _limit(); not I2, not the __main__ block
         "core/X/imported.py": {"reads": 1, "import_time": 0},
+        "core/X/os_sub.py": {"reads": 1, "import_time": 1},  # ``import os.path`` also binds ``os``
         "core/X/resolver_user.py": {"reads": 2, "import_time": 0},  # R1 and R3 (resolver-backed _via) count outside config
         "core/config_sections/precedence.py": {"reads": 1, "import_time": 0},  # resolve's own body; its callers are resolver reads
         "core/config_sections/y.py": {"reads": 2, "import_time": 2},  # a direct-backed helper counts even in a config module
