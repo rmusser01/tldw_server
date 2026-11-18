@@ -923,6 +923,9 @@ jobs:
           - name: auth-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ_Unit/test_[m-z]*.py
+          - name: telegram
+            paths: >-
+              tldw_Server_API/tests/Telegram
           - name: chacha-core-stores
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
@@ -2678,6 +2681,9 @@ jobs:
           - name: auth-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ_Unit/test_[m-z]*.py
+          - name: telegram
+            paths: >-
+              tldw_Server_API/tests/Telegram
           - name: chacha-core-stores
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
@@ -4241,6 +4247,9 @@ jobs:
           - name: auth-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ_Unit/test_[m-z]*.py
+          - name: telegram
+            paths: >-
+              tldw_Server_API/tests/Telegram
           - name: chacha-core-stores
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
@@ -5708,6 +5717,9 @@ jobs:
           - name: auth-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ_Unit/test_[m-z]*.py
+          - name: telegram
+            paths: >-
+              tldw_Server_API/tests/Telegram
           - name: chacha-core-stores
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
@@ -7166,6 +7178,9 @@ jobs:
           - name: auth-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ_Unit/test_[m-z]*.py
+          - name: telegram
+            paths: >-
+              tldw_Server_API/tests/Telegram
           - name: chacha-core-stores
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
