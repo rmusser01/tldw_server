@@ -30,6 +30,8 @@ ADR required: no. The picker uses existing media APIs, Study Pack source referen
 Owner requested independent review and follow-up corrections on PR #3504.
 Addressed the independent review. The drawer now clears on extension account changes even when initial identity lookup failed. A failed keyword search keeps its term and can retry the same request. Duplicate media titles show their IDs, and a result-limit message shows how many items are available. Updated the guide to include Create cards. The new failure cases reproduced before the fixes and the 65 focused tests passed.
 The independent second review approved the correction commit 853ec748 and independently passed 48 focused tests. The full affected public suite passed 860 tests and the WebUI typecheck passed on the same source. No actionable findings remain. Live authenticated browser smoke was outside this review. PR #3504 remains a draft pending its human-authored Change summary.
+Public dev still reproduced the saved PDF and EPUB Study Pack failure. Extend this PR with the same bounded saved-text fallback qualified on the hosted resolver.
+Public dev red reproduced the missing transcript evidence error for real saved PDF and EPUB records. The bounded saved-text fallback passed all 150 available Study Pack tests. The suite skipped 42 tests. Ruff and Bandit passed the touched files. Long-document coverage and section selection are tracked separately in TASK-15574.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
