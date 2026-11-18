@@ -1,8 +1,10 @@
 import React from "react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { StudyPackCreateDrawer } from "../StudyPackCreateDrawer"
+import { tldwClient } from "@/services/tldw"
 import type { StudyPackIntent } from "@/services/tldw/study-pack-handoff"
 
 const navigateMock = vi.hoisted(() => vi.fn())
@@ -111,6 +113,13 @@ const buildCompletedResponse = () => ({
   error: null
 })
 
+const renderDrawer = (drawer: React.ReactElement) => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } }
+  })
+  return render(<QueryClientProvider client={client}>{drawer}</QueryClientProvider>)
+}
+
 describe("StudyPackCreateDrawer", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -120,8 +129,59 @@ describe("StudyPackCreateDrawer", () => {
     })
   })
 
+  it("browses and searches the media library, then submits the chosen media ID", async () => {
+    vi.spyOn(tldwClient, "listMedia").mockResolvedValue({
+      items: [{ id: 7, title: "Recent lecture", type: "video" }]
+    })
+    vi.spyOn(tldwClient, "searchMedia").mockResolvedValue({
+      results: [{ id: 42, title: "Routing protocols", type: "pdf" }]
+    })
+    createStudyPackJobMock.mockResolvedValue({ job: { id: 91 } })
+
+    renderDrawer(<StudyPackCreateDrawer open onClose={vi.fn()} />)
+
+    const picker = screen.getByRole("combobox", { name: "Search media library" })
+    fireEvent.mouseDown(picker)
+    expect(await screen.findByText("Recent lecture")).toBeInTheDocument()
+
+    fireEvent.change(picker, { target: { value: "Routing" } })
+    fireEvent.click(await screen.findByText("Routing protocols"))
+    expect(screen.getByTestId("study-pack-source-0")).toHaveTextContent("Routing protocols")
+    expect(tldwClient.searchMedia).toHaveBeenCalledWith(
+      { query: "Routing" },
+      { page: 1, results_per_page: 50 },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Networks" } })
+    fireEvent.click(screen.getByRole("button", { name: "Create study pack" }))
+    await waitFor(() => {
+      expect(createStudyPackJobMock).toHaveBeenCalledWith({
+        title: "Networks",
+        source_items: [{ source_type: "media", source_id: "42", source_title: "Routing protocols" }],
+        deck_mode: "new"
+      })
+    })
+  })
+
+  it("shows a media load failure and can retry into an empty library", async () => {
+    vi.spyOn(tldwClient, "listMedia")
+      .mockRejectedValueOnce(new Error("request failed"))
+      .mockResolvedValueOnce({ items: [] })
+
+    renderDrawer(<StudyPackCreateDrawer open onClose={vi.fn()} />)
+    const picker = screen.getByRole("combobox", { name: "Search media library" })
+    fireEvent.mouseDown(picker)
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load media.")
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument())
+    if (picker.getAttribute("aria-expanded") === "false") fireEvent.mouseDown(picker)
+    expect(await screen.findByText("Your media library is empty.")).toBeInTheDocument()
+  })
+
   it("requires a title and at least one source before enabling submit", () => {
-    render(<StudyPackCreateDrawer open onClose={vi.fn()} />)
+    renderDrawer(<StudyPackCreateDrawer open onClose={vi.fn()} />)
 
     expect(screen.getByRole("dialog", { name: "Create study pack" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Create study pack" })).toBeDisabled()
@@ -177,7 +237,7 @@ describe("StudyPackCreateDrawer", () => {
 
     const onClose = vi.fn()
 
-    render(<StudyPackCreateDrawer open onClose={onClose} initialIntent={intent} />)
+    renderDrawer(<StudyPackCreateDrawer open onClose={onClose} initialIntent={intent} />)
 
     expect(screen.getByDisplayValue("Networks")).toBeInTheDocument()
     expect(screen.getByText("Lecture 5")).toBeInTheDocument()
@@ -210,7 +270,7 @@ describe("StudyPackCreateDrawer", () => {
   it("shows a friendly error when job creation fails", async () => {
     createStudyPackJobMock.mockRejectedValue(new Error("request failed"))
 
-    render(<StudyPackCreateDrawer open onClose={vi.fn()} />)
+    renderDrawer(<StudyPackCreateDrawer open onClose={vi.fn()} />)
 
     fireEvent.change(screen.getByLabelText("Title"), {
       target: { value: "Networks" }
@@ -229,7 +289,7 @@ describe("StudyPackCreateDrawer", () => {
 
   it("names a source from Notes by its title and type and tucks the ID entry under Advanced (NE-08)", () => {
     const noteId = "cc02b050-2725-4d05-9793-f7070ac43150"
-    render(
+    renderDrawer(
       <StudyPackCreateDrawer
         open
         onClose={vi.fn()}
@@ -264,7 +324,7 @@ describe("StudyPackCreateDrawer", () => {
   })
 
   it("labels source IDs as an advanced manual reference with supported source guidance", () => {
-    render(<StudyPackCreateDrawer open onClose={vi.fn()} />)
+    renderDrawer(<StudyPackCreateDrawer open onClose={vi.fn()} />)
 
     expect(screen.getByLabelText("Source ID (advanced/manual)")).toBeInTheDocument()
     expect(screen.getByTestId("study-pack-source-id-guidance")).toHaveTextContent(

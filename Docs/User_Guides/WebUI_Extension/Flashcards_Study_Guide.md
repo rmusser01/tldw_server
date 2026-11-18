@@ -1,6 +1,6 @@
 # Flashcards Study Guide
 
-_Last updated: 2026-05-26_
+_Last updated: 2026-11-17_
 
 This guide explains the Flashcards flow in `Study`, `Manage`, `Create & Import`, `Templates`, and `Scheduler`, including extension selected-text capture, scheduling basics, queue states, cloze syntax, and import/export formats.
 
@@ -29,6 +29,14 @@ Why the 8 KB field limit did not increase:
 4. Reveal the answer, then rate recall (`Again`, `Hard`, `Good`, `Easy`).
 5. Use `Manage` when you want to inspect queue state on expanded cards or document rows while cleaning up a deck.
 6. Repeat daily. The scheduler adjusts next due dates from your ratings.
+
+## Create a Study Pack from Media
+
+1. In Flashcards, open **Import / Export** and choose **Create study pack** in the **Study packs** card.
+2. Open **Search media library** to see recent items. Type a search term to look across the library, then select an item to add it. Repeat for each source.
+3. Enter a title and select **Create study pack**. Flashcards opens the review deck when generation finishes.
+
+Use **Add a source by ID** when you already have a media, note, or message ID.
 
 ## Extension Selected-Text Capture
 
