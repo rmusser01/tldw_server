@@ -50,6 +50,19 @@ def single_user_fixed_id_env(env: Mapping[str, str] | None = None) -> str | None
     return resolve(("SINGLE_USER_FIXED_ID",), env=env, blank_env=True).value
 
 
+def resolve_access_token_expire_minutes(
+    config_parser: ConfigParserLike | None, env: Mapping[str, str] | None = None
+) -> Resolved:
+    """The AuthNZ overlay's rule: env ``ACCESS_TOKEN_EXPIRE_MINUTES``, then ``[AuthNZ] access_token_expire_minutes``.
+
+    Blank values count as set; the raw text is never validated here (pydantic's ``int`` field does that).
+    """
+    return resolve(
+        ("ACCESS_TOKEN_EXPIRE_MINUTES",), (("AuthNZ", "access_token_expire_minutes"),),
+        config_parser=config_parser, env=env, blank_env=True, blank_config=True,
+    )
+
+
 @cache
 def _warn_fixed_id_ignored_once() -> None:
     """Runs its body once per process (``cache``): ``[AuthNZ] single_user_fixed_id`` is ignored (D1g)."""

@@ -21,7 +21,7 @@ from pydantic import Field, field_validator
 # 3rd-party imports
 from pydantic_settings import BaseSettings, NoDecode
 
-from tldw_Server_API.app.core.config_sections.auth import resolve_auth_mode
+from tldw_Server_API.app.core.config_sections.auth import resolve_access_token_expire_minutes, resolve_auth_mode
 from tldw_Server_API.app.core.config_sections.precedence import resolve
 
 _SETTINGS_IMPORT_EXCEPTIONS = (
@@ -1442,7 +1442,10 @@ def _load_overrides_from_config() -> dict:
             "org_invite_allow_missing_email",
             _bool_from_str,
         )
-        maybe_set("ACCESS_TOKEN_EXPIRE_MINUTES", "access_token_expire_minutes", lambda v: int(v))
+        resolved_ttl = resolve_access_token_expire_minutes(cfg)
+        if resolved_ttl.source == "config":
+            with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+                overrides["ACCESS_TOKEN_EXPIRE_MINUTES"] = int(resolved_ttl.value)
         maybe_set("REFRESH_TOKEN_EXPIRE_DAYS", "refresh_token_expire_days", lambda v: int(v))
         maybe_set("MAGIC_LINK_EXPIRE_MINUTES", "magic_link_expire_minutes", lambda v: int(v))
         maybe_set("PUBLIC_WEB_BASE_URL", "public_web_base_url", lambda v: v.strip())

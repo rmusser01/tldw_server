@@ -997,7 +997,6 @@ def load_settings():
     # --- Multi-User Settings (JWT) ---
     jwt_secret_key = os.getenv("JWT_SECRET_KEY", "a_very_insecure_default_secret_key_for_dev_only")
     jwt_algorithm = "HS256"
-    access_token_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
     # --- Redis Configuration ---
     # Initialize comprehensive_config early to avoid UnboundLocalError
@@ -1526,7 +1525,6 @@ def load_settings():
         # Multi User / Auth
         "JWT_SECRET_KEY": jwt_secret_key,
         "JWT_ALGORITHM": jwt_algorithm,
-        "ACCESS_TOKEN_EXPIRE_MINUTES": access_token_expire_minutes,
         "DATABASE_URL": database_url,
         "USER_DB_BASE_DIR": user_data_base_dir, # Renamed for clarity (was user_db_base_dir)
         "USERS_DB_CONFIGURED": users_db_configured,

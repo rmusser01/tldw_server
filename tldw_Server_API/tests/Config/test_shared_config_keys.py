@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.config_sections import auth as auth_section
 from tldw_Server_API.app.core.config_sections.auth import (
     auth_mode_env,
     load_auth_config,
+    resolve_access_token_expire_minutes,
     resolve_auth_mode,
     resolve_single_user_fixed_id,
     single_user_fixed_id_env,
@@ -377,14 +378,15 @@ def apply_ttl_case(monkeypatch):
     authnz_settings.reset_settings()
 
 
-# config_sections has no function for this key today. LazySettings ignores config.txt.
+# config_sections has no function for this key today. The LazySettings entry is deleted (no reader used it), so the key is absent.
+ABSENT = "absent"
 TTL_EXPECTED = {
     #                 AuthNZ LazySettings
-    "env_set": (7, 7),
-    "env_blank": (ERR, ERR),
-    "env_invalid": (ERR, ERR),
-    "config_only": (45, 30),
-    "neither": (30, 30),
+    "env_set": (7, ABSENT),
+    "env_blank": (ERR, ABSENT),
+    "env_invalid": (ERR, ABSENT),
+    "config_only": (45, ABSENT),
+    "neither": (30, ABSENT),
 }
 
 
@@ -394,4 +396,25 @@ def test_access_token_expire_minutes_resolution_today(apply_ttl_case, case):
     authnz, lazy = TTL_EXPECTED[case]
 
     assert _outcome(lambda: authnz_settings.get_settings().ACCESS_TOKEN_EXPIRE_MINUTES) == authnz
-    assert _outcome(lambda: config.load_settings()["ACCESS_TOKEN_EXPIRE_MINUTES"]) == lazy
+    assert _outcome(lambda: config.load_settings().get("ACCESS_TOKEN_EXPIRE_MINUTES", ABSENT)) == lazy
+
+
+# The overlay's rule: env (blank kept), then [AuthNZ] access_token_expire_minutes (blank kept), then nothing.
+TTL_RESOLVED = {
+    "env_set": Resolved("7", "env", "ACCESS_TOKEN_EXPIRE_MINUTES"),
+    "env_blank": Resolved("", "env", "ACCESS_TOKEN_EXPIRE_MINUTES"),
+    "env_invalid": Resolved("abc", "env", "ACCESS_TOKEN_EXPIRE_MINUTES"),
+    "config_only": Resolved("45", "config", "AuthNZ.access_token_expire_minutes"),
+    "neither": Resolved(None, "default", None),
+}
+
+
+@pytest.mark.parametrize("case", list(TTL_CASES))
+def test_access_token_expire_minutes_resolves_through_config_sections(apply_ttl_case, case):
+    parser = apply_ttl_case(case)
+    assert resolve_access_token_expire_minutes(parser) == TTL_RESOLVED[case]
+
+
+def test_access_token_expire_minutes_is_not_in_lazy_settings(apply_ttl_case):
+    apply_ttl_case("env_set")
+    assert "ACCESS_TOKEN_EXPIRE_MINUTES" not in config.load_settings()
