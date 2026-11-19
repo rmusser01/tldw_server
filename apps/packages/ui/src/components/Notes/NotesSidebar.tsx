@@ -519,6 +519,69 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
             </div>
 
             <div className="space-y-2">
+              {/* ---- Search first: above Views, so it is the first control after the header (NL-04, NL-12) ---- */}
+              {listMode === 'active' ? (
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <Input
+                      allowClear
+                      placeholder={t('option:notesSearch.placeholder', {
+                        defaultValue: 'Search notes... (use quotes for exact match)'
+                      })}
+                      prefix={(<SearchIcon className="w-4 h-4 text-text-subtle" />)}
+                      value={queryInput}
+                      aria-label={t('option:notesSearch.searchInputAriaLabel', {
+                        defaultValue: 'Search notes'
+                      })}
+                      onChange={(e) => {
+                        setQueryInput(e.target.value)
+                      }}
+                      onPressEnter={() => {
+                        clearSearchQueryTimeout()
+                        setQuery(queryInput)
+                        setPage(1)
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey) return
+                        // First Escape clears the search; the next one moves to the results (AX-03).
+                        if (queryInput.length > 0) {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          clearSearchQueryTimeout()
+                          setQueryInput('')
+                          setQuery('')
+                          setPage(1)
+                          return
+                        }
+                        // In the mobile dialog an empty-search Escape closes the list instead.
+                        if (offCanvas.isModal) return
+                        const aside = offCanvas.asideRef.current
+                        if (focusActiveNotesListRow(aside)) event.preventDefault()
+                      }}
+                      ref={searchInputRef}
+                      {...{ [NOTES_SEARCH_INPUT_ATTR]: '' }}
+                    />
+                  </div>
+                  <Select
+                    value={sortOption}
+                    onChange={(value) => {
+                      setSortOption(value as NotesSortOption)
+                      setPage(1)
+                    }}
+                    className="w-[160px] flex-shrink-0"
+                    size="small"
+                    data-testid="notes-sort-select"
+                    aria-label={t('option:notesSearch.sortAriaLabel', {
+                      defaultValue: 'Sort notes'
+                    })}
+                    options={buildNotesSortOptions(t, {
+                      bestMatchAvailable: Boolean(sortBestMatchAvailable)
+                    })}
+                  />
+                </div>
+              ) : setTrashQuery ? (
+                <NotesTrashSearch value={trashQuery} onSearch={setTrashQuery} />
+              ) : null}
               {/* ---- Collapsible: Views (always visible) ---- */}
               <CollapsibleSection
                 title={t('option:notesSearch.viewOrganizeSectionTitle', {
@@ -749,66 +812,6 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
 
               {listMode === 'active' ? (
                 <>
-                  {/* ---- Always visible: Search + Sort row ---- */}
-                  <div className="flex items-center gap-2">
-                    <div className="min-w-0 flex-1">
-                      <Input
-                        allowClear
-                        placeholder={t('option:notesSearch.placeholder', {
-                          defaultValue: 'Search notes... (use quotes for exact match)'
-                        })}
-                        prefix={(<SearchIcon className="w-4 h-4 text-text-subtle" />)}
-                        value={queryInput}
-                        aria-label={t('option:notesSearch.searchInputAriaLabel', {
-                          defaultValue: 'Search notes'
-                        })}
-                        onChange={(e) => {
-                          setQueryInput(e.target.value)
-                        }}
-                        onPressEnter={() => {
-                          clearSearchQueryTimeout()
-                          setQuery(queryInput)
-                          setPage(1)
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey) return
-                          // First Escape clears the search; the next one moves to the results (AX-03).
-                          if (queryInput.length > 0) {
-                            event.preventDefault()
-                            event.stopPropagation()
-                            clearSearchQueryTimeout()
-                            setQueryInput('')
-                            setQuery('')
-                            setPage(1)
-                            return
-                          }
-                          // In the mobile dialog an empty-search Escape closes the list instead.
-                          if (offCanvas.isModal) return
-                          const aside = offCanvas.asideRef.current
-                          if (focusActiveNotesListRow(aside)) event.preventDefault()
-                        }}
-                        ref={searchInputRef}
-                        {...{ [NOTES_SEARCH_INPUT_ATTR]: '' }}
-                      />
-                    </div>
-                    <Select
-                      value={sortOption}
-                      onChange={(value) => {
-                        setSortOption(value as NotesSortOption)
-                        setPage(1)
-                      }}
-                      className="w-[160px] flex-shrink-0"
-                      size="small"
-                      data-testid="notes-sort-select"
-                      aria-label={t('option:notesSearch.sortAriaLabel', {
-                        defaultValue: 'Sort notes'
-                      })}
-                      options={buildNotesSortOptions(t, {
-                        bestMatchAvailable: Boolean(sortBestMatchAvailable)
-                      })}
-                    />
-                  </div>
-
                   {/* ---- Collapsible: Filters ---- */}
                   <CollapsibleSection
                     title={t('option:notesSearch.filtersSectionTitle', {
@@ -1003,7 +1006,6 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 </>
               ) : (
                 <>
-                  {setTrashQuery && <NotesTrashSearch value={trashQuery} onSearch={setTrashQuery} />}
                   <Typography.Text
                     type="secondary"
                     className="text-[11px] text-text-muted block"
