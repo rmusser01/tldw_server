@@ -462,7 +462,8 @@ describe("history-first sidebar navigation", () => {
       expect(recentToggle()).toHaveAttribute("aria-expanded", "false"),
     );
     fireEvent.click(screen.getByRole("button", { name: "Change page" }));
-    expect(screen.getByRole("button", { name: "Navigation" })).toHaveAttribute(
+    // Off /chat the navigation section is the whole menu, named "Menu".
+    expect(screen.getByRole("button", { name: "Menu" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
@@ -551,7 +552,7 @@ describe("history-first sidebar navigation", () => {
     expect(screen.queryByTestId("server-chat-list")).toBeNull();
   });
 
-  it.each(["new control", "close and reopen", "route replacement"])(
+  it.each(["new control", "close and reopen", "route replacement", "leaving the chat route"])(
     "cancels delayed Find focus after %s",
     async (changed) => {
       let resolve!: (value: unknown) => void;
@@ -568,7 +569,8 @@ describe("history-first sidebar navigation", () => {
               collapsed={collapsed}
               onToggleCollapse={() => setCollapsed((value) => !value)}
             />
-            <button onClick={() => navigate("/settings")}>Replace route</button>
+            <button onClick={() => navigate("/chat?chat=other")}>Replace route</button>
+            <button onClick={() => navigate("/settings")}>Leave chat</button>
           </>
         );
       };
@@ -592,14 +594,16 @@ describe("history-first sidebar navigation", () => {
           screen.getByRole("button", { name: "Collapse sidebar" }),
         );
         fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
-      } else {
+      } else if (changed === "route replacement") {
         fireEvent.click(screen.getByRole("button", { name: "Replace route" }));
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Leave chat" }));
       }
       await act(async () => {
         resolve("local");
       });
       // XP-11: leaving /chat takes the chat list and its search away.
-      if (changed === "route replacement")
+      if (changed === "leaving the chat route")
         expect(
           screen.queryByRole("textbox", { name: "Find conversations" }),
         ).toBeNull();

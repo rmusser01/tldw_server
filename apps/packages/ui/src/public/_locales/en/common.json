@@ -945,7 +945,7 @@
     "message": "Toggle Sidebar"
   },
   "commandPalette_toggleSidebarDesc": {
-    "message": "Show or hide the chat sidebar"
+    "message": "Show or hide the sidebar"
   },
   "commandPalette_placeholder": {
     "message": "Search commands, settings, and prompts…"
@@ -1036,9 +1036,6 @@
   },
   "chatSidebar_historyLandmark": {
     "message": "Chat history"
-  },
-  "chatSidebar_appNavigation": {
-    "message": "App navigation"
   },
   "chatSidebar_menuTitle": {
     "message": "Menu"

@@ -644,7 +644,7 @@
     "description": "Command palette toggle label to show or hide the sidepanel."
   },
   "commandPalette_toggleSidebarDesc": {
-    "message": "Show or hide the chat sidebar",
+    "message": "Show or hide the sidebar",
     "description": "Command palette description text explaining the sidebar visibility toggle."
   },
   "commandPalette_placeholder": {

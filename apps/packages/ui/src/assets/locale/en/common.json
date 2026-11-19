@@ -528,7 +528,7 @@
     "ingestDesc": "Save this page to your knowledge base",
     "switchModel": "Switch Model",
     "toggleSidebar": "Toggle Sidebar",
-    "toggleSidebarDesc": "Show or hide the chat sidebar",
+    "toggleSidebarDesc": "Show or hide the sidebar",
     "placeholder": "Search commands, settings, and prompts…",
     "noResults": "No results found",
     "title": "Search commands",
@@ -577,7 +577,6 @@
   "chatSidebar": {
     "title": "Chats",
     "historyLandmark": "Chat history",
-    "appNavigation": "App navigation",
     "menuTitle": "Menu",
     "newChat": "New Chat",
     "collapse": "Collapse sidebar",

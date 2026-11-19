@@ -8,6 +8,16 @@ import { ChatSidebar } from "../ChatSidebar"
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator"
 
 const useSettingMock = vi.hoisted(() => vi.fn())
+const useServerChatHistoryMock = vi.hoisted(() => vi.fn(() => ({ data: [], total: 0 })))
+const verifiedOwner = vi.hoisted(() => ({
+  ownerKey: "coordinator-owner",
+  verificationState: "ready",
+  isCurrent: () => true,
+  requestScope: { config: { serverUrl: "https://chat.test", authMode: "multi-user" as const }, userId: 7 },
+  retryVerification: vi.fn()
+}))
+
+vi.mock("@/hooks/useChatDraftOwner", () => ({ useChatDraftOwner: () => verifiedOwner }))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -32,7 +42,7 @@ vi.mock("@/hooks/useDebounce", () => ({
 
 vi.mock("@/hooks/useServerChatHistory", () => ({
   SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE: 25,
-  useServerChatHistory: () => ({ data: [], total: 0 })
+  useServerChatHistory: useServerChatHistoryMock
 }))
 
 vi.mock("@/hooks/chat/useClearChat", () => ({
@@ -159,7 +169,7 @@ describe("ChatSidebar coordinator integration", () => {
       </MemoryRouter>
     )
 
-    const landmark = screen.getByRole("navigation", { name: "App navigation" })
+    const landmark = screen.getByRole("navigation", { name: "Menu" })
     expect(landmark).toBe(screen.getByTestId("chat-sidebar"))
     expect(screen.queryByRole("navigation", { name: "Chat history" })).not.toBeInTheDocument()
     expect(screen.queryByTestId("chat-sidebar-new-chat")).not.toBeInTheDocument()
@@ -171,7 +181,8 @@ describe("ChatSidebar coordinator integration", () => {
     expect(screen.getByTestId("chat-sidebar-toggle")).toBeInTheDocument()
   })
 
-  it("keeps the expanded sidebar's navigation on a non-chat route, under a Menu heading", () => {
+  // One name for the region off /chat: its landmark, heading and section toggle.
+  it("keeps the expanded sidebar's navigation on a non-chat route, all named Menu", () => {
     render(
       <MemoryRouter initialEntries={["/notes"]}>
         <ChatSidebar collapsed={false} />
@@ -180,10 +191,14 @@ describe("ChatSidebar coordinator integration", () => {
 
     expect(screen.getByRole("heading", { level: 2, name: "Menu" })).toBeInTheDocument()
     expect(screen.queryByRole("heading", { name: "Chats" })).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Navigation" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Menu" })).toHaveAttribute("aria-expanded", "true")
+    expect(screen.queryByRole("button", { name: "Navigation" })).not.toBeInTheDocument()
   })
 
-  it("reads no server chat history on a non-chat route", () => {
+  it.each([
+    ["/notes", false],
+    ["/chat", true]
+  ])("reads server chat history only on the chat route: %s", (path, reads) => {
     useSettingMock.mockImplementation((setting: { key?: string } | string) => {
       const key = typeof setting === "string" ? setting : setting?.key
       if (key === "tldw:sidebar:recentCollapsed") return [false, vi.fn()]
@@ -192,16 +207,29 @@ describe("ChatSidebar coordinator integration", () => {
       if (key === "tldw:sidebar:shortcutSelection") return [[], vi.fn()]
       return [null, vi.fn()]
     })
+    useChatSurfaceCoordinatorStore.setState({
+      engagedPanels: {
+        "server-history": true,
+        "mcp-tools": false,
+        "audio-health": false,
+        "model-catalog": false
+      }
+    })
+    useServerChatHistoryMock.mockClear()
 
     render(
-      <MemoryRouter initialEntries={["/notes"]}>
+      <MemoryRouter initialEntries={[path]}>
         <ChatSidebar collapsed={false} />
       </MemoryRouter>
     )
 
     expect(
       useChatSurfaceCoordinatorStore.getState().visiblePanels["server-history"]
-    ).toBe(false)
+    ).toBe(reads)
+    expect(useServerChatHistoryMock).toHaveBeenLastCalledWith(
+      "",
+      expect.objectContaining({ enabled: reads })
+    )
   })
 
   it("shows the chat list on the chat route", () => {

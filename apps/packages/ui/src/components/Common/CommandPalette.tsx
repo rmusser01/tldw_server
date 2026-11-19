@@ -569,7 +569,7 @@ export function CommandPalette({
               label: t("common:commandPalette.toggleSidebar", "Toggle Sidebar"),
               description: t(
                 "common:commandPalette.toggleSidebarDesc",
-                "Show or hide the chat sidebar"
+                "Show or hide the sidebar"
               ),
               icon: <Eye className="size-4" />,
               shortcut: toCommandShortcut(configuredShortcuts.toggleSidebar),

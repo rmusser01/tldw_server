@@ -335,10 +335,16 @@ export function ChatSidebar({
     }
   }, [currentTab, markPanelEngaged, recentConversationsExpanded, setRecentCollapsed])
 
+  // Off /chat the sidebar is only the app menu: its landmark, heading and
+  // section toggle share one name (XP-11).
+  const menuLabel = t("common:chatSidebar.menuTitle", "Menu")
   // A landmark, so screen-reader users can jump to chat history (AX-14).
   const historyLandmarkLabel = showChatList
     ? t("common:chatSidebar.historyLandmark", "Chat history")
-    : t("common:chatSidebar.appNavigation", "App navigation")
+    : menuLabel
+  const navigationSectionLabel = showChatList
+    ? t("common:chatSidebar.navigation", "Navigation")
+    : menuLabel
 
   // Collapsed view - just icons
   if (collapsed) {
@@ -486,9 +492,7 @@ export function ChatSidebar({
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between px-3 py-3 border-b border-border">
         <h2 className="font-semibold text-text">
-          {showChatList
-            ? t("common:chatSidebar.title", "Chats")
-            : t("common:chatSidebar.menuTitle", "Menu")}
+          {showChatList ? t("common:chatSidebar.title", "Chats") : menuLabel}
         </h2>
         <div className="flex items-center gap-1">
           {showChatList && recentHistoryVisible && (currentTab === "server" || currentTab === "all") && !temporaryChat && (
@@ -721,10 +725,10 @@ export function ChatSidebar({
             "group flex w-full items-center justify-between px-3 py-2 text-left hover:bg-surface",
             focusRingClasses
           )}
-          title={t("common:chatSidebar.navigation", "Navigation")}
+          title={navigationSectionLabel}
         >
           <span className="text-xs font-semibold text-text-muted">
-            {t("common:chatSidebar.navigation", "Navigation")}
+            {navigationSectionLabel}
           </span>
           <ChevronDown
             className={cn(
