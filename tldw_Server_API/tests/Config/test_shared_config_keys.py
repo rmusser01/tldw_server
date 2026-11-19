@@ -28,9 +28,11 @@ from tldw_Server_API.app.core.config_sections.auth import (
     load_auth_config,
     resolve_access_token_expire_minutes,
     resolve_auth_mode,
+    resolve_database_url,
     resolve_single_user_fixed_id,
     single_user_fixed_id_env,
 )
+from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.config_sections.precedence import Resolved
 from tldw_Server_API.app.core.DB_Management import db_path_utils
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
@@ -526,3 +528,47 @@ def test_preflight_reads_the_live_database_url_today(monkeypatch):
     assert startup_preflight.check_database_connectivity()["message"].startswith("Cannot reach Postgres at dbhost:6543")
     monkeypatch.setenv("DATABASE_URL", "")
     assert startup_preflight.check_database_connectivity()["status"] == "ok"
+
+
+DB_RESOLVED = {
+    "env_set": Resolved("sqlite:///./env.db", "env", "DATABASE_URL"),
+    "env_blank": Resolved("", "env", "DATABASE_URL"),
+    "config_only": Resolved("sqlite:///./cfg.db", "config", "AuthNZ.database_url"),
+    "config_blank": Resolved("", "config", "AuthNZ.database_url"),
+    "synth_sqlite": Resolved("sqlite:///./synth.db", "config", "AuthNZ.db_type"),
+    "synth_postgres": Resolved(DB_AUTHNZ_EXPECTED["synth_postgres"], "config", "AuthNZ.db_type"),
+    "synth_postgres_no_password": Resolved(None, "default", None),
+    "neither": Resolved(None, "default", None),
+}
+
+
+@pytest.mark.parametrize("case", list(DB_CASES))
+def test_database_url_resolves_through_config_sections(apply_db_case, case):
+    parser = apply_db_case(case)
+    assert resolve_database_url(parser) == DB_RESOLVED[case]
+
+
+def test_database_url_env_is_env_only_blank_kept_and_live(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    assert database_url_env() is None
+    monkeypatch.setenv("DATABASE_URL", "")
+    assert database_url_env() == ""
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///x.db")
+    assert database_url_env() == "sqlite:///x.db"
+    assert database_url_env({"DATABASE_URL": "y"}) == "y"
+    assert database_url_env({}) is None
+
+
+def test_resolve_database_url_logs_the_password_warning_without_a_secret():
+    seen: list[str] = []
+    sink = logger.add(lambda message: seen.append(str(message)), level="WARNING")
+    try:
+        no_password = _db_parser(UNSET, "postgres", UNSET)
+        no_password.set("AuthNZ", "pg_user", "someone")
+        resolve_database_url(no_password, env={})
+        resolve_database_url(_db_parser(UNSET, "postgres", "pw"), env={})
+    finally:
+        logger.remove(sink)
+    text = "".join(seen)
+    assert "pg_password not set in config.txt; not synthesizing DATABASE_URL." in text
+    assert "someone" not in text and "pw@" not in text

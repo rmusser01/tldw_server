@@ -24,6 +24,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file
 from tldw_Server_API.app.core.config_sections.auth import load_auth_config, resolve_single_user_fixed_id
+from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.config_sections.precedence import resolve
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
@@ -1138,7 +1139,7 @@ def load_settings():
     # Main/central SQLite database: ACTUAL_PROJECT_ROOT/Databases/user_databases/<SINGLE_USER_FIXED_ID>/tldw.db
     default_main_db_path = (ACTUAL_PROJECT_ROOT / "Databases" / "user_databases" / f"{single_user_fixed_id}" / "tldw.db").resolve()
     default_database_url = f"sqlite:///{default_main_db_path}"
-    database_url = os.getenv("DATABASE_URL", default_database_url)
+    database_url = default_database_url if (env_url := database_url_env()) is None else env_url
 
     users_db_configured = os.getenv("USERS_DB_ENABLED", "false").lower() == "true"
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()

@@ -33,6 +33,14 @@ class DatabaseConfig:
     prompts_db_path: str
 
 
+def database_url_env(env: Mapping[str, str] | None = None) -> str | None:
+    """The content-backend override: the live ``DATABASE_URL`` text, blank kept, ``None`` when unset.
+
+    Environment only. AuthNZ's users DB has its own rule, ``auth.resolve_database_url``.
+    """
+    return resolve(("DATABASE_URL",), env=env, blank_env=True).value
+
+
 def _get_raw(
     config_parser: ConfigParserLike,
     env_map: Mapping[str, str],

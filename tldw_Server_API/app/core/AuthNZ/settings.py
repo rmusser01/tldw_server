@@ -21,7 +21,11 @@ from pydantic import Field, field_validator
 # 3rd-party imports
 from pydantic_settings import BaseSettings, NoDecode
 
-from tldw_Server_API.app.core.config_sections.auth import resolve_access_token_expire_minutes, resolve_auth_mode
+from tldw_Server_API.app.core.config_sections.auth import (
+    resolve_access_token_expire_minutes,
+    resolve_auth_mode,
+    resolve_database_url,
+)
 from tldw_Server_API.app.core.config_sections.precedence import resolve
 
 _SETTINGS_IMPORT_EXCEPTIONS = (
@@ -1382,7 +1386,9 @@ def _load_overrides_from_config() -> dict:
         if resolved_mode.source == "config":
             with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
                 overrides["AUTH_MODE"] = str(resolved_mode.value).strip()
-        maybe_set("DATABASE_URL", "database_url", lambda v: v.strip())
+        resolved_url = resolve_database_url(cfg)
+        if resolved_url.source == "config":
+            overrides["DATABASE_URL"] = str(resolved_url.value).strip()
         maybe_set("JWT_SECRET_KEY", "jwt_secret_key", lambda v: v.strip())
         maybe_set("SINGLE_USER_API_KEY", "single_user_api_key", lambda v: v.strip())
         for field, key in _AUTHNZ_TRANSACTION_POLICY_CONFIG_KEYS:
@@ -1492,29 +1498,6 @@ def _load_overrides_from_config() -> dict:
             "org_rbac_scoped_permission_denylist",
             _split_csv,
         )
-
-        # If DATABASE_URL is not provided via env or explicit key, synthesize from db_type fields
-        if os.getenv("DATABASE_URL") is None and "DATABASE_URL" not in overrides:
-            if cfg.has_option("AuthNZ", "db_type"):
-                db_type = cfg.get("AuthNZ", "db_type").strip().lower()
-                if db_type == "sqlite":
-                    # sqlite_path supports relative paths; default to Databases/users.db
-                    sqlite_path = cfg.get("AuthNZ", "sqlite_path", fallback="./Databases/users.db").strip()
-                    overrides["DATABASE_URL"] = f"sqlite:///{sqlite_path}"
-                elif db_type in {"postgres", "postgresql"}:
-                    host = cfg.get("AuthNZ", "pg_host", fallback="localhost").strip()
-                    port = cfg.get("AuthNZ", "pg_port", fallback="5432").strip()
-                    db   = cfg.get("AuthNZ", "pg_db", fallback="tldw_users").strip()
-                    user = cfg.get("AuthNZ", "pg_user", fallback="tldw_user").strip()
-                    # Do NOT silently synthesize with a placeholder password.
-                    pwd  = cfg.get("AuthNZ", "pg_password", fallback="").strip()
-                    sslm = cfg.get("AuthNZ", "pg_sslmode", fallback="prefer").strip()
-                    if not pwd:
-                        # Never synthesize with a placeholder password; leave DATABASE_URL unset.
-                        logger.warning("AuthNZ: pg_password not set in config.txt; not synthesizing DATABASE_URL.")
-                    else:
-                        overrides["DATABASE_URL"] = f"postgresql://{user}:{pwd}@{host}:{port}/{db}?sslmode={sslm}"
-                # else: ignore unknown types
     except _SETTINGS_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"AuthNZ settings: failed to load overrides from config.txt: {e}")
     return overrides

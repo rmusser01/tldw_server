@@ -46,6 +46,7 @@ from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_setting
 from tldw_Server_API.app.core.AuthNZ.username_utils import normalize_admin_username
 from tldw_Server_API.app.core.config import get_tldw_env_file_path, is_tldw_env_file_exclusive
 from tldw_Server_API.app.core.config_sections.auth import auth_mode_env
+from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.DB_Management.Users_DB import ensure_user_directories, get_users_db
 from tldw_Server_API.app.core.testing import is_test_mode
 
@@ -775,7 +776,7 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
     # In test suites we may switch DATABASE_URL or AUTH_MODE between runs (e.g., SQLite → Postgres).
     # Detect and realign settings/pools so the seed targets the active backend.
     try:
-        effective_db_url = os.getenv("DATABASE_URL")
+        effective_db_url = database_url_env()
     except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS:
         effective_db_url = None
     try:

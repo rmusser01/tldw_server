@@ -11,6 +11,7 @@ import pydantic
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ import settings as authnz_settings
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 
 pytestmark = pytest.mark.unit
 
@@ -47,3 +48,10 @@ def test_config_file_cannot_set_the_single_user_identity(monkeypatch):
         assert authnz_settings.get_settings().SINGLE_USER_FIXED_ID == 1
     finally:
         authnz_settings.reset_settings()
+
+
+def test_auth_config_repr_hides_secrets():
+    """Row 4: a URL that can carry a password never shows in the typed auth view's repr."""
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.add_section("AuthNZ")
+    assert "s3cret" not in repr(load_auth_config(parser, env={"DATABASE_URL": "s3cret"}))
