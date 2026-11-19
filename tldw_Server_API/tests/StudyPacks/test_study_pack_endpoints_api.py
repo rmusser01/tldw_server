@@ -331,6 +331,13 @@ def test_failed_study_pack_jobs_return_diagnostics_without_partial_pack(
 
 @pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
 @pytest.mark.parametrize("lookup", ["detail", "list"])
+@pytest.mark.parametrize(("error_code", "public_error"), [
+    ("worker_exception", "Study pack generation failed."),
+    (
+        "study_pack_invalid_citations",
+        "The generated cards could not be verified against their sources. No Study Pack was saved.",
+    ),
+])
 def test_quarantined_study_pack_job_is_a_public_terminal_failure(
     client: TestClient,
     jobs_db_path: Path,
@@ -338,6 +345,8 @@ def test_quarantined_study_pack_job_is_a_public_terminal_failure(
     monkeypatch: pytest.MonkeyPatch,
     backend: str,
     lookup: str,
+    error_code: str,
+    public_error: str,
 ):
     """A real quarantined job must stop polling without exposing diagnostics."""
     monkeypatch.setenv("JOBS_QUARANTINE_THRESHOLD", "1")
@@ -355,7 +364,7 @@ def test_quarantined_study_pack_job_is_a_public_terminal_failure(
     assert jm.fail_job(
         int(job["id"]), error="private backend diagnostic", retryable=True,
         worker_id="study-pack-test", lease_id=str(acquired["lease_id"]),
-        error_code="worker_exception",
+        error_code=error_code,
     )
     assert jm.get_job(int(job["id"]))["status"] == "quarantined"
 
@@ -367,7 +376,7 @@ def test_quarantined_study_pack_job_is_a_public_terminal_failure(
     assert public_job["status"] == "failed"
     assert "private backend diagnostic" not in response.text
     if lookup == "detail":
-        assert body["error"] == "Study pack generation failed."
+        assert body["error"] == public_error
         assert body["study_pack"] is None
     else:
         assert body["total"] == 1
