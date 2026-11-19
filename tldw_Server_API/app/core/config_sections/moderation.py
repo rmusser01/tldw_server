@@ -5,6 +5,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from .precedence import resolve
 from .types import ConfigParserLike
 
 _TRUE_VALUES = {"1", "true", "yes", "y", "on"}
@@ -40,14 +41,10 @@ def _get_raw(
     option: str,
     default: str,
 ) -> str:
-    if env_key is not None:
-        env_value = env_map.get(env_key)
-        if env_value is not None and str(env_value).strip() != "":
-            return str(env_value)
-
-    raw = config_parser.get("Moderation", option, fallback=default)
-    text = str(raw).strip()
-    return text or default
+    env_keys = () if env_key is None else (env_key,)
+    resolved = resolve(env_keys, (("Moderation", option),), config_parser=config_parser, env=env_map, default=default)
+    text = str(resolved.value)
+    return text if resolved.source == "env" else (text.strip() or default)
 
 
 def _parse_bool(raw: object, *, option: str, default: bool) -> bool:

@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Mapping
 
+from .precedence import resolve
 from .types import ConfigParserLike
 
 
@@ -21,17 +22,17 @@ def load_rag_config(
     env_map: Mapping[str, str] = env if env is not None else os.environ
 
     vector_store_type = str(
-        env_map.get("RAG_VECTOR_STORE_TYPE")
+        resolve(("RAG_VECTOR_STORE_TYPE",), env=env_map, blank_env=True).value
         or config_parser.get("RAG", "vector_store_type", fallback="chromadb")
     ).strip() or "chromadb"
 
     default_llm_provider = str(
-        env_map.get("RAG_DEFAULT_LLM_PROVIDER")
+        resolve(("RAG_DEFAULT_LLM_PROVIDER",), env=env_map, blank_env=True).value
         or config_parser.get("RAG", "rag_default_llm_provider", fallback="openai")
     ).strip() or "openai"
 
     default_llm_model = str(
-        env_map.get("RAG_DEFAULT_LLM_MODEL")
+        resolve(("RAG_DEFAULT_LLM_MODEL",), env=env_map, blank_env=True).value
         or config_parser.get("RAG", "rag_default_llm_model", fallback="gpt-4o-mini")
     ).strip() or "gpt-4o-mini"
 

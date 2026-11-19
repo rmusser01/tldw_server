@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from configparser import NoSectionError
 from dataclasses import dataclass
 
+from .precedence import resolve
 from .types import ConfigParserLike
 
 _SECTION = "SlidesStandaloneHtml"
@@ -45,14 +46,20 @@ def _get_raw(
     default: str,
     strip: bool = True,
 ) -> str:
-    if env_key in env_map:
-        text = str(env_map[env_key])
-        return text.strip() if strip else text
     try:
-        text = str(config_parser.get(_SECTION, option, fallback=default))
-        return text.strip() if strip else text
+        resolved = resolve(
+            (env_key,),
+            ((_SECTION, option),),
+            config_parser=config_parser,
+            env=env_map,
+            default=default,
+            blank_env=True,
+            blank_config=True,
+        )
     except NoSectionError:
         return default
+    text = str(resolved.value)
+    return text.strip() if strip else text
 
 
 def _parse_bool(raw: str) -> bool:

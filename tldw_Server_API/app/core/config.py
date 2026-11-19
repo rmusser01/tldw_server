@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file
+from tldw_Server_API.app.core.config_sections.precedence import resolve
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
     custom_openai_config_option_names,
@@ -104,13 +105,9 @@ def _first_nonempty_env(
     *,
     environment: Mapping[str, str] | None = None,
 ) -> str | None:
-    """Return the first non-empty environment value from ordered candidates."""
-    env = os.environ if environment is None else environment
-    for env_key in env_keys:
-        value = env.get(env_key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+    """Return the first non-empty environment value from ordered candidates, stripped."""
+    value = resolve(env_keys, env=environment).value
+    return None if value is None else value.strip()
 
 
 def _env_or_config_value(
@@ -122,11 +119,16 @@ def _env_or_config_value(
     fallback: Optional[str] = None,
     environment: Mapping[str, str] | None = None,
 ) -> Optional[str]:
-    """Resolve an env-first value with a single config option fallback."""
-    return _first_nonempty_env(
+    """Resolve an env-first value (stripped) with a single config option fallback, which wins even when blank."""
+    resolved = resolve(
         env_keys,
-        environment=environment,
-    ) or config_parser_object.get(section, key, fallback=fallback)
+        ((section, key),),
+        config_parser=config_parser_object,
+        env=environment,
+        default=fallback,
+        blank_config=True,
+    )
+    return str(resolved.value).strip() if resolved.source == "env" else resolved.value
 
 
 def _first_config_option_value(
@@ -137,15 +139,7 @@ def _first_config_option_value(
     fallback: Optional[str] = None,
 ) -> Optional[str]:
     """Return the first non-empty value from equivalent config option names."""
-    sentinel = object()
-    for key in keys:
-        value = config_parser_object.get(section, key, fallback=sentinel)
-        if value is sentinel or value is None:
-            continue
-        if isinstance(value, str) and not value.strip():
-            continue
-        return value
-    return fallback
+    return resolve((), [(section, key) for key in keys], config_parser=config_parser_object, default=fallback).value
 
 
 def _env_or_config_option_value(
@@ -157,16 +151,15 @@ def _env_or_config_option_value(
     fallback: Optional[str] = None,
     environment: Mapping[str, str] | None = None,
 ) -> Optional[str]:
-    """Resolve ordered env aliases before ordered config option aliases."""
-    return _first_nonempty_env(
+    """Resolve ordered env aliases (stripped) before ordered config option aliases."""
+    resolved = resolve(
         env_keys,
-        environment=environment,
-    ) or _first_config_option_value(
-        config_parser_object,
-        section,
-        keys,
-        fallback=fallback,
+        [(section, key) for key in keys],
+        config_parser=config_parser_object,
+        env=environment,
+        default=fallback,
     )
+    return str(resolved.value).strip() if resolved.source == "env" else resolved.value
 
 
 def _int_env_or_cfg(

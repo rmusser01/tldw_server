@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Mapping
 
+from .precedence import resolve
 from .types import ConfigParserLike
 
 
@@ -21,17 +22,17 @@ def load_audio_config(
     env_map: Mapping[str, str] = env if env is not None else os.environ
 
     default_tts_provider = str(
-        env_map.get("TTS_DEFAULT_PROVIDER")
+        resolve(("TTS_DEFAULT_PROVIDER",), env=env_map, blank_env=True).value
         or config_parser.get("TTS-Settings", "default_tts_provider", fallback="openai")
     ).strip() or "openai"
 
     default_tts_voice = str(
-        env_map.get("TTS_DEFAULT_VOICE")
+        resolve(("TTS_DEFAULT_VOICE",), env=env_map, blank_env=True).value
         or config_parser.get("TTS-Settings", "default_tts_voice", fallback="shimmer")
     ).strip() or "shimmer"
 
     local_tts_device = str(
-        env_map.get("LOCAL_TTS_DEVICE")
+        resolve(("LOCAL_TTS_DEVICE",), env=env_map, blank_env=True).value
         or config_parser.get("TTS-Settings", "local_tts_device", fallback="cpu")
     ).strip() or "cpu"
 

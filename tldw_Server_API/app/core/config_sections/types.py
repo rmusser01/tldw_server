@@ -4,5 +4,5 @@ from typing import Any, Protocol
 
 
 class ConfigParserLike(Protocol):
-    def get(self, section: str, option: str, fallback: Any = ...) -> Any:
+    def get(self, section: str, option: str, *, fallback: Any) -> Any:
         ...
