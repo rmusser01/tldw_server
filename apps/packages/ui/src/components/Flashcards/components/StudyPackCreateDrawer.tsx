@@ -1,10 +1,18 @@
 import React from "react"
 import { Button, Drawer, Input, Select, Space, Typography } from "antd"
+import { useQuery } from "@tanstack/react-query"
 import { ChevronDown, ChevronRight, FileText, Film, MessageSquare, Trash2 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 
+import {
+  getMediaLibraryItemKey,
+  normalizeMediaLibraryResponse
+} from "@/components/Option/ResearchWorkspace/SourcesPane/media-library-normalization"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
+import { useDebounce } from "@/hooks/useDebounce"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { tldwClient } from "@/services/tldw"
 import type {
   StudyPackSourceSelection,
   StudyPackSourceType,
@@ -42,6 +50,113 @@ const normalizeIntentSources = (
         locator: item.locator
       }))
     : []
+
+type MediaOption = { value: string; label: string; title?: string }
+
+const StudyPackMediaPicker = ({ onSelect }: { onSelect: (media: MediaOption) => void }) => {
+  const { t } = useTranslation(["option", "common"])
+  const pickerId = React.useId()
+  const [opened, setOpened] = React.useState(false)
+  const [search, setSearch] = React.useState("")
+  const term = useDebounce(search.trim(), 300)
+  const isDebouncing = search.trim() !== term
+  const media = useQuery({
+    queryKey: ["study-pack-media", pickerId, term],
+    enabled: opened && !isDebouncing,
+    gcTime: 0,
+    queryFn: async ({ signal }) => {
+      const page = { page: 1, results_per_page: 50 }
+      const response = term
+        ? await tldwClient.searchMedia({ query: term }, page, { signal })
+        : await tldwClient.listMedia(page, { signal })
+      signal.throwIfAborted()
+      const { items, totalCount } = normalizeMediaLibraryResponse(response)
+      const options = items.flatMap((item): MediaOption[] => {
+        const id = getMediaLibraryItemKey(item)
+        if (!id) return []
+        const rawTitle = (item as { title?: unknown }).title
+        const title = typeof rawTitle === "string" ? rawTitle.trim() || undefined : undefined
+        return [{
+          value: id,
+          label: title ?? t("option:flashcards.studyPackUntitledMedia", {
+            defaultValue: "Media {{id}}",
+            id
+          }),
+          title
+        }]
+      })
+      return {
+        totalCount,
+        options: options.map((option) =>
+          options.some((other) => other.value !== option.value && other.label === option.label)
+            ? { ...option, label: t("option:flashcards.studyPackMediaTitleWithId", {
+                defaultValue: "{{title}} (ID {{id}})",
+                title: option.label,
+                id: option.value
+              }) }
+            : option
+        )
+      }
+    }
+  })
+
+  const loading = isDebouncing || (opened && media.isFetching && !media.data)
+  const result = loading || media.isError ? undefined : media.data
+  const searchLabel = t("option:flashcards.studyPackMediaSearch", {
+    defaultValue: "Search media library"
+  })
+  const emptyText = term
+    ? t("option:flashcards.studyPackNoMediaMatches", { defaultValue: "No matching media." })
+    : t("option:flashcards.studyPackMediaEmpty", { defaultValue: "Your media library is empty." })
+
+  return (
+    <div className="mb-3">
+      <Select<string[], MediaOption>
+        aria-label={searchLabel}
+        placeholder={searchLabel}
+        className="w-full"
+        mode="multiple"
+        value={[]}
+        showSearch={{
+          searchValue: search,
+          onSearch: setSearch,
+          filterOption: false,
+          // Keep the failed term visible when Retry takes focus.
+          autoClearSearchValue: false
+        }}
+        onOpenChange={(isOpen) => { if (isOpen) setOpened(true) }}
+        onSelect={(_, option) => {
+          onSelect(option)
+          setSearch("")
+        }}
+        loading={loading}
+        options={result?.options ?? []}
+        notFoundContent={loading
+          ? t("option:flashcards.studyPackMediaLoading", { defaultValue: "Loading media…" })
+          : media.isError ? null : emptyText}
+      />
+      {result && result.options.length > 0 && result.options.length < result.totalCount ? (
+        <Text type="secondary" className="mt-1 block">
+          {t("option:flashcards.studyPackMediaResultLimit", {
+            defaultValue: "Showing {{shown}} of {{total}} media items. Try a more specific search.",
+            shown: result.options.length,
+            total: result.totalCount
+          })}
+        </Text>
+      ) : null}
+      {!isDebouncing && media.isError ? (
+        <Space className="mt-1">
+          <Text role="alert">
+            {t("option:flashcards.studyPackMediaError", { defaultValue: "Could not load media." })}
+          </Text>
+          <Button size="small" onClick={() => void media.refetch()} loading={media.isFetching}>
+            {t("common:retry", { defaultValue: "Retry" })}
+          </Button>
+        </Space>
+      ) : null}
+    </div>
+  )
+}
 
 export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
   open,
@@ -110,6 +225,13 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
     setJobId(null)
     handledTerminalJobIdRef.current = null
   }, [initialIntent, open])
+
+  React.useEffect(() => {
+    if (!open) return
+    return watchChatAccountChanges((invalidated) => {
+      if (invalidated) onClose()
+    })
+  }, [open, onClose])
 
   React.useEffect(() => {
     const response = jobQuery.data
@@ -187,6 +309,14 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
     setSourceId("")
     setSourceTitle("")
   }, [sourceType, trimmedSourceId, trimmedSourceTitle])
+
+  const handleSelectMedia = ({ value, title }: MediaOption) => {
+    setSourceItems((current) =>
+      current.some((source) => source.source_type === "media" && source.source_id === value)
+        ? current
+        : [...current, { source_type: "media", source_id: value, source_title: title }]
+    )
+  }
 
   const handleRemoveSource = React.useCallback((index: number) => {
     setSourceItems((current) => current.filter((_, currentIndex) => currentIndex !== index))
@@ -282,6 +412,8 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
               })}
             </Text>
           </div>
+
+          {open ? <StudyPackMediaPicker onSelect={handleSelectMedia} /> : null}
 
           <button
             type="button"
