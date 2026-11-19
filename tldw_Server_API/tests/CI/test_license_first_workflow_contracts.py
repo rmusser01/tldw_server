@@ -1580,6 +1580,24 @@ def test_backend_required_enforces_endpoint_scope_guards(guard: str) -> None:
     assert guard in shlex.split(gate["run"].replace("\\\n", " "), comments=True)  # nosec B101
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("ratchet", ["tldw_Server_API/tests/lint/test_env_read_ratchet.py"])
+def test_backend_required_enforces_config_ratchets(ratchet: str) -> None:
+    """TASK-13950.21: the config ratchets run in a required step, with the PR base their reason check reads."""
+    import shlex
+
+    from tldw_Server_API.tests.lint._ceilings import BASE_ENV
+
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    # Shell words, as bash reads them: a commented-out path is not an argument.
+    assert ratchet in shlex.split(gate["run"].replace("\\\n", " "), comments=True)  # nosec B101
+    # A rename on either side would quietly drop the bump-with-reason check to its local fallback.
+    assert "base_sha" in str(gate.get("env", {}).get(BASE_ENV, ""))  # nosec B101 - regression assertion
+
+
 def test_backend_required_enforces_isolation_ratchets():
     workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
     steps = workflow["jobs"]["backend-required"]["steps"]
