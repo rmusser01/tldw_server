@@ -19,6 +19,7 @@ import { useTranslation } from "react-i18next"
 import { LOADING_STATE_LABEL } from "@/design-system"
 import { Alert } from "@/components/ui"
 import { RecoveryCallout, type RecoveryState } from "@/components/ui/state"
+import { useInvalidateWatchlists, useSetWatchlistsQueryData, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   cancelWatchlistRun,
@@ -39,13 +40,14 @@ import {
   parseWatchlistsRunStreamPayload
 } from "@/services/watchlists-stream"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
-import type { RunDetailResponse, ScrapedItem, WatchlistRunAudioStatus } from "@/types/watchlists"
+import type { PaginatedResponse, RunDetailResponse, RunStatus, ScrapedItem, WatchlistRunAudioStatus } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { safeExternalUrl } from "@/utils/safe-external-url"
 import { StatusTag } from "../shared"
 import { isWatchlistRunTerminal } from "../shared/runStatus"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import { classifyRunFailure, getRunFailureHint } from "./run-notifications"
+import { usePatchRunLists } from "./usePatchRunLists"
 import {
   type AudioArtifactSummary,
   createOutputMetadataLabels,
@@ -125,14 +127,9 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const { t } = useTranslation(["watchlists", "common"])
   const { isConstrained } = useWatchlistsViewport()
   const outputMetadataLabels = useMemo(() => createOutputMetadataLabels(t), [t])
-  const [loading, setLoading] = useState(false)
-  const [data, setData] = useState<RunDetailResponse | null>(null)
-  const [error, setError] = useState<ReturnType<typeof mapWatchlistsError> | null>(null)
-  const [itemsLoading, setItemsLoading] = useState(false)
-  const [items, setItems] = useState<ScrapedItem[]>([])
-  const [itemsTotal, setItemsTotal] = useState(0)
-  const [itemsPage, setItemsPage] = useState(1)
-  const [itemsPageSize, setItemsPageSize] = useState(20)
+  const [itemsPagination, setItemsPagination] = useState({ runId, page: 1, size: 20 })
+  const itemsPage = itemsPagination.runId === runId ? itemsPagination.page : 1
+  const itemsPageSize = itemsPagination.size
   const [updatingItemIds, setUpdatingItemIds] = useState<number[]>([])
   const [exportingTalliesCsv, setExportingTalliesCsv] = useState(false)
   const [streamState, setStreamState] = useState<StreamConnectionState>("disconnected")
@@ -144,12 +141,6 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const [retryingDelivery, setRetryingDelivery] = useState(false)
   const [retryingAudio, setRetryingAudio] = useState(false)
   const [exportingDiagnostics, setExportingDiagnostics] = useState(false)
-  const [sourceNamesById, setSourceNamesById] = useState<Record<number, string>>({})
-  const [linkedOutputCount, setLinkedOutputCount] = useState<number | null>(null)
-  const [linkedOutputsLoading, setLinkedOutputsLoading] = useState(false)
-  const [audioStatus, setAudioStatus] = useState<WatchlistRunAudioStatus | null>(null)
-  const [audioStatusLoading, setAudioStatusLoading] = useState(false)
-  const [audioStatusError, setAudioStatusError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const translationRef = useRef(t)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -158,12 +149,56 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const currentStatusRef = useRef<string | null>(null)
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
-  const updateRunInList = useWatchlistsStore((s) => s.updateRunInList)
-  const addRun = useWatchlistsStore((s) => s.addRun)
   const setActiveTab = useWatchlistsStore((s) => s.setActiveTab)
   const setOutputsJobFilter = useWatchlistsStore((s) => s.setOutputsJobFilter)
   const setOutputsRunFilter = useWatchlistsStore((s) => s.setOutputsRunFilter)
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
+
+  const invalidateWatchlists = useInvalidateWatchlists()
+  const setQueryData = useSetWatchlistsQueryData()
+  const patchRunLists = usePatchRunLists()
+  const runOpen = open && runId != null
+  const detailsQuery = useWatchlistsQuery("run-detail", runId, ({ signal }) => getRunDetails(runId!, signal), {
+    enabled: runOpen
+  })
+  const data = runOpen ? detailsQuery.data : undefined
+  const loading = runOpen && detailsQuery.isLoading
+  const error = detailsQuery.error ? mapWatchlistsError(detailsQuery.error, {
+    t,
+    context: t("watchlists:runs.detail.context", "run details"),
+    fallbackMessage: t("watchlists:runs.detail.loadError", "Failed to load details"),
+    operationLabel: t("watchlists:errors.operation.load", "load")
+  }) : null
+
+  const sourceParams = { page: 1, size: SOURCE_LOOKUP_LIMIT }
+  const { data: sources } = useWatchlistsQuery("sources", sourceParams, ({ signal }) => fetchWatchlistSources(sourceParams, signal), {
+    enabled: open
+  })
+  const sourceNamesById = useMemo(
+    () => Object.fromEntries((sources?.items ?? []).map((source) => [source.id, source.name])),
+    [sources]
+  )
+  const outputParams = { run_id: runId ?? undefined, page: 1, size: 1 }
+  const linkedOutputsQuery = useWatchlistsQuery("outputs", outputParams, ({ signal }) => fetchWatchlistOutputs(outputParams, signal), {
+    enabled: runOpen
+  })
+  const linkedOutputsLoading = linkedOutputsQuery.isFetching
+  const linkedOutputs = linkedOutputsQuery.data
+  const linkedOutputCount = linkedOutputs
+    ? Math.max(0, linkedOutputs.total ?? linkedOutputs.items?.length ?? 0)
+    : null
+
+  const itemsParams = { run_id: runId ?? undefined, page: itemsPage, size: itemsPageSize }
+  const itemsQuery = useWatchlistsQuery("items", itemsParams, ({ signal }) => fetchScrapedItems(itemsParams, signal), {
+    enabled: runOpen
+  })
+  const items = itemsQuery.data?.items ?? []
+  const itemsTotal = itemsQuery.data?.total ?? 0
+  const itemsLoading = itemsQuery.isFetching
+
+  const setData = useCallback((update: (previous: RunDetailResponse | undefined) => RunDetailResponse | undefined) => {
+    setQueryData<RunDetailResponse>("run-detail", runId, update)
+  }, [runId, setQueryData])
 
   const audioTaskId = useMemo(() => {
     const stats = data?.stats as Record<string, unknown> | null | undefined
@@ -172,6 +207,16 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
     if (typeof value === "number" && Number.isFinite(value)) return String(value)
     return null
   }, [data?.stats])
+
+  const audioParams = { runId, taskId: audioTaskId }
+  const audioQuery = useWatchlistsQuery("run-audio", audioParams, ({ signal }) => getWatchlistRunAudio(runId!, signal), {
+    enabled: runOpen && Boolean(audioTaskId)
+  })
+  const audioStatus = audioQuery.data
+  const audioStatusLoading = audioQuery.isLoading
+  const audioStatusError = audioQuery.error
+    ? audioQuery.error.message || t("watchlists:runs.detail.audioStatusError", "Failed to load audio status")
+    : null
 
   const audioSummary = useMemo(() => {
     const liveSummary = getAudioStatusSummary(audioStatus, outputMetadataLabels)
@@ -278,8 +323,8 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       }
     })
 
-    updateRunInList(run.id, {
-      status: run.status as any,
+    patchRunLists(run.id, {
+      status: run.status as RunStatus,
       started_at: run.started_at ?? null,
       finished_at: run.finished_at ?? null,
       stats,
@@ -294,34 +339,6 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   useEffect(() => {
     translationRef.current = t
   }, [t])
-
-  const loadRunDetails = useCallback(async () => {
-    if (!runId) return
-    const translate = translationRef.current
-    setLoading(true)
-    setError(null)
-    setStreamError(null)
-    setCancelState("idle")
-    try {
-      const result = await getRunDetails(runId)
-      setData(result)
-    } catch (err) {
-      console.error("Failed to fetch run details:", err)
-      setError(
-        mapWatchlistsError(err, {
-          t: translate,
-          context: translate("watchlists:runs.detail.context", "run details"),
-          fallbackMessage: translate(
-            "watchlists:runs.detail.loadError",
-            "Failed to load details"
-          ),
-          operationLabel: translate("watchlists:errors.operation.load", "load")
-        })
-      )
-    } finally {
-      setLoading(false)
-    }
-  }, [runId])
 
   useLayoutEffect(() => {
     if (open) {
@@ -339,157 +356,22 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   }, [open])
 
   useEffect(() => {
-    if (open && runId) {
-      void loadRunDetails()
-    } else {
-      setData(null)
-      setError(null)
+    setCancelState("idle")
+    setStreamError(null)
+    setLastStreamEventAt(null)
+    if (!open) {
+      setItemsPagination({ runId, page: 1, size: 20 })
       setStreamState("disconnected")
-      setStreamError(null)
-      setLastStreamEventAt(null)
-    }
-  }, [open, runId, loadRunDetails])
-
-  useEffect(() => {
-    let active = true
-
-    if (!open) {
-      setSourceNamesById({})
-      return () => {
-        active = false
-      }
-    }
-
-    fetchWatchlistSources({ page: 1, size: SOURCE_LOOKUP_LIMIT })
-      .then((result) => {
-        if (!active) return
-        const next: Record<number, string> = {}
-        for (const source of result.items || []) {
-          next[source.id] = source.name
-        }
-        setSourceNamesById(next)
-      })
-      .catch((err) => {
-        console.warn("Failed to resolve source names for run detail:", err)
-      })
-
-    return () => {
-      active = false
     }
   }, [open, runId])
 
+  const itemsError = itemsQuery.error
   useEffect(() => {
-    let active = true
-
-    if (!open || !runId || !audioTaskId) {
-      setAudioStatus(null)
-      setAudioStatusLoading(false)
-      setAudioStatusError(null)
-      return () => {
-        active = false
-      }
+    if (itemsError && runOpen) {
+      console.error("Failed to fetch run items:", itemsError)
+      message.error(translationRef.current("watchlists:runs.detail.itemsError", "Failed to load items"))
     }
-
-    setAudioStatusLoading(true)
-    setAudioStatusError(null)
-    getWatchlistRunAudio(runId)
-      .then((result) => {
-        if (!active) return
-        setAudioStatus(result)
-      })
-      .catch((err) => {
-        console.warn("Failed to resolve run audio status:", err)
-        if (!active) return
-        setAudioStatus(null)
-        setAudioStatusError(
-          err instanceof Error
-            ? err.message
-            : t("watchlists:runs.detail.audioStatusError", "Failed to load audio status")
-        )
-      })
-      .finally(() => {
-        if (!active) return
-        setAudioStatusLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [audioTaskId, open, runId, t])
-
-  useEffect(() => {
-    let active = true
-
-    if (!open || !runId) {
-      setLinkedOutputCount(null)
-      setLinkedOutputsLoading(false)
-      return () => {
-        active = false
-      }
-    }
-
-    setLinkedOutputsLoading(true)
-    fetchWatchlistOutputs({ run_id: runId, page: 1, size: 1 })
-      .then((result) => {
-        if (!active) return
-        const total =
-          typeof result.total === "number"
-            ? result.total
-            : Array.isArray(result.items)
-              ? result.items.length
-              : 0
-        setLinkedOutputCount(Math.max(0, total))
-      })
-      .catch((err) => {
-        console.warn("Failed to resolve linked outputs for run detail:", err)
-        if (!active) return
-        setLinkedOutputCount(null)
-      })
-      .finally(() => {
-        if (!active) return
-        setLinkedOutputsLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [open, runId])
-
-  const loadItems = useCallback(async () => {
-    if (!open || !runId) return
-    setItemsLoading(true)
-    try {
-      const result = await fetchScrapedItems({
-        run_id: runId,
-        page: itemsPage,
-        size: itemsPageSize
-      })
-      setItems(Array.isArray(result.items) ? result.items : [])
-      setItemsTotal(result.total || 0)
-    } catch (err) {
-      console.error("Failed to fetch run items:", err)
-      message.error(t("watchlists:runs.detail.itemsError", "Failed to load items"))
-      setItems([])
-      setItemsTotal(0)
-    } finally {
-      setItemsLoading(false)
-    }
-  }, [itemsPage, itemsPageSize, open, runId, t])
-
-  useEffect(() => {
-    if (!open) {
-      setItems([])
-      setItemsTotal(0)
-      setItemsPage(1)
-      setItemsPageSize(20)
-      return
-    }
-    setItemsPage(1)
-  }, [open, runId])
-
-  useEffect(() => {
-    loadItems()
-  }, [loadItems])
+  }, [itemsError, runOpen])
 
   useEffect(() => {
     if (!open || !runId || !streamingEnabled) {
@@ -525,7 +407,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
         }
 
         ws.onmessage = (event) => {
-          if (disposed || typeof event.data !== "string") return
+          if (disposed || wsRef.current !== ws || typeof event.data !== "string") return
           let parsedJson: unknown = null
           try {
             parsedJson = JSON.parse(event.data)
@@ -578,7 +460,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
           if (streamEvent.type === "complete") {
             const finalStatus = streamEvent.status || currentStatusRef.current || "completed"
             setData((prev) => (prev ? { ...prev, status: finalStatus } : prev))
-            updateRunInList(runId, { status: finalStatus as any })
+            patchRunLists(runId, { status: finalStatus as RunStatus })
             setStreamState("disconnected")
             manuallyClosedRef.current = true
             closeStream()
@@ -586,7 +468,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
         }
 
         ws.onerror = () => {
-          if (disposed) return
+          if (disposed || wsRef.current !== ws) return
           setStreamState("error")
           setStreamError(t("watchlists:runs.detail.streamError", "Live stream error"))
         }
@@ -634,7 +516,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       closeStream()
       setStreamState("disconnected")
     }
-  }, [open, runId, streamingEnabled, t, updateRunInList])
+  }, [open, runId, streamingEnabled, t, patchRunLists, setData])
 
   // Calculate duration
   const calculateDuration = (): string => {
@@ -672,11 +554,11 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
     setUpdatingItemIds((prev) => [...prev, item.id])
     try {
       const updated = await updateScrapedItem(item.id, { reviewed })
-      setItems((prev) =>
-        prev.map((entry) =>
-          entry.id === item.id ? { ...entry, reviewed: updated.reviewed } : entry
-        )
-      )
+      setQueryData<PaginatedResponse<ScrapedItem>>("items", itemsParams, (page) => page && {
+        ...page,
+        items: page.items.map((entry) => entry.id === item.id ? { ...entry, reviewed: updated.reviewed } : entry)
+      })
+      void invalidateWatchlists("items", "overview")
     } catch (err) {
       console.error("Failed to update item:", err)
       message.error(t("watchlists:runs.detail.itemsUpdateError", "Failed to update item"))
@@ -725,11 +607,12 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
             }
           : prev
       )
-      updateRunInList(runId, {
-        status: "cancelled" as any,
+      patchRunLists(runId, {
+        status: "cancelled",
         finished_at: finishedAt,
         error_msg: "cancelled_by_user"
       })
+      void invalidateWatchlists("runs", "jobs", "overview")
       setCancelState("idle")
       message.success(t("watchlists:runs.cancelRunSuccess", "Run cancelled"))
       manuallyClosedRef.current = true
@@ -969,12 +852,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
           total={itemsTotal}
           showSizeChanger
           showTotal={(total) => t("watchlists:runs.detail.itemsTotal", "{{total}} items", { total })}
-          onChange={(page, pageSize) => {
-            setItemsPage(page)
-            if (pageSize !== itemsPageSize) {
-              setItemsPageSize(pageSize)
-            }
-          }}
+          onChange={(page, size) => setItemsPagination({ runId, page, size })}
         />
       )}
     </div>
@@ -1017,7 +895,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
     setRetryingRun(true)
     try {
       const rerun = await triggerWatchlistRun(data.job_id)
-      addRun(rerun)
+      void invalidateWatchlists("runs", "jobs", "overview")
       message.success(
         t("watchlists:runs.detail.retryTriggered", "Retry started as run #{{id}}.", {
           id: rerun.id
@@ -1049,7 +927,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
           id: result.output_id ?? "-"
         })
       )
-      void loadRunDetails()
+      void invalidateWatchlists("run-detail", "outputs", "overview")
     } catch (err) {
       console.error("Failed to retry delivery:", err)
       message.error(t("watchlists:runs.detail.deliveryRetryError", "Failed to retry delivery"))
@@ -1061,7 +939,6 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const handleRetryAudio = async () => {
     if (!runId || retryingAudio) return
     setRetryingAudio(true)
-    setAudioStatusError(null)
     try {
       const result = await retryWatchlistRunAudio(runId)
       if (!result.retried) {
@@ -1071,21 +948,24 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
         return
       }
       if (result.task_id) {
-        setAudioStatusError(null)
-        setAudioStatus((prev) => ({
-          ...(prev || { run_id: runId }),
+        const taskId = result.task_id
+        const pending: WatchlistRunAudioStatus = {
           run_id: runId,
-          task_id: result.task_id,
+          task_id: taskId,
           status: "pending",
           audio_uri: null,
           download_url: null,
           error: null
-        }))
+        }
+        setQueryData<WatchlistRunAudioStatus>("run-audio", audioParams, () => pending)
+        setQueryData<WatchlistRunAudioStatus>("run-audio", { runId, taskId }, () => pending)
+      } else {
+        void invalidateWatchlists("run-audio")
       }
       message.success(
         t("watchlists:runs.detail.audioRetrySuccess", "Audio retry queued.")
       )
-      void loadRunDetails()
+      void invalidateWatchlists("run-detail", "outputs", "overview")
     } catch (err) {
       console.error("Failed to retry audio:", err)
       message.error(t("watchlists:runs.detail.audioRetryError", "Failed to retry audio"))
@@ -1580,12 +1460,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                   pageSize: itemsPageSize,
                   total: itemsTotal,
                   showSizeChanger: true,
-                  onChange: (page, pageSize) => {
-                    setItemsPage(page)
-                    if (pageSize !== itemsPageSize) {
-                      setItemsPageSize(pageSize)
-                    }
-                  }
+                  onChange: (page, size) => setItemsPagination({ runId, page, size })
                 }}
                 size="small"
               />
@@ -1650,7 +1525,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
           message={error.description}
           primaryAction={{
             label: t("watchlists:errors.retry", "Retry"),
-            onClick: () => void loadRunDetails()
+            onClick: () => void detailsQuery.refetch()
           }}
         />
       ) : data ? (

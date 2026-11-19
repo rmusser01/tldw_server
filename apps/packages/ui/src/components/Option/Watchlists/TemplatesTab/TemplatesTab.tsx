@@ -12,6 +12,7 @@ import {
 import type { ColumnsType } from "antd/es/table"
 import { Edit, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { useInvalidateWatchlists, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   fetchWatchlistJobs,
@@ -33,42 +34,25 @@ export const TemplatesTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
   const { isConstrained } = useWatchlistsViewport()
 
-  // Store state
-  const templates = useWatchlistsStore((s) => s.templates)
-  const templatesLoading = useWatchlistsStore((s) => s.templatesLoading)
+  const templatesQuery = useWatchlistsQuery("templates", null, ({ signal }) => fetchWatchlistTemplates(signal))
+  const templates = templatesQuery.data?.items
+  const templatesLoading = templatesQuery.isFetching
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
-
-  // Store actions
-  const setTemplates = useWatchlistsStore((s) => s.setTemplates)
-  const setTemplatesLoading = useWatchlistsStore((s) => s.setTemplatesLoading)
+  const invalidate = useInvalidateWatchlists()
 
   // Local state for editor
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<WatchlistTemplate | null>(null)
   const [checkingTemplateDeleteName, setCheckingTemplateDeleteName] = useState<string | null>(null)
 
-  // Fetch templates
-  const loadTemplates = useCallback(async () => {
-    setTemplatesLoading(true)
-    try {
-      const result = await fetchWatchlistTemplates()
-      setTemplates(Array.isArray(result.items) ? result.items : [])
-    } catch (err) {
-      console.error("Failed to fetch templates:", err)
-      message.error(t("watchlists:templates.fetchError", "Failed to load templates"))
-      setTemplates([])
-    } finally {
-      setTemplatesLoading(false)
-    }
-  }, [setTemplates, setTemplatesLoading, t])
-
   // Ensure templates is always an array for rendering
   const safeTemplates = Array.isArray(templates) ? templates : []
 
-  // Initial load
   useEffect(() => {
-    loadTemplates()
-  }, [loadTemplates])
+    if (templatesQuery.errorUpdatedAt) {
+      message.error(t("watchlists:templates.fetchError", "Failed to load templates"))
+    }
+  }, [templatesQuery.errorUpdatedAt, t])
 
   // Handle create
   const handleCreate = () => {
@@ -83,16 +67,16 @@ export const TemplatesTab: React.FC = () => {
   }
 
   // Handle delete
-  const handleDelete = async (template: WatchlistTemplate) => {
+  const handleDelete = useCallback(async (template: WatchlistTemplate) => {
     try {
       await deleteWatchlistTemplate(template.name)
       message.success(t("watchlists:templates.deleted", "Template deleted"))
-      loadTemplates()
+      void invalidate("templates", "template", "template-versions")
     } catch (err) {
       console.error("Failed to delete template:", err)
       message.error(t("watchlists:templates.deleteError", "Failed to delete template"))
     }
-  }
+  }, [invalidate, t])
 
   const loadJobsForTemplateUsageCheck = useCallback(async (): Promise<WatchlistJob[]> => {
     const allJobs: WatchlistJob[] = []
@@ -191,7 +175,7 @@ export const TemplatesTab: React.FC = () => {
     setEditorOpen(false)
     setEditingTemplate(null)
     if (saved) {
-      loadTemplates()
+      void invalidate("templates", "template", "template-versions")
     }
   }
 
@@ -362,7 +346,7 @@ export const TemplatesTab: React.FC = () => {
         </Button>
         <Button
           icon={<RefreshCw className="h-4 w-4" />}
-          onClick={loadTemplates}
+          onClick={() => void templatesQuery.refetch()}
           loading={templatesLoading}
         >
           {t("common:refresh", "Refresh")}

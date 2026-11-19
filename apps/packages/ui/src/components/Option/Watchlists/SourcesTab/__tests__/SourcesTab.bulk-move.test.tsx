@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { SourcesTab } from "../SourcesTab"
 
@@ -163,6 +164,7 @@ vi.mock("@/utils/dateFormatters", () => ({
 }))
 
 vi.mock("@/services/watchlists", () => ({
+  getWatchlistSettings: vi.fn().mockResolvedValue({ forums_enabled: false }),
   checkWatchlistSourcesNow: (...args: any[]) => mocks.checkWatchlistSourcesNowMock(...args),
   createWatchlistSource: (...args: any[]) => mocks.createWatchlistSourceMock(...args),
   deleteWatchlistSource: (...args: any[]) => mocks.deleteWatchlistSourceMock(...args),
@@ -250,9 +252,18 @@ describe("SourcesTab bulk move", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.storeStateRef.current = baseState()
-    mocks.fetchWatchlistSourcesMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({
+      items: [buildSource(101, [1]), buildSource(202, [])], total: 2, has_more: false
+    })
     mocks.fetchWatchlistTagsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
-    mocks.fetchWatchlistGroupsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+    mocks.fetchWatchlistGroupsMock.mockResolvedValue({
+      items: [
+        { id: 1, name: "News", parent_group_id: null },
+        { id: 2, name: "Research", parent_group_id: null }
+      ],
+      total: 2,
+      has_more: false
+    })
     mocks.fetchWatchlistJobsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
     mocks.getSourceSeenStatsMock.mockResolvedValue({
       source_id: 101,
@@ -273,7 +284,7 @@ describe("SourcesTab bulk move", () => {
   it("moves selected feeds to a new group and supports undo restoration", async () => {
     render(<SourcesTab />)
 
-    fireEvent.click(screen.getByTestId("select-source-101"))
+    fireEvent.click(await screen.findByTestId("select-source-101"))
 
     fireEvent.change(screen.getByLabelText("Move to group"), {
       target: { value: "2" }
@@ -301,7 +312,7 @@ describe("SourcesTab bulk move", () => {
   it("supports bulk move to no group target", async () => {
     render(<SourcesTab />)
 
-    fireEvent.click(screen.getByTestId("select-source-101"))
+    fireEvent.click(await screen.findByTestId("select-source-101"))
 
     fireEvent.change(screen.getByLabelText("Move to group"), {
       target: { value: "__none__" }
@@ -316,18 +327,18 @@ describe("SourcesTab bulk move", () => {
     })
   })
 
-  it("renders high-density source tables for bulk operations", () => {
+  it("renders high-density source tables for bulk operations", async () => {
     const manySources = Array.from({ length: 200 }, (_value, index) =>
       buildSource(index + 1, index % 2 === 0 ? [1] : [])
     )
-    mocks.storeStateRef.current = baseState({
-      sources: manySources,
-      sourcesTotal: manySources.length
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({
+      items: manySources, total: manySources.length, has_more: false
     })
 
     const { container } = render(<SourcesTab />)
 
-    expect(screen.getByTestId("sources-table")).toBeInTheDocument()
-    expect(container.querySelectorAll("[data-testid^='select-source-']").length).toBe(200)
+    await waitFor(() => {
+      expect(container.querySelectorAll("[data-testid^='select-source-']")).toHaveLength(200)
+    })
   })
 })

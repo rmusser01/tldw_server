@@ -43,12 +43,12 @@ import {
   updateScrapedItem
 } from "@/services/watchlists"
 import type { FetchItemsParams } from "@/services/watchlists"
+import { useInvalidateWatchlists, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { useWatchlistsStore } from "@/store/watchlists"
 import type {
   ScrapedItem,
   ScrapedItemAlertSummary,
   ScrapedItemBatchScope,
-  ScrapedItemBatchUpdateResponse,
   WatchlistContentAlertSeverity,
   WatchlistItemSavedView,
   WatchlistItemSavedViewFilters,
@@ -63,7 +63,6 @@ import {
   DEFAULT_ITEMS_SORT_MODE,
   extractImageUrl,
   filterSourcesForReader,
-  getMigratableItemsViewPresets,
   getInitialSourceRenderCount,
   getNextSourceRenderCount,
   ITEM_PAGE_SIZE_OPTIONS,
@@ -80,7 +79,6 @@ import {
   type PersistedItemsViewPreset,
   type ReaderSortMode,
   resolveSelectedItemId,
-  shouldReloadItemsAfterReviewMutation,
   shouldExpandSourceRenderWindow,
   SOURCE_LIST_INITIAL_RENDER_COUNT,
   SOURCE_LOAD_MAX_ITEMS,
@@ -117,12 +115,19 @@ type ItemsViewPreset = Omit<PersistedItemsViewPreset, "smartFilter" | "statusFil
   serverId?: number
 }
 const SHORTCUTS_HINT_DISMISSED_STORAGE_KEY = "watchlists:items:shortcuts-hint-dismissed"
-const SMART_COUNTS_CACHE_TTL_MS = 15_000
-
-interface SmartCountsCacheEntry {
-  counts: Record<SmartFeedFilter, number>
-  cachedAt: number
+const EMPTY_SOURCES: WatchlistSource[] = []
+const EMPTY_RUNS: WatchlistRun[] = []
+const EMPTY_ITEMS: ScrapedItem[] = []
+const EMPTY_SMART_COUNTS: Record<SmartFeedFilter, number> = {
+  all: 0,
+  today: 0,
+  todayUnread: 0,
+  unread: 0,
+  reviewed: 0,
+  queued: 0,
+  alertMatches: 0
 }
+const ITEMS_POLL_INTERVAL_MS = 30_000
 
 interface BatchReviewProgress {
   scope: BatchReviewScope
@@ -341,23 +346,10 @@ export const ItemsTab: React.FC = () => {
   const setStoreItemsSearch = useWatchlistsStore((s) => s.setItemsSearchQuery)
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
 
-  const [sources, setSources] = useState<WatchlistSource[]>([])
-  const [sourcesLoading, setSourcesLoading] = useState(false)
-  const [sourcesLoaded, setSourcesLoaded] = useState(false)
-  // No watchlist feeds exist at all (confirmed by a successful load): there
-  // is nothing to triage, so the saved-views / bulk-action machinery hides
-  // behind the create-first-watchlist empty state (#2899 I5).
-  const trulyEmptyWatchlists =
-    sourcesLoaded && !sourcesLoading && sources.length === 0
-  const [sourcesCappedAtLimit, setSourcesCappedAtLimit] = useState(false)
+  const invalidateWatchlists = useInvalidateWatchlists()
   const [sourceSearch, setSourceSearch] = useState("")
-  const [runs, setRuns] = useState<WatchlistRun[]>([])
-  const [runsLoading, setRunsLoading] = useState(false)
   const [queueRunFilter, setQueueRunFilter] = useState<number | null>(selectedRunId)
   const [visibleSourceCount, setVisibleSourceCount] = useState(SOURCE_LIST_INITIAL_RENDER_COUNT)
-  const [items, setItems] = useState<ScrapedItem[]>([])
-  const [itemsLoading, setItemsLoading] = useState(false)
-  const [itemsTotal, setItemsTotal] = useState(0)
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
   const [itemsPage, setItemsPage] = useState(1)
   const [itemsPageSize, setItemsPageSize] = useState<number>(() =>
@@ -407,34 +399,160 @@ export const ItemsTab: React.FC = () => {
       }),
     [t]
   )
-  const [viewPresets, setViewPresets] = useState<ItemsViewPreset[]>(() =>
-    provisionItemsViewPresets(
-      loadPersistedItemsViewPresets(
-        typeof window !== "undefined" ? window.localStorage : undefined
-      ),
-      defaultViewPresets
-    ).map((preset) => ({
-      ...preset,
-      smartFilter: normalizeSmartFilter(preset.smartFilter),
-      statusFilter: normalizeStatusFilter(preset.statusFilter),
-      sortMode: normalizeReaderSortMode(preset.sortMode)
-    }))
+  const [localViewPresets, setLocalViewPresets] = useState(() =>
+    loadPersistedItemsViewPresets(
+      typeof window !== "undefined" ? window.localStorage : undefined
+    )
   )
-  const [viewPresetsLoading, setViewPresetsLoading] = useState(false)
-  const [legacyViewPresets, setLegacyViewPresets] = useState<ItemsViewPreset[]>([])
+  const [importedLocalViewIds, setImportedLocalViewIds] = useState<Record<number, string[]>>({})
   const [importingLocalViews, setImportingLocalViews] = useState(false)
   const [activePresetId, setActivePresetId] = useState<string | null>(null)
   const [saveViewModalOpen, setSaveViewModalOpen] = useState(false)
   const [newViewName, setNewViewName] = useState("")
-  const [smartCounts, setSmartCounts] = useState<Record<SmartFeedFilter, number>>({
-    all: 0,
-    today: 0,
-    todayUnread: 0,
-    unread: 0,
-    reviewed: 0,
-    queued: 0,
-    alertMatches: 0
+  const searchQuery = itemsSearch.trim()
+  const [effectiveSearchQuery, setEffectiveSearchQuery] = useState(searchQuery)
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setEffectiveSearchQuery(searchQuery)
+    }, 180)
+    return () => clearTimeout(timeout)
+  }, [searchQuery])
+
+  const buildBaseFilterParams = useCallback(
+    (
+      overrides: Partial<FetchItemsParams> = {},
+      queryOverride: string = effectiveSearchQuery
+    ): FetchItemsParams => {
+      const params: FetchItemsParams = {
+        watchlist_id: selectedWatchlistId ?? undefined,
+        source_id: selectedSourceId ?? undefined,
+        status: statusFilter === "all" ? undefined : statusFilter,
+        sort: toServerItemSortMode(sortMode),
+        include_alert_summary: true,
+        q: queryOverride || undefined,
+        ...overrides
+      }
+
+      if (smartFilter === "today") {
+        params.since = startOfTodayIso()
+      } else if (smartFilter === "todayUnread") {
+        params.since = startOfTodayIso()
+        params.reviewed = false
+      } else if (smartFilter === "unread") {
+        params.reviewed = false
+      } else if (smartFilter === "reviewed") {
+        params.reviewed = true
+      } else if (smartFilter === "queued") {
+        params.queued_for_briefing = true
+        params.run_id = queueRunFilter ?? undefined
+      } else if (smartFilter === "alertMatches") {
+        params.has_alert = true
+      }
+
+      return params
+    },
+    [effectiveSearchQuery, queueRunFilter, selectedSourceId, selectedWatchlistId, smartFilter, sortMode, statusFilter]
+  )
+
+  const sourceParams = {
+    watchlist_id: selectedWatchlistId ?? undefined,
+    size: SOURCE_LOAD_PAGE_SIZE,
+    maxItems: SOURCE_LOAD_MAX_ITEMS
+  }
+  const sourcesQuery = useWatchlistsQuery("sources", sourceParams, async ({ signal }) => {
+    const loaded: WatchlistSource[] = []
+    let total = 0
+    let page = 1
+    while (loaded.length < SOURCE_LOAD_MAX_ITEMS) {
+      const response = await fetchWatchlistSources({
+        watchlist_id: sourceParams.watchlist_id,
+        page,
+        size: sourceParams.size
+      }, signal)
+      signal.throwIfAborted()
+      const batch = Array.isArray(response.items) ? response.items : []
+      if (page === 1) total = Number(response.total || batch.length)
+      loaded.push(...batch)
+      if (batch.length < SOURCE_LOAD_PAGE_SIZE || loaded.length >= (response.total || 0)) break
+      page += 1
+    }
+    return { items: loaded.slice(0, SOURCE_LOAD_MAX_ITEMS), total }
   })
+  const sources = sourcesQuery.data?.items ?? EMPTY_SOURCES
+  const sourcesLoading = sourcesQuery.isLoading
+  // A successful empty catalog means that the first-feed setup replaces triage controls.
+  const trulyEmptyWatchlists = sourcesQuery.data !== undefined && sources.length === 0
+  const sourcesCappedAtLimit = (sourcesQuery.data?.total ?? 0) > SOURCE_LOAD_MAX_ITEMS
+
+  const runsParams = { watchlist_id: selectedWatchlistId ?? undefined, page: 1, size: 200 }
+  const runsQuery = useWatchlistsQuery("runs", runsParams, ({ signal }) => fetchWatchlistRuns(runsParams, signal))
+  const runs = Array.isArray(runsQuery.data?.items) ? runsQuery.data.items : EMPTY_RUNS
+  const runsLoading = runsQuery.isFetching
+
+  const itemParams = buildBaseFilterParams({ page: itemsPage, size: itemsPageSize })
+  const itemsQuery = useWatchlistsQuery("items", itemParams, ({ signal }) => fetchScrapedItems(itemParams, signal), {
+    refetchInterval: ITEMS_POLL_INTERVAL_MS
+  })
+  const items = Array.isArray(itemsQuery.data?.items) ? itemsQuery.data.items : EMPTY_ITEMS
+  const itemsLoading = itemsQuery.isLoading
+  const itemsTotal = itemsQuery.data?.total || items.length
+
+  const countParams = {
+    watchlist_id: selectedWatchlistId ?? undefined,
+    source_id: selectedSourceId ?? undefined,
+    status: statusFilter === "all" ? undefined : statusFilter,
+    q: effectiveSearchQuery || undefined,
+    queue_run_id: queueRunFilter ?? undefined
+  }
+  const smartCountsQuery = useWatchlistsQuery("items-counts", countParams, async ({ signal }) => {
+    const [counts, alertCounts] = await Promise.all([
+      fetchScrapedItemSmartCounts(countParams, signal),
+      fetchScrapedItemSmartCounts({ ...countParams, has_alert: true }, signal)
+    ])
+    return {
+      all: Number(counts.all || 0),
+      today: Number(counts.today || 0),
+      todayUnread: Number(counts.today_unread || 0),
+      unread: Number(counts.unread || 0),
+      reviewed: Number(counts.reviewed || 0),
+      queued: Number(counts.queued || 0),
+      alertMatches: Number(alertCounts.all || 0)
+    }
+  }, { refetchInterval: ITEMS_POLL_INTERVAL_MS })
+  const smartCounts = smartCountsQuery.data ?? EMPTY_SMART_COUNTS
+  const { refetch: reloadSources } = sourcesQuery
+  const { refetch: reloadItems } = itemsQuery
+  const { isStale: smartCountsStale, refetch: reloadSmartCounts } = smartCountsQuery
+
+  const savedViewsQuery = useWatchlistsQuery(
+    "saved-views",
+    { watchlist_id: selectedWatchlistId },
+    ({ signal }) => fetchWatchlistItemViews(selectedWatchlistId!, signal),
+    { enabled: selectedWatchlistId != null }
+  )
+  const viewPresetsLoading = savedViewsQuery.isFetching
+  const normalizeViewPresets = useCallback(
+    (presets: PersistedItemsViewPreset[]): ItemsViewPreset[] =>
+      provisionItemsViewPresets(presets, defaultViewPresets).map((preset) => ({
+        ...preset,
+        smartFilter: normalizeSmartFilter(preset.smartFilter),
+        statusFilter: normalizeStatusFilter(preset.statusFilter),
+        sortMode: normalizeReaderSortMode(preset.sortMode)
+      })),
+    [defaultViewPresets]
+  )
+  const viewPresets = useMemo(() => {
+    if (Array.isArray(savedViewsQuery.data?.items)) {
+      return normalizeViewPresets(savedViewsQuery.data.items.map(toItemsViewPresetFromServer))
+    }
+    return normalizeViewPresets(selectedWatchlistId == null || savedViewsQuery.isError ? localViewPresets : [])
+  }, [localViewPresets, normalizeViewPresets, savedViewsQuery.data, savedViewsQuery.isError, selectedWatchlistId])
+  const legacyViewPresets = localViewPresets.filter((preset) =>
+    selectedWatchlistId != null &&
+    !isSystemItemsViewPresetId(preset.id) &&
+    !importedLocalViewIds[selectedWatchlistId]?.includes(preset.id)
+  )
 
   const sourceNameById = useMemo(
     () => new Map<number, string>(sources.map((source) => [source.id, source.name])),
@@ -517,18 +635,7 @@ export const ItemsTab: React.FC = () => {
     return map
   }, [items])
 
-  const currentUnreadCount = useMemo(
-    () => smartCounts.unread,
-    [smartCounts.unread]
-  )
-  const requiresReviewedRefresh = shouldReloadItemsAfterReviewMutation(smartFilter)
-
-  const searchQuery = itemsSearch.trim()
-  const [effectiveSearchQuery, setEffectiveSearchQuery] = useState(searchQuery)
-  const sourcesRequestTokenRef = useRef(0)
-  const itemsRequestTokenRef = useRef(0)
-  const smartCountsRequestTokenRef = useRef(0)
-  const smartCountsCacheRef = useRef<Record<string, SmartCountsCacheEntry>>({})
+  const currentUnreadCount = smartCounts.unread
   const sourceListRef = useRef<HTMLDivElement | null>(null)
   const shortcutsTriggerRef = useRef<HTMLElement | null>(null)
   const shortcutsHelpButtonRef = useRef<HTMLButtonElement | null>(null)
@@ -538,13 +645,6 @@ export const ItemsTab: React.FC = () => {
   const hasItemsAnnouncementBaselineRef = useRef(false)
   const previousSelectedItemIdRef = useRef<number | null>(null)
   const skippedInitialAutoSelectionRef = useRef(false)
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setEffectiveSearchQuery(searchQuery)
-    }, 180)
-    return () => clearTimeout(timeout)
-  }, [searchQuery])
 
   useEffect(() => {
     const currentSelectedId = selectedItem?.id ?? null
@@ -595,106 +695,6 @@ export const ItemsTab: React.FC = () => {
     previousSelectedItemIdRef.current = currentSelectedId
   }, [selectedItem, sourceNameById, t])
 
-  const buildBaseFilterParams = useCallback(
-    (
-      overrides: Partial<FetchItemsParams> = {},
-      queryOverride: string = effectiveSearchQuery
-    ): FetchItemsParams => {
-      const params: FetchItemsParams = {
-        watchlist_id: selectedWatchlistId ?? undefined,
-        source_id: selectedSourceId ?? undefined,
-        status: statusFilter === "all" ? undefined : statusFilter,
-        sort: toServerItemSortMode(sortMode),
-        include_alert_summary: true,
-        q: queryOverride || undefined,
-        ...overrides
-      }
-
-      if (smartFilter === "today") {
-        params.since = startOfTodayIso()
-      } else if (smartFilter === "todayUnread") {
-        params.since = startOfTodayIso()
-        params.reviewed = false
-      } else if (smartFilter === "unread") {
-        params.reviewed = false
-      } else if (smartFilter === "reviewed") {
-        params.reviewed = true
-      } else if (smartFilter === "queued") {
-        params.queued_for_briefing = true
-        params.run_id = queueRunFilter ?? undefined
-      } else if (smartFilter === "alertMatches") {
-        params.has_alert = true
-      }
-
-      return params
-    },
-    [effectiveSearchQuery, queueRunFilter, selectedSourceId, selectedWatchlistId, smartFilter, sortMode, statusFilter]
-  )
-
-  const loadSources = useCallback(async () => {
-    const requestToken = sourcesRequestTokenRef.current + 1
-    sourcesRequestTokenRef.current = requestToken
-    setSourcesLoading(true)
-    try {
-      const loaded: WatchlistSource[] = []
-      let sourceTotal = 0
-      let page = 1
-
-      while (loaded.length < SOURCE_LOAD_MAX_ITEMS) {
-        const response = await fetchWatchlistSources({
-          watchlist_id: selectedWatchlistId ?? undefined,
-          page,
-          size: SOURCE_LOAD_PAGE_SIZE
-        })
-        if (requestToken !== sourcesRequestTokenRef.current) return
-        const batch = Array.isArray(response.items) ? response.items : []
-        if (page === 1) {
-          sourceTotal = Number(response.total || batch.length)
-        }
-        loaded.push(...batch)
-        if (
-          batch.length < SOURCE_LOAD_PAGE_SIZE ||
-          loaded.length >= (response.total || 0)
-        ) {
-          break
-        }
-        page += 1
-      }
-
-      if (requestToken !== sourcesRequestTokenRef.current) return
-      const capped = loaded.slice(0, SOURCE_LOAD_MAX_ITEMS)
-      setSources(capped)
-      setSourcesLoaded(true)
-      const normalizedTotal = sourceTotal > 0 ? sourceTotal : capped.length
-      setSourcesCappedAtLimit(normalizedTotal > SOURCE_LOAD_MAX_ITEMS)
-    } catch (error) {
-      if (requestToken !== sourcesRequestTokenRef.current) return
-      console.error("Failed to load watchlist sources:", error)
-      message.error(t("watchlists:items.sourcesError", "Failed to load sources"))
-      setSourcesCappedAtLimit(false)
-    } finally {
-      if (requestToken !== sourcesRequestTokenRef.current) return
-      setSourcesLoading(false)
-    }
-  }, [selectedWatchlistId, t])
-
-  const loadRuns = useCallback(async () => {
-    setRunsLoading(true)
-    try {
-      const response = await fetchWatchlistRuns({
-        watchlist_id: selectedWatchlistId ?? undefined,
-        page: 1,
-        size: 200
-      })
-      setRuns(Array.isArray(response.items) ? response.items : [])
-    } catch (error) {
-      console.error("Failed to load watchlist runs:", error)
-      setRuns([])
-    } finally {
-      setRunsLoading(false)
-    }
-  }, [selectedWatchlistId])
-
   const expandVisibleSourcesIfNeeded = useCallback(() => {
     const listElement = sourceListRef.current
     if (!listElement) return
@@ -713,133 +713,41 @@ export const ItemsTab: React.FC = () => {
     )
   }, [hasCollapsedSources, orderedSources.length])
 
-  const loadItems = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
-    const requestToken = itemsRequestTokenRef.current + 1
-    itemsRequestTokenRef.current = requestToken
-    if (!silent) setItemsLoading(true)
-    try {
-      const response = await fetchScrapedItems(
-        buildBaseFilterParams({
-          page: itemsPage,
-          size: itemsPageSize
-        })
-      )
-      if (requestToken !== itemsRequestTokenRef.current) return
-      const nextItems = Array.isArray(response.items) ? response.items : []
-      setItems(nextItems)
-      setItemsTotal(response.total || nextItems.length)
-      setSelectedItemId((prev) => resolveSelectedItemId(prev, nextItems))
-    } catch (error) {
-      if (requestToken !== itemsRequestTokenRef.current) return
-      console.error("Failed to load watchlist items:", error)
-      if (!silent) {
-        message.error(t("watchlists:items.fetchError", "Failed to load updates"))
-        setItems([])
-        setItemsTotal(0)
-        setSelectedItemId(null)
-      }
-    } finally {
-      if (requestToken !== itemsRequestTokenRef.current) return
-      if (!silent) setItemsLoading(false)
-    }
-  }, [buildBaseFilterParams, itemsPage, itemsPageSize, t])
-
-  const loadSmartCounts = useCallback(async () => {
-    const requestToken = smartCountsRequestTokenRef.current + 1
-    smartCountsRequestTokenRef.current = requestToken
-    const cacheKey = [
-      selectedWatchlistId ?? "all-watchlists",
-      selectedSourceId ?? "all",
-      statusFilter,
-      queueRunFilter ?? "all-runs",
-      effectiveSearchQuery.trim().toLowerCase()
-    ].join("|")
-    const cached = smartCountsCacheRef.current[cacheKey]
-    if (cached && Date.now() - cached.cachedAt < SMART_COUNTS_CACHE_TTL_MS) {
-      setSmartCounts(cached.counts)
-      return
-    }
-    try {
-      const base = {
-        watchlist_id: selectedWatchlistId ?? undefined,
-        source_id: selectedSourceId ?? undefined,
-        status: statusFilter === "all" ? undefined : statusFilter,
-        q: effectiveSearchQuery || undefined,
-        queue_run_id: queueRunFilter ?? undefined
-      }
-      const [counts, alertCounts] = await Promise.all([
-        fetchScrapedItemSmartCounts(base),
-        fetchScrapedItemSmartCounts({
-          ...base,
-          has_alert: true
-        })
-      ])
-
-      if (requestToken !== smartCountsRequestTokenRef.current) return
-      const nextCounts = {
-        all: Number(counts.all || 0),
-        today: Number(counts.today || 0),
-        todayUnread: Number(counts.today_unread || 0),
-        unread: Number(counts.unread || 0),
-        reviewed: Number(counts.reviewed || 0),
-        queued: Number(counts.queued || 0),
-        alertMatches: Number(alertCounts.all || 0)
-      }
-      setSmartCounts(nextCounts)
-      smartCountsCacheRef.current[cacheKey] = {
-        counts: nextCounts,
-        cachedAt: Date.now()
-      }
-    } catch (error) {
-      if (requestToken !== smartCountsRequestTokenRef.current) return
-      console.error("Failed to load smart feed counts:", error)
-    }
-  }, [effectiveSearchQuery, queueRunFilter, selectedSourceId, selectedWatchlistId, statusFilter])
-
-  const invalidateSmartCountsCache = useCallback(() => {
-    smartCountsCacheRef.current = {}
-  }, [])
-
   const refreshItemsView = useCallback(() => {
-    void loadSources()
-    void loadItems()
-    void loadSmartCounts()
-  }, [loadItems, loadSmartCounts, loadSources])
+    void reloadSources()
+    void reloadItems().then(({ data, isError }) => {
+      if (isError && data) message.error(t("watchlists:items.fetchError", "Failed to load updates"))
+    })
+    if (smartCountsStale) void reloadSmartCounts()
+  }, [reloadItems, reloadSmartCounts, reloadSources, smartCountsStale, t])
 
   useEffect(() => {
-    void loadSources()
-  }, [loadSources])
+    if (!sourcesQuery.error) return
+    console.error("Failed to load watchlist sources:", sourcesQuery.error)
+    message.error(t("watchlists:items.sourcesError", "Failed to load sources"))
+  }, [sourcesQuery.error, t])
 
   useEffect(() => {
-    void loadRuns()
-  }, [loadRuns])
-
-  useEffect(() => {
-    void loadItems()
-  }, [loadItems])
-
-  // Auto-refresh items every 30 seconds to pick up new content from runs
-  useEffect(() => {
-    let pollInFlight = false
-    const interval = setInterval(() => {
-      if (pollInFlight || document.visibilityState !== "visible") return
-      pollInFlight = true
-      void Promise.all([
-        loadItems({ silent: true }),
-        loadSmartCounts()
-      ]).finally(() => {
-        pollInFlight = false
-      })
-    }, 30_000)
-    return () => {
-      clearInterval(interval)
-      pollInFlight = false
+    if (!itemsQuery.error) return
+    console.error("Failed to load watchlist items:", itemsQuery.error)
+    if (!itemsQuery.data) {
+      message.error(t("watchlists:items.fetchError", "Failed to load updates"))
     }
-  }, [loadItems, loadSmartCounts])
+  }, [itemsQuery.data, itemsQuery.error, t])
 
   useEffect(() => {
-    void loadSmartCounts()
-  }, [loadSmartCounts])
+    if (runsQuery.error) console.error("Failed to load watchlist runs:", runsQuery.error)
+  }, [runsQuery.error])
+
+  useEffect(() => {
+    if (smartCountsQuery.error) console.error("Failed to load smart feed counts:", smartCountsQuery.error)
+  }, [smartCountsQuery.error])
+
+  useEffect(() => {
+    if (!savedViewsQuery.error) return
+    console.error("Failed to load watchlist item saved views:", savedViewsQuery.error)
+    message.error(t("watchlists:items.savedViews.loadError", "Failed to load saved views."))
+  }, [savedViewsQuery.error, t])
 
   useEffect(() => {
     setVisibleSourceCount((currentCount) => {
@@ -868,9 +776,9 @@ export const ItemsTab: React.FC = () => {
     if (selectedWatchlistId != null) return
     persistItemsViewPresets(
       typeof window !== "undefined" ? window.localStorage : undefined,
-      viewPresets
+      localViewPresets
     )
-  }, [selectedWatchlistId, viewPresets])
+  }, [localViewPresets, selectedWatchlistId])
 
   useEffect(() => {
     persistItemsSortMode(
@@ -925,12 +833,13 @@ export const ItemsTab: React.FC = () => {
   }, [sortedItems])
 
   useEffect(() => {
+    if (itemsLoading) return
     setSelectedItemId((prev) => resolveSelectedItemId(prev, sortedItems))
-  }, [sortedItems])
+  }, [itemsLoading, sortedItems])
 
   useEffect(() => {
     setSelectedItemIds((prev) => (prev.length === 0 ? prev : []))
-  }, [selectedSourceId, smartFilter, statusFilter, searchQuery, itemsPage])
+  }, [selectedWatchlistId, selectedSourceId, smartFilter, statusFilter, searchQuery, itemsPage])
 
   useEffect(() => {
     if (selectedRunId && queueRunFilter == null) {
@@ -984,37 +893,27 @@ export const ItemsTab: React.FC = () => {
     setUpdatingItemId(item.id)
     try {
       const updated = await updateScrapedItem(item.id, { reviewed: !item.reviewed })
-      setItems((prev) =>
-        prev.map((entry) => (entry.id === updated.id ? updated : entry))
-      )
       message.success(
         updated.reviewed
           ? t("watchlists:items.markedReviewed", "Marked as reviewed")
           : t("watchlists:items.markedUnreviewed", "Marked as unreviewed")
       )
-      if (requiresReviewedRefresh) {
-        void loadItems()
-      }
-      invalidateSmartCountsCache()
-      void loadSmartCounts()
+      void invalidateWatchlists("items", "items-counts", "overview")
     } catch (error) {
       console.error("Failed to update watchlist item:", error)
       message.error(t("watchlists:items.updateError", "Failed to update item"))
     } finally {
       setUpdatingItemId(null)
     }
-  }, [invalidateSmartCountsCache, loadItems, loadSmartCounts, requiresReviewedRefresh, t])
+  }, [invalidateWatchlists, t])
 
   const handleToggleBriefingQueue = useCallback(async (item: ScrapedItem) => {
     const isQueued = Boolean(item.queued_for_briefing)
     setUpdatingItemId(item.id)
     try {
-      const updated = await updateScrapedItem(item.id, {
+      await updateScrapedItem(item.id, {
         queued_for_briefing: !isQueued
       })
-      setItems((prev) =>
-        prev.map((entry) => (entry.id === updated.id ? updated : entry))
-      )
       message.success(
         !isQueued
           ? t(
@@ -1026,11 +925,7 @@ export const ItemsTab: React.FC = () => {
               "Removed from the briefing queue."
             )
       )
-      if (smartFilter === "queued") {
-        await loadItems()
-      }
-      invalidateSmartCountsCache()
-      await loadSmartCounts()
+      void invalidateWatchlists("items", "items-counts", "overview")
     } catch (error) {
       console.error("Failed to update watchlist item briefing queue:", error)
       message.error(
@@ -1042,7 +937,7 @@ export const ItemsTab: React.FC = () => {
     } finally {
       setUpdatingItemId(null)
     }
-  }, [loadItems, loadSmartCounts, smartFilter, t])
+  }, [invalidateWatchlists, t])
 
   const handleGenerateReportFromQueue = useCallback(async () => {
     const runId = queueRunFilter
@@ -1102,6 +997,8 @@ export const ItemsTab: React.FC = () => {
         )
       )
 
+      await invalidateWatchlists("outputs")
+      void invalidateWatchlists("runs", "overview")
       setOutputsRunFilter(runId)
       const jobId = queuedItems[0]?.job_id
       if (typeof jobId === "number") {
@@ -1119,7 +1016,7 @@ export const ItemsTab: React.FC = () => {
     } finally {
       setQueueGenerating(false)
     }
-  }, [queueRunFilter, setActiveTab, setOutputsJobFilter, setOutputsRunFilter, t])
+  }, [invalidateWatchlists, queueRunFilter, setActiveTab, setOutputsJobFilter, setOutputsRunFilter, t])
 
   const pageItemIds = useMemo(() => sortedItems.map((item) => item.id), [sortedItems])
 
@@ -1192,17 +1089,6 @@ export const ItemsTab: React.FC = () => {
       })),
     [viewPresets]
   )
-  const normalizeViewPresets = useCallback(
-    (presets: PersistedItemsViewPreset[]): ItemsViewPreset[] =>
-      provisionItemsViewPresets(presets, defaultViewPresets).map((preset) => ({
-        ...preset,
-        smartFilter: normalizeSmartFilter(preset.smartFilter),
-        statusFilter: normalizeStatusFilter(preset.statusFilter),
-        sortMode: normalizeReaderSortMode(preset.sortMode)
-      })),
-    [defaultViewPresets]
-  )
-
   const buildCurrentServerViewPayload = useCallback(
     (name: string) =>
       buildServerItemViewCreatePayload(
@@ -1217,53 +1103,6 @@ export const ItemsTab: React.FC = () => {
       ),
     [searchQuery, selectedSourceId, smartFilter, sortMode, statusFilter]
   )
-
-  useEffect(() => {
-    let cancelled = false
-
-    const loadServerSavedViews = async () => {
-      const storage = typeof window !== "undefined" ? window.localStorage : undefined
-      const migratable = getMigratableItemsViewPresets(storage).map((preset) => ({
-        ...preset,
-        smartFilter: normalizeSmartFilter(preset.smartFilter),
-        statusFilter: normalizeStatusFilter(preset.statusFilter),
-        sortMode: normalizeReaderSortMode(preset.sortMode)
-      }))
-
-      if (selectedWatchlistId == null) {
-        setLegacyViewPresets([])
-        setViewPresets(
-          normalizeViewPresets(loadPersistedItemsViewPresets(storage))
-        )
-        return
-      }
-
-      setViewPresetsLoading(true)
-      try {
-        const result = await fetchWatchlistItemViews(selectedWatchlistId)
-        if (cancelled) return
-        const serverPresets = (Array.isArray(result.items) ? result.items : [])
-          .map(toItemsViewPresetFromServer)
-        setLegacyViewPresets(migratable)
-        setViewPresets(normalizeViewPresets(serverPresets))
-      } catch (error) {
-        if (cancelled) return
-        console.error("Failed to load watchlist item saved views:", error)
-        setLegacyViewPresets(migratable)
-        setViewPresets(normalizeViewPresets(loadPersistedItemsViewPresets(storage)))
-        message.error(
-          t("watchlists:items.savedViews.loadError", "Failed to load saved views.")
-        )
-      } finally {
-        if (!cancelled) setViewPresetsLoading(false)
-      }
-    }
-
-    void loadServerSavedViews()
-    return () => {
-      cancelled = true
-    }
-  }, [normalizeViewPresets, selectedWatchlistId, t])
 
   const activePresetIsSystem = useMemo(
     () => isSystemItemsViewPresetId(activePresetId),
@@ -1323,25 +1162,6 @@ export const ItemsTab: React.FC = () => {
     return Number(response.total || 0)
   }, [])
 
-  const applyBatchReviewResult = useCallback((
-    result: ScrapedItemBatchUpdateResponse,
-    fallbackIds: number[]
-  ) => {
-    const changedIds = Array.isArray(result.changed_ids)
-      ? result.changed_ids
-      : fallbackIds
-    if (changedIds.length === 0) return
-    const changedIdSet = new Set(changedIds)
-    setItems((prev) =>
-      prev.map((item) =>
-        changedIdSet.has(item.id)
-          ? { ...item, reviewed: true }
-          : item
-      )
-    )
-    setSelectedItemIds((prev) => prev.filter((id) => !changedIdSet.has(id)))
-  }, [])
-
   const markItemsReviewed = useCallback(async (
     itemIds: number[] | null,
     scope: BatchReviewScope,
@@ -1397,7 +1217,10 @@ export const ItemsTab: React.FC = () => {
             }
       )
 
-      applyBatchReviewResult(result, uniqueIds)
+      const changedIds = new Set(Array.isArray(result.changed_ids) ? result.changed_ids : uniqueIds)
+      if (changedIds.size > 0) {
+        setSelectedItemIds((prev) => prev.filter((id) => !changedIds.has(id)))
+      }
 
       const cappedOrIncomplete = result.capped === true || result.exhausted === false
       const finalPhase: BatchReviewPhase =
@@ -1471,13 +1294,7 @@ export const ItemsTab: React.FC = () => {
         )
       }
 
-      if (requiresReviewedRefresh) {
-        invalidateSmartCountsCache()
-        await Promise.all([loadItems(), loadSmartCounts()])
-      } else {
-        invalidateSmartCountsCache()
-        await loadSmartCounts()
-      }
+      void invalidateWatchlists("items", "items-counts", "overview")
     } catch (error) {
       console.error("Failed to apply batch reviewed update:", error)
       const scopeLabel = getBatchScopeLabel(scope, totalEstimate)
@@ -1499,13 +1316,9 @@ export const ItemsTab: React.FC = () => {
       setBatchReviewScope(null)
     }
   }, [
-    applyBatchReviewResult,
     buildAllFilteredBatchParams,
     getBatchScopeLabel,
-    invalidateSmartCountsCache,
-    loadItems,
-    loadSmartCounts,
-    requiresReviewedRefresh,
+    invalidateWatchlists,
     selectedWatchlistId,
     t
   ])
@@ -1714,15 +1527,8 @@ export const ItemsTab: React.FC = () => {
             preset.serverId,
             payload
           )
-          const nextPreset = toItemsViewPresetFromServer(updated)
-          setViewPresets((prev) =>
-            normalizeViewPresets(
-              prev.map((candidate) =>
-                candidate.id === activePresetId ? nextPreset : candidate
-              )
-            )
-          )
-          setActivePresetId(nextPreset.id)
+          await invalidateWatchlists("saved-views")
+          setActivePresetId(toItemsViewPresetFromServer(updated).id)
           message.success(t("watchlists:items.savedViews.updated", "Saved view updated."))
         } catch (error) {
           console.error("Failed to update item saved view:", error)
@@ -1733,20 +1539,11 @@ export const ItemsTab: React.FC = () => {
         return
       }
 
-      setViewPresets((prev) =>
-        normalizeViewPresets(
-          prev.map((candidate) =>
-            candidate.id === activePresetId
-              ? {
-                  ...candidate,
-                  sourceId: selectedSourceId,
-                  smartFilter,
-                  statusFilter,
-                  sortMode,
-                  searchQuery
-                }
-              : candidate
-          )
+      setLocalViewPresets((prev) =>
+        prev.map((candidate) =>
+          candidate.id === activePresetId
+            ? { ...candidate, sourceId: selectedSourceId, smartFilter, statusFilter, sortMode, searchQuery }
+            : candidate
         )
       )
       message.success(t("watchlists:items.savedViews.updated", "Saved view updated."))
@@ -1761,7 +1558,7 @@ export const ItemsTab: React.FC = () => {
   }, [
     activePresetId,
     buildCurrentServerViewPayload,
-    normalizeViewPresets,
+    invalidateWatchlists,
     searchQuery,
     selectedSourceId,
     selectedWatchlistId,
@@ -1809,7 +1606,7 @@ export const ItemsTab: React.FC = () => {
           buildCurrentServerViewPayload(trimmedName)
         )
         const createdPreset = toItemsViewPresetFromServer(created)
-        setViewPresets((prev) => normalizeViewPresets([createdPreset, ...prev]))
+        await invalidateWatchlists("saved-views")
         setActivePresetId(createdPreset.id)
         setSaveViewModalOpen(false)
         setNewViewName("")
@@ -1832,15 +1629,15 @@ export const ItemsTab: React.FC = () => {
       sortMode,
       searchQuery
     }
-    setViewPresets((prev) => normalizeViewPresets([newPreset, ...prev]))
+    setLocalViewPresets((prev) => [newPreset, ...prev])
     setActivePresetId(newPreset.id)
     setSaveViewModalOpen(false)
     setNewViewName("")
     message.success(t("watchlists:items.savedViews.created", "Saved view created."))
   }, [
     buildCurrentServerViewPayload,
+    invalidateWatchlists,
     newViewName,
-    normalizeViewPresets,
     searchQuery,
     selectedSourceId,
     selectedWatchlistId,
@@ -1868,17 +1665,15 @@ export const ItemsTab: React.FC = () => {
       onOk: async () => {
         if (selectedWatchlistId != null && typeof preset.serverId === "number") {
           await deleteWatchlistItemView(selectedWatchlistId, preset.serverId)
+          await invalidateWatchlists("saved-views")
+        } else {
+          setLocalViewPresets((prev) => prev.filter((candidate) => candidate.id !== activePresetId))
         }
-        setViewPresets((prev) =>
-          normalizeViewPresets(
-            prev.filter((candidate) => candidate.id !== activePresetId)
-          )
-        )
         setActivePresetId((prev) => (prev === activePresetId ? null : prev))
         message.success(t("watchlists:items.savedViews.deleted", "Saved view deleted."))
       }
     })
-  }, [activePresetId, normalizeViewPresets, selectedWatchlistId, t, viewPresets])
+  }, [activePresetId, invalidateWatchlists, selectedWatchlistId, t, viewPresets])
 
   const importLegacySavedViews = useCallback(async () => {
     if (selectedWatchlistId == null || legacyViewPresets.length === 0) return
@@ -1892,25 +1687,20 @@ export const ItemsTab: React.FC = () => {
           )
         )
       )
-      const createdViews = results
-        .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof createWatchlistItemView>>> =>
-          result.status === "fulfilled"
-        )
-        .map((result) => result.value)
-      const failedCount = results.length - createdViews.length
-      const importedPresets = createdViews.map(toItemsViewPresetFromServer)
-      setViewPresets((prev) => normalizeViewPresets([...importedPresets, ...prev]))
-      const importedIds = new Set(
-        legacyViewPresets
-          .filter((_, index) => results[index]?.status === "fulfilled")
-          .map((preset) => preset.id)
-      )
-      setLegacyViewPresets((prev) => prev.filter((preset) => !importedIds.has(preset.id)))
-      if (importedPresets.length > 0) {
+      const importedIds = legacyViewPresets
+        .filter((_, index) => results[index]?.status === "fulfilled")
+        .map((preset) => preset.id)
+      const failedCount = results.length - importedIds.length
+      if (importedIds.length > 0) {
+        setImportedLocalViewIds((prev) => ({
+          ...prev,
+          [selectedWatchlistId]: [...(prev[selectedWatchlistId] ?? []), ...importedIds]
+        }))
+        await invalidateWatchlists("saved-views")
         message.success(
           t("watchlists:items.savedViews.imported", "Imported {{count}} saved view{{plural}}.", {
-            count: importedPresets.length,
-            plural: importedPresets.length === 1 ? "" : "s"
+            count: importedIds.length,
+            plural: importedIds.length === 1 ? "" : "s"
           })
         )
       }
@@ -1934,7 +1724,7 @@ export const ItemsTab: React.FC = () => {
     } finally {
       setImportingLocalViews(false)
     }
-  }, [legacyViewPresets, normalizeViewPresets, selectedWatchlistId, t])
+  }, [invalidateWatchlists, legacyViewPresets, selectedWatchlistId, t])
 
   const moveSelectionBy = useCallback((offset: number) => {
     if (sortedItems.length === 0) return
@@ -2266,7 +2056,7 @@ export const ItemsTab: React.FC = () => {
           <Button
             icon={<RefreshCw className="h-4 w-4" />}
             onClick={refreshItemsView}
-            loading={sourcesLoading || itemsLoading}
+            loading={sourcesQuery.isFetching || itemsQuery.isFetching}
           >
             {t("common:refresh", "Refresh")}
           </Button>

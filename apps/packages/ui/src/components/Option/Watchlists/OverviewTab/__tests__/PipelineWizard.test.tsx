@@ -502,8 +502,12 @@ describe("PipelineWizard", () => {
       )
     })
     expect(inDialog().getByText("2 ready, 1 filtered from 3 items.")).toBeInTheDocument()
-    expect(inDialog().getByText("Ready item")).toBeInTheDocument()
-    expect(inDialog().getByText("Filtered item")).toBeInTheDocument()
+    const sample = inDialog().getByRole("list", { name: "Source test sample" })
+    const [readyItem, filteredItem] = within(sample).getAllByRole("listitem")
+    expect(within(readyItem).getByText("Ready item")).toBeInTheDocument()
+    expect(within(readyItem).getByText("Ready")).toBeInTheDocument()
+    expect(within(filteredItem).getByText("Filtered item")).toBeInTheDocument()
+    expect(within(filteredItem).getByText("Filtered")).toBeInTheDocument()
   })
 
   it("keeps the draft after server failure and distinguishes explicit cancellation", async () => {

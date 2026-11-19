@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { TemplatesTab } from "../TemplatesTab"
 
@@ -201,9 +202,7 @@ describe("TemplatesTab constrained management", () => {
       description: "HTML digest",
       format: "html"
     })
-    mocks.storeStateRef.current = baseState({
-      templates: [markdownTemplate, htmlTemplate]
-    })
+    mocks.fetchWatchlistTemplatesMock.mockResolvedValueOnce({ items: [markdownTemplate, htmlTemplate] })
 
     render(<TemplatesTab />)
 

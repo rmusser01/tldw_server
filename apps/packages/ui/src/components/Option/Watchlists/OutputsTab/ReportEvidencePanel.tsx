@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react"
+import React, { useMemo } from "react"
 import { Empty, Spin, Table, Tag, Tooltip } from "antd"
 import type { ColumnsType } from "antd/es/table"
 import { useTranslation } from "react-i18next"
+import { useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { Alert } from "@/components/ui"
 import { getWatchlistOutputEvidence } from "@/services/watchlists"
 import { safeExternalUrl } from "@/utils/safe-external-url"
@@ -42,34 +43,14 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
   const { t } = useTranslation(["watchlists", "common"])
   const { isConstrained } = useWatchlistsViewport()
   const outputMetadataLabels = useMemo(() => createOutputMetadataLabels(t), [t])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [response, setResponse] = useState<WatchlistOutputEvidenceResponse | null>(
-    evidenceResponse ?? null
-  )
-
-  const loadEvidence = useCallback(async () => {
-    if (evidenceResponse) {
-      setResponse(evidenceResponse)
-      setError(null)
-      return
-    }
-    setLoading(true)
-    setError(null)
-    try {
-      const next = await getWatchlistOutputEvidence(outputId)
-      setResponse(next)
-    } catch (err) {
-      console.error("Failed to load Watchlist report evidence:", err)
-      setError(err instanceof Error ? err.message : "evidence_unavailable")
-    } finally {
-      setLoading(false)
-    }
-  }, [evidenceResponse, outputId])
-
-  useEffect(() => {
-    loadEvidence()
-  }, [loadEvidence])
+  const evidenceQuery = useWatchlistsQuery("output-evidence", outputId, ({ signal }) => getWatchlistOutputEvidence(outputId, signal), {
+    enabled: !evidenceResponse
+  })
+  const response = evidenceResponse ?? evidenceQuery.data
+  const loading = evidenceQuery.isFetching
+  const error = !evidenceResponse && evidenceQuery.error
+    ? evidenceQuery.error.message || "evidence_unavailable"
+    : null
 
   const snapshot = response?.snapshot ?? null
   const readiness = response?.readiness ?? snapshot?.readiness ?? null
@@ -254,7 +235,7 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
         title={t("watchlists:reports.evidence.errorTitle", "Evidence snapshot unavailable")}
         action={{
           label: t("common:retry", "Retry"),
-          onClick: loadEvidence
+          onClick: () => void evidenceQuery.refetch()
         }}
       >
         {error}

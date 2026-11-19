@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { OverviewTab } from "../OverviewTab"
 
@@ -301,17 +302,17 @@ describe("OverviewTab alert and health summary", () => {
     vi.useFakeTimers()
     try {
       render(<OverviewTab />)
-      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
       expect(screen.getByRole("heading", { name: "Latest briefing" })).toBeVisible()
       expect(screen.getAllByTestId("watchlists-overview-live-polite")).toHaveLength(1)
       expect(screen.getAllByTestId("watchlists-overview-live-assertive")).toHaveLength(1)
 
-      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_010) })
       expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent(
         "Signal Check is ready. Audio and show notes are available."
       )
 
-      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_010) })
       expect(mocks.fetchOverviewMock).toHaveBeenCalledTimes(3)
       expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")
     } finally {
@@ -342,12 +343,12 @@ describe("OverviewTab alert and health summary", () => {
     vi.useFakeTimers()
     try {
       render(<OverviewTab />)
-      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
       fireEvent.click(screen.getByRole("button", { name: "Open report for Signal Check" }))
       expect(mocks.setActiveTabMock).toHaveBeenCalledWith("outputs")
       expect(mocks.openOutputPreviewMock).toHaveBeenCalledWith(71)
 
-      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_010) })
       expect(mocks.fetchOverviewMock).toHaveBeenCalledTimes(2)
       expect(screen.queryByText("Failed to load overview")).not.toBeInTheDocument()
       expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent("")
@@ -415,7 +416,7 @@ describe("OverviewTab alert and health summary", () => {
     vi.useFakeTimers()
     try {
       render(<OverviewTab />)
-      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
       expect(screen.getByRole("heading", { name: "Latest briefing" })).toBeVisible()
       fireEvent.click(screen.getByRole("button", { name: "Test now: Signal Check" }))
       await act(async () => { await Promise.resolve(); await Promise.resolve() })
@@ -423,7 +424,7 @@ describe("OverviewTab alert and health summary", () => {
         "Test run queued. Progress will appear in the latest briefing."
       )
 
-      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_010) })
       expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent(
         "Signal Check is ready. The report is available."
       )
@@ -501,14 +502,14 @@ describe("OverviewTab alert and health summary", () => {
     vi.useFakeTimers()
     try {
       render(<OverviewTab />)
-      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
       fireEvent.click(screen.getByRole("button", { name: "Retry saving report for Old occurrence" }))
-      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
       expect(mocks.retryWatchlistBriefingStageMock).toHaveBeenCalledTimes(1)
       const retryOptions = mocks.retryWatchlistBriefingStageMock.mock.calls[0][2]
       expect(retryOptions.signal).toBeInstanceOf(AbortSignal)
 
-      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_010) })
       expect(screen.getByText("New occurrence")).toBeVisible()
       expect(retryOptions.signal.aborted).toBe(true)
 
@@ -558,15 +559,15 @@ describe("OverviewTab alert and health summary", () => {
     vi.useFakeTimers()
     try {
       const { rerender } = render(<OverviewTab />)
-      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
       expect(screen.getByText("First Watchlist")).toBeVisible()
-      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_010) })
       expect(screen.getByTestId("watchlists-overview-live-polite"))
         .toHaveTextContent("First Watchlist is ready")
 
       mocks.selectedWatchlistId = 99
       rerender(<OverviewTab />)
-      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
       expect(screen.getByText("Second Watchlist")).toBeVisible()
       expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent("")
       expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")

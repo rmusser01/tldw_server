@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react"
 import { Button, Input, Modal, Select } from "antd"
 import { useTranslation } from "react-i18next"
+import { useAssertCurrentWatchlistsAccount } from "@/hooks/useWatchlistsQuery"
 import { Alert } from "@/components/ui/primitives"
 import {
   getWatchlistRunBriefing,
@@ -91,6 +92,7 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
   onComplete
 }) => {
   const { t } = useTranslation("watchlists")
+  const assertCurrentAccount = useAssertCurrentWatchlistsAccount()
   const [values, setValues] = useState<WatchlistSetupValues>(() => initialValues())
   const [watchlist, setWatchlist] = useState<WatchlistContainer | null>(null)
   const [pipelineDraft, setPipelineDraft] = useState<Partial<PipelineWizardDraft>>()
@@ -126,7 +128,9 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
     setBusy(true)
     setError(null)
     try {
+      assertCurrentAccount()
       const created = await onCreateWatchlist(buildWatchlistSetupPlan(values).watchlist)
+      assertCurrentAccount()
       setWatchlist(created)
       setPipelineDraft({
         sourceMode: "new",
@@ -151,6 +155,7 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
     requestedJobId?: number,
     testOptions?: PipelineWizardTestOptions
   ) => {
+    assertCurrentAccount(testOptions?.signal)
     if (!watchlist) throw new Error("Watchlist container is missing.")
     const signature = getPipelineWizardSourceSignature(draft)
     const sessionKey = watchlist.id
@@ -189,6 +194,7 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
         sessionKey
       }
     }
+    assertCurrentAccount(testOptions?.signal)
     const pipeline = toBriefingPipelineDraft(draft, sourceIds)
     const jobPayload = testOptions
       ? toPipelineTestJobCreatePayload(pipeline, testOptions)
@@ -215,6 +221,7 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
     onProgress: Parameters<typeof waitForPipelineWizardBriefing>[2]
   ) => {
     const persisted = await persistInactive(draft, options.jobId, options)
+    assertCurrentAccount(options.signal)
     const run = await triggerWatchlistRun(persisted.job.id)
     const briefing = await waitForPipelineWizardBriefing(
       run.id,
@@ -250,7 +257,9 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
   const activatePipeline = async (draft: PipelineWizardDraft, options: { jobId?: number }) => {
     if (!watchlist) throw new Error("Watchlist container is missing.")
     const persisted = await persistInactive(draft, options.jobId)
+    assertCurrentAccount()
     const activeJob = await onUpdateJob(persisted.job.id, { active: true })
+    assertCurrentAccount()
     jobRef.current = activeJob
     onComplete({
       destination: "jobs",

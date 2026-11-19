@@ -1,5 +1,6 @@
 import { notifyManager, QueryClient } from "@tanstack/react-query"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { getWatchlistsAccountGeneration, watchWatchlistsAccountChanges } from "@/services/watchlists-account-boundary"
 
 const RATE_LIMIT_PATTERN = /(429|rate limit|too many requests)/i
 const MAX_QUERY_RETRIES = 1
@@ -27,6 +28,13 @@ const buildQueryClient = (): QueryClient =>
 
 let singleton: QueryClient | null = null
 
+const stopWatchingWatchlistsAccount = watchWatchlistsAccountChanges(() => {
+  singleton?.removeQueries({
+    queryKey: ["watchlists"],
+    predicate: ({ queryKey }) => queryKey[1] !== getWatchlistsAccountGeneration()
+  })
+})
+
 const stopWatchingReadinessAccount = watchChatAccountChanges(invalidated => {
   if (!invalidated || !singleton) return
   const client = singleton
@@ -44,6 +52,7 @@ const stopWatchingReadinessAccount = watchChatAccountChanges(invalidated => {
 })
 const queryClientHot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
 queryClientHot?.dispose(stopWatchingReadinessAccount)
+queryClientHot?.dispose(stopWatchingWatchlistsAccount)
 
 export const getQueryClient = (): QueryClient => {
   if (!singleton) {
