@@ -68,6 +68,9 @@
   "header_openSettingsAria": {
     "message": "Open settings"
   },
+  "header_openFlashcards": {
+    "message": "Flashcards"
+  },
   "header_tempPill": {
     "message": "Temp"
   },

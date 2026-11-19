@@ -31,6 +31,7 @@
     "openHistoryAria": "Open history",
     "openModelSettingsAria": "Open model settings",
     "openSettingsAria": "Open settings",
+    "openFlashcards": "Flashcards",
     "openFullChatWebui": "Open full chat in WebUI",
     "openFullChatWebuiDescription": "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context.",
     "openFullChatWebuiRouteOnlyDescription": "Opens /chat in a new tab without transferring the current draft or page context.",

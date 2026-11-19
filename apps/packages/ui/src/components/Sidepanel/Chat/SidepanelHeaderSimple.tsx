@@ -3,7 +3,7 @@ import logoImage from "@/assets/icon.png"
 import { useMessage } from "@/hooks/useMessage"
 import { Link } from "react-router-dom"
 import { Tooltip } from "antd"
-import { Bot, CogIcon, ExternalLink, LayoutDashboard, Menu, Pencil, Volume2 } from "lucide-react"
+import { Bot, CogIcon, ExternalLink, Layers, Menu, Pencil, Volume2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import React from "react"
 import { StatusDot } from "./StatusDot"
@@ -215,7 +215,7 @@ export const SidepanelHeaderSimple = ({
     openFallback()
   }, [chatReady, historySelection, notification, onOpenChatInWebUi, t, usesExtensionExpansion])
 
-  const openDashboard = React.useCallback(() => {
+  const openFlashcards = React.useCallback(() => {
     const url = browser.runtime.getURL("/options.html#/flashcards")
     if (browser.tabs?.create) {
       browser.tabs.create({ url }).catch(() => {
@@ -358,16 +358,17 @@ export const SidepanelHeaderSimple = ({
             </Link>
           </Tooltip>
         ) : null}
-        <Tooltip title={t("sidepanel:header.openDashboard", "Open dashboard")}>
+        {/* XS-12: named for what it opens, with the Flashcards nav icon. */}
+        <Tooltip title={t("sidepanel:header.openFlashcards", "Flashcards")}>
           <button
             type="button"
-            onClick={openDashboard}
-            aria-label={t("sidepanel:header.openDashboard", "Open dashboard")}
+            onClick={openFlashcards}
+            aria-label={t("sidepanel:header.openFlashcards", "Flashcards")}
             className={HEADER_ICON_CONTROL_CLASS}
-            title={t("sidepanel:header.openDashboard", "Open dashboard")}
-            data-testid="chat-open-dashboard"
+            title={t("sidepanel:header.openFlashcards", "Flashcards")}
+            data-testid="chat-open-flashcards"
           >
-            <LayoutDashboard className="size-4" aria-hidden="true" />
+            <Layers className="size-4" aria-hidden="true" />
           </button>
         </Tooltip>
         <Tooltip title={openFullChatDescription}>
