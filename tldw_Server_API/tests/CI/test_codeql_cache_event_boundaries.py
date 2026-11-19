@@ -23,6 +23,10 @@ PR_FIELDS = {
     "github.event.workflow_run.pull_requests[0].head.sha",
     "github.event.pull_request.head.sha",
 }
+EVENT_SHA_BRANCHES = {
+    "(github.event.pull_request.base.ref == 'main' && github.sha)",
+    "(inputs.qualification && github.sha)",
+}
 
 
 def test_backend_required_only_uses_direct_event_sources() -> None:
@@ -49,6 +53,8 @@ def non_pr_checkout_ref(expression: str, jobs: dict[str, Any], job: dict[str, An
     for field in fields:
         if field == "github.sha":
             return field
+        if field in EVENT_SHA_BRANCHES:
+            continue
         if field == "needs.admission.outputs.head_sha":
             assert " ".join(jobs["admission"]["if"].split()) == ADMISSION_GUARD
             needs = job.get("needs", [])
@@ -75,6 +81,8 @@ def test_cache_writing_events_checkout_the_event_commit(workflow_path: str, job_
     "expression",
     [
         "${{ inputs.head_sha || github.sha }}",
+        "${{ (inputs.qualification && inputs.head_sha) || github.sha }}",
+        "${{ (github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.sha) || github.sha }}",
         "${{ github.event.inputs.head_sha || github.sha }}",
         "${{ needs.unchecked.outputs.head_sha || github.sha }}",
         "${{ github.event.pull_request.head.sha }}",
