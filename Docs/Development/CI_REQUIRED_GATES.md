@@ -23,7 +23,7 @@ Roll out in this order:
 
 1. Keep `CI_TIERED_ENABLED` unset. Land the reviewed workflow change on `dev` through its regular PR checks and record a passing normal broad run for the baseline. Install the reviewed workflow changes on default `main` through a CI-only promotion. A main push can publish the rolling image after qualification, so handle that promotion under the normal release policy.
 2. Observe an actual scheduled dispatcher run and a successful broad nightly. Confirm unchanged-SHA deduplication and that a genuine failed nightly remains retryable. Qualify a full candidate at one SHA without invoking either publication workflow.
-3. Verify the `Server CI verdict` context on a regular `dev` PR and `Main PR release qualification` on a regular `main` PR. Add those exact observed Actions check contexts to the corresponding strict protection rules. Preserve every existing check and bypass setting. Verify missing, skipped, cancelled and failed expected work blocks qualification, and that promotion status comes from the PR event.
+3. Deploy the queue's active-rule support on `dev` and the CI failure wake workflow on default `main` before requiring the verdict. Verify the `Server CI verdict` context on a regular `dev` PR and `Main PR release qualification` on a regular `main` PR. Add those exact observed Actions check contexts to the corresponding strict protection rules. Preserve every existing check and bypass setting. Verify missing, skipped, cancelled and failed expected work blocks qualification, and that promotion status comes from the PR event.
 4. Recheck the live results and protections before setting `CI_TIERED_ENABLED=true`. Verify a mapped PR selects smoke and a risky or unknown change selects broad CI. Compare the observed duration to the same hosted baseline. Clear the variable to restore the original PR selection. The nightly and publication gates are independent of the variable.
 
 ## Required Check Names
@@ -337,7 +337,7 @@ Fork PRs and PRs opened by bots or apps are never queued and stay manual.
 - **All eight green:** checks the head against `dev` (the merge state can lag right after a merge) and waits for
   auto-merge. The merge pushes `dev`, which wakes the queue for the next PR.
 
-Non-required workflows (`ci.yml` and the rest) are not re-run on the rebased head: their held runs are deleted.
+The queue deletes held runs for supplemental workflows. It promotes `ci.yml` into the approval and retry list when an active `dev` ruleset requires `Server CI verdict`. The default-branch `Wake merge queue after server CI` workflow dispatches the existing queue kick after a same-repository PR CI failure or cancellation when this rule is active.
 
 ### Three details that surprise people
 
