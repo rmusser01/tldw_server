@@ -63,7 +63,7 @@ SHARED_KEYS: frozenset[str] = frozenset({
     "AUTH_MODE", "APP_MODE", "SINGLE_USER_API_KEY", "API_KEY", "JWT_SECRET_KEY", "DATABASE_URL", "REDIS_URL",
     "SINGLE_USER_FIXED_ID", "ACCESS_TOKEN_EXPIRE_MINUTES", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL",
 })
-MOVED_SHARED_KEYS: frozenset[str] = frozenset({"AUTH_MODE", "APP_MODE"})
+MOVED_SHARED_KEYS: frozenset[str] = frozenset({"AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"})
 
 RATCHET = _ceilings.Ratchet(
     baseline=Path(__file__).resolve().with_name("env_read_baseline.json"),

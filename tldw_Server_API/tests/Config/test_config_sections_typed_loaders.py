@@ -149,7 +149,7 @@ def test_load_config_sections_exposes_new_typed_sections(monkeypatch: pytest.Mon
     sections = load_config_sections(parser)
 
     assert sections.auth.mode == "multi_user"
-    assert sections.auth.single_user_fixed_id == 7
+    assert sections.auth.single_user_fixed_id == 1  # D1(g): config.txt no longer sets it
     assert sections.rag.vector_store_type == "faiss"
     assert sections.rag.default_llm_provider == "anthropic"
     assert sections.audio.default_tts_provider == "kokoro"

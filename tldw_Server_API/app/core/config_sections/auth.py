@@ -3,7 +3,10 @@ from __future__ import annotations
 import configparser
 import os
 from dataclasses import dataclass
+from functools import cache
 from typing import Mapping
+
+from loguru import logger
 
 from .precedence import Resolved, resolve
 from .types import ConfigParserLike
@@ -32,6 +35,35 @@ def auth_mode_env(env: Mapping[str, str] | None = None) -> str | None:
     return resolve(("AUTH_MODE",), env=env, blank_env=True).value
 
 
+def resolve_single_user_fixed_id(
+    config_parser: ConfigParserLike | None, env: Mapping[str, str] | None = None
+) -> Resolved:
+    """AuthNZ's and LazySettings' rule: env ``SINGLE_USER_FIXED_ID`` (blank kept), then ``1``.
+
+    ``[AuthNZ] single_user_fixed_id`` is not read (D1g); the raw text is never validated here.
+    """
+    return resolve(("SINGLE_USER_FIXED_ID",), config_parser=config_parser, env=env, default="1", blank_env=True)
+
+
+def single_user_fixed_id_env(env: Mapping[str, str] | None = None) -> str | None:
+    """The environment layer alone: the live ``SINGLE_USER_FIXED_ID`` text, blank kept, ``None`` when unset."""
+    return resolve(("SINGLE_USER_FIXED_ID",), env=env, blank_env=True).value
+
+
+@cache
+def _warn_fixed_id_ignored_once() -> None:
+    """Runs its body once per process (``cache``): ``[AuthNZ] single_user_fixed_id`` is ignored (D1g)."""
+    logger.warning(
+        "[AuthNZ] single_user_fixed_id in config.txt is ignored; set the SINGLE_USER_FIXED_ID "
+        "environment variable instead."
+    )
+
+
+def _warn_ignored_fixed_id(config_parser: ConfigParserLike) -> None:
+    if config_parser.get("AuthNZ", "single_user_fixed_id", fallback=None) is not None:
+        _warn_fixed_id_ignored_once()
+
+
 def load_auth_config(
     config_parser: ConfigParserLike | None = None,
     env: Mapping[str, str] | None = None,
@@ -53,10 +85,8 @@ def load_auth_config(
         app_mode = str(resolve(("APP_MODE",), env=env_map, default="single", blank_env=True).value).strip().lower()
         mode = "multi_user" if app_mode == "multi" else "single_user"
 
-    single_user_raw = (
-        resolve(("SINGLE_USER_FIXED_ID",), env=env_map, blank_env=True).value
-        or config_parser.get("AuthNZ", "single_user_fixed_id", fallback="1")
-    )
+    _warn_ignored_fixed_id(config_parser)
+    single_user_raw = single_user_fixed_id_env(env_map) or "1"
     try:
         single_user_fixed_id = int(str(single_user_raw))
     except (TypeError, ValueError):

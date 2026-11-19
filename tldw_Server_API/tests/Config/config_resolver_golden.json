@@ -15,14 +15,14 @@
   "load_auth_config": {
     "none": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
     "env_blank": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
-    "env_space": {"value": {"mode": "single_user", "single_user_fixed_id": 7}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"]]},
-    "env_word": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"]]},
-    "env_true": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"]]},
+    "env_space": {"value": {"mode": "single_user", "single_user_fixed_id": 7}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
+    "env_word": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
+    "env_true": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
     "cfg_blank": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
-    "cfg_space": {"value": {"mode": "single_user", "single_user_fixed_id": 7}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
+    "cfg_space": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
     "cfg_false": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
-    "both": {"value": {"mode": "single_user", "single_user_fixed_id": 8}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"]]},
-    "env_blank_cfg": {"value": {"mode": "single_user", "single_user_fixed_id": 9}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
+    "both": {"value": {"mode": "single_user", "single_user_fixed_id": 8}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
+    "env_blank_cfg": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
     "cfg_raises": {"value": {"raises": "InterpolationSyntaxError"}, "env": ["AUTH_MODE"], "config": [["AuthNZ", "auth_mode"]]}
   },
   "load_chat_config": {

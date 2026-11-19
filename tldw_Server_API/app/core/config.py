@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file
-from tldw_Server_API.app.core.config_sections.auth import load_auth_config
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config, resolve_single_user_fixed_id
 from tldw_Server_API.app.core.config_sections.precedence import resolve
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
@@ -989,7 +989,7 @@ def load_settings():
     # --- Single-User Settings ---
     # Use a fixed ID for the single user's database path and cache key
     # Default to 1 for single-user mode (0 is typically reserved for system/admin)
-    single_user_fixed_id = int(os.getenv("SINGLE_USER_FIXED_ID", "1")) # Default to user ID 1
+    single_user_fixed_id = int(str(resolve_single_user_fixed_id(load_comprehensive_config()).value)) # Default to user ID 1
     # API Key for accessing the single-user instance
     # Check both SINGLE_USER_API_KEY (AuthNZ standard) and API_KEY (legacy) environment variables
     single_user_api_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")

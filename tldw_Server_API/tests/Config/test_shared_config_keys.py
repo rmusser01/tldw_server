@@ -12,16 +12,20 @@ from pathlib import Path
 
 import pydantic
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints import setup as setup_endpoint
 from tldw_Server_API.app.core import config
 from tldw_Server_API.app.core.AuthNZ import initialize as authnz_initialize
 from tldw_Server_API.app.core.AuthNZ import settings as authnz_settings
 from tldw_Server_API.app.core.Chat import command_router
+from tldw_Server_API.app.core.config_sections import auth as auth_section
 from tldw_Server_API.app.core.config_sections.auth import (
     auth_mode_env,
     load_auth_config,
     resolve_auth_mode,
+    resolve_single_user_fixed_id,
+    single_user_fixed_id_env,
 )
 from tldw_Server_API.app.core.config_sections.precedence import Resolved
 from tldw_Server_API.app.core.DB_Management import db_path_utils
@@ -269,13 +273,14 @@ def _outcome(fn):
         return ERR
 
 
-# config_sections reads [AuthNZ] single_user_fixed_id today; AuthNZ, LazySettings and websub never do.
+# D1(g): config_sections no longer reads [AuthNZ] single_user_fixed_id (before, a blank env value or
+# config only gave 9); AuthNZ, LazySettings and websub never did.
 ID_EXPECTED = {
     #                 config_sections AuthNZ  LazySettings websub
     "env_set": (7, 7, 7, 7),
-    "env_blank": (9, ERR, ERR, 1),
+    "env_blank": (1, ERR, ERR, 1),
     "env_invalid": (1, ERR, ERR, ERR),
-    "config_only": (9, 1, 1, 1),
+    "config_only": (1, 1, 1, 1),
     "neither": (1, 1, 1, 1),
 }
 
@@ -289,3 +294,41 @@ def test_single_user_fixed_id_resolution_today(apply_id_case, case):
     assert _outcome(lambda: authnz_settings.get_settings().SINGLE_USER_FIXED_ID) == authnz
     assert _outcome(lambda: config.load_settings()["SINGLE_USER_FIXED_ID"]) == lazy
     assert _outcome(lambda: websub._iter_user_ids_with_websub()) == ([watch] if watch != ERR else ERR)
+
+
+# D1(g): config.txt no longer sets the id. The raw env text is returned unvalidated (blank kept).
+ID_RESOLVED = {
+    "env_set": Resolved("7", "env", "SINGLE_USER_FIXED_ID"),
+    "env_blank": Resolved("", "env", "SINGLE_USER_FIXED_ID"),
+    "env_invalid": Resolved("abc", "env", "SINGLE_USER_FIXED_ID"),
+    "config_only": Resolved("1", "default", None),
+    "neither": Resolved("1", "default", None),
+}
+
+
+@pytest.mark.parametrize("case", list(ID_CASES))
+def test_single_user_fixed_id_resolves_through_config_sections(apply_id_case, case):
+    parser = apply_id_case(case)
+    assert resolve_single_user_fixed_id(parser) == ID_RESOLVED[case]
+    assert resolve_single_user_fixed_id(None) == ID_RESOLVED[case]
+    assert single_user_fixed_id_env() == ID_CASES[case][0]
+
+
+def test_single_user_fixed_id_env_is_exact_case_and_live():
+    assert single_user_fixed_id_env({"SINGLE_USER_FIXED_ID": " 3 "}) == " 3 "
+    assert single_user_fixed_id_env({"single_user_fixed_id": "3"}) is None
+    assert single_user_fixed_id_env({}) is None
+
+
+def test_config_only_fixed_id_warns_once_per_process():
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    auth_section._warn_fixed_id_ignored_once.cache_clear()
+    try:
+        for _ in range(3):
+            assert load_auth_config(_id_parser("9"), env={}).single_user_fixed_id == 1
+        assert load_auth_config(_id_parser(None), env={}).single_user_fixed_id == 1
+    finally:
+        logger.remove(sink)
+    hits = [m for m in messages if "single_user_fixed_id" in m and "SINGLE_USER_FIXED_ID" in m]
+    assert len(hits) == 1
