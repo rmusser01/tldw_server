@@ -1428,7 +1428,7 @@ def test_resolve_provider_native_tokenizer_configured_local_provider_matrix(
     parser.add_section(section)
     parser.set(section, endpoint_field, endpoint)
     parser.set(section, api_key_field, "test-key")
-    monkeypatch.setattr(writing_endpoints, "load_comprehensive_config", lambda: parser)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: parser)
 
     captured = {}
 

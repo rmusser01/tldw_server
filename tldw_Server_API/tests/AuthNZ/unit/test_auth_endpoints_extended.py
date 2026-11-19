@@ -84,7 +84,7 @@ async def test_org_bootstrap_uses_atomic_owner_creation(monkeypatch):
             observed["kwargs"] = kwargs
             return {"id": 11}
 
-    monkeypatch.setattr(auth, "list_memberships_for_user", _no_memberships)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.orgs_teams.list_memberships_for_user", _no_memberships)
     monkeypatch.setattr(database_module, "get_db_pool", _pool)
     monkeypatch.setattr(repo_module, "AuthnzOrgsTeamsRepo", _Repo)
 
@@ -173,7 +173,7 @@ async def test_reset_password_weak_and_success(monkeypatch):
             return 0
 
     monkeypatch.setattr(_auth, "is_postgres_backend", _fake_is_pg)
-    monkeypatch.setattr(_auth, "get_token_blacklist", lambda: _StubBlacklist())
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", lambda: _StubBlacklist())
 
     scope = {
         "type": "http",
@@ -519,7 +519,7 @@ async def test_login_lockout_uses_trusted_forwarded_client_login_key(monkeypatch
     async def _fake_get_auth_governor():
         return _StubGov()
 
-    monkeypatch.setattr(auth, "get_auth_governor", _fake_get_auth_governor)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.auth_governor.get_auth_governor", _fake_get_auth_governor)
 
     scope = {
         "type": "http",
@@ -580,8 +580,8 @@ async def test_login_unknown_user_records_only_client_login_lockout_key(monkeypa
         assert identifier == "alice@example.com"
         return None
 
-    monkeypatch.setattr(auth, "get_auth_governor", _fake_get_auth_governor)
-    monkeypatch.setattr(auth, "fetch_user_by_login_identifier", _no_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.auth_governor.get_auth_governor", _fake_get_auth_governor)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.fetch_user_by_login_identifier", _no_user)
     request = Request({
         "type": "http", "method": "POST", "path": "/api/v1/auth/login", "headers": [],
         "client": ("203.0.113.9", 1234), "scheme": "http", "query_string": b"",
@@ -647,8 +647,8 @@ async def test_login_bad_password_uses_client_and_account_lockout_buckets(
     async def _fake_audit_service(user_id: int):
         return _StubAuditService()
 
-    monkeypatch.setattr(auth, "get_auth_governor", _fake_get_auth_governor)
-    monkeypatch.setattr(auth, "fetch_user_by_login_identifier", _user)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.auth_governor.get_auth_governor", _fake_get_auth_governor)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.fetch_user_by_login_identifier", _user)
     monkeypatch.setattr(auth, "get_or_create_audit_service_for_user_id", _fake_audit_service)
     request = Request({
         "type": "http", "method": "POST", "path": "/api/v1/auth/login", "headers": [],
@@ -725,9 +725,9 @@ async def test_login_success_resets_client_and_account_lockout_buckets(monkeypat
     async def _fake_audit_service(user_id: int):
         return _StubAuditService()
 
-    monkeypatch.setattr(auth, "get_auth_governor", _fake_get_auth_governor)
-    monkeypatch.setattr(auth, "fetch_user_by_login_identifier", _user)
-    monkeypatch.setattr(auth, "update_user_last_login", _noop)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.auth_governor.get_auth_governor", _fake_get_auth_governor)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.fetch_user_by_login_identifier", _user)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.update_user_last_login", _noop)
     monkeypatch.setattr(auth, "get_or_create_audit_service_for_user_id", _fake_audit_service)
     monkeypatch.setattr(auth, "_is_mfa_backend_supported", _noop)
     request = Request({
@@ -888,9 +888,9 @@ async def test_logout_uses_utc_expiry(monkeypatch):
                 ("single", {"session_id": session_id, "revoked_by": revoked_by, "reason": reason})
             )
 
-    monkeypatch.setattr(auth, "JWTService", StubJWT)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.jwt_service.JWTService", StubJWT)
     stub_blacklist = StubBlacklist()
-    monkeypatch.setattr(auth, "get_token_blacklist", lambda: stub_blacklist)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", lambda: stub_blacklist)
 
     scope = {
         "type": "http",
@@ -997,8 +997,8 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
 
     monkeypatch.setattr(auth, "_is_mfa_backend_supported", _fake_mfa_supported)
     monkeypatch.setattr(auth, "_get_mfa_service", lambda: _StubMFA())
-    monkeypatch.setattr(auth, "fetch_user_by_login_identifier", _fake_fetch_user)
-    monkeypatch.setattr(auth, "get_auth_governor", _fake_get_auth_governor)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.fetch_user_by_login_identifier", _fake_fetch_user)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.auth_governor.get_auth_governor", _fake_get_auth_governor)
 
     scope = {
         "type": "http",
@@ -1119,7 +1119,7 @@ async def test_mfa_login_completes_tokens(monkeypatch, legacy_payload):
             return "REFRESH"
 
     monkeypatch.setattr(auth, "_is_mfa_backend_supported", _fake_mfa_supported)
-    monkeypatch.setattr(auth, "fetch_active_user_by_id", _fake_fetch_active_user)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.fetch_active_user_by_id", _fake_fetch_active_user)
     monkeypatch.setattr(auth, "_get_mfa_service", lambda: _StubMFA())
     async def _noop_async(*args, **kwargs):
         return None
@@ -1127,7 +1127,7 @@ async def test_mfa_login_completes_tokens(monkeypatch, legacy_payload):
     async def _noop_claims(*args, **kwargs):
         return {}
 
-    monkeypatch.setattr(auth, "update_user_last_login", _noop_async)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.update_user_last_login", _noop_async)
     monkeypatch.setattr(auth, "_build_scope_claims", _noop_claims)
 
     class _StubAuditService:
@@ -1238,7 +1238,7 @@ async def test_mfa_login_rejects_invalid_cached_lockout_keys_before_user_lookup(
     monkeypatch.setattr(auth, "_ensure_mfa_available", _noop_async)
     monkeypatch.setattr(auth, "_ensure_mfa_cache_available", _noop_async)
     monkeypatch.setattr(auth, "_reserve_auth_rg_requests", _unexpected)
-    monkeypatch.setattr(auth, "fetch_active_user_by_id", _unexpected)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.fetch_active_user_by_id", _unexpected)
 
     request = Request({
         "type": "http", "method": "POST", "path": "/api/v1/auth/mfa/login", "headers": [],
@@ -1556,7 +1556,7 @@ async def test_logout_accepts_lowercase_bearer(monkeypatch):
         async def revoke_session(self, **kwargs):
             return None
 
-    monkeypatch.setattr(auth, "get_token_blacklist", lambda: StubBlacklist())
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", lambda: StubBlacklist())
 
     scope = {
         "type": "http",
@@ -1614,7 +1614,7 @@ async def test_logout_all_devices_uses_session_manager_only(monkeypatch):
         async def revoke_token(self, **kwargs):
             raise AssertionError("single-token revoke path should not run for logout(all_devices=true)")
 
-    monkeypatch.setattr(auth, "get_token_blacklist", lambda: _BlacklistShouldNotBeCalled())
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", lambda: _BlacklistShouldNotBeCalled())
 
     scope = {
         "type": "http",
@@ -1667,7 +1667,7 @@ async def test_logout_rejects_api_key_authenticated_current_session_logout(monke
             self.calls.append(("single", kwargs))
             return None
 
-    monkeypatch.setattr(auth, "get_token_blacklist", lambda: _StubBlacklist())
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", lambda: _StubBlacklist())
 
     scope = {
         "type": "http",
@@ -1715,7 +1715,7 @@ async def test_logout_all_devices_ignores_blacklist_factory_failure(monkeypatch)
     def _failing_blacklist_factory():
         raise RuntimeError("blacklist unavailable")
 
-    monkeypatch.setattr(auth, "get_token_blacklist", _failing_blacklist_factory)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", _failing_blacklist_factory)
 
     scope = {
         "type": "http",
@@ -1824,7 +1824,6 @@ async def test_list_user_sessions_sanitizes_backend_error_in_test_mode(monkeypat
         async def get_user_sessions(self, user_id: int):
             raise RuntimeError(f"session backend exploded for user {user_id}")
 
-    monkeypatch.setattr(auth, "_is_test_mode", lambda: True)
 
     with pytest.raises(HTTPException) as exc:
         await auth.list_user_sessions(
@@ -1863,7 +1862,7 @@ async def test_logout_raises_when_access_token_revoke_fails(monkeypatch):
         async def revoke_session(self, **kwargs):
             return None
 
-    monkeypatch.setattr(auth, "get_token_blacklist", lambda: _FailingBlacklist())
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", lambda: _FailingBlacklist())
 
     scope = {
         "type": "http",
@@ -1908,7 +1907,7 @@ async def test_refresh_single_user_respects_ip_allowlist(monkeypatch):
             "is_active": True,
         }
 
-    monkeypatch.setattr(auth, "fetch_active_user_by_id", _fake_fetch_active_user_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.fetch_active_user_by_id", _fake_fetch_active_user_by_id)
 
     scope = {
         "type": "http",
@@ -1958,8 +1957,8 @@ async def test_login_rejects_single_user_mode_for_enterprise_admin_ui(monkeypatc
             "password_hash": "hashed-password",
         }
 
-    monkeypatch.setattr(auth, "get_auth_governor", _fake_get_auth_governor)
-    monkeypatch.setattr(auth, "fetch_user_by_login_identifier", _fake_fetch_user_by_login_identifier)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.auth_governor.get_auth_governor", _fake_get_auth_governor)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.fetch_user_by_login_identifier", _fake_fetch_user_by_login_identifier)
 
     request = Request({
         "type": "http",

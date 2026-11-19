@@ -151,7 +151,7 @@ async def test_document_figures_sanitizes_database_error_log(monkeypatch):
 async def test_document_figures_sanitizes_storage_error_log(monkeypatch):
     logger_stub = _patch_logger(monkeypatch)
     monkeypatch.setattr(figures_endpoint, "_check_pymupdf_available", lambda: True)
-    monkeypatch.setattr(figures_endpoint, "get_storage_backend", lambda: _FailingStorage())
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.get_storage_backend", lambda: _FailingStorage())
 
     with pytest.raises(HTTPException) as exc_info:
         await figures_endpoint.get_document_figures(
@@ -172,7 +172,7 @@ async def test_document_figures_sanitizes_extraction_error_log(monkeypatch):
         raise RuntimeError("figures extraction leaked /private/tmp/document-figures-extract")
 
     monkeypatch.setattr(figures_endpoint, "_check_pymupdf_available", lambda: True)
-    monkeypatch.setattr(figures_endpoint, "get_storage_backend", lambda: _WorkingStorage())
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.get_storage_backend", lambda: _WorkingStorage())
     monkeypatch.setattr(figures_endpoint, "_extract_pdf_figures", _raise_extract_failure)
 
     with pytest.raises(HTTPException) as exc_info:

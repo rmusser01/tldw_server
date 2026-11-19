@@ -15,17 +15,22 @@ from typing import Dict, Any, Optional
 # Disable rate limiting for all e2e tests
 @pytest.fixture(autouse=True, scope="session")
 def disable_rate_limiting():
-    """Disable rate limiting for all tests in e2e suite"""
-    os.environ["TESTING"] = "true"  # For embeddings endpoint
-    os.environ["TEST_MODE"] = "true"  # For regular limiter
-    os.environ.setdefault("ENABLE_REGISTRATION", "true")
-    os.environ.setdefault("REQUIRE_REGISTRATION_CODE", "false")
-    yield
-    # Clean up after tests
-    if "TESTING" in os.environ:
-        del os.environ["TESTING"]
-    if "TEST_MODE" in os.environ:
-        del os.environ["TEST_MODE"]
+    """Disable rate limiting for all tests in e2e suite.
+
+    Session scope on purpose: the session fixtures below start the server once
+    and read these. Every value is put back at the end (TASK-15497); a variable
+    the caller already had is no longer deleted.
+    """
+    mp = pytest.MonkeyPatch()
+    mp.setenv("TESTING", "true")  # For embeddings endpoint
+    mp.setenv("TEST_MODE", "true")  # For regular limiter
+    for key, value in (("ENABLE_REGISTRATION", "true"), ("REQUIRE_REGISTRATION_CODE", "false")):
+        if key not in os.environ:
+            mp.setenv(key, value)
+    try:
+        yield
+    finally:
+        mp.undo()
 
 # Custom markers for conditional test execution
 pytest_markers = [

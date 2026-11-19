@@ -61,10 +61,10 @@ def test_audio_ws_quota_error_includes_error_type_and_closes_1008(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
 
     # Force daily minutes denial
-    async def _deny(user_id: int, minutes_requested: float):
+    async def _deny(user_id: int, minutes_requested: float, **_kwargs):
         return False, 0.0
 
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _deny)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _deny)
 
     token = get_settings().SINGLE_USER_API_KEY
 
@@ -103,10 +103,10 @@ def test_audio_ws_quota_error_without_compat_alias(monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
     import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
 
-    async def _deny(user_id: int, minutes_requested: float):
+    async def _deny(user_id: int, minutes_requested: float, **_kwargs):
         return False, 0.0
 
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _deny)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _deny)
     monkeypatch.setenv("AUDIO_WS_COMPAT_ERROR_TYPE", "0")
 
     token = get_settings().SINGLE_USER_API_KEY

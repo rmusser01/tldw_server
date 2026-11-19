@@ -99,7 +99,7 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
         )
     )
     rerun_job = AsyncMock()
-    monkeypatch.setattr(watchlists, "run_watchlist_job", rerun_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.Watchlists.pipeline.run_watchlist_job", rerun_job)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
         trigger,

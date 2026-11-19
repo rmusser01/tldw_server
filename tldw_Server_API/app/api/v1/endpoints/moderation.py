@@ -64,7 +64,6 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Moderation.classification import (
     ClassificationError,
-    audited_transport,
     classify_sample,
     saved_classification,
 )
@@ -72,16 +71,17 @@ from tldw_Server_API.app.core.Moderation.moderation_service import get_moderatio
 from tldw_Server_API.app.core.Moderation.review_service import ModerationReviewService, get_moderation_review_service
 from tldw_Server_API.app.core.Moderation.supervised_policy import (
     GuardianModerationProxy,
-    bootstrap_guardian_moderation_runtime,
 )
 from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     derive_trusted_credential_scope,
-    load_server_config_snapshot,
 )
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import capture_provider_override_call_snapshot
-from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import ProviderCredentialRuntime
 from tldw_Server_API.app.core.Slides.generation_disconnect import generation_disconnected
+import tldw_Server_API.app.core.Moderation.classification as _classification
+import tldw_Server_API.app.core.Moderation.supervised_policy as _supervised_policy
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
+import tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime as _provider_credential_runtime
 
 router = APIRouter()
 
@@ -583,7 +583,7 @@ async def test_moderation(
                 detail="dependent_user_id must match user_id for live-chat guardian simulation",
             )
         guardian_chat_type = _normalize_chat_type(payload.chat_type)
-        runtime = bootstrap_guardian_moderation_runtime(
+        runtime = _supervised_policy.bootstrap_guardian_moderation_runtime(
             user_id=user_id,
             dependent_user_id=dependent_user_id,
             chat_type=guardian_chat_type,
@@ -678,14 +678,14 @@ async def classify_moderation_sample(
         saved = saved_classification(payload, actor_id=principal.principal_id, review=review)
         if saved is not None:
             return ModerationReviewItem.model_validate(saved)
-        if not audited_transport(payload.provider):
+        if not _classification.audited_transport(payload.provider):
             raise ClassificationError("unsupported_provider")
-        runtime = ProviderCredentialRuntime(
+        runtime = _provider_credential_runtime.ProviderCredentialRuntime(
             user_id=owner,
             team_ids=team_ids,
             org_ids=org_ids,
             trusted_base_url_override=trusted_override,
-            server_config_snapshot=copy.deepcopy(load_server_config_snapshot()),
+            server_config_snapshot=copy.deepcopy(_byok_helpers.load_server_config_snapshot()),
             override_snapshot_resolver=capture_provider_override_call_snapshot,
         )
         credentials = await runtime.resolve(payload.provider, model=payload.model)

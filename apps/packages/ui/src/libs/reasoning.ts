@@ -3,7 +3,17 @@ type ReasoningPart = {
   type: "reasoning" | "text";
   content: string;
   reasoning_running?: boolean;
+  range?: { start: number; end: number };
 };
+
+// Reserve distinct escapes so typed reasoning can include literal tags and Markdown code.
+export function encodeReasoningText(text: string): string {
+  return text.replaceAll("&", "&#x000026;").replaceAll("<", "&#x00003c;");
+}
+
+export function decodeReasoningText(text: string): string {
+  return text.replace(/&#x0000(26|3c);/g, (_, code) => code === "26" ? "&" : "<");
+}
 
 function splitReasoning(text: string): ReasoningPart[] {
   const result: ReasoningPart[] = [];
@@ -26,7 +36,11 @@ function splitReasoning(text: string): ReasoningPart[] {
       depth -= 1;
       if (depth === 0) {
         const content = text.slice(currentIndex, match.index);
-        if (content) result.push({ type: "reasoning", content });
+        if (content) result.push({
+          type: "reasoning",
+          content,
+          range: { start: currentIndex, end: match.index },
+        });
         currentIndex = match.index! + match[0].length;
       }
     }
@@ -40,6 +54,7 @@ function splitReasoning(text: string): ReasoningPart[] {
           ? text.slice(currentIndex)
           : text.slice(currentIndex).replace(closingTagPattern, ""),
       reasoning_running: depth > 0,
+      ...(depth > 0 && { range: { start: currentIndex, end: text.length } }),
     });
   }
   return result;
@@ -48,12 +63,24 @@ function splitReasoning(text: string): ReasoningPart[] {
 export function parseReasoning(text: string): ReasoningPart[] {
   try {
     return splitReasoning(text)
-      .map((part) => ({ ...part, content: part.content.trim() }))
+      .map((part) => ({
+        ...part,
+        content: (part.type === "reasoning" ? decodeReasoningText(part.content) : part.content).trim(),
+      }))
       .filter((part) => part.content || part.reasoning_running !== undefined);
   } catch (e) {
     console.error(`Error parsing reasoning: ${e}`);
     return [{ type: "text", content: text }];
   }
+}
+
+export function isEditableReasoningContent(content: string): boolean {
+  const [part] = splitReasoning(`<think>${content}</think>`);
+  return Boolean(
+    content.trim() &&
+    !part?.reasoning_running &&
+    part?.range?.end === "<think>".length + content.length
+  );
 }
 
 export function isReasoningStarted(text: string): boolean {

@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import slack as slack_endpoint
-from tldw_Server_API.app.api.v1.endpoints import slack_support
+from tldw_Server_API.app.api.v1.utils.chatops import slack_support
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.tests._chatops_helpers.fake_oauth_repos import (
     FakeOAuthStateRepo as _FakeOAuthStateRepo,
@@ -49,13 +49,12 @@ def slack_oauth_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, _Fa
             "authed_user": {"id": "U456"},
         }
 
-    monkeypatch.setattr(slack_endpoint, "_get_oauth_state_repo", _get_state_repo)
-    monkeypatch.setattr(slack_endpoint, "_get_user_secret_repo", _get_user_repo)
-    monkeypatch.setattr(slack_endpoint, "_slack_oauth_token_exchange", _token_exchange)
-    monkeypatch.setattr(slack_endpoint, "_encrypt_slack_payload", lambda payload: json.dumps(payload))
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.slack_support._get_oauth_state_repo", _get_state_repo)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.slack_support._get_user_secret_repo", _get_user_repo)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.slack_support._slack_oauth_token_exchange", _token_exchange)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.slack_support._encrypt_slack_payload", lambda payload: json.dumps(payload))
     monkeypatch.setattr(
-        slack_endpoint,
-        "_decrypt_slack_payload",
+        "tldw_Server_API.app.api.v1.utils.chatops.slack_support._decrypt_slack_payload",
         lambda encrypted_blob: json.loads(encrypted_blob) if encrypted_blob else None,
     )
 
@@ -131,7 +130,7 @@ def test_slack_oauth_callback_sanitizes_provider_error(
         assert form_data["client_id"] == "C123"
         return {"ok": False, "error": "invalid_code"}
 
-    monkeypatch.setattr(slack_endpoint, "_slack_oauth_token_exchange", _failed_token_exchange)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.slack_support._slack_oauth_token_exchange", _failed_token_exchange)
 
     start = client.post("/api/v1/slack/oauth/start")
     state = _extract_state_from_auth_url(start.json()["auth_url"])

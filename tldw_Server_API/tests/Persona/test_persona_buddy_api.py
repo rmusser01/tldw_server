@@ -162,7 +162,7 @@ def test_api_create_rolls_back_visible_profile_when_buddy_upkeep_fails(persona_d
     def _raise_buddy_failure(*_args, **_kwargs):
         raise ValueError("buddy unavailable")
 
-    monkeypatch.setattr(persona_ep, "ensure_persona_buddy_for_profile", _raise_buddy_failure)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.buddy.ensure_persona_buddy_for_profile", _raise_buddy_failure)
 
     with _client_for_user(1, persona_db) as client:
         created = client.post(
@@ -250,7 +250,7 @@ def test_api_update_reverts_profile_when_buddy_upkeep_fails(persona_db: Characte
     def _raise_buddy_failure(*_args, **_kwargs):
         raise ValueError("buddy unavailable")
 
-    monkeypatch.setattr(persona_ep, "ensure_persona_buddy_for_profile", _raise_buddy_failure)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.buddy.ensure_persona_buddy_for_profile", _raise_buddy_failure)
 
     with _client_for_user(1, persona_db) as client:
         updated = client.patch(
@@ -275,7 +275,7 @@ def test_api_create_surfaces_rollback_failures_after_buddy_validation_error(
     def _raise_buddy_failure(*_args, **_kwargs):
         raise ValueError("buddy unavailable")
 
-    monkeypatch.setattr(persona_ep, "ensure_persona_buddy_for_profile", _raise_buddy_failure)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.buddy.ensure_persona_buddy_for_profile", _raise_buddy_failure)
     monkeypatch.setattr(
         persona_db,
         "soft_delete_persona_profile",
@@ -319,7 +319,7 @@ def test_api_update_surfaces_rollback_failures_after_buddy_validation_error(
             return real_update(*args, **kwargs)
         return False
 
-    monkeypatch.setattr(persona_ep, "ensure_persona_buddy_for_profile", _raise_buddy_failure)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.buddy.ensure_persona_buddy_for_profile", _raise_buddy_failure)
     monkeypatch.setattr(persona_db, "update_persona_profile", _fail_second_update)
 
     with _client_for_user(1, persona_db) as client:

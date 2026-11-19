@@ -791,7 +791,7 @@ class TestIntegration:
         }
 
         # Mock the TemplateProcessor to avoid complex setup
-        with patch("tldw_Server_API.app.api.v1.endpoints.chunking_templates.TemplateProcessor") as mock_processor:
+        with patch("tldw_Server_API.app.core.Chunking.templates.TemplateProcessor") as mock_processor:
             mock_instance = MagicMock()
             mock_instance.process_template.return_value = [
                 "This is a long text",

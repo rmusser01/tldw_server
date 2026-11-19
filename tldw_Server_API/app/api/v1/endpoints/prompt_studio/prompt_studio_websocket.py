@@ -62,8 +62,6 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     PromptStudioDatabase,
     get_prompt_studio_db,
     get_prompt_studio_user,
-    managed_prompt_studio_db,
-    require_project_access,
 )
 from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import _acp_ws_subprotocol, _authenticate_ws
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.jobs_adapter import (
@@ -73,8 +71,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio.event_broadcaster 
     prompt_studio_connection_scope,
 )
 from tldw_Server_API.app.core.LLM_Calls.sse import sse_data
-from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
-from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work, is_lifecycle_draining
 from tldw_Server_API.app.services.shutdown_transport_registry import (
     register_shutdown_transport_family,
@@ -292,7 +289,7 @@ class ConnectionManager:
             self.connection_metadata.clear()
 
 # NOTE: A single, shared connection manager is defined later as
-# `connection_manager` and imported by the job processor for broadcasts.
+# `connection_manager` and published to core through prompt_studio/ws_connections.py.
 # Avoid creating multiple manager instances to ensure events reach clients.
 
 ########################################################################################################################
@@ -305,6 +302,9 @@ class ConnectionManager:
 # SSE (Server-Sent Events) Fallback
 
 from fastapi.responses import StreamingResponse
+import tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps as _prompt_studio_deps
+import tldw_Server_API.app.core.Streaming.streams as _streams
+import tldw_Server_API.app.core.testing as _testing
 
 
 async def sse_endpoint(
@@ -325,7 +325,7 @@ async def sse_endpoint(
         db: Database instance
     """
     from tldw_Server_API.app.core.Streaming.streams import SSEStream
-    use_unified = env_flag_enabled("STREAMS_UNIFIED")
+    use_unified = _testing.env_flag_enabled("STREAMS_UNIFIED")
 
     if use_unified:
         stream = SSEStream(
@@ -456,6 +456,7 @@ async def sse_endpoint_route(
 
 # Initialize connection manager
 connection_manager = ConnectionManager()
+ws_connections.publish(connection_manager)
 register_shutdown_transport_family(
     "prompt_studio.websocket",
     active_count=connection_manager.get_connection_count,
@@ -523,8 +524,8 @@ async def _authorize_prompt_studio_project(
 ) -> bool:
     """Authorize one project before binding a WebSocket to its event scope."""
     try:
-        with managed_prompt_studio_db(user_context) as db:
-            await require_project_access(project_id, user_context, db)
+        with _prompt_studio_deps.managed_prompt_studio_db(user_context) as db:
+            await _prompt_studio_deps.require_project_access(project_id, user_context, db)
         return True
     except HTTPException as exc:
         await websocket.close(code=4404 if exc.status_code == 404 else 4403)
@@ -553,7 +554,7 @@ async def websocket_endpoint_base(
     ):
         return
     # Wrap socket for lifecycle metrics; keep domain payloads unchanged
-    stream = WebSocketStream(
+    stream = _streams.WebSocketStream(
         websocket,
         heartbeat_interval_s=0.0,  # disable WS ping; domain heartbeats only
         idle_timeout_s=None,
@@ -642,7 +643,7 @@ async def websocket_endpoint(
         project_id,
     ):
         return
-    stream = WebSocketStream(
+    stream = _streams.WebSocketStream(
         websocket,
         heartbeat_interval_s=0.0,
         idle_timeout_s=None,

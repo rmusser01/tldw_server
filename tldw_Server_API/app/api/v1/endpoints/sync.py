@@ -110,7 +110,6 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
 )
 from tldw_Server_API.app.core.Sync.v2.factory import (
     default_sync_v2_registry,
-    sync_v2_service_for_user,
     sync_v2_storage_exists_for_user,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
@@ -128,6 +127,7 @@ from tldw_Server_API.app.core.Sync.v2.security import (
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
+import tldw_Server_API.app.core.Sync.v2.factory as _factory
 
 #
 #
@@ -155,7 +155,7 @@ def get_sync_v2_service(
 ) -> SyncV2Service:
     """Build the per-user Sync v2 service dependency."""
 
-    return sync_v2_service_for_user(_sync_user_id(user))
+    return _factory.sync_v2_service_for_user(_sync_user_id(user))
 
 
 def get_sync_v2_profile_service(
@@ -166,7 +166,7 @@ def get_sync_v2_profile_service(
     user_id = _sync_user_id(user)
     if not sync_v2_storage_exists_for_user(user_id):
         return None
-    return sync_v2_service_for_user(user_id)
+    return _factory.sync_v2_service_for_user(user_id)
 
 
 def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException:

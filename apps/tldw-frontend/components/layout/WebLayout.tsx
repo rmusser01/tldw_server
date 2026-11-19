@@ -80,6 +80,12 @@ const TutorialRunner = lazy(() =>
     default: m.TutorialRunner,
   }))
 );
+const TutorialPrompt = lazy(() =>
+  import('@/components/Common/TutorialPrompt').then((m) => ({
+    default: m.TutorialPrompt,
+  }))
+);
+const PAGE_OWNED_TUTORIAL_ROUTES = ['/research-workspace'];
 import { useConfirmDanger } from '@/components/Common/confirm-danger';
 import { DemoModeProvider, useDemoMode } from '@/context/demo-mode';
 
@@ -716,6 +722,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           {/* Shared walkthrough runner for route-level tour controls */}
           <Suspense fallback={null}>
             <TutorialRunner />
+          </Suspense>
+
+          <Suspense fallback={null}>
+            <TutorialPrompt excludedRoutes={PAGE_OWNED_TUTORIAL_ROUTES} />
           </Suspense>
 
           {/* Quick Ingest Modal Host - listens for global open events */}

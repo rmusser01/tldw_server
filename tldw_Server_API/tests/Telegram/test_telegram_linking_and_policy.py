@@ -6,7 +6,7 @@ import pytest
 from fastapi import Request
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-from tldw_Server_API.app.api.v1.endpoints.telegram_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.telegram_support import (
     TelegramCommand,
     TelegramScope,
     _handle_telegram_link_command,
@@ -67,9 +67,9 @@ def client(client_user_only, monkeypatch):
 
 
 @pytest.fixture()
-def principal_override(client):
+def principal_override(client, back_principal):
     def _install(principal: AuthPrincipal) -> None:
-        _override_principal(client, principal)
+        _override_principal(client, back_principal(principal))
 
     yield _install
     client.app.dependency_overrides.pop(get_auth_principal, None)

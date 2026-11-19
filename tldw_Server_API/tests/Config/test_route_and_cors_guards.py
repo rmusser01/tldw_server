@@ -30,7 +30,21 @@ from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
     standalone_response_invalid_response,
 )
 
-app_main = importlib.reload(app_main)
+
+@pytest.fixture(scope="module", autouse=True)
+def _reloaded_app_main():
+    """Reload app.main for this module only, and put it back afterwards."""
+    from tldw_Server_API.tests.helpers.app_main_state import (
+        restore_app_main_namespace,
+        snapshot_app_main_namespace,
+    )
+
+    saved = snapshot_app_main_namespace(app_main)
+    importlib.reload(app_main)
+    try:
+        yield
+    finally:
+        restore_app_main_namespace(app_main, saved)
 
 
 def test_main_app_route_guard_passes_for_current_routes() -> None:

@@ -16,7 +16,6 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    RequirePermission,
     RequireRole,
     get_auth_principal,
     get_db_transaction,
@@ -56,11 +55,6 @@ from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
 from tldw_Server_API.app.api.v1.utils.cache import generate_etag, is_not_modified
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
-from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
-from tldw_Server_API.app.core.AuthNZ.database import (
-    get_db_pool,
-    is_postgres_backend,
-)
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DatabaseError,
     StorageError,
@@ -68,7 +62,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
 )
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, fetch_password_hash
 from tldw_Server_API.app.core.AuthNZ.permissions import NOTIFICATIONS_READ, SYSTEM_LOGS, TASKS_READ
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_single_user_principal
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.profile_version import (
     ProfileVersionNotFound,
 )
@@ -77,7 +71,6 @@ from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
 from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
 from tldw_Server_API.app.core.testing import is_truthy
-from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
 from tldw_Server_API.app.core.UserProfiles.contracts import (
     ProfileContractMode,
     ProfileReadRequest,
@@ -91,10 +84,16 @@ from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import load_user_profile_catalog
 from tldw_Server_API.app.services.storage_quota_service import (
     StorageQuotaService,
-    get_storage_service,
     quota_view,
     with_resolved_storage_quota,
 )
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
+import tldw_Server_API.app.core.AuthNZ.api_key_manager as _api_key_manager
+import tldw_Server_API.app.core.AuthNZ.database as _database
+import tldw_Server_API.app.core.AuthNZ.principal_model as _principal_model
+import tldw_Server_API.app.core.AuthNZ.repos.users_repo as _users_repo
+import tldw_Server_API.app.core.UserProfiles.command_service as _command_service
+import tldw_Server_API.app.services.storage_quota_service as _storage_quota_service
 
 _USERS_AUDIT_EXCEPTIONS = (
     AttributeError,
@@ -240,7 +239,7 @@ async def _fetch_password_hash_for_user(db: Any, user_id: int) -> str | None:
     """
     Compatibility helper retained for backend-selection unit tests.
     """
-    return await fetch_password_hash(db, user_id, is_postgres=await is_postgres_backend())
+    return await fetch_password_hash(db, user_id, is_postgres=await _database.is_postgres_backend())
 
 
 def _require_active_verified_user(user_context: dict[str, Any]) -> None:
@@ -274,7 +273,7 @@ async def _resolve_user_context(
         "created_at": datetime.utcnow(),
         "last_login": None,
     }
-    repo = await AuthnzUsersRepo.from_pool()
+    repo = await _users_repo.AuthnzUsersRepo.from_pool()
     user = await repo.get_user_by_id(user_id)
     if not user:
         if allow_missing:
@@ -296,7 +295,7 @@ async def _require_principal_active_verified(
     Single-user mode may operate with a synthetic principal identity that does not
     have a persisted users table row; allow fallback context only for that case.
     """
-    allow_missing = bool(allow_missing_single_user and is_single_user_principal(principal))
+    allow_missing = bool(allow_missing_single_user and _principal_model.is_single_user_principal(principal))
     user_context = await _resolve_user_context(principal, allow_missing=allow_missing)
     _require_active_verified_user(user_context)
     return user_context
@@ -371,7 +370,7 @@ async def get_current_user_capabilities(
         ("can_read_monitoring_alerts", SYSTEM_LOGS),
     ):
         try:
-            await RequirePermission(permission)(principal)
+            await _auth_deps.RequirePermission(permission)(principal)
         except HTTPException as exc:
             if exc.status_code != status.HTTP_403_FORBIDDEN:
                 raise
@@ -449,14 +448,14 @@ async def get_current_user_profile_view(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="admin_only_query_parameters",
         )
-    db_pool = await get_db_pool()
+    db_pool = await _database.get_db_pool()
     service = UserProfileService(db_pool)
     query_service = ProfileQueryService(service)
     user_context = await _resolve_user_context(principal)
     _require_active_verified_user(user_context)
     user_dict: dict[str, Any] = dict(user_context)
     requested = service.parse_sections(sections)
-    api_mgr = await get_api_key_manager()
+    api_mgr = await _api_key_manager.get_api_key_manager()
     security = await service.build_security(
         user_id=int(user_context["id"]),
         session_manager=session_manager,
@@ -504,7 +503,7 @@ async def update_current_user_profile(
     user_context = await _resolve_user_context(principal)
     _require_active_verified_user(user_context)
     user_id = int(user_context["id"])
-    db_pool = await get_db_pool()
+    db_pool = await _database.get_db_pool()
     command = ProfileUpdateCommand(
         actor_user_id=user_id,
         target_user_id=user_id,
@@ -514,7 +513,7 @@ async def update_current_user_profile(
         expected_profile_version=payload.profile_version,
         contract_mode=ProfileContractMode.LEGACY_V1,
     )
-    result = await ProfileCommandService(db_pool=db_pool).apply(
+    result = await _command_service.ProfileCommandService(db_pool=db_pool).apply(
         command,
         db_conn=db,
         scope=None,
@@ -563,7 +562,7 @@ async def get_current_user_profile(
         principal,
         allow_missing_single_user=True,
     )
-    storage_service = await get_storage_service()
+    storage_service = await _storage_quota_service.get_storage_service()
     storage_status = await storage_service.user_quota_status(int(user_context['id']))
     return DeprecatedUserResponse(
         warning="deprecated_endpoint",
@@ -619,7 +618,7 @@ async def update_user_profile(
         updates_made = False
 
         if request.email and request.email != user_context.get("email"):
-            is_pg = await is_postgres_backend()
+            is_pg = await _database.is_postgres_backend()
             try:
                 await update_user_email(
                     db,
@@ -641,7 +640,7 @@ async def update_user_profile(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates provided")
 
         # Return updated user info
-        storage_service = await get_storage_service()
+        storage_service = await _storage_quota_service.get_storage_service()
         storage_status = await storage_service.user_quota_status(user_id)
         return DeprecatedUserResponse(
             warning="deprecated_endpoint",
@@ -700,7 +699,7 @@ async def change_password(
         password_hash = await _fetch_password_hash_for_user(db, user_id)
         user_row: dict[str, Any] = {}
         try:
-            users_repo = await AuthnzUsersRepo.from_pool()
+            users_repo = await _users_repo.AuthnzUsersRepo.from_pool()
             fetched_row = await users_repo.get_user_by_id(user_id)
             if isinstance(fetched_row, dict):
                 user_row = dict(fetched_row)
@@ -732,7 +731,7 @@ async def change_password(
         new_hash = password_service.hash_password(request.new_password)
 
         # Update password in database
-        await password_service.set_password(user_id, new_hash, db, is_postgres=await is_postgres_backend())
+        await password_service.set_password(user_id, new_hash, db, is_postgres=await _database.is_postgres_backend())
 
         logger.info(f"Password changed for user {username} (ID: {user_id})")
 
@@ -761,7 +760,7 @@ async def list_api_keys(principal: AuthPrincipal = Depends(get_auth_principal)) 
     """List active API keys for the current user (metadata only)."""
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
-    api_mgr = await get_api_key_manager()
+    api_mgr = await _api_key_manager.get_api_key_manager()
     rows = await api_mgr.list_user_keys(user_id=user_id)
     # list_user_keys does not return the raw key; return metadata only
     return [APIKeyMetadata(**row) for row in rows]
@@ -779,7 +778,7 @@ async def create_api_key(
     """Create a new API key for the current user and return the key once."""
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
-    api_mgr = await get_api_key_manager()
+    api_mgr = await _api_key_manager.get_api_key_manager()
     try:
         result = await api_mgr.create_api_key(
             user_id=user_id,
@@ -829,7 +828,7 @@ async def create_virtual_api_key(
     """Create a constrained (virtual/burnable) API key for the current user."""
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
-    api_mgr = await get_api_key_manager()
+    api_mgr = await _api_key_manager.get_api_key_manager()
     try:
         result = await api_mgr.create_virtual_key(
             user_id=user_id,
@@ -869,7 +868,7 @@ async def rotate_api_key(
     """Rotate an API key (revoke old; create new) and return the new key once."""
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
-    api_mgr = await get_api_key_manager()
+    api_mgr = await _api_key_manager.get_api_key_manager()
     try:
         result = await api_mgr.rotate_api_key(
             key_id=key_id,
@@ -901,7 +900,7 @@ async def revoke_api_key(
     """Revoke an API key for the current user."""
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
-    api_mgr = await get_api_key_manager()
+    api_mgr = await _api_key_manager.get_api_key_manager()
     try:
         success = await api_mgr.revoke_api_key(
             key_id=key_id,
@@ -1051,7 +1050,7 @@ async def get_storage_quota(
         if user_context is None:
             user_context = await _resolve_user_context(
                 principal,
-                allow_missing=is_single_user_principal(principal),
+                allow_missing=_principal_model.is_single_user_principal(principal),
             )
         fallback = await storage_service.user_quota_status(int(user_context['id']))
         quota = fallback['quota_mb']

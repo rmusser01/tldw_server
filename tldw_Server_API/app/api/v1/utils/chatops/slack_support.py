@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager as _global_get_job_manager
-from tldw_Server_API.app.api.v1.endpoints._in_memory_limits import SlidingWindowLimiter, TTLReceiptStore
+from tldw_Server_API.app.api.v1.utils.in_memory_limits import SlidingWindowLimiter, TTLReceiptStore
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy, afetch as _http_afetch
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
@@ -25,8 +25,8 @@ from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import 
     loads_envelope,
 )
 
-from ._chatops import policy as _chatops_policy
-from ._chatops.settings import ChatOpsSettings, coerce_nonempty_string, env_int
+from tldw_Server_API.app.api.v1.utils.chatops import policy as _chatops_policy
+from tldw_Server_API.app.api.v1.utils.chatops.settings import ChatOpsSettings, coerce_nonempty_string, env_int
 
 _EVENT_RECEIPTS = TTLReceiptStore()
 _COMMAND_RECEIPTS = TTLReceiptStore()
@@ -49,7 +49,7 @@ _SETTINGS = ChatOpsSettings(
     default_oauth_token_url="https://slack.com/api/oauth.v2.access",
     installation_fields=('team_id', 'team_name', 'enterprise_id', 'bot_user_id'),
 )
-# The names the slack endpoints import; one implementation in _chatops/settings.py.
+# The names the slack endpoints import; one implementation in chatops/settings.py.
 _env_int = env_int
 _coerce_nonempty_string = coerce_nonempty_string
 _replay_window_seconds = _SETTINGS.replay_window_seconds

@@ -115,6 +115,7 @@ const backendUnavailableGateState = vi.hoisted(() => ({
 vi.mock('antd', async (original) => {
   const actual = await original<typeof import('antd')>();
   return {
+    ...actual,
     Drawer: (props: React.ComponentProps<typeof actual.Drawer>) =>
       capabilityProbe.actualDrawer ? (
         <actual.Drawer {...props} />
@@ -1661,6 +1662,42 @@ describe('WebLayout chat tour rendered outcome', () => {
     expect(await screen.findByRole('dialog', { name: 'Page Help' })).toBeVisible();
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
   });
+  it('offers the first-visit Chat tutorial and records that it was seen', async () => {
+    render(<OptionLayout><PlaygroundEmpty /></OptionLayout>);
+    expect(await screen.findByText('New to this page?', {}, { timeout: 4_000 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start tour' }));
+    expect(useTutorialStore.getState().activeTutorialId).toBe('playground-basics');
+    expect(useTutorialStore.getState().hasSeenPromptForPage('/chat')).toBe(true);
+  });
+
+  it('offers Notes help and preserves the choice to dismiss it', async () => {
+    routerState.location.pathname = '/notes';
+    render(
+      <OptionLayout>
+        <button data-testid="notes-new-note-button">New note</button>
+      </OptionLayout>
+    );
+
+    expect(await screen.findByText('New to this page?', {}, { timeout: 4_000 })).toBeInTheDocument();
+    expect(useTutorialStore.getState().activeTutorialId).toBeFalsy();
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    expect(useTutorialStore.getState().hasSeenPromptForPage('/notes')).toBe(true);
+    expect(useTutorialStore.getState().activeTutorialId).toBeFalsy();
+  });
+
+  it('offers Settings help even when the page uses its own header', async () => {
+    routerState.location.pathname = '/settings/preferences';
+    render(
+      <OptionLayout hideHeader>
+        <select data-testid="settings-nav-select" aria-label="Settings section" />
+        <h1 id="settings-route-heading">Preferences</h1>
+      </OptionLayout>
+    );
+    expect(await screen.findByText('New to this page?', {}, { timeout: 4_000 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    expect(useTutorialStore.getState().hasSeenPromptForPage('/settings')).toBe(true);
+  });
+
   it('starts the registered chat tutorial from its actual help control', async () => {
     render(
       <OptionLayout>

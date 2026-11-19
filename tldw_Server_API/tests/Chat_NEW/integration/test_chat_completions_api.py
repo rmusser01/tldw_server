@@ -162,7 +162,7 @@ class TestChatCompletionsEndpoint:
             captured["messages"] = kwargs.get("messages_payload")
             return {"choices": [{"message": {"role": "assistant", "content": "provider ok"}}]}
 
-        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
 
         response = test_client.post(
             "/api/v1/chat/completions",
@@ -190,7 +190,7 @@ class TestChatCompletionsEndpoint:
         def fail_call(**_kwargs):
             raise AssertionError("provider path should not be called for chat macros")
 
-        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fail_call)
 
         try:
             response = test_client.post(
@@ -256,7 +256,7 @@ class TestChatCompletionsEndpoint:
         config = configparser.ConfigParser()
         administrator: dict[str, str | None] = {"model": None}
         monkeypatch.setattr(chat_endpoint, "_config", config)
-        monkeypatch.setattr(chat_endpoint, "get_override_default_model", lambda _provider: administrator["model"])
+        monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.get_override_default_model", lambda _provider: administrator["model"])
         monkeypatch.setattr(chat_endpoint, "get_llm_provider_override", lambda _provider: None)
         if default_source == "environment":
             monkeypatch.setenv("DEFAULT_MODEL_LOCAL_LLM", "request-time-model")
@@ -376,7 +376,7 @@ class TestChatCompletionsEndpoint:
         def fail_call(**_kwargs):
             raise AssertionError("provider path should not be called for streaming chat macros")
 
-        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fail_call)
 
         try:
             response = test_client.post(
@@ -427,7 +427,7 @@ class TestChatCompletionsEndpoint:
         def fail_call(**_kwargs):
             raise AssertionError("provider path should not receive failed macro invocations")
 
-        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fail_call)
 
         try:
             response = test_client.post(
@@ -474,7 +474,7 @@ class TestChatCompletionsEndpoint:
         def fail_list(_service):
             raise RuntimeError("api_key=secret should not leak")
 
-        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
         monkeypatch.setattr(chat_endpoint.ChatMacrosService, "list_macros", fail_list)
 
         try:
@@ -519,8 +519,8 @@ class TestChatCompletionsEndpoint:
         def fail_call(**_kwargs):
             raise AssertionError("provider path should not be called when macro start is rate-limited")
 
-        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
-        monkeypatch.setattr(chat_endpoint, "get_rate_limiter", lambda: DenyLimiter())
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fail_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.rate_limiter.get_rate_limiter", lambda: DenyLimiter())
 
         try:
             response = test_client.post(
@@ -557,7 +557,7 @@ class TestChatCompletionsEndpoint:
         def fail_call(**_kwargs):
             raise AssertionError("provider path should not be called for invalid chat macros")
 
-        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fail_call)
 
         try:
             response = test_client.post(
@@ -594,7 +594,7 @@ class TestChatCompletionsEndpoint:
             calls.append(kwargs)
             return {"choices": [{"message": {"role": "assistant", "content": "provider fallback"}}]}
 
-        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
 
         response = test_client.post(
             "/api/v1/chat/completions",
@@ -791,7 +791,7 @@ class TestErrorHandling:
         from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
         def raise_auth(*args, **kwargs):
             raise ChatAuthenticationError("Invalid API key", provider="openai")
-        with patch('tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call', new=raise_auth):
+        with patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", new=raise_auth):
             response = credentialed_test_client.post(
                 "/api/v1/chat/completions",
                 json={
@@ -812,7 +812,7 @@ class TestErrorHandling:
         from unittest.mock import patch
         def boom(*args, **kwargs):
             raise Exception("Unexpected error")
-        with patch('tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call', new=boom):
+        with patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", new=boom):
             response = credentialed_test_client.post(
                 "/api/v1/chat/completions",
                 json={
@@ -893,7 +893,7 @@ class TestRequestQueueAdmission:
         from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
         queue_stub = _InactiveQueueStub()
-        monkeypatch.setattr(chat_endpoint, "get_request_queue", lambda: queue_stub)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", lambda: queue_stub)
         monkeypatch.setattr(chat_endpoint, "QUEUED_EXECUTION", False, raising=False)
 
         response = credentialed_test_client.post(
@@ -919,7 +919,7 @@ class TestRequestQueueAdmission:
         from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
         queue_stub = _ActiveQueueStub()
-        monkeypatch.setattr(chat_endpoint, "get_request_queue", lambda: queue_stub)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", lambda: queue_stub)
         monkeypatch.setattr(chat_endpoint, "QUEUED_EXECUTION", False, raising=False)
 
         response = credentialed_test_client.post(
@@ -940,7 +940,7 @@ class TestRequestQueueAdmission:
         from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
         queue_stub = _ActiveQueueStub(fail_with=RuntimeError("boom"))
-        monkeypatch.setattr(chat_endpoint, "get_request_queue", lambda: queue_stub)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", lambda: queue_stub)
         monkeypatch.setattr(chat_endpoint, "QUEUED_EXECUTION", False, raising=False)
 
         response = test_client.post(

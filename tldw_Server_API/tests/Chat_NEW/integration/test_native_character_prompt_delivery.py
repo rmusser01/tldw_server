@@ -41,6 +41,9 @@ from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
 
 
+pytestmark = pytest.mark.real_chat_service
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_saved_testbot_instruction_reaches_first_ollama_system_message(

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from tldw_Server_API.app.api.v1.endpoints.telegram_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.telegram_support import (
     TelegramScope,
     _peek_pending_telegram_approval_for_tests,
     build_telegram_approval_callback_data,
@@ -162,4 +162,3 @@ async def test_telegram_approval_callback_data_changes_when_scope_payload_change
     assert first_pending is not None
     assert second_pending is not None
     assert first_pending["scope_key"] != second_pending["scope_key"]
-

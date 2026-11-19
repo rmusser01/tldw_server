@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+from tldw_Server_API.app.api.v1.utils.pagination import (
     build_offset_pagination_meta,
 )
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
@@ -47,10 +47,6 @@ from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
-from tldw_Server_API.app.core.Chat.chat_service import (
-    invalidate_model_alias_caches,
-)
-from tldw_Server_API.app.core.Usage.pricing_catalog import reset_pricing_catalog
 from tldw_Server_API.app.services.admin_maintenance_rotation_service import (
     AdminMaintenanceRotationService,
 )
@@ -62,9 +58,6 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     create_report_schedule as svc_create_report_schedule,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    create_webhook as svc_create_webhook,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     delete_feature_flag as svc_delete_feature_flag,
@@ -79,31 +72,7 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
     delete_webhook as svc_delete_webhook,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
-    get_digest_preference as svc_get_digest_preference,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
     get_incident as svc_get_incident,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    get_maintenance_state as svc_get_maintenance_state,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    get_uptime_stats as svc_get_uptime_stats,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    list_email_deliveries as svc_list_email_deliveries,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    list_feature_flags as svc_list_feature_flags,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    list_incidents as svc_list_incidents,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    list_report_schedules as svc_list_report_schedules,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    list_webhook_deliveries as svc_list_webhook_deliveries,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     list_webhooks as svc_list_webhooks,
@@ -121,9 +90,6 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
     send_test_webhook as svc_send_test_webhook,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
-    set_digest_preference as svc_set_digest_preference,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
     update_incident as svc_update_incident,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
@@ -133,12 +99,13 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
     update_report_schedule as svc_update_report_schedule,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
-    update_webhook as svc_update_webhook,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
     upsert_feature_flag as svc_upsert_feature_flag,
 )
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
+import tldw_Server_API.app.core.AuthNZ.database as _database
+import tldw_Server_API.app.core.Chat.chat_service as _chat_service
+import tldw_Server_API.app.core.Usage.pricing_catalog as _pricing_catalog
+import tldw_Server_API.app.services.admin_system_ops_service as _admin_system_ops_service
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.AuthNZ.repos.maintenance_rotation_runs_repo import (
@@ -269,7 +236,7 @@ async def get_maintenance_mode(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> MaintenanceState:
     del principal
-    state = await asyncio.to_thread(svc_get_maintenance_state)
+    state = await asyncio.to_thread(_admin_system_ops_service.get_maintenance_state)
     return MaintenanceState(**state)
 
 
@@ -456,7 +423,7 @@ async def list_feature_flags(
         return FeatureFlagsResponse(items=[], total=0)
     try:
         items = await asyncio.to_thread(
-            svc_list_feature_flags,
+            _admin_system_ops_service.list_feature_flags,
             scope=scope,
             org_id=org_id if org_ids is None else None,
             user_id=user_id,
@@ -568,7 +535,7 @@ async def list_incidents(
 ) -> IncidentListResponse:
     del principal
     items, total = await asyncio.to_thread(
-        svc_list_incidents,
+        _admin_system_ops_service.list_incidents,
         status=status,
         severity=severity,
         tag=tag,
@@ -631,7 +598,7 @@ async def get_incident_sla_metrics(
     """Compute SLA metrics across all incidents."""
     _require_platform_admin(principal)
     incidents, _ = await asyncio.to_thread(
-        svc_list_incidents,
+        _admin_system_ops_service.list_incidents,
         status=None,
         severity=None,
         tag=None,
@@ -934,7 +901,7 @@ async def create_webhook(
     """Create a new webhook. The secret is returned once in this response."""
     _require_platform_admin(principal)
     try:
-        webhook = svc_create_webhook(
+        webhook = _admin_system_ops_service.create_webhook(
             url=payload.url,
             events=payload.events,
             enabled=payload.enabled,
@@ -970,7 +937,7 @@ async def update_webhook(
     """Update a webhook. Secret is never returned after creation."""
     _require_platform_admin(principal)
     try:
-        webhook = svc_update_webhook(
+        webhook = _admin_system_ops_service.update_webhook(
             webhook_id=webhook_id,
             url=payload.url,
             events=payload.events,
@@ -1039,7 +1006,7 @@ async def list_webhook_deliveries(
 ) -> WebhookDeliveryListResponse:
     """List delivery history for a webhook, newest first."""
     _require_platform_admin(principal)
-    items, total = svc_list_webhook_deliveries(
+    items, total = _admin_system_ops_service.list_webhook_deliveries(
         webhook_id=webhook_id,
         limit=limit,
         offset=offset,
@@ -1126,7 +1093,7 @@ async def get_billing_analytics(
     try:
         from tldw_Server_API.app.core.AuthNZ.repos.billing_repo import AuthnzBillingRepo
 
-        pool = await get_db_pool()
+        pool = await _database.get_db_pool()
         repo = AuthnzBillingRepo(db_pool=pool)
 
         subscriptions = await repo.list_all_subscriptions()
@@ -1269,7 +1236,7 @@ async def reload_llm_pricing_catalog() -> dict:
     without restarting the server.
     """
     try:
-        reset_pricing_catalog()
+        _pricing_catalog.reset_pricing_catalog()
         return {"status": "ok"}
     except _OPS_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to reload pricing catalog")
@@ -1290,7 +1257,7 @@ async def reload_chat_model_alias_caches() -> dict:
     without restarting the server.
     """
     try:
-        invalidate_model_alias_caches()
+        _chat_service.invalidate_model_alias_caches()
         return {"status": "ok"}
     except _OPS_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to reload chat model alias caches")
@@ -1314,7 +1281,7 @@ async def get_compliance_posture(
     """
     _require_platform_admin(principal)
 
-    pool = await get_db_pool()
+    pool = await _database.get_db_pool()
 
     # --- MFA adoption ----------------------------------------------------------
     mfa_enabled = 0
@@ -1393,7 +1360,7 @@ async def _check_dep(
 
 async def _check_authnz_database() -> dict[str, Any]:
     """Check AuthNZ database pool connectivity."""
-    pool = await get_db_pool()
+    pool = await _database.get_db_pool()
     health = await pool.health_check()
     return {
         "status": health.get("status", "unhealthy"),
@@ -1502,7 +1469,7 @@ async def get_dependency_uptime(
     """
     _require_platform_admin(principal)
     try:
-        stats = await asyncio.to_thread(svc_get_uptime_stats, name, days)
+        stats = await asyncio.to_thread(_admin_system_ops_service.get_uptime_stats, name, days)
     except _OPS_NONCRITICAL_EXCEPTIONS as exc:
         _raise_internal_admin_error("Failed to get dependency uptime", exc)
     return stats
@@ -1523,7 +1490,7 @@ async def list_email_deliveries(
     """List email delivery log entries with optional status filter and pagination."""
     _require_platform_admin(principal)
     try:
-        items, total = await asyncio.to_thread(svc_list_email_deliveries, limit=limit, offset=offset, status=status)
+        items, total = await asyncio.to_thread(_admin_system_ops_service.list_email_deliveries, limit=limit, offset=offset, status=status)
     except _OPS_NONCRITICAL_EXCEPTIONS as exc:
         _raise_internal_admin_error("Failed to list email deliveries", exc)
     pagination = build_offset_pagination_meta(
@@ -1553,7 +1520,7 @@ async def get_report_schedules(
     """List all compliance report schedules."""
     _require_platform_admin(principal)
     try:
-        items = await asyncio.to_thread(svc_list_report_schedules)
+        items = await asyncio.to_thread(_admin_system_ops_service.list_report_schedules)
     except _OPS_NONCRITICAL_EXCEPTIONS as exc:
         _raise_internal_admin_error("Failed to list report schedules", exc)
     return {"items": items, "total": len(items)}
@@ -1649,7 +1616,7 @@ async def send_report_now(
 
     # Fetch the schedule
     try:
-        schedules = await asyncio.to_thread(svc_list_report_schedules)
+        schedules = await asyncio.to_thread(_admin_system_ops_service.list_report_schedules)
     except _OPS_NONCRITICAL_EXCEPTIONS as exc:
         _raise_internal_admin_error("Failed to load report schedules.", exc)
 
@@ -1780,7 +1747,7 @@ async def get_digest_preference(
     if not user_id:
         raise HTTPException(status_code=401, detail="User identity required.")
     try:
-        pref = await asyncio.to_thread(svc_get_digest_preference, user_id=user_id)
+        pref = await asyncio.to_thread(_admin_system_ops_service.get_digest_preference, user_id=user_id)
     except _OPS_NONCRITICAL_EXCEPTIONS as exc:
         _raise_internal_admin_error("Failed to get digest preference", exc)
     if pref is None:
@@ -1802,7 +1769,7 @@ async def set_digest_preference(
     frequency = body.get("frequency", "off")
     try:
         pref = await asyncio.to_thread(
-            svc_set_digest_preference,
+            _admin_system_ops_service.set_digest_preference,
             user_id=user_id,
             email=email,
             frequency=frequency,

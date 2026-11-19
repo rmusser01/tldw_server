@@ -55,8 +55,8 @@ from tldw_Server_API.app.core.Slides.standalone_html_service import (
 )
 from tldw_Server_API.app.core.Slides.standalone_html_sources import (
     StandaloneHtmlSourceError,
-    resolve_standalone_html_source,
 )
+import tldw_Server_API.app.core.Slides.standalone_html_sources as _standalone_html_sources
 
 router = APIRouter()
 
@@ -427,7 +427,7 @@ async def submit_standalone_html_generation(
                 media_db = await stack.enter_async_context(source_databases.media())
             if kind in {"chat", "notes", "rag"}:
                 chacha_db = await stack.enter_async_context(source_databases.chacha())
-            return await resolve_standalone_html_source(
+            return await _standalone_html_sources.resolve_standalone_html_source(
                 source,
                 owner_user_id=owner_user_id,
                 limits=limits,

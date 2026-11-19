@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import HTTPException
 
-from tldw_Server_API.app.api.v1.endpoints import telegram_support as support
+from tldw_Server_API.app.api.v1.utils.chatops import telegram_support as support
 from tldw_Server_API.app.api.v1.schemas.telegram_schemas import TelegramBotConfigUpdate
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal

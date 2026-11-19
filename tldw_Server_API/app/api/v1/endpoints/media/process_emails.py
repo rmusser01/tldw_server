@@ -13,15 +13,14 @@ import tldw_Server_API.app.core.Ingestion_Media_Processing.Email.Email_Processin
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
+    admit_media_analysis,
     get_process_emails_form,
     media_analysis_requested,
 )
 from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
     media_create_dependencies,
 )
-from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessEmailsForm
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
@@ -34,7 +33,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     first_saved_filename,
-    save_uploaded_files,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
     ProcessItem,
@@ -42,6 +40,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import FileValidator
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
+import tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps as _Prompts_DB_Deps
+import tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing as _input_sourcing
 
 router = APIRouter()
 
@@ -96,11 +96,11 @@ async def process_emails_endpoint(
 
     if media_analysis_requested(form_data):
         # Usage quotas (LLM usage accounting spec §4a), before any download or processing.
-        await enforce_llm_quota(current_user.id)
+        await admit_media_analysis(current_user.id, form_data)
 
     system_prompt = form_data.system_prompt
     if form_data.perform_analysis and form_data.api_name and system_prompt is None:
-        prompts_db = await get_prompts_db_for_user(request, current_user)
+        prompts_db = await _Prompts_DB_Deps.get_prompts_db_for_user(request, current_user)
 
         def resolve_system_prompt() -> str:
             """Capture email instructions and release this worker's connection."""
@@ -150,7 +150,7 @@ async def process_emails_endpoint(
         temp_dir_path = Path(temp_dir)
 
         # Save uploaded files via shared helper.
-        saved_files_info, file_errors = await save_uploaded_files(
+        saved_files_info, file_errors = await _input_sourcing.save_uploaded_files(
             files or [],
             temp_dir=temp_dir_path,
             validator=validator,

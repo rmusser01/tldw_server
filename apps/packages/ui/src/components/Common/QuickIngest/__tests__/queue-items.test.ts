@@ -7,7 +7,8 @@ import {
   validateQueueItem
 } from "../queue-items"
 import type { WizardQueueItem } from "../types"
-import { QUICK_INGEST_MAX_FILE_SIZE } from "../constants"
+const DOCUMENT_LIMIT = 250 * 1024 ** 2
+const AV_LIMIT = 1024 ** 3
 
 const fileItem = (id: string, size = 4): WizardQueueItem => ({
   id,
@@ -53,8 +54,25 @@ describe("queue eligibility", () => {
       queue[0].id
     ])
   })
+  it.each([
+    ["pdf", "scan.pdf", "application/pdf", DOCUMENT_LIMIT],
+    ["ebook", "sample.epub", "application/epub+zip", DOCUMENT_LIMIT],
+    ["document", "notes.docx", "", DOCUMENT_LIMIT],
+    ["audio", "sample.ogg", "audio/ogg", AV_LIMIT],
+    ["video", "sample.mkv", "", AV_LIMIT]
+  ] as const)("enforces the %s boundary from the actual File", (detectedType, name, type, limit) => {
+    const file = new File(["sample"], name, { type })
+    const item = { ...fileItem("selected"), file, fileName: name, detectedType }
+    Object.defineProperty(file, "size", { value: limit, configurable: true })
+    expect(validateQueueItem(item).valid).toBe(true)
+    Object.defineProperty(file, "size", { value: limit + 1 })
+    expect(validateQueueItem(item).valid).toBe(false)
+    expect(getEligibleQueueItems([item])).toEqual([])
+  })
+
   it("validates file size and unsupported types without allowing process-again to bypass validation", () => {
-    const item = fileItem("large", QUICK_INGEST_MAX_FILE_SIZE + 1)
+    const item = fileItem("large", DOCUMENT_LIMIT + 1)
+    Object.defineProperty(item.file!, "size", { value: item.fileSize })
     expect(validateQueueItem(item).valid).toBe(false)
     item.detectedType = "unknown"
     item.validation = validateQueueItem(item)

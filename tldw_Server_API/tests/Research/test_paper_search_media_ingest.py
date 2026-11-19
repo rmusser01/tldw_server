@@ -23,7 +23,7 @@ def test_ingest_paper_search_media_uses_media_repository_for_media_db_sessions(
     fake_repo = _FakeRepo()
     media_db = _MediaDb()
 
-    monkeypatch.setattr(paper_search, "get_media_repository", lambda db: fake_repo, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_media_repository", lambda db: fake_repo, raising=False)
 
     result = paper_search._ingest_paper_search_media(
         media_db=media_db,
@@ -69,7 +69,7 @@ def test_ingest_paper_search_media_falls_back_to_direct_writer_when_repository_w
     def _raise_not_a_db(_db):
         raise TypeError("already a writer")
 
-    monkeypatch.setattr(paper_search, "get_media_repository", _raise_not_a_db, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.api.get_media_repository", _raise_not_a_db, raising=False)
 
     result = paper_search._ingest_paper_search_media(
         media_db=direct_writer,

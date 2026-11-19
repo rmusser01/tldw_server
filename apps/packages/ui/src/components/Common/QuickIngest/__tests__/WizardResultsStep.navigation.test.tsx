@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import React from "react"
 import type { WizardResultItem } from "../types"
+import { extractCompletedIngestJobWarning } from "@/services/tldw/ingest-job-results"
 
 const wizardHarness = vi.hoisted(() => ({
   results: [] as WizardResultItem[],
@@ -400,6 +401,28 @@ describe("WizardResultsStep navigation buttons", () => {
 
     expect(screen.getByText(/already in library/i)).toBeTruthy()
     expect(screen.getByText(/overwrite existing/i)).toBeTruthy()
+  })
+
+  it("explains skipped analysis and opens the existing Media item", () => {
+    const warning = "Analysis skipped because this item is already in your library."
+    const data = {
+      status: "Skipped",
+      media_id: 42,
+      db_message: "Media already exists. Overwrite not enabled.",
+      warnings: [warning],
+    }
+    setSinglePdfResult({
+      outcome: "skipped",
+      mediaId: 42,
+      data,
+      warning: extractCompletedIngestJobWarning(data),
+    })
+    const onOpenMedia = vi.fn()
+    render(<WizardResultsStep onClose={vi.fn()} onOpenMedia={onOpenMedia} />)
+
+    expect(screen.getByText(warning)).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: /open .* in media/i }))
+    expect(onOpenMedia).toHaveBeenCalledWith(expect.objectContaining({ mediaId: 42 }))
   })
 
   it("does not render Open in Document Workspace when the original file was not persisted", () => {

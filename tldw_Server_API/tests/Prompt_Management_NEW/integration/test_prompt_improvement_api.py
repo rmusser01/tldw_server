@@ -48,6 +48,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
 )
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+from tldw_Server_API.tests.helpers.offline_network import stub_host_resolution
 
 pytestmark = pytest.mark.integration
 
@@ -106,6 +107,12 @@ def _test_user() -> SimpleNamespace:
 
 def _configured_providers() -> dict[str, Any]:
     return {"providers": [], "default_provider": "openai"}
+
+
+@pytest.fixture
+def offline_provider_hosts(monkeypatch):
+    """The route's provider listing runs the egress policy, which resolves every configured provider host."""
+    stub_host_resolution(monkeypatch)
 
 
 @contextmanager
@@ -185,7 +192,7 @@ def test_improve_endpoint_returns_canonical_response_and_isolates_target(monkeyp
         captured.update(kwargs)
         return _success_dispatch_result()
 
-    monkeypatch.setattr(prompts, "dispatch_prompt_improvement", fake_dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch.dispatch_prompt_improvement", fake_dispatch)
 
     with _isolated_prompt_client() as (client, _app, _route):
         response = client.post("/api/v1/prompts/improve", json=_payload())
@@ -255,7 +262,7 @@ def test_improve_endpoint_reports_concrete_and_actual_auto_route(
             model=resolved_model,
         )
 
-    monkeypatch.setattr(prompts, "dispatch_prompt_improvement", fake_dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch.dispatch_prompt_improvement", fake_dispatch)
     payload = _payload(
         model_selection={
             "selected_model": selected_model,
@@ -346,7 +353,7 @@ def test_request_validation_is_bounded_forbidden_and_sanitized(monkeypatch, muta
         dispatched = True
         return _success_dispatch_result()
 
-    monkeypatch.setattr(prompts, "dispatch_prompt_improvement", fake_dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch.dispatch_prompt_improvement", fake_dispatch)
     payload = _payload(**mutation)
 
     with _isolated_prompt_client() as (client, _app, _route):
@@ -364,8 +371,7 @@ def test_request_validation_is_bounded_forbidden_and_sanitized(monkeypatch, muta
 def test_oversized_draft_uses_stable_error_without_echo(monkeypatch):
     oversized = "PRIVATE_DRAFT_SENTINEL" + ("x" * MAX_DRAFT_CHARS)
     monkeypatch.setattr(
-        prompts,
-        "dispatch_prompt_improvement",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch.dispatch_prompt_improvement",
         AsyncMock(side_effect=AssertionError("provider must not be called")),
     )
 
@@ -393,8 +399,7 @@ def test_raw_json_parsing_is_bounded_stable_and_never_echoes_input(
     expected_code,
 ):
     monkeypatch.setattr(
-        prompts,
-        "dispatch_prompt_improvement",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch.dispatch_prompt_improvement",
         AsyncMock(side_effect=AssertionError("provider must not be called")),
     )
 
@@ -600,10 +605,10 @@ def _ordered_gate_client(monkeypatch, events: list[str]):
     async def billing_dependency() -> None:
         await billing()
 
-    monkeypatch.setattr(prompts, "consume_deferred_token_quota", quota, raising=False)
-    monkeypatch.setattr(prompts, "enforce_rbac_rate_limit", rbac, raising=False)
-    monkeypatch.setattr(prompts, "enforce_llm_budget", budget)
-    monkeypatch.setattr(prompts, "get_db_pool", get_pool)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.consume_deferred_token_quota", quota, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.enforce_rbac_rate_limit", rbac, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.llm_budget_guard.enforce_llm_budget", budget)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", get_pool)
     monkeypatch.setattr(
         prompts,
         "_PROMPT_IMPROVEMENT_BILLING_CHECK",
@@ -664,7 +669,7 @@ def test_invalid_requests_do_not_run_operation_gates_or_dispatch(
         events.append("dispatch")
         return _success_dispatch_result()
 
-    monkeypatch.setattr(prompts, "dispatch_prompt_improvement", dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch.dispatch_prompt_improvement", dispatch)
     with _ordered_gate_client(monkeypatch, events) as client:
         response = client.post("/api/v1/prompts/improve", **request_kwargs)
 
@@ -679,7 +684,7 @@ def test_valid_request_runs_operation_gates_in_order_before_dispatch(monkeypatch
         events.append("dispatch")
         return _success_dispatch_result()
 
-    monkeypatch.setattr(prompts, "dispatch_prompt_improvement", dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch.dispatch_prompt_improvement", dispatch)
     with _ordered_gate_client(monkeypatch, events) as client:
         response = client.post("/api/v1/prompts/improve", json=_payload())
 
@@ -707,7 +712,7 @@ def test_protected_token_occurrence_presence_and_total_limits_precede_dispatch(
     protected_tokens,
 ):
     dispatch_spy = AsyncMock(side_effect=AssertionError("provider must not be called"))
-    monkeypatch.setattr(prompts, "dispatch_prompt_improvement", dispatch_spy)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch.dispatch_prompt_improvement", dispatch_spy)
     text = _TARGET_DRAFT
     if len(protected_tokens) > 2:
         text = " ".join(token["value"] for token in protected_tokens)
@@ -806,7 +811,7 @@ def test_improve_endpoint_enforces_chat_equivalent_dependencies(
     gate,
     status_code,
 ):
-    monkeypatch.setattr(prompts, "dispatch_prompt_improvement", AsyncMock())
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch.dispatch_prompt_improvement", AsyncMock())
 
     with _isolated_prompt_client() as (client, app, route):
         if gate == "auth":
@@ -850,20 +855,17 @@ def test_improve_endpoint_enforces_post_validation_operation_gates(
     async def get_pool() -> object:
         return object()
 
-    monkeypatch.setattr(prompts, "get_db_pool", get_pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", get_pool)
     monkeypatch.setattr(
-        prompts,
-        "consume_deferred_token_quota",
+        "tldw_Server_API.app.api.v1.API_Deps.auth_deps.consume_deferred_token_quota",
         allow,
     )
     monkeypatch.setattr(
-        prompts,
-        "enforce_rbac_rate_limit",
+        "tldw_Server_API.app.api.v1.API_Deps.auth_deps.enforce_rbac_rate_limit",
         deny if gate == "rbac" else allow,
     )
     monkeypatch.setattr(
-        prompts,
-        "enforce_llm_budget",
+        "tldw_Server_API.app.core.Usage.llm_budget_guard.enforce_llm_budget",
         deny if gate == "budget" else allow,
     )
     monkeypatch.setattr(
@@ -871,7 +873,7 @@ def test_improve_endpoint_enforces_post_validation_operation_gates(
         "_PROMPT_IMPROVEMENT_BILLING_CHECK",
         deny if gate == "billing" else allow,
     )
-    monkeypatch.setattr(prompts, "dispatch_prompt_improvement", AsyncMock())
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch.dispatch_prompt_improvement", AsyncMock())
 
     with _isolated_prompt_client(bypass_post_validation_gates=False) as (
         client,
@@ -941,7 +943,7 @@ def test_stable_error_mapping_never_exposes_internal_exception_text(
                 retry_after_seconds=17 if error_code == "provider_rate_limited" else None,
             )
 
-    monkeypatch.setattr(prompts, "dispatch_prompt_improvement", fake_dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch.dispatch_prompt_improvement", fake_dispatch)
 
     with _isolated_prompt_client() as (client, _app, _route):
         response = client.post("/api/v1/prompts/improve", json=_payload())
@@ -1227,16 +1229,16 @@ def test_prompt_improvement_catalog_rate_limit_is_per_user(monkeypatch):
     async def dispatch(**_kwargs):
         return _success_dispatch_result()
 
-    monkeypatch.setattr(prompts, "get_db_pool", get_pool, raising=False)
-    monkeypatch.setattr(prompts, "consume_deferred_token_quota", allow, raising=False)
-    monkeypatch.setattr(prompts, "enforce_llm_budget", allow)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", get_pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.consume_deferred_token_quota", allow, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.llm_budget_guard.enforce_llm_budget", allow)
     monkeypatch.setattr(
         prompts,
         "_PROMPT_IMPROVEMENT_BILLING_CHECK",
         allow,
         raising=False,
     )
-    monkeypatch.setattr(prompts, "dispatch_prompt_improvement", dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch.dispatch_prompt_improvement", dispatch)
     app.dependency_overrides[auth_deps.get_db_pool] = get_pool
 
     for dependency in route.dependant.dependencies:
@@ -1648,7 +1650,7 @@ async def test_dispatch_maps_rate_limit_retry_after_and_provider_refusal(monkeyp
     byok.touch_last_used.assert_awaited_once_with()
 
 
-def test_llm_quota_refusal_answers_402_not_retryable_provider_unavailable(monkeypatch):
+def test_llm_quota_refusal_answers_402_not_retryable_provider_unavailable(monkeypatch, offline_provider_hosts):
     """The user's LLM limit is let through as the 402, not mapped to a retryable provider outage (TASK-13638)."""
     refusal = LLMQuotaExceededError(
         category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60

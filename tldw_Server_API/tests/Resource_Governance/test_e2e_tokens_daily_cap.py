@@ -197,7 +197,7 @@ async def test_e2e_chat_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backen
             False,
         )
 
-    monkeypatch.setattr(chat_ep, "build_context_and_messages", _stub_build_context_and_messages, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.build_context_and_messages", _stub_build_context_and_messages, raising=False)
 
     try:
         with _with_rg_middleware(app):

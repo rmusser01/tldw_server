@@ -739,7 +739,7 @@
       "count": 1
     },
     "no-restricted-syntax": {
-      "count": 9
+      "count": 5
     }
   },
   "packages/ui/src/components/Review/hooks/useMediaSelection.ts": {

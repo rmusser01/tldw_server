@@ -51,11 +51,11 @@ import {
   isRecord,
   normalizeConfidenceScore,
   normalizeText,
-  extractStringCandidate,
   toFiniteNumber,
   toPositiveInt,
   type RetrievalDiagnostics
 } from "./retrieval-diagnostics"
+import { resolveSourceContentText } from "../source-content-text"
 import type { WorkspaceCapabilitiesResponse } from "@/services/tldw/domains/workspace-api"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
@@ -346,32 +346,6 @@ const getSourceTagColor = (
   if (status === "processing") return "gold"
   if (status === "error") return "red"
   return "blue"
-}
-
-const extractSourceFullText = (detail: unknown): string => {
-  if (!isRecord(detail)) return ""
-  const content = isRecord(detail.content) ? detail.content : null
-  const processing = isRecord(detail.processing) ? detail.processing : null
-
-  const candidates: unknown[] = [
-    content?.text,
-    content?.content,
-    content?.full_text,
-    content?.transcript,
-    content?.raw_text,
-    processing?.analysis,
-    processing?.transcript,
-    processing?.text
-  ]
-
-  for (const candidate of candidates) {
-    const normalized = extractStringCandidate(candidate)
-    if (normalized.length > 0) {
-      return normalized
-    }
-  }
-
-  return ""
 }
 
 const findSourceIdFromCitation = (
@@ -2243,17 +2217,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 )
               return { source, fullText: version.content }
             }
-            const detail = await tldwClient.getMediaDetails(source.mediaId, {
-              include_content: true,
-              include_versions: false,
-              include_version_content: false,
-              ...options
-            })
+            // WP-45: reuse already-ingested source text from the workspace
+            // store; only misses hit the network.
+            const resolvedContent = await resolveSourceContentText(
+              source.mediaId,
+              options
+            )
             assertCurrent()
-            const fullText = extractSourceFullText(detail)
             return {
               source,
-              fullText
+              fullText: resolvedContent.text
             }
           })
         )

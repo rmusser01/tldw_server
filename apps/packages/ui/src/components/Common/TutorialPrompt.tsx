@@ -7,10 +7,12 @@ import { useStartTutorial } from "@/hooks/useStartTutorial"
 import React, { useEffect, useLayoutEffect, useRef } from "react"
 import { useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
-import { notification, Button, Space } from "antd"
+import { Button, ConfigProvider, notification, Space, theme } from "antd"
 import { GraduationCap } from "lucide-react"
+import { CHAT_PATH } from "@/routes/route-paths"
 import { useTutorialStore } from "@/store/tutorials"
-import { getPrimaryTutorialForRoute, hasTutorialsForRoute } from "@/tutorials"
+import { getPrimaryTutorialForRoute, normalizeTutorialRoute } from "@/tutorials"
+import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -24,23 +26,22 @@ const PROMPT_COOLDOWN_MS = 10000
 /** Duration the notification stays open (seconds); auto-dismiss after 15s */
 const NOTIFICATION_DURATION = 15
 const NOTIFICATION_KEY = "tutorial-prompt-global"
+// Place the Chat offer below the workspace toolbar and clear of the composer.
+const CHAT_PROMPT_TOP_PX = 128
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const TutorialPrompt: React.FC = () => {
+export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = ({
+  excludedRoutes
+}) => {
   const { t } = useTranslation(["tutorials", "common"])
   const location = useLocation()
-  const [api, contextHolder] = notification.useNotification()
-  const timeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(
-    null
-  )
-  const notificationKeyRef = useRef<string | null>(null)
+  const { token } = theme.useToken()
+  const [api, contextHolder] = notification.useNotification({ top: CHAT_PROMPT_TOP_PX })
   const shownRef = useRef<Set<string>>(new Set())
   const lastPromptShownAtRef = useRef(0)
-  const activePromptPageRef = useRef<string | null>(null)
-  const suppressCloseMarkRef = useRef(false)
 
   const hasSeenPromptForPage = useTutorialStore(
     (state) => state.hasSeenPromptForPage
@@ -63,40 +64,18 @@ export const TutorialPrompt: React.FC = () => {
   useEffect(() => {
     // Keep the prompt's original source; unrelated renders must not cancel its delay.
     const launchTutorial = launcherRef.current
-    let active = true
-    const pageKey = location.pathname
+    const pageKey = normalizeTutorialRoute(location.pathname)
     const tutorialLookupOptions = {
       completedTutorialIds: completedTutorials
     }
 
-    // Clean up previous timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
-    }
-
-    // Always keep a single active notification instance.
-    if (notificationKeyRef.current) {
-      suppressCloseMarkRef.current = true
-      api.destroy(notificationKeyRef.current)
-      notificationKeyRef.current = null
-      activePromptPageRef.current = null
-    } else {
-      suppressCloseMarkRef.current = false
-    }
-
     // Skip prompts while a tutorial/help modal is active.
-    if (isHelpModalOpen || activeTutorialId) {
+    if (isHelpModalOpen || activeTutorialId || excludedRoutes?.includes(pageKey)) {
       return
     }
 
     // Skip if we've already shown a prompt for this page in this session
     if (shownRef.current.has(pageKey)) {
-      return
-    }
-
-    // Skip if page has no tutorials
-    if (!hasTutorialsForRoute(pageKey, tutorialLookupOptions)) {
       return
     }
 
@@ -110,7 +89,7 @@ export const TutorialPrompt: React.FC = () => {
       pageKey,
       tutorialLookupOptions
     )
-    if (!primaryTutorial) {
+    if (!primaryTutorial || completedTutorials.includes(primaryTutorial.id)) {
       return
     }
 
@@ -125,36 +104,49 @@ export const TutorialPrompt: React.FC = () => {
     )
     const delayMs = Math.max(PROMPT_DELAY_MS, cooldownRemaining)
 
-    // Show notification after a delay
-    timeoutRef.current = globalThis.setTimeout(() => {
-      if (!active) return
+    const firstTarget = primaryTutorial.requireFirstTargetForPrompt
+      ? primaryTutorial.steps[0]?.target
+      : undefined
+    let currentPrompt: symbol | undefined
+    const closePrompt = () => {
+      if (!currentPrompt) return
+      currentPrompt = undefined
+      api.destroy(NOTIFICATION_KEY)
+    }
+    const updatePrompt = () => {
+      const overlayOpen = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          '[aria-modal="true"], [data-tutorial-prompt-blocker][aria-expanded="true"]'
+        )
+      ).some((element) => !isHiddenBySelfOrAncestor(element))
+      if (overlayOpen) {
+        closePrompt()
+        return
+      }
+      if (currentPrompt || (firstTarget && !document.querySelector(firstTarget))) {
+        return
+      }
+
+      const prompt = Symbol()
+      currentPrompt = prompt
       shownRef.current.add(pageKey)
       lastPromptShownAtRef.current = Date.now()
-      activePromptPageRef.current = pageKey
 
-      const handleDismiss = () => {
-        if (!active) return
-        active = false
-        if (notificationKeyRef.current) {
-          api.destroy(notificationKeyRef.current)
-          notificationKeyRef.current = null
-        }
+      const finishPrompt = () => {
+        promptObserver.disconnect()
         markPromptSeen(pageKey)
-        activePromptPageRef.current = null
+      }
+      const handleDismiss = () => {
+        if (currentPrompt !== prompt) return
+        closePrompt()
+        finishPrompt()
       }
 
       const handleStartTour = () => {
-        if (!active || !launchTutorial(primaryTutorial.id)) return
-        active = false
-        if (notificationKeyRef.current) {
-          api.destroy(notificationKeyRef.current)
-          notificationKeyRef.current = null
-        }
-        markPromptSeen(pageKey)
-        activePromptPageRef.current = null
+        if (currentPrompt !== prompt || !launchTutorial(primaryTutorial.id)) return
+        handleDismiss()
       }
 
-      notificationKeyRef.current = NOTIFICATION_KEY
       api.info({
         key: NOTIFICATION_KEY,
         message: (
@@ -164,13 +156,7 @@ export const TutorialPrompt: React.FC = () => {
         ),
         description: (
           <span className="text-text-muted">
-            {t("tutorials:prompt.description", {
-              defaultValue: "Take a quick tour to learn the key features.",
-              tutorialName: t(
-                primaryTutorial.labelKey,
-                primaryTutorial.labelFallback
-              )
-            })}
+            {t(primaryTutorial.descriptionKey, primaryTutorial.descriptionFallback)}
           </span>
         ),
         icon: (
@@ -189,42 +175,37 @@ export const TutorialPrompt: React.FC = () => {
           </Space>
         ),
         duration: NOTIFICATION_DURATION,
-        placement: "bottomRight",
+        placement: pageKey === CHAT_PATH ? "topRight" : "bottomRight",
         className: "tutorial-prompt-notification",
         onClose: () => {
-          if (!active) return
-          active = false
-          notificationKeyRef.current = null
-          if (suppressCloseMarkRef.current) {
-            suppressCloseMarkRef.current = false
-            return
-          }
-
-          if (activePromptPageRef.current) {
-            markPromptSeen(activePromptPageRef.current)
-          }
-          activePromptPageRef.current = null
+          if (currentPrompt !== prompt) return
+          currentPrompt = undefined
+          finishPrompt()
         }
       })
+    }
+
+    const promptObserver = new MutationObserver(updatePrompt)
+    const timeout = globalThis.setTimeout(() => {
+      promptObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["aria-expanded", "aria-hidden", "aria-modal", "class", "hidden", "style"]
+      })
+      updatePrompt()
     }, delayMs)
 
     return () => {
-      active = false
-      if (timeoutRef.current) {
-        window.clearTimeout(timeoutRef.current)
-        timeoutRef.current = null
-      }
-      if (notificationKeyRef.current) {
-        suppressCloseMarkRef.current = true
-        api.destroy(notificationKeyRef.current)
-        notificationKeyRef.current = null
-        activePromptPageRef.current = null
-      }
+      globalThis.clearTimeout(timeout)
+      promptObserver.disconnect()
+      closePrompt()
     }
   }, [
     location.pathname,
     activeTutorialId,
     api,
+    excludedRoutes,
     isHelpModalOpen,
     completedTutorials,
     t,
@@ -232,7 +213,16 @@ export const TutorialPrompt: React.FC = () => {
     markPromptSeen
   ])
 
-  return contextHolder
+  // A dialog can open after its page's offer is already visible.
+  return (
+    <ConfigProvider
+      theme={{
+        components: { Notification: { zIndexPopup: token.zIndexPopupBase - 1 } }
+      }}
+    >
+      {contextHolder}
+    </ConfigProvider>
+  )
 }
 
 export default TutorialPrompt

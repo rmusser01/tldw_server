@@ -41,7 +41,7 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleN
 
     # The database factory and model are the external boundaries; conversion,
     # batching, chunking, registry validation and SQLite storage remain real.
-    monkeypatch.setattr(endpoint, "get_prompts_db_for_user", get_db, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps.get_prompts_db_for_user", get_db, raising=False)
     monkeypatch.setattr(endpoint.docs, "analyze", analyze)
     yield SimpleNamespace(databases=databases, reads=reads, calls=calls)
     for database in databases.values():
@@ -213,7 +213,7 @@ async def test_corrupt_override_stops_before_input_processing(
         """Fail if input processing starts before prompt validation."""
         pytest.fail("Input processing started before prompt validation")
 
-    monkeypatch.setattr(endpoint, "core_save_uploaded_files", unexpected_upload)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing.save_uploaded_files", unexpected_upload)
     with pytest.raises(ServicePromptCorruptOverride):
         await process()
     assert context.calls == []

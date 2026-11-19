@@ -23,7 +23,7 @@ def path_browser_client(monkeypatch, tmp_path):
     outside_root = tmp_path / "outside"
     outside_root.mkdir()
 
-    monkeypatch.setattr(ep, "get_ingestion_source_allowed_roots", lambda: (allowed_root,))
+    monkeypatch.setattr("tldw_Server_API.app.core.config.get_ingestion_source_allowed_roots", lambda: (allowed_root,))
     monkeypatch.setattr(
         ep,
         "_can_create_local_directory_ingestion_source_for_request",

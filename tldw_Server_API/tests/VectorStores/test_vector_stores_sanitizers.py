@@ -119,10 +119,10 @@ async def test_create_vector_store_sanitizes_meta_uniqueness_fallback_log(
         return fake_adapter
 
     monkeypatch.setattr(vector_ep, "_get_adapter_for_user", fake_get_adapter_for_user)
-    monkeypatch.setattr(vector_ep, "resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
-    monkeypatch.setattr(vector_ep, "init_meta_db", lambda _uid: None)
-    monkeypatch.setattr(vector_ep, "meta_find_store_by_name", _sensitive_error)
-    monkeypatch.setattr(vector_ep, "meta_register_store", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_meta_db.init_meta_db", lambda _uid: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_meta_db.find_store_by_name", _sensitive_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_meta_db.register_store", lambda *_args, **_kwargs: None)
 
     result = await vector_ep.create_vector_store(
         vector_ep.VectorStoreCreate(name="Docs", dimensions=8),
@@ -149,10 +149,10 @@ async def test_create_vector_store_sanitizes_meta_registration_fallback_log(
         return fake_adapter
 
     monkeypatch.setattr(vector_ep, "_get_adapter_for_user", fake_get_adapter_for_user)
-    monkeypatch.setattr(vector_ep, "resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
-    monkeypatch.setattr(vector_ep, "init_meta_db", lambda _uid: None)
-    monkeypatch.setattr(vector_ep, "meta_find_store_by_name", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(vector_ep, "meta_register_store", _sensitive_error)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_meta_db.init_meta_db", lambda _uid: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_meta_db.find_store_by_name", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_meta_db.register_store", _sensitive_error)
 
     result = await vector_ep.create_vector_store(
         vector_ep.VectorStoreCreate(name="Docs", dimensions=8),
@@ -186,10 +186,10 @@ async def test_update_vector_store_sanitizes_meta_name_persistence_fallback_log(
         return fake_adapter
 
     monkeypatch.setattr(vector_ep, "_get_adapter_for_user", fake_get_adapter_for_user)
-    monkeypatch.setattr(vector_ep, "resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
-    monkeypatch.setattr(vector_ep, "init_meta_db", lambda _uid: None)
-    monkeypatch.setattr(vector_ep, "meta_find_store_by_name", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(vector_ep, "meta_list_stores", _sensitive_error)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_meta_db.init_meta_db", lambda _uid: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_meta_db.find_store_by_name", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_meta_db.list_stores", _sensitive_error)
 
     result = await vector_ep.update_vector_store(
         store_id="vs_existing",
@@ -217,8 +217,8 @@ async def test_delete_vector_store_sanitizes_meta_delete_fallback_log(
         return fake_adapter
 
     monkeypatch.setattr(vector_ep, "_get_adapter_for_user", fake_get_adapter_for_user)
-    monkeypatch.setattr(vector_ep, "resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
-    monkeypatch.setattr(vector_ep, "meta_delete_store", _sensitive_error)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_meta_db.delete_store", _sensitive_error)
 
     result = await vector_ep.delete_vector_store(
         store_id="vs_existing",
@@ -252,8 +252,8 @@ async def test_list_vector_stores_sanitizes_meta_db_fallback_log(
         return fake_adapter
 
     monkeypatch.setattr(vector_ep, "_get_adapter_for_user", fake_get_adapter_for_user)
-    monkeypatch.setattr(vector_ep, "resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
-    monkeypatch.setattr(vector_ep, "init_meta_db", _sensitive_error)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_meta_db.init_meta_db", _sensitive_error)
 
     result = await vector_ep.list_vector_stores(current_user=user)
 

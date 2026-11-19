@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -17,7 +17,21 @@ const mocks = vi.hoisted(() => ({
   subscribeResearchRunEvents: vi.fn(),
 }));
 
+// Mirrors the real module's pure WP-40 cadence helper (the real module cannot
+// be importOriginal'd here because it evaluates the API base config).
+const researchRunsRefetchIntervalMock = vi.hoisted(() => {
+  const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
+  return (runs: Array<{ status: string }> | undefined): number | false =>
+    Array.isArray(runs) && runs.some((run) => !terminalStatuses.has(run.status))
+      ? 5000
+      : false;
+});
+
 vi.mock('@web/lib/api/researchRuns', () => ({
+  hasActiveResearchRun: (runs: Array<{ status: string }> | undefined) =>
+    researchRunsRefetchIntervalMock(runs) !== false,
+  RESEARCH_RUNS_ACTIVE_REFETCH_INTERVAL_MS: 5000,
+  researchRunsRefetchInterval: researchRunsRefetchIntervalMock,
   listResearchRuns: (...args: unknown[]) => mocks.listResearchRuns(...args),
   createResearchRun: (...args: unknown[]) => mocks.createResearchRun(...args),
   getResearchRun: (...args: unknown[]) => mocks.getResearchRun(...args),
@@ -977,5 +991,90 @@ describe('ResearchRunsPage', () => {
       expect(mocks.getResearchBundle).toHaveBeenCalledWith('rs_1');
     });
     expect(await screen.findByText(/Final synthesized answer/)).toBeInTheDocument();
+  });
+});
+
+describe('ResearchRunsPage list polling (WP-40)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.history.replaceState({}, '', '/research');
+    mocks.listResearchRuns.mockResolvedValue([
+      makeRun({ id: 'rs_done', query: 'Finished run', status: 'completed', phase: 'completed' }),
+    ]);
+    mocks.getResearchRun.mockResolvedValue(
+      makeRun({ id: 'rs_done', status: 'completed', phase: 'completed', latest_checkpoint_id: null })
+    );
+    mocks.subscribeResearchRunEvents.mockImplementation(() => () => {});
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('stops list polling when every run is terminal', async () => {
+    vi.useFakeTimers();
+
+    renderWithProviders(<ResearchRunsPage />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText('Finished run')).toBeInTheDocument();
+    expect(mocks.listResearchRuns).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(mocks.listResearchRuns).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the 5 s list cadence while a run is active', async () => {
+    mocks.listResearchRuns.mockResolvedValue([
+      makeRun({ id: 'rs_live', query: 'Live run' }),
+    ]);
+    mocks.getResearchRun.mockResolvedValue(makeRun({ id: 'rs_live' }));
+    vi.useFakeTimers();
+
+    renderWithProviders(<ResearchRunsPage />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.listResearchRuns).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(mocks.listResearchRuns).toHaveBeenCalledTimes(4);
+  });
+
+  it('refetches the run list exactly once when the stream reports a terminal event', async () => {
+    let streamOnEvent: ((event: { event: string; id?: number; payload?: unknown }) => void) | undefined;
+    mocks.subscribeResearchRunEvents.mockImplementation((options: {
+      onEvent: (event: { event: string; id?: number; payload?: unknown }) => void;
+    }) => {
+      streamOnEvent = options.onEvent;
+      return () => {};
+    });
+    vi.useFakeTimers();
+
+    renderWithProviders(<ResearchRunsPage />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.listResearchRuns).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      streamOnEvent?.({
+        event: 'terminal',
+        id: 9,
+        payload: { id: 'rs_done', status: 'completed', phase: 'completed' },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.listResearchRuns).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(mocks.listResearchRuns).toHaveBeenCalledTimes(2);
   });
 });

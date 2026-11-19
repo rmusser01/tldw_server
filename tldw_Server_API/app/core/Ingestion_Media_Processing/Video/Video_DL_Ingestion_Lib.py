@@ -55,7 +55,7 @@ def perform_transcription(*args, **kwargs):
     )
     return _perform_transcription(*args, **kwargs)
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
-from tldw_Server_API.app.core.config import loaded_config_data
+from tldw_Server_API.app.core.config import MAX_STANDARD_MEDIA_UPLOAD_MIB, loaded_config_data
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
     custom_openai_provider_number,
@@ -142,7 +142,7 @@ _PROVIDER_ENV_MAP: dict[str, str] = {
 }
 
 media_config = loaded_config_data.get('media_processing', {}) if loaded_config_data else {}
-DEFAULT_MAX_VIDEO_FILE_SIZE_MB = media_config.get('max_video_file_size_mb', 1000)
+DEFAULT_MAX_VIDEO_FILE_SIZE_MB = media_config.get('max_video_file_size_mb', MAX_STANDARD_MEDIA_UPLOAD_MIB)
 DEFAULT_MAX_VIDEO_FILE_SIZE_BYTES = DEFAULT_MAX_VIDEO_FILE_SIZE_MB * 1024 * 1024
 _TRANSCRIPTION_EXTRACTION_ERROR_SENTINEL = "Error: Unable to extract transcription"
 _KEEP_VIDEO_MAX_FILES = max(0, int(media_config.get('kept_video_max_files', 5)))  # per-user file cap
@@ -664,6 +664,20 @@ def get_youtube_playlist_urls(playlist_id):
         return [entry['url'] for entry in result['entries'] if entry.get('url')]
 
 
+def youtube_playlist_id(url: str) -> str | None:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    host = (parsed.netloc or "").lower().split(":", 1)[0]
+    if host not in {"youtube.com", "youtube-nocookie.com"} and not host.endswith(
+        (".youtube.com", ".youtube-nocookie.com")
+    ):
+        return None
+    ids = parse_qs(parsed.query).get("list")
+    return ids[0] if ids else None
+
+
 def parse_and_expand_urls(urls):
     logging.info(f"Starting parse_and_expand_urls with input: {redact_urls_for_log(urls)}")
     expanded_urls = []
@@ -675,37 +689,17 @@ def parse_and_expand_urls(urls):
             parsed_url = urlparse(url)
             logging.debug(f"Parsed URL components: {parsed_url}")
 
-            # YouTube playlist handling
-            netloc_lower = (parsed_url.netloc or "").lower()
-            host_without_port = netloc_lower.split(":", 1)[0]
-            query_params = parse_qs(parsed_url.query)
-            youtube_playlist_hosts = (
-                "youtube.com",
-                "www.youtube.com",
-                "m.youtube.com",
-                "music.youtube.com",
-                "youtube-nocookie.com",
-            )
-
-            def _matches_youtube_host(hostname: str, _hwp=host_without_port) -> bool:
-                return (
-                    _hwp == hostname
-                    or _hwp.endswith(f".{hostname}")
-                )
-
-            if any(_matches_youtube_host(host) for host in youtube_playlist_hosts):
-                playlist_ids = query_params.get("list")
-                if playlist_ids:
-                    playlist_id = playlist_ids[0]
-                    logging.info(f"Detected YouTube playlist with ID: {playlist_id}")
-                    playlist_urls = get_youtube_playlist_urls(playlist_id)
-                    logging.info(f"Expanded playlist URLs: {redact_urls_for_log(playlist_urls)}")
-                    if playlist_urls:
-                        expanded_urls.extend(playlist_urls)
-                    else:
-                        logging.warning(f"No entries found for playlist '{safe_url}'. Keeping original URL.")
-                        expanded_urls.append(url)
-                    continue
+            playlist_id = youtube_playlist_id(url)
+            if playlist_id:
+                logging.info(f"Detected YouTube playlist with ID: {playlist_id}")
+                playlist_urls = get_youtube_playlist_urls(playlist_id)
+                logging.info(f"Expanded playlist URLs: {redact_urls_for_log(playlist_urls)}")
+                if playlist_urls:
+                    expanded_urls.extend(playlist_urls)
+                else:
+                    logging.warning(f"No entries found for playlist '{safe_url}'. Keeping original URL.")
+                    expanded_urls.append(url)
+                continue
 
             # YouTube short URL handling
             if 'youtu.be' in parsed_url.netloc:

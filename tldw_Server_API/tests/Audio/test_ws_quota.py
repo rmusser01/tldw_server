@@ -39,10 +39,10 @@ async def test_ws_quota_exceeded_structured_error(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
 
     # Monkeypatch quota check to immediately deny any minutes
-    async def _deny(user_id: int, minutes_requested: float):
+    async def _deny(user_id: int, minutes_requested: float, **_kwargs):
         return False, 0.0
 
-    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _deny)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.audio_quota.consume_daily_minutes", _deny)
 
     settings = get_settings()
     token = settings.SINGLE_USER_API_KEY

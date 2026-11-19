@@ -12,7 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
-from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
+from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -231,8 +231,7 @@ def test_workspace_context_combines_sources_readiness_capabilities_and_preview_r
     monkeypatch,
 ):
     monkeypatch.setattr(
-        workspaces_endpoint,
-        "collect_workspace_service_capabilities",
+        "tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities",
         _provider_ready_service_capabilities,
         raising=True,
     )
@@ -299,8 +298,7 @@ def test_workspace_context_includes_attached_primary_root(
         }
 
     monkeypatch.setattr(
-        workspaces_endpoint,
-        "collect_workspace_service_capabilities",
+        "tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities",
         _service_capabilities,
         raising=True,
     )

@@ -235,7 +235,7 @@ async def test_optimization_rate_limit_uses_the_five_request_optimize_bucket(
         seen.append(operation)
         return True
 
-    monkeypatch.setattr(optimization_endpoint, "check_rate_limit", _capture)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.check_rate_limit", _capture)
 
     assert await optimization_endpoint._rl_optimizations(
         user_context={"user_id": "7"},

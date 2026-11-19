@@ -7,8 +7,8 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, User, get_auth_principal, get_request_user
-from tldw_Server_API.app.api.v1.endpoints.discord_oauth_admin import discord_oauth_start_impl
-from tldw_Server_API.app.api.v1.endpoints.discord_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.discord_oauth_admin import discord_oauth_start_impl
+from tldw_Server_API.app.api.v1.utils.chatops.discord_support import (
     _decrypt_discord_payload,
     _discord_policy_for_guild,
     _encrypt_discord_payload,
@@ -22,8 +22,7 @@ from tldw_Server_API.app.api.v1.endpoints.discord_support import (
     _oauth_state_ttl_seconds as _discord_oauth_state_ttl_seconds,
     _set_discord_policy,
 )
-from tldw_Server_API.app.api.v1.endpoints.slack_oauth_admin import slack_oauth_start_impl
-from tldw_Server_API.app.api.v1.endpoints.slack_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.slack_support import (
     _coerce_nonempty_string,
     _decrypt_slack_payload,
     _encrypt_slack_payload,
@@ -37,7 +36,7 @@ from tldw_Server_API.app.api.v1.endpoints.slack_support import (
     _set_slack_policy,
     _slack_policy_for_workspace,
 )
-from tldw_Server_API.app.api.v1.endpoints.telegram_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.telegram_support import (
     TelegramScope,
     _resolve_shared_scope,
     telegram_admin_get_bot_impl,
@@ -74,6 +73,7 @@ from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_re
 from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
 from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import key_hint_for_api_key
 from tldw_Server_API.app.services.integrations_control_plane_service import IntegrationsControlPlaneService
+import tldw_Server_API.app.api.v1.utils.chatops.slack_oauth_admin as _slack_oauth_admin
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
@@ -249,7 +249,7 @@ async def _start_personal_integration_connect_flow(
     workspace_org_id: int,
 ) -> PersonalIntegrationConnectResponse:
     if provider == "slack":
-        response = await slack_oauth_start_impl(
+        response = await _slack_oauth_admin.slack_oauth_start_impl(
             user=user,
             workspace_org_id=workspace_org_id,
             oauth_client_id=_slack_oauth_client_id,

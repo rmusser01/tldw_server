@@ -90,7 +90,7 @@ async def test_transcriptions_health_rejects_non_admin_warm_up(monkeypatch):
     async def non_admin(_request):
         return AuthPrincipal(kind="user", user_id=2)
 
-    monkeypatch.setattr(audio_health, "get_auth_principal", non_admin)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", non_admin)
     request = Request({"type": "http", "method": "GET", "path": "/api/v1/audio/transcriptions/health", "headers": []})
     with pytest.raises(HTTPException) as exc_info:
         await audio_health._authorize_stt_health_warm(request, warm=True)

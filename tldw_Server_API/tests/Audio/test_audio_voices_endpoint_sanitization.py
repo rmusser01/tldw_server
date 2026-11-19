@@ -144,7 +144,7 @@ async def test_audio_voice_generic_failure_logs_are_sanitized(
 ):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(audio_voices, "logger", logger_stub)
-    monkeypatch.setattr(audio_voices, "ensure_request_id", lambda _request: "req-test")
+    monkeypatch.setattr("tldw_Server_API.app.core.Logging.log_context.ensure_request_id", lambda _request: "req-test")
     _install_voice_manager(monkeypatch)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -175,7 +175,7 @@ async def test_audio_voice_validation_failure_logs_are_sanitized(
 ):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(audio_voices, "logger", logger_stub)
-    monkeypatch.setattr(audio_voices, "ensure_request_id", lambda _request: "req-test")
+    monkeypatch.setattr("tldw_Server_API.app.core.Logging.log_context.ensure_request_id", lambda _request: "req-test")
     _install_voice_manager(monkeypatch, voice_manager)
 
     with pytest.raises(HTTPException) as exc_info:

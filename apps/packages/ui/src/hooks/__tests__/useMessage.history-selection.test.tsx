@@ -459,7 +459,8 @@ vi.mock("@/utils/human-message", () => ({
     mocks.humanMessageFormatter(...args)
 }))
 
-vi.mock("@/libs/reasoning", () => ({
+vi.mock("@/libs/reasoning", async importOriginal => ({
+  ...await importOriginal<typeof import("@/libs/reasoning")>(),
   MISSING_FINAL_ANSWER_MESSAGE: "Final answer unavailable",
   isReasoningOnlyResponse: () => false,
   isReasoningEnded: () => false,

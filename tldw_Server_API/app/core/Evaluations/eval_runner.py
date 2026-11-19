@@ -11,8 +11,10 @@ Handles:
 
 import asyncio
 import os
+import re
 import statistics
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from copy import deepcopy
 from datetime import datetime
@@ -43,6 +45,7 @@ from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
 from tldw_Server_API.app.core.Evaluations.rag_evaluator import _CANONICAL_METRIC_FOR_ALIAS, RAGEvaluator
 from tldw_Server_API.app.core.Evaluations.response_quality_evaluator import ResponseQualityEvaluator
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
     get_adapter_or_raise,
@@ -58,6 +61,11 @@ from tldw_Server_API.app.core.Evaluations.run_state import (
 )
 from tldw_Server_API.app.core.Evaluations.scoring import normalize_geval_metric
 from tldw_Server_API.app.core.Evaluations.webhook_security import webhook_validator
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    is_runtime_issued_provider_call_credentials,
+)
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import SummaryProviderError
 from tldw_Server_API.app.core.RAG.rag_custom_metrics import get_custom_metrics
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
@@ -113,11 +121,17 @@ def _call_adapter_text(
     user: Optional[str] = None,
     app_config: Optional[dict[str, Any]] = None,
     timeout: Optional[float] = None,
+    provider_credentials: Any = None,
     **extra_kwargs: Any,
 ) -> str:
     provider = normalize_provider(api_endpoint)
     if not provider:
         raise ChatConfigurationError(provider=api_endpoint, message="LLM provider is required.")
+    if provider_credentials is not None:  # the user's own key, recorded as theirs (TASK-15426)
+        if not is_runtime_issued_provider_call_credentials(provider_credentials, provider=provider):
+            raise ChatConfigurationError(provider=provider, message="Provider credential context is invalid.")
+        api_key, app_config = provider_credentials.api_key, provider_credentials.app_config
+        extra_kwargs.update({PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials, "credentials_resolved": True})
     cfg = ensure_app_config(app_config)
     resolved_model = model or resolve_provider_model(provider, cfg)
     if not resolved_model:
@@ -139,8 +153,38 @@ def _call_adapter_text(
     }
     request.update(extra_kwargs)
     response = get_adapter_or_raise(provider).chat(request, timeout=timeout)
-    return extract_response_content(response) or str(response)
+    content = extract_response_content(response)
+    # Empty content from a call that succeeded is a non-answer (""), not a label hiding in the response's repr (TASK-15491)
+    return content if content is not None else str(response)
 
+
+_LLM_RUN_TYPES = frozenset({"model_graded", "label_choice", "nli_factcheck"})
+
+
+def run_llm_provider(
+    evaluation: Optional[Mapping[str, Any]], run_config: Optional[Mapping[str, Any]]
+) -> tuple[Optional[str], Optional[str]]:
+    """The provider and model every LLM call of an evaluation run uses, as the runner resolves them (TASK-15426).
+
+    ``(None, None)`` when the run cannot be placed on one key: no evaluation, a type that makes no LLM
+    call, a raw ``api_key`` in the spec or the run config (it counts), or a ``rag_pipeline`` run, whose
+    pipeline stages pick their own providers.
+    """
+    spec = (evaluation or {}).get("eval_spec") or {}
+    if (evaluation or {}).get("eval_type") not in _LLM_RUN_TYPES or spec.get("sub_type") == "rag_pipeline":
+        return None, None
+    api_name, model, api_key = EvaluationRunner._resolve_eval_provider_model_api_key(spec, {"config": run_config})
+    return (None, None) if api_key else (canonical_provider_name(api_name), model)
+
+
+def _is_known_provider(name: str) -> bool:
+    return bool(name) and canonical_provider_name(name) in ChatProviderRegistry.DEFAULT_ADAPTERS
+
+
+def _split_provider_prefix(api_name: str, value: str) -> tuple[str, str]:
+    """``("openai", "gpt-4")`` for ``"openai:gpt-4"`` or ``"openai/gpt-4"``; ``(api_name, value)`` when the prefix is no provider."""
+    match = re.fullmatch(r"([^:/]+)[:/](.+)", value, re.DOTALL)
+    return (normalize_provider(match[1]), match[2]) if match and _is_known_provider(match[1]) else (api_name, value)
 
 
 class EvaluationRunner:
@@ -166,8 +210,8 @@ class EvaluationRunner:
         self.semaphore = asyncio.Semaphore(max_concurrent_evals)
         self.eval_timeout = eval_timeout
 
+    @staticmethod
     def _resolve_eval_provider_model_api_key(
-        self,
         eval_spec: dict[str, Any],
         eval_config: dict[str, Any],
     ) -> tuple[str, Optional[str], Optional[str]]:
@@ -180,40 +224,36 @@ class EvaluationRunner:
         if not isinstance(run_config, dict):
             run_config = {}
 
-        api_name = (
+        named = str(
             eval_spec.get("api_name")
             or eval_spec.get("provider")
             or run_config.get("api_name")
             or run_config.get("provider")
-            or "openai"
-        )
-        api_name = str(api_name).strip() or "openai"
+            or ""
+        ).strip()
+        api_name = named or "openai"
         api_key = (
             eval_spec.get("api_key")
             or eval_spec.get("apiKey")
             or run_config.get("api_key")
         )
         model_override = eval_spec.get("model") or run_config.get("model")
+        model_from_spec = isinstance(model_override, str) and bool(model_override)
 
-        # Backward compatibility: evaluator_model may refer to provider OR model
-        evaluator_model = eval_spec.get("evaluator_model")
-        if evaluator_model:
-            normalized_provider = normalize_provider(str(evaluator_model))
-            if normalized_provider:
-                api_name = normalized_provider
-            elif not model_override:
-                model_override = str(evaluator_model)
+        # evaluator_model names a provider, a model, or "provider:model" / "provider/model". Only a
+        # registered provider counts as one, so a model name such as "gpt-4" stays a model (TASK-15492).
+        evaluator_model = str(eval_spec.get("evaluator_model") or "").strip()
+        if _is_known_provider(evaluator_model):
+            api_name = normalize_provider(evaluator_model)
+        elif evaluator_model:
+            if not named:  # a provider named in api_name/provider keeps "anthropic/claude-3.5-sonnet" a model id
+                api_name, evaluator_model = _split_provider_prefix(api_name, evaluator_model)
+            model_override = model_override or evaluator_model
 
-        # Allow model strings like "provider:model" or "provider/model" to override provider
-        if isinstance(model_override, str) and model_override:
-            for sep in (":", "/"):
-                if sep in model_override:
-                    prefix, rest = model_override.split(sep, 1)
-                    normalized_provider = normalize_provider(prefix)
-                    if normalized_provider and rest:
-                        api_name = normalized_provider
-                        model_override = rest
-                    break
+        # Allow model strings like "provider:model" or "provider/model" to override provider, unless one is named
+        # (a remainder taken from evaluator_model was already split once and is never split again)
+        if not named and model_from_spec:
+            api_name, model_override = _split_provider_prefix(api_name, model_override)
 
         return api_name, model_override, api_key
 
@@ -1459,6 +1499,7 @@ class EvaluationRunner:
                 api_name=api_name,
                 model=model_override,
                 save=False,
+                provider_credentials=config.get("provider_credentials"),
             )
             result = await loop.run_in_executor(None, call_geval)
 
@@ -1529,7 +1570,12 @@ class EvaluationRunner:
 
             # Run RAG evaluation
             api_name, model_override, _ = self._resolve_eval_provider_model_api_key(eval_spec, config)
-            result = await self.rag_evaluator.evaluate(
+            handle = config.get("provider_credentials")
+            # On the user's own key the similarity is the LLM's too, as on /evaluations/rag (TASK-15426).
+            evaluator = self.rag_evaluator if handle is None else RAGEvaluator(
+                embedding_provider=None, embedding_model=None, provider_credentials=handle
+            )
+            result = await evaluator.evaluate(
                 query=query,
                 contexts=contexts,
                 response=response,
@@ -1599,6 +1645,7 @@ class EvaluationRunner:
                 custom_criteria=eval_spec.get("custom_criteria"),
                 api_name=api_name,
                 model=model_override,
+                provider_credentials=config.get("provider_credentials"),
             )
 
             # Extract scores
@@ -1914,21 +1961,19 @@ class EvaluationRunner:
                 messages = [{"role": "user", "content": user_prompt}]
                 response_format = {"type": "json_object"} if structured else None
 
-                try:
-                    resp = await asyncio.to_thread(
-                        _call_adapter_text,
-                        api_endpoint=api_name,
-                        messages_payload=messages,
-                        temperature=temperature,
-                        system_message=system_prompt,
-                        response_format=response_format,
-                        max_tokens=16,
-                        api_key=api_key,
-                        model=model_override,
-                    )
-                except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as ce:
-                    logger.error(f"Chat call failed for label_choice {sample_id}: {ce}")
-                    resp = ""
+                # A failed judge call raises to the sample-error handler below: unscored, not accuracy 0.0 (TASK-15491)
+                resp = await asyncio.to_thread(
+                    _call_adapter_text,
+                    api_endpoint=api_name,
+                    messages_payload=messages,
+                    temperature=temperature,
+                    system_message=system_prompt,
+                    response_format=response_format,
+                    max_tokens=16,
+                    api_key=api_key,
+                    model=model_override,
+                    provider_credentials=config.get("provider_credentials"),
+                )
 
                 # Extract text content from provider response
                 def _extract_content(r: Any) -> str:
@@ -2108,21 +2153,19 @@ class EvaluationRunner:
                 messages = [{"role": "user", "content": user_prompt}]
                 response_format = {"type": "json_object"} if structured else None
 
-                try:
-                    resp = await asyncio.to_thread(
-                        _call_adapter_text,
-                        api_endpoint=api_name,
-                        messages_payload=messages,
-                        temperature=temperature,
-                        system_message=system_prompt,
-                        response_format=response_format,
-                        max_tokens=16,
-                        api_key=api_key,
-                        model=model_override,
-                    )
-                except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as ce:
-                    logger.error(f"Chat call failed for nli_factcheck {sample_id}: {ce}")
-                    resp = ""
+                # A failed judge call raises to the sample-error handler below: unscored, not accuracy 0.0 (TASK-15491)
+                resp = await asyncio.to_thread(
+                    _call_adapter_text,
+                    api_endpoint=api_name,
+                    messages_payload=messages,
+                    temperature=temperature,
+                    system_message=system_prompt,
+                    response_format=response_format,
+                    max_tokens=16,
+                    api_key=api_key,
+                    model=model_override,
+                    provider_credentials=config.get("provider_credentials"),
+                )
 
                 def _extract_content(r: Any) -> str:
                     if isinstance(r, str):
@@ -2298,44 +2341,39 @@ class EvaluationRunner:
         """Calculate aggregate statistics"""
         _ = metrics
         _ = threshold
-        empty_pass_rate = 0.0
         if not results:
             return {
-                "mean_score": 0,
-                "std_dev": 0,
-                "min_score": 0,
-                "max_score": 0,
-                "pass_rate": empty_pass_rate,
+                "mean_score": None,  # nothing scored: no average, not a 0.0 that reads as "all wrong"
+                "std_dev": None,
+                "min_score": None,
+                "max_score": None,
+                "pass_rate": None,
                 "total_samples": 0,
                 "failed_samples": 0
             }
 
-        # Get all scores
+        # A sample with no score (an error, a failed judge call) is unscored: in no mean or pass rate
         all_scores = []
         passed_count = 0
         failed_samples = 0
 
         for result in results:
-            score_val = result.get("avg_score")
-            if score_val is None:
-                failed_samples += 1
-                score_val = 0.0
             try:
-                score_val = float(score_val)
+                score_val = float(result.get("avg_score"))
             except (TypeError, ValueError):
                 failed_samples += 1
-                score_val = 0.0
+                continue
             all_scores.append(score_val)
             if result.get("passed", False):
                 passed_count += 1
 
         if not all_scores:
             return {
-                "mean_score": 0,
-                "std_dev": 0,
-                "min_score": 0,
-                "max_score": 0,
-                "pass_rate": empty_pass_rate,
+                "mean_score": None,  # nothing scored: no average, not a 0.0 that reads as "all wrong"
+                "std_dev": None,
+                "min_score": None,
+                "max_score": None,
+                "pass_rate": None,
                 "total_samples": len(results),
                 "failed_samples": len(results)
             }
@@ -2345,7 +2383,7 @@ class EvaluationRunner:
             "std_dev": statistics.stdev(all_scores) if len(all_scores) > 1 else 0,
             "min_score": min(all_scores),
             "max_score": max(all_scores),
-            "pass_rate": passed_count / len(results),
+            "pass_rate": passed_count / len(all_scores),
             "total_samples": len(results),
             "failed_samples": failed_samples
         }

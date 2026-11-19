@@ -82,9 +82,7 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.config import clear_config_cache
 from tldw_Server_API.app.core.exceptions import BadRequestError, InvalidFirstRunTransition
-from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Setup import (
     audio_pack_service,
     audio_profile_service,
@@ -95,16 +93,13 @@ from tldw_Server_API.app.core.Setup import (
 )
 from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
     DEFAULT_AUDIO_RESOURCE_PROFILE,
-    get_audio_bundle_catalog,
 )
-from tldw_Server_API.app.core.Setup.first_chat_verifier import verify_first_chat
 from tldw_Server_API.app.core.Setup.first_run_mcp_tools import build_mcp_tools_catalog
 from tldw_Server_API.app.core.Setup.first_run_state import (
     REQUIRED_FIRST_RUN_STEPS,
     FirstRunStateStore,
     FirstRunStatus,
 )
-from tldw_Server_API.app.core.Setup.install_manager import execute_install_plan
 from tldw_Server_API.app.core.Setup.install_schema import InstallPlan
 from tldw_Server_API.app.core.Setup.provider_catalog import (
     get_setup_provider_catalog,
@@ -116,8 +111,6 @@ from tldw_Server_API.app.core.Setup.provider_validation import (
     HostedProviderValidationRequest,
     LocalEndpointValidationRequest,
     validate_hosted_provider_credentials,
-    validate_local_openai_endpoint,
-    validate_native_kobold_endpoint,
 )
 from tldw_Server_API.app.core.Setup.readiness_models import LANE_IDS, LANE_STATUSES, OVERLAY_IDS
 from tldw_Server_API.app.core.Setup.readiness_profiles import build_readiness_profiles
@@ -133,6 +126,12 @@ from tldw_Server_API.app.services.setup_mcp_tools_service import (
     McpToolsValidationResult,
     SetupMcpToolsService,
 )
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
+import tldw_Server_API.app.core.Setup.audio_bundle_catalog as _audio_bundle_catalog
+import tldw_Server_API.app.core.Setup.first_chat_verifier as _first_chat_verifier
+import tldw_Server_API.app.core.Setup.provider_validation as _provider_validation
+import tldw_Server_API.app.core.Utils.egress as _egress
+import tldw_Server_API.app.core.config as _config
 
 router = APIRouter(prefix="/setup", tags=["setup"], include_in_schema=True)
 
@@ -770,7 +769,7 @@ async def _require_mcp_tools_setup_or_admin_access(request: Request) -> AuthPrin
         await _require_first_run_write_access(request)
         return None
 
-    principal = await get_auth_principal(request)
+    principal = await _auth_deps.get_auth_principal(request)
     if not _has_system_configure_permission(principal):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="system_configure_required")
     return principal
@@ -787,7 +786,7 @@ async def _require_mcp_tools_catalog_access(request: Request) -> None:
 
 
 async def _require_system_configure_access(request: Request) -> AuthPrincipal:
-    principal = await get_auth_principal(request)
+    principal = await _auth_deps.get_auth_principal(request)
     if not _has_system_configure_permission(principal):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="system_configure_required")
     return principal
@@ -971,7 +970,7 @@ def _provider_config_updates(payload: SetupProviderSaveRequest) -> dict[str, dic
 
 def _refresh_runtime_config_cache(context: str) -> bool:
     try:
-        clear_config_cache()
+        _config.clear_config_cache()
     except Exception as exc:  # noqa: BLE001 - public response must stay sanitized
         logger.warning(
             "Runtime config cache refresh failed after {}: {}",
@@ -1221,7 +1220,7 @@ async def _complete_setup_flow(
         if payload.install_plan and not payload.install_plan.is_empty():
             plan_requested = True
             plan_dict = _install_plan_background_payload(payload.install_plan)
-            background_tasks.add_task(execute_install_plan, plan_dict)
+            background_tasks.add_task(install_manager.execute_install_plan, plan_dict)
 
         if payload.disable_first_time_setup:
             await asyncio.to_thread(
@@ -1387,7 +1386,7 @@ async def get_first_run_state(
     """Return safe progress, preserving local model IDs for verified configuration admins."""
     allow_model_paths = False
     try:
-        principal = await get_auth_principal(request)
+        principal = await _auth_deps.get_auth_principal(request)
         allow_model_paths = _has_system_configure_permission(principal)
     except HTTPException as exc:
         if exc.status_code not in {401, 403}:
@@ -1639,7 +1638,7 @@ async def validate_first_run_provider(
         api_key=payload.api_key,
     )
     try:
-        configured_endpoint = ConfiguredEndpointScope.from_url(normalized_payload.base_url)
+        configured_endpoint = _egress.ConfiguredEndpointScope.from_url(normalized_payload.base_url)
     except ValueError:
         return SetupProviderValidationResponse(
             provider_key=provider_key,
@@ -1648,11 +1647,11 @@ async def validate_first_run_provider(
             message="Local provider endpoint is unreachable.",
         )
     if provider_key == "koboldcpp":
-        return await validate_native_kobold_endpoint(
+        return await _provider_validation.validate_native_kobold_endpoint(
             normalized_payload,
             configured_endpoint=configured_endpoint,
         )
-    return await validate_local_openai_endpoint(
+    return await _provider_validation.validate_local_openai_endpoint(
         normalized_payload,
         configured_endpoint=configured_endpoint,
     )
@@ -1668,7 +1667,7 @@ async def verify_first_run_first_chat(
     _guard: None = Depends(_require_first_run_write_access),
 ) -> FirstChatVerifyResponse:
     _require_safe_first_chat_request_metadata(provider=payload.provider, model=payload.model)
-    result = await verify_first_chat(
+    result = await _first_chat_verifier.verify_first_chat(
         provider=payload.provider,
         model=payload.model,
         prompt=payload.prompt,
@@ -2363,7 +2362,7 @@ async def _provision_setup_readiness(
     install_plan_submitted = not install_plan.is_empty()
     install_plan_payload = model_dump_compat(install_plan)
     if install_plan_submitted:
-        background_tasks.add_task(execute_install_plan, _install_plan_background_payload(install_plan))
+        background_tasks.add_task(install_manager.execute_install_plan, _install_plan_background_payload(install_plan))
 
     operation_id = _new_setup_readiness_operation_id()
     operation_status = "queued" if install_plan_submitted else "completed"
@@ -2571,7 +2570,7 @@ def _build_audio_recommendations_response(
         prefer_offline_runtime=prefer_offline_runtime,
         allow_hosted_fallbacks=allow_hosted_fallbacks,
     )
-    catalog = get_audio_bundle_catalog()
+    catalog = _audio_bundle_catalog.get_audio_bundle_catalog()
     bundle_lookup = {
         bundle.bundle_id: bundle.model_dump() if hasattr(bundle, "model_dump") else dict(bundle)
         for bundle in catalog.bundles

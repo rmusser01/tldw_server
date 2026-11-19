@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import propagate_billing_headers, require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
+    admit_media_analysis,
     get_process_ebooks_form,
     media_analysis_requested,
 )
@@ -31,15 +32,13 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
-from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
-from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
+from tldw_Server_API.app.api.v1.utils.media_deprecation_signals import (
     apply_media_legacy_headers,
     build_media_legacy_signal,
 )
-from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
+from tldw_Server_API.app.api.v1.utils.media_input_contracts import (
     normalize_urls_field,
     validate_media_inputs,
 )
@@ -52,13 +51,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     resolve_chunking_options_and_plan,
     uses_hierarchical_chunking,
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils import (
-    download_url_async as core_download_url_async,
-)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     first_saved_filename,
-    save_uploaded_files,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
     ProcessItem,
@@ -66,6 +61,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import FileValidator
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
+import tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps as _Prompts_DB_Deps
+import tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils as _download_utils
+import tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing as _input_sourcing
 
 router = APIRouter()
 
@@ -207,11 +205,11 @@ async def process_ebooks_endpoint(
 
     if media_analysis_requested(form_data):
         # Usage quotas (LLM usage accounting spec §4a), before any download or processing.
-        await enforce_llm_quota(current_user.id)
+        await admit_media_analysis(current_user.id, form_data)
 
     system_prompt = form_data.system_prompt
     if form_data.perform_analysis and form_data.api_name and system_prompt is None:
-        prompts_db = await get_prompts_db_for_user(request, current_user)
+        prompts_db = await _Prompts_DB_Deps.get_prompts_db_for_user(request, current_user)
 
         def resolve_system_prompt() -> str:
             """Capture EPUB instructions and release this worker's connection."""
@@ -243,7 +241,7 @@ async def process_ebooks_endpoint(
 
         # ---- Handle uploads via shared input_sourcing helper ----
         if files:
-            saved_files, upload_errors = await save_uploaded_files(
+            saved_files, upload_errors = await _input_sourcing.save_uploaded_files(
                 files,
                 temp_dir=temp_dir_path,
                 validator=validator,
@@ -292,7 +290,7 @@ async def process_ebooks_endpoint(
                 "Attempting to download {} EPUB URL(s) asynchronously...",
                 len(form_data.urls),
             )
-            download_url_async = core_download_url_async
+            download_url_async = _download_utils.download_url_async
             download_tasks = [
                 download_url_async(
                     client=None,

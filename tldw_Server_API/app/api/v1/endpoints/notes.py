@@ -47,11 +47,9 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 # Dependency to get user-specific ChaChaNotes_DB instance
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
-    resolve_chacha_user_base_dir,
 )
-from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import (
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.notes_sync_errors import (
     NOTES_SYNC_EXCEPTIONS,
     notes_sync_http_error,
 )
@@ -145,7 +143,6 @@ from tldw_Server_API.app.api.v1.schemas.notes_studio import (
     NoteStudioRegenerateRequest,
     NoteStudioStateResponse,
 )
-from tldw_Server_API.app.core.config import settings as core_settings
 
 #
 # Local Imports
@@ -187,7 +184,6 @@ from tldw_Server_API.app.core.Notes.legacy_attachment_source import (
 from tldw_Server_API.app.core.Notes.organization_capture import (
     compound_note_id,
     compound_note_request_fingerprint,
-    plan_compound_note,
 )
 from tldw_Server_API.app.core.Notes.provenance import provenance_response, save_local_note
 from tldw_Server_API.app.core.Notes.studio_service import NotesStudioService
@@ -249,7 +245,6 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
     SyncServerOriginRestoreConflictError,
     capture_server_origin_mutation,
     capture_server_origin_note_restore,
-    get_active_server_origin_sync_service_for_user,
     server_origin_object_id,
     server_origin_stable_key,
 )
@@ -262,7 +257,15 @@ from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.app.core.Utils.base64url import verify_signed_token
 from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
-from tldw_Server_API.app.core.Writing.note_title import TitleGenOptions, generate_note_title
+from tldw_Server_API.app.core.Writing.note_title import TitleGenOptions
+import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
+import tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps as _Prompts_DB_Deps
+import tldw_Server_API.app.core.Notes.organization_capture as _organization_capture
+import tldw_Server_API.app.core.Notes.studio_service as _studio_service
+import tldw_Server_API.app.core.Prompt_Management.service_prompts as _service_prompts
+import tldw_Server_API.app.core.Sync.v2.server_origin as _server_origin
+import tldw_Server_API.app.core.Writing.note_title as _note_title
+import tldw_Server_API.app.core.config as _config
 
 #
 #
@@ -315,11 +318,11 @@ async def _resolve_note_title_service_prompt(
 
     if options.strategy not in ("llm", "llm_fallback"):
         return None
-    db = await get_prompts_db_for_user(request, current_user)
+    db = await _Prompts_DB_Deps.get_prompts_db_for_user(request, current_user)
 
     def resolve_and_close() -> ResolvedServicePrompt:
         try:
-            return resolve_service_prompt(db, _NOTES_TITLE_SERVICE_PROMPT_ID)
+            return _service_prompts.resolve_service_prompt(db, _NOTES_TITLE_SERVICE_PROMPT_ID)
         finally:
             db.close_connection()
 
@@ -335,8 +338,8 @@ def _generate_note_title_with_service_prompt(
     """Preserve the legacy generator call shape for heuristic titles."""
 
     if options.strategy == "heuristic" or service_prompt is None:
-        return generate_note_title(content, options=options)
-    return generate_note_title(
+        return _note_title.generate_note_title(content, options=options)
+    return _note_title.generate_note_title(
         content,
         options=options,
         service_prompt=service_prompt,
@@ -345,7 +348,7 @@ def _generate_note_title_with_service_prompt(
 
 def _resolve_notes_attachment_max_bytes() -> int:
     try:
-        value = int(core_settings.get("NOTES_ATTACHMENT_MAX_BYTES", _NOTES_ATTACHMENT_DEFAULT_MAX_BYTES))
+        value = int(_config.settings.get("NOTES_ATTACHMENT_MAX_BYTES", _NOTES_ATTACHMENT_DEFAULT_MAX_BYTES))
         if value <= 0:
             return _NOTES_ATTACHMENT_DEFAULT_MAX_BYTES
         return value
@@ -537,7 +540,7 @@ def _note_payload_from_row(note: dict[str, Any]) -> dict[str, object]:
 
 
 def _active_notes_sync_service(current_user: User) -> SyncV2Service | None:
-    return get_active_server_origin_sync_service_for_user(str(current_user.id))
+    return _server_origin.get_active_server_origin_sync_service_for_user(str(current_user.id))
 
 
 def _active_notes_attachment_coordinator(
@@ -868,7 +871,7 @@ def _attachment_mutation_response(
 def _attachment_cursor_secret() -> bytes:
     """Return the configured secret used to authenticate attachment cursors."""
 
-    value = str(core_settings.get("JWT_SECRET_KEY") or "").strip()
+    value = str(_config.settings.get("JWT_SECRET_KEY") or "").strip()
     if not value:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1147,7 +1150,7 @@ def _capture_notes_organization_plan(
 def _attach_note_provenance(db: CharactersRAGDB, note: dict[str, Any], *, portable: bool = False) -> dict[str, Any]:
     """Read canonical evidence; preserve acknowledged pair snapshots on retries."""
     # Gate even already-acknowledged snapshots and editable historical markers.
-    service = get_active_server_origin_sync_service_for_user(str(db.owner_user_id))
+    service = _server_origin.get_active_server_origin_sync_service_for_user(str(db.owner_user_id))
     try:
         dataset = (
             require_notes_provenance_read_policy(service=service, user_id=str(db.owner_user_id)) if service else None
@@ -1473,14 +1476,14 @@ def _build_title_opts(note_in: Any) -> TitleGenOptions:
     - Max length: coerce to int, default 250, clamp to [min_len, max_len_bound].
     """
     # Resolve strategy honoring client intent when provided
-    default_strategy = str(core_settings.get("NOTES_TITLE_DEFAULT_STRATEGY", "heuristic")).lower()
+    default_strategy = str(_config.settings.get("NOTES_TITLE_DEFAULT_STRATEGY", "heuristic")).lower()
     if _field_supplied(note_in, "title_strategy"):
         strategy = getattr(note_in, "title_strategy", default_strategy) or default_strategy
     else:
         strategy = default_strategy
 
     # Apply LLM enabled gate after resolving strategy
-    if strategy in ("llm", "llm_fallback") and not bool(core_settings.get("NOTES_TITLE_LLM_ENABLED", False)):
+    if strategy in ("llm", "llm_fallback") and not bool(_config.settings.get("NOTES_TITLE_LLM_ENABLED", False)):
         strategy = "heuristic"
 
     # Resolve and clamp max length
@@ -1490,7 +1493,7 @@ def _build_title_opts(note_in: Any) -> TitleGenOptions:
     except _NOTES_NONCRITICAL_EXCEPTIONS:
         max_len_val = 250
     try:
-        max_bound = int(core_settings.get("NOTES_TITLE_MAX_LEN", 1000))
+        max_bound = int(_config.settings.get("NOTES_TITLE_MAX_LEN", 1000))
         if max_bound <= 0:
             max_bound = 1000
     except _NOTES_NONCRITICAL_EXCEPTIONS:
@@ -2282,7 +2285,7 @@ async def notes_health() -> dict[str, Any]:
     }
 
     try:
-        base_dir = resolve_chacha_user_base_dir()
+        base_dir = _ChaCha_Notes_DB_Deps.resolve_chacha_user_base_dir()
         exists = base_dir.exists()
         writable = False
         if exists:
@@ -2481,7 +2484,7 @@ async def create_note(
             "message_id": message_id,
         }
         if coordinator is not None and compound_note is None:
-            compound_plan = plan_compound_note(
+            compound_plan = _organization_capture.plan_compound_note(
                 coordinator,
                 note_id=note_id,
                 note_payload=note_payload,
@@ -3913,7 +3916,7 @@ async def import_notes(
                             projected_note = dict(existing_note)
                             projected_note.update(update_patch)
                             note_payload = _note_payload_from_row(projected_note)
-                            overwrite_plan = plan_compound_note(
+                            overwrite_plan = _organization_capture.plan_compound_note(
                                 coordinator,
                                 note_id=str(imported_id),
                                 note_payload=note_payload,
@@ -4002,7 +4005,7 @@ async def import_notes(
                                 folder_paths=None,
                             )
                         )
-                        create_plan = plan_compound_note(
+                        create_plan = _organization_capture.plan_compound_note(
                             coordinator,
                             note_id=created_note_id,
                             note_payload=note_payload,
@@ -5466,7 +5469,7 @@ async def get_note_studio_state_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))},
             )
 
-        studio_state = await NotesStudioService(db=db, user_id=current_user.id).get_note_studio_state(note_id=note_id)
+        studio_state = await _studio_service.NotesStudioService(db=db, user_id=current_user.id).get_note_studio_state(note_id=note_id)
         studio_state["note"] = _attach_keywords_inline(db, studio_state["note"])
         studio_state["note"] = _attach_folders_inline(db, studio_state["note"])
         return studio_state
@@ -5500,7 +5503,7 @@ async def derive_note_studio_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))},
             )
 
-        studio_state = await NotesStudioService(db=db, user_id=current_user.id).derive_from_excerpt(
+        studio_state = await _studio_service.NotesStudioService(db=db, user_id=current_user.id).derive_from_excerpt(
             source_note_id=studio_in.source_note_id,
             excerpt_text=studio_in.excerpt_text,
             template_type=studio_in.template_type,
@@ -5545,7 +5548,7 @@ async def regenerate_note_studio_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))},
             )
 
-        studio_state = await NotesStudioService(db=db, user_id=current_user.id).regenerate_note_markdown(
+        studio_state = await _studio_service.NotesStudioService(db=db, user_id=current_user.id).regenerate_note_markdown(
             note_id=note_id,
             expected_version=regenerate_in.expected_version,
             current_markdown=regenerate_in.current_markdown,
@@ -5593,7 +5596,7 @@ async def update_note_studio_diagram_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))},
             )
 
-        studio_state = await NotesStudioService(db=db, user_id=current_user.id).update_diagram_manifest(
+        studio_state = await _studio_service.NotesStudioService(db=db, user_id=current_user.id).update_diagram_manifest(
             note_id=note_id,
             diagram_type=diagram_in.diagram_type,
             source_section_ids=diagram_in.source_section_ids,
@@ -7096,7 +7099,7 @@ async def update_note(
                 )
             projected_note = dict(current_note)
             projected_note.update(update_data)
-            compound_plan = plan_compound_note(
+            compound_plan = _organization_capture.plan_compound_note(
                 coordinator,
                 note_id=note_id,
                 note_payload=_note_payload_from_row(projected_note),
@@ -7393,7 +7396,7 @@ async def patch_note(
                     )
                 payload = _note_payload_from_row(current)
                 payload.update(update_data)
-                compound_plan = plan_compound_note(
+                compound_plan = _organization_capture.plan_compound_note(
                     coordinator,
                     note_id=note_id,
                     note_payload=payload,
@@ -7780,7 +7783,7 @@ async def restore_note_provenance(
         ):
             raise ConflictError("Knowledge provenance retained head conflict")
         if coordinator is not None:
-            plan = plan_compound_note(
+            plan = _organization_capture.plan_compound_note(
                 coordinator,
                 note_id=note_id,
                 note_payload=_note_payload_from_row(current),
@@ -8007,7 +8010,7 @@ async def bulk_create_notes(
                 "message_id": message_id,
             }
             if coordinator is not None and compound_note is None:
-                compound_plan = plan_compound_note(
+                compound_plan = _organization_capture.plan_compound_note(
                     coordinator,
                     note_id=note_id,
                     note_payload=note_payload,

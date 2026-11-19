@@ -92,7 +92,7 @@ def test_ingest_web_content_auto_chunking_adds_plan_metadata(
             }
         ]
 
-    monkeypatch.setattr(endpoint_mod, "ingest_web_content_orchestrate", _fake_orchestrate)
+    monkeypatch.setattr("tldw_Server_API.app.services.web_scraping_service.ingest_web_content_orchestrate", _fake_orchestrate)
 
     response = _ClientWithToken(client_user_only).post(
         "/api/v1/media/ingest-web-content",

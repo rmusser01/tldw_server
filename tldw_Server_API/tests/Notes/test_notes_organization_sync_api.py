@@ -210,8 +210,7 @@ def client(
     app.dependency_overrides[notes_endpoint.get_request_user] = _user_override
     app.dependency_overrides[notes_endpoint.get_rate_limiter_dep] = lambda: _NoopRateLimiter()
     monkeypatch.setattr(
-        notes_endpoint,
-        "get_active_server_origin_sync_service_for_user",
+        "tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user",
         lambda user_id: sync_service,
     )
     return TestClient(app)
@@ -883,8 +882,7 @@ def test_direct_inactive_sync_preserves_local_keyword_collection_and_folder_writ
     sync_service: SyncV2Service,
 ) -> None:
     monkeypatch.setattr(
-        notes_endpoint,
-        "get_active_server_origin_sync_service_for_user",
+        "tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user",
         lambda user_id: None,
     )
 
@@ -1543,8 +1541,7 @@ def test_organization_only_patch_bumps_version_so_a_stale_patch_conflicts(
     """Two clients that read the same version must not both win a tags-only edit (#3157)."""
     if not sync_active:
         monkeypatch.setattr(
-            notes_endpoint,
-            "get_active_server_origin_sync_service_for_user",
+            "tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user",
             lambda user_id: None,
         )
     created = client.post("/api/v1/notes/", json={"title": "Tagged", "content": "Body"})
@@ -1581,8 +1578,7 @@ def test_local_patch_with_unchanged_keywords_keeps_version(
 ) -> None:
     """Re-sending the same tags changes nothing, so other clients see no remote edit."""
     monkeypatch.setattr(
-        notes_endpoint,
-        "get_active_server_origin_sync_service_for_user",
+        "tldw_Server_API.app.core.Sync.v2.server_origin.get_active_server_origin_sync_service_for_user",
         lambda user_id: None,
     )
     created = client.post(
@@ -1807,7 +1803,7 @@ def test_active_import_create_copy_never_falls_back_to_direct_note_insert(
         raise ConflictError("injected canonical conflict", entity="notes")
 
     monkeypatch.setattr(chacha_db, "add_note", count_direct_add)
-    monkeypatch.setattr(notes_endpoint, "plan_compound_note", reject_canonical_capture)
+    monkeypatch.setattr("tldw_Server_API.app.core.Notes.organization_capture.plan_compound_note", reject_canonical_capture)
 
     response = client.post(
         "/api/v1/notes/import",
@@ -2307,7 +2303,7 @@ def test_inline_auto_title_replay_looks_up_manifest_before_generation(
         generated.append(title)
         return title
 
-    monkeypatch.setattr(notes_endpoint, "generate_note_title", _generate_title)
+    monkeypatch.setattr("tldw_Server_API.app.core.Writing.note_title.generate_note_title", _generate_title)
     payload = {
         "content": "Auto-title body",
         "auto_title": True,
@@ -2583,7 +2579,7 @@ def test_bulk_auto_title_replay_looks_up_manifest_before_generation(
         generated.append(title)
         return title
 
-    monkeypatch.setattr(notes_endpoint, "generate_note_title", _generate_title)
+    monkeypatch.setattr("tldw_Server_API.app.core.Writing.note_title.generate_note_title", _generate_title)
     headers = {"Idempotency-Key": "bulk-auto-title-replay"}
     payload = {
         "notes": [

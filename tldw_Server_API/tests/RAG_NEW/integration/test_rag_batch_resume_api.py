@@ -124,7 +124,7 @@ def _install_recording_runtime(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
 
     _RecordingRuntime.instances.clear()
-    monkeypatch.setattr(rag_ep, "ProviderCredentialRuntime", _RecordingRuntime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", _RecordingRuntime)
 
 
 def _patch_current_memberships(monkeypatch, *, team_ids=(), org_ids=(), calls=None):
@@ -299,7 +299,7 @@ def test_rag_batch_resume_reuses_shared_batch_resolution(
         captured["kwargs"] = {"queries": queries, **kwargs}
         return [up.UnifiedSearchResult(documents=[], query=queries[0], errors=[])]
 
-    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fake_batch_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_batch_pipeline", fake_batch_pipeline)
 
     resp = client_with_overrides.post(f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}")
     assert resp.status_code == 200, resp.text
@@ -433,7 +433,7 @@ def test_rag_batch_resume_rejects_revoked_checkpoint_membership(
         "resolve_static_server_fallback_from_snapshot",
         lambda provider, _snapshot: fail_server_fallback(provider),
     )
-    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fail_provider_dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_batch_pipeline", fail_provider_dispatch)
 
     logs: list[str] = []
     sink_id = logger.add(logs.append, format="{message}")
@@ -642,10 +642,10 @@ def test_rag_batch_resume_rebuilds_owner_runtime_with_current_base_url_authority
         captured["pipeline_scope"] = get_scope()
         return [up.UnifiedSearchResult(documents=[], query="resume me", errors=[])]
 
-    monkeypatch.setattr(rag_ep, "managed_media_db_for_owner", _owner_media)
-    monkeypatch.setattr(rag_ep, "get_chacha_db_for_owner", _owner_chacha)
-    monkeypatch.setattr(rag_ep, "get_prompts_db_for_user", _owner_prompts)
-    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fake_batch_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.DB_Deps.managed_media_db_for_owner", _owner_media)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_owner", _owner_chacha)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps.get_prompts_db_for_user", _owner_prompts)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_batch_pipeline", fake_batch_pipeline)
 
     with scoped_context(
         user_id=42,
@@ -763,20 +763,18 @@ def test_rag_batch_admin_resume_uses_checkpoint_owner_scope(
         return [up.UnifiedSearchResult(documents=[], query="resume me", errors=[])]
 
     monkeypatch.setattr(
-        rag_ep,
-        "managed_media_db_for_owner",
+        "tldw_Server_API.app.api.v1.API_Deps.DB_Deps.managed_media_db_for_owner",
         _owner_media,
         raising=False,
     )
     monkeypatch.setattr(
-        rag_ep,
-        "get_chacha_db_for_owner",
+        "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_owner",
         _owner_chacha,
         raising=False,
     )
-    monkeypatch.setattr(rag_ep, "get_prompts_db_for_user", _owner_prompts)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps.get_prompts_db_for_user", _owner_prompts)
     monkeypatch.setattr(rag_ep, "_build_batch_request_bundle", _recording_build_bundle)
-    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fake_batch_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_batch_pipeline", fake_batch_pipeline)
 
     with scoped_context(
         user_id=99,
@@ -911,7 +909,7 @@ def test_rag_batch_legacy_checkpoint_denies_ordinary_principal_before_runtime(
         "resolve_static_server_fallback_from_snapshot",
         lambda provider, _snapshot: fail_server_fallback(provider),
     )
-    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fail_provider_dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_batch_pipeline", fail_provider_dispatch)
 
     logs: list[str] = []
     sink_id = logger.add(logs.append, format="{message}")

@@ -133,7 +133,7 @@ def _file_endpoint_kwargs(file: _FakeUploadFile) -> dict[str, Any]:
 async def test_chunk_text_language_inference_fallback_log_is_sanitized(monkeypatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(chunking, "logger", logger_stub)
-    monkeypatch.setattr(chunking, "improved_chunking_process", _successful_chunker)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", _successful_chunker)
 
     response = await chunking.process_text_for_chunking_json(
         _text_request(_BadStrFilename()),
@@ -156,7 +156,7 @@ async def test_chunk_text_language_inference_fallback_log_is_sanitized(monkeypat
 async def test_chunk_text_unexpected_error_log_and_detail_are_sanitized(monkeypatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(chunking, "logger", logger_stub)
-    monkeypatch.setattr(chunking, "improved_chunking_process", _failing_chunker)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", _failing_chunker)
 
     with pytest.raises(HTTPException) as exc_info:
         await chunking.process_text_for_chunking_json(
@@ -183,7 +183,7 @@ async def test_chunk_file_language_inference_fallback_log_is_sanitized(monkeypat
     logger_stub = _LoggerStub()
     file = _FakeUploadFile(_BadRsplitFilename("safe.py"))
     monkeypatch.setattr(chunking, "logger", logger_stub)
-    monkeypatch.setattr(chunking, "improved_chunking_process", _successful_chunker)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", _successful_chunker)
 
     response = await chunking.process_file_for_chunking(**_file_endpoint_kwargs(file))
 
@@ -203,7 +203,7 @@ async def test_chunk_file_unexpected_error_log_and_detail_are_sanitized(monkeypa
     logger_stub = _LoggerStub()
     file = _FakeUploadFile("safe.py")
     monkeypatch.setattr(chunking, "logger", logger_stub)
-    monkeypatch.setattr(chunking, "improved_chunking_process", _failing_chunker)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", _failing_chunker)
 
     with pytest.raises(HTTPException) as exc_info:
         await chunking.process_file_for_chunking(**_file_endpoint_kwargs(file))
@@ -239,7 +239,7 @@ async def test_chunk_text_expected_failures_are_sanitized_and_detached(
         raise error
 
     monkeypatch.setattr(chunking, "logger", logger_stub)
-    monkeypatch.setattr(chunking, "improved_chunking_process", fail)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", fail)
 
     with pytest.raises(HTTPException) as exc_info:
         await chunking.process_text_for_chunking_json(
@@ -274,7 +274,7 @@ async def test_chunk_file_expected_failures_are_sanitized_and_detached(
         raise error
 
     monkeypatch.setattr(chunking, "logger", logger_stub)
-    monkeypatch.setattr(chunking, "improved_chunking_process", fail)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.improved_chunking_process", fail)
 
     with pytest.raises(HTTPException) as exc_info:
         await chunking.process_file_for_chunking(**_file_endpoint_kwargs(file))

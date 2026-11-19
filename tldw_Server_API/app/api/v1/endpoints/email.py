@@ -12,7 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 )
 from tldw_Server_API.app.api.v1.API_Deps.content_org_deps import select_content_org
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.config import settings
@@ -20,18 +20,12 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
-from tldw_Server_API.app.core.External_Sources.connectors_service import (
-    create_import_job,
-    get_source_by_id,
-)
-from tldw_Server_API.app.core.External_Sources.connectors_service import (
-    list_sources as list_connector_sources,
-)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
     exception_frames_for_log,
     exception_type_for_log,
 )
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
+import tldw_Server_API.app.core.External_Sources.connectors_service as _connectors_service
 
 router = APIRouter(tags=["Email"])
 
@@ -103,7 +97,7 @@ async def list_email_sources(
     tenant_id = str(user_id)
 
     try:
-        rows = await list_connector_sources(db, user_id)
+        rows = await _connectors_service.list_sources(db, user_id)
     except Exception as exc:
         logger.error("Failed to list email sources (error_type={})", exception_type_for_log(exc))
         raise HTTPException(
@@ -170,7 +164,7 @@ async def trigger_email_source_sync(
     _ensure_email_source_sync_enabled()
     user_id = _get_user_id(principal)
 
-    source = await get_source_by_id(db, user_id, source_id)
+    source = await _connectors_service.get_source_by_id(db, user_id, source_id)
     if not source:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -185,7 +179,7 @@ async def trigger_email_source_sync(
 
     rid = ensure_request_id(request) if request is not None else None
     try:
-        job = await create_import_job(user_id, source_id, request_id=rid)
+        job = await _connectors_service.create_import_job(user_id, source_id, request_id=rid)
     except Exception as exc:
         logger.error("Failed to queue email sync job (error_type={})", exception_type_for_log(exc))
         raise HTTPException(

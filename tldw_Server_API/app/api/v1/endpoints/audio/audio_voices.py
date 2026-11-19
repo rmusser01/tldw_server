@@ -26,16 +26,14 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     VoiceEncodeResponse,
 )
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
-from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.TTS.fish_s2_reference_imports import (
-    FISH_S2_REFERENCE_IMPORT_MAX_BYTES,
-    FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES,
-    FISH_S2_REFERENCE_IMPORT_MAX_ITEMS,
     FishS2ReferenceImportError,
     parse_fish_s2_reference_import_result,
 )
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, TTSProviderError
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
+import tldw_Server_API.app.core.Logging.log_context as _log_context
+import tldw_Server_API.app.core.TTS.fish_s2_reference_imports as _fish_s2_reference_imports
 
 router = APIRouter(
     tags=["Audio"],
@@ -110,7 +108,7 @@ async def upload_voice(
     """
     Upload a custom voice sample for use with TTS.
     """
-    request_id = ensure_request_id(request)
+    request_id = _log_context.ensure_request_id(request)
     try:
         from tldw_Server_API.app.core.TTS.voice_manager import (
             VoiceProcessingError,
@@ -354,7 +352,7 @@ async def preview_voice(
     """
     Generate a short preview of a custom voice.
     """
-    request_id = ensure_request_id(request)
+    request_id = _log_context.ensure_request_id(request)
     try:
         from tldw_Server_API.app.core.TTS.voice_manager import get_voice_manager
 
@@ -429,7 +427,7 @@ async def create_fish_s2_reference(
     tts_service: TTSServiceV2 = Depends(get_tts_service),
 ):
     """Create a managed Fish S2 reference from an existing stored voice or a new upload."""
-    request_id = ensure_request_id(request)
+    request_id = _log_context.ensure_request_id(request)
     if voice_id:
         if file is not None:
             raise HTTPException(
@@ -447,8 +445,8 @@ async def create_fish_s2_reference(
                     request_id,
                 ),
             )
-        file_content = await file.read(FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES + 1)
-        if len(file_content) > FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES:
+        file_content = await file.read(_fish_s2_reference_imports.FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES + 1)
+        if len(file_content) > _fish_s2_reference_imports.FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=_http_error_detail("Fish S2 reference audio is too large", request_id),
@@ -540,10 +538,10 @@ async def import_fish_s2_references(
     tts_service: TTSServiceV2 = Depends(get_tts_service),
 ):
     """Import one or more Fish S2 managed references from JSON or Markdown."""
-    request_id = ensure_request_id(request)
+    request_id = _log_context.ensure_request_id(request)
     try:
-        content = await file.read(FISH_S2_REFERENCE_IMPORT_MAX_BYTES + 1)
-        if len(content) > FISH_S2_REFERENCE_IMPORT_MAX_BYTES:
+        content = await file.read(_fish_s2_reference_imports.FISH_S2_REFERENCE_IMPORT_MAX_BYTES + 1)
+        if len(content) > _fish_s2_reference_imports.FISH_S2_REFERENCE_IMPORT_MAX_BYTES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=_http_error_detail("Fish S2 reference import file is too large", request_id),
@@ -551,8 +549,8 @@ async def import_fish_s2_references(
         parsed = parse_fish_s2_reference_import_result(
             filename=file.filename or "",
             content=content,
-            max_items=FISH_S2_REFERENCE_IMPORT_MAX_ITEMS,
-            max_bytes=FISH_S2_REFERENCE_IMPORT_MAX_BYTES,
+            max_items=_fish_s2_reference_imports.FISH_S2_REFERENCE_IMPORT_MAX_ITEMS,
+            max_bytes=_fish_s2_reference_imports.FISH_S2_REFERENCE_IMPORT_MAX_BYTES,
         )
     except FishS2ReferenceImportError as e:
         logger.warning(f"Fish S2 reference import parse failed: {e}")
@@ -569,7 +567,7 @@ async def import_fish_s2_references(
         file_content = None
         filename = None
         if item.audio_base64:
-            if _estimated_base64_decoded_size(item.audio_base64) > FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES:
+            if _estimated_base64_decoded_size(item.audio_base64) > _fish_s2_reference_imports.FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES:
                 errors.append(
                     _fish_s2_import_error(
                         item.source_index,
@@ -583,7 +581,7 @@ async def import_fish_s2_references(
                 errors.append(_fish_s2_import_error(item.source_index, "audio_base64 must be valid base64"))
                 logger.warning(f"Fish S2 reference import item {item.source_index} has invalid audio_base64: {e}")
                 continue
-            if len(file_content) > FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES:
+            if len(file_content) > _fish_s2_reference_imports.FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES:
                 errors.append(
                     _fish_s2_import_error(
                         item.source_index,
@@ -658,7 +656,7 @@ async def delete_fish_s2_reference(
     tts_service: TTSServiceV2 = Depends(get_tts_service),
 ):
     """Delete the remote Fish S2 reference while preserving the local voice asset."""
-    request_id = ensure_request_id(request)
+    request_id = _log_context.ensure_request_id(request)
     try:
         return await tts_service.delete_fish_s2_reference(
             user_id=current_user.id,

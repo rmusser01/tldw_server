@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile, status
@@ -16,13 +17,15 @@ from tldw_Server_API.app.api.v1.API_Deps.billing_deps import propagate_billing_h
 from tldw_Server_API.app.api.v1.API_Deps.content_org_deps import select_content_org
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_add_deps import get_add_media_form
-from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_requested
+from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
+    admit_media_analysis,
+    media_analysis_requested,
+)
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -34,9 +37,10 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     add_media_persist,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.research_discovery_handoff import (
-    add_research_discovery_pdfs,
     is_research_discovery_handoff,
 )
+import tldw_Server_API.app.core.Ingestion_Media_Processing.persistence as _persistence
+import tldw_Server_API.app.core.Ingestion_Media_Processing.research_discovery_handoff as _research_discovery_handoff
 
 router = APIRouter()
 
@@ -80,13 +84,18 @@ async def add_media(
     helper.
     """
 
+    research_handoff = is_research_discovery_handoff(form_data)
+    admit_after_duplicate_check = None
     if media_analysis_requested(form_data):
-        # Usage quotas (LLM usage accounting spec §4a), before any download or processing.
-        await enforce_llm_quota(current_user.id)
+        admit = partial(admit_media_analysis, current_user.id, form_data)
+        if not research_handoff and form_data.media_type != "email" and not form_data.overwrite_existing:
+            admit_after_duplicate_check = admit
+        else:
+            await admit()
 
-    if is_research_discovery_handoff(form_data):
+    if research_handoff:
         try:
-            result = await add_research_discovery_pdfs(
+            result = await _research_discovery_handoff.add_research_discovery_pdfs(
                 background_tasks=background_tasks,
                 form_data=form_data,
                 files=files,
@@ -101,7 +110,7 @@ async def add_media(
             raise HTTPException(status_code=422, detail=exc.public_detail) from exc
 
     else:
-        result = await add_media_persist(
+        result = await _persistence.add_media_persist(
             background_tasks=background_tasks,
             form_data=form_data,
             files=files,
@@ -110,6 +119,7 @@ async def add_media(
             usage_log=usage_log,
             response=None,
             request=request,
+            admit_after_duplicate_check=admit_after_duplicate_check,
         )
 
     if isinstance(result, Response):

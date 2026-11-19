@@ -31,11 +31,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories.document_works
     DocumentWorkspaceRepository,
 )
 from tldw_Server_API.app.core.Document_Workspace.pdf_service import (
-    annotate_document_pdf,
     pdf_operation,
-    render_document_pdf,
 )
 from tldw_Server_API.app.core.Storage.storage_interface import StorageError
+import tldw_Server_API.app.core.Document_Workspace.pdf_service as _pdf_service
 
 router = APIRouter(tags=["Document Workspace"])
 
@@ -76,7 +75,7 @@ async def render_document(body: DocumentRenderRequest, _user: User = Depends(get
     """Render a new PDF; saving still uses normal Media ingestion and quotas."""
     try:
         with pdf_operation():
-            data = await render_document_pdf(body)
+            data = await _pdf_service.render_document_pdf(body)
     except (ValueError, TimeoutError, DaemonCapacityError) as exc:
         raise _processing_error(exc) from exc
     return _pdf_response(data, "document-draft.pdf")
@@ -150,7 +149,7 @@ async def _export_document(media_id: int, db: Any, user: User) -> Response:
     except StorageError as exc:
         raise HTTPException(500, "The original PDF could not be read from storage.") from exc
     try:
-        data = await annotate_document_pdf(b"".join(chunks), annotations)
+        data = await _pdf_service.annotate_document_pdf(b"".join(chunks), annotations)
     except (ValueError, TimeoutError, DaemonCapacityError) as exc:
         raise _processing_error(exc) from exc
     return _pdf_response(data, f"document-{media_id}-annotated.pdf")

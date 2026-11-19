@@ -337,7 +337,7 @@ class TestAdminStorageQuotaEndpointErrorMapping:
             side_effect=RuntimeError("quota backend exploded at /private/storage-quota.db")
         )
         monkeypatch.setattr(quotas_module, "logger", logger_stub)
-        monkeypatch.setattr(quotas_module, "get_storage_service", AsyncMock(return_value=service))
+        monkeypatch.setattr("tldw_Server_API.app.services.storage_quota_service.get_storage_service", AsyncMock(return_value=service))
 
         with pytest.raises(HTTPException) as exc_info:
             await quotas_module.get_user_storage_quota(1)
@@ -354,7 +354,7 @@ class TestAdminStorageQuotaEndpointErrorMapping:
             side_effect=RuntimeError("quota backend exploded at /private/storage-quota.db")
         )
         monkeypatch.setattr(quotas_module, "logger", logger_stub)
-        monkeypatch.setattr(quotas_module, "get_storage_service", AsyncMock(return_value=service))
+        monkeypatch.setattr("tldw_Server_API.app.services.storage_quota_service.get_storage_service", AsyncMock(return_value=service))
 
         with pytest.raises(HTTPException) as exc_info:
             await quotas_module.update_user_storage_quota(

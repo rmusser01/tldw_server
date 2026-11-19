@@ -23,8 +23,6 @@ from tldw_Server_API.app.api.v1.API_Deps.billing_deps import get_billing_org_id,
 from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.Billing.enforcement import (
     LimitCategory,
-    enforcement_enabled,
-    get_billing_enforcer,
 )
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
@@ -46,7 +44,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import
     apply_transcript_text_policy,
     build_audio_retention_decision,
     redact_timed_segments,
-    resolve_effective_stt_policy,
     retain_stt_audio_artifact,
 )
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
@@ -59,19 +56,9 @@ from tldw_Server_API.app.core.Metrics.stt_metrics import (
 )
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Usage import concurrency_quota, quota_checks
-from tldw_Server_API.app.core.Usage.audio_quota import (
-    add_daily_minutes,
-    can_start_job,
-    check_daily_minutes_allow,
-    consume_daily_minutes,
-    consume_daily_minutes_with_compat,
-    finish_job,
-    get_job_heartbeat_interval_seconds,
-    get_limits_for_user,
-    heartbeat_jobs,
-    increment_jobs_started,
-    monthly_minutes_exhausted,
-)
+import tldw_Server_API.app.core.Usage.audio_quota as _audio_quota
+import tldw_Server_API.app.core.Billing.enforcement as _enforcement
+import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy as _stt_policy
 
 TRANSCRIPTIONS_KEY = "limits.audio_concurrent_transcriptions"
 
@@ -199,64 +186,6 @@ def _resolve_audio_upload_suffix(
     return ".audio"
 
 
-def _audio_shim_attr(name: str):
-    defaults: dict[str, Any] = {
-        "check_daily_minutes_allow": check_daily_minutes_allow,
-        "add_daily_minutes": add_daily_minutes,
-        "consume_daily_minutes": consume_daily_minutes,
-        "get_job_heartbeat_interval_seconds": get_job_heartbeat_interval_seconds,
-        "heartbeat_jobs": heartbeat_jobs,
-        "get_limits_for_user": get_limits_for_user,
-        "can_start_job": can_start_job,
-        "increment_jobs_started": increment_jobs_started,
-        "finish_job": finish_job,
-        "monthly_minutes_exhausted": monthly_minutes_exhausted,
-        "sf": sf,
-    }
-    default_value = defaults.get(name)
-    package_candidate: Any = None
-    module_candidate: Any = None
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints import audio as audio_pkg_shim
-
-        if hasattr(audio_pkg_shim, name):
-            package_candidate = getattr(audio_pkg_shim, name)
-    except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
-        logger.debug("audio_transcriptions shim package lookup failed")
-    except Exception:
-        logger.debug("audio_transcriptions shim package lookup raised unexpected error")
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.audio import audio as audio_module_shim
-
-        if hasattr(audio_module_shim, name):
-            module_candidate = getattr(audio_module_shim, name)
-    except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
-        logger.debug("audio_transcriptions shim module lookup failed")
-    except Exception:
-        logger.debug("audio_transcriptions shim module lookup raised unexpected error")
-
-    if package_candidate is not None and module_candidate is not None:
-        if package_candidate is module_candidate:
-            return package_candidate
-        if default_value is not None:
-            package_changed = package_candidate is not default_value
-            module_changed = module_candidate is not default_value
-            if package_changed != module_changed:
-                return package_candidate if package_changed else module_candidate
-            if package_changed and module_changed:
-                return package_candidate
-        return module_candidate
-
-    if package_candidate is not None:
-        return package_candidate
-    if module_candidate is not None:
-        return module_candidate
-    if name in defaults:
-        return defaults[name]
-    raise NameError(name)
-
-
 def _max_upload_bytes(limits: dict[str, Any]) -> int:
     """The user's upload cap from their audio limits, else [Media-Processing] max_audio_file_size_mb."""
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
@@ -270,26 +199,13 @@ def _max_upload_bytes(limits: dict[str, Any]) -> int:
     return int(audio_files.MAX_FILE_SIZE)
 
 
-async def _check_daily_minutes_allow(user_id: int, minutes: float):
-    return await _audio_shim_attr("check_daily_minutes_allow")(user_id, minutes)
-
-
-async def _add_daily_minutes(user_id: int, minutes: float):
-    return await _audio_shim_attr("add_daily_minutes")(user_id, minutes)
-
-
 async def _consume_daily_minutes(
     user_id: int,
     minutes: float,
     *,
     operation_id: str | None = None,
 ) -> tuple[bool, float | None]:
-    return await consume_daily_minutes_with_compat(
-        user_id=user_id,
-        minutes=minutes,
-        operation_id=operation_id,
-        quota_helper_resolver=_audio_shim_attr,
-    )
+    return await _audio_quota.consume_daily_minutes(user_id, minutes, operation_id=operation_id)
 
 
 def _stt_provider_envelope(stt_registry: Any, provider_name: str) -> Optional[dict[str, Any]]:
@@ -593,7 +509,7 @@ async def create_transcription(
     async def _maybe_start_job_heartbeat(user_id: int) -> Optional[asyncio.Task]:
         """Best-effort RG job heartbeat loop (no-op when unsupported)."""
         try:
-            interval = _audio_shim_attr("get_job_heartbeat_interval_seconds")()
+            interval = _audio_quota.get_job_heartbeat_interval_seconds()
         except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
             logger.debug("audio.transcriptions job heartbeat interval lookup failed; skipping job heartbeat")
             return None
@@ -604,7 +520,7 @@ async def create_transcription(
             while True:
                 await asyncio.sleep(interval)
                 try:
-                    await _audio_shim_attr("heartbeat_jobs")(user_id)
+                    await _audio_quota.heartbeat_jobs(user_id)
                 except asyncio.CancelledError:
                     raise
                 except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
@@ -618,7 +534,7 @@ async def create_transcription(
 
     # Resolve per-tier file size limit
     try:
-        limits = await _audio_shim_attr("get_limits_for_user")(current_user.id)
+        limits = await _audio_quota.get_limits_for_user(current_user.id)
     except EXPECTED_DB_EXC as e:
         logger.exception(
             'Failed to get limits for user {} during upload; using the media-processing cap: {}; request_id={}',
@@ -661,13 +577,13 @@ async def create_transcription(
             )
 
     # Before any heavy work, enforce concurrent jobs cap per user
-    ok_job, msg_job = await _audio_shim_attr("can_start_job")(current_user.id)
+    ok_job, msg_job = await _audio_quota.can_start_job(current_user.id)
     if not ok_job:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=msg_job)
     # Record job start (best-effort)
     acquired_job_slot = False
     try:
-        await _audio_shim_attr("increment_jobs_started")(current_user.id)
+        await _audio_quota.increment_jobs_started(current_user.id)
         acquired_job_slot = True
     except EXPECTED_DB_EXC as e:
         logger.exception(
@@ -681,7 +597,7 @@ async def create_transcription(
     temp_audio_path = None
     canonical_path = None
     try:
-        effective_stt_policy = await resolve_effective_stt_policy(
+        effective_stt_policy = await _stt_policy.resolve_effective_stt_policy(
             principal=principal,
             user_id=int(current_user.id) if getattr(current_user, "id", None) is not None else None,
             db=db,
@@ -803,7 +719,7 @@ async def create_transcription(
 
         base_dir = canonical_path_obj.parent
 
-        sf_mod = _audio_shim_attr("sf")
+        sf_mod = sf
         duration_seconds = 0.0
         try:
             info_fn = getattr(sf_mod, "info", None)
@@ -928,7 +844,7 @@ async def create_transcription(
             allow = True
         if not allow:
             try:
-                await _audio_shim_attr("finish_job")(current_user.id)
+                await _audio_quota.finish_job(current_user.id)
             except EXPECTED_DB_EXC as e:
                 logger.exception(
                     'Failed to release job slot after quota denial: user_id={}, error={}; request_id={}',
@@ -941,7 +857,7 @@ async def create_transcription(
                 job_heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await job_heartbeat_task
-            period = "monthly" if await _audio_shim_attr("monthly_minutes_exhausted")(current_user.id, minutes_est) else "daily"
+            period = "monthly" if await _audio_quota.monthly_minutes_exhausted(current_user.id, minutes_est) else "daily"
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail=_dictation_error_detail(
@@ -952,10 +868,10 @@ async def create_transcription(
             )
         # Secondary billing check with the real minute estimate (the dependency
         # pre-check only gates on 1 unit to verify the org has *any* quota).
-        if enforcement_enabled() and billing_org_id is not None and minutes_est > 1:
+        if _enforcement.enforcement_enabled() and billing_org_id is not None and minutes_est > 1:
             _real_units = max(1, int(math.ceil(minutes_est)))
             try:
-                _enforcer = get_billing_enforcer()
+                _enforcer = _enforcement.get_billing_enforcer()
                 _recheck = await _enforcer.check_limit(
                     billing_org_id,
                     LimitCategory.TRANSCRIPTION_MINUTES_MONTH,
@@ -1140,7 +1056,7 @@ async def create_transcription(
                     with contextlib.suppress(asyncio.CancelledError):
                         await job_heartbeat_task
                 if acquired_job_slot:
-                    await _audio_shim_attr("finish_job")(current_user.id)
+                    await _audio_quota.finish_job(current_user.id)
             except EXPECTED_DB_EXC as e:
                 logger.exception(
                     'Failed to release job slot in finally: user_id={}, error={}; request_id={}',
@@ -1180,10 +1096,10 @@ async def create_transcription(
             redaction_outcome = "skipped"
 
         # Billing: record actual transcription minutes to org-level enforcement
-        if enforcement_enabled() and billing_org_id is not None and minutes_est > 0:
+        if _enforcement.enforcement_enabled() and billing_org_id is not None and minutes_est > 0:
             _billed_minutes = max(1, int(math.ceil(minutes_est)))
             try:
-                get_billing_enforcer().apply_usage_delta(
+                _enforcement.get_billing_enforcer().apply_usage_delta(
                     billing_org_id,
                     LimitCategory.TRANSCRIPTION_MINUTES_MONTH,
                     _billed_minutes,

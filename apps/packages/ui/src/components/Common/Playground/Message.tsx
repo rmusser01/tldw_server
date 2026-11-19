@@ -459,6 +459,7 @@ const PlaygroundMessageImpl = (props: Props) => {
   const articleRef = useRef<HTMLElement | null>(null)
   const copyFeedback = useCopyFeedback(2000)
   const [editPresentation, setEditPresentation] = React.useState<"flat" | "bubble" | null>(null)
+  const [reasoningEditIndex, setReasoningEditIndex] = React.useState<number | null>(null)
   const editMode = editPresentation !== null
   const [checkWideMode] = useStorage("checkWideMode", false)
   const [isUserChatBubble] = useStorage("userChatBubble", true)
@@ -1202,6 +1203,12 @@ const PlaygroundMessageImpl = (props: Props) => {
     props.serverChatId,
     props.serverMessageId
   ])
+
+  useEffect(() => {
+    if (reasoningEditIndex !== null && !parseReasoning(props.message)[reasoningEditIndex]?.range) {
+      setReasoningEditIndex(null)
+    }
+  }, [props.message, reasoningEditIndex])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -2000,7 +2007,8 @@ const PlaygroundMessageImpl = (props: Props) => {
   const actionRowVisibility = isProMode || props.messageView === "research" || (props.isBot && isLastMessage)
     ? "flex"
     : "hidden group-hover:flex group-focus-within:flex"
-  const showInlineActions = !props.isProcessing && !editMode
+  const showInlineActions = !props.isProcessing && !editMode && reasoningEditIndex === null
+  const canEditReasoning = showInlineActions && !props.hideEditAndRegenerate && !responseStreaming
   const showEmptyAssistantResponse =
     props.isBot &&
     !isSystemMessage &&
@@ -2949,6 +2957,19 @@ const PlaygroundMessageImpl = (props: Props) => {
                             searchQuery={props.searchQuery}
                             t={t}
                             enableMermaidDiagrams={enableAssistantMermaidDiagrams}
+                            onEdit={e.range && canEditReasoning
+                              ? () => setReasoningEditIndex(i)
+                              : undefined}
+                            editor={e.range && reasoningEditIndex === i ? (
+                              <EditMessageForm
+                                key={messageKey}
+                                value={props.message}
+                                reasoningRange={e.range}
+                                onSumbit={props.onEditFormSubmit}
+                                onClose={() => setReasoningEditIndex(null)}
+                                isBot
+                              />
+                            ) : undefined}
                           />
                         )
                       }

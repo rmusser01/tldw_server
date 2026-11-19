@@ -13,7 +13,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
-from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
+from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Workspaces.job_status import (
     list_recent_workspace_source_ingest_jobs,
@@ -287,8 +287,7 @@ def test_workspace_capabilities_fail_closed_without_queryable_sources(
     db = CharactersRAGDB(db_path=str(tmp_path / "empty-chacha.db"), client_id="user-1")
     db.upsert_workspace("ws-empty", "Empty Workspace")
     monkeypatch.setattr(
-        workspaces_endpoint,
-        "collect_workspace_service_capabilities",
+        "tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities",
         _empty_service_capabilities,
         raising=False,
     )
@@ -371,8 +370,7 @@ def test_workspace_capabilities_allow_grounded_questions_for_partial_text_source
         }
 
     monkeypatch.setattr(
-        workspaces_endpoint,
-        "collect_workspace_service_capabilities",
+        "tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities",
         _service_capabilities,
         raising=False,
     )
@@ -402,8 +400,7 @@ def test_workspace_capabilities_accept_project_workspace_profile(
     db = CharactersRAGDB(db_path=str(tmp_path / "project-chacha.db"), client_id="user-1")
     db.upsert_workspace("ws-project", "Project Workspace", workspace_profile="project")
     monkeypatch.setattr(
-        workspaces_endpoint,
-        "collect_workspace_service_capabilities",
+        "tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities",
         _empty_service_capabilities,
         raising=False,
     )
@@ -457,8 +454,7 @@ def test_workspace_capabilities_include_attached_primary_root(
         }
 
     monkeypatch.setattr(
-        workspaces_endpoint,
-        "collect_workspace_service_capabilities",
+        "tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities",
         _service_capabilities,
         raising=False,
     )
@@ -549,8 +545,7 @@ def test_workspace_capabilities_reflect_service_capability_projection(
         }
 
     monkeypatch.setattr(
-        workspaces_endpoint,
-        "collect_workspace_service_capabilities",
+        "tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities",
         _service_capabilities,
         raising=False,
     )
@@ -860,7 +855,7 @@ def test_workspace_job_manager_resolver_fails_open(monkeypatch: pytest.MonkeyPat
     def _raise_job_manager() -> None:
         raise RuntimeError("jobs manager unavailable")
 
-    monkeypatch.setattr(workspaces_endpoint, "try_get_job_manager", _raise_job_manager)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.jobs_deps.try_get_job_manager", _raise_job_manager)
 
     assert workspaces_endpoint.try_get_workspace_job_manager() is None
 

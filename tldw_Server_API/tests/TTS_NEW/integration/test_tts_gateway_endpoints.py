@@ -293,8 +293,8 @@ async def test_speech_gateway_response_has_provenance_and_closes_iterator(
         return _Service()
 
     resolve_legacy = AsyncMock(side_effect=AssertionError("legacy BYOK resolver used"))
-    original_resolver = audio_endpoints._resolve_tts_byok
-    audio_endpoints._resolve_tts_byok = resolve_legacy
+    original_resolver = audio_tts._resolve_tts_byok
+    audio_tts._resolve_tts_byok = resolve_legacy
     test_client.app.dependency_overrides[audio_endpoints.get_tts_service] = _get_service
     try:
         response = test_client.post(
@@ -311,7 +311,7 @@ async def test_speech_gateway_response_has_provenance_and_closes_iterator(
         )
     finally:
         test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
-        audio_endpoints._resolve_tts_byok = original_resolver
+        audio_tts._resolve_tts_byok = original_resolver
 
     assert response.status_code == status.HTTP_200_OK, response.text
     assert response.content == b"audio-oneaudio-two"
@@ -327,8 +327,8 @@ async def test_speech_backend_conflict_precedes_all_credential_resolution(
     auth_headers,
 ) -> None:
     resolve_legacy = AsyncMock(side_effect=AssertionError("credential lookup used"))
-    original_resolver = audio_endpoints._resolve_tts_byok
-    audio_endpoints._resolve_tts_byok = resolve_legacy
+    original_resolver = audio_tts._resolve_tts_byok
+    audio_tts._resolve_tts_byok = resolve_legacy
     try:
         response = test_client.post(
             "/api/v1/audio/speech",
@@ -341,7 +341,7 @@ async def test_speech_backend_conflict_precedes_all_credential_resolution(
             headers={**auth_headers, "X-TLDW-TTS-Backend": "gateway:two"},
         )
     finally:
-        audio_endpoints._resolve_tts_byok = original_resolver
+        audio_tts._resolve_tts_byok = original_resolver
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     resolve_legacy.assert_not_awaited()

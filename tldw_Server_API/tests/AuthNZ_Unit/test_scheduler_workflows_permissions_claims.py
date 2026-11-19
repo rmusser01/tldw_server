@@ -175,7 +175,7 @@ async def test_scheduler_admin_rescan_failure_log_is_sanitized(monkeypatch):
 
     logger = _LoggerStub()
     monkeypatch.setattr(sched_mod, "logger", logger)
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: _FailingScheduler())
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: _FailingScheduler())
 
     with pytest.raises(sched_mod.HTTPException) as exc_info:
         await sched_mod.admin_rescan(_principal=_make_principal())
@@ -202,7 +202,7 @@ async def test_scheduler_admin_rescan_job_count_failure_log_is_sanitized(monkeyp
 
     logger = _LoggerStub()
     monkeypatch.setattr(sched_mod, "logger", logger)
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: _Scheduler())
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: _Scheduler())
 
     result = await sched_mod.admin_rescan(_principal=_make_principal())
 
@@ -252,7 +252,7 @@ async def test_scheduler_get_schedule_next_run_persist_failure_log_is_sanitized(
 
     logger = _LoggerStub()
     monkeypatch.setattr(sched_mod, "logger", logger)
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: _Scheduler())
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: _Scheduler())
 
     result = await sched_mod.get_schedule(
         "sched-secret",
@@ -295,7 +295,7 @@ async def test_scheduler_get_schedule_cron_parse_failure_log_is_sanitized(monkey
 
     logger = _LoggerStub()
     monkeypatch.setattr(sched_mod, "logger", logger)
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: _Scheduler())
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: _Scheduler())
 
     result = await sched_mod.get_schedule(
         "sched-secret",
@@ -315,7 +315,7 @@ async def test_scheduler_admin_rescan_forbidden_for_non_admin_without_claims(mon
     )
     app = _build_app_with_overrides(principal)
     fake_scheduler = app.state._fake_scheduler
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: fake_scheduler)
 
     with TestClient(app) as client:
         resp = client.post("/api/v1/scheduler/workflows/admin/rescan")
@@ -331,7 +331,7 @@ async def test_scheduler_admin_rescan_allows_for_admin_principal(monkeypatch):
     )
     app = _build_app_with_overrides(principal)
     fake_scheduler = app.state._fake_scheduler
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: fake_scheduler)
 
     with TestClient(app) as client:
         resp = client.post("/api/v1/scheduler/workflows/admin/rescan")
@@ -350,7 +350,7 @@ async def test_scheduler_admin_rescan_allows_service_admin_principal(monkeypatch
     )
     app = _build_app_with_overrides(principal)
     fake_scheduler = app.state._fake_scheduler
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: fake_scheduler)
 
     with TestClient(app) as client:
         resp = client.post("/api/v1/scheduler/workflows/admin/rescan")
@@ -368,7 +368,7 @@ async def test_scheduler_admin_rescan_allows_non_admin_with_workflows_admin_perm
     )
     app = _build_app_with_overrides(principal)
     fake_scheduler = app.state._fake_scheduler
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: fake_scheduler)
 
     with TestClient(app) as client:
         resp = client.post("/api/v1/scheduler/workflows/admin/rescan")
@@ -386,7 +386,7 @@ async def test_scheduler_list_owner_filter_allows_admin_role_claim(monkeypatch):
     )
     app = _build_app_with_overrides(principal)
     fake_scheduler = app.state._fake_scheduler
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: fake_scheduler)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/scheduler/workflows", params={"owner": "2"})
@@ -403,7 +403,7 @@ async def test_scheduler_list_owner_filter_allows_workflows_admin_permission(mon
     )
     app = _build_app_with_overrides(principal)
     fake_scheduler = app.state._fake_scheduler
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: fake_scheduler)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/scheduler/workflows", params={"owner": "2"})
@@ -420,7 +420,7 @@ async def test_scheduler_list_owner_filter_forbidden_without_admin_claims(monkey
     )
     app = _build_app_with_overrides(principal)
     fake_scheduler = app.state._fake_scheduler
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: fake_scheduler)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/scheduler/workflows", params={"owner": "2"})
@@ -436,7 +436,7 @@ async def test_scheduler_list_owner_filter_forbidden_for_is_admin_boolean_withou
     )
     app = _build_app_with_overrides(principal)
     fake_scheduler = app.state._fake_scheduler
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: fake_scheduler)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/scheduler/workflows", params={"owner": "2"})
@@ -452,7 +452,7 @@ async def test_scheduler_get_schedule_allows_admin_role_cross_user(monkeypatch):
     )
     app = _build_app_with_overrides(principal)
     fake_scheduler = app.state._fake_scheduler
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: fake_scheduler)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/scheduler/workflows/sched-1")
@@ -469,7 +469,7 @@ async def test_scheduler_get_schedule_forbidden_without_admin_claims(monkeypatch
     )
     app = _build_app_with_overrides(principal)
     fake_scheduler = app.state._fake_scheduler
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: fake_scheduler)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/scheduler/workflows/sched-1")
@@ -485,7 +485,7 @@ async def test_scheduler_get_schedule_forbidden_for_is_admin_boolean_without_cla
     )
     app = _build_app_with_overrides(principal)
     fake_scheduler = app.state._fake_scheduler
-    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr("tldw_Server_API.app.services.workflows_scheduler.get_workflows_scheduler", lambda: fake_scheduler)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/scheduler/workflows/sched-1")

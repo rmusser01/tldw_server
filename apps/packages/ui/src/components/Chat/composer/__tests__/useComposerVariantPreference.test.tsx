@@ -93,22 +93,26 @@ describe("useComposerVariantPreference", () => {
   })
 
   it("does not throw when localStorage.setItem rejects", () => {
-    const originalSetItem = window.localStorage.setItem
-    window.localStorage.setItem = () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("QuotaExceededError")
+    })
+
+    try {
+      const { result } = renderHook(() =>
+        useComposerVariantPreference({ disableServerSync: true })
+      )
+
+      expect(() =>
+        act(() => {
+          result.current[1]("v5")
+        })
+      ).not.toThrow()
+
+      expect(setItem).toHaveBeenCalledWith(COMPOSER_VARIANT_PREFERENCE_KEY, "v5")
+      expect(window.localStorage.getItem(COMPOSER_VARIANT_PREFERENCE_KEY)).toBeNull()
+    } finally {
+      setItem.mockRestore()
     }
-
-    const { result } = renderHook(() =>
-      useComposerVariantPreference({ disableServerSync: true })
-    )
-
-    expect(() =>
-      act(() => {
-        result.current[1]("v5")
-      })
-    ).not.toThrow()
-
-    window.localStorage.setItem = originalSetItem
   })
 
   // --- Server-sync layer ---

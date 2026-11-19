@@ -249,8 +249,7 @@ def test_reference_images_endpoint_sanitizes_operational_failures(client_with_us
         raise ReferenceImageOperationalError("reference image backend exploded")
 
     monkeypatch.setattr(
-        files_endpoint,
-        "list_reference_image_candidates",
+        "tldw_Server_API.app.core.Image_Generation.reference_images.list_reference_image_candidates",
         _raise_operational_error,
     )
 

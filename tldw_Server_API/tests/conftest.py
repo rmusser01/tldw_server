@@ -344,6 +344,26 @@ def _offline_provider_model_inventory(request, monkeypatch):
             monkeypatch.setattr(module, "_validate_provider_model_selection", lambda _provider, _request, **_kw: None)
 
 
+@pytest.fixture(autouse=True)
+def _no_live_network(request):
+    """Fail a test that reaches a non-loopback host (TASK-15486).
+
+    Opt out with the ``live_network`` marker (``external_api``, ``local_llm_service``,
+    ``provider_inventory``, ``requires_model`` and ``stt_golden`` count too), by a line in
+    tests/live_network_baseline.txt, or by living under tests/e2e, server_e2e_tests or
+    frontend_e2e; see tests/README.md. Function-scoped: session- and module-scoped
+    fixture setup runs outside it.
+    """
+    from tldw_Server_API.tests.helpers.offline_network import block_live_network, live_network_allowed
+
+    if live_network_allowed(request.node):
+        yield
+        return
+    with block_live_network() as attempts:
+        yield
+    assert attempts == [], "live network attempted: " + repr(list(attempts)) + "\n" + "\n".join(attempts.details)
+
+
 @pytest.fixture()
 def auth_headers():
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
@@ -1028,16 +1048,17 @@ def client_with_single_user(monkeypatch):
                 logging.getLogger(__name__).debug("Failed to set request.state.auth: %s", e)
         return principal
 
-    fastapi_app.dependency_overrides[get_request_user] = _override_user
-    fastapi_app.dependency_overrides[get_usage_event_logger] = _override_logger
-    fastapi_app.dependency_overrides[get_auth_principal] = _override_principal
+    # Through monkeypatch, not set-then-pop: a test that also overrides one of
+    # these keys with monkeypatch.setitem recorded this fixture's value and, as
+    # monkeypatch tears down after this fixture, put it back on the shared app
+    # after the pop, so every later test in the process ran authenticated.
+    # monkeypatch undoes both in reverse order.
+    monkeypatch.setitem(fastapi_app.dependency_overrides, get_request_user, _override_user)
+    monkeypatch.setitem(fastapi_app.dependency_overrides, get_usage_event_logger, _override_logger)
+    monkeypatch.setitem(fastapi_app.dependency_overrides, get_auth_principal, _override_principal)
 
     with TestClient(fastapi_app) as client:
         yield client, usage_logger
-
-    fastapi_app.dependency_overrides.pop(get_request_user, None)
-    fastapi_app.dependency_overrides.pop(get_usage_event_logger, None)
-    fastapi_app.dependency_overrides.pop(get_auth_principal, None)
 
 
 @pytest.fixture()

@@ -76,7 +76,7 @@ def pg_voice_db(pg_database_config, tmp_path, monkeypatch):
     async def _db_for_user(_user_id, client_id=None):  # noqa: ARG001
         return db
 
-    monkeypatch.setattr(voice_assistant, "get_chacha_db_for_user_id", _db_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id", _db_for_user)
 
     def outstanding():
         return sorted(holders[key] for key, count in (taken - returned).items() for _ in range(count))
@@ -148,8 +148,8 @@ async def test_a_command_takes_no_checkout_on_the_event_loop_and_holds_none_whil
         return ActionResult(success=True, action_type=ActionType.LLM_CHAT, response_text="done")
 
     monkeypatch.setattr(router, "_execute_intent", act)
-    monkeypatch.setattr(voice_assistant, "get_voice_session_manager", lambda: sessions)
-    monkeypatch.setattr(voice_assistant, "get_voice_command_router", lambda: router)
+    monkeypatch.setattr("tldw_Server_API.app.core.VoiceAssistant.get_voice_session_manager", lambda: sessions)
+    monkeypatch.setattr("tldw_Server_API.app.core.VoiceAssistant.get_voice_command_router", lambda: router)
     ws = DummyWebSocket(
         [{"type": "auth", "token": "valid-token"}, {"type": "config"}, {"type": "text", "text": "hello there"}]
     )

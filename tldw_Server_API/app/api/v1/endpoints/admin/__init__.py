@@ -19,13 +19,11 @@ from tldw_Server_API.app.core.Admin_Webhooks.config import (
 from tldw_Server_API.app.core.AuthNZ.alerting import (
     get_security_alert_dispatcher as _core_get_security_alert_dispatcher,
 )
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DuplicateRoleError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import InputError, KanbanDBError
 from tldw_Server_API.app.core.exceptions import ResourceNotFoundError
-from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services import admin_profiles_service, admin_scope_service
 
 from . import admin_acp_agents as admin_acp_agents_endpoints
@@ -60,6 +58,8 @@ from . import admin_user as admin_user_endpoints
 from . import admin_webhooks as admin_webhooks_endpoints
 from . import context_integrity as context_integrity_endpoints
 from . import startup_warnings as startup_warnings_endpoints
+import tldw_Server_API.app.core.AuthNZ.database as _database
+import tldw_Server_API.app.core.testing as _testing
 
 _ADMIN_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
@@ -89,7 +89,7 @@ _ADMIN_NONCRITICAL_EXCEPTIONS = (
 async def _is_postgres_backend() -> bool:
     """Return True when AuthNZ is backed by PostgreSQL."""
     try:
-        pool = await get_db_pool()
+        pool = await _database.get_db_pool()
     except _ADMIN_NONCRITICAL_EXCEPTIONS:
         logger.debug("Admin backend detection falling back to SQLite due to pool error")
         return False
@@ -186,7 +186,7 @@ async def _ensure_sqlite_authnz_ready_if_test_mode() -> None:
     """
     try:
         # Only act in obvious test contexts to avoid production overhead
-        is_test = is_test_mode() or os.getenv("PYTEST_CURRENT_TEST") is not None
+        is_test = _testing.is_test_mode() or os.getenv("PYTEST_CURRENT_TEST") is not None
         if not is_test:
             return
 

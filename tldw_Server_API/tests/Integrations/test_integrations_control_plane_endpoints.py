@@ -12,17 +12,17 @@ from tldw_Server_API.app.api.v1.endpoints import integrations_control_plane as i
 from tldw_Server_API.app.api.v1.endpoints.integrations_control_plane import (
     get_integrations_control_plane_service,
 )
-from tldw_Server_API.app.api.v1.endpoints.discord_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.discord_support import (
     _decrypt_discord_payload,
     _encrypt_discord_payload,
 )
-from tldw_Server_API.app.api.v1.endpoints.discord_support import _reset_discord_state_for_tests
-from tldw_Server_API.app.api.v1.endpoints.slack_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.discord_support import _reset_discord_state_for_tests
+from tldw_Server_API.app.api.v1.utils.chatops.slack_support import (
     _decrypt_slack_payload,
     _encrypt_slack_payload,
 )
-from tldw_Server_API.app.api.v1.endpoints.slack_support import _reset_slack_state_for_tests
-from tldw_Server_API.app.api.v1.endpoints.telegram_support import _reset_telegram_link_state_for_tests
+from tldw_Server_API.app.api.v1.utils.chatops.slack_support import _reset_slack_state_for_tests
+from tldw_Server_API.app.api.v1.utils.chatops.telegram_support import _reset_telegram_link_state_for_tests
 from tldw_Server_API.app.api.v1.schemas.integrations_control_plane_schemas import (
     IntegrationConnection,
     IntegrationOverviewResponse,
@@ -238,7 +238,7 @@ def test_personal_slack_connect_route_returns_auth_url(
             "expires_at": "2026-03-20T22:00:00+00:00",
         }
 
-    monkeypatch.setattr(integrations_module, "slack_oauth_start_impl", _fake_start)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.slack_oauth_admin.slack_oauth_start_impl", _fake_start)
 
     response = client.post("/api/v1/integrations/personal/slack/connect", headers=auth_headers)
 

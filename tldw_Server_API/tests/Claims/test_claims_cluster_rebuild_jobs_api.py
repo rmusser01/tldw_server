@@ -237,7 +237,7 @@ def test_claims_auth_precedes_manager_and_reference_lookup(manager, monkeypatch,
 
 
 def test_platform_explicit_self_uses_owned_link_without_jobs_admin_guard(manager, monkeypatch):
-    monkeypatch.setattr(claims, "authorize_jobs_admin_domain_read", forbidden, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.jobs_admin_deps.authorize_jobs_admin_domain_read", forbidden, raising=False)
     with TestClient(build_app(principal(permissions=["system.configure"]))) as client:
         response = client.post(PATH, params={"method": "exact", "user_id": 1})
     assert response.status_code == 202, response.text

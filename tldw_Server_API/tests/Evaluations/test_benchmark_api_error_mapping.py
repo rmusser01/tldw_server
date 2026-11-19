@@ -30,7 +30,7 @@ async def test_list_benchmarks_sanitizes_generic_failure(monkeypatch):
             raise RuntimeError("benchmark registry exploded at /private/benchmarks.db")
 
     monkeypatch.setattr(benchmark_module, "logger", logger_stub)
-    monkeypatch.setattr(benchmark_module, "get_registry", lambda: _BrokenRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_registry.get_registry", lambda: _BrokenRegistry())
 
     with pytest.raises(HTTPException) as exc_info:
         await benchmark_module.list_benchmarks()
@@ -52,7 +52,7 @@ async def test_get_benchmark_info_sanitizes_generic_failure(monkeypatch):
             raise RuntimeError("benchmark registry exploded at /private/benchmarks.db")
 
     monkeypatch.setattr(benchmark_module, "logger", logger_stub)
-    monkeypatch.setattr(benchmark_module, "get_registry", lambda: _BrokenRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_registry.get_registry", lambda: _BrokenRegistry())
 
     with pytest.raises(HTTPException) as exc_info:
         await benchmark_module.get_benchmark_info("demo-benchmark")
@@ -74,8 +74,8 @@ async def test_get_benchmark_samples_sanitizes_generic_failure(monkeypatch):
         raise RuntimeError("benchmark dataset exploded at /private/benchmarks.json")
 
     monkeypatch.setattr(benchmark_module, "logger", logger_stub)
-    monkeypatch.setattr(benchmark_module, "get_registry", lambda: _Registry())
-    monkeypatch.setattr(benchmark_module, "load_benchmark_dataset", _raise_dataset_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_registry.get_registry", lambda: _Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_loaders.load_benchmark_dataset", _raise_dataset_error)
 
     with pytest.raises(HTTPException) as exc_info:
         await benchmark_module.get_benchmark_samples("demo-benchmark", limit=5)
@@ -106,17 +106,16 @@ async def test_run_benchmark_sanitizes_generic_failure(monkeypatch):
 
             return _Evaluator()
 
-    monkeypatch.setattr(benchmark_module, "get_registry", lambda: _Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_registry.get_registry", lambda: _Registry())
     monkeypatch.setattr(
-        benchmark_module,
-        "load_benchmark_dataset",
+        "tldw_Server_API.app.core.Evaluations.benchmark_loaders.load_benchmark_dataset",
         lambda *args, **kwargs: [{"question": "What is 2+2?", "category": "math"}],
     )
     manager = SimpleNamespace(
         evaluate_custom_metric=AsyncMock(return_value={"score": 1.0, "explanation": "ok"}),
         store_evaluation=AsyncMock(side_effect=RuntimeError("benchmark storage exploded at /private/evals.db")),
     )
-    monkeypatch.setattr(benchmark_module, "EvaluationManager", lambda **_kwargs: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.evaluation_manager.EvaluationManager", lambda **_kwargs: manager)
     monkeypatch.setattr(benchmark_module, "logger", logger_stub)
 
     request = benchmark_module.BenchmarkRunRequest(
@@ -159,16 +158,15 @@ async def test_run_benchmark_sanitizes_item_evaluation_failure_log(monkeypatch):
 
             return _Evaluator()
 
-    monkeypatch.setattr(benchmark_module, "get_registry", lambda: _Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_registry.get_registry", lambda: _Registry())
     monkeypatch.setattr(
-        benchmark_module,
-        "load_benchmark_dataset",
+        "tldw_Server_API.app.core.Evaluations.benchmark_loaders.load_benchmark_dataset",
         lambda *args, **kwargs: [{"question": "What is 2+2?", "category": "math"}],
     )
     manager = SimpleNamespace(
         evaluate_custom_metric=AsyncMock(side_effect=RuntimeError("benchmark item exploded at /private/evals.db")),
     )
-    monkeypatch.setattr(benchmark_module, "EvaluationManager", lambda **_kwargs: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.evaluation_manager.EvaluationManager", lambda **_kwargs: manager)
     monkeypatch.setattr(benchmark_module, "logger", logger_stub)
 
     request = benchmark_module.BenchmarkRunRequest(
@@ -222,14 +220,13 @@ async def test_run_benchmark_counts_an_unscored_item_apart(monkeypatch):
             )
 
     store = AsyncMock(return_value="eval-1")
-    monkeypatch.setattr(benchmark_module, "get_registry", lambda: _Registry())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.benchmark_registry.get_registry", lambda: _Registry())
     monkeypatch.setattr(
-        benchmark_module,
-        "load_benchmark_dataset",
+        "tldw_Server_API.app.core.Evaluations.benchmark_loaders.load_benchmark_dataset",
         lambda *args, **kwargs: [{"question": question, "category": "math"} for question in replies],
     )
     manager = SimpleNamespace(evaluate_custom_metric=_evaluate, store_evaluation=store)
-    monkeypatch.setattr(benchmark_module, "EvaluationManager", lambda **_kwargs: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.evaluation_manager.EvaluationManager", lambda **_kwargs: manager)
 
     request = benchmark_module.BenchmarkRunRequest(limit=3, api_name="openai", parallel=3, save_results=True)
     response = await benchmark_module.run_benchmark(

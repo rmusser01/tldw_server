@@ -12,8 +12,8 @@ from typing import Any, Awaitable, Callable
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 
-from ._chatops import oauth_admin as _shared
-from ._chatops.oauth_admin import ChatOpsOAuthProvider
+from tldw_Server_API.app.api.v1.utils.chatops import oauth_admin as _shared
+from tldw_Server_API.app.api.v1.utils.chatops.oauth_admin import ChatOpsOAuthProvider
 
 SLACK = ChatOpsOAuthProvider(
     name="slack",

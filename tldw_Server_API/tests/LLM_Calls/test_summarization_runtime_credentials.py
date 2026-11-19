@@ -287,3 +287,29 @@ async def test_summary_rejects_invalid_runtime_handle_before_adapter_dispatch(
     assert exc_info.value.provider == "local-llm"
     assert "forged-key" not in repr(exc_info.value)
     assert "custom-snapshot-key" not in repr(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("api_name", "api_key", "uses_handle"),
+    [("openai", None, True), ("anthropic", None, False), ("openai", "sk-raw", False)],
+    ids=["bound-provider", "another-provider", "own-api-key"],
+)
+def test_analyze_runs_on_the_bound_handle_for_its_provider_without_a_key_of_its_own(
+    monkeypatch: pytest.MonkeyPatch, api_name: str, api_key: str | None, uses_handle: bool
+) -> None:
+    """A request or job bound to the user's own key runs each analysis for that provider on it (TASK-15426)."""
+    import contextvars
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Usage.llm_call_context import bind_provider_credentials
+
+    handle = SimpleNamespace(provider="openai")
+    seen: list[object] = []
+    monkeypatch.setattr(sgl, "_summarize_via_adapter", lambda **kwargs: seen.append(kwargs["provider_credentials"]) or "ok")
+
+    def _bound() -> object:
+        bind_provider_credentials(handle)
+        return sgl.analyze(api_name, "Cedar opens in January.", None, api_key, input_is_literal_text=True)
+
+    assert contextvars.copy_context().run(_bound) == "ok"
+    assert seen == [handle if uses_handle else None]

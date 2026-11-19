@@ -26,8 +26,6 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     AuthPrincipal,
     TokenScopeGuard,
     User,
-    consume_deferred_token_quota,
-    enforce_rbac_rate_limit,
     get_auth_principal,
     get_request_user,
     rbac_rate_limit,
@@ -38,13 +36,11 @@ from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas import prompt_schemas as schemas
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Chat.chat_exceptions import set_request_id
 from tldw_Server_API.app.core.config import settings
@@ -74,19 +70,13 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
 from tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch import (
     PromptImprovementDispatchError,
     PromptImprovementDispatchResult,
-    dispatch_prompt_improvement,
 )
 
 #
 # Local Imports
-from tldw_Server_API.app.core.Prompt_Management.Prompts_Interop import (
-    db_export_prompt_keywords_to_csv,
-    db_export_prompts_formatted,  # Using the standalone function from interop
-)
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
     PromptDefinition,
     StructuredPromptAssemblyError,
-    assemble_prompt_definition,
     convert_legacy_prompt_to_definition,
     extract_legacy_prompt_variables,
 )
@@ -100,10 +90,16 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts.single_text_r
     render_single_text_recipe_template,
 )
 from tldw_Server_API.app.core.testing import env_flag_enabled
-from tldw_Server_API.app.core.Usage.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 from .llm_providers import get_configured_providers
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
+import tldw_Server_API.app.core.AuthNZ.database as _database
+import tldw_Server_API.app.core.AuthNZ.settings as _settings
+import tldw_Server_API.app.core.Prompt_Management.Prompts_Interop as _Prompts_Interop
+import tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch as _prompt_improvement_dispatch
+import tldw_Server_API.app.core.Prompt_Management.structured_prompts as _structured_prompts
+import tldw_Server_API.app.core.Usage.llm_budget_guard as _llm_budget_guard
 
 #from tldw_Server_API.app.core.DB_Management.DB_Manager import DBManager
 #
@@ -374,7 +370,7 @@ def _generate_unique_prompt_name(base_name: str, used_names: set, name_counts: d
 def _is_single_user_auth_mode() -> bool:
     # Legacy APP_MODE defaults must not override canonical authentication or
     # authorize a single-user identity when canonical settings fail to load.
-    return get_auth_settings().AUTH_MODE == "single_user"
+    return _settings.get_settings().AUTH_MODE == "single_user"
 
 
 def _get_single_user_api_key() -> Optional[str]:
@@ -382,7 +378,7 @@ def _get_single_user_api_key() -> Optional[str]:
         key = settings.get("SINGLE_USER_API_KEY")
         return key if key else None
     try:
-        key = getattr(get_auth_settings(), "SINGLE_USER_API_KEY", None)
+        key = getattr(_settings.get_settings(), "SINGLE_USER_API_KEY", None)
     except _PROMPTS_LOOKUP_EXCEPTIONS:
         key = None
     if key:
@@ -412,7 +408,7 @@ async def _resolve_prompts_auth_user(
     if not raw_token:
         if request is not None:
             try:
-                return await get_request_user(
+                return await _auth_deps.get_request_user(
                     request,
                     api_key=None,
                     token=None,
@@ -443,7 +439,7 @@ async def _resolve_prompts_auth_user(
         # Preserve claim-first authorization semantics in downstream checks by
         # returning a synthetic admin-style User rather than branching on mode.
         try:
-            user_id = int(getattr(get_auth_settings(), "SINGLE_USER_FIXED_ID", 1))
+            user_id = int(getattr(_settings.get_settings(), "SINGLE_USER_FIXED_ID", 1))
         except _PROMPTS_LOOKUP_EXCEPTIONS:
             user_id = 1
         return User(
@@ -483,7 +479,7 @@ async def _resolve_prompts_auth_user(
         api_key = x_api_key.strip()
 
     try:
-        user = await get_request_user(
+        user = await _auth_deps.get_request_user(
             request,
             api_key=api_key,
             token=bearer_token,
@@ -733,10 +729,10 @@ async def _run_prompt_improvement_post_validation_gates(
 ) -> None:
     """Debit and enforce operation gates after bounded domain validation."""
 
-    db_pool = await get_db_pool()
-    await consume_deferred_token_quota(request, db_pool=db_pool)
-    await enforce_rbac_rate_limit(request, "prompts.improve", db_pool)
-    await enforce_llm_budget(request)
+    db_pool = await _database.get_db_pool()
+    await _auth_deps.consume_deferred_token_quota(request, db_pool=db_pool)
+    await _auth_deps.enforce_rbac_rate_limit(request, "prompts.improve", db_pool)
+    await _llm_budget_guard.enforce_llm_budget(request)
     await _PROMPT_IMPROVEMENT_BILLING_CHECK(
         response=response,
         principal=principal,
@@ -849,7 +845,7 @@ async def improve_prompt_endpoint(
         nonlocal dispatch_result
         if dispatch_result is not None:
             raise PromptImprovementDispatchError("internal_error")
-        dispatch_result = await dispatch_prompt_improvement(
+        dispatch_result = await _prompt_improvement_dispatch.dispatch_prompt_improvement(
             request=request,
             current_user=current_user,
             routing_decision_store=routing_decision_store,
@@ -1146,7 +1142,7 @@ async def export_prompts_api(
     try:
         # Use the standalone function from prompts_interop (or Prompts_DB_v2)
         # It needs the db_instance.
-        status_msg, file_path_or_content = db_export_prompts_formatted(
+        status_msg, file_path_or_content = _Prompts_Interop.db_export_prompts_formatted(
             db_instance=db, # Pass the user-specific DB instance
             export_format=export_format,
             filter_keywords=filter_keywords,
@@ -1195,7 +1191,7 @@ async def export_keywords_api(
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
-        status_msg, file_path = db_export_prompt_keywords_to_csv(db_instance=db)
+        status_msg, file_path = _Prompts_Interop.db_export_prompt_keywords_to_csv(db_instance=db)
         if file_path == "None" or not os.path.exists(file_path):
             if "Successfully exported 0 active prompt keywords" in status_msg or "No active keywords found" in status_msg : # Adjusted condition for empty export
                  return schemas.ExportResponse(message=status_msg, file_content_b64=None)
@@ -1440,7 +1436,7 @@ async def preview_prompt_api(
             system_prompt=payload.system_prompt,
             user_prompt=payload.user_prompt,
         )
-        assembly = assemble_prompt_definition(definition, payload.variables)
+        assembly = _structured_prompts.assemble_prompt_definition(definition, payload.variables)
     except InputError as e:
         raise map_db_error_to_http(e) from e
     except ValidationError as e:

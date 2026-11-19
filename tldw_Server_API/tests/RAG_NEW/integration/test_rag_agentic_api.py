@@ -212,7 +212,7 @@ def _recording_pipeline(monkeypatch) -> list[dict]:
         calls.append(kwargs)
         return up.UnifiedSearchResult(documents=[], query=kwargs.get("query", ""), errors=[])
 
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_pipeline)
     return calls
 
 
@@ -272,7 +272,7 @@ def _over_the_limit_with_own_keys(monkeypatch, own: set[str]) -> tuple[list[str]
         return up.UnifiedSearchResult(documents=[], query=kwargs.get("query", ""), errors=[])
 
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_pipeline)
     refuse_llm_work(monkeypatch)
     return asked, marked
 
@@ -394,6 +394,78 @@ def test_every_rag_request_switch_says_whether_it_makes_another_llm_call():
     assert switches - listed - _NO_OTHER_LLM_CALL == set(), "add each to _RAG_OTHER_LLM_STAGES or _NO_OTHER_LLM_CALL"
     assert listed & _NO_OTHER_LLM_CALL == set()
     assert (listed | _NO_OTHER_LLM_CALL) - switches == set()
+
+
+# The stages /search/stream runs: the retrieval step's, and claims in the streamer. The rest of
+# rag_unified._RAG_OTHER_LLM_STAGES run only after the answer, which the stream's retrieval step does not make (TASK-15488).
+_STREAM_RUNS_LLM_STAGES = frozenset({
+    "enable_query_classification", "enable_research_loop", "enable_document_grading", "enable_claims",
+    "enable_evidence_accumulation", "enable_evidence_chains",
+})
+
+
+def test_every_other_llm_stage_says_whether_the_stream_runs_it():
+    """A new _RAG_OTHER_LLM_STAGES entry must be classified as run or not run by /search/stream (TASK-15488)."""
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    listed = set(rag_ep._RAG_OTHER_LLM_STAGES)
+    skipped = set(rag_ep._RAG_STREAM_SKIPPED_LLM_STAGES)
+    assert listed - skipped - _STREAM_RUNS_LLM_STAGES == set(), "classify each as run or skipped by the stream"
+    assert skipped & _STREAM_RUNS_LLM_STAGES == set()
+    assert (skipped | _STREAM_RUNS_LLM_STAGES) - listed == set()
+
+
+_POST_ANSWER_STAGES = {"enable_suggestions": True, "enable_post_verification": True,
+                       "enable_faithfulness_eval": True, "enable_utility_grading": True,
+                       "enable_fast_hallucination_check": True, "enable_multi_turn_synthesis": True}
+
+
+def _stream_without_pipeline(monkeypatch):
+    """Stop the stream's generation at its executor, so a request past the quota check ends at once."""
+    import tldw_Server_API.app.core.RAG.rag_service.streaming_executor as streaming_executor
+
+    async def _no_events(*args, **kwargs):  # noqa: ARG001
+        return
+        yield
+
+    monkeypatch.setattr(streaming_executor, "_stream_generation_events", _no_events)
+
+
+def test_rag_stream_admits_an_own_key_answer_with_only_post_answer_stages(client_with_agentic_overrides, monkeypatch):
+    """The stream runs no post-answer stage, so an over-limit own-key user streams; /search refuses the same body."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+
+    asked, _marked = _over_the_limit_with_own_keys(monkeypatch, {"openai"})
+    _stream_without_pipeline(monkeypatch)
+    body = {"query": "q", "enable_generation": True, "generation_provider": "openai", **_POST_ANSWER_STAGES}
+    resp = client_with_agentic_overrides.post("/api/v1/rag/search/stream", json=body)
+    assert resp.status_code == 200, resp.text
+    assert asked == ["openai"]
+    assert_llm_quota_402(client_with_agentic_overrides.post("/api/v1/rag/search", json=body))
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{"enable_query_classification": True}, {"enable_document_grading": True}, {"enable_claims": True},
+     {"enable_evidence_chains": True}, {"enable_evidence_accumulation": True}],
+    ids=["classification", "grading", "claims", "evidence-chains", "evidence-accumulation"],
+)
+def test_rag_stream_still_refuses_an_own_key_answer_with_a_stage_the_stream_runs(
+    client_with_agentic_overrides, monkeypatch, extra
+):
+    """A stage the stream does run keeps the 402 (TASK-15488).
+
+    enable_research_loop cannot be a body case here: the schema returns 422 without enable_query_classification.
+    """
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+
+    _over_the_limit_with_own_keys(monkeypatch, {"openai"})
+    _stream_without_pipeline(monkeypatch)
+    resp = client_with_agentic_overrides.post(
+        "/api/v1/rag/search/stream",
+        json={"query": "q", "enable_generation": True, "generation_provider": "openai", **extra},
+    )
+    assert_llm_quota_402(resp)
 
 @pytest.mark.parametrize(
     ("default_on", "admitted"),
@@ -545,7 +617,7 @@ def test_rag_agentic_search_uses_shared_request_resolution_and_retrieval_plan(
         )
 
     monkeypatch.setattr(rag_ep, "build_agentic_execution_context", fake_build_agentic_execution_context)
-    monkeypatch.setattr(rag_ep, "agentic_rag_pipeline", fake_agentic_rag_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", fake_agentic_rag_pipeline)
 
     payload = {
         "query": "shared contract parity",

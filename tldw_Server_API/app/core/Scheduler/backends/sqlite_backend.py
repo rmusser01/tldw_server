@@ -924,19 +924,12 @@ class SQLiteBackend(QueueBackend):
         """Renew leadership by updating acquired_at if leader matches."""
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         async with self._lock:
-            cursor = await self._connection.execute(
-                "SELECT leader_id FROM service_leaders WHERE service_name = ?",
-                (resource,)
-            )
-            row = await cursor.fetchone()
-            if not row or row[0] != leader_id:
-                return False
-            await self._connection.execute(
-                "UPDATE service_leaders SET acquired_at = ? WHERE service_name = ?",
-                (now.isoformat(), resource)
+            affected = await self._connection.execute(
+                "UPDATE service_leaders SET acquired_at = ? WHERE service_name = ? AND leader_id = ?",
+                (now.isoformat(), resource, leader_id),
             )
             await self._connection.commit()
-            return True
+            return affected.rowcount > 0
 
     async def release_leader(self, resource: str, leader_id: str) -> bool:
         """Release leadership if currently held by leader_id."""

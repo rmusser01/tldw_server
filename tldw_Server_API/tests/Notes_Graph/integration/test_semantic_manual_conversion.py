@@ -365,8 +365,7 @@ def test_preflight_failure_without_live_manual_link_remains_fail_closed(
         lambda **_kwargs: projector,
     )
     monkeypatch.setattr(
-        endpoint,
-        "resolve_notes_link_coordinator",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.resolve_notes_link_coordinator",
         lambda **_kwargs: _PreflightCoordinator(),
     )
 

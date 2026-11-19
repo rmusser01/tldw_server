@@ -1,6 +1,6 @@
 import pytest
 
-from tldw_Server_API.app.api.v1.endpoints.llm_providers import get_model_metadata
+from tldw_Server_API.app.core.LLM_Calls.model_metadata import get_model_metadata
 from tldw_Server_API.app.core.LLM_Calls.routing.metadata import (
     ROUTING_MODEL_RANKS,
     merge_routing_metadata,

@@ -56,7 +56,7 @@ def test_get_topic_monitoring_db_uses_fallback_root_when_get_project_root_import
             raise ImportError("import boom")
         return original_import(name, globals, locals, fromlist, level)
 
-    monkeypatch.setattr(monitoring_ep, "TopicMonitoringDB", _StubDB)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.TopicMonitoring_DB.TopicMonitoringDB", _StubDB)
     monkeypatch.setattr(builtins, "__import__", _fake_import)
     monkeypatch.setenv("MONITORING_ALERTS_DB", "relative/alerts.db")
     monkeypatch.setattr(monitoring_ep, "_find_project_root", lambda _start: tmp_path)

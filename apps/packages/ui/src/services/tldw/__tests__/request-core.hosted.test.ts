@@ -49,6 +49,22 @@ describe("tldwRequest hosted mode", () => {
     expect((init.headers as Record<string, string>)["X-TLDW-Org-Id"]).toBe("17")
   })
 
+  it("accepts a 204 chat DELETE even if Fetch exposes an empty stream", async () => {
+    const response = new Response(null, { status: 204 })
+    Object.defineProperty(response, "body", { value: new ReadableStream() })
+    const fetchMock = vi.fn().mockResolvedValue(response)
+    const { tldwRequest } = await import("@/services/tldw/request-core")
+
+    await expect(tldwRequest(
+      {
+        path: "/api/v1/chats/owned?scope_type=global&expected_version=3",
+        method: "DELETE"
+      },
+      { getConfig: async () => ({ authMode: "multi-user" }), fetchFn: fetchMock }
+    )).resolves.toMatchObject({ ok: true, status: 204 })
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
   it("ignores a stale cookie marker in hosted mode", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: 1 }), {

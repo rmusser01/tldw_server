@@ -25,8 +25,8 @@ def test_character_telemetry_keeps_legacy_label_shape(monkeypatch):
     def _record_histogram(metric_name: str, value: float, labels: dict[str, str] | None = None):  # noqa: ARG001
         recorded.append(dict(labels or {}))
 
-    monkeypatch.setattr(chat_endpoint_module, "log_histogram", _record_histogram)
-    monkeypatch.setattr(chat_endpoint_module, "log_counter", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_logger.log_histogram", _record_histogram)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_logger.log_counter", lambda *args, **kwargs: None)
 
     chat_endpoint_module._record_persona_telemetry_hooks(
         telemetry={"ioo": 0.1, "ior": 0.2, "lcs": 0.05, "safety_flags": []},
@@ -49,8 +49,8 @@ def test_character_telemetry_keeps_legacy_label_shape(monkeypatch):
 
 
 def test_character_sustained_ioo_reader_matches_writer_key(monkeypatch):
-    monkeypatch.setattr(chat_endpoint_module, "log_histogram", lambda *args, **kwargs: None)
-    monkeypatch.setattr(chat_endpoint_module, "log_counter", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_logger.log_histogram", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_logger.log_counter", lambda *args, **kwargs: None)
 
     for _ in range(chat_endpoint_module._PERSONA_IOO_SUSTAIN_WINDOW):
         chat_endpoint_module._record_persona_telemetry_hooks(
@@ -73,8 +73,8 @@ def test_persona_telemetry_sanitizes_assistant_id_and_caps_alert_windows(monkeyp
     def _record_histogram(metric_name: str, value: float, labels: dict[str, str] | None = None):  # noqa: ARG001
         recorded.append(dict(labels or {}))
 
-    monkeypatch.setattr(chat_endpoint_module, "log_histogram", _record_histogram)
-    monkeypatch.setattr(chat_endpoint_module, "log_counter", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_logger.log_histogram", _record_histogram)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_logger.log_counter", lambda *args, **kwargs: None)
     monkeypatch.setattr(chat_endpoint_module, "_PERSONA_IOO_WINDOW_MAX_KEYS", 2)
 
     for assistant_id in (

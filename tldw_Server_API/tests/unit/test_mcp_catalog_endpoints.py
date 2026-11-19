@@ -36,7 +36,7 @@ def _load_real_catalog():
 
 def _allow_catalog_probe_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """Bypass DNS-backed URL safety checks in tests covering probe behavior."""
-    monkeypatch.setattr(mcp_endpoint, "assert_url_safe", lambda _url: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Security.url_validation.assert_url_safe", lambda _url: None)
 
 
 # -- list_mcp_catalog --------------------------------------------------------
@@ -201,7 +201,7 @@ async def test_connection_uses_central_url_safety_guard(monkeypatch: pytest.Monk
         raise AssertionError("_probe_mcp_connection should not run when the safety guard blocks")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint.assert_url_safe",
+        "tldw_Server_API.app.core.Security.url_validation.assert_url_safe",
         _fake_assert_url_safe,
     )
     monkeypatch.setattr(

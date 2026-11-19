@@ -15,10 +15,8 @@ from loguru import logger
 
 import tldw_Server_API.app.core.LLM_Calls.adapter_registry as llm_adapter_registry
 from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
-from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.config_llm_providers import (
     ALL_SUPPORTED_PROVIDER_NAMES_LIST,
-    get_api_keys,
 )
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_config_option_names,
@@ -33,14 +31,13 @@ from tldw_Server_API.app.core.exceptions import (
 )
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import fetch as _http_fetch
-from tldw_Server_API.app.core.Image_Generation.listing import list_image_models_for_catalog
-from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import get_allowed_fields
 from tldw_Server_API.app.core.LLM_Calls.extra_body_compat_catalog import (
     get_model_extra_body_compat,
     get_provider_extra_body_compat,
 )
 from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import resolve_llamacpp_runtime_caps
+from tldw_Server_API.app.core.LLM_Calls.model_metadata import get_model_metadata
 from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
     discover_openrouter_models as _discover_openrouter_models_shared,
 )
@@ -57,26 +54,14 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     provider_requires_api_key,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
-    discover_provider_models,
     has_model_listing,
     inventory_endpoint_scope,
-    resolve_provider_models_base_url,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
     ModelDiscoveryResult,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
-    configured_endpoint_probe_enabled as _configured_endpoint_probe_enabled,
-)
-from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
     normalize_catalog_provider_for_chat as _normalize_catalog_provider_for_chat,
-)
-from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
-    provider_readiness as _provider_readiness,
-)
-from tldw_Server_API.app.core.LLM_Calls.routing.metadata import merge_routing_metadata
-from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
-    resolve_tokenizer_metadata,
 )
 from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     strict_token_counting_enabled as _strict_token_counting_enabled_shared,
@@ -89,19 +74,24 @@ from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import LLMInfer
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     ServerFallbackCredentials,
-    resolve_static_server_fallback,
 )
 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     ProviderOverrideCallSnapshot,
-    apply_llm_provider_overrides_to_listing,
-    get_llm_provider_overrides_snapshot,
 )
 from tldw_Server_API.app.core.Security.egress import (
     ConfiguredEndpointScope,
     URLPolicyResult,
-    evaluate_url_policy,
 )
-from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
+import tldw_Server_API.app.core.Image_Generation.listing as _listing
+import tldw_Server_API.app.core.LLM_Calls.provider_model_inventory as _provider_model_inventory
+import tldw_Server_API.app.core.LLM_Calls.provider_readiness as __provider_readiness
+import tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver as _tokenizer_resolver
+import tldw_Server_API.app.core.Provider_Credentials.byok_runtime as _byok_runtime
+import tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides as _llm_provider_overrides
+import tldw_Server_API.app.core.Usage.pricing_catalog as _pricing_catalog
+import tldw_Server_API.app.core.Utils.egress as _egress
+import tldw_Server_API.app.core.config as _config
+import tldw_Server_API.app.core.config_llm_providers as _config_llm_providers
 
 #######################################################################################################################
 #
@@ -134,830 +124,6 @@ _LLAMACPP_METADATA_EXCEPTIONS = _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS + (
     LLMInferenceLibError,
 )
 
-# ----------------------------------------------------------------------------------
-# Model metadata registry
-# ----------------------------------------------------------------------------------
-# Note: These are conservative, best-effort defaults to enrich the providers API.
-# They can be overridden later via config if needed.
-
-MODEL_METADATA: dict[str, dict[str, dict[str, Any]]] = {
-    "openai": {
-        "gpt-4o": {
-            "context_window": 128_000,
-            "max_output_tokens": 4096,
-            "capabilities": {
-                "vision": True,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": True,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image"], "output": ["text"]},
-            "notes": "Vision multimodal; tool use supported.",
-        },
-        "gpt-4o-mini": {
-            "context_window": 128_000,
-            "max_output_tokens": 4096,
-            "capabilities": {
-                "vision": True,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": True,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image"], "output": ["text"]},
-            "notes": "Smaller 4o variant with vision.",
-        },
-        "gpt-3.5-turbo": {
-            "context_window": 16_384,
-            "max_output_tokens": 4096,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": True,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["text"]},
-            "notes": "Legacy model; function calling supported.",
-        },
-    },
-    "anthropic": {
-        "claude-sonnet-4-5": {
-            "context_window": 200_000,
-            "max_output_tokens": 64_000,
-            "capabilities": {
-                "vision": True,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False
-            },
-            "modalities": {"input": ["text", "image", "file"], "output": ["text"]},
-            "notes": "Claude Sonnet 4.5; fast near-frontier model with tools and vision.",
-            "source_url": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
-            "last_verified": None
-        },
-        "claude-haiku-4-5": {
-            "context_window": 200_000,
-            "max_output_tokens": 64_000,
-            "capabilities": {
-                "vision": True,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False
-            },
-            "modalities": {"input": ["text", "image", "file"], "output": ["text"]},
-            "notes": "Claude Haiku 4.5; fastest model with near-frontier intelligence.",
-            "source_url": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
-            "last_verified": None
-        },
-        "claude-opus-4-1": {
-            "context_window": 200_000,
-            "max_output_tokens": 32_000,
-            "capabilities": {
-                "vision": True,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False
-            },
-            "modalities": {"input": ["text", "image", "file"], "output": ["text"]},
-            "notes": "Claude Opus 4.1 with tools and vision.",
-            "source_url": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
-            "last_verified": None
-        },
-        "claude-sonnet-4": {
-            "context_window": 200_000,
-            "max_output_tokens": 8192,
-            "capabilities": {
-                "vision": True,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False
-            },
-            "modalities": {"input": ["text", "image", "file"], "output": ["text"]},
-            "notes": "Claude Sonnet 4 with tools and vision.",
-            "source_url": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
-            "last_verified": None
-        }
-    },
-    "google": {
-        "gemini-3-pro-preview": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": True,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image", "audio", "video", "file"], "output": ["text"]},
-            "notes": "Gemini 3 Pro Preview (Gemini API).",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-3-flash-preview": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": True,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image", "audio", "video", "file"], "output": ["text"]},
-            "notes": "Gemini 3 Flash Preview (Gemini API).",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-3-pro-image-preview": {
-            "type": "image",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image"], "output": ["image"]},
-            "notes": "Gemini 3 Pro Image Preview (image generation).",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-2.5-pro": {
-            "context_window": 1_048_576,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": True,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image", "audio", "video", "file"], "output": ["text"]},
-            "notes": "Gemini 2.5 Pro on Vertex AI; 1,048,576 max input tokens per docs.",
-            "source_url": "https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-pro",
-            "last_verified": None,
-        },
-        "gemini-2.5-flash": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": True,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image", "audio", "video", "file"], "output": ["text"]},
-            "notes": "Gemini 2.5 Flash (Gemini API).",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-2.5-flash-lite": {
-            "context_window": 1_048_576,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": True,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image", "audio", "video", "file"], "output": ["text"]},
-            "notes": "Gemini 2.5 Flash Lite on Vertex AI; large context window per docs.",
-            "source_url": "https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash-lite",
-            "last_verified": None,
-        },
-        "gemini-2.5-flash-lite-preview-09-2025": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": True,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image", "audio", "video", "file"], "output": ["text"]},
-            "notes": "Gemini 2.5 Flash-Lite Preview (09-2025).",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-2.5-flash-native-audio-preview-12-2025": {
-            "type": "audio",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": True,
-                "audio_output": True,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "audio", "video"], "output": ["audio", "text"]},
-            "notes": "Gemini 2.5 Flash Native Audio (Live API).",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-2.5-flash-image": {
-            "type": "image",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image"], "output": ["image"]},
-            "notes": "Gemini 2.5 Flash Image (image generation).",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-2.5-flash-preview-tts": {
-            "type": "audio",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": True,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["audio"]},
-            "notes": "Gemini 2.5 Flash Preview TTS.",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-2.5-pro-preview-tts": {
-            "type": "audio",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": True,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["audio"]},
-            "notes": "Gemini 2.5 Pro Preview TTS.",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-2.5-computer-use-preview-10-2025": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": True,
-            },
-            "modalities": {"input": ["text", "image"], "output": ["text"]},
-            "notes": "Gemini 2.5 Computer Use Preview (Gemini API).",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-2.0-flash": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": True,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image", "audio"], "output": ["text"]},
-            "notes": "Gemini 2.0 Flash (Gemini API).",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-2.0-flash-lite": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": True,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image", "audio"], "output": ["text"]},
-            "notes": "Gemini 2.0 Flash-Lite (Gemini API).",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "imagen-4.0-generate-001": {
-            "type": "image",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["image"]},
-            "notes": "Imagen 4 (standard) image generation; priced per image.",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "imagen-4.0-ultra-generate-001": {
-            "type": "image",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["image"]},
-            "notes": "Imagen 4 Ultra image generation; priced per image.",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "imagen-4.0-fast-generate-001": {
-            "type": "image",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["image"]},
-            "notes": "Imagen 4 Fast image generation; priced per image.",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "veo-3.1-generate-preview": {
-            "type": "video",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image"], "output": ["video"]},
-            "notes": "Veo 3.1 preview video generation; priced per second.",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "veo-3.1-fast-generate-preview": {
-            "type": "video",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image"], "output": ["video"]},
-            "notes": "Veo 3.1 Fast preview video generation; priced per second.",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "veo-3.0-generate-001": {
-            "type": "video",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image"], "output": ["video"]},
-            "notes": "Veo 3 video generation; priced per second.",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "veo-3.0-fast-generate-001": {
-            "type": "video",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image"], "output": ["video"]},
-            "notes": "Veo 3 Fast video generation; priced per second.",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "veo-2.0-generate-001": {
-            "type": "video",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image"], "output": ["video"]},
-            "notes": "Veo 2 video generation; priced per second.",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-embedding-001": {
-            "type": "embedding",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "embedding": True,
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["embedding"]},
-            "notes": "Gemini Embedding model.",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-        "gemini-robotics-er-1.5-preview": {
-            "type": "other",
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": False,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image", "video"], "output": ["text"]},
-            "notes": "Gemini Robotics-ER 1.5 Preview; pricing follows token-based tiers.",
-            "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-            "last_verified": None,
-        },
-    },
-    "mistral": {
-        "mistral-large-2411": {
-            "context_window": 131_072,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["text"]},
-            "notes": "Mistral Large 2411; ~131k context window.",
-            "source_url": "https://docs.mistral.ai/getting-started/models/models_overview/",
-            "last_verified": None,
-        },
-        "mistral-medium-3.1": {
-            "context_window": 131_072,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["text"]},
-            "notes": "Mistral Medium 3.1; text-only.",
-            "source_url": "https://docs.mistral.ai/getting-started/models/models_overview/",
-            "last_verified": None,
-        },
-        "mistral-small-3.2-24b-instruct": {
-            "context_window": 128_000,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image"], "output": ["text"]},
-            "notes": "Mistral Small 3.2 Instruct with image understanding.",
-            "source_url": "https://docs.mistral.ai/getting-started/models/models_overview/",
-            "last_verified": None,
-        },
-        "pixtral-large-2411": {
-            "context_window": 131_072,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": True,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text", "image"], "output": ["text"]},
-            "notes": "Pixtral Large 2411 vision model.",
-            "source_url": "https://docs.mistral.ai/getting-started/models/models_overview/",
-            "last_verified": None,
-        },
-        "mistral-large-latest": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["text"]},
-            "notes": "Tool use supported.",
-        },
-        "mistral-medium-latest": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["text"]},
-            "notes": None,
-        },
-        "mistral-small-latest": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["text"]},
-            "notes": None,
-        },
-    },
-    "groq": {
-        "llama-3.3-70b-versatile": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": True,
-                "json_mode": False,
-                "function_calling": True,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["text"]},
-            "notes": "Groq-hosted Llama; fast inference.",
-        },
-    },
-    "ollama": {
-        "llama3.2": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["text"]},
-            "notes": "Defaults vary by local model build.",
-        },
-        "mistral": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["text"]},
-            "notes": None,
-        },
-        "codellama": {
-            "context_window": None,
-            "max_output_tokens": None,
-            "capabilities": {
-                "vision": False,
-                "audio_input": False,
-                "audio_output": False,
-                "tool_use": False,
-                "json_mode": False,
-                "function_calling": False,
-                "streaming": True,
-                "thinking": False,
-            },
-            "modalities": {"input": ["text"], "output": ["text"]},
-            "notes": "Code-focused local model.",
-        },
-    },
-}
-
-def _default_model_metadata(provider: str, model: str) -> dict[str, Any]:
-    """Return a conservative default metadata object for unknown models."""
-    return {
-        "name": model,
-        "context_window": None,
-        "max_output_tokens": 4096,
-        "capabilities": {
-            "vision": False,
-            "audio_input": False,
-            "audio_output": False,
-            "tool_use": False,
-            "json_mode": False,
-            "function_calling": False,
-            "streaming": provider in {
-                "openai",
-                "anthropic",
-                "google",
-                "mistral",
-                "groq",
-                "openrouter",
-                "novita",
-                "poe",
-                "together",
-            },
-            "thinking": False,
-        },
-        "modalities": {"input": ["text"], "output": ["text"]},
-        "tool_support": False,
-        "vision_support": False,
-        "json_mode_support": False,
-        "reasoning_support": False,
-        "quality_rank": None,
-        "latency_rank": None,
-        "notes": None,
-    }
-
-
-def get_model_metadata(provider: str, model: str) -> dict[str, Any]:
-    """Get metadata for a given provider/model with safe fallbacks."""
-    provider = (provider or "").lower()
-    model = model or ""
-    # The table is keyed by API IDs; a saved dotted Anthropic name (claude-sonnet-4.5) finds its dashed entry.
-    lookup = canonical_anthropic_model_id(model) if provider == "anthropic" else model
-    md = MODEL_METADATA.get(provider, {}).get(lookup)
-    base = _default_model_metadata(provider, model)
-    if md is None:
-        return merge_routing_metadata(base, provider=provider, model=model)
-    # Merge on top of defaults to ensure stable schema
-    merged = {**base, **{k: v for k, v in md.items() if k != "name"}}
-    merged["name"] = model
-    return merge_routing_metadata(merged, provider=provider, model=model)
 
 @router.get("/llm/health", summary="LLM inference health", response_model=dict[str, Any])
 async def llm_health():
@@ -1409,7 +575,7 @@ def _resolve_model_tokenizer_support(
             strict_mode_effective=strict_mode_effective,
         )
     try:
-        return resolve_tokenizer_metadata(
+        return _tokenizer_resolver.resolve_tokenizer_metadata(
             provider_name,
             model_name,
             strict_mode_effective=strict_mode_effective,
@@ -1591,7 +757,7 @@ def _resolve_commercial_listing(
             return None, False, ModelDiscoveryResult("auth_failed")
         return api_key_value, bool(api_key_value), ModelDiscoveryResult("auth_failed")
     try:
-        static = resolve_static_server_fallback(provider_name)
+        static = _byok_runtime.resolve_static_server_fallback(provider_name)
         fallback = ProviderOverrideCallSnapshot(provider_name, override).server_fallback(
             ServerFallbackCredentials(api_key=api_key_value, credential_fields={}, app_config=static.app_config)
         )
@@ -1606,14 +772,14 @@ def _resolve_commercial_listing(
     if not has_model_listing(provider_name):
         return api_key_value, True, None  # no listing: the configured models are shown, as before
     fallback_config = fallback.app_config if fallback is not None else static.app_config
-    base_url = resolve_provider_models_base_url(
+    base_url = _provider_model_inventory.resolve_provider_models_base_url(
         provider_name, dict(fallback_config) if fallback_config is not None else None, credentials_resolved=True,
     )
     if base_url is None:
         return api_key_value, True, ModelDiscoveryResult("unsupported")
     scope = inventory_endpoint_scope(provider_name, base_url)
     scope_option: dict[str, Any] = {"configured_endpoint": scope} if scope is not None else {}
-    return api_key_value, True, discover_provider_models(
+    return api_key_value, True, _provider_model_inventory.discover_provider_models(
         provider_name, api_key_value, base_url=base_url,
         force_refresh=refresh_openrouter and provider_name == "openrouter", **scope_option,
     )
@@ -1622,7 +788,7 @@ def _resolve_commercial_listing(
 def _with_pricing_models(provider_name: str, models: list[str]) -> list[str]:
     """Configured models, then the pricing catalog's chat models: dev's listing for a provider with no model list."""
     try:
-        pricing_models = [m for m in list_provider_models(provider_name) if 'embed' not in m.lower()]
+        pricing_models = [m for m in _pricing_catalog.list_provider_models(provider_name) if 'embed' not in m.lower()]
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
         pricing_models = []
     seen = {m.strip() for m in models}
@@ -1682,9 +848,9 @@ def get_configured_providers(
         Dictionary containing provider information
     """
     try:
-        config_parser = load_comprehensive_config()
+        config_parser = _config.load_comprehensive_config()
         try:
-            provider_overrides = get_llm_provider_overrides_snapshot()
+            provider_overrides = _llm_provider_overrides.get_llm_provider_overrides_snapshot()
             credential_store_available = True
         except ByokResolutionError:
             provider_overrides, credential_store_available = {}, False
@@ -1711,7 +877,7 @@ def get_configured_providers(
             }
 
         try:
-            api_keys_by_provider = get_api_keys()
+            api_keys_by_provider = _config_llm_providers.get_api_keys()
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             api_keys_by_provider = {}
 
@@ -1974,8 +1140,8 @@ def get_configured_providers(
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             health_report = {}
         registry_capability_envelopes = _llm_registry_capability_envelopes()
-        supported_chat_providers = set(ALL_SUPPORTED_PROVIDER_NAMES_LIST)
-        endpoint_probe_enabled = _configured_endpoint_probe_enabled()
+        supported_chat_providers = set(_config_llm_providers.ALL_SUPPORTED_PROVIDER_NAMES_LIST)
+        endpoint_probe_enabled = __provider_readiness.configured_endpoint_probe_enabled()
 
         commercial_listings = (
             _resolve_commercial_listings(
@@ -2067,7 +1233,7 @@ def get_configured_providers(
             if endpoint_url:
                 try:
                     endpoint_scope = ConfiguredEndpointScope.from_url(endpoint_url)
-                    endpoint_policy = evaluate_url_policy(
+                    endpoint_policy = _egress.evaluate_url_policy(
                         endpoint_url,
                         configured_endpoint=endpoint_scope,
                     )
@@ -2112,7 +1278,7 @@ def get_configured_providers(
                         [*models, *discovery_result.models]
                     )
 
-            provider_readiness = _provider_readiness(
+            provider_readiness = __provider_readiness.provider_readiness(
                 provider_name=provider_name,
                 provider_info=provider_info,
                 is_configured=is_configured,
@@ -2358,7 +1524,7 @@ def get_all_available_models() -> list[str]:
     Returns:
         List of all available model names
     """
-    result = apply_llm_provider_overrides_to_listing(get_configured_providers())
+    result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(get_configured_providers())
     models = []
 
     for provider in result.get('providers', []):
@@ -2620,7 +1786,7 @@ async def get_llm_providers(include_deprecated: bool = False):
 
         # Inject Diagnostics UI interval bounds from server config if available
         try:
-            cfg = load_comprehensive_config()
+            cfg = _config.load_comprehensive_config()
             section = 'LLM_Diagnostics'
             def _getint(key: str, fallback: int) -> int:
                 try:
@@ -2645,7 +1811,7 @@ async def get_llm_providers(include_deprecated: bool = False):
             # Best-effort; omit diagnostics_ui on failure
             pass
 
-        result = apply_llm_provider_overrides_to_listing(result)
+        result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(result)
 
         if result['total_configured'] == 0:
             logger.warning("No LLM providers are configured")
@@ -2730,7 +1896,7 @@ async def get_models_metadata(
             include_deprecated=include_deprecated,
             refresh_openrouter=refresh_openrouter,
         )
-        result = apply_llm_provider_overrides_to_listing(result)
+        result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(result)
         flattened: list[dict[str, Any]] = []
         for provider in result.get('providers', []):
             provider_is_configured = bool(provider.get('is_configured'))
@@ -2778,7 +1944,7 @@ async def get_models_metadata(
             flattened.append(entry)
         # Append image generation backends to the catalog
         try:
-            image_models = list_image_models_for_catalog()
+            image_models = _listing.list_image_models_for_catalog()
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             logger.warning("Failed to list image generation models")
             image_models = []
@@ -2818,7 +1984,7 @@ async def get_provider_details(provider_name: str, include_deprecated: bool = Fa
     """
     try:
         result = await get_configured_providers_async(include_deprecated=include_deprecated)
-        result = apply_llm_provider_overrides_to_listing(result)
+        result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(result)
 
         # Find the specific provider
         for provider in result['providers']:
@@ -2875,7 +2041,7 @@ async def get_all_models(
         input_filters = _normalize_filter_values(input_modality)
         output_filters = _normalize_filter_values(output_modality)
         result = await get_configured_providers_async(include_deprecated=include_deprecated)
-        result = apply_llm_provider_overrides_to_listing(result)
+        result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(result)
         models: list[str] = []
         for provider in result.get('providers', []):
             provider_name = provider.get('name') or "unknown"
@@ -2894,7 +2060,7 @@ async def get_all_models(
                 models.append(f"{provider_name}/{model}")
         # Append image generation backends to the flat list
         try:
-            image_models = list_image_models_for_catalog()
+            image_models = _listing.list_image_models_for_catalog()
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             logger.warning("Failed to list image generation models")
             image_models = []

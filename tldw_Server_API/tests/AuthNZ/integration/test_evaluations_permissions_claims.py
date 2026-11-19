@@ -130,7 +130,7 @@ async def test_evaluations_list_allows_with_evals_read(monkeypatch):
     )
     app = _build_app_with_overrides(principal)
 
-    async def _fake_service_for_user(_user_id: int):
+    def _fake_service_for_user(_user_id: int):
         class _Svc:
             async def list_evaluations(
                 self,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import sys
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -86,6 +87,34 @@ def test_recurring_scheduler_worker_spec_predicates_match_legacy_gates(
 
     assert specs["authnz_scheduler"].enabled(_context()) is True
     assert specs["reading_digest_sched_task"].enabled(_context(test_mode=False)) is True
+
+
+@pytest.mark.parametrize("value, should_start", [(None, True), ("false", False), ("true", True)])
+@pytest.mark.asyncio
+async def test_workflow_scheduler_startup_honors_default_and_override(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str | None,
+    should_start: bool,
+) -> None:
+    from tldw_Server_API.app.services import workflows_scheduler
+
+    key = "WORKFLOWS_SCHEDULER_ENABLED"
+    if value is None:
+        monkeypatch.delenv(key, raising=False)
+    else:
+        monkeypatch.setenv(key, value)
+
+    spec = _specs_by_name(_import_startup_recurring_schedulers())["workflows_sched_task"]
+    service = AsyncMock()
+    monkeypatch.setattr(workflows_scheduler, "get_workflows_scheduler", lambda: service)
+    task = await workflows_scheduler.start_workflows_scheduler()
+    if task is not None:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert spec.enabled(_context()) is should_start
+    assert (task is not None) is should_start
+    assert service.start.await_count == int(should_start)
 
 
 @pytest.mark.asyncio

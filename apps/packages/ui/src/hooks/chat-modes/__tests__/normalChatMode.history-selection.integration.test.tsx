@@ -3359,7 +3359,10 @@ describe("real full and compact Scene consumers across persistence and steering"
     }
   })
 
-  const declareNativeMirrorTransport = (serverCompletion: boolean | "unsupported" = false) => {
+  const declareNativeMirrorTransport = (
+    serverCompletion: boolean | "unsupported" = false,
+    supportsReasoning = false
+  ) => {
     const rows: Array<{
       id: string
       role: string
@@ -3404,6 +3407,7 @@ describe("real full and compact Scene consumers across persistence and steering"
           storage_context_digest: "storage",
           ...(serverCompletion ? { native_completion_v1: {
             policy: "selected_history_v1", supported: serverCompletion === true,
+            ...(supportsReasoning ? { reasoning_history_supported: true } : {}),
             storage_context_digest: "storage"
           } } : {})
         } as never
@@ -3511,6 +3515,54 @@ describe("real full and compact Scene consumers across persistence and steering"
       } finally { consumer.unmount(); useConnectionStore.setState({ state: initialConnection }); }
     }
   );
+
+  it.each([true, false])("keeps native settlement after thinking only when the server supports it (%s)", async supportsReasoning => {
+    const scoped = answerSnapshot()
+    vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockResolvedValue(scoped)
+    const { rows, append } = declareNativeMirrorTransport(true, supportsReasoning)
+    const initialConnection = useConnectionStore.getState().state
+    useConnectionStore.setState({ state: { ...initialConnection, isConnected: true,
+      phase: ConnectionPhase.CONNECTED, mode: "normal", offlineBypass: false } })
+    const consumer = mountConsumer("full", scoped, { actualOption: true })
+    const reply = "<think>Provider reasoning</think>Answer"
+    let dispatches = 0
+    vi.mocked(tldwChat.streamMessage).mockImplementation(async function* (_messages, options, onChunk) {
+      options.onDispatch?.()
+      const turn = ++dispatches
+      const selection = options.preparedRequest?.tldw_history_selection_v1
+      const input = `thinking-input-${turn}`
+      const result = `thinking-reply-${turn}`
+      if (selection) {
+        rows.push({ id: input, role: "user", content: `Question ${turn}`, parent_message_id: rows.at(-1)?.id ?? null })
+        await onChunk?.({ tldw_history_admission_v1: {
+          version: 1, owner_key: "server-owner", conversation_id: newServerId,
+          input_message_id: input, input_message_revision: "1", selection_digest: selection.selection_digest,
+          messages: selection.messages, originating_selection_revision: selection.selection_revision
+        } })
+      }
+      yield reply
+      if (selection) {
+        rows.push({ id: result, role: "assistant", content: reply, parent_message_id: input })
+        await onChunk?.({ tldw_conversation_id: newServerId, tldw_user_message_id: input, tldw_message_id: result })
+      }
+    })
+    try {
+      for (const turn of [1, 2]) {
+        await act(async () => {
+          const outcome = await consumer.mounted.result.current.onSubmit({ message: `Question ${turn}`, image: "" })
+          expect(normalizeChatSubmitResult(outcome)).toEqual({ status: "submitted" })
+        })
+      }
+      const request = vi.mocked(tldwChat.streamMessage).mock.calls[1][1]?.preparedRequest
+      expect(Boolean(request?.tldw_history_selection_v1)).toBe(supportsReasoning)
+      expect(Boolean(request?.metadata?.tldw_retain_reasoning_history_v1)).toBe(supportsReasoning)
+      expect(request?.save_to_db).toBe(supportsReasoning)
+      expect(append).toHaveBeenCalledTimes(supportsReasoning ? 0 : 2)
+    } finally {
+      consumer.unmount()
+      useConnectionStore.setState({ state: initialConnection })
+    }
+  })
 
   it.each((["full", "compact"] as const).flatMap(surface =>
     (["complete", "duplicate", "provider partial", "drop after saved", "missing admission", "missing final", "foreign CID", "foreign user", "conflicting admission", "conflicting final", "final before admission", "Stop before admission", "Stop after admission"] as const)

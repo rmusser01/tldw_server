@@ -188,14 +188,12 @@ def _install_cancel_adapter(monkeypatch, core_jobs: _CancellationCoreJobs) -> No
     adapter._backend = "core"
     adapter._jm = core_jobs
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_cancel_write_access,
         raising=True,
     )
     monkeypatch.setattr(
-        optimization_endpoint,
-        "PromptStudioJobsAdapter",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.jobs_adapter.PromptStudioJobsAdapter",
         lambda: adapter,
         raising=True,
     )
@@ -405,8 +403,7 @@ async def test_create_optimization_maps_database_error(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write_access,
         raising=True,
     )
@@ -432,8 +429,7 @@ async def test_create_optimization_sanitizes_database_error(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write_access,
         raising=True,
     )
@@ -460,8 +456,7 @@ async def test_create_optimization_database_error_log_is_sanitized(monkeypatch):
 
     logger_stub = _EndpointLoggerStub()
     monkeypatch.setattr(
-        optimization_endpoint,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         _allow_write_access,
         raising=True,
     )

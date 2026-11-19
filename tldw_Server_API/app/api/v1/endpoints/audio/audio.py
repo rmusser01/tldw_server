@@ -2,7 +2,6 @@
 # Description: Aggregate audio endpoints and WebSocket routes.
 import asyncio as asyncio
 import importlib
-import os
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -23,6 +22,7 @@ from tldw_Server_API.app.core.config_llm_providers import get_api_keys
 from tldw_Server_API.app.core.Metrics.metrics_manager import (
     get_metrics_registry,
 )
+import tldw_Server_API.app.core.Provider_Credentials.byok_runtime as _byok_runtime
 
 from . import (
     audio_health,
@@ -151,17 +151,11 @@ def _tts_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
 
 def _resolve_tts_byok_resolver():
     local_resolver = resolve_byok_credentials
-    package_resolver = _default_resolve_byok_credentials
-    try:
-        from tldw_Server_API.app.api.v1.endpoints import audio as _audio_pkg
-
-        package_resolver = getattr(_audio_pkg, "resolve_byok_credentials", _default_resolve_byok_credentials)
-    except (AttributeError, ImportError):
-        logger.debug("Falling back to default BYOK resolver after audio package resolver lookup failed")
+    home_resolver = _byok_runtime.resolve_byok_credentials
     if local_resolver is not _default_resolve_byok_credentials:
         return local_resolver
-    if package_resolver is not _default_resolve_byok_credentials:
-        return package_resolver
+    if home_resolver is not _default_resolve_byok_credentials:
+        return home_resolver
     try:
         from tldw_Server_API.app.core.Audio import tts_service as core_tts_service
 
@@ -202,51 +196,6 @@ async def _resolve_tts_byok(
         return await core_tts_service._resolve_tts_byok(**kwargs)
     except ByokResolutionError as exc:
         raise _tts_credential_http_exception(exc) from None
-
-
-def _get_failopen_cap_minutes() -> float:
-    """Return per-connection fail-open cap in minutes for streaming quotas.
-
-    Resolution order:
-      1) Env var AUDIO_FAILOPEN_CAP_MINUTES (>0)
-      2) Config [Audio-Quota] failopen_cap_minutes (>0)
-      3) Config [Audio] failopen_cap_minutes (>0)
-      4) Default 5.0
-    """
-    v = os.getenv("AUDIO_FAILOPEN_CAP_MINUTES")
-    if v is not None:
-        try:
-            f = float(v)
-            if f > 0:
-                return f
-        except (ValueError, TypeError):
-            logger.debug("AUDIO_FAILOPEN_CAP_MINUTES parse failed")
-    try:
-        try:
-            from tldw_Server_API.app.api.v1.endpoints import audio as _audio_pkg
-
-            cfg_loader = getattr(_audio_pkg, "load_comprehensive_config", load_comprehensive_config)
-        except Exception:
-            cfg_loader = load_comprehensive_config
-        cfg = cfg_loader()
-        if cfg is not None:
-            if cfg.has_section("Audio-Quota"):
-                try:
-                    f = float(cfg.get("Audio-Quota", "failopen_cap_minutes", fallback=""))
-                    if f > 0:
-                        return f
-                except (ValueError, TypeError):
-                    logger.debug("[Audio-Quota].failopen_cap_minutes parse failed")
-            if cfg.has_section("Audio"):
-                try:
-                    f = float(cfg.get("Audio", "failopen_cap_minutes", fallback=""))
-                    if f > 0:
-                        return f
-                except (ValueError, TypeError):
-                    logger.debug("[Audio].failopen_cap_minutes parse failed")
-    except Exception:
-        logger.debug("Config read for failopen cap failed")
-    return 5.0
 
 
 async def audio_chat_turn(*args, **kwargs):

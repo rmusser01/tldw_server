@@ -47,7 +47,7 @@ async def test_voice_command_dry_run_loads_defaults_and_refreshes_user_commands(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     registry = _RegistryStub()
-    monkeypatch.setattr(voice_assistant, "get_voice_command_registry", lambda: registry)
+    monkeypatch.setattr("tldw_Server_API.app.core.VoiceAssistant.get_voice_command_registry", lambda: registry)
 
     from tldw_Server_API.app.core.VoiceAssistant import intent_parser as intent_parser_module
 

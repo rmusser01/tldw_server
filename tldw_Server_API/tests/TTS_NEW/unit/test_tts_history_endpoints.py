@@ -204,7 +204,7 @@ def test_history_text_exact_hash_failure_log_is_sanitized(test_client, auth_head
     def fail_hash(*_args, **_kwargs):
         raise RuntimeError("hash backend exploded at /private/tts-history.key")
 
-    monkeypatch.setattr(audio_history, "compute_tts_history_text_hash", fail_hash)
+    monkeypatch.setattr("tldw_Server_API.app.core.TTS.utils.compute_tts_history_text_hash", fail_hash)
 
     dep_keys = _set_media_db_override(fastapi_app, db)
     try:

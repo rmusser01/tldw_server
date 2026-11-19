@@ -119,7 +119,7 @@ async def test_link_expiring_during_claim_cannot_grant_credentials(sign_in, monk
         return True
 
     monkeypatch.setattr(auth, "datetime", Clock)
-    monkeypatch.setattr(auth, "consume_magic_link", claim_at_expiry)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.consume_magic_link", claim_at_expiry)
     monkeypatch.setattr(sign_in.jwt, "verify_token_async", AsyncMock(return_value={
         "jti": "synthetic-expiring-link", "exp": expires_at.timestamp(), "user_id": sign_in.user_id,
     }))
@@ -154,6 +154,6 @@ async def test_unconfirmed_insert_result_is_unavailable(sign_in, monkeypatch, dr
     async def consume_with_unknown_result(db, **kwargs):
         return await consume(SimpleNamespace(execute=AsyncMock(return_value=result)), **kwargs)
 
-    monkeypatch.setattr(auth, "consume_magic_link", consume_with_unknown_result)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.consume_magic_link", consume_with_unknown_result)
     assert (await sign_in.submit()).status_code == 503
     assert await sign_in.pool.fetchval("SELECT count(*) FROM sessions WHERE user_id = ?", sign_in.user_id) == 0

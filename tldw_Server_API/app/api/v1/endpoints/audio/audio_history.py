@@ -13,7 +13,7 @@ from starlette import status
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_cursor_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_cursor_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     TTSHistoryDetailResponse,
@@ -24,8 +24,9 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.TTS.utils import compute_tts_history_text_hash, parse_bool
+from tldw_Server_API.app.core.TTS.utils import parse_bool
 from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
+import tldw_Server_API.app.core.TTS.utils as _utils
 
 router = APIRouter(
     tags=["Audio"],
@@ -141,7 +142,7 @@ async def list_tts_history(
     text_hash = None
     if text_exact:
         try:
-            text_hash = compute_tts_history_text_hash(text_exact, cfg.get("hash_key"))
+            text_hash = _utils.compute_tts_history_text_hash(text_exact, cfg.get("hash_key"))
         except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("TTS history: failed to compute text_exact hash")
             raise HTTPException(

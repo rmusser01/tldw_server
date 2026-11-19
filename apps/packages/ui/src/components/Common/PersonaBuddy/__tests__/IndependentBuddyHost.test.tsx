@@ -481,6 +481,8 @@ it("keeps later workspace conversation choices and drafts through refresh and ar
 
 it("preserves animation props through unchanged polls and observes profile updates", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
+  // WP-39: the fast cadence only applies while the panel is open.
+  useBuddyManagementStore.setState({ open: true })
   let version = 1
   let optionalPersonaAvailable = true
   mocks.listBuddies.mockImplementation(async () => ({
@@ -596,7 +598,8 @@ it("stops Buddy polls on disconnect and discards late data before verified recon
   view.rerender(<IndependentBuddyHost />)
   await screen.findByRole("button", { name: "Open Duck — Research" })
   const countAfterReconnect = mocks.listBuddies.mock.calls.length
-  await act(async () => vi.advanceTimersByTimeAsync(5_000))
+  // WP-39: with the panel closed the closed-panel backoff is once a minute.
+  await act(async () => vi.advanceTimersByTimeAsync(60_000))
   expect(mocks.listBuddies).toHaveBeenCalledTimes(countAfterReconnect + 1)
   expect(mocks.getBuddyAttachment).toHaveBeenCalledTimes(countAfterReconnect + 1)
   view.unmount()
@@ -661,12 +664,13 @@ it("slows Buddy polling while nothing changes and speeds up again after a change
     target: { title: "Renamed research" }
   })
   const renamed = { name: "Open Duck — Renamed research" }
-  for (let tick = 0; tick < 12 && !screen.queryByRole("button", renamed); tick += 1) {
+  // WP-39: with the panel closed the cadence is once a minute.
+  for (let tick = 0; tick < 13 && !screen.queryByRole("button", renamed); tick += 1) {
     await act(async () => vi.advanceTimersByTimeAsync(5_000))
   }
   expect(screen.getByRole("button", renamed)).toBeInTheDocument()
   const afterChange = reads()
-  await act(async () => vi.advanceTimersByTimeAsync(5_000))
+  await act(async () => vi.advanceTimersByTimeAsync(60_000))
   expect(reads()).toBe(afterChange + 1)
 })
 

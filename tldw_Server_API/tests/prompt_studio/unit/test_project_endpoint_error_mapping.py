@@ -173,20 +173,17 @@ class _FakePsLogger:
 
 def _patch_prompt_studio_request_logging(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        projects_endpoint,
-        "ensure_request_id",
+        "tldw_Server_API.app.core.Logging.log_context.ensure_request_id",
         lambda _request: "req-1",
         raising=True,
     )
     monkeypatch.setattr(
-        projects_endpoint,
-        "ensure_traceparent",
+        "tldw_Server_API.app.core.Logging.log_context.ensure_traceparent",
         lambda _request: "tp-1",
         raising=True,
     )
     monkeypatch.setattr(
-        projects_endpoint,
-        "get_ps_logger",
+        "tldw_Server_API.app.core.Logging.log_context.get_ps_logger",
         lambda **_kwargs: _FakePsLogger(),
         raising=True,
     )

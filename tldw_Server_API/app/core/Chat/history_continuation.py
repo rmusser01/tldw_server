@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Chat.history_selection import (
     REPLY_ACTION_REFUSED_REQUEST,
     reply_action_refusal,
 )
+from tldw_Server_API.app.core.Chat.knowledge_save import strip_reasoning_blocks
 
 CONTINUE_METADATA_KEY = "tldw_continue_from_message_id"
 UNSUPPORTED_CONTINUATION = "unsupported_history_continuation"
@@ -88,7 +89,7 @@ def continued_reply_prefix(item: Mapping[str, Any]) -> str:
     text = item.get("message")
     if (
         not isinstance(text, str)
-        or not text.strip()
+        or not strip_reasoning_blocks(text).strip()
         or item.get("images")
         or item.get("tool_calls") is not None
         or extra.get("function_call") is not None
@@ -108,7 +109,7 @@ def _join_continuation(prefix: str, text: str) -> str:
     doubling it; one that starts with text (a provider that answers with a new
     message) keeps the saved spacing.
     """
-    return (prefix.rstrip() if text[:1].isspace() else prefix) + text
+    return (prefix.rstrip() if strip_reasoning_blocks(text)[:1].isspace() else prefix) + text
 
 
 def merge_continued_reply(payload: Mapping[str, Any], prefix: str) -> dict[str, Any]:

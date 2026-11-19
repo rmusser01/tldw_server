@@ -94,7 +94,7 @@ def test_chat_completions_dispatches_mlx_to_sync_seam(monkeypatch):
         headers = {"X-API-KEY": api_key, "X-CSRF-Token": csrf}
         body = {"api_provider": "mlx", "model": "m", "save_to_db": False, "messages": _MESSAGES}
         with patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             return_value=mock_response,
         ) as mocked:
             r = client.post("/api/v1/chat/completions", json=body, headers=headers)

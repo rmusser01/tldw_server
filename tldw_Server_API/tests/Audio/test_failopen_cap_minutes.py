@@ -1,4 +1,3 @@
-import builtins
 import importlib
 import types
 
@@ -82,7 +81,7 @@ def _import_audio_module(monkeypatch, cfg=None):
 
     # Ensure clean import state
     import importlib
-    mod = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.audio")
+    mod = importlib.import_module("tldw_Server_API.app.core.Audio.quota_helpers")
     # Patch load_comprehensive_config to return our fake cfg
     if cfg is not None:
         monkeypatch.setattr(mod, "load_comprehensive_config", lambda: cfg, raising=True)
@@ -93,11 +92,9 @@ def _import_audio_aggregate_module(monkeypatch, cfg=None):
 
 
     import importlib
-    package_mod = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.audio")
     aggregate_mod = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.audio.audio")
     if cfg is not None:
-        monkeypatch.setattr(package_mod, "load_comprehensive_config", lambda: cfg, raising=True)
-        monkeypatch.setattr(aggregate_mod, "load_comprehensive_config", lambda: cfg, raising=True)
+        monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: cfg, raising=True)
     return aggregate_mod
 
 
@@ -214,64 +211,6 @@ def test_failopen_config_read_log_is_sanitized(monkeypatch):
     _assert_sanitized_debug_log(logger_stub, "Config read for failopen cap failed")
 
 
-def test_aggregate_failopen_env_parse_log_is_sanitized(monkeypatch):
-    monkeypatch.setenv("AUDIO_FAILOPEN_CAP_MINUTES", "audio config backend exploded /private/tmp/audio-failopen.ini")
-    mod = _import_audio_aggregate_module(monkeypatch, cfg=_fake_cfg({}))
-    logger_stub = _LoggerStub()
-    monkeypatch.setattr(mod, "logger", logger_stub, raising=True)
-
-    assert abs(mod._get_failopen_cap_minutes() - 5.0) < 1e-6
-
-    _assert_sanitized_debug_log(logger_stub, "AUDIO_FAILOPEN_CAP_MINUTES parse failed")
-
-
-def test_aggregate_failopen_audio_quota_parse_log_is_sanitized(monkeypatch):
-    monkeypatch.delenv("AUDIO_FAILOPEN_CAP_MINUTES", raising=False)
-    cfg = _fake_cfg({
-        "Audio-Quota": {"failopen_cap_minutes": "audio config backend exploded /private/tmp/audio-failopen.ini"}
-    })
-    mod = _import_audio_aggregate_module(monkeypatch, cfg=cfg)
-    logger_stub = _LoggerStub()
-    monkeypatch.setattr(mod, "logger", logger_stub, raising=True)
-
-    assert abs(mod._get_failopen_cap_minutes() - 5.0) < 1e-6
-
-    _assert_sanitized_debug_log(logger_stub, "[Audio-Quota].failopen_cap_minutes parse failed")
-
-
-def test_aggregate_failopen_audio_section_parse_log_is_sanitized(monkeypatch):
-    monkeypatch.delenv("AUDIO_FAILOPEN_CAP_MINUTES", raising=False)
-    cfg = _fake_cfg({
-        "Audio": {"failopen_cap_minutes": "audio config backend exploded /private/tmp/audio-failopen.ini"}
-    })
-    mod = _import_audio_aggregate_module(monkeypatch, cfg=cfg)
-    logger_stub = _LoggerStub()
-    monkeypatch.setattr(mod, "logger", logger_stub, raising=True)
-
-    assert abs(mod._get_failopen_cap_minutes() - 5.0) < 1e-6
-
-    _assert_sanitized_debug_log(logger_stub, "[Audio].failopen_cap_minutes parse failed")
-
-
-def test_aggregate_failopen_config_read_log_is_sanitized(monkeypatch):
-    monkeypatch.delenv("AUDIO_FAILOPEN_CAP_MINUTES", raising=False)
-    mod = _import_audio_aggregate_module(monkeypatch, cfg=_fake_cfg({}))
-    logger_stub = _LoggerStub()
-    monkeypatch.setattr(mod, "logger", logger_stub, raising=True)
-
-    def _raise_config_error():
-        raise RuntimeError("audio config backend exploded /private/tmp/audio-failopen.ini")
-
-    import importlib
-    package_mod = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.audio")
-    monkeypatch.setattr(package_mod, "load_comprehensive_config", _raise_config_error, raising=True)
-    monkeypatch.setattr(mod, "load_comprehensive_config", _raise_config_error, raising=True)
-
-    assert abs(mod._get_failopen_cap_minutes() - 5.0) < 1e-6
-
-    _assert_sanitized_debug_log(logger_stub, "Config read for failopen cap failed")
-
-
 def test_aggregate_streaming_route_import_failure_log_is_sanitized(monkeypatch):
     mod = _import_audio_aggregate_module(monkeypatch, cfg=_fake_cfg({}))
     logger_stub = _LoggerStub()
@@ -341,53 +280,6 @@ async def test_aggregate_resolve_tts_byok_delegates_to_core(monkeypatch):
             "force_oauth_refresh": True,
         }
     ]
-
-
-@pytest.mark.asyncio
-async def test_aggregate_resolve_tts_byok_logs_resolver_lookup_fallback(monkeypatch):
-    from tldw_Server_API.app.core.Audio import tts_service
-
-    mod = _import_audio_aggregate_module(monkeypatch, cfg=_fake_cfg({}))
-    logger_stub = _LoggerStub()
-    monkeypatch.setattr(mod, "logger", logger_stub, raising=True)
-    original_import = builtins.__import__
-
-    async def _fallback_resolver(*_args, **_kwargs):
-        return tts_service.ResolvedByokCredentials(
-            provider="fish_s2",
-            api_key="configured",
-            app_config={},
-            credential_fields={},
-            source="user",
-            allowlisted=True,
-        )
-
-    def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "tldw_Server_API.app.api.v1.endpoints" and "audio" in fromlist:
-            raise ImportError("audio package resolver unavailable")
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(mod, "resolve_byok_credentials", _fallback_resolver, raising=True)
-    monkeypatch.setattr(
-        tts_service,
-        "capture_provider_override_call_snapshot",
-        lambda _provider: _HealthyProviderOverrideSnapshot(),
-    )
-    monkeypatch.setattr(builtins, "__import__", _guarded_import)
-
-    result = await mod._resolve_tts_byok(
-        provider_hint="fish_s2",
-        current_user=types.SimpleNamespace(id=1),
-        request=object(),
-    )
-
-    assert result[0] == 1
-    assert result[1]["api_key"] == "configured"
-    assert result[1]["credentials_resolved"] is True
-    _assert_sanitized_debug_log(
-        logger_stub,
-        "Falling back to default BYOK resolver after audio package resolver lookup failed",
-    )
 
 
 @pytest.mark.asyncio

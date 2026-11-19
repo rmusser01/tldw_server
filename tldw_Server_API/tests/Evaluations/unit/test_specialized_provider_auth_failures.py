@@ -397,13 +397,11 @@ async def test_specialized_endpoint_maps_auth_to_502_without_marking_used(
 
     monkeypatch.setattr(eval_endpoint, "_resolve_and_validate_eval_provider", resolve)
     monkeypatch.setattr(
-        eval_endpoint,
-        "get_user_rate_limiter_for_user",
+        "tldw_Server_API.app.core.Evaluations.user_rate_limiter.get_user_rate_limiter_for_user",
         lambda _user_id: _AllowingLimiter(),
     )
     monkeypatch.setattr(
-        eval_endpoint,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: RejectingService(),
     )
     monkeypatch.setattr(

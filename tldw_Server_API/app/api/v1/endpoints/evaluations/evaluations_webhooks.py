@@ -23,14 +23,12 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     WebhookTestResponse,
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
-from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
-    get_unified_evaluation_service_for_user,
-)
 from tldw_Server_API.app.core.Evaluations.webhook_manager import (
     WebhookEvent,
     WebhookManager,
     webhook_manager,
 )
+import tldw_Server_API.app.core.Evaluations.unified_evaluation_service as _unified_evaluation_service
 
 webhooks_router = APIRouter()
 
@@ -73,7 +71,7 @@ def _webhook_proxy_has_local_override() -> bool:
 def _get_webhook_manager_for_user(user_id: int | str) -> WebhookManager:
     service = None
     try:
-        service = get_unified_evaluation_service_for_user(user_id)
+        service = _unified_evaluation_service.get_unified_evaluation_service_for_user(user_id)
         from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
         if _is_test_mode():
             manager = getattr(service, "webhook_manager", None)
@@ -83,7 +81,7 @@ def _get_webhook_manager_for_user(user_id: int | str) -> WebhookManager:
     except _WEBHOOK_TESTMODE_EXCEPTIONS:
         logger.debug("Webhook test mode detection skipped")
     if service is None:
-        service = get_unified_evaluation_service_for_user(user_id)
+        service = _unified_evaluation_service.get_unified_evaluation_service_for_user(user_id)
     manager = getattr(service, "webhook_manager", None)
     if manager is None:
         service.webhook_manager = webhook_manager

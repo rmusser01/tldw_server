@@ -183,8 +183,8 @@ async def test_get_media_navigation_content_sanitizes_db_fetch_log(monkeypatch) 
 async def test_get_media_navigation_sanitizes_invalid_cached_payload_log(monkeypatch) -> None:
     fake_logger = MagicMock()
     monkeypatch.setattr(navigation_mod, "logger", fake_logger)
-    monkeypatch.setattr(navigation_mod, "get_cached_response", lambda _cache_key: ("etag", {}))
-    monkeypatch.setattr(navigation_mod, "cache_response", lambda *_args, **_kwargs: "etag")
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", lambda _cache_key: ("etag", {}))
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.cache.cache_response", lambda *_args, **_kwargs: "etag")
 
     async def _empty_source_nodes(**_kwargs):
         return [], []
@@ -206,8 +206,8 @@ async def test_get_media_navigation_sanitizes_invalid_cached_payload_log(monkeyp
 async def test_get_media_navigation_content_sanitizes_invalid_cached_payload_log(monkeypatch) -> None:
     fake_logger = MagicMock()
     monkeypatch.setattr(navigation_mod, "logger", fake_logger)
-    monkeypatch.setattr(navigation_mod, "get_cached_response", lambda _cache_key: ("etag", {}))
-    monkeypatch.setattr(navigation_mod, "cache_response", lambda *_args, **_kwargs: "etag")
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", lambda _cache_key: ("etag", {}))
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.cache.cache_response", lambda *_args, **_kwargs: "etag")
 
     async def _source_nodes(**_kwargs):
         return [
@@ -408,7 +408,7 @@ async def test_extract_pdf_outline_nodes_sanitizes_large_file_skip_log(monkeypat
     fake_logger = MagicMock()
     monkeypatch.setattr(navigation_mod, "logger", fake_logger)
     monkeypatch.setattr(navigation_mod, "_check_pymupdf_available", lambda: True)
-    monkeypatch.setattr(navigation_mod, "get_storage_backend", lambda: _LargePdfStorageBackend())
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.get_storage_backend", lambda: _LargePdfStorageBackend())
 
     result = await navigation_mod._extract_pdf_outline_nodes(
         media_id=7,
@@ -425,7 +425,7 @@ async def test_extract_pdf_outline_nodes_sanitizes_storage_failure_log(monkeypat
     fake_logger = MagicMock()
     monkeypatch.setattr(navigation_mod, "logger", fake_logger)
     monkeypatch.setattr(navigation_mod, "_check_pymupdf_available", lambda: True)
-    monkeypatch.setattr(navigation_mod, "get_storage_backend", lambda: _PdfStorageErrorBackend())
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.get_storage_backend", lambda: _PdfStorageErrorBackend())
 
     result = await navigation_mod._extract_pdf_outline_nodes(
         media_id=7,
@@ -442,7 +442,7 @@ async def test_extract_pdf_outline_nodes_sanitizes_extraction_failure_log(monkey
     fake_logger = MagicMock()
     monkeypatch.setattr(navigation_mod, "logger", fake_logger)
     monkeypatch.setattr(navigation_mod, "_check_pymupdf_available", lambda: True)
-    monkeypatch.setattr(navigation_mod, "get_storage_backend", lambda: _PdfStorageBackend())
+    monkeypatch.setattr("tldw_Server_API.app.core.Storage.get_storage_backend", lambda: _PdfStorageBackend())
 
     def _raise_pdf_outline_error(_pdf_file):
         raise RuntimeError("navigation pdf parser exploded")

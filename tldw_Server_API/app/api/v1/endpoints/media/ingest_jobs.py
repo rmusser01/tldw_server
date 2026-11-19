@@ -31,8 +31,9 @@ from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limi
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.api.v1.API_Deps.media_add_deps import get_add_media_form
+from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_requested
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
@@ -40,16 +41,16 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
-    save_uploaded_files,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.exceptions import BadRequestError
-from tldw_Server_API.app.core.testing import is_test_mode
-from tldw_Server_API.app.services.worker_startup_policy import worker_path_enabled
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from tldw_Server_API.app.services.worker_startup_policy import media_ingest_heavy_worker_available
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+import tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing as _input_sourcing
 
 router = APIRouter()
 
@@ -365,20 +366,12 @@ def _is_heavy_media_ingest_request(form_data: AddMediaForm) -> bool:
     media_type = str(getattr(form_data, "media_type", "") or "").strip().lower()
     if media_type in {"audio", "video"}:
         return True
-    if bool(getattr(form_data, "enable_ocr", False)):
-        return True
-    return False
+    return bool(getattr(form_data, "enable_ocr", False)) or media_analysis_requested(form_data)
 
 
 def _heavy_media_ingest_worker_available() -> bool:
-    return worker_path_enabled(
-        "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
-        "media-ingest-heavy-jobs",
-        default_stable=False,
-        # Queue routing should still honor explicit route policy in tests so
-        # integration coverage can model a deployed heavy-worker path without
-        # auto-starting local workers.
-        test_mode=False,
+    return media_ingest_heavy_worker_available(
+        sidecar_mode=env_flag_enabled("TLDW_WORKERS_SIDECAR_MODE"),
     )
 
 
@@ -727,7 +720,7 @@ async def submit_media_ingest_jobs(
             try:
                 with TempDirManager(prefix="media_ingest_job_", cleanup=False) as temp_dir:
                     temp_dir_path = str(temp_dir)
-                    saved_files, file_errors = await save_uploaded_files(
+                    saved_files, file_errors = await _input_sourcing.save_uploaded_files(
                         [upload],
                         temp_dir=temp_dir,
                         validator=file_validator_instance,

@@ -26,7 +26,7 @@ def _user(uid):
 
 
 async def test_owner_reads_its_own_cached_batch(monkeypatch):
-    monkeypatch.setattr(vs, "resolve_user_id_for_request", lambda user, **kw: str(user.id))
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.resolve_user_id_for_request", lambda user, **kw: str(user.id))
     vs._BATCH_STATUS["vsb_1"] = {
         "id": "vsb_1", "status": "processing", "upserted": 0, "error": None, "user_id": "7",
     }
@@ -38,8 +38,8 @@ async def test_owner_reads_its_own_cached_batch(monkeypatch):
 
 async def test_another_account_does_not_read_the_cached_batch(monkeypatch):
     """The regression: any caller knowing the id got the entry back."""
-    monkeypatch.setattr(vs, "resolve_user_id_for_request", lambda user, **kw: str(user.id))
-    monkeypatch.setattr(vs, "db_get_batch", lambda batch_id, user_id: None)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.resolve_user_id_for_request", lambda user, **kw: str(user.id))
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_batches_db.get_batch", lambda batch_id, user_id: None)
     vs._BATCH_STATUS["vsb_1"] = {
         "id": "vsb_1", "status": "processing", "upserted": 0, "error": "secret", "user_id": "7",
     }
@@ -52,8 +52,8 @@ async def test_another_account_does_not_read_the_cached_batch(monkeypatch):
 
 async def test_an_unstamped_entry_is_not_served_to_anyone(monkeypatch):
     """Entries predating the owner stamp must fall through, not leak."""
-    monkeypatch.setattr(vs, "resolve_user_id_for_request", lambda user, **kw: str(user.id))
-    monkeypatch.setattr(vs, "db_get_batch", lambda batch_id, user_id: None)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.resolve_user_id_for_request", lambda user, **kw: str(user.id))
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_batches_db.get_batch", lambda batch_id, user_id: None)
     vs._BATCH_STATUS["vsb_1"] = {"id": "vsb_1", "status": "processing"}
 
     with pytest.raises(Exception) as exc:

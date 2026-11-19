@@ -69,7 +69,7 @@ def _patched_user_api_keys_deps(monkeypatch: pytest.MonkeyPatch) -> None:
         "_require_principal_active_verified",
         _fake_require_principal_active_verified,
     )
-    monkeypatch.setattr(users_endpoints, "get_api_key_manager", _fake_get_api_key_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.api_key_manager.get_api_key_manager", _fake_get_api_key_manager)
 
 
 @pytest.mark.asyncio

@@ -2,7 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { BetaTag } from "../Common/Beta";
-import { XIcon } from "lucide-react";
+import { HelpCircle, XIcon } from "lucide-react";
 import { getSettingsNavGroups, type SettingsNavItem } from "./settings-nav";
 import {
   isSettingsNavItemActive,
@@ -21,6 +21,7 @@ import {
   CONTEXT_MENU_CLICK_SETTING,
 } from "@/services/action";
 import { useServerCapabilities } from "@/hooks/useServerCapabilities";
+import { useTutorialStore } from "@/store/tutorials";
 
 function classNames(...classes: string[]) {
   return classes.filter(Boolean).join(" ");
@@ -99,6 +100,8 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { t } = useTranslation(["settings", "common"]);
+  const openHelp = useTutorialStore((state) => state.openHelpModal);
+  const helpLabel = t("common:help.pageHelp", "Page Help");
   const [settingsFilterQuery, setSettingsFilterQuery] = React.useState("");
   const [hideBetaBadges, setHideBetaBadges] = React.useState<boolean>(
     readHideBetaBadgesPreference,
@@ -373,8 +376,16 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
               className="relative min-w-0 flex-1 px-4 py-8 sm:px-6 lg:px-0 lg:py-20"
               aria-labelledby="settings-route-heading"
             >
-              {/* Close button over right of content area */}
-              <div className="absolute right-4 top-4 lg:right-0 lg:top-6 lg:translate-x-[-1rem]">
+              <div className="absolute right-4 top-4 flex items-center gap-1 lg:right-0 lg:top-6 lg:translate-x-[-1rem]">
+                <button
+                  type="button"
+                  className="inline-flex size-9 items-center justify-center rounded text-text-muted hover:bg-surface2 hover:text-text"
+                  onClick={openHelp}
+                  aria-label={helpLabel}
+                  title={helpLabel}
+                >
+                  <HelpCircle className="size-4" aria-hidden="true" />
+                </button>
                 <button
                   className="inline-flex items-center gap-1 text-xs border rounded px-2 py-1 text-text  hover:bg-surface2 "
                   title={t("common:close", "Close")}

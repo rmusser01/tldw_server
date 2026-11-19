@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+from tldw_Server_API.app.api.v1.utils.pagination import (
     build_offset_pagination_meta,
 )
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
@@ -48,25 +48,7 @@ from tldw_Server_API.app.services.admin_data_ops_service import (
     build_retention_preview_signature as svc_build_retention_preview_signature,
 )
 from tldw_Server_API.app.services.admin_data_ops_service import (
-    create_backup_snapshot as svc_create_backup_snapshot,
-)
-from tldw_Server_API.app.services.admin_data_ops_service import (
-    list_backup_items as svc_list_backup_items,
-)
-from tldw_Server_API.app.services.admin_data_ops_service import (
-    list_retention_policies as svc_list_retention_policies,
-)
-from tldw_Server_API.app.services.admin_data_ops_service import (
-    preview_retention_policy as svc_preview_retention_policy,
-)
-from tldw_Server_API.app.services.admin_data_ops_service import (
-    restore_backup_snapshot as svc_restore_backup_snapshot,
-)
-from tldw_Server_API.app.services.admin_data_ops_service import (
     update_retention_policy as svc_update_retention_policy,
-)
-from tldw_Server_API.app.services.admin_data_ops_service import (
-    verify_retention_preview_signature as svc_verify_retention_preview_signature,
 )
 from tldw_Server_API.app.services.admin_data_subject_requests_service import (
     execute_dsr_erasure as svc_execute_dsr_erasure,
@@ -80,6 +62,7 @@ from tldw_Server_API.app.services.admin_data_subject_requests_service import (
 from tldw_Server_API.app.services.admin_data_subject_requests_service import (
     record_data_subject_request as svc_record_data_subject_request,
 )
+import tldw_Server_API.app.services.admin_data_ops_service as _admin_data_ops_service
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
@@ -242,7 +225,7 @@ async def list_backups(
         # unfiltered admin view) are synchronous filesystem work - keep them
         # off the event loop.
         items, total = await asyncio.to_thread(
-            svc_list_backup_items,
+            _admin_data_ops_service.list_backup_items,
             dataset=normalized_dataset,
             user_id=user_id,
             limit=limit,
@@ -291,7 +274,7 @@ async def create_backup(
         _require_user_id_for_dataset(dataset, payload.user_id)
         if payload.user_id is not None:
             await _enforce_admin_user_scope(principal, payload.user_id, require_hierarchy=False)
-        item = svc_create_backup_snapshot(
+        item = _admin_data_ops_service.create_backup_snapshot(
             dataset=dataset,
             user_id=payload.user_id,
             backup_type=payload.backup_type or "full",
@@ -366,7 +349,7 @@ async def restore_backup(
         _require_user_id_for_dataset(dataset, payload.user_id)
         if payload.user_id is not None:
             await _enforce_admin_user_scope(principal, payload.user_id, require_hierarchy=False)
-        result = svc_restore_backup_snapshot(
+        result = _admin_data_ops_service.restore_backup_snapshot(
             dataset=dataset,
             user_id=payload.user_id,
             backup_id=backup_id,
@@ -853,7 +836,7 @@ async def list_retention_policies(
 ) -> RetentionPoliciesResponse:
     try:
         del principal
-        policies = [RetentionPolicy(**item) for item in await svc_list_retention_policies()]
+        policies = [RetentionPolicy(**item) for item in await _admin_data_ops_service.list_retention_policies()]
         return RetentionPoliciesResponse(policies=policies)
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
         logger.error("Failed to list retention policies")
@@ -867,7 +850,7 @@ async def preview_retention_policy(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> RetentionPolicyPreviewResponse:
     try:
-        preview = await svc_preview_retention_policy(
+        preview = await _admin_data_ops_service.preview_retention_policy(
             policy_key=policy_key,
             current_days=payload.current_days,
             days=payload.days,
@@ -901,7 +884,7 @@ async def update_retention_policy(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> RetentionPolicy:
     try:
-        await svc_verify_retention_preview_signature(
+        await _admin_data_ops_service.verify_retention_preview_signature(
             principal=principal,
             policy_key=policy_key,
             days=payload.days,

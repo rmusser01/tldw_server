@@ -89,6 +89,10 @@ describe("hosted option route visibility", () => {
     expect(hiddenRoutesWithoutReason).toEqual([])
   })
 
+  it("keeps the Watchlists route visible in hosted mode", () => {
+    expect(isHostedVisibleOptionPath("/watchlists")).toBe(true)
+  })
+
   it("keeps audio explainer routes visible in hosted mode", () => {
     expect(isHostedVisibleOptionPath("/tts")).toBe(true)
     expect(isHostedVisibleOptionPath("/stt")).toBe(true)

@@ -83,7 +83,7 @@ def _readiness_api_setup(monkeypatch, tmp_path):
         "recommend_audio_bundles",
         lambda *args, **kwargs: {"recommendations": [], "excluded": []},
     )
-    monkeypatch.setattr(setup_endpoint, "get_audio_bundle_catalog", lambda: _EmptyBundleCatalog())
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.audio_bundle_catalog.get_audio_bundle_catalog", lambda: _EmptyBundleCatalog())
     return store
 
 
@@ -149,7 +149,7 @@ def _admin_readiness_api_setup(monkeypatch, tmp_path):
         "recommend_audio_bundles",
         lambda *args, **kwargs: {"recommendations": [], "excluded": []},
     )
-    monkeypatch.setattr(setup_endpoint, "get_audio_bundle_catalog", lambda: _EmptyBundleCatalog())
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.audio_bundle_catalog.get_audio_bundle_catalog", lambda: _EmptyBundleCatalog())
     return store
 
 
@@ -279,7 +279,7 @@ def test_readiness_provision_returns_pollable_status_without_waiting_for_downloa
         "update_config",
         lambda updates: config_updates.append(updates),
     )
-    monkeypatch.setattr(setup_endpoint, "execute_install_plan", lambda plan: install_plans.append(plan))
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.install_manager.execute_install_plan", lambda plan: install_plans.append(plan))
 
     client = _make_client()
     preview_response = client.post(
@@ -387,7 +387,7 @@ def test_readiness_inline_provision_persists_submitted_secret_without_storing_it
         "update_config",
         lambda updates: config_updates.append(updates),
     )
-    monkeypatch.setattr(setup_endpoint, "execute_install_plan", lambda plan: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.install_manager.execute_install_plan", lambda plan: None)
 
     client = _make_client()
     response = client.post(
@@ -428,7 +428,7 @@ def test_readiness_preview_id_provision_rejects_unretained_submitted_secret(
     _readiness_api_setup,
 ):
     monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", lambda updates: None)
-    monkeypatch.setattr(setup_endpoint, "execute_install_plan", lambda plan: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.install_manager.execute_install_plan", lambda plan: None)
 
     client = _make_client()
     preview_response = client.post(
@@ -556,7 +556,7 @@ def test_admin_readiness_provision_returns_admin_status_url(monkeypatch, _admin_
         _admin_principal,
     )
     monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", lambda updates: None)
-    monkeypatch.setattr(setup_endpoint, "execute_install_plan", lambda plan: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.install_manager.execute_install_plan", lambda plan: None)
 
     client = _make_client()
     preview_response = client.post(

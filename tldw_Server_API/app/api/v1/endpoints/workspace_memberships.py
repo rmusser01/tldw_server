@@ -11,7 +11,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_use
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import try_get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import try_get_watchlists_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Workflows_DB_Deps import try_get_workflows_db_for_user
-from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
+from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import WorkspaceResourceMembershipListResponse
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (

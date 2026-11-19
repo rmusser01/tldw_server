@@ -30,7 +30,7 @@ def test_arxiv_search_sanitizes_generic_failure(
     def fake_search_arxiv_custom_api(query, author, year, start_index, results_per_page):
         raise RuntimeError("arxiv backend exploded")
 
-    monkeypatch.setattr(research_module, "search_arxiv_custom_api", fake_search_arxiv_custom_api)
+    monkeypatch.setattr("tldw_Server_API.app.core.Third_Party.Arxiv.search_arxiv_custom_api", fake_search_arxiv_custom_api)
 
     resp = legacy_research_client.get(
         "/api/v1/research/arxiv-search",
@@ -63,7 +63,7 @@ def test_arxiv_search_includes_canonical_page_pagination(
             None,
         )
 
-    monkeypatch.setattr(research_module, "search_arxiv_custom_api", fake_search_arxiv_custom_api)
+    monkeypatch.setattr("tldw_Server_API.app.core.Third_Party.Arxiv.search_arxiv_custom_api", fake_search_arxiv_custom_api)
 
     resp = legacy_research_client.get(
         "/api/v1/research/arxiv-search",
@@ -102,8 +102,7 @@ def test_semantic_scholar_search_sanitizes_generic_failure(
         raise RuntimeError("semantic scholar backend exploded")
 
     monkeypatch.setattr(
-        research_module,
-        "search_papers_semantic_scholar",
+        "tldw_Server_API.app.core.Third_Party.Semantic_Scholar.search_papers_semantic_scholar",
         fake_search_papers_semantic_scholar,
     )
 
@@ -153,8 +152,7 @@ def test_semantic_scholar_search_includes_canonical_page_pagination(
         )
 
     monkeypatch.setattr(
-        research_module,
-        "search_papers_semantic_scholar",
+        "tldw_Server_API.app.core.Third_Party.Semantic_Scholar.search_papers_semantic_scholar",
         fake_search_papers_semantic_scholar,
     )
 

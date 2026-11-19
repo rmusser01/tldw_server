@@ -34,7 +34,6 @@ def test_rg_refund_on_provider_error(monkeypatch, test_client, auth_headers):
 
     monkeypatch.setenv("RG_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
-    monkeypatch.setattr(chat_endpoint, "get_rate_limiter", lambda: None)
 
     async def fake_build_context_and_messages(
         chat_db,
@@ -54,13 +53,13 @@ def test_rg_refund_on_provider_error(monkeypatch, test_client, auth_headers):
             False,
         )
 
-    monkeypatch.setattr(chat_endpoint, "build_context_and_messages", fake_build_context_and_messages)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.build_context_and_messages", fake_build_context_and_messages)
 
     def fail_call(**_kwargs):
 
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fail_call)
 
     payload = {
         "model": "openai/gpt-4o-mini",
@@ -94,8 +93,7 @@ def test_rg_refund_on_streaming_error(monkeypatch, test_client, auth_headers):
 
     monkeypatch.setenv("RG_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
-    monkeypatch.setattr(chat_endpoint, "get_rate_limiter", lambda: None)
-    monkeypatch.setattr(chat_endpoint, "get_request_queue", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", lambda: None)
 
     async def fake_build_context_and_messages(
         chat_db,
@@ -115,12 +113,12 @@ def test_rg_refund_on_streaming_error(monkeypatch, test_client, auth_headers):
             False,
         )
 
-    monkeypatch.setattr(chat_endpoint, "build_context_and_messages", fake_build_context_and_messages)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.build_context_and_messages", fake_build_context_and_messages)
 
     def fail_call(**_kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fail_call)
 
     payload = {
         "model": "openai/gpt-4o-mini",

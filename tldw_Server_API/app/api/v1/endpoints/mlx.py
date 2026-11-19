@@ -12,9 +12,9 @@ from tldw_Server_API.app.api.v1.schemas.mlx import MLXLoadRequest, MLXUnloadRequ
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError, ChatProviderError
 from tldw_Server_API.app.core.LLM_Calls.providers.mlx_provider import (
     MLXSessionRegistry,
-    _default_settings,
     get_mlx_registry,
 )
+import tldw_Server_API.app.core.LLM_Calls.providers.mlx_provider as _mlx_provider
 
 router = APIRouter()
 
@@ -55,7 +55,7 @@ async def load_mlx_model(
     overrides = payload.model_dump(exclude_none=True)
     model_path = _normalize_model_path(overrides.pop("model_path", None))
     if model_path is None:
-        model_path = _normalize_model_path(_default_settings().get("model_path"))
+        model_path = _normalize_model_path(_mlx_provider._default_settings().get("model_path"))
     try:
         status = registry.load(model_path=model_path, overrides=overrides)
         return _normalize_mlx_response(status)

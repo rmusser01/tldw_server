@@ -260,7 +260,7 @@ def test_email_sources_endpoint_returns_sync_status_states(email_search_client, 
             },
         ]
 
-    monkeypatch.setattr(email_endpoint, "list_connector_sources", _fake_list_connector_sources)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.list_sources", _fake_list_connector_sources)
     _FakeEmailDB.sync_state_by_source_key = {
         "11": {
             "cursor": "1001",
@@ -344,8 +344,8 @@ def test_email_source_sync_endpoint_queues_job(email_search_client, monkeypatch)
             "counts": {"processed": 0, "skipped": 0, "failed": 0},
         }
 
-    monkeypatch.setattr(email_endpoint, "get_source_by_id", _fake_get_source_by_id)
-    monkeypatch.setattr(email_endpoint, "create_import_job", _fake_create_import_job)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.create_import_job", _fake_create_import_job)
 
     response = email_search_client.post("/api/v1/email/sources/22/sync")
     assert response.status_code == 200, response.text
@@ -368,7 +368,7 @@ def test_email_source_sync_endpoint_returns_404_for_missing_source(
     async def _fake_get_source_by_id(_db, _user_id, _source_id):
         return None
 
-    monkeypatch.setattr(email_endpoint, "get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_id", _fake_get_source_by_id)
     response = email_search_client.post("/api/v1/email/sources/999/sync")
     assert response.status_code == 404
 
@@ -387,6 +387,6 @@ def test_email_source_sync_endpoint_returns_400_for_non_gmail_source(
             "enabled": True,
         }
 
-    monkeypatch.setattr(email_endpoint, "get_source_by_id", _fake_get_source_by_id)
+    monkeypatch.setattr("tldw_Server_API.app.core.External_Sources.connectors_service.get_source_by_id", _fake_get_source_by_id)
     response = email_search_client.post("/api/v1/email/sources/12/sync")
     assert response.status_code == 400

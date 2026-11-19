@@ -31,7 +31,6 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
-    get_chacha_db_for_owner,
     get_chacha_db_for_user,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
@@ -39,7 +38,6 @@ from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collecti
 # Dependencies
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
     get_media_db_for_user,
-    managed_media_db_for_owner,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import (
@@ -60,7 +58,6 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.config import get_config_value
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -84,7 +81,6 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
 from tldw_Server_API.app.core.RAG.rag_service import transport as rag_transport
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     AgenticConfig,
-    agentic_rag_pipeline,
 )
 from tldw_Server_API.app.core.RAG.rag_service.agentic_execution import (
     build_agentic_execution_context,
@@ -102,10 +98,6 @@ from tldw_Server_API.app.core.RAG.rag_service.request_resolution import (
     ResolvedRAGRequest,
     resolve_rag_request,
 )
-from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
-    rag_result_from_unified_search_result,
-    rag_result_to_response,
-)
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import (
     RetrievalPlan,
     build_retrieval_plan,
@@ -118,7 +110,6 @@ from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
     classify_rag_provider_error,
     rag_internal_error_event,
     rag_provider_error_event,
-    stream_rag_events,
 )
 
 # Unified Pipeline
@@ -126,8 +117,6 @@ from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     UnifiedSearchResult,  # noqa: F401 - compatibility export for endpoint adapters
     advanced_search,
     simple_search,
-    unified_batch_pipeline,
-    unified_rag_pipeline,
 )
 
 _BATCH_ROUND2_DEFAULT_FIELDS = {
@@ -185,7 +174,7 @@ def _build_credential_runtime_for_scope(
 ) -> ProviderCredentialRuntime:
     """Create a provider runtime from an already trusted execution scope."""
 
-    return ProviderCredentialRuntime(
+    return _provider_credential_runtime.ProviderCredentialRuntime(
         user_id=user_id,
         team_ids=team_ids,
         org_ids=org_ids,
@@ -220,14 +209,20 @@ _RAG_OTHER_LLM_STAGES = (
 )
 # Every other switch of the RAG request schemas makes no LLM call of its own, or makes it only inside a listed
 # stage; test_rag_agentic_api.py's _NO_OTHER_LLM_CALL declares each one (TASK-15427).
+# Of those, the stages that run only after the answer; /search/stream's retrieval step generates nothing (TASK-15482),
+# so it never runs them. The rest run there (claims in the streamer, the others in retrieval); a test pins both sets.
+_RAG_STREAM_SKIPPED_LLM_STAGES = frozenset({
+    "enable_fast_hallucination_check", "enable_utility_grading", "enable_post_verification",
+    "enable_multi_turn_synthesis", "enable_suggestions", "enable_faithfulness_eval",
+})
 
 
-def _rag_llm_providers(settings: Mapping[str, Any]) -> list[str | None]:
+def _rag_llm_providers(settings: Mapping[str, Any], *, stream: bool = False) -> list[str | None]:
     """The provider of each LLM call a RAG request makes, for ``enforce_llm_quota`` (TASK-13956).
 
     The answer's provider, as the generator resolves it, and the reformulation's when a chat history
     is reformulated, both canonical (TASK-15427). Any other LLM stage adds None, so an over-limit user
-    is refused as before.
+    is refused as before. ``stream`` leaves out the stages the stream does not run (TASK-15488).
     """
     # ponytail: a stage this list misses is still checked at its own call (refused there, never counted).
     from tldw_Server_API.app.core.config import load_and_log_configs
@@ -244,7 +239,11 @@ def _rag_llm_providers(settings: Mapping[str, Any]) -> list[str | None]:
         str(settings.get("strategy") or "standard") != "standard"
         or settings.get("search_depth_mode") == "quality"
         or (settings.get("enable_reranking", True) and settings.get("reranking_strategy") in {"llm_scoring", "two_tier"})
-        or any(settings.get(flag) for flag in _RAG_OTHER_LLM_STAGES)
+        or any(
+            settings.get(flag)
+            for flag in _RAG_OTHER_LLM_STAGES
+            if not (stream and flag in _RAG_STREAM_SKIPPED_LLM_STAGES)
+        )
     ):
         providers.append(None)
     return providers
@@ -362,7 +361,7 @@ def _search_agent_setting(env_key: str, config_key: str) -> Optional[str]:
     if env_value is not None:
         return env_value
     try:
-        return get_config_value("Search-Agent", config_key, default=None)
+        return _config.get_config_value("Search-Agent", config_key, default=None)
     except (TypeError, ValueError):
         return None
 
@@ -816,7 +815,17 @@ def _build_source_health_source_sets(
 
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
-from tldw_Server_API.app.core.RAG.rag_service.analytics_system import UnifiedFeedbackSystem
+import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
+import tldw_Server_API.app.api.v1.API_Deps.DB_Deps as _DB_Deps
+import tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps as _Prompts_DB_Deps
+import tldw_Server_API.app.api.v1.API_Deps.billing_deps as _billing_deps
+import tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime as _provider_credential_runtime
+import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as _agentic_chunker
+import tldw_Server_API.app.core.RAG.rag_service.analytics_system as _analytics_system
+import tldw_Server_API.app.core.RAG.rag_service.response_mapping as _response_mapping
+import tldw_Server_API.app.core.RAG.rag_service.streaming_executor as _streaming_executor
+import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as _unified_pipeline
+import tldw_Server_API.app.core.config as _config
 
 router = APIRouter(prefix="/api/v1/rag", tags=["rag-unified"])
 
@@ -910,20 +919,20 @@ async def rag_ablate(
 
         runs = []
 
-        r1 = await unified_rag_pipeline(**common, enable_reranking=False)
+        r1 = await _unified_pipeline.unified_rag_pipeline(**common, enable_reranking=False)
         runs.append({
             "label": "baseline",
-            "result": rag_result_to_response(rag_result_from_unified_search_result(r1)),
+            "result": _response_mapping.rag_result_to_response(_response_mapping.rag_result_from_unified_search_result(r1)),
         })
 
-        r2 = await unified_rag_pipeline(
+        r2 = await _unified_pipeline.unified_rag_pipeline(
             **common,
             enable_reranking=True,
             reranking_strategy=request.reranking_strategy,
         )
         runs.append({
             "label": "+rerank",
-            "result": rag_result_to_response(rag_result_from_unified_search_result(r2)),
+            "result": _response_mapping.rag_result_to_response(_response_mapping.rag_result_from_unified_search_result(r2)),
         })
 
         a_cfg = AgenticConfig(
@@ -936,14 +945,14 @@ async def rag_ablate(
             enable_tools=False,
             debug_trace=False,
         )
-        r3 = await agentic_rag_pipeline(
+        r3 = await _agentic_chunker.agentic_rag_pipeline(
             **common,
             agentic=a_cfg,
             enable_citations=False,
         )
         runs.append({
             "label": "agentic",
-            "result": rag_result_to_response(rag_result_from_unified_search_result(r3)),
+            "result": _response_mapping.rag_result_to_response(_response_mapping.rag_result_from_unified_search_result(r3)),
         })
 
         a_cfg_strict = AgenticConfig(
@@ -957,14 +966,14 @@ async def rag_ablate(
             time_budget_sec=5.0,
             debug_trace=False,
         )
-        r4 = await agentic_rag_pipeline(
+        r4 = await _agentic_chunker.agentic_rag_pipeline(
             **common,
             agentic=a_cfg_strict,
             enable_citations=False,
         )
         runs.append({
             "label": "agentic_strict",
-            "result": rag_result_to_response(rag_result_from_unified_search_result(r4)),
+            "result": _response_mapping.rag_result_to_response(_response_mapping.rag_result_from_unified_search_result(r4)),
         })
 
         out = []
@@ -1547,7 +1556,7 @@ async def unified_search_endpoint(
             )
 
             try:
-                result = await agentic_rag_pipeline(
+                result = await _agentic_chunker.agentic_rag_pipeline(
                     query=resolved_request.query,
                     sources=list(retrieval_plan.sources),
                     media_db=media_db,
@@ -1602,10 +1611,10 @@ async def unified_search_endpoint(
             kwargs = dict(standard_bundle.pipeline_kwargs)
             kwargs["credential_runtime"] = credential_runtime
             _sync_retriever_overrides_to_pipeline()
-            result = await unified_rag_pipeline(**kwargs)
+            result = await _unified_pipeline.unified_rag_pipeline(**kwargs)
 
         # Convert to response format
-        response = rag_result_to_response(rag_result_from_unified_search_result(result))
+        response = _response_mapping.rag_result_to_response(_response_mapping.rag_result_from_unified_search_result(result))
 
         # Best-effort RAG query usage logging for billing/analytics.
         await _log_rag_queries_for_org(request_raw, current_user, units=1)
@@ -1654,7 +1663,7 @@ async def rag_implicit_feedback(
         if not implicit_feedback_enabled():
             return {"ok": True, "disabled": True}
         user_id = _resolve_implicit_feedback_user_id(request.user_id, current_user)
-        collector = UnifiedFeedbackSystem()
+        collector = _analytics_system.UnifiedFeedbackSystem()
         await collector.record_implicit_interaction(
             user_id=user_id,
             query=request.query,
@@ -1721,7 +1730,7 @@ async def unified_batch_endpoint(
 
     try:
         requested_units = len(request.queries or [])
-        limit_checker = require_within_limit(LimitCategory.RAG_QUERIES_DAY, requested_units)
+        limit_checker = _billing_deps.require_within_limit(LimitCategory.RAG_QUERIES_DAY, requested_units)
         org_header = request_raw.headers.get("X-TLDW-Org-Id")
         org_query = request_raw.query_params.get("org_id")
         try:
@@ -1822,7 +1831,7 @@ async def unified_batch_endpoint(
 
             on_query_done = _on_query_done
 
-        results = await unified_batch_pipeline(
+        results = await _unified_pipeline.unified_batch_pipeline(
             queries=request.queries,
             max_concurrent=request.max_concurrent,
             media_db=media_db,
@@ -1833,7 +1842,7 @@ async def unified_batch_endpoint(
         )
 
         # Convert results
-        responses = [rag_result_to_response(rag_result_from_unified_search_result(r)) for r in results]
+        responses = [_response_mapping.rag_result_to_response(_response_mapping.rag_result_from_unified_search_result(r)) for r in results]
 
         # Count successes and failures
         successful = sum(1 for r in results if not r.errors)
@@ -2024,7 +2033,7 @@ async def resume_batch_endpoint(
     prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ):
     """Resume a batch RAG operation from a previously saved checkpoint."""
-    credential_runtime: ProviderCredentialRuntime | None = None
+    credential_runtime: _provider_credential_runtime.ProviderCredentialRuntime | None = None
     owner_resource_stack = ExitStack()
 
     try:
@@ -2115,10 +2124,10 @@ async def resume_batch_endpoint(
                     )
                 )
                 execution_media_db = owner_resource_stack.enter_context(
-                    managed_media_db_for_owner(owner_user_id)
+                    _DB_Deps.managed_media_db_for_owner(owner_user_id)
                 )
-                execution_chacha_db = await get_chacha_db_for_owner(owner_user_id)
-                execution_prompts_db = await get_prompts_db_for_user(
+                execution_chacha_db = await _ChaCha_Notes_DB_Deps.get_chacha_db_for_owner(owner_user_id)
+                execution_prompts_db = await _Prompts_DB_Deps.get_prompts_db_for_user(
                     request_raw,
                     execution_user,
                 )
@@ -2204,7 +2213,7 @@ async def resume_batch_endpoint(
             except Exception as _cp_err:  # noqa: BLE001 - checkpoint should not fail request
                 logger.warning(f"Checkpoint incremental save failed: {_cp_err}")
 
-        results = await unified_batch_pipeline(
+        results = await _unified_pipeline.unified_batch_pipeline(
             queries=remaining_queries,
             max_concurrent=max_concurrent,
             on_query_done=_on_query_done,
@@ -2215,7 +2224,7 @@ async def resume_batch_endpoint(
             **kwargs,
         )
 
-        responses = [rag_result_to_response(rag_result_from_unified_search_result(r)) for r in results]
+        responses = [_response_mapping.rag_result_to_response(_response_mapping.rag_result_from_unified_search_result(r)) for r in results]
         successful = sum(1 for r in results if not r.errors)
         failed = len(results) - successful
         total_time = time.time() - start_time
@@ -2311,7 +2320,9 @@ async def unified_search_stream_endpoint(
     # Usage quotas (LLM usage accounting spec §4a), before the streaming response starts. The providers come
     # from the resolved request, which carries a profile's switches and the server's search defaults (TASK-13956).
     resolved_settings = _resolved_rag_settings(request, current_user)
-    await enforce_llm_quota(getattr(current_user, "id", None), provider=_rag_llm_providers(resolved_settings))
+    await enforce_llm_quota(
+        getattr(current_user, "id", None), provider=_rag_llm_providers(resolved_settings, stream=True)
+    )
     request = _apply_media_collection_scope(request, collections_db)
 
     # Streaming search counts as a single RAG query.
@@ -2364,16 +2375,16 @@ async def unified_search_stream_endpoint(
     }
 
     async def event_generator():
-        credential_runtime: ProviderCredentialRuntime | None = None
+        credential_runtime: _provider_credential_runtime.ProviderCredentialRuntime | None = None
         rag_stream: Any = None
         output_emitted = False
         try:
             credential_runtime = _build_credential_runtime(request_raw, current_user)
-            rag_stream = stream_rag_events(
+            rag_stream = _streaming_executor.stream_rag_events(
                 resolved_request=resolved_request,
                 retrieval_plan=stream_bundle.retrieval_plan,
-                standard_pipeline=unified_rag_pipeline,
-                agentic_pipeline=agentic_rag_pipeline,
+                standard_pipeline=_unified_pipeline.unified_rag_pipeline,
+                agentic_pipeline=_agentic_chunker.agentic_rag_pipeline,
                 extra_context={
                     **base_stream_context,
                     "credential_runtime": credential_runtime,
@@ -2487,7 +2498,7 @@ async def advanced_search_endpoint(
             **db_paths
         )
 
-        return rag_result_to_response(rag_result_from_unified_search_result(result))
+        return _response_mapping.rag_result_to_response(_response_mapping.rag_result_from_unified_search_result(result))
 
     except _RAG_PROVIDER_FAILURES as exc:
         raise_detached_error(_rag_provider_http_exception(exc))

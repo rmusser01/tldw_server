@@ -52,7 +52,7 @@ def test_skill_command_system_mode_injects_output_and_preserves_args(
         captured["messages"] = kwargs.get("messages_payload")
         return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
 
     payload = {
         "model": "openai/gpt-4o-mini",
@@ -105,7 +105,7 @@ def test_skill_command_preface_mode_prefixes_user_message(
         captured["messages"] = kwargs.get("messages_payload")
         return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
 
     payload = {
         "model": "openai/gpt-4o-mini",
@@ -157,7 +157,7 @@ def test_skill_command_replace_mode_uses_fork_output(
         captured["messages"] = kwargs.get("messages_payload")
         return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
 
     payload = {
         "model": "openai/gpt-4o-mini",
@@ -207,7 +207,7 @@ def test_skills_command_system_mode_lists_invocable_skills(
         captured["messages"] = kwargs.get("messages_payload")
         return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
 
     payload = {
         "model": "openai/gpt-4o-mini",

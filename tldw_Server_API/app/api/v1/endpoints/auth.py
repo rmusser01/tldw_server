@@ -68,8 +68,6 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
 )
-from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
-from tldw_Server_API.app.core.AuthNZ.auth_governor import get_auth_governor
 from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     resolve_effective_csrf_enabled,
@@ -104,20 +102,17 @@ from tldw_Server_API.app.core.AuthNZ.lockout_tracker import (
     build_login_client_lockout_key,
     validate_login_client_lockout_key,
 )
-from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.identity_provider_repo import IdentityProviderRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
-from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_profile, get_settings
+from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
 from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     clear_single_user_session_cookie,
     mint_single_user_session,
     set_single_user_session_cookie,
-    validate_single_user_session,
 )
-from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
 from tldw_Server_API.app.core.AuthNZ.transaction_policy import get_authnz_transaction_policy
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor, RGRequest
@@ -130,9 +125,6 @@ from tldw_Server_API.app.core.testing import (
     is_test_context,
 )
 from tldw_Server_API.app.core.testing import (
-    is_test_mode as _is_test_mode,
-)
-from tldw_Server_API.app.core.testing import (
     is_truthy as _is_truthy,
 )
 from tldw_Server_API.app.services.auth_service import (
@@ -140,9 +132,6 @@ from tldw_Server_API.app.services.auth_service import (
 )
 from tldw_Server_API.app.services.auth_service import (
     consume_magic_link,
-    fetch_active_user_by_id,
-    fetch_user_by_login_identifier,
-    update_user_last_login,
     update_user_password_hash,
 )
 from tldw_Server_API.app.services.auth_service import (
@@ -165,6 +154,15 @@ from tldw_Server_API.app.services.auth_service import (
 )
 from tldw_Server_API.app.services.registration_service import RegistrationService
 from tldw_Server_API.app.services.storage_quota_service import resolved_storage_quota_mb
+import tldw_Server_API.app.core.AuthNZ.api_key_manager as _api_key_manager
+import tldw_Server_API.app.core.AuthNZ.auth_governor as _auth_governor
+import tldw_Server_API.app.core.AuthNZ.jwt_service as _jwt_service
+import tldw_Server_API.app.core.AuthNZ.orgs_teams as _orgs_teams
+import tldw_Server_API.app.core.AuthNZ.settings as __settings
+import tldw_Server_API.app.core.AuthNZ.single_user_session as _single_user_session
+import tldw_Server_API.app.core.AuthNZ.token_blacklist as _token_blacklist
+import tldw_Server_API.app.core.testing as _testing
+import tldw_Server_API.app.services.auth_service as _auth_service
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -250,7 +248,7 @@ async def _resolve_federation_provider(
 def _build_federation_redirect_uri(request: Request, provider_slug: str) -> str:
     """Build the callback redirect URI, replacing request authority with public base when configured."""
     callback_url = request.url_for("federation_callback", provider_slug=provider_slug)
-    public_web_base_url = str(getattr(get_settings(), "PUBLIC_WEB_BASE_URL", "") or "").strip()
+    public_web_base_url = str(getattr(__settings.get_settings(), "PUBLIC_WEB_BASE_URL", "") or "").strip()
     if not public_web_base_url:
         return str(callback_url)
 
@@ -322,7 +320,7 @@ async def _is_mfa_backend_supported() -> bool:
 
 async def _ensure_mfa_available():
     """Validate MFA endpoints are allowed under current configuration."""
-    settings = get_settings()
+    settings = __settings.get_settings()
     if settings.AUTH_MODE != "multi_user":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -380,7 +378,7 @@ async def _safe_audit_log_login_event(
             success=success,
         )
         flush_on_login = _env_flag_enabled("AUDIT_FLUSH_ON_LOGIN")
-        test_mode = _is_test_mode()
+        test_mode = _testing.is_test_mode()
         if flush_on_login or test_mode:
             await svc.flush()
     except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
@@ -439,7 +437,7 @@ async def _issue_multi_user_tokens(
         access_token=access_token,
         refresh_token=refresh_token,
     )
-    await update_user_last_login(db, user_id, datetime.utcnow())
+    await _auth_service.update_user_last_login(db, user_id, datetime.utcnow())
     await _safe_audit_log_login_event(
         user_id=user_id,
         username=username,
@@ -825,7 +823,7 @@ async def _mark_user_verified(user_id: int, now_utc: datetime) -> None:
     """
     pool = await get_db_pool()
     async with pool.transaction() as conn:
-        await _svc_mark_user_verified(conn, user_id, now_utc)
+        await _auth_service.mark_user_verified(conn, user_id, now_utc)
 
 
 def _current_user_username(user: Any) -> str:
@@ -945,7 +943,7 @@ async def _provision_federated_user(
 async def _ensure_user_org_membership(user_id: int, username: Optional[str] = None) -> None:
     """Ensure a user has at least one org membership; create a personal org if not."""
     try:
-        memberships = await list_memberships_for_user(int(user_id))
+        memberships = await _orgs_teams.list_memberships_for_user(int(user_id))
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         memberships = []
     if memberships:
@@ -996,7 +994,7 @@ def _is_enterprise_admin_ui_mode() -> bool:
 
 def _auth_request_client_ip(request: Request) -> str:
     try:
-        settings = get_settings()
+        settings = __settings.get_settings()
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         settings = None
     try:
@@ -1262,7 +1260,7 @@ async def create_single_user_cookie_session(
     session_manager: SessionManager = Depends(get_session_manager_dep),
 ) -> SingleUserSessionResponse:
     """Mint or reuse an opaque session for an explicit single-user API key."""
-    settings = get_settings()
+    settings = __settings.get_settings()
     if settings.AUTH_MODE != "single_user":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     raw_api_key = request.headers.get("X-API-KEY")
@@ -1281,7 +1279,7 @@ async def create_single_user_cookie_session(
     response.headers["Cache-Control"] = "no-store"
 
     try:
-        identity = await validate_single_user_session(
+        identity = await _single_user_session.validate_single_user_session(
             request,
             session_manager,
             strict=True,
@@ -1322,11 +1320,11 @@ async def delete_single_user_cookie_session(
     session_manager: SessionManager = Depends(get_session_manager_dep),
 ) -> SingleUserSessionLogoutResponse:
     """Revoke exactly the current opaque single-user session and clear its cookie."""
-    if get_settings().AUTH_MODE != "single_user":
+    if __settings.get_settings().AUTH_MODE != "single_user":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     try:
-        identity = await validate_single_user_session(
+        identity = await _single_user_session.validate_single_user_session(
             request,
             session_manager,
             strict=True,
@@ -1366,7 +1364,7 @@ async def delete_single_user_cookie_session(
 
 async def _build_scope_claims(user_id: int) -> dict[str, Any]:
     try:
-        memberships = await list_memberships_for_user(int(user_id))
+        memberships = await _orgs_teams.list_memberships_for_user(int(user_id))
     except asyncio.CancelledError:
         raise
     except _AUTH_NONCRITICAL_EXCEPTIONS:
@@ -1394,7 +1392,7 @@ async def _register_runtime_diag(request: Request, response: Response):
     - X-TLDW-CSRF-Enabled: 'true' or 'false' from runtime settings
     - X-TLDW-Register-Duration-ms: handler duration in ms (set after return)
     """
-    test_mode = _is_test_mode()
+    test_mode = _testing.is_test_mode()
     if not test_mode:
         # No-op when not in test mode
         return
@@ -1431,7 +1429,7 @@ def _finalize_register_diag(request: Request, response: Response):
 
 async def _login_runtime_diag(request: Request, response: Response):
     """Diagnostics for login (TEST_MODE only): annotate DB backend and CSRF state, capture start time."""
-    test_mode = _is_test_mode()
+    test_mode = _testing.is_test_mode()
     if not test_mode:
         return
     import time as _t
@@ -1495,7 +1493,7 @@ async def mint_self_virtual_key(
     role = _principal_primary_role(current_user)
 
     try:
-        svc = JWTService(settings)
+        svc = _jwt_service.JWTService(settings)
         add_claims: dict[str, Any] = {}
         if body.allowed_endpoints:
             add_claims["allowed_endpoints"] = [str(x) for x in body.allowed_endpoints]
@@ -1585,7 +1583,7 @@ async def login(
     """
     start_time = time.perf_counter()
     log_counter("auth_login_attempt")
-    auth_gov = await get_auth_governor()
+    auth_gov = await _auth_governor.get_auth_governor()
     try:
         # Get client info and normalize the identifier as the database lookup does.
         client_ip = _auth_request_client_ip(request)
@@ -1641,7 +1639,7 @@ async def login(
                 )
                 # Persist immediately for observability (tests/admin tools) without relying on background loops.
                 flush_on_login = _env_flag_enabled("AUDIT_FLUSH_ON_LOGIN")
-                test_mode = _is_test_mode()
+                test_mode = _testing.is_test_mode()
                 if flush_on_login or test_mode:
                     await svc.flush()
             except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
@@ -1654,7 +1652,7 @@ async def login(
                 )
 
         # Fetch user from database using sanitized identifier
-        user = await fetch_user_by_login_identifier(db, login_identifier)
+        user = await _auth_service.fetch_user_by_login_identifier(db, login_identifier)
 
         # Check if user exists
         if not user:
@@ -1677,7 +1675,7 @@ async def login(
             with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 _finalize_login_diag(request, response)
             extra_headers = {"WWW-Authenticate": "Bearer"}
-            if _is_test_mode():
+            if _testing.is_test_mode():
                 extra_headers["X-TLDW-Login-Reason"] = "user-not-found"
                 # Stage marker to aid triage in test runs
                 extra_headers["X-TLDW-Login-Stage"] = "user_fetch"
@@ -1724,7 +1722,7 @@ async def login(
                 )
 
         # Verify password
-        is_test_mode = _is_test_mode()
+        is_test_mode = _testing.is_test_mode()
         is_valid, needs_rehash = password_service.verify_password(form_data.password, user['password_hash'])
         # In TEST_MODE, double-check with a fresh PasswordService to rule out stale settings
         if not is_valid and is_test_mode:
@@ -1789,7 +1787,7 @@ async def login(
             with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 _finalize_login_diag(request, response)
             extra_headers = {"WWW-Authenticate": "Bearer"}
-            if _is_test_mode():
+            if _testing.is_test_mode():
                 extra_headers["X-TLDW-Login-Reason"] = "invalid-password"
                 # Stage marker to aid triage in test runs
                 extra_headers["X-TLDW-Login-Stage"] = "verify_password"
@@ -1950,7 +1948,7 @@ async def login(
 
 
         # Update last login time
-        await update_user_last_login(db, int(user['id']), datetime.utcnow())
+        await _auth_service.update_user_last_login(db, int(user['id']), datetime.utcnow())
 
         # Log successful login
         if settings.PII_REDACT_LOGS:
@@ -1996,7 +1994,7 @@ async def login(
         logger.exception("Login error")
         log_counter("auth_login_unexpected_error")
         log_histogram("auth_login_duration", time.perf_counter() - start_time)
-        if _is_test_mode():  # expose details in tests
+        if _testing.is_test_mode():  # expose details in tests
             try:
                 response.headers["X-TLDW-Login-Error"] = "internal-error"
                 _finalize_login_diag(request, response)
@@ -2068,7 +2066,7 @@ async def logout(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Current-session logout requires a bearer token. Use all_devices=true to revoke all sessions.",
                 )
-            blacklist = get_token_blacklist()
+            blacklist = _token_blacklist.get_token_blacklist()
             payload = {}
             try:
                 # NOTE: Using sync verify_token() here is acceptable - we're extracting
@@ -2128,7 +2126,7 @@ async def logout(
 
         # PII-aware logging
         try:
-            _settings = get_settings()
+            _settings = __settings.get_settings()
         except _AUTH_NONCRITICAL_EXCEPTIONS:
             _settings = None
         if _settings and getattr(_settings, 'PII_REDACT_LOGS', False):
@@ -2326,7 +2324,7 @@ async def refresh_token(
     log_counter("auth_refresh_attempt")
     try:
         # TEST_MODE diagnostics (set DB and CSRF headers for easier triage)
-        if _is_test_mode():
+        if _testing.is_test_mode():
             try:
                 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool as _get_pool
                 pool = await _get_pool()
@@ -2350,7 +2348,7 @@ async def refresh_token(
                     raise InvalidTokenError("Invalid refresh token format")
                 user_id = int(getattr(settings, "SINGLE_USER_FIXED_ID", 1))
             else:
-                if _is_test_mode():
+                if _testing.is_test_mode():
                     try:
                         response.headers["X-TLDW-Refresh-Stage"] = "validate"
                         response.headers["X-TLDW-Refresh-Reason"] = "invalid-format"
@@ -2362,7 +2360,7 @@ async def refresh_token(
             try:
                 token_payload = jwt_service.decode_refresh_token(payload.refresh_token)
             except _AUTH_NONCRITICAL_EXCEPTIONS as _e:
-                if _is_test_mode():
+                if _testing.is_test_mode():
                     try:
                         response.headers["X-TLDW-Refresh-Stage"] = "decode"
                         response.headers["X-TLDW-Refresh-Reason"] = f"invalid-token:{type(_e).__name__}"
@@ -2374,7 +2372,7 @@ async def refresh_token(
             if await session_manager.is_token_blacklisted(
                 payload.refresh_token, token_payload.get("jti"), strict=True
             ):
-                if _is_test_mode():
+                if _testing.is_test_mode():
                     try:
                         response.headers["X-TLDW-Refresh-Stage"] = "blacklist"
                         response.headers["X-TLDW-Refresh-Reason"] = "revoked"
@@ -2385,7 +2383,7 @@ async def refresh_token(
             # JWT standard uses 'sub' for subject (user ID)
             raw_user_id = token_payload.get("sub") or token_payload.get("user_id")
             if not raw_user_id:
-                if _is_test_mode():
+                if _testing.is_test_mode():
                     try:
                         response.headers["X-TLDW-Refresh-Stage"] = "decode"
                         response.headers["X-TLDW-Refresh-Reason"] = "missing-user-id"
@@ -2397,7 +2395,7 @@ async def refresh_token(
             try:
                 user_id = int(raw_user_id)
             except (ValueError, TypeError):
-                if _is_test_mode():
+                if _testing.is_test_mode():
                     try:
                         response.headers["X-TLDW-Refresh-Stage"] = "decode"
                         response.headers["X-TLDW-Refresh-Reason"] = "invalid-user-id"
@@ -2408,10 +2406,10 @@ async def refresh_token(
             session_id = token_payload.get("session_id")
 
         # Fetch user
-        user = await fetch_active_user_by_id(db, user_id)
+        user = await _auth_service.fetch_active_user_by_id(db, user_id)
 
         if not user:
-            if _is_test_mode():
+            if _testing.is_test_mode():
                 try:
                     response.headers["X-TLDW-Refresh-Stage"] = "fetch-user"
                     response.headers["X-TLDW-Refresh-Reason"] = "user-not-found"
@@ -2473,7 +2471,7 @@ async def refresh_token(
                 )
             except (InvalidSessionError, SessionRevokedException) as _sess_e:
                 # Treat missing/invalid session mapping as invalid token usage
-                if _is_test_mode():
+                if _testing.is_test_mode():
                     try:
                         response.headers.setdefault("X-TLDW-Refresh-Stage", "session")
                         response.headers.setdefault("X-TLDW-Refresh-Reason", f"session-error:{type(_sess_e).__name__}")
@@ -2515,7 +2513,7 @@ async def refresh_token(
         log_counter("auth_refresh_success")
         log_histogram("auth_refresh_duration", time.perf_counter() - start_time)
         # TEST_MODE: include simple duration metric header (non-breaking)
-        if _is_test_mode():
+        if _testing.is_test_mode():
             with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Refresh-Duration-ms"] = str(int((time.perf_counter() - start_time) * 1000))
         return TokenResponse(
@@ -2537,7 +2535,7 @@ async def refresh_token(
         logger.warning(f"Token refresh failed: {e}")
         log_counter("auth_refresh_token_error", labels={"type": type(e).__name__})
         log_histogram("auth_refresh_duration", time.perf_counter() - start_time)
-        if _is_test_mode():
+        if _testing.is_test_mode():
             try:
                 response.headers.setdefault("X-TLDW-Refresh-Stage", "error")
                 response.headers.setdefault("X-TLDW-Refresh-Reason", type(e).__name__)
@@ -2552,7 +2550,7 @@ async def refresh_token(
         logger.error(f"Token refresh error: {e}")
         log_counter("auth_refresh_unexpected_error")
         log_histogram("auth_refresh_duration", time.perf_counter() - start_time)
-        if _is_test_mode():
+        if _testing.is_test_mode():
             try:
                 response.headers["X-TLDW-Refresh-Stage"] = "unexpected"
                 response.headers["X-TLDW-Refresh-Reason"] = "internal-error"
@@ -2739,10 +2737,10 @@ async def reset_password(
         )
 
         # Revoke all existing sessions for security
-        blacklist = get_token_blacklist()
+        blacklist = _token_blacklist.get_token_blacklist()
         await blacklist.revoke_all_user_tokens(user_id, "Password reset")
 
-        if get_settings().PII_REDACT_LOGS:
+        if __settings.get_settings().PII_REDACT_LOGS:
             logger.info("Password reset completed for authenticated user (details redacted)")
         else:
             logger.info(f"Password reset completed for user {user_id}")
@@ -2807,7 +2805,7 @@ async def verify_email(
                 detail="Invalid or expired verification token",
             )
 
-        if get_settings().PII_REDACT_LOGS:
+        if __settings.get_settings().PII_REDACT_LOGS:
             logger.info("Email verified for authenticated user (details redacted)")
         else:
             logger.info(f"Email verified for user {user_id}")
@@ -2892,7 +2890,7 @@ async def request_magic_link(
 
     Always returns a generic success message to avoid user enumeration.
     """
-    settings = get_settings()
+    settings = __settings.get_settings()
     if settings.AUTH_MODE != "multi_user":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2930,7 +2928,7 @@ async def request_magic_link(
     if not email_allowed:
         return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
 
-    user = await fetch_user_by_login_identifier(db, email)
+    user = await _auth_service.fetch_user_by_login_identifier(db, email)
     user_id = int(user["id"]) if user and user.get("id") is not None else None
 
     # If registration is disabled and user doesn't exist, do not send an email.
@@ -2974,7 +2972,7 @@ async def request_admin_reauth(
     jwt_service: JWTService = Depends(get_jwt_service_dep),
 ) -> MessageResponse:
     """Email a purpose-scoped admin reauthentication link to the acting admin."""
-    settings = get_settings()
+    settings = __settings.get_settings()
     if settings.AUTH_MODE != "multi_user":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2996,7 +2994,7 @@ async def request_admin_reauth(
     email = _normalize_magic_email(_current_user_value(current_user, "email", ""))
     username = _current_user_username(current_user)
     if not email:
-        actor = await fetch_active_user_by_id(db, int(user_id))
+        actor = await _auth_service.fetch_active_user_by_id(db, int(user_id))
         if actor:
             email = _normalize_magic_email(actor.get("email") or "")
             username = str(actor.get("username") or username)
@@ -3052,7 +3050,7 @@ async def verify_magic_link(
     An already consumed link returns 400. If storage cannot confirm consumption,
     the server returns 503. Request a fresh link if sign-in fails after consumption.
     """
-    settings = get_settings()
+    settings = __settings.get_settings()
     if settings.AUTH_MODE != "multi_user":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -3102,9 +3100,9 @@ async def verify_magic_link(
 
     user: Optional[dict[str, Any]] = None
     if user_id is not None:
-        user = await fetch_active_user_by_id(db, int(user_id))
+        user = await _auth_service.fetch_active_user_by_id(db, int(user_id))
     if not user and email:
-        user = await fetch_user_by_login_identifier(db, email)
+        user = await _auth_service.fetch_user_by_login_identifier(db, email)
 
     if not user and not settings.ENABLE_REGISTRATION:
         raise HTTPException(
@@ -3128,7 +3126,7 @@ async def verify_magic_link(
         raise HTTPException(status_code=400, detail="Invalid magic link token") from None
 
     try:
-        claimed = await consume_magic_link(
+        claimed = await _auth_service.consume_magic_link(
             db, jti=jti, expires_at=expires_at, actor_id=int(user["id"]) if user else None,
             ip_address=_auth_request_client_ip(request),
         )
@@ -3157,7 +3155,7 @@ async def verify_magic_link(
                 break
             except DuplicateUserError as dupe:
                 if getattr(dupe, "field", None) == "email":
-                    user = await fetch_user_by_login_identifier(db, email)
+                    user = await _auth_service.fetch_user_by_login_identifier(db, email)
                     break
             except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
                 logger.error("Magic link registration failed: {}", exc)
@@ -3170,7 +3168,7 @@ async def verify_magic_link(
             user_id = int(user_info["user_id"])
             # Mark user verified (magic link serves as email verification)
             await _mark_user_verified(user_id, datetime.utcnow())
-            user = await fetch_active_user_by_id(db, user_id)
+            user = await _auth_service.fetch_active_user_by_id(db, user_id)
 
     if not user:
         raise HTTPException(
@@ -3227,7 +3225,7 @@ async def verify_magic_link(
         refresh_token=refresh_token,
     )
 
-    await update_user_last_login(db, int(user["id"]), datetime.utcnow())
+    await _auth_service.update_user_last_login(db, int(user["id"]), datetime.utcnow())
 
     return TokenResponse(
         access_token=access_token,
@@ -3253,7 +3251,7 @@ async def setup_mfa(
     """
     try:
         await _ensure_mfa_available()
-        await _ensure_mfa_cache_available(session_manager, get_settings())
+        await _ensure_mfa_cache_available(session_manager, __settings.get_settings())
         mfa_service = _get_mfa_service()
         user_id = _current_user_id(current_user)
         if user_id is None:
@@ -3333,7 +3331,7 @@ async def verify_mfa_setup(
     """
     try:
         await _ensure_mfa_available()
-        await _ensure_mfa_cache_available(session_manager, get_settings())
+        await _ensure_mfa_cache_available(session_manager, __settings.get_settings())
         mfa_service = _get_mfa_service()
         user_id = _current_user_id(current_user)
         if user_id is None:
@@ -3448,7 +3446,7 @@ async def disable_mfa(
         if user_id is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-        user_record = await fetch_active_user_by_id(db, int(user_id))
+        user_record = await _auth_service.fetch_active_user_by_id(db, int(user_id))
         if not isinstance(user_record, dict):
             try:
                 user_record = dict(user_record) if user_record is not None else None
@@ -3555,7 +3553,7 @@ async def mfa_login(
                 headers={"Retry-After": str(int(retry_after or 1))},
             )
 
-        user = await fetch_active_user_by_id(db, user_id)
+        user = await _auth_service.fetch_active_user_by_id(db, user_id)
         if not isinstance(user, dict):
             try:
                 user = dict(user) if user is not None else None
@@ -3614,7 +3612,7 @@ async def mfa_login(
             refresh_token=refresh_token,
         )
 
-        await update_user_last_login(db, user_id, datetime.utcnow())
+        await _auth_service.update_user_last_login(db, user_id, datetime.utcnow())
 
         # Audit log successful login
         client_ip = _auth_request_client_ip(request)
@@ -3630,7 +3628,7 @@ async def mfa_login(
                     success=success,
                 )
                 flush_on_login = _env_flag_enabled("AUDIT_FLUSH_ON_LOGIN")
-                test_mode = _is_test_mode()
+                test_mode = _testing.is_test_mode()
                 if flush_on_login or test_mode:
                     await svc.flush()
             except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
@@ -3715,11 +3713,11 @@ async def register(
     """
     start_time = time.perf_counter()
     log_counter("auth_register_attempt")
-    settings = get_settings()
+    settings = __settings.get_settings()
     try:
         # Hard constraint for local-single-user profile: do not allow
         # registration of additional users beyond the bootstrapped admin.
-        profile = get_profile()
+        profile = __settings.get_profile()
         if isinstance(profile, str) and profile.strip().lower() in {"local-single-user", "single_user"}:
             if getattr(settings, "PII_REDACT_LOGS", False):
                 logger.warning("Registration attempt rejected in local-single-user profile [redacted]")
@@ -3747,7 +3745,7 @@ async def register(
         api_key_value = None
         try:
             if isinstance(settings.DATABASE_URL, str) and settings.DATABASE_URL.startswith("sqlite"):
-                api_mgr = await get_api_key_manager()
+                api_mgr = await _api_key_manager.get_api_key_manager()
                 key_result = await api_mgr.create_api_key(
                     user_id=int(user_info['user_id']),
                     name="Default API Key",
@@ -3838,7 +3836,7 @@ async def register(
         log_counter("auth_register_duplicate")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
         # Attach diagnostics (if enabled)
-        if _is_test_mode():
+        if _testing.is_test_mode():
             with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "duplicate-user"
         _finalize_register_diag(http_request, response)
@@ -3857,7 +3855,7 @@ async def register(
         logger.warning(f"Registration failed - weak password: {e}")
         log_counter("auth_register_weak_password")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
-        if _is_test_mode():
+        if _testing.is_test_mode():
             with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "weak-password"
         _finalize_register_diag(http_request, response)
@@ -3869,7 +3867,7 @@ async def register(
         logger.warning(f"Registration failed - invalid code: {e}")
         log_counter("auth_register_invalid_code")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
-        if _is_test_mode():
+        if _testing.is_test_mode():
             with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "invalid-registration-code"
         _finalize_register_diag(http_request, response)
@@ -3892,7 +3890,7 @@ async def register(
         logger.error(f"Registration error: {e}")
         log_counter("auth_register_error")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
-        if _is_test_mode():
+        if _testing.is_test_mode():
             with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "registration-error"
         _finalize_register_diag(http_request, response)
@@ -3909,12 +3907,12 @@ async def register(
         logger.error(f"Unexpected registration error: {e}")
         log_counter("auth_register_unexpected_error")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
-        if _is_test_mode():
+        if _testing.is_test_mode():
             with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "internal-error"
         duration = time.perf_counter() - start_time
         _finalize_register_diag(http_request, response)
-        if _is_test_mode():
+        if _testing.is_test_mode():
             try:
                 pool = await get_db_pool()
                 db_backend = "postgres" if getattr(pool, "pool", None) is not None else "sqlite"

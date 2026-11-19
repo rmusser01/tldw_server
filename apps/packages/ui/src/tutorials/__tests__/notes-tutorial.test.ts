@@ -23,19 +23,16 @@ const stepFor = (testId: string) => {
 }
 
 describe("Notes tour copy (NO-02)", () => {
-  it("ends on creating a note without assuming the library is empty", () => {
+  it("introduces creating a note without assuming the library is empty", () => {
     // The tour can be replayed from "?" with notes already in the library.
     const step = stepFor("notes-new-note-button")
     expect(step.titleFallback).toBe("Create a note")
     expect(notesLocale.createTitle).toBe("Create a note")
   })
 
-  it("does not ask the user to open the Filters section, which starts open", () => {
-    const step = stepFor("notes-sort-select")
-    expect(step.contentFallback).not.toMatch(/\bOpen Filters\b/)
-    expect(step.contentFallback).toBe(
-      "Sort the list by date or title. Use Filters below it to narrow the list by tag."
-    )
-    expect(notesLocale.filtersContent).toBe(step.contentFallback)
+  it("shows the keyboard shortcuts for saving a note", () => {
+    const step = stepFor("notes-save-button")
+    expect(step.contentFallback).toContain("Ctrl+S or ⌘S")
+    expect(notesLocale.quickStartSave).toBe(step.contentFallback)
   })
 })

@@ -92,20 +92,17 @@ def _patch_prompt_studio_request_logging(
 ) -> _FakePsLogger:
     ps_logger = _FakePsLogger()
     monkeypatch.setattr(
-        evaluations_endpoint,
-        "ensure_request_id",
+        "tldw_Server_API.app.core.Logging.log_context.ensure_request_id",
         lambda _request: "req-1",
         raising=True,
     )
     monkeypatch.setattr(
-        evaluations_endpoint,
-        "ensure_traceparent",
+        "tldw_Server_API.app.core.Logging.log_context.ensure_traceparent",
         lambda _request: "tp-1",
         raising=True,
     )
     monkeypatch.setattr(
-        evaluations_endpoint,
-        "get_ps_logger",
+        "tldw_Server_API.app.core.Logging.log_context.get_ps_logger",
         lambda **_kwargs: ps_logger,
         raising=True,
     )
@@ -191,14 +188,12 @@ class _NoCredentialRuntime:
 
 def _patch_no_credentials_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        evaluations_endpoint,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: _NoCredentialRuntime(),
         raising=True,
     )
     monkeypatch.setattr(
-        evaluations_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda *_args: (None, [], [], False),
         raising=True,
     )
@@ -236,14 +231,12 @@ async def test_create_evaluation_detaches_byok_error_graph(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        evaluations_endpoint,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         lambda **_kwargs: _ChainedByokRuntime(),
         raising=True,
     )
     monkeypatch.setattr(
-        evaluations_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda *_args: (1, [], [], False),
         raising=True,
     )
@@ -275,8 +268,7 @@ async def test_create_evaluation_detaches_byok_error_graph(monkeypatch):
 async def test_create_evaluation_maps_database_error(monkeypatch):
     ps_logger = _patch_prompt_studio_request_logging(monkeypatch)
     monkeypatch.setattr(
-        evaluations_endpoint,
-        "EvaluationManager",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager.EvaluationManager",
         _BrokenCreateEvaluationManager,
         raising=True,
     )
@@ -313,8 +305,7 @@ async def test_create_evaluation_maps_database_error(monkeypatch):
 async def test_list_evaluations_maps_database_error(monkeypatch):
     ps_logger = _patch_prompt_studio_request_logging(monkeypatch)
     monkeypatch.setattr(
-        evaluations_endpoint,
-        "EvaluationManager",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager.EvaluationManager",
         _BrokenEvaluationManager,
         raising=True,
     )
@@ -395,8 +386,7 @@ async def test_delete_missing_evaluation_is_404():
 async def test_create_evaluation_sanitizes_unexpected_error(monkeypatch):
     ps_logger = _patch_prompt_studio_request_logging(monkeypatch)
     monkeypatch.setattr(
-        evaluations_endpoint,
-        "EvaluationManager",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager.EvaluationManager",
         _UnexpectedCreateEvaluationManager,
         raising=True,
     )
@@ -427,8 +417,7 @@ async def test_create_evaluation_sanitizes_unexpected_error(monkeypatch):
 async def test_list_evaluations_sanitizes_unexpected_error(monkeypatch):
     ps_logger = _patch_prompt_studio_request_logging(monkeypatch)
     monkeypatch.setattr(
-        evaluations_endpoint,
-        "EvaluationManager",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager.EvaluationManager",
         _UnexpectedEvaluationManager,
         raising=True,
     )

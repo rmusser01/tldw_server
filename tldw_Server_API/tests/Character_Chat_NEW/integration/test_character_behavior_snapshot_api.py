@@ -2653,7 +2653,7 @@ def test_auto_summary_writer_uses_transactional_conversation_identity(
         return settings
 
     monkeypatch.setattr(character_db, "get_conversation_by_id", lambda *_args, **_kwargs: stale)
-    monkeypatch.setattr(sessions, "validate_chat_settings_storage", _capture)
+    monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.chat_settings_validation.validate_chat_settings_storage", _capture)
 
     sessions._persist_auto_summary_to_settings(
         character_db,
@@ -2809,7 +2809,7 @@ def test_pin_writer_uses_transactional_conversation_identity(
         return settings
 
     monkeypatch.setattr(character_db, "get_conversation_by_id", lambda *_args, **_kwargs: stale)
-    monkeypatch.setattr(messages, "validate_chat_settings_storage", _capture)
+    monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.chat_settings_validation.validate_chat_settings_storage", _capture)
 
     response = test_client.put(
         "/api/v1/messages/writer-race-message",
@@ -3335,8 +3335,7 @@ def test_combined_content_pin_update_rolls_back_on_materialization_failure(
         raise InputError("forced pin materialization failure")
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "materialize_roleplay_behavior_settings",
+        "tldw_Server_API.app.core.Character_Chat.character_conversation_factory.materialize_roleplay_behavior_settings",
         _fail_materialization,
     )
 

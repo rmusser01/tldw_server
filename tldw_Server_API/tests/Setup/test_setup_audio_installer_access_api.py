@@ -49,7 +49,7 @@ def _shared_audio_setup(monkeypatch):
         "recommend_audio_bundles",
         lambda *args, **kwargs: {"recommendations": [], "excluded": []},
     )
-    monkeypatch.setattr(setup_endpoint, "get_audio_bundle_catalog", lambda: _BundleCatalogStub())
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.audio_bundle_catalog.get_audio_bundle_catalog", lambda: _BundleCatalogStub())
     monkeypatch.setattr(
         setup_endpoint.install_manager,
         "get_install_status_snapshot",

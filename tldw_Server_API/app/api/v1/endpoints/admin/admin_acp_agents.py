@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPAgentConfigCreate,
     ACPAgentConfigListResponse,
@@ -41,7 +41,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.execution_health import (
     summarize_execution_health,
 )
 from tldw_Server_API.app.core.Usage.pricing_catalog import compute_token_cost
-from tldw_Server_API.app.services.admin_acp_sessions_service import get_acp_session_store
+import tldw_Server_API.app.services.admin_acp_sessions_service as _admin_acp_sessions_service
 
 router = APIRouter(tags=["admin-acp"])
 
@@ -102,7 +102,7 @@ async def admin_list_acp_sessions(
     offset: int = Query(default=0, ge=0),
 ) -> ACPSessionListResponse:
     """Admin cross-user view of all ACP sessions."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
 
     has_ws_fn = _get_ws_checker()
     records, total = await store.list_sessions(
@@ -133,7 +133,7 @@ async def admin_list_acp_sessions(
 @router.get("/acp/sessions/{session_id}/usage", response_model=ACPSessionUsageResponse)
 async def admin_acp_session_usage(session_id: str) -> ACPSessionUsageResponse:
     """Get token usage for any ACP session (admin view)."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     rec = await store.get_session(session_id)
     if not rec:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session_not_found")
@@ -157,7 +157,7 @@ async def admin_acp_session_usage(session_id: str) -> ACPSessionUsageResponse:
 @router.post("/acp/sessions/{session_id}/close")
 async def admin_close_acp_session(session_id: str) -> dict[str, str]:
     """Force-close an ACP session (admin action)."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     rec = await store.get_session(session_id)
     if not rec:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session_not_found")
@@ -183,7 +183,7 @@ async def admin_set_session_budget(
     When auto_terminate_at_budget is True, the session will automatically
     close once total_tokens >= token_budget.
     """
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     rec = await store.update_session_budget(
         session_id,
         token_budget=body.token_budget,
@@ -217,7 +217,7 @@ async def admin_get_agent_usage(
     __: None = Depends(check_rate_limit),
 ) -> ACPAgentUsageResponse:
     """Aggregated per-agent token usage from ACP sessions."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     rows = await store.get_agent_usage_stats(range_days=range_days)
     return ACPAgentUsageResponse(
         agents=[ACPAgentUsageItem(**r) for r in rows],
@@ -236,7 +236,7 @@ async def admin_list_agent_configs(
     enabled_only: bool = Query(default=False),
 ) -> ACPAgentConfigListResponse:
     """List all custom agent configurations."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     configs = await store.list_agent_configs(org_id=org_id, team_id=team_id, enabled_only=enabled_only)
     return ACPAgentConfigListResponse(
         agents=[ACPAgentConfigResponse(**c.to_dict()) for c in configs],
@@ -251,7 +251,7 @@ async def get_acp_agent_metrics() -> ACPAgentMetricsListResponse:
     Returns per-agent totals for sessions, active sessions, tokens,
     messages, and the timestamp of the most recent activity.
     """
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     metrics = await store.get_agent_metrics()
     return ACPAgentMetricsListResponse(
         items=[ACPAgentMetrics(**m) for m in metrics],
@@ -265,7 +265,7 @@ async def get_acp_execution_health_summary(
     __: None = Depends(check_rate_limit),
 ) -> ACPExecutionHealthSummaryResponse:
     """Return a compact ACP execution-health rollup for admin reporting."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     since = datetime.now(timezone.utc) - timedelta(days=range_days)
     sessions = await store.list_sessions_with_messages_since(since=since, page_size=1000)
 
@@ -296,7 +296,7 @@ async def get_acp_execution_health_summary(
 @router.post("/acp/agents", response_model=ACPAgentConfigResponse, status_code=status.HTTP_201_CREATED)
 async def admin_create_agent_config(payload: ACPAgentConfigCreate) -> ACPAgentConfigResponse:
     """Create a new custom agent configuration."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     config = await store.create_agent_config(payload.model_dump())
     return ACPAgentConfigResponse(**config.to_dict())
 
@@ -304,7 +304,7 @@ async def admin_create_agent_config(payload: ACPAgentConfigCreate) -> ACPAgentCo
 @router.get("/acp/agents/{config_id}", response_model=ACPAgentConfigResponse)
 async def admin_get_agent_config(config_id: int) -> ACPAgentConfigResponse:
     """Get a specific agent configuration."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     config = await store.get_agent_config(config_id)
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="agent_config_not_found")
@@ -314,7 +314,7 @@ async def admin_get_agent_config(config_id: int) -> ACPAgentConfigResponse:
 @router.put("/acp/agents/{config_id}", response_model=ACPAgentConfigResponse)
 async def admin_update_agent_config(config_id: int, payload: ACPAgentConfigCreate) -> ACPAgentConfigResponse:
     """Update an agent configuration."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     config = await store.update_agent_config(config_id, payload.model_dump())
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="agent_config_not_found")
@@ -324,7 +324,7 @@ async def admin_update_agent_config(config_id: int, payload: ACPAgentConfigCreat
 @router.delete("/acp/agents/{config_id}")
 async def admin_delete_agent_config(config_id: int) -> dict[str, str]:
     """Delete an agent configuration."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     deleted = await store.delete_agent_config(config_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="agent_config_not_found")
@@ -341,7 +341,7 @@ async def admin_list_permission_policies(
     team_id: int | None = Query(default=None),
 ) -> ACPPermissionPolicyListResponse:
     """List tool permission policies."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     policies = await store.list_permission_policies(org_id=org_id, team_id=team_id)
     return ACPPermissionPolicyListResponse(
         policies=[
@@ -365,7 +365,7 @@ async def admin_list_permission_policies(
 @router.post("/acp/permission-policies", response_model=ACPPermissionPolicyResponse, status_code=status.HTTP_201_CREATED)
 async def admin_create_permission_policy(payload: ACPPermissionPolicyCreate) -> ACPPermissionPolicyResponse:
     """Create a new tool permission policy."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     policy = await store.create_permission_policy(payload.model_dump())
     return ACPPermissionPolicyResponse(
         id=policy.id,
@@ -383,7 +383,7 @@ async def admin_create_permission_policy(payload: ACPPermissionPolicyCreate) -> 
 @router.put("/acp/permission-policies/{policy_id}", response_model=ACPPermissionPolicyResponse)
 async def admin_update_permission_policy(policy_id: int, payload: ACPPermissionPolicyCreate) -> ACPPermissionPolicyResponse:
     """Update a permission policy."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     policy = await store.update_permission_policy(policy_id, payload.model_dump())
     if not policy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="policy_not_found")
@@ -403,7 +403,7 @@ async def admin_update_permission_policy(policy_id: int, payload: ACPPermissionP
 @router.delete("/acp/permission-policies/{policy_id}")
 async def admin_delete_permission_policy(policy_id: int) -> dict[str, str]:
     """Delete a permission policy."""
-    store = await get_acp_session_store()
+    store = await _admin_acp_sessions_service.get_acp_session_store()
     deleted = await store.delete_permission_policy(policy_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="policy_not_found")

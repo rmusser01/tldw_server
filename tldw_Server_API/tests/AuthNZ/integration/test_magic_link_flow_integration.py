@@ -106,7 +106,7 @@ async def test_magic_link_verify_creates_user_and_org(
             "SELECT profile_version FROM users WHERE id = $1", user_id,
         )
 
-    monkeypatch.setattr(auth, "_svc_mark_user_verified", mark_verified_and_record_version)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.mark_user_verified", mark_verified_and_record_version)
 
     async def ensure_membership_after_verification(user_id: int, username: str | None = None) -> None:
         """Independent auth services must see committed verification before FK writes."""

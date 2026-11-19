@@ -50,7 +50,7 @@ def override_db_dependency(app, monkeypatch):
     async def _ok(*args, **kwargs):
         return True
 
-    monkeypatch.setattr(pso, "require_project_write_access", _ok, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access", _ok, raising=True)
 
     yield db
     app.dependency_overrides.pop(deps.get_prompt_studio_db, None)

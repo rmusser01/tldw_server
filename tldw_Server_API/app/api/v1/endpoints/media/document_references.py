@@ -15,7 +15,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.document_references import (
     DocumentReferencesResponse,
     ReferenceEntry,
@@ -23,14 +23,12 @@ from tldw_Server_API.app.api.v1.schemas.document_references import (
 from tldw_Server_API.app.api.v1.utils.cache import (
     cache_response,
     get_cache_client,
-    get_cached_response,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_latest_transcription,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository import (
-    DocumentWorkspaceRepository,
-)
+import tldw_Server_API.app.api.v1.utils.cache as _cache
+import tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository as _document_workspace_repository
 
 router = APIRouter(tags=["Document Workspace"])
 
@@ -146,7 +144,7 @@ def _make_external_cache_key(provider: str, lookup: str) -> str:
 
 
 def _get_cached_external(key: str) -> tuple[dict[str, Any] | None, str | None] | None:
-    cached = get_cached_response(key)
+    cached = _cache.get_cached_response(key)
     if cached is None:
         return None
     _etag, payload = cached
@@ -1301,7 +1299,7 @@ async def get_document_references(
         search_query=search,
         reference_index=reference_index,
     )
-    cached = get_cached_response(cache_key)
+    cached = _cache.get_cached_response(cache_key)
     if cached is not None:
         _etag, payload = cached
         if "pagination" not in payload:
@@ -1403,7 +1401,7 @@ async def get_document_references(
         return response
 
     # 4. Parse individual references (with DB-backed parsed-reference cache)
-    repo = DocumentWorkspaceRepository.from_media_db(db)
+    repo = _document_workspace_repository.DocumentWorkspaceRepository.from_media_db(db)
     refs_hash = _hash_reference_content(refs_section)
     try:
         cached_parsed = repo.get_parsed_references_cache(

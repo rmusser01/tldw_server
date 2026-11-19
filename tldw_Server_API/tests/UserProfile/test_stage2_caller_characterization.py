@@ -681,10 +681,9 @@ class CallerHarness:
             audits.append(kwargs)
 
         self._monkeypatch.setattr(users_endpoints, "_resolve_user_context", _resolve)
-        self._monkeypatch.setattr(users_endpoints, "get_db_pool", _pool)
+        self._monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _pool)
         self._monkeypatch.setattr(
-            users_endpoints,
-            "ProfileCommandService",
+            "tldw_Server_API.app.core.UserProfiles.command_service.ProfileCommandService",
             self._command_service_type(case, calls),
         )
         self._monkeypatch.setattr(users_endpoints, "_emit_user_profile_audit_event", _audit)
@@ -984,7 +983,7 @@ class CallerHarness:
             _FrozenDeprecationDateTime,
         )
         self._monkeypatch.setattr(users_endpoints, "_resolve_user_context", _resolve)
-        self._monkeypatch.setattr(users_endpoints, "get_storage_service", _storage_service)
+        self._monkeypatch.setattr("tldw_Server_API.app.services.storage_quota_service.get_storage_service", _storage_service)
         use_normal_transaction_dependency = case.email_failure in {"duplicate", "commit"}
         if use_normal_transaction_dependency:
             self._monkeypatch.setenv("TEST_MODE", "0")

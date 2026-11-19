@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio import (
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio import (
     test_runner as test_runner_mod,
 )
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.job_processor import JobProcessor
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.mcts_optimizer import MCTSOptimizer
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.optimization_engine import (
@@ -189,12 +190,7 @@ def optimization_runtime_boundary(monkeypatch: pytest.MonkeyPatch) -> dict[str, 
         _CompletionBroadcaster,
         raising=True,
     )
-    monkeypatch.setattr(
-        mcts_optimizer_mod,
-        "ws_connection_manager",
-        object(),
-        raising=True,
-    )
+    monkeypatch.setattr(ws_connections, "current", lambda: object())
     return state
 
 
@@ -285,8 +281,7 @@ async def test_admin_cross_owner_create_then_cancel_targets_exact_core_job(
         return None
 
     monkeypatch.setattr(
-        ps_opt_endpoints,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         allow_project_write_access,
         raising=True,
     )
@@ -555,8 +550,7 @@ async def test_endpoint_created_mcts_job_executes_via_worker_path_and_persists_t
         return None
 
     monkeypatch.setattr(
-        ps_opt_endpoints,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         allow_project_write_access,
         raising=True,
     )
@@ -677,14 +671,12 @@ async def test_history_endpoint_returns_progress_and_timeline_after_worker_run(
         return None
 
     monkeypatch.setattr(
-        ps_opt_endpoints,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         allow_project_write_access,
         raising=True,
     )
     monkeypatch.setattr(
-        ps_opt_endpoints,
-        "require_project_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_access",
         allow_project_access,
         raising=True,
     )
@@ -887,8 +879,7 @@ async def test_worker_path_respects_cancelled_optimization_for_queued_and_runnin
         return None
 
     monkeypatch.setattr(
-        ps_opt_endpoints,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         allow_project_write_access,
         raising=True,
     )
@@ -942,7 +933,7 @@ async def test_worker_path_respects_cancelled_optimization_for_queued_and_runnin
     monkeypatch.setattr(MCTSOptimizer, "_rephrase_segment", fake_rephrase_segment, raising=True)
     monkeypatch.setattr(jobs_worker, "_get_processor", lambda _user_id: JobProcessor(db), raising=True)
     monkeypatch.setattr(mcts_optimizer_mod, "EventBroadcaster", _RecordingBroadcaster, raising=True)
-    monkeypatch.setattr(mcts_optimizer_mod, "ws_connection_manager", object(), raising=True)
+    monkeypatch.setattr(ws_connections, "current", lambda: object())
 
     # Queued cancellation: cancelling before worker handling should keep optimization cancelled.
     queued_opt_id, queued_job_id, _queued_body = await _create_optimization_via_endpoint(
@@ -1050,8 +1041,7 @@ async def test_generic_jobs_cancellation_stops_running_optimization_at_adapter_b
         return None
 
     monkeypatch.setattr(
-        ps_opt_endpoints,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         allow_project_write_access,
         raising=True,
     )
@@ -1163,8 +1153,7 @@ async def test_cancelled_queued_job_reconciles_prompt_optimization_without_provi
         return None
 
     monkeypatch.setattr(
-        ps_opt_endpoints,
-        "require_project_write_access",
+        "tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.require_project_write_access",
         allow_project_write_access,
         raising=True,
     )

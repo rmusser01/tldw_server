@@ -528,3 +528,244 @@ def test_response_quality_saved_ui_min_score_is_a_global_threshold(tmp_path, sco
     assert runner._evaluate_passed({"accuracy": score, "overall_quality": score}, score, {  # nosec B101 - Existing UI threshold is a global minimum.
         "thresholds": {"min_score": minimum},
     }) is passed
+
+
+_SAMPLE = {
+    "input": {"source_text": "s", "summary": "s", "query": "q", "contexts": ["c"], "response": "r",
+              "prompt": "p", "question": "q", "claim": "c", "evidence": "e"},
+    "expected": "A",
+}
+_SPEC = {"allowed_labels": ["A", "B"]}
+
+
+async def _own_key_run(monkeypatch, tmp_path):
+    """A runner and a run config carrying the user's own-key handle for OpenAI (TASK-15426)."""
+    from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import users_own_key_credentials
+    from tldw_Server_API.tests.helpers.llm_quota import users_own_key
+
+    users_own_key(monkeypatch, "openai")
+    handle = await users_own_key_credentials(1, "openai")
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    return runner, handle, {"config": {"api_name": "openai"}, "provider_credentials": handle}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eval_type", ["summarization", "rag", "response_quality"])
+async def test_every_judge_evaluator_of_a_run_gets_the_users_handle(monkeypatch, tmp_path, eval_type):
+    """A run started with the user's own-key handle passes it to G-Eval and to the RAG and quality judges."""
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+
+    runner, handle, config = await _own_key_run(monkeypatch, tmp_path)
+    seen: list = []
+
+    class _Evaluator:
+        def __init__(self, **kwargs):
+            if "provider_credentials" in kwargs:
+                seen.append(kwargs["provider_credentials"])
+
+        async def evaluate(self, **kwargs):
+            if "provider_credentials" in kwargs:
+                seen.append(kwargs["provider_credentials"])
+            return {"metrics": {}}
+
+    monkeypatch.setattr(eval_runner, "run_geval", lambda **kwargs: seen.append(kwargs["provider_credentials"]) or {})
+    monkeypatch.setattr(eval_runner, "RAGEvaluator", _Evaluator)
+    monkeypatch.setattr(eval_runner, "ResponseQualityEvaluator", _Evaluator)
+    fn = {"summarization": runner._eval_summarization, "rag": runner._eval_rag,
+          "response_quality": runner._eval_response_quality}[eval_type]
+
+    result = await fn(_SAMPLE, _SPEC, config, "sample_000001")
+
+    assert "error" not in result, result
+    assert seen and all(item is handle for item in seen), seen
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eval_type", ["label_choice", "nli_factcheck"])
+async def test_a_runs_direct_judge_calls_carry_the_users_key(monkeypatch, tmp_path, eval_type):
+    """Label choice and NLI call the adapter directly: the request carries the user's key, recorded as theirs."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+    from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    )
+    from tldw_Server_API.app.core.Usage.llm_call_context import call_credential_source
+
+    runner, handle, config = await _own_key_run(monkeypatch, tmp_path)
+    requests: list[dict] = []
+
+    def _chat(request, timeout=None):
+        requests.append(request)
+        return {"choices": [{"message": {"content": "A"}}]}
+
+    monkeypatch.setattr(eval_runner, "get_adapter_or_raise", lambda _provider: SimpleNamespace(chat=_chat))
+    fn = {"label_choice": runner._eval_label_choice, "nli_factcheck": runner._eval_nli_factcheck}[eval_type]
+
+    result = await fn(_SAMPLE, _SPEC, config, "sample_000001")
+
+    assert "error" not in result, result
+    assert [(r["api_key"], call_credential_source(r), r.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)) for r in requests] == [
+        ("sk-users-own-key", "user", handle)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_direct_judge_call_refuses_a_handle_for_another_provider(monkeypatch, tmp_path):
+    """A handle issued for another provider fails the call before any adapter, so it never runs on a key (TASK-15426)."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+
+    _runner, handle, _config = await _own_key_run(monkeypatch, tmp_path)
+    adapters: list[str] = []
+
+    def _adapter(provider):
+        adapters.append(provider)
+        return SimpleNamespace(chat=lambda _request, timeout=None: {"choices": [{"message": {"content": "A"}}]})
+
+    monkeypatch.setattr(eval_runner, "get_adapter_or_raise", _adapter)
+
+    with pytest.raises(ChatConfigurationError) as refused:
+        eval_runner._call_adapter_text(
+            api_endpoint="anthropic", messages_payload=[{"role": "user", "content": "A or B?"}], model="claude-test",
+            provider_credentials=handle,
+        )
+    assert (refused.value.provider, refused.value.message) == ("anthropic", "Provider credential context is invalid.")
+    assert adapters == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eval_type", ["label_choice", "nli_factcheck"])
+@pytest.mark.parametrize("failure", [ConnectionError("down"), TimeoutError("slow")])
+async def test_a_failed_judge_call_is_a_sample_error_not_accuracy_zero(monkeypatch, tmp_path, eval_type, failure):
+    """A label-choice or NLI judge call that raises leaves the sample unscored: an error, no score (TASK-15491)."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+
+    def _chat(_request, timeout=None):
+        raise failure
+
+    monkeypatch.setattr(eval_runner, "get_adapter_or_raise", lambda _provider: SimpleNamespace(chat=_chat))
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    fn = {"label_choice": runner._eval_label_choice, "nli_factcheck": runner._eval_nli_factcheck}[eval_type]
+
+    result = await fn(_SAMPLE, _SPEC, {"config": {"api_name": "openai", "model": "m"}}, "sample_000001")
+
+    assert result == {"sample_id": "sample_000001", "error": str(failure)}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eval_type", ["label_choice", "nli_factcheck"])
+async def test_a_judge_config_error_is_a_sample_error(monkeypatch, tmp_path, eval_type):
+    """ChatConfigurationError (a refused handle, no model) is a sample error too (TASK-15491)."""
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+
+    def _refused(**_kwargs):
+        raise ChatConfigurationError(provider="openai", message="Provider credential context is invalid.")
+
+    monkeypatch.setattr(eval_runner, "_call_adapter_text", _refused)
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    fn = {"label_choice": runner._eval_label_choice, "nli_factcheck": runner._eval_nli_factcheck}[eval_type]
+
+    result = await fn(_SAMPLE, _SPEC, {"config": {"api_name": "openai", "model": "m"}}, "s1")
+
+    assert "error" in result and "scores" not in result and "avg_score" not in result, result
+
+
+def test_the_aggregate_leaves_a_sample_error_out_of_mean_and_pass_rate(tmp_path):
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    results = [{"avg_score": 1.0, "passed": True}, {"error": "judge down"}, {"avg_score": 0.0, "passed": False}]
+
+    aggregate = runner._calculate_aggregate_results(results, None, 0.7)
+
+    assert (aggregate["mean_score"], aggregate["pass_rate"], aggregate["min_score"]) == (0.5, 0.5, 0.0)
+    assert (aggregate["total_samples"], aggregate["failed_samples"]) == (3, 1)
+
+
+def test_an_all_unscored_run_reports_every_sample_failed(tmp_path):
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+
+    aggregate = runner._calculate_aggregate_results([{"error": "a"}, {"error": "b"}], None, 0.7)
+
+    # No scored sample, so no mean or pass rate: None, never a 0.0 that reads as "every answer wrong"
+    assert {k: aggregate[k] for k in ("mean_score", "std_dev", "min_score", "max_score", "pass_rate")} == dict.fromkeys(
+        ("mean_score", "std_dev", "min_score", "max_score", "pass_rate")
+    )
+    assert (aggregate["total_samples"], aggregate["failed_samples"]) == (2, 2)
+
+
+@pytest.mark.parametrize("spec,want", [
+    ({"evaluator_model": "openai"}, ("openai", None)),
+    ({"evaluator_model": "Anthropic"}, ("anthropic", None)),
+    ({"evaluator_model": "gpt-4"}, ("openai", "gpt-4")),
+    ({"evaluator_model": "claude-2", "api_name": "anthropic"}, ("anthropic", "claude-2")),
+    ({"evaluator_model": "gpt-4", "model": "gpt-4o"}, ("openai", "gpt-4o")),
+    ({"evaluator_model": "anthropic:claude-3-opus"}, ("anthropic", "claude-3-opus")),
+    ({"evaluator_model": "openrouter/meta-llama/llama-3"}, ("openrouter", "meta-llama/llama-3")),
+    ({"evaluator_model": "ft:gpt-3.5-turbo:org"}, ("openai", "ft:gpt-3.5-turbo:org")),
+    ({"model": "meta-llama/llama-3", "api_name": "openrouter"}, ("openrouter", "meta-llama/llama-3")),
+    # a provider named in api_name/provider stops the split: these are the ids of OpenRouter, Together and Ollama
+    ({"model": "anthropic/claude-3.5-sonnet", "api_name": "openrouter"}, ("openrouter", "anthropic/claude-3.5-sonnet")),
+    ({"model": "google/gemma-2-9b", "provider": "openrouter"}, ("openrouter", "google/gemma-2-9b")),
+    ({"model": "Qwen/Qwen2-72B-Instruct", "api_name": "together"}, ("together", "Qwen/Qwen2-72B-Instruct")),
+    ({"model": "cohere/command-r", "api_name": "openrouter"}, ("openrouter", "cohere/command-r")),
+    ({"model": "mistral:7b", "api_name": "ollama"}, ("ollama", "mistral:7b")),
+    ({"model": "qwen:14b", "provider": "ollama"}, ("ollama", "qwen:14b")),
+    ({"evaluator_model": "openai/gpt-4o", "api_name": "openrouter"}, ("openrouter", "openai/gpt-4o")),
+    # evaluator_model is split once: the remainder is a model id, not "provider/model" again
+    ({"evaluator_model": "openrouter/openai/gpt-4o"}, ("openrouter", "openai/gpt-4o")),
+    ({"evaluator_model": "ollama:mistral:7b"}, ("ollama", "mistral:7b")),
+    ({"evaluator_model": "together/Qwen/Qwen2-72B-Instruct"}, ("together", "Qwen/Qwen2-72B-Instruct")),
+])
+def test_evaluator_model_is_a_provider_only_when_it_names_one(spec, want):
+    """A model name is a model, a provider name a provider, "provider:model" both; the run route names the same one."""
+    from tldw_Server_API.app.core.Evaluations.eval_runner import run_llm_provider
+
+    api_name, model, _key = EvaluationRunner._resolve_eval_provider_model_api_key(spec, {})
+
+    assert (api_name, model) == want
+    assert run_llm_provider({"eval_type": "label_choice", "eval_spec": spec}, {}) == (api_name, model)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eval_type", ["label_choice", "nli_factcheck"])
+async def test_an_unparseable_reply_from_a_successful_call_is_a_wrong_answer(monkeypatch, tmp_path, eval_type):
+    """The call is the system under test, not a judge: a reply that names no allowed label is a wrong answer.
+
+    Accuracy 0.0 fits the owner's unscored rule, which is about a grader's reply with no readable score (TASK-15491).
+    """
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+
+    monkeypatch.setattr(eval_runner, "_call_adapter_text", lambda **_kwargs: "xyz")
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    fn = {"label_choice": runner._eval_label_choice, "nli_factcheck": runner._eval_nli_factcheck}[eval_type]
+
+    result = await fn(_SAMPLE, _SPEC, {"config": {"api_name": "openai", "model": "m"}}, "s1")
+
+    assert (result["scores"], result["passed"], result["avg_score"]) == ({"accuracy": 0.0}, False, 0.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eval_type", ["label_choice", "nli_factcheck"])
+async def test_an_empty_reply_from_a_successful_call_is_a_wrong_answer_not_a_label_in_its_repr(
+    monkeypatch, tmp_path, eval_type
+):
+    """A reasoning model that spends max_tokens thinking returns empty content; the repr of that response is not read."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+
+    empty = {"choices": [{"message": {"role": "assistant", "content": ""}, "finish_reason": "length"}]}
+    monkeypatch.setattr(
+        eval_runner, "get_adapter_or_raise", lambda _provider: SimpleNamespace(chat=lambda _r, timeout=None: empty)
+    )
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    fn = {"label_choice": runner._eval_label_choice, "nli_factcheck": runner._eval_nli_factcheck}[eval_type]
+
+    result = await fn(_SAMPLE, _SPEC, {"config": {"api_name": "openai", "model": "m"}}, "s1")
+
+    assert (result["scores"], result["passed"], result["avg_score"]) == ({"accuracy": 0.0}, False, 0.0), result

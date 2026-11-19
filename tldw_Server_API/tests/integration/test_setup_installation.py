@@ -34,9 +34,8 @@ def test_complete_setup_with_install_plan_triggers_background_task(mocker):
     )
     mock_mark = mocker.patch.object(setup_endpoint.setup_manager, 'mark_setup_completed')
     mocker.patch.object(setup_endpoint.setup_manager, 'update_config')
-    mocker.patch.object(
-        setup_endpoint,
-        'execute_install_plan',
+    mocker.patch(
+        "tldw_Server_API.app.core.Setup.install_manager.execute_install_plan",
         side_effect=lambda payload: install_calls.append(payload),
     )
     mocker.patch.object(

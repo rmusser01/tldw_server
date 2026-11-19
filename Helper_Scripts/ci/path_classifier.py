@@ -57,6 +57,11 @@ FRONTEND_GLOBS = [
 E2E_BACKEND_GLOBS = [
     "tldw_Server_API/app/api/v1/endpoints/**",
     "tldw_Server_API/app/api/v1/schemas/**",
+    "tldw_Server_API/app/api/v1/utils/**",
+    "tldw_Server_API/app/core/Sandbox/default_service.py",
+    "tldw_Server_API/app/core/LLM_Calls/model_metadata.py",
+    "tldw_Server_API/app/core/Embeddings/media_embeddings.py",
+    "tldw_Server_API/app/core/Prompt_Management/prompt_studio/ws_connections.py",
     "tldw_Server_API/app/core/AuthNZ/**",
     "tldw_Server_API/app/core/Provider_Credentials/**",
     "tldw_Server_API/app/core/Usage/llm_budget_*.py",

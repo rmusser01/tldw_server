@@ -1,17 +1,25 @@
 """Media processing with analysis refuses an over-quota user before any work (LLM usage accounting spec §4a)."""
 
+import io
+import wave
 from types import SimpleNamespace
 
+import pymupdf
 import pytest
+from ebooklib import epub
 
 import tldw_Server_API.app.api.v1.endpoints.media as media_mod
-from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_requested
+from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_provider, media_analysis_requested
+from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import Video_DL_Ingestion_Lib
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib
 from tldw_Server_API.tests.helpers.llm_quota import (
     assert_llm_quota_402,
-    own_keys_for_every_provider,
     refuse_llm_work,
+    users_own_key,
 )
+from tldw_Server_API.tests.helpers.offline_network import block_live_network
 
 
 class _StubQuotaService:
@@ -34,15 +42,66 @@ def quota_service_stub(monkeypatch):
     yield
 
 
+@pytest.fixture()
+def transcribed(monkeypatch):
+    """Speech recognition returns a fixed transcript (as the media ingest job tests stub it, and the video library's
+    as ``test_video_summary_service_prompt.py`` does), so no model and no ffmpeg run."""
+    segments = [{"start_seconds": 0, "end_seconds": 1, "Text": "Send the report on Friday."}]
+    monkeypatch.setattr(Audio_Files, "speech_to_text", lambda **_kwargs: segments)
+    monkeypatch.setattr(Audio_Files, "check_transcription_model_status", lambda _: {"available": True, "usable": True})
+    monkeypatch.setattr(Video_DL_Ingestion_Lib, "perform_transcription", lambda **_kwargs: (None, segments))
+
+
+def _wav() -> bytes:
+    """A tenth of a second of silence."""
+    out = io.BytesIO()
+    with wave.open(out, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(8000)
+        wav.writeframes(b"\x00\x00" * 800)
+    return out.getvalue()
+
+
+def _pdf() -> bytes:
+    """A one-page PDF with text."""
+    with pymupdf.open() as document:
+        document.new_page().insert_text((72, 72), "Project Cedar opens on 24 January 2027.")
+        return document.tobytes()
+
+
+def _epub(tmp_path) -> bytes:
+    """A one-chapter EPUB."""
+    book = epub.EpubBook()
+    book.set_identifier("own-key-test")
+    book.set_title("Cedar")
+    book.set_language("en")
+    chapter = epub.EpubHtml(title="Cedar", file_name="cedar.xhtml", lang="en")
+    chapter.content = "<h1>Cedar</h1><p>Project Cedar opens on 24 January 2027.</p>"
+    book.add_item(chapter)
+    book.spine = [chapter]
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    epub.write_epub(tmp_path / "cedar.epub", book)
+    return (tmp_path / "cedar.epub").read_bytes()
+
+
 _ANALYSIS = {"perform_analysis": "true", "api_name": "openai"}
 
+# The last value is how many analysis calls an admitted request makes.
 _OTHER_HANDLERS = [
-    pytest.param("/api/v1/media/process-audios", _ANALYSIS, [("files", ("a.mp3", b"fake", "audio/mpeg"))], id="audios"),
-    pytest.param("/api/v1/media/process-videos", _ANALYSIS, [("files", ("v.mp4", b"fake", "video/mp4"))], id="videos"),
-    pytest.param("/api/v1/media/process-documents", _ANALYSIS, [("files", ("d.txt", b"fake", "text/plain"))], id="documents"),
-    pytest.param("/api/v1/media/process-pdfs", _ANALYSIS, [("files", ("d.pdf", b"%PDF-1.4 fake", "application/pdf"))], id="pdfs"),
-    pytest.param("/api/v1/media/process-emails", _ANALYSIS, [("files", ("m.eml", b"fake", "message/rfc822"))], id="emails"),
-    pytest.param("/api/v1/media/add", {**_ANALYSIS, "media_type": "document"}, [("files", ("d.txt", b"fake", "text/plain"))], id="add"),
+    pytest.param("/api/v1/media/process-audios", _ANALYSIS, [("files", ("a.wav", _wav, "audio/wav"))], 1, id="audios"),
+    pytest.param("/api/v1/media/process-videos", _ANALYSIS, [("files", ("v.mp4", b"fake", "video/mp4"))], 1, id="videos"),
+    pytest.param("/api/v1/media/process-documents", _ANALYSIS, [("files", ("d.txt", b"fake", "text/plain"))], 1, id="documents"),
+    pytest.param(
+        "/api/v1/media/process-pdfs",
+        {**_ANALYSIS, "pdf_parsing_engine": "pymupdf"},
+        [("files", ("d.pdf", _pdf, "application/pdf"))],
+        1,
+        id="pdfs",
+    ),
+    pytest.param("/api/v1/media/process-emails", _ANALYSIS, [("files", ("m.eml", b"fake", "message/rfc822"))], 1, id="emails"),
+    pytest.param("/api/v1/media/add", {**_ANALYSIS, "media_type": "document"}, [("files", ("d.txt", b"fake", "text/plain"))], 1, id="add"),
 ]
 
 
@@ -57,29 +116,86 @@ def test_analysis_is_requested_only_with_a_provider(perform_analysis: bool, api_
     assert media_analysis_requested(form) is expected
 
 
-@pytest.mark.integration
-def test_ebook_analysis_is_refused_before_processing(
-    client_with_single_user, quota_service_stub, monkeypatch: pytest.MonkeyPatch
+_NO_OTHER_STAGE = {"api_name": "OpenAI", "perform_claims_extraction": False}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "stage",
+    [
+        {"perform_claims_extraction": True},
+        {"enable_contextual_chunking": True},
+        {"contextual_llm_model": "gpt-4o-mini"},
+        {"context_window_size": 500},
+        {"auto_chunking_use_llm": True},
+        {"auto_apply_template": True},
+        {"chunking_template_name": "academic_paper"},
+        {"perform_confabulation_check_of_analysis": True},
+        {"proposition_engine": "llm"},
+        {"proposition_engine": " Auto "},
+    ],
+    ids=lambda stage: next(iter(stage)) + ("=" + str(stage["proposition_engine"]).strip() if "proposition_engine" in stage else ""),
+)
+def test_another_llm_stage_names_no_provider(stage: dict) -> None:
+    """Every other LLM stage the boundary cannot place on the user's key makes the request name no provider, so an
+    over-limit user is refused (TASK-15426)."""
+    assert media_analysis_provider(SimpleNamespace(**_NO_OTHER_STAGE)) == "openai"
+    assert media_analysis_provider(SimpleNamespace(**{**_NO_OTHER_STAGE, **stage})) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("server_default", "perform_claims_extraction", "expected"),
+    [(True, None, None), (False, None, "openai"), (True, False, "openai")],
+    ids=["server-default-on", "server-default-off", "opted-out"],
+)
+def test_claims_by_the_servers_default_name_no_provider(
+    monkeypatch: pytest.MonkeyPatch, server_default: bool, perform_claims_extraction: bool | None, expected: str | None
 ) -> None:
-    """An over-quota user asking for analysis gets the 402, and the ebook is never processed."""
+    """Claims the server turns on by default (ENABLE_INGESTION_CLAIMS) are another LLM stage unless the request opts
+    out with perform_claims_extraction=false (TASK-15426)."""
+    monkeypatch.setitem(settings, "ENABLE_INGESTION_CLAIMS", server_default)
+    form = SimpleNamespace(api_name="openai", perform_claims_extraction=perform_claims_extraction)
+    assert media_analysis_provider(form) == expected
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("own_key", [True, False], ids=["own-key", "server-key"])
+def test_ebook_analysis_names_its_provider_before_processing(
+    client_with_single_user, quota_service_stub, monkeypatch: pytest.MonkeyPatch, tmp_path, own_key: bool
+) -> None:
+    """Past a limit, an ebook whose analysis runs on the user's own key is processed and analysed on that key; on the
+    server's key the user gets the 402 and the ebook is never processed (TASK-15426)."""
     client, _usage_logger = client_with_single_user
     processed: list[object] = []
+    summarized: list[dict] = []
+    process_epub = media_mod.books.process_epub
 
     def _process_epub(*args: object, **kwargs: object) -> dict:
         processed.append(kwargs)
-        return {"status": "Success", "content": "", "metadata": {}}
+        return process_epub(*args, **kwargs)
 
     monkeypatch.setattr(media_mod.books, "process_epub", _process_epub)
-    refuse_llm_work(monkeypatch)
-    asked = own_keys_for_every_provider(monkeypatch)  # analysis runs on the server's key (TASK-13956)
-    response = client.post(
-        "/api/v1/media/process-ebooks",
-        data={"perform_analysis": "true", "api_name": "openai"},
-        files=[("files", ("sample.epub", b"fake", "application/epub+zip"))],
+    monkeypatch.setattr(
+        Summarization_General_Lib, "_summarize_via_adapter", lambda **kwargs: summarized.append(kwargs) or "Summary."
     )
-    assert_llm_quota_402(response)
-    assert processed == []
-    assert asked == []
+    refuse_llm_work(monkeypatch)
+    asked = users_own_key(monkeypatch, "openai" if own_key else "anthropic")
+    with block_live_network() as attempts:
+        response = client.post(
+            "/api/v1/media/process-ebooks",
+            data={"perform_analysis": "true", "api_name": "openai"},
+            files=[("files", ("cedar.epub", _epub(tmp_path), "application/epub+zip"))],
+        )
+    assert attempts == []
+    assert asked == ["openai"]
+    if own_key:
+        assert response.status_code != 402, response.text
+        assert len(processed) == 1
+        assert [getattr(k["provider_credentials"], "api_key", None) for k in summarized] == ["sk-users-own-key"]
+    else:
+        assert_llm_quota_402(response)
+        assert (processed, summarized) == ([], [])
 
 
 @pytest.mark.integration
@@ -102,20 +218,90 @@ def test_ebook_processing_without_analysis_is_not_refused(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize(("path", "data", "files"), _OTHER_HANDLERS)
-def test_other_media_handlers_refuse_analysis_for_an_over_quota_user(
-    client_with_single_user, quota_service_stub, monkeypatch: pytest.MonkeyPatch, path: str, data: dict, files: list
+@pytest.mark.parametrize("own_key", [True, False], ids=["own-key", "server-key"])
+@pytest.mark.parametrize(("path", "data", "files", "analyses"), _OTHER_HANDLERS)
+def test_media_handlers_name_the_analysis_provider_to_the_llm_quota(
+    client_with_single_user,
+    quota_service_stub,
+    transcribed,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    path: str,
+    data: dict,
+    files: list,
+    analyses: int,
+    own_key: bool,
 ) -> None:
-    """Each remaining handler answers the 402 before touching its input, whatever keys the user has stored."""
+    """Past a limit, analysis whose provider runs on the user's own key is admitted and runs on that key; on the
+    server's key a new input gets a 402 before analysis (TASK-15426). Nothing leaves the machine."""
     client, _usage_logger = client_with_single_user
     summarized: list[dict] = []
-    # A regression would admit the request and analyse on the server's key for real: stub that call.
     monkeypatch.setattr(
-        Summarization_General_Lib, "_summarize_via_adapter", lambda **kwargs: summarized.append(kwargs) or ""
+        Summarization_General_Lib, "_summarize_via_adapter", lambda **kwargs: summarized.append(kwargs) or "Summary."
     )
     refuse_llm_work(monkeypatch)
-    asked = own_keys_for_every_provider(monkeypatch)
-    response = client.post(path, data=data, files=files)
+    asked = users_own_key(monkeypatch, "openai" if own_key else "anthropic")
+
+    with block_live_network() as attempts:
+        files = [(field, (name, body() if callable(body) else body, mime)) for field, (name, body, mime) in files]
+        if path == "/api/v1/media/add":
+            files = [(field, (f"{tmp_path.name}-{name}", body, mime)) for field, (name, body, mime) in files]
+        response = client.post(path, data=data, files=files)
+
+    assert attempts == []
+    assert asked == ["openai"]
+    if own_key:
+        assert response.status_code != 402, response.text
+        assert [getattr(k["provider_credentials"], "api_key", None) for k in summarized] == ["sk-users-own-key"] * analyses
+    else:
+        assert_llm_quota_402(response)
+        assert summarized == []
+
+
+@pytest.mark.integration
+def test_another_llm_stage_keeps_the_refusal_for_an_own_key_user(
+    client_with_single_user, quota_service_stub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A request that also asks for LLM chunk boundaries makes a call the boundary cannot place on the user's key,
+    so an over-limit user gets the 402, though they stored a key for the analysis (TASK-15426)."""
+    client, _usage_logger = client_with_single_user
+    summarized: list[dict] = []
+    monkeypatch.setattr(
+        Summarization_General_Lib, "_summarize_via_adapter", lambda **kwargs: summarized.append(kwargs) or "Summary."
+    )
+    refuse_llm_work(monkeypatch)
+    asked = users_own_key(monkeypatch, "openai")
+    with block_live_network() as attempts:
+        response = client.post(
+            "/api/v1/media/process-documents",
+            data={**_ANALYSIS, "auto_chunking_use_llm": "true"},
+            files=[("files", ("d.txt", b"fake", "text/plain"))],
+        )
+    assert attempts == []
     assert_llm_quota_402(response)
-    assert asked == []
-    assert summarized == []
+    assert (asked, summarized) == (["openai"], [])
+
+
+@pytest.mark.integration
+def test_another_llm_stage_still_analyses_on_an_under_limit_users_own_key(
+    client_with_single_user, quota_service_stub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under the limit, a request that also turns on another LLM stage still runs its analysis on the user's own key
+    for the analysis provider; only the other stage keeps the server's key (TASK-15426). Chunking is off here, so
+    the LLM chunk boundaries the request asks for make no call."""
+    client, _usage_logger = client_with_single_user
+    summarized: list[dict] = []
+    monkeypatch.setattr(
+        Summarization_General_Lib, "_summarize_via_adapter", lambda **kwargs: summarized.append(kwargs) or "Summary."
+    )
+    asked = users_own_key(monkeypatch, "openai")
+    with block_live_network() as attempts:
+        response = client.post(
+            "/api/v1/media/process-documents",
+            data={**_ANALYSIS, "auto_chunking_use_llm": "true", "perform_chunking": "false"},
+            files=[("files", ("d.txt", b"Project Cedar opens on 24 January 2027.", "text/plain"))],
+        )
+    assert attempts == []
+    assert response.status_code == 200, response.text
+    assert [getattr(k["provider_credentials"], "api_key", None) for k in summarized] == ["sk-users-own-key"]
+    assert asked == ["openai"]

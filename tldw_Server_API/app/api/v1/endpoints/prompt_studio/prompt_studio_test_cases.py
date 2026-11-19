@@ -33,10 +33,9 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     get_prompt_studio_user,
     get_security_config,
     require_project_access,
-    require_project_write_access,
 )
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
-from tldw_Server_API.app.api.v1.endpoints.prompt_studio.resource_binding import (
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
+from tldw_Server_API.app.api.v1.utils.prompt_studio_resource_binding import (
     authoritative_prompt_project,
     require_test_cases_in_project,
 )
@@ -64,26 +63,23 @@ from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     provider_auth_is_resolved,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
-    provider_requires_api_key,
-)
-from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_generator import TestCaseGenerator
-from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_io import TestCaseIO
-from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager import TestCaseManager
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts import StructuredPromptAssemblyError
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
-    derive_trusted_credential_scope,
-)
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     capture_provider_override_call_snapshot,
 )
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
-    ProviderCredentialRuntime,
     configured_provider_model_from_snapshot,
     mark_provider_credential_used,
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
+import tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps as _prompt_studio_deps
+import tldw_Server_API.app.core.LLM_Calls.provider_metadata as _provider_metadata
+import tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_generator as _test_case_generator
+import tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_io as _test_case_io
+import tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager as _test_case_manager
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
+import tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime as _provider_credential_runtime
 
 PROMPT_STUDIO_TEST_CASE_EXCEPTIONS = (
     DatabaseError,
@@ -136,7 +132,7 @@ async def list_test_runs(
     user_context: dict = Depends(get_prompt_studio_user),
 ) -> PageListResponse:
     """Read saved execution history after authorizing its actual project."""
-    await require_project_access(project_id, user_context=user_context, db=db)
+    await _prompt_studio_deps.require_project_access(project_id, user_context=user_context, db=db)
     try:
         result = db.list_test_runs(project_id, page=page, per_page=per_page)
         pagination = result["pagination"]
@@ -158,7 +154,7 @@ async def get_test_run(
         row = db.get_test_run(run_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Test run not found")
-        await require_project_access(row["project_id"], user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_access(row["project_id"], user_context=user_context, db=db)
         return StandardResponse(success=True, data=TestRunHistoryResponse(**row))
     except DatabaseError as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to read test run") from exc
@@ -252,10 +248,10 @@ async def create_test_case(
     """
     try:
         # Enforce project write access
-        await require_project_write_access(test_case_data.project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_write_access(test_case_data.project_id, user_context=user_context, db=db)
 
         # Check test case limit
-        manager = TestCaseManager(db)
+        manager = _test_case_manager.TestCaseManager(db)
         current_count = manager.get_test_case_stats(test_case_data.project_id)["total"]
 
         if current_count >= security_config.max_test_cases:
@@ -353,9 +349,9 @@ async def create_bulk_test_cases(
     """
     try:
         # Enforce project write access
-        await require_project_write_access(bulk_data.project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_write_access(bulk_data.project_id, user_context=user_context, db=db)
 
-        manager = TestCaseManager(db)
+        manager = _test_case_manager.TestCaseManager(db)
 
         # Check test case limit
         current_count = manager.get_test_case_stats(bulk_data.project_id)["total"]
@@ -458,7 +454,7 @@ async def list_test_cases(
         Paginated list of test cases
     """
     try:
-        manager = TestCaseManager(db)
+        manager = _test_case_manager.TestCaseManager(db)
 
         # Parse tags
         tag_list = None
@@ -520,7 +516,7 @@ async def get_test_case(
         Test case details
     """
     try:
-        manager = TestCaseManager(db)
+        manager = _test_case_manager.TestCaseManager(db)
         test_case = manager.get_test_case(test_case_id)
 
         if not test_case:
@@ -530,7 +526,7 @@ async def get_test_case(
             )
 
         # Check project access
-        await require_project_access(test_case["project_id"], user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_access(test_case["project_id"], user_context=user_context, db=db)
 
         return StandardResponse(
             success=True,
@@ -566,7 +562,7 @@ async def update_test_case(
         Updated test case details
     """
     try:
-        manager = TestCaseManager(db)
+        manager = _test_case_manager.TestCaseManager(db)
 
         # Get test case to check project
         test_case = manager.get_test_case(test_case_id)
@@ -577,7 +573,7 @@ async def update_test_case(
             )
 
         # Check project access
-        await require_project_write_access(test_case["project_id"], user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_write_access(test_case["project_id"], user_context=user_context, db=db)
 
         # Update test case
         try:
@@ -636,7 +632,7 @@ async def delete_test_case(
         Success response
     """
     try:
-        manager = TestCaseManager(db)
+        manager = _test_case_manager.TestCaseManager(db)
 
         # Get test case to check project
         test_case = manager.get_test_case(test_case_id)
@@ -647,7 +643,7 @@ async def delete_test_case(
             )
 
         # Check project access
-        await require_project_write_access(test_case["project_id"], user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_write_access(test_case["project_id"], user_context=user_context, db=db)
 
         # Delete test case
         success = manager.delete_test_case(test_case_id, hard_delete=permanent)
@@ -741,10 +737,10 @@ async def import_test_cases(
     """
     try:
         # Ensure write access
-        await require_project_write_access(import_data.project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_write_access(import_data.project_id, user_context=user_context, db=db)
 
-        manager = TestCaseManager(db)
-        io_manager = TestCaseIO(manager)
+        manager = _test_case_manager.TestCaseManager(db)
+        io_manager = _test_case_io.TestCaseIO(manager)
 
         # Check test case limit
         current_count = manager.get_test_case_stats(import_data.project_id)["total"]
@@ -843,10 +839,10 @@ async def import_test_cases_csv_upload(
 ) -> StandardResponse:
     """Import test cases from a CSV file upload (multipart/form-data)."""
     try:
-        await require_project_write_access(project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_write_access(project_id, user_context=user_context, db=db)
 
-        manager = TestCaseManager(db)
-        io_manager = TestCaseIO(manager)
+        manager = _test_case_manager.TestCaseManager(db)
+        io_manager = _test_case_io.TestCaseIO(manager)
 
         # Read file content
         content_bytes = await file.read()
@@ -916,8 +912,8 @@ async def get_csv_import_template(
     columns derived from the signature schemas. Otherwise, a minimal template is returned.
     """
     try:
-        manager = TestCaseManager(db)
-        io_manager = TestCaseIO(manager)
+        manager = _test_case_manager.TestCaseManager(db)
+        io_manager = _test_case_io.TestCaseIO(manager)
         csv_text = io_manager.generate_csv_template(signature_id=signature_id)
         return Response(
             content=csv_text,
@@ -948,20 +944,20 @@ async def run_test_cases_simple(
         prompt_id,
         compatibility_project_id=payload.project_id,
     )
-    await require_project_access(project_id, user_context=user_context, db=db)
+    await _prompt_studio_deps.require_project_access(project_id, user_context=user_context, db=db)
     test_case_ids = require_test_cases_in_project(
         db,
         payload.test_case_ids or [],
         project_id,
     )
 
-    manager = TestCaseManager(db)
+    manager = _test_case_manager.TestCaseManager(db)
     provider = payload.provider
     requested_model = payload.model
 
     try:
         runtime_user_id, team_ids, org_ids, trusted_base_url_override = (
-            derive_trusted_credential_scope(request, None)
+            _byok_helpers.derive_trusted_credential_scope(request, None)
         )
     except ByokResolutionError as exc:
         raise_detached_error(_credential_http_exception(exc))
@@ -982,7 +978,7 @@ async def run_test_cases_simple(
             runtime_user_id = None
 
     try:
-        credential_runtime = ProviderCredentialRuntime(
+        credential_runtime = _provider_credential_runtime.ProviderCredentialRuntime(
             user_id=runtime_user_id,
             team_ids=team_ids,
             org_ids=org_ids,
@@ -1034,7 +1030,7 @@ async def run_test_cases_simple(
                     },
                 )
             )
-        if provider_requires_api_key(provider) and not provider_auth_is_resolved(
+        if _provider_metadata.provider_requires_api_key(provider) and not provider_auth_is_resolved(
             provider,
             api_key=credentials.api_key,
             app_config=app_config,
@@ -1137,10 +1133,10 @@ async def export_test_cases(
     """
     try:
         # Ensure read access
-        await require_project_access(project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_access(project_id, user_context=user_context, db=db)
 
-        manager = TestCaseManager(db)
-        io_manager = TestCaseIO(manager)
+        manager = _test_case_manager.TestCaseManager(db)
+        io_manager = _test_case_io.TestCaseIO(manager)
 
         # Export based on format
         if export_request.format == "csv":
@@ -1246,10 +1242,10 @@ async def generate_test_cases(
     """
     try:
         # Enforce project write access
-        await require_project_write_access(generate_request.project_id, user_context=user_context, db=db)
+        await _prompt_studio_deps.require_project_write_access(generate_request.project_id, user_context=user_context, db=db)
 
-        manager = TestCaseManager(db)
-        generator = TestCaseGenerator(manager)
+        manager = _test_case_manager.TestCaseManager(db)
+        generator = _test_case_generator.TestCaseGenerator(manager)
 
         # Check test case limit
         current_count = manager.get_test_case_stats(generate_request.project_id)["total"]

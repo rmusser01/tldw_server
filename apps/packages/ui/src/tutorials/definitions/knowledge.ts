@@ -21,6 +21,7 @@ const knowledgeBasics: TutorialDefinition = {
     nextLabelKey: "tutorials:gettingStarted.sequence.documentWorkspaceLabel",
     nextLabelFallback: "Continue in Document Workspace"
   },
+  requireFirstTargetForPrompt: true,
   steps: [
     {
       target: "#knowledge-search-input",
@@ -28,11 +29,12 @@ const knowledgeBasics: TutorialDefinition = {
       titleFallback: "Ask a Question",
       contentKey: "tutorials:knowledge.basics.searchContent",
       contentFallback:
-        "Enter a focused question about your docs, notes, or media to start retrieval.",
+        "Ask a question your saved sources can answer, such as “What decisions were made in the last meeting?”",
       placement: "bottom",
       disableBeacon: true
     },
     {
+      optional: true,
       target: "#knowledge-source-selector-toggle",
       titleKey: "tutorials:knowledge.basics.sourcesTitle",
       titleFallback: "Choose Sources",
@@ -42,25 +44,7 @@ const knowledgeBasics: TutorialDefinition = {
       placement: "bottom"
     },
     {
-      target: '[data-testid="knowledge-search-shell"]',
-      titleKey: "tutorials:knowledge.basics.contextTitle",
-      titleFallback: "Search Context Bar",
-      contentKey: "tutorials:knowledge.basics.contextContent",
-      contentFallback:
-        "Adjust retrieval preset and context options before running your search.",
-      placement: "bottom"
-    },
-    {
-      target:
-        '[data-testid="knowledge-history-desktop-open"], [data-testid="knowledge-history-desktop-collapsed"], [data-testid="knowledge-history-mobile-open"]',
-      titleKey: "tutorials:knowledge.basics.historyTitle",
-      titleFallback: "History and Recovery",
-      contentKey: "tutorials:knowledge.basics.historyContent",
-      contentFallback:
-        "Reuse prior threads and queries from history so you can continue investigations quickly.",
-      placement: "right"
-    },
-    {
+      optional: true,
       target: '[data-testid="knowledge-results-shell"]',
       titleKey: "tutorials:knowledge.basics.resultsTitle",
       titleFallback: "Results Workspace",

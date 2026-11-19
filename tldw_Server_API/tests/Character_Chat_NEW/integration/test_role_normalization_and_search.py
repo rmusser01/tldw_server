@@ -94,7 +94,7 @@ async def test_complete_v2_uses_normalized_roles_via_stubbed_provider(monkeypatc
             captured["messages"] = messages_payload
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -199,7 +199,7 @@ async def test_complete_v2_injects_author_note_from_chat_settings(monkeypatch):
             captured["messages"] = messages_payload
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -852,7 +852,7 @@ async def test_complete_v2_round_robin_turn_taking_persists_participant_senders(
             call_count["value"] += 1
             return {"choices": [{"message": {"content": f"ok-{call_count['value']}"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -961,7 +961,7 @@ async def test_complete_v2_directed_character_override_and_round_robin_continuat
             call_count["value"] += 1
             return {"choices": [{"message": {"content": f"ok-{call_count['value']}"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -1055,7 +1055,7 @@ async def test_complete_v2_rejects_directed_character_not_in_participants(monkey
             call_count["value"] += 1
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -1145,7 +1145,7 @@ async def test_complete_v2_memory_scope_character_uses_directed_speaker_note(mon
             captured["messages"] = messages_payload
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -1251,7 +1251,7 @@ async def test_complete_v2_character_greeting_scope_injects_per_participant_firs
             captured_payloads.append(messages_payload)
             return {"choices": [{"message": {"content": f"ok-{call_count['value']}"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -1389,7 +1389,7 @@ async def test_complete_v2_chat_greeting_scope_injects_once_for_group_chat(monke
             captured_payloads.append(messages_payload)
             return {"choices": [{"message": {"content": f"ok-{call_count['value']}"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -1513,7 +1513,7 @@ async def test_complete_v2_character_greeting_scope_single_participant_injects_o
             captured_payloads.append(messages_payload)
             return {"choices": [{"message": {"content": f"ok-{call_count['value']}"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -1616,7 +1616,7 @@ async def test_complete_v2_character_greeting_scope_respects_disabled_toggle(mon
             captured["messages"] = messages_payload
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -1698,7 +1698,7 @@ async def test_complete_v2_applies_chat_generation_override(monkeypatch):
             captured_call_kwargs.update(kwargs)
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -1775,7 +1775,7 @@ async def test_complete_v2_applies_preset_scope_chat_override(monkeypatch):
             captured_payloads.append(messages_payload)
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -2097,7 +2097,7 @@ async def test_export_uses_participant_alias_for_tool_calls_inline_fallback(monk
                 )
             return "primary-turn"
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -2211,7 +2211,7 @@ async def test_complete_v2_author_note_memory_scope_character_overrides_shared(m
             captured["messages"] = messages_payload
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -2292,7 +2292,7 @@ async def test_complete_v2_uses_character_default_author_note_when_chat_note_emp
             captured["messages"] = messages_payload
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -2376,7 +2376,7 @@ async def test_complete_v2_inserts_author_note_at_depth_position(monkeypatch):
             captured["messages"] = messages_payload
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -2519,7 +2519,7 @@ async def test_complete_v2_injects_message_steering_instruction(monkeypatch):
             captured["messages"] = messages_payload
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -2655,7 +2655,7 @@ async def test_complete_v2_applies_character_generation_defaults_when_request_om
             captured["kwargs"] = kwargs
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -2736,7 +2736,7 @@ async def test_complete_v2_request_generation_fields_override_character_defaults
             captured["kwargs"] = kwargs
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -2822,7 +2822,7 @@ async def test_complete_v2_auto_summary_injects_and_persists_to_chat_settings(mo
             captured["messages"] = messages_payload
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -2928,7 +2928,7 @@ async def test_complete_v2_auto_summary_excludes_pinned_messages_from_compressio
             captured["messages"] = messages_payload
             return {"choices": [{"message": {"content": "ok"}}]}
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

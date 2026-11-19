@@ -85,8 +85,7 @@ async def test_process_text_dictionary_ids_share_one_token_budget(monkeypatch):
             }
 
     monkeypatch.setattr(
-        chat_dictionary_endpoints,
-        "ChatDictionaryService",
+        "tldw_Server_API.app.core.Character_Chat.chat_dictionary.ChatDictionaryService",
         FakeChatDictionaryService,
     )
 
@@ -487,8 +486,7 @@ async def test_bulk_dictionary_entry_operations_sanitizes_unexpected_error(
         raise RuntimeError("bulk response backend unavailable")
 
     monkeypatch.setattr(
-        chat_dictionary_endpoints,
-        "BulkOperationResponse",
+        "tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas.BulkOperationResponse",
         _raise_unexpected_response_error,
     )
 

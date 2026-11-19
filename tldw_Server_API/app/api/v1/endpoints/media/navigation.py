@@ -19,7 +19,7 @@ from tldw_Server_API.app.api.v1.endpoints.media.document_outline import (
     _check_pymupdf_available,
     _extract_pdf_outline,
 )
-from tldw_Server_API.app.api.v1.endpoints.media_navigation_policy import (
+from tldw_Server_API.app.api.v1.utils.media_navigation_policy import (
     MEDIA_NAVIGATION_ROUTE_POLICY,
 )
 from tldw_Server_API.app.api.v1.schemas.media_navigation_schemas import (
@@ -31,7 +31,6 @@ from tldw_Server_API.app.api.v1.schemas.media_navigation_schemas import (
     MediaNavigationStats,
     MediaNavigationTarget,
 )
-from tldw_Server_API.app.api.v1.utils.cache import cache_response, get_cached_response
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_document_version,
     get_latest_transcription,
@@ -41,8 +40,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     lookup_section_by_heading,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
-from tldw_Server_API.app.core.Storage import get_storage_backend
 from tldw_Server_API.app.core.Storage.storage_interface import StorageError
+import tldw_Server_API.app.api.v1.utils.cache as _cache
+import tldw_Server_API.app.core.Storage as _Storage
 
 router = APIRouter(tags=["Document Workspace"])
 
@@ -668,7 +668,7 @@ async def _extract_pdf_outline_nodes(
     if not storage_path or (not is_pdf_mime and not is_pdf_extension):
         return []
 
-    storage = get_storage_backend()
+    storage = _Storage.get_storage_backend()
     try:
         if not await storage.exists(storage_path):
             return []
@@ -1669,7 +1669,7 @@ async def get_media_navigation(
         )
 
     cache_key = _build_navigation_cache_key(media_id, media, params)
-    cached = get_cached_response(cache_key)
+    cached = _cache.get_cached_response(cache_key)
     if cached is not None:
         _etag, payload = cached
         try:
@@ -1705,7 +1705,7 @@ async def get_media_navigation(
         ),
     )
 
-    cache_response(cache_key, response.model_dump(mode="json"), media_id=media_id)
+    _cache.cache_response(cache_key, response.model_dump(mode="json"), media_id=media_id)
     return response
 
 
@@ -1788,7 +1788,7 @@ async def get_media_navigation_content(
         navigation_version=navigation_version,
         params=params,
     )
-    cached = get_cached_response(cache_key)
+    cached = _cache.get_cached_response(cache_key)
     if cached is not None:
         _etag, payload = cached
         try:
@@ -1840,5 +1840,5 @@ async def get_media_navigation_content(
         ),
     )
 
-    cache_response(cache_key, response.model_dump(mode="json"), media_id=media_id)
+    _cache.cache_response(cache_key, response.model_dump(mode="json"), media_id=media_id)
     return response

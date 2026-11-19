@@ -225,11 +225,17 @@ test.describe("Accessibility ratchet", () => {
     skipIfServerUnavailable(serverInfo)
     await warmBackendOnce(createSeedApi(request))
     await primeUxRoutes(authedPage)
+    await authedPage.addInitScript(() => localStorage.removeItem("tldw-tutorials"))
+    const startTour = authedPage.getByRole("button", { name: "Start tour", exact: true })
     await expectA11yMatchesBaseline(authedPage, "chat-model-picker", testInfo, async () => {
       await openUxRoute(authedPage, "/chat")
+      await expect(startTour).toBeVisible()
       await authedPage.getByTestId("model-selector").first().click()
       await expect(authedPage.getByTestId("model-selector-option").first()).toBeVisible()
+      await expect(startTour).toBeHidden({ timeout: 1_500 })
     })
+    await authedPage.keyboard.press("Escape")
+    await expect(startTour).toBeVisible()
   })
 
   // The acceptance criteria for #3124 cover the side panel too. It loads the

@@ -12,6 +12,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
 )
 from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import NativeQuotaUnavailableError
 from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 
@@ -38,7 +39,7 @@ def test_chat_completions_402_on_monthly_llm_token_quota(
 
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.user_quota", _tiny_llm_tokens_limit)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.llm_tokens_this_month", _month_already_spent)
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _recording_dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _recording_dispatch)
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call", _recording_dispatch)
     monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"local-llm": "dummy-key"}))
 
@@ -93,7 +94,7 @@ def test_chat_completions_402_on_daily_llm_cost_quota(
 
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.user_quota", _daily_cost_limit)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.llm_cost_today", _spent_fifty_cents)
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _recording_dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _recording_dispatch)
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call", _recording_dispatch)
     monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"local-llm": "dummy-key"}))
 
@@ -145,7 +146,7 @@ def test_chat_completions_admits_an_over_limit_user_whose_provider_runs_on_their
 
     refuse_llm_work(monkeypatch)
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _dispatch)
 
     request_data = ChatCompletionRequest(
         model="local-llm",
@@ -178,7 +179,7 @@ def test_chat_completions_answers_402_when_the_call_itself_is_refused(
             category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
         )
 
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _refused_at_the_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _refused_at_the_call)
 
     request_data = ChatCompletionRequest(
         model="local-llm",
@@ -209,10 +210,27 @@ class _PlanSpent:
         raise HTTPException(status_code=402, detail={"error": "limit_exceeded", "category": "llm_tokens_month"})
 
 
-def _on_a_spent_hosted_plan(client, monkeypatch) -> None:
-    """Billing checks on for org 7, whose plan refuses every LLM request (the hosted product)."""
-    monkeypatch.setattr(chat_ep, "enforcement_enabled", lambda: True)
-    monkeypatch.setattr(chat_ep, "LimitEnforcer", _PlanSpent)
+class _PlanOpen:
+    """The hosted billing plan's LLM token check, with room left on the org's plan."""
+
+    def __init__(self, *_args, **_kwargs):
+        """Any org, category and estimate."""
+
+    async def __aenter__(self):
+        """Admit, as LimitEnforcer does under the plan's llm_tokens_month."""
+        return self
+
+    async def __aexit__(self, *_exc):
+        """Nothing to record."""
+
+    def record_actual(self, _units):
+        """Nothing to record."""
+
+
+def _on_a_hosted_plan(client, monkeypatch, plan=_PlanSpent) -> None:
+    """Billing checks on for org 7, whose plan is ``plan``: spent (refuses every LLM request) or open (the hosted product)."""
+    monkeypatch.setattr("tldw_Server_API.app.core.Billing.enforcement.enforcement_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.billing_deps.LimitEnforcer", plan)
     monkeypatch.setitem(client.app.dependency_overrides, chat_ep.get_billing_org_id, lambda: 7)
 
 
@@ -239,9 +257,9 @@ def test_the_hosted_plan_does_not_check_a_request_on_the_users_own_key(
             "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
         }
 
-    _on_a_spent_hosted_plan(client, monkeypatch)
-    monkeypatch.setattr(chat_ep, "users_own_key_serves", _own_key)
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
+    _on_a_hosted_plan(client, monkeypatch)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps.users_own_key_serves", _own_key)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _dispatch)
 
     request_data = ChatCompletionRequest(
         model="local-llm",
@@ -291,11 +309,11 @@ def test_a_hosted_over_limit_request_on_the_users_own_key_looks_the_key_up_once(
             "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
         }
 
-    _on_a_spent_hosted_plan(client, monkeypatch)
+    _on_a_hosted_plan(client, monkeypatch)
     refuse_llm_work(monkeypatch)
-    monkeypatch.setattr(chat_ep, "users_own_key_serves", _own_key)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps.users_own_key_serves", _own_key)
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _dispatch)
 
     request_data = ChatCompletionRequest(
         model="local-llm",
@@ -313,3 +331,156 @@ def test_a_hosted_over_limit_request_on_the_users_own_key_looks_the_key_up_once(
 
     assert response.status_code == status.HTTP_200_OK, response.text
     assert asked == ["local-llm"]
+
+
+# The four failover paths of /chat/completions, each by the request that reaches it: the pre-dispatch health
+# check (stream and not), the stream retry loop (entered by an eager error: the endpoint's stream wrapper turns a
+# provider's error into a lazy one, so execute_streaming_call's own fallback cannot fire from the endpoint here;
+# the request flag at chat.py enable_provider_fallback=... is its only guard) and _execute_non_stream_call_impl's
+# (TASK-15481).
+_FAILOVER_PATHS = ("health_switch", "health_switch_stream", "stream_retry", "stream_in_call", "non_stream_in_call")
+_STREAM_PATHS = ("health_switch_stream", "stream_retry", "stream_in_call")
+
+
+class _PlanBroken:
+    """The hosted billing plan's LLM token check, whose lookup fails (a billing error, not a refusal)."""
+
+    def __init__(self, *_args, **_kwargs):
+        """Any org, category and estimate."""
+
+    async def __aenter__(self):
+        """Fail as LimitEnforcer does when the native storage ledger cannot be read (not governed by the failure mode)."""
+        raise NativeQuotaUnavailableError("Native retained storage usage is unavailable")
+
+
+@pytest.fixture
+def own_key_failover(monkeypatch):
+    """An own-key openai request with provider fallback on and anthropic the healthy fallback, each collaborator
+    patched where the endpoint looks it up: the credential resolver (the user's key for openai, the server's for
+    anthropic), the provider manager's home module and the chat service's provider calls. ``install(path)`` makes
+    the primary fail as that failover path needs; ``dispatched`` records every provider called."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+    from tldw_Server_API.tests.Chat.integration.test_chat_endpoint_simplified import _certified_pre_dispatch
+    from tldw_Server_API.tests.helpers.llm_quota import users_own_key
+
+    users_own_key(monkeypatch, "openai")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic-server-key")
+    monkeypatch.setenv("CHAT_ENFORCE_STRICT_MODEL_SELECTION", "0")
+    # The module's own constant, with no other home (config.txt is read once at import).
+    monkeypatch.setattr(chat_ep, "ENABLE_PROVIDER_FALLBACK", True)
+    provider_manager = MagicMock()
+    provider_manager.get_available_provider.return_value = "anthropic"
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", lambda: provider_manager
+    )
+    doubles = SimpleNamespace(
+        provider_manager=provider_manager,
+        dispatched=[],
+        reply={
+            "id": "chatcmpl-failover",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "gpt-4o-mini",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+        },
+    )
+
+    def _ok_stream():
+        """A reply, streamed."""
+        yield 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+        yield "data: [DONE]\n\n"
+
+    def _dead_stream():
+        """A stream that fails before any output, certified safe to replay: the retry loop's case."""
+        if False:
+            yield ""
+        raise _certified_pre_dispatch(ChatProviderError(provider="openai", message="down", status_code=502))
+
+    def install(path: str) -> None:
+        """The primary fails as ``path`` needs; an unregistered primary is unhealthy to the pre-dispatch check."""
+        stream = path in _STREAM_PATHS
+        provider_manager.circuit_breakers = (
+            {} if path.startswith("health_switch") else {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+        )
+
+        def _call(**kwargs):
+            """The primary fails as the path needs; any other provider answers."""
+            provider = str(kwargs.get("api_endpoint"))
+            doubles.dispatched.append(provider)
+            if provider == "openai" and path == "stream_retry":
+                return _dead_stream()
+            if provider == "openai" and path in ("stream_in_call", "non_stream_in_call"):
+                raise _certified_pre_dispatch(ChatProviderError(provider="openai", message="down", status_code=502))
+            return _ok_stream() if stream else doubles.reply
+
+        async def _call_async(**kwargs):
+            """The non-stream fallback's call."""
+            doubles.dispatched.append(str(kwargs.get("api_endpoint")))
+            return doubles.reply
+
+        monkeypatch.setattr(chat_service, "perform_chat_api_call", _call)
+        monkeypatch.setattr(chat_service, "perform_chat_api_call_async", _call_async)
+
+    doubles.install = install
+    return doubles
+
+
+def _failover_request(stream: bool) -> ChatCompletionRequest:
+    """An openai request, streamed or not."""
+    return ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=stream,
+    )
+
+
+@pytest.mark.parametrize("spent", [True, False], ids=["over-plan", "within-plan"])
+@pytest.mark.parametrize("path", _FAILOVER_PATHS)
+def test_an_own_key_request_fails_over_only_while_the_org_is_within_its_hosted_plan(
+    authenticated_client, own_key_failover, monkeypatch, path, spent
+):
+    """With provider fallback on, an own-key request from an org over its plan gets no failover reply on another key
+    by any of the four failover paths; an org within its plan keeps failover (TASK-15481)."""
+    own_key_failover.install(path)
+    _on_a_hosted_plan(authenticated_client, monkeypatch, plan=_PlanSpent if spent else _PlanOpen)
+
+    response = authenticated_client.post(
+        "/api/v1/chat/completions", json=_failover_request(path in _STREAM_PATHS).model_dump()
+    )
+
+    if not spent:
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert own_key_failover.dispatched[-1] == "anthropic"
+        assert "hi" in response.text
+        return
+    own_key_failover.provider_manager.get_available_provider.assert_not_called()
+    assert own_key_failover.dispatched == ["openai"]
+    if path.startswith("health_switch"):
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert "hi" in response.text
+    else:
+        # The primary's failure, as it would be with fallback off; no reply content from any other key.
+        assert response.status_code == status.HTTP_502_BAD_GATEWAY, response.text
+        assert "hi" not in response.text
+
+
+def test_a_failed_hosted_plan_lookup_withholds_failover_but_not_the_own_key_request(
+    authenticated_client, own_key_failover, monkeypatch
+):
+    """A plan lookup that fails (a billing error, not a refusal) withholds the failover, fail-closed; the request
+    itself still runs on the user's key (TASK-15481)."""
+    own_key_failover.install("health_switch")
+    _on_a_hosted_plan(authenticated_client, monkeypatch, plan=_PlanBroken)
+
+    response = authenticated_client.post("/api/v1/chat/completions", json=_failover_request(False).model_dump())
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert "hi" in response.text
+    own_key_failover.provider_manager.get_available_provider.assert_not_called()
+    assert own_key_failover.dispatched == ["openai"]

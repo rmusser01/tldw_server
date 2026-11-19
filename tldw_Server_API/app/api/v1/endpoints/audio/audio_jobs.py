@@ -33,7 +33,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_request_user,
 )
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_cursor_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_cursor_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_MAINTENANCE
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
@@ -53,10 +53,9 @@ from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.Usage.audio_quota import (
     TIER_LIMITS,
     get_limits_for_user,
-    get_user_tier,
-    set_user_tier,
 )
 from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
+import tldw_Server_API.app.core.Usage.audio_quota as _audio_quota
 
 router = APIRouter()
 
@@ -786,7 +785,7 @@ class SetUserTierRequest(BaseModel):
 )
 async def get_user_tier_admin(user_id: int):
     try:
-        tier = await get_user_tier(int(user_id))
+        tier = await _audio_quota.get_user_tier(int(user_id))
         return UserTierResponse(user_id=int(user_id), tier=tier)
     except HTTPException:
         raise
@@ -808,7 +807,7 @@ async def set_user_tier_admin(user_id: int, req: SetUserTierRequest):
         allowed = set(TIER_LIMITS.keys())
         if tier not in allowed:
             raise HTTPException(status_code=400, detail=f"Invalid tier. Allowed: {', '.join(sorted(allowed))}")
-        await set_user_tier(int(user_id), tier)
+        await _audio_quota.set_user_tier(int(user_id), tier)
         return UserTierResponse(user_id=int(user_id), tier=tier)
     except HTTPException:
         raise

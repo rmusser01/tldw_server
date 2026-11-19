@@ -428,9 +428,9 @@ def _install_boundary(monkeypatch: pytest.MonkeyPatch, adapter: Any, pool: _Obse
         raising=False,
     )
     monkeypatch.setattr(user_routes, "_require_byok_enabled", lambda: None)
-    monkeypatch.setattr(user_routes, "is_provider_allowlisted", lambda _provider: True)
-    monkeypatch.setattr(user_routes, "is_trusted_base_url_request", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(user_routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.is_trusted_base_url_request", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(shared_service, "require_byok_enabled", lambda: None)
     monkeypatch.setattr(shared_service, "is_provider_allowlisted", lambda _provider: True)
     monkeypatch.setattr(shared_service, "normalize_credential_fields", lambda *_args, **_kwargs: {})
@@ -451,13 +451,12 @@ def _install_boundary(monkeypatch: pytest.MonkeyPatch, adapter: Any, pool: _Obse
     monkeypatch.setattr(shared_service, "get_shared_byok_repo", shared_repo)
     monkeypatch.setattr(scoped_routes, "_require_byok_enabled", lambda: None)
     monkeypatch.setattr(scoped_routes, "_require_org_manager", _allow_scope)
-    monkeypatch.setattr(scoped_routes, "is_provider_allowlisted", lambda _provider: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.is_provider_allowlisted", lambda _provider: True)
     monkeypatch.setattr(
-        scoped_routes,
-        "is_trusted_base_url_request",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.is_trusted_base_url_request",
         lambda *_args, **_kwargs: True,
     )
-    monkeypatch.setattr(scoped_routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.validate_credential_fields", lambda *_args, **_kwargs: {})
 
 
 def _install_legacy_boundary(

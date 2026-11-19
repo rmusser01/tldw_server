@@ -28,8 +28,7 @@ async def test_list_retention_policies_sanitizes_generic_failure_log(
         raise RuntimeError("retention list backend exploded at /private/retention.db")
 
     monkeypatch.setattr(
-        admin_data_ops,
-        "svc_list_retention_policies",
+        "tldw_Server_API.app.services.admin_data_ops_service.list_retention_policies",
         _raise_list_retention_policies,
     )
 
@@ -52,8 +51,7 @@ async def test_preview_retention_policy_sanitizes_generic_failure_log(
         raise RuntimeError("retention preview backend exploded at /private/retention.db")
 
     monkeypatch.setattr(
-        admin_data_ops,
-        "svc_preview_retention_policy",
+        "tldw_Server_API.app.services.admin_data_ops_service.preview_retention_policy",
         _raise_preview_retention_policy,
     )
 
@@ -80,8 +78,7 @@ async def test_update_retention_policy_sanitizes_generic_failure_log(
         raise RuntimeError("retention update backend exploded at /private/retention.db")
 
     monkeypatch.setattr(
-        admin_data_ops,
-        "svc_verify_retention_preview_signature",
+        "tldw_Server_API.app.services.admin_data_ops_service.verify_retention_preview_signature",
         _raise_verify_retention_preview_signature,
     )
 

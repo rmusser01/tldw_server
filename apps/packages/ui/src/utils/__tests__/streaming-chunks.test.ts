@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { parseReasoning } from "@/libs/reasoning"
 import {
   consumeStreamingChunk,
   extractStreamingChunkError
@@ -78,6 +79,19 @@ describe("reasoning and answer stream boundaries", () => {
     state = consumeStreamingChunk(state, { choices: [{ delta: { content: "Answer two" } }] })
     expect(state.fullText).toBe("<think>First</think>Answer one<think>Second</think>Answer two")
     expect(state.contentToSave).toBe(state.fullText)
+  })
+
+  it("keeps a literal closing tag split across reasoning chunks inside the block", () => {
+    let state = consumeStreamingChunk(empty, {
+      choices: [{ delta: { reasoning_content: "example </th" } }]
+    })
+    state = consumeStreamingChunk(state, {
+      choices: [{ delta: { reasoning_content: "ink> here", content: "Answer" } }]
+    })
+    expect(parseReasoning(state.fullText).map((part) => part.content)).toEqual([
+      "example </think> here",
+      "Answer"
+    ])
   })
 
   it("keeps ordinary strings exact and creates no empty reasoning segment", () => {

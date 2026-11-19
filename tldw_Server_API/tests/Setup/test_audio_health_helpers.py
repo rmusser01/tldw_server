@@ -406,7 +406,7 @@ def test_tts_health_capability_model_dump_failure_log_is_sanitized(monkeypatch):
     def _fail_model_dump(_caps):
         raise RuntimeError("capability model dump exploded at /private/tts-caps.json")
 
-    monkeypatch.setattr(audio_health, "model_dump_compat", _fail_model_dump)
+    monkeypatch.setattr("tldw_Server_API.app.core.Utils.pydantic_compat.model_dump_compat", _fail_model_dump)
 
     result = audio_health._serialize_tts_caps_for_health(
         object(),
@@ -424,7 +424,7 @@ def test_tts_health_capability_model_dump_failure_log_is_sanitized(monkeypatch):
 def test_tts_health_capability_dataclass_failure_log_is_sanitized(monkeypatch):
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_health, "logger", fake_logger)
-    monkeypatch.setattr(audio_health, "model_dump_compat", lambda _caps: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Utils.pydantic_compat.model_dump_compat", lambda _caps: None)
     monkeypatch.setattr(audio_health, "is_dataclass", lambda _caps: True)
 
     def _fail_asdict(_caps):
@@ -451,7 +451,7 @@ def test_tts_health_auth_config_lookup_failure_log_is_sanitized(monkeypatch):
 
     fake_logger = MagicMock()
     monkeypatch.setattr(audio_health, "logger", fake_logger)
-    monkeypatch.setattr(audio_health, "get_tts_config_manager", _fail_config_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager", _fail_config_manager)
 
     loaded, configs = audio_health._load_auth_provider_configs()
 

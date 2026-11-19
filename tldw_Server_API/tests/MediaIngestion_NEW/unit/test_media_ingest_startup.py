@@ -201,7 +201,7 @@ def test_media_ingest_lifecycle_spec_skips_in_sidecar_mode(monkeypatch):
     assert spec.enabled(_worker_context(sidecar_mode=True, route_allowed=True)) is False
 
 
-def test_media_ingest_heavy_lifecycle_spec_remains_disabled_by_default(monkeypatch):
+def test_media_ingest_heavy_lifecycle_spec_starts_by_default(monkeypatch):
     route_calls = []
 
     def _route_enabled(*args, **kwargs):
@@ -223,5 +223,8 @@ def test_media_ingest_heavy_lifecycle_spec_remains_disabled_by_default(monkeypat
             import_exceptions=(),
             sidecar_mode=False,
         )
-    ) is False
-    assert route_calls == [(("media-ingest-heavy-jobs",), {"default_stable": False})]
+    ) is True
+    assert route_calls == [
+        (("media",), {"default_stable": True}),
+        (("media-ingest-heavy-jobs",), {"default_stable": True}),
+    ]

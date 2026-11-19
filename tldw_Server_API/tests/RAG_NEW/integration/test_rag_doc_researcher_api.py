@@ -88,7 +88,7 @@ def test_rag_search_doc_researcher_flags(client_with_overrides, monkeypatch):
             total_time=0.0,
         )
 
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_unified_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_unified_pipeline)
 
     payload = {
         "query": "alpha beta gamma",
@@ -403,8 +403,8 @@ def test_rag_search_endpoint_applies_search_agent_config_defaults(client_with_ov
         }
         return values.get(key, default)
 
-    monkeypatch.setattr(rag_ep, "get_config_value", _fake_get_config_value)
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_unified_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.get_config_value", _fake_get_config_value)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_unified_pipeline)
 
     for env_key in (
         "SEARCH_QUERY_CLASSIFICATION",

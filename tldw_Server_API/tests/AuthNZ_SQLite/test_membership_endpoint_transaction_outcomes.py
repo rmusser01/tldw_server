@@ -293,7 +293,7 @@ async def test_contention_has_retryable_outcome_without_hidden_writes(
         return service
 
     if operation == "redeem":
-        monkeypatch.setattr(org_invites, "get_invite_service", _invite_service)
+        monkeypatch.setattr("tldw_Server_API.app.services.org_invite_service.get_invite_service", _invite_service)
     expected_error = failure_type if operation == "redeem_service" else HTTPException
     with pytest.raises(expected_error) as raised:
         if operation == "register":

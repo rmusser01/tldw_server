@@ -156,7 +156,7 @@ def test_render_permission_and_owner_refusals_precede_pdf_work(
     client, _, principal = document_client
     principal.permissions = permissions
     render = AsyncMock()
-    monkeypatch.setattr(document_rendering, "render_document_pdf", render)
+    monkeypatch.setattr("tldw_Server_API.app.core.Document_Workspace.pdf_service.render_document_pdf", render)
     response = client.post(
         "/api/v1/media/documents/render", json=DRAFT, headers={"X-TLDW-Expected-User-ID": expected_user}
     )
@@ -172,7 +172,7 @@ def test_render_processing_errors_are_fixed_and_private(document_client, monkeyp
     from tldw_Server_API.app.api.v1.endpoints.media import document_rendering
 
     client, _, _ = document_client
-    monkeypatch.setattr(document_rendering, "render_document_pdf", AsyncMock(side_effect=error))
+    monkeypatch.setattr("tldw_Server_API.app.core.Document_Workspace.pdf_service.render_document_pdf", AsyncMock(side_effect=error))
     response = client.post("/api/v1/media/documents/render", json=DRAFT)
     assert response.status_code == status and "private backend details" not in response.text  # nosec B101 # Internal diagnostics never enter public error details.
 

@@ -87,7 +87,7 @@ def app(monkeypatch):
         list_user_notifications=Mock(return_value=[]),
         count_user_notifications=Mock(return_value=0),
     )
-    monkeypatch.setattr(notifications, "RemindersService", Mock())
+    monkeypatch.setattr("tldw_Server_API.app.core.Reminders.reminders_service.RemindersService", Mock())
     application.dependency_overrides[monitoring.get_topic_monitoring_db] = lambda: SimpleNamespace(
         list_alerts=Mock(return_value=[]),
     )
@@ -144,7 +144,7 @@ def test_requires_authentication(app):
 @pytest.mark.parametrize("error", [HTTPException(status_code=503, detail="unavailable"), RuntimeError("guard failed")])
 def test_unexpected_guard_failure_is_not_a_denied_capability(app, monkeypatch, error):
     app.dependency_overrides[get_auth_principal] = lambda: AuthPrincipal(kind="user", user_id=7)
-    monkeypatch.setattr(users, "RequirePermission", lambda _permission: AsyncMock(side_effect=error), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.RequirePermission", lambda _permission: AsyncMock(side_effect=error), raising=False)
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.get("/api/v1/users/me/capabilities")
     assert response.status_code == getattr(error, "status_code", 500)

@@ -388,8 +388,8 @@ async def test_media_add_route_branches_before_normal_persistence(monkeypatch):
     async def should_not_run(**_kwargs):
         raise AssertionError("normal persistence must not run in discovery mode")
 
-    monkeypatch.setattr(add_endpoint, "add_research_discovery_pdfs", fake_handoff)
-    monkeypatch.setattr(add_endpoint, "add_media_persist", should_not_run)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.research_discovery_handoff.add_research_discovery_pdfs", fake_handoff)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.persistence.add_media_persist", should_not_run)
 
     response = await add_endpoint.add_media(
         request=SimpleNamespace(),
@@ -416,7 +416,7 @@ async def test_media_add_route_leaves_normal_url_persistence_unchanged(monkeypat
         captured.update(kwargs)
         return expected
 
-    monkeypatch.setattr(add_endpoint, "add_media_persist", fake_persist)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.persistence.add_media_persist", fake_persist)
     form = AddMediaForm(media_type="pdf", urls=["https://repo.example/direct.pdf"])
 
     response = await add_endpoint.add_media(
@@ -455,7 +455,7 @@ async def test_media_add_route_maps_discovery_validation_to_422(monkeypatch):
     async def fake_handoff(**_kwargs):
         raise ResearchDiscoveryValidationError("research_discovery_snapshot_unavailable")
 
-    monkeypatch.setattr(add_endpoint, "add_research_discovery_pdfs", fake_handoff)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.research_discovery_handoff.add_research_discovery_pdfs", fake_handoff)
 
     with pytest.raises(HTTPException) as exc_info:
         await add_endpoint.add_media(

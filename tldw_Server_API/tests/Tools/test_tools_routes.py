@@ -79,7 +79,7 @@ async def test_list_tools_generic_failure_log_is_sanitized(monkeypatch):
             raise RuntimeError("tools backend exploded at /private/tools.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(tools, "ToolExecutor", _FailingToolExecutor)
+    monkeypatch.setattr("tldw_Server_API.app.core.Tools.tool_executor.ToolExecutor", _FailingToolExecutor)
     monkeypatch.setattr(tools, "logger", logger_stub)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -118,7 +118,7 @@ async def test_list_tools_parse_fallback_logs_are_sanitized(monkeypatch):
             }
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(tools, "ToolExecutor", _MalformedToolExecutor)
+    monkeypatch.setattr("tldw_Server_API.app.core.Tools.tool_executor.ToolExecutor", _MalformedToolExecutor)
     monkeypatch.setattr(tools, "logger", logger_stub)
 
     response = await tools.list_tools_endpoint(current_user=SimpleNamespace(id=1, username="alice"))
@@ -147,7 +147,7 @@ async def test_execute_tool_generic_failure_log_is_sanitized(monkeypatch):
             raise RuntimeError("tool backend exploded at /private/tool.sock")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(tools, "ToolExecutor", _FailingToolExecutor)
+    monkeypatch.setattr("tldw_Server_API.app.core.Tools.tool_executor.ToolExecutor", _FailingToolExecutor)
     monkeypatch.setattr(tools, "logger", logger_stub)
 
     with pytest.raises(HTTPException) as exc_info:

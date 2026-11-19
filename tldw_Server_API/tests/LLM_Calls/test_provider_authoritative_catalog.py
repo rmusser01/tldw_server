@@ -19,17 +19,16 @@ def inventory(monkeypatch, healthy_no_override_tts_credential_snapshot):
         "anthropic_api_key": "synthetic-key",
         "anthropic_model": "claude-3-retired",
     }})
-    monkeypatch.setattr(catalog, "load_comprehensive_config", lambda: parser)
-    monkeypatch.setattr(catalog, "get_api_keys", lambda: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: parser)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
     monkeypatch.setattr(catalog, "get_provider_manager", lambda: None)
-    monkeypatch.setattr(catalog, "list_provider_models", lambda _: ["claude-3-retired"], raising=False)
-    monkeypatch.setattr(catalog, "list_image_models_for_catalog", lambda: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.pricing_catalog.list_provider_models", lambda _: ["claude-3-retired"], raising=False)
     monkeypatch.setattr(catalog, "_llm_registry_capability_envelopes", lambda: {})
     monkeypatch.setattr(catalog, "_resolve_model_tokenizer_support", lambda *args: {})
-    monkeypatch.setattr(catalog, "get_llm_provider_overrides_snapshot", lambda: {}, raising=False)
-    monkeypatch.setattr(catalog, "resolve_static_server_fallback", lambda _: SimpleNamespace(app_config={}), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.get_llm_provider_overrides_snapshot", lambda: {}, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_runtime.resolve_static_server_fallback", lambda _: SimpleNamespace(app_config={}), raising=False)
     probe = Mock(return_value=ModelDiscoveryResult("ready", ("claude-current",)))
-    monkeypatch.setattr(catalog, "discover_provider_models", probe, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models", probe, raising=False)
     return probe
 
 
@@ -85,7 +84,7 @@ def test_override_lists_cannot_resurrect_retired_ids(live):
 @pytest.mark.unit
 def test_catalog_uses_encrypted_override_key(inventory, monkeypatch):
     override = overrides.LLMProviderOverride(provider="anthropic", api_key="override-key")
-    monkeypatch.setattr(catalog, "get_llm_provider_overrides_snapshot",
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.get_llm_provider_overrides_snapshot",
                         lambda: {"anthropic": override}, raising=False)
     assert _anthropic()["models"] == ["claude-current"]
     assert inventory.call_args.args[1] == "override-key"
@@ -93,7 +92,7 @@ def test_catalog_uses_encrypted_override_key(inventory, monkeypatch):
 
 @pytest.mark.unit
 def test_inventory_honors_runtime_key_precedence(inventory, monkeypatch):
-    monkeypatch.setattr(catalog, "get_api_keys", lambda: {"anthropic": "runtime-key"})
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {"anthropic": "runtime-key"})
     _anthropic()
     assert inventory.call_args.args[1] == "runtime-key"
 
@@ -103,7 +102,7 @@ def test_inventory_honors_runtime_key_precedence(inventory, monkeypatch):
 def test_disabled_or_invalid_override_never_discovers(inventory, monkeypatch, disabled, invalid):
     override = overrides.LLMProviderOverride(provider="anthropic", api_key="override-key",
                                              is_enabled=not disabled, credentials_invalid=invalid)
-    monkeypatch.setattr(catalog, "get_llm_provider_overrides_snapshot",
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.get_llm_provider_overrides_snapshot",
                         lambda: {"anthropic": override}, raising=False)
     provider = _anthropic()
     assert provider["models"] == []
@@ -117,7 +116,7 @@ def test_disabled_or_invalid_override_never_discovers(inventory, monkeypatch, di
 
 @pytest.mark.unit
 def test_invalid_resolved_endpoint_never_reverts_to_global_default(inventory, monkeypatch):
-    monkeypatch.setattr(catalog, "resolve_provider_models_base_url", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.resolve_provider_models_base_url", lambda *_args, **_kwargs: None)
     assert _anthropic()["models"] == []
     inventory.assert_not_called()
 
@@ -136,7 +135,7 @@ def test_unhealthy_credential_store_never_reverts_to_plaintext(inventory, monkey
     def unavailable():
         raise ByokResolutionError("credential_store_unavailable", "provider-overrides")
 
-    monkeypatch.setattr(catalog, "get_llm_provider_overrides_snapshot", unavailable)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.get_llm_provider_overrides_snapshot", unavailable)
     result = catalog.get_configured_providers()
     assert [p for p in result["providers"] if p["type"] == "commercial"] == []
     assert result["error"] == "Provider credential store is unavailable."
@@ -161,7 +160,7 @@ def _with_local_provider(monkeypatch):
         "API": {"anthropic_api_key": "synthetic-key"},
         "Local-API": {"ollama_api_IP": "http://127.0.0.1:11434/v1/chat/completions", "ollama_model": "llama3"},
     })
-    monkeypatch.setattr(catalog, "load_comprehensive_config", lambda: parser)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: parser)
 
 
 @pytest.mark.unit
@@ -173,7 +172,7 @@ def test_credential_store_failure_drops_only_commercial_entries(inventory, monke
 
     _with_local_provider(monkeypatch)
     if where == "snapshot":
-        monkeypatch.setattr(catalog, "get_llm_provider_overrides_snapshot", unavailable)
+        monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.get_llm_provider_overrides_snapshot", unavailable)
     else:
         monkeypatch.setattr(overrides.ProviderOverrideCallSnapshot, "server_fallback", unavailable)
     result = catalog.get_configured_providers()
@@ -196,18 +195,17 @@ def test_listing_discovers_slow_failing_providers_concurrently_and_briefly_cache
     providers = ("openai", "anthropic", "groq", "mistral")
     parser = ConfigParser()
     parser.read_dict({"API": {f"{name}_api_key": "synthetic-key" for name in providers}})
-    monkeypatch.setattr(catalog, "load_comprehensive_config", lambda: parser)
-    monkeypatch.setattr(catalog, "get_api_keys", lambda: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: parser)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
     monkeypatch.setattr(catalog, "get_provider_manager", lambda: None)
-    monkeypatch.setattr(catalog, "list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(catalog, "_llm_registry_capability_envelopes", lambda: {})
     monkeypatch.setattr(catalog, "_resolve_model_tokenizer_support", lambda *args: {})
-    monkeypatch.setattr(catalog, "get_llm_provider_overrides_snapshot", lambda: {}, raising=False)
-    monkeypatch.setattr(catalog, "resolve_static_server_fallback", lambda _: SimpleNamespace(app_config={}))
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.get_llm_provider_overrides_snapshot", lambda: {}, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_runtime.resolve_static_server_fallback", lambda _: SimpleNamespace(app_config={}))
     monkeypatch.setattr(
-        catalog, "resolve_provider_models_base_url", lambda provider, *_a, **_k: f"https://{provider}.example.invalid/v1",
+        "tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.resolve_provider_models_base_url", lambda provider, *_a, **_k: f"https://{provider}.example.invalid/v1",
     )
-    monkeypatch.setattr(catalog, "discover_provider_models", inventory_module.discover_provider_models)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models", inventory_module.discover_provider_models)
     monkeypatch.setattr(inventory_module, "_CACHE", type(inventory_module._CACHE)())
     monkeypatch.setattr(inventory_module, "_FAILED", type(inventory_module._FAILED)())
     fetches: list[str] = []
@@ -239,13 +237,13 @@ def test_providers_without_a_model_list_show_their_configured_models(inventory, 
         "zai_api_key": "synthetic-key", "zai_model": "glm-configured",
         "minimax_api_key": "synthetic-key", "minimax_model": "minimax-configured",
     }})
-    monkeypatch.setattr(catalog, "load_comprehensive_config", lambda: parser)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: parser)
     pricing = {
         "bedrock": ["anthropic.claude-configured", "anthropic.claude-pricing", "amazon.titan-embed-text"],
         "zai": ["glm-pricing"],
         "minimax": [],
     }
-    monkeypatch.setattr(catalog, "list_provider_models", lambda provider: pricing.get(provider, []), raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.pricing_catalog.list_provider_models", lambda provider: pricing.get(provider, []), raising=False)
     providers = {p["name"]: p for p in catalog.get_configured_providers()["providers"]}
 
     assert providers["bedrock"]["models"] == ["anthropic.claude-configured", "anthropic.claude-pricing"]

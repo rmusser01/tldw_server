@@ -7,7 +7,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     create_error_response,
     get_evaluation_identity,
@@ -27,9 +27,9 @@ from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.DB_Management.Evaluations_DB import to_unix_timestamp
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS,
-    get_unified_evaluation_service_for_user,
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
+import tldw_Server_API.app.core.Evaluations.unified_evaluation_service as _unified_evaluation_service
 
 datasets_router = APIRouter()
 
@@ -69,7 +69,7 @@ async def create_dataset(
 ):
     try:
         identity = get_evaluation_identity(current_user)
-        svc = get_unified_evaluation_service_for_user(identity.user_scope)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
         if idempotency_key:
             try:
                 existing_id = svc.db.lookup_idempotency("dataset", idempotency_key, identity.created_by)
@@ -122,7 +122,7 @@ async def list_datasets(
 ):
     try:
         identity = get_evaluation_identity(current_user)
-        svc = get_unified_evaluation_service_for_user(identity.user_scope)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
         items, has_more = svc.db.list_datasets(limit=limit, offset=offset, created_by=identity.created_by)
         total = svc.db.count_datasets(created_by=identity.created_by)
         resp = [DatasetResponse(**_normalize_dataset_payload(r)) for r in items]
@@ -166,7 +166,7 @@ async def get_dataset(
 ):
     try:
         identity = get_evaluation_identity(current_user)
-        svc = get_unified_evaluation_service_for_user(identity.user_scope)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
         row = svc.db.get_dataset(
             dataset_id,
             created_by=identity.created_by,
@@ -220,7 +220,7 @@ async def delete_dataset(
 ) -> Response:
     try:
         identity = get_evaluation_identity(current_user)
-        svc = get_unified_evaluation_service_for_user(identity.user_scope)
+        svc = _unified_evaluation_service.get_unified_evaluation_service_for_user(identity.user_scope)
         ok = await svc.delete_dataset(
             dataset_id,
             deleted_by=identity.created_by,

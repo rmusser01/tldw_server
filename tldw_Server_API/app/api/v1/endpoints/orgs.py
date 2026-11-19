@@ -25,7 +25,7 @@ from tldw_Server_API.app.api.v1.API_Deps.org_deps import (
     require_org_membership,
     require_org_owner,
 )
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     OrgBudgetItem,
     OrgBudgetSelfUpdateRequest,
@@ -77,17 +77,15 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipTargetNotFound,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
-from tldw_Server_API.app.core.Billing.subscription_service import get_subscription_service
 from tldw_Server_API.app.services.admin_budgets_service import (
     list_org_budgets as svc_list_org_budgets,
 )
-from tldw_Server_API.app.services.admin_budgets_service import (
-    upsert_org_budget as svc_upsert_org_budget,
-)
-from tldw_Server_API.app.services.budget_audit_service import emit_budget_audit_event
-from tldw_Server_API.app.services.org_invite_service import get_invite_service
 from tldw_Server_API.app.services.registration_service import RegistrationService
+import tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo as _orgs_teams_repo
+import tldw_Server_API.app.core.Billing.subscription_service as _subscription_service
+import tldw_Server_API.app.services.admin_budgets_service as _admin_budgets_service
+import tldw_Server_API.app.services.budget_audit_service as _budget_audit_service
+import tldw_Server_API.app.services.org_invite_service as _org_invite_service
 
 router = APIRouter(
     prefix="/orgs",
@@ -185,7 +183,7 @@ async def list_my_orgs(
 ):
     """List organizations the current user is a member of."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     paginated, total = await repo.list_organizations_for_user(
         principal.user_id,
@@ -222,7 +220,7 @@ async def create_org(
 ):
     """Create a new organization with the current user as owner."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     try:
         org = await repo.create_organization_with_owner_membership(
@@ -266,7 +264,7 @@ async def get_org(
 ):
     """Get detailed information about an organization."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     # Get org
     all_orgs, _ = await repo.list_organizations(limit=1000, offset=0)
@@ -313,7 +311,7 @@ async def update_org(
 ):
     """Update organization details. Requires admin or owner role."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     # Build update fields
     updates = {}
@@ -356,7 +354,7 @@ async def delete_org(
     """Delete an organization. Requires owner role."""
     # Check for active paid subscription before allowing deletion
     try:
-        subscription_service = await get_subscription_service()
+        subscription_service = await _subscription_service.get_subscription_service()
         sub_status = await subscription_service.get_subscription(ctx.org_id)
     except Exception:
         logger.warning("delete_org: failed to load subscription")
@@ -370,7 +368,7 @@ async def delete_org(
         )
 
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
     try:
         await repo.delete_organization_with_provider_secrets(
             org_id=ctx.org_id,
@@ -395,7 +393,7 @@ async def transfer_ownership(
 ):
     """Transfer organization ownership to another member. Requires owner role."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     # Prevent transferring ownership to the current owner (no-op that would demote them to admin)
     if principal.user_id is None:
@@ -469,7 +467,7 @@ async def list_org_members(
 ):
     """List members of an organization."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     members = await repo.list_org_members(org_id=ctx.org_id, limit=limit, offset=offset)
     return [OrgMemberListItem(**m) for m in members]
@@ -488,7 +486,7 @@ async def add_org_member(
 ):
     """Add a member to the organization. Requires admin or owner role."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     # Cannot add owners via this endpoint
     if body.role and body.role.lower() == "owner":
@@ -524,7 +522,7 @@ async def update_member_role(
 ):
     """Update a member's role. Requires admin or owner role."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     # Cannot assign owner role via this endpoint
     if body.role.lower() == "owner":
@@ -575,7 +573,7 @@ async def remove_org_member(
 ) -> Response:
     """Remove a member from the organization. Requires admin or owner role."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     # Cannot remove yourself if you're the only owner
     if user_id == principal.user_id and ctx.role == "owner":
@@ -647,7 +645,7 @@ async def create_team(
 ):
     """Create a new team in the organization. Requires admin or owner role."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     try:
         team = await repo.create_team(
@@ -676,7 +674,7 @@ async def get_team(
 ):
     """Get team details."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     team = await repo.get_team(team_id)
     if not team or team.get("org_id") != ctx.org_id:
@@ -700,7 +698,7 @@ async def update_team(
 ):
     """Update team details. Requires admin or owner role."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     # Verify team belongs to org
     team = await repo.get_team(team_id)
@@ -746,7 +744,7 @@ async def delete_team(
 ) -> Response:
     """Delete a team. Requires admin or owner role."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     # Verify team belongs to org
     team = await repo.get_team(team_id)
@@ -784,7 +782,7 @@ async def list_team_members(
 ):
     """List members of a team."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     # Verify team belongs to org
     team = await repo.get_team(team_id)
@@ -823,7 +821,7 @@ async def add_team_member(
 ):
     """Add a member to a team. Requires admin or owner role."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     # Verify team belongs to org
     team = await repo.get_team(team_id)
@@ -874,7 +872,7 @@ async def remove_team_member(
 ) -> Response:
     """Remove a member from a team. Requires admin or owner role."""
     db_pool = await get_db_pool()
-    repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
+    repo = _orgs_teams_repo.AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     # Verify team belongs to org
     team = await repo.get_team(team_id)
@@ -920,7 +918,7 @@ async def list_invites(
     offset: int = Query(0, ge=0),
 ):
     """List invites for the organization. Requires admin or owner role."""
-    invite_service = await get_invite_service()
+    invite_service = await _org_invite_service.get_invite_service()
 
     invites, total = await invite_service.list_org_invites(
         ctx.org_id,
@@ -957,7 +955,7 @@ async def create_invite(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ):
     """Create a new invite code. Requires admin or owner role."""
-    invite_service = await get_invite_service()
+    invite_service = await _org_invite_service.get_invite_service()
 
     try:
         invite = await invite_service.create_invite(
@@ -1034,7 +1032,7 @@ async def revoke_invite(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> Response:
     """Revoke an invite. Requires admin or owner role."""
-    invite_service = await get_invite_service()
+    invite_service = await _org_invite_service.get_invite_service()
 
     success = await invite_service.revoke_invite(invite_id, ctx.org_id)
     if not success:
@@ -1226,7 +1224,7 @@ async def update_org_budgets(
     if payload.budgets is not None:
         budget_updates = payload.budgets.model_dump(exclude_unset=True, by_alias=True)
     try:
-        item, audit_changes = await svc_upsert_org_budget(
+        item, audit_changes = await _admin_budgets_service.upsert_org_budget(
             db,
             org_id=ctx.org_id,
             budget_updates=budget_updates,
@@ -1246,7 +1244,7 @@ async def update_org_budgets(
         raise HTTPException(status_code=500, detail="Failed to upsert org budget") from exc
 
     try:
-        await emit_budget_audit_event(
+        await _budget_audit_service.emit_budget_audit_event(
             request,
             principal,
             org_id=ctx.org_id,

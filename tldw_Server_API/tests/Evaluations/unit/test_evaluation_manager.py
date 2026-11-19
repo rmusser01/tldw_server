@@ -613,8 +613,8 @@ _QA_ASKS = "GRADE: [correct/incorrect"
         ("simple_bench", _MC_ITEM, "Grade: Correct answer is B; the model chose A.\nSCORE: 1", _MC_ASKS, 0.0),
         # the judge restates the rubric before a labelled score; the prompt must ask for that label
         ("bullshit_benchmark", {"question": "q", "nonsensical_element": "n"},
-         "Score 0-10 where 0=fully engages nonsense, 10=clearly flags incoherence. SCORE: 9\nEXPLANATION: flags it",
-         "SCORE: [0-10]", 8 / 9),
+         "Score 1-10 where 1=fully engages nonsense, 10=clearly flags incoherence. SCORE: 9\nEXPLANATION: flags it",
+         "SCORE: [1-10]", 8 / 9),
     ],
     ids=["mc-correct", "mc-incorrect", "no-score", "mc-reasoning", "simpleqa-correct", "simpleqa-incorrect",
          "simpleqa-grade-decides", "simpleqa-bracketed-grade", "judge-error", "rubric-echo", "markdown-label",
@@ -657,6 +657,47 @@ async def test_a_benchmark_item_is_scored_from_the_judges_reply(
     assert result["score"] == pytest.approx(expected)
     if isinstance(reply, Exception):
         assert result["explanation"].startswith("Error:")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reply", "asks_grade", "expected"),
+    [
+        ("8", False, 7 / 9),  # a bare number: json.loads reads an int, not a dict, and the patterns still apply
+        ('{"score": "8"}', False, 7 / 9),  # a numeric string
+        # exponent form is not a 1-10 score: no leading digit of it is read as one
+        ("Score: 1e308", False, None),
+        ("Score: 15e3", False, None),
+        ("Score: 1.5e3", False, None),
+        ("Score: 10e5", False, None),
+        ("Score: 3.0e2", False, None),
+        ('{"score": "1_0"}', False, None),  # float("1_0") is 10.0, but no human reads "1_0" as a score
+        # the judge echoes the prompt's format line before its grade: the echo is not a grade
+        ("GRADE: [correct/incorrect/not_attempted]\nGRADE: incorrect\nEXPLANATION: Lyon.", True, 0.0),
+        ("GRADE: not attempted\nEXPLANATION: it refused.", True, 0.0),
+        # a restated rubric ("Score 10 for a correct answer") is not the score; the labelled rating is
+        ("Per the rubric: Score 10 for a correct answer, 1 for an incorrect one. The model chose A, which is wrong.\n"
+         "Rating: 1/10", False, 0.0),
+        ("I should score 10 for a correct answer. The model picked A; the answer is B.", False, None),
+        ('{"score": true}', False, None),  # a boolean is an int in Python, but not a readable score
+        ('{"score": false}', False, None),
+    ],
+    ids=["bare-number", "numeric-string", "exponent", "exponent-15e3", "exponent-1.5e3", "exponent-10e5",
+         "exponent-3.0e2", "underscore-string", "grade-format-echo", "grade-not-attempted", "rubric-echo-rating", "rubric-echo-only", "bool-true", "bool-false"],
+)
+async def test_a_judge_reply_a_human_would_read_as_a_score_is_read(evaluation_manager, reply, asks_grade, expected):
+    """Replies a human reads as a score (or a grade) are read as one; one that only looks like a score is not
+    (TASK-15487)."""
+    with patch("tldw_Server_API.app.core.Evaluations.evaluation_manager.analyze", return_value=reply):
+        result = await evaluation_manager.evaluate_custom_metric(
+            metric_name="m",
+            description="d",
+            evaluation_prompt="Grade {answer}.\nGRADE: [correct/incorrect/not_attempted]" if asks_grade else "Rate {answer}",
+            input_data={"answer": "a"},
+            scoring_criteria={"accuracy": "1-10"},
+        )
+    assert result["score"] == (None if expected is None else pytest.approx(expected))
 
 
 @pytest.mark.unit

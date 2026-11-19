@@ -9,11 +9,12 @@ import secrets
 import string
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos.datetime_utils import _strip_tzinfo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
 # Invite code configuration
@@ -92,7 +93,7 @@ class AuthnzOrgInvitesRepo:
                                   created_at, expires_at, max_uses, uses_count, is_active, description,
                                   allowed_email_domain
                         """,
-                        code, org_id, team_id, role_to_grant, created_by, expires_at,
+                        code, org_id, team_id, role_to_grant, created_by, _strip_tzinfo(expires_at),
                         max_uses, description, allowed_email_domain, metadata
                     )
                     result = dict(row)
@@ -294,7 +295,7 @@ class AuthnzOrgInvitesRepo:
                 if not include_expired:
                     if self._is_postgres(conn):
                         conditions.append(f"expires_at > ${len(params) + 1}")
-                        params.append(datetime.now(timezone.utc))
+                        params.append(_strip_tzinfo(datetime.now(timezone.utc)))
                     else:
                         conditions.append("expires_at > ?")
                         params.append(datetime.now(timezone.utc).isoformat())
@@ -406,7 +407,7 @@ class AuthnzOrgInvitesRepo:
                         "UPDATE org_invites SET uses_count = uses_count + 1 WHERE id = ?",
                         (invite_id,)
                     )
-                    return cur.rowcount > 0
+                    return cast(int, cur.rowcount) > 0
         except Exception as exc:
             logger.error(f"AuthnzOrgInvitesRepo.increment_uses_count failed: {exc}")
             raise
@@ -430,7 +431,7 @@ class AuthnzOrgInvitesRepo:
                         "UPDATE org_invites SET is_active = 0 WHERE id = ? AND org_id = ?",
                         (invite_id, org_id)
                     )
-                    return cur.rowcount > 0
+                    return cast(int, cur.rowcount) > 0
         except Exception as exc:
             logger.error(f"AuthnzOrgInvitesRepo.deactivate_invite failed: {exc}")
             raise
@@ -557,12 +558,12 @@ class AuthnzOrgInvitesRepo:
                     if deactivate_only:
                         result = await conn.execute(
                             "UPDATE org_invites SET is_active = FALSE WHERE expires_at < $1 AND is_active = TRUE",
-                            now
+                            _strip_tzinfo(now)
                         )
                     else:
                         result = await conn.execute(
                             "DELETE FROM org_invites WHERE expires_at < $1",
-                            now
+                            _strip_tzinfo(now)
                         )
                     # Parse affected rows from result string
                     import re
@@ -580,7 +581,7 @@ class AuthnzOrgInvitesRepo:
                             "DELETE FROM org_invites WHERE expires_at < ?",
                             (now_str,)
                         )
-                    return cur.rowcount
+                    return cast(int, cur.rowcount)
         except Exception as exc:
             logger.error(f"AuthnzOrgInvitesRepo.cleanup_expired_invites failed: {exc}")
             raise

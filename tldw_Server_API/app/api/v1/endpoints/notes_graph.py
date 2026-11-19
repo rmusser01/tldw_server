@@ -14,14 +14,13 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     TokenScopeGuard,
     User,
-    enforce_rbac_rate_limit,
     get_db_pool,
     get_request_user,
     principal_has_admin_bypass_claims,
     rbac_rate_limit,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import notes_sync_http_error
+from tldw_Server_API.app.api.v1.utils.notes_sync_errors import notes_sync_http_error
 from tldw_Server_API.app.api.v1.schemas.notes_graph import (
     EdgeType,
     GraphFormat,
@@ -49,7 +48,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.Notes_Graph.formatters import to_cytoscape
 from tldw_Server_API.app.core.Notes_Graph.graph_cache import GraphCache
 from tldw_Server_API.app.core.Notes_Graph.graph_service import (
-    NOTES_GRAPH_ENABLED,
     GraphProjectionNotReadyError,
     NoteGraphService,
     decode_notes_link_cursor,
@@ -76,12 +74,13 @@ from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkResourceNotFoundError,
     NotesLinkSyncInactiveDatasetError,
     NotesLinkVersionConflictError,
-    resolve_notes_link_coordinator,
-    resolve_notes_link_dataset_authority,
 )
 from tldw_Server_API.app.services.notes_semantic_audit import (
     emit_semantic_audit_event,
 )
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
+import tldw_Server_API.app.core.Notes_Graph.graph_service as _graph_service
+import tldw_Server_API.app.core.Sync.v2.notes_link_coordinator as _notes_link_coordinator
 
 
 def _semantic_edge_requested(request: Request) -> bool:
@@ -165,7 +164,7 @@ async def _enforce_graph_request_rate_limit(
     """Charge exactly one ordinary or semantic graph-read resource."""
 
     resource = "notes.graph.semantic.read" if _semantic_edge_requested(request) else "notes.graph.read"
-    await enforce_rbac_rate_limit(request, resource, db_pool)
+    await _auth_deps.enforce_rbac_rate_limit(request, resource, db_pool)
 
 
 _enforce_graph_request_rate_limit._tldw_rate_limit_resources = (
@@ -310,7 +309,7 @@ def _link_summary(link: NotesLink) -> dict[str, object]:
 
 
 def _graph_dataset_key(*, user_id: str, dataset_id: str | None) -> str:
-    authority = resolve_notes_link_dataset_authority(
+    authority = _notes_link_coordinator.resolve_notes_link_dataset_authority(
         user_id=user_id,
         dataset_id=dataset_id,
     )
@@ -487,7 +486,7 @@ async def get_notes_graph(
     ___: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.read")),
 ):
     """Return a bounded subgraph of notes, tags, and sources."""
-    if not NOTES_GRAPH_ENABLED():
+    if not _graph_service.NOTES_GRAPH_ENABLED():
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Notes graph is disabled")
     try:
         if getattr(req, "center_note_id", None):
@@ -631,7 +630,7 @@ async def get_note_neighbors(
     ___: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.read")),
 ):
     """Return a radius=1 ego network for the given note."""
-    if not NOTES_GRAPH_ENABLED():
+    if not _graph_service.NOTES_GRAPH_ENABLED():
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Notes graph is disabled")
     try:
         # Re-parse edge_types from query params (FastAPI Depends may not handle list[Enum] well)
@@ -754,7 +753,7 @@ async def create_manual_link(
             graph_cache=_GRAPH_CACHE,
             projector_factory=_build_semantic_graph_projector,
             audit_emitter=_audit_semantic_conversion,
-            coordinator_resolver=resolve_notes_link_coordinator,
+            coordinator_resolver=_notes_link_coordinator.resolve_notes_link_coordinator,
         )
         edge_response = _link_response(stored) if isinstance(stored, NotesLink) else stored
         return {"status": "created", "edge": edge_response}
@@ -867,7 +866,7 @@ async def update_manual_link(
 
     try:
         normalized_edge_id = _normalize_edge_id(edge_id)
-        coordinator = resolve_notes_link_coordinator(
+        coordinator = _notes_link_coordinator.resolve_notes_link_coordinator(
             user_id=str(current_user.id_str),
             note_db=db,
             dataset_id=mutation.dataset_id,
@@ -962,7 +961,7 @@ async def delete_manual_link(
     """
     try:
         normalized_edge_id = _normalize_edge_id(edge_id)
-        coordinator = resolve_notes_link_coordinator(
+        coordinator = _notes_link_coordinator.resolve_notes_link_coordinator(
             user_id=str(current_user.id_str),
             note_db=db,
             dataset_id=dataset_id,
@@ -1016,7 +1015,7 @@ async def restore_manual_link(
 
     try:
         normalized_edge_id = _normalize_edge_id(edge_id)
-        coordinator = resolve_notes_link_coordinator(
+        coordinator = _notes_link_coordinator.resolve_notes_link_coordinator(
             user_id=str(current_user.id_str),
             note_db=db,
             dataset_id=mutation.dataset_id,

@@ -66,7 +66,7 @@ def client(monkeypatch):
         def chunk_text(self, text, method=None, max_size=None, overlap=None):
             # pretend to create 3 chunks
             return ['c1','c2','c3']
-    monkeypatch.setattr(vs, 'Chunker', StubChunker)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.chunker.Chunker", StubChunker)
 
     async def override_user():
         return User(id=1, username='tester', email='t@e.com', is_active=True, is_admin=True)
@@ -144,17 +144,17 @@ async def test_create_from_media_sanitizes_embedding_failure(monkeypatch):
         fake_adapter.config.embedding_dim = embedding_dim
         return fake_adapter
 
-    monkeypatch.setattr(vs, "Chunker", StubChunker)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chunking.chunker.Chunker", StubChunker)
     monkeypatch.setattr(vs, "_get_adapter_for_user", fake_get_adapter_for_user)
     monkeypatch.setattr(vs, "_get_embeddings_fn", lambda: exploding_embeddings)
     monkeypatch.setattr(vs, "get_media_by_id", lambda _db, mid: {"id": mid, "title": "T", "content": "dummy text"})
     monkeypatch.setattr(vs, "_allowed_providers", lambda: None)
     monkeypatch.setattr(vs, "_allowed_models", lambda: None)
     monkeypatch.setattr(vs, "_count_tokens", lambda _text, _model_id: 1)
-    monkeypatch.setattr(vs, "init_batches_db", lambda _uid: None)
-    monkeypatch.setattr(vs, "db_create_batch", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_batches_db.init_db", lambda _uid: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_batches_db.create_batch", lambda *args, **kwargs: None)
     updates = []
-    monkeypatch.setattr(vs, "db_update_batch", lambda *args, **kwargs: updates.append(kwargs))
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_batches_db.update_batch", lambda *args, **kwargs: updates.append(kwargs))
 
     payload = vs.CreateFromMediaRequest(
         store_name="ignore",
@@ -193,10 +193,10 @@ async def test_upsert_vectors_batch_sanitizes_unexpected_failure(monkeypatch):
     updates = []
     logger_stub = LoggerStub()
 
-    monkeypatch.setattr(vs, "resolve_user_id_for_request", lambda *_args, **_kwargs: 1)
-    monkeypatch.setattr(vs, "init_batches_db", lambda _uid: None)
-    monkeypatch.setattr(vs, "db_create_batch", lambda *args, **kwargs: None)
-    monkeypatch.setattr(vs, "db_update_batch", lambda *args, **kwargs: updates.append(kwargs))
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.resolve_user_id_for_request", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_batches_db.init_db", lambda _uid: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_batches_db.create_batch", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_batches_db.update_batch", lambda *args, **kwargs: updates.append(kwargs))
     monkeypatch.setattr(vs, "upsert_vectors", _fail_upsert_vectors)
     monkeypatch.setattr(vs, "logger", logger_stub)
     vs._BATCH_STATUS.clear()

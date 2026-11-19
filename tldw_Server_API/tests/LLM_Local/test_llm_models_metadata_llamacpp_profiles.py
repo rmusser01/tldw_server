@@ -58,8 +58,8 @@ def _client_for_profiles(
         return {"providers": [], "default_provider": None, "total_configured": 0}
 
     monkeypatch.setattr(llm_providers, "get_configured_providers_async", _configured_providers)
-    monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)
-    monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", lambda: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.apply_llm_provider_overrides_to_listing", lambda result: result)
+    monkeypatch.setattr("tldw_Server_API.app.core.Image_Generation.listing.list_image_models_for_catalog", lambda: [])
     response_or_error = scan_assets_response or LlamaCppAssetsResponse(assets=assets, warnings=[])
 
     def _scan_assets(*_args, **_kwargs):

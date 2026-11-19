@@ -6,7 +6,7 @@ dataset_format: huggingface
 field_mappings:
   question: question
   choices: options
-  correct_answer: answer_idx
+  correct_answer: answer
   category: category
 evaluation_params:
   num_choices: 10

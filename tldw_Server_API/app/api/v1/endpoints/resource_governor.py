@@ -198,9 +198,9 @@ async def get_resource_governor_policy(
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.core.Resource_Governance.policy_admin import (
-    AuthNZPolicyAdmin,
     PolicyVersionConflictError,
 )
+import tldw_Server_API.app.core.Resource_Governance.policy_admin as _policy_admin
 
 
 class PolicyUpsertRequest(BaseModel):
@@ -217,7 +217,7 @@ async def upsert_policy(
     body: PolicyUpsertRequest = Body(...),
 ):
     try:
-        admin = AuthNZPolicyAdmin()
+        admin = _policy_admin.AuthNZPolicyAdmin()
         await admin.upsert_policy(policy_id, body.payload, version=body.version)
         # Best-effort loader refresh when using DB store
         try:
@@ -280,7 +280,7 @@ async def delete_policy(
     version: int | None = Query(None, ge=1, description="Optional expected version for optimistic delete"),
 ):
     try:
-        admin = AuthNZPolicyAdmin()
+        admin = _policy_admin.AuthNZPolicyAdmin()
         deleted = await admin.delete_policy(policy_id, version=version)
         # Best-effort loader refresh when using DB store
         try:
@@ -340,7 +340,7 @@ async def delete_policy(
 )
 async def list_policies():
     try:
-        admin = AuthNZPolicyAdmin()
+        admin = _policy_admin.AuthNZPolicyAdmin()
         rows = await admin.list_policies()
         return JSONResponse({"status": "ok", "items": rows, "count": len(rows)})
     except Exception:  # noqa: BLE001 - generic 500 handler
@@ -354,7 +354,7 @@ async def list_policies():
 )
 async def get_policy(policy_id: str = Path(..., description="Policy identifier")):
     try:
-        admin = AuthNZPolicyAdmin()
+        admin = _policy_admin.AuthNZPolicyAdmin()
         rec = await admin.get_policy_record(policy_id)
         if not rec:
             return JSONResponse({"status": "not_found", "policy_id": policy_id}, status_code=404)

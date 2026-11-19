@@ -108,7 +108,7 @@ def test_chat_endpoint_large_data_image_accepted_by_size_and_flagged_by_image_va
                 "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
             }
 
-            with patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=mock_response):
+            with patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=mock_response):
                 r = client.post("/api/v1/chat/completions", json=body, headers=headers)
                 assert r.status_code == 200, f"Unexpected status: {r.status_code}, {r.text}"
                 data = r.json()
@@ -397,7 +397,7 @@ def test_chat_endpoint_streaming_large_data_image_placeholder_in_db(monkeypatch)
                 yield "data: [DONE]\n\n"
 
             with patch(
-                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=upstream_stream()
             ):
                 r = client.post("/api/v1/chat/completions", json=body, headers=headers)
                 assert r.status_code == 200, f"Unexpected status: {r.status_code}"

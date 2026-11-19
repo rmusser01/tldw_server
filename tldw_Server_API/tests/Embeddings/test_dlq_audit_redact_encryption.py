@@ -88,7 +88,7 @@ def test_dlq_requeue_audited(disable_heavy_startup, admin_user, redis_client, mo
     async def _get_audit_service_for_user(current_user=None):
         return stub
 
-    monkeypatch.setattr(emb_mod, "get_audit_service_for_user", _get_audit_service_for_user)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps.get_audit_service_for_user", _get_audit_service_for_user)
 
     # Seed one DLQ entry
     async def _seed():

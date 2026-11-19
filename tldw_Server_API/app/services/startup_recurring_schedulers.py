@@ -76,7 +76,7 @@ def provide_recurring_scheduler_worker_specs(
         _recurring_scheduler_spec(
             name="workflows_sched_task",
             task_name="workflows_recurring_scheduler",
-            enabled=_env_enabled_predicate("WORKFLOWS_SCHEDULER_ENABLED"),
+            enabled=lambda _context: _env_flag_enabled("WORKFLOWS_SCHEDULER_ENABLED", default=True),
             starter=_start_workflows_scheduler_service,
             stopper=_stop_workflows_scheduler_service,
         ),
@@ -322,7 +322,7 @@ async def _start_workflows_scheduler(
 ) -> Any | None:
     return await _start_optional_scheduler(
         started_message="Workflows recurring scheduler started",
-        disabled_message="Workflows recurring scheduler disabled (WORKFLOWS_SCHEDULER_ENABLED != true)",
+        disabled_message="Workflows recurring scheduler disabled by WORKFLOWS_SCHEDULER_ENABLED",
         failure_message="Failed to start Workflows recurring scheduler: {exc}",
         starter=_start_workflows_scheduler_service,
         worker_inventory=worker_inventory,

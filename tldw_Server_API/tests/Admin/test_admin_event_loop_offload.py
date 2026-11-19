@@ -146,10 +146,10 @@ def test_system_ops_reads_offloaded(monkeypatch: pytest.MonkeyPatch):
             }
         ]
 
-    monkeypatch.setattr(admin_ops_mod, "svc_get_maintenance_state", _fake_maintenance_state)
-    monkeypatch.setattr(admin_ops_mod, "svc_list_feature_flags", _fake_list_feature_flags)
-    monkeypatch.setattr(admin_ops_mod, "svc_list_incidents", _fake_list_incidents)
-    monkeypatch.setattr(admin_api_keys_mod, "svc_list_api_key_usage", _fake_list_api_key_usage)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.get_maintenance_state", _fake_maintenance_state)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.list_feature_flags", _fake_list_feature_flags)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.list_incidents", _fake_list_incidents)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_system_ops_service.list_api_key_usage", _fake_list_api_key_usage)
 
     app = _make_admin_app()
     with TestClient(app) as client:

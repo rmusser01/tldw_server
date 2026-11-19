@@ -148,8 +148,7 @@ def test_chat_auto_routing_keeps_listing_candidates_and_priority_on_one_override
         no_llm_router,
     )
     monkeypatch.setattr(
-        chat_endpoint,
-        "build_provider_order_for_routing",
+        "tldw_Server_API.app.core.LLM_Calls.routing.build_provider_order_for_routing",
         _gated_provider_order_builder(
             ready=ready,
             release=release,
@@ -225,8 +224,7 @@ def test_character_chat_auto_routing_keeps_listing_candidates_and_priority_on_on
         no_llm_router,
     )
     monkeypatch.setattr(
-        character_chat_endpoint,
-        "build_provider_order_for_routing",
+        "tldw_Server_API.app.core.LLM_Calls.routing.build_provider_order_for_routing",
         _gated_provider_order_builder(
             ready=ready,
             release=release,

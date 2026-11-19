@@ -22,7 +22,7 @@ pytestmark = pytest.mark.integration
 def fresh_suggestions(request, tmp_path, monkeypatch):
     # Other transport fixtures install a FakeAPI directly on the route module.
     # This fixture always exercises the real factory, even in a mixed suite.
-    monkeypatch.setattr(endpoint, "build_notes_graph_suggestions_api", suggestion_api.build_notes_graph_suggestions_api)
+    monkeypatch.setattr("tldw_Server_API.app.core.Notes_Graph.suggestion_api.build_notes_graph_suggestions_api", suggestion_api.build_notes_graph_suggestions_api)
     backend = (
         DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
         if request.param == "postgres"

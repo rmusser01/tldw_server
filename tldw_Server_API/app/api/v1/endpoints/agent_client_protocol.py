@@ -28,8 +28,8 @@ from loguru import logger
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, User, get_request_user
-from tldw_Server_API.app.api.v1.endpoints._in_memory_limits import SlidingWindowLimiter
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.in_memory_limits import SlidingWindowLimiter
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACP_COMPATIBILITY_DOCS_URL,
     ACPAgentCompatibilityStatus,
@@ -69,7 +69,6 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.sse_consumer impor
 from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
 from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
     ACPGovernanceDeniedError,
-    get_existing_runner_client,
     get_runner_client,
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPResponseError
@@ -89,6 +88,8 @@ from tldw_Server_API.app.services.admin_acp_sessions_service import (
     SessionRecord,
     get_acp_session_store,
 )
+import tldw_Server_API.app.core.Agent_Client_Protocol.runner_client as _runner_client
+import tldw_Server_API.app.core.Streaming.streams as _streams
 
 router = APIRouter(prefix="/acp", tags=["acp"])
 
@@ -1166,7 +1167,7 @@ async def _require_persisted_session_access(*, session_id: str, user_id: int) ->
 async def _session_runtime_presence(*, session_id: str, user_id: int) -> tuple[bool, bool]:
     """Project current runtime ownership independently of persisted session status."""
     try:
-        client = get_existing_runner_client()
+        client = _runner_client.get_existing_runner_client()
         if client is None or not await client.verify_session_access(session_id, user_id):
             return False, False
         return True, client.has_websocket_connections(session_id)
@@ -1242,7 +1243,7 @@ async def acp_session_stream(
             await websocket.close(code=4429)
         return
 
-    stream = WebSocketStream(
+    stream = _streams.WebSocketStream(
         websocket,
         heartbeat_interval_s=30.0,
         idle_timeout_s=None,  # No idle timeout for ACP sessions

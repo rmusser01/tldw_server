@@ -11,7 +11,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
-from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
+from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
 from tldw_Server_API.app.core.Workspaces import membership_adapters
 from tldw_Server_API.app.core.Workspaces.membership_service import (
     WorkspaceMembershipService,
@@ -548,7 +548,7 @@ def _context_app(db: ContextFakeDB, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
             "allowed_actions": {},
         }
 
-    monkeypatch.setattr(workspaces_endpoint, "collect_workspace_service_capabilities", fake_capabilities)
+    monkeypatch.setattr("tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities", fake_capabilities)
     app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="user-1")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     app.dependency_overrides[try_get_media_db_for_user] = lambda: None

@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import discord as discord_endpoint
-from tldw_Server_API.app.api.v1.endpoints import discord_support
+from tldw_Server_API.app.api.v1.utils.chatops import discord_support
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.tests._chatops_helpers.fake_oauth_repos import (
     FakeOAuthStateRepo as _FakeOAuthStateRepo,
@@ -47,13 +47,12 @@ def discord_oauth_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, _
             "guild": {"id": "G123", "name": "Guild 123"},
         }
 
-    monkeypatch.setattr(discord_endpoint, "_get_oauth_state_repo", _get_state_repo)
-    monkeypatch.setattr(discord_endpoint, "_get_user_secret_repo", _get_user_repo)
-    monkeypatch.setattr(discord_endpoint, "_discord_oauth_token_exchange", _token_exchange)
-    monkeypatch.setattr(discord_endpoint, "_encrypt_discord_payload", lambda payload: json.dumps(payload))
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.discord_support._get_oauth_state_repo", _get_state_repo)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.discord_support._get_user_secret_repo", _get_user_repo)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.discord_support._discord_oauth_token_exchange", _token_exchange)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chatops.discord_support._encrypt_discord_payload", lambda payload: json.dumps(payload))
     monkeypatch.setattr(
-        discord_endpoint,
-        "_decrypt_discord_payload",
+        "tldw_Server_API.app.api.v1.utils.chatops.discord_support._decrypt_discord_payload",
         lambda encrypted_blob: json.loads(encrypted_blob) if encrypted_blob else None,
     )
 

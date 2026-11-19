@@ -222,10 +222,9 @@ def test_reprocess_chunking_returns_400_for_input_error(monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
     from tldw_Server_API.app.main import app as fastapi_app
 
-    monkeypatch.setattr(reprocess_endpoint, "apply_chunking_template_if_any", lambda *args, **kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options.apply_chunking_template_if_any", lambda *args, **kwargs: {})
     monkeypatch.setattr(
-        reprocess_endpoint,
-        "improved_chunking_process",
+        "tldw_Server_API.app.core.Chunking.improved_chunking_process",
         lambda _content, _options: [{"text": "Chunk one", "chunk_index": 0}],
     )
 
@@ -277,10 +276,9 @@ def test_reprocess_chunking_database_error_is_sanitized(monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
     from tldw_Server_API.app.main import app as fastapi_app
 
-    monkeypatch.setattr(reprocess_endpoint, "apply_chunking_template_if_any", lambda *args, **kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options.apply_chunking_template_if_any", lambda *args, **kwargs: {})
     monkeypatch.setattr(
-        reprocess_endpoint,
-        "improved_chunking_process",
+        "tldw_Server_API.app.core.Chunking.improved_chunking_process",
         lambda _content, _options: [{"text": "Chunk one", "chunk_index": 0}],
     )
 
@@ -335,14 +333,13 @@ def test_reprocess_chunking_failure_sanitizes_log(monkeypatch):
 
     logger_stub = _patch_reprocess_logger(monkeypatch)
 
-    monkeypatch.setattr(reprocess_endpoint, "apply_chunking_template_if_any", lambda *args, **kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options.apply_chunking_template_if_any", lambda *args, **kwargs: {})
 
     def _raise_chunking_failure(_content, _options):
         raise RuntimeError("chunker backend leaked /private/chunker/token")
 
     monkeypatch.setattr(
-        reprocess_endpoint,
-        "improved_chunking_process",
+        "tldw_Server_API.app.core.Chunking.improved_chunking_process",
         _raise_chunking_failure,
     )
 
@@ -505,11 +502,11 @@ def test_reprocess_force_regenerate_embeddings_delete_failure_sanitizes_log(tmp_
         _raise_delete_embeddings_for_media,
     )
     monkeypatch.setattr(
-        reprocess_endpoint.embeddings_endpoint,
+        reprocess_endpoint._media_embeddings,
         "generate_embeddings_for_media",
         _fake_generate_embeddings_for_media,
     )
-    monkeypatch.setattr(reprocess_endpoint, "invalidate_rag_caches", lambda *_, **__: None)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.rag_cache.invalidate_rag_caches", lambda *_, **__: None)
 
     db_path = tmp_path / "media.db"
     seed_db = MediaDatabase(db_path=str(db_path), client_id="test_client")
@@ -564,7 +561,7 @@ def test_generate_embeddings_sanitizes_persisted_error(monkeypatch):
         raise RuntimeError("embedding backend leaked /private/vector/token")
 
     monkeypatch.setattr(
-        reprocess_endpoint.embeddings_endpoint,
+        reprocess_endpoint._media_embeddings,
         "generate_embeddings_for_media",
         _raise_generate_embeddings_for_media,
     )
@@ -614,7 +611,7 @@ def test_generate_embeddings_sanitizes_error_status_update_failure(monkeypatch):
         raise RuntimeError("embedding backend leaked /private/vector/token")
 
     monkeypatch.setattr(
-        reprocess_endpoint.embeddings_endpoint,
+        reprocess_endpoint._media_embeddings,
         "generate_embeddings_for_media",
         _raise_generate_embeddings_for_media,
     )
@@ -682,8 +679,8 @@ def test_delete_embeddings_sanitizes_where_delete_fallback_log(monkeypatch):
         def get_or_create_collection(self, collection_name: str):
             return collection
 
-    monkeypatch.setattr(reprocess_endpoint.embeddings_endpoint, "_user_embedding_config", lambda: {})
-    monkeypatch.setattr(reprocess_endpoint.embeddings_endpoint, "ChromaDBManager", _FakeChromaDBManager)
+    monkeypatch.setattr(reprocess_endpoint._media_embeddings, "_user_embedding_config", lambda: {})
+    monkeypatch.setattr(reprocess_endpoint.ChromaDB_Library, "ChromaDBManager", _FakeChromaDBManager)
 
     reprocess_endpoint._delete_embeddings_for_media(media_id=321, user_id="1")
 
@@ -713,8 +710,8 @@ def test_delete_embeddings_sanitizes_verify_failure_log(monkeypatch):
         def get_or_create_collection(self, collection_name: str):
             return _VerifyFailureCollection()
 
-    monkeypatch.setattr(reprocess_endpoint.embeddings_endpoint, "_user_embedding_config", lambda: {})
-    monkeypatch.setattr(reprocess_endpoint.embeddings_endpoint, "ChromaDBManager", _FakeChromaDBManager)
+    monkeypatch.setattr(reprocess_endpoint._media_embeddings, "_user_embedding_config", lambda: {})
+    monkeypatch.setattr(reprocess_endpoint.ChromaDB_Library, "ChromaDBManager", _FakeChromaDBManager)
 
     reprocess_endpoint._delete_embeddings_for_media(media_id=321, user_id="1")
 
@@ -737,11 +734,11 @@ def test_reprocess_embeddings_marks_vector_processed(tmp_path, monkeypatch):
         return {"status": "success", "embedding_count": 1, "chunks_processed": 1}
 
     monkeypatch.setattr(
-        reprocess_endpoint.embeddings_endpoint,
+        reprocess_endpoint._media_embeddings,
         "generate_embeddings_for_media",
         _fake_generate_embeddings_for_media,
     )
-    monkeypatch.setattr(reprocess_endpoint, "invalidate_rag_caches", lambda *_, **__: None)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.rag_cache.invalidate_rag_caches", lambda *_, **__: None)
 
     db_path = tmp_path / "media.db"
     seed_db = MediaDatabase(db_path=str(db_path), client_id="test_client")
@@ -803,11 +800,11 @@ def test_reprocess_embeddings_retries_mark_processed_conflicts(tmp_path, monkeyp
         return {"status": "success", "embedding_count": 1, "chunks_processed": 1}
 
     monkeypatch.setattr(
-        reprocess_endpoint.embeddings_endpoint,
+        reprocess_endpoint._media_embeddings,
         "generate_embeddings_for_media",
         _fake_generate_embeddings_for_media,
     )
-    monkeypatch.setattr(reprocess_endpoint, "invalidate_rag_caches", lambda *_, **__: None)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.rag_cache.invalidate_rag_caches", lambda *_, **__: None)
 
     original_mark_media_as_processed = reprocess_endpoint.mark_media_as_processed
     attempts = {"processed": 0}
@@ -819,8 +816,7 @@ def test_reprocess_embeddings_retries_mark_processed_conflicts(tmp_path, monkeyp
         return original_mark_media_as_processed(db_instance=db_instance, media_id=media_id)
 
     monkeypatch.setattr(
-        reprocess_endpoint,
-        "mark_media_as_processed",
+        "tldw_Server_API.app.core.DB_Management.DB_Manager.mark_media_as_processed",
         _flaky_mark_media_as_processed,
     )
 

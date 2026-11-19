@@ -74,7 +74,7 @@ async def refresh_harness(tmp_path, monkeypatch):
     monkeypatch.setattr(app_services(), "db_pool", pool)
     # Keep the route's real dependency, forcing its production transaction branch.
     monkeypatch.setattr(auth_deps, "_is_test_mode", lambda: False)
-    monkeypatch.setattr(auth, "_is_test_mode", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.testing.is_test_mode", lambda: False)
     users = AuthnzUsersRepo(pool)
     user_id = await users.create_user(  # nosec B106 - deliberately unusable synthetic fixture hash
         username="refresh-user", email="refresh-user@example.com", password_hash="unused-test-hash"
@@ -236,7 +236,7 @@ async def test_refresh_cancellation_propagates_with_transaction_rollback(refresh
 
     with monkeypatch.context() as patch:
         if boundary == "scope":
-            patch.setattr(auth, "list_memberships_for_user", cancel)
+            patch.setattr("tldw_Server_API.app.core.AuthNZ.orgs_teams.list_memberships_for_user", cancel)
         elif boundary == "blacklist-write":
             patch.setattr(h.blacklist, "revoke_token", cancel)
         else:

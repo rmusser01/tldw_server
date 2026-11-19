@@ -13,7 +13,7 @@ import tldw_Server_API.app.core.Chat.chat_metrics as chat_metrics
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, RequireRole
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.Chat.chat_metrics import get_chat_metrics
-from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
+import tldw_Server_API.app.core.Metrics.metrics_manager as _metrics_manager
 
 try:
     from redis.exceptions import RedisError
@@ -131,7 +131,7 @@ async def _refresh_embeddings_stage_flags() -> None:
 
 async def build_prometheus_metrics_response() -> Response:
     """Build the canonical text-format metrics response used by all surface routes."""
-    registry = get_metrics_registry()
+    registry = _metrics_manager.get_metrics_registry()
     _ensure_embeddings_worker_metrics_registered()
     await _refresh_embeddings_stage_flags()
     prometheus_text = registry.export_prometheus_format() or ""
@@ -189,7 +189,7 @@ async def get_json_metrics() -> dict[str, Any]:
     useful for debugging and custom monitoring solutions.
     """
     try:
-        registry = get_metrics_registry()
+        registry = _metrics_manager.get_metrics_registry()
         chat_metrics = get_chat_metrics()
 
         all_metrics = registry.get_all_metrics()
@@ -292,7 +292,7 @@ async def reset_metrics() -> dict[str, str]:
     """
     try:
         # Reinitialize metrics
-        registry = get_metrics_registry()
+        registry = _metrics_manager.get_metrics_registry()
         collector = get_chat_metrics()
 
         # Clear values

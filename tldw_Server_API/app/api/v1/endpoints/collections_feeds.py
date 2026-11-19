@@ -22,10 +22,9 @@ from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_me
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.Personalization import (
-    record_watchlist_source_created,
     record_watchlist_source_deleted,
-    record_watchlist_source_updated,
 )
+import tldw_Server_API.app.core.Personalization as _Personalization
 
 FEED_ORIGIN = "feed"
 _COLLECTIONS_COMPANION_SURFACE = "api.collections"
@@ -442,7 +441,7 @@ async def create_feed_subscription(
     job = db.get_job(int(job.id))
 
     response = _to_feed_response(source, job_row=job, settings=settings)
-    record_watchlist_source_created(
+    _Personalization.record_watchlist_source_created(
         user_id=current_user.id,
         source=response,
         route="/api/v1/collections/feeds",
@@ -599,7 +598,7 @@ async def update_feed_subscription(
 
     response = _to_feed_response(source, job_row=job, settings=settings)
     if activity_patch:
-        record_watchlist_source_updated(
+        _Personalization.record_watchlist_source_updated(
             user_id=current_user.id,
             source=response,
             patch=activity_patch,

@@ -46,11 +46,11 @@ from tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints import
     ConfigUpdater,
     apply_embedding_recipe_recommendation,
     build_embedding_recipe_apply_preview,
-    build_embedding_recipe_candidate_hints,
 )
 from tldw_Server_API.app.core.Evaluations.recipes.reporting import RecipeRunReport
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.exceptions import RecipeEnqueueError
+import tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints as _embeddings_recipe_hints
 
 recipes_router = APIRouter()
 
@@ -187,7 +187,7 @@ async def get_embeddings_recipe_candidates(
 ):
     del user_ctx
     try:
-        return build_embedding_recipe_candidate_hints(user=current_user)
+        return _embeddings_recipe_hints.build_embedding_recipe_candidate_hints(user=current_user)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

@@ -79,7 +79,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
       SKIP_WXT_PREPARE: "1"
