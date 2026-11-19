@@ -14,8 +14,8 @@ tldw_Server_API/app/core/Character_Chat/chat_dictionary.py:1710 if client_id
 tldw_Server_API/app/core/DB_Management/Workflows_DB.py:1926 if tenant_id
 tldw_Server_API/app/core/DB_Management/Workflows_DB.py:1929 if owner_id
 tldw_Server_API/app/core/DB_Management/Workflows_DB.py:2078 if user_id
-tldw_Server_API/app/core/DB_Management/Workflows_Scheduler_DB.py:409 if user_id
-tldw_Server_API/app/core/DB_Management/Workflows_Scheduler_DB.py:442 if user_id
+tldw_Server_API/app/core/DB_Management/Workflows_Scheduler_DB.py:406 if user_id
+tldw_Server_API/app/core/DB_Management/Workflows_Scheduler_DB.py:439 if user_id
 tldw_Server_API/app/core/DB_Management/media_db/api.py:1084 if user_id
 tldw_Server_API/app/core/DB_Management/prompt_studio_db/repositories/projects.py:139 if user_id
 tldw_Server_API/app/core/Jobs/manager.py:5987 if owner_user_id

@@ -569,6 +569,7 @@ const HOSTED_VISIBLE_SHORTCUT_PATHS = new Set([
   "/knowledge",
   "/media",
   "/collections",
+  "/watchlists",
   "/stt",
   "/tts"
 ])

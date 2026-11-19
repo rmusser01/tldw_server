@@ -12,8 +12,6 @@
   "api/v1/endpoints/admin/admin_ops.py": {"reads": 2, "import_time": 0, "reason": null},
   "api/v1/endpoints/agent_client_protocol.py": {"reads": 9, "import_time": 0, "reason": null},
   "api/v1/endpoints/agent_orchestration.py": {"reads": 1, "import_time": 0, "reason": null},
-  "api/v1/endpoints/audio/__init__.py": {"reads": 1, "import_time": 0, "reason": null},
-  "api/v1/endpoints/audio/audio.py": {"reads": 1, "import_time": 0, "reason": null},
   "api/v1/endpoints/audio/audio_health.py": {"reads": 5, "import_time": 0, "reason": null},
   "api/v1/endpoints/audio/audio_jobs.py": {"reads": 3, "import_time": 0, "reason": null},
   "api/v1/endpoints/audio/audio_streaming.py": {"reads": 18, "import_time": 0, "reason": null},
@@ -626,7 +624,7 @@
   "services/worker_startup_policy.py": {"reads": 1, "import_time": 0, "reason": null},
   "services/workflows_artifact_gc_service.py": {"reads": 2, "import_time": 0, "reason": null},
   "services/workflows_db_maintenance.py": {"reads": 5, "import_time": 0, "reason": null},
-  "services/workflows_scheduler.py": {"reads": 10, "import_time": 0, "reason": null},
+  "services/workflows_scheduler.py": {"reads": 9, "import_time": 0, "reason": null},
   "services/workflows_webhook_dlq_service.py": {"reads": 11, "import_time": 0, "reason": null},
   "services/workspace_file_inventory_jobs_worker.py": {"reads": 7, "import_time": 0, "reason": null},
   "services/writing_annotation_review_jobs_worker.py": {"reads": 7, "import_time": 0, "reason": null}

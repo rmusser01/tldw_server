@@ -15,11 +15,15 @@ import {
 } from "@/services/tldw/flashcards-generate-handoff"
 import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
 
-const mocks = vi.hoisted(() => ({ request: vi.fn(), user: 1, resolveUser: vi.fn(), messages: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } }))
+type StorageChangeListener = (changes: Record<string, { oldValue?: string; newValue?: string }>, area: string) => void
+const storageListeners = vi.hoisted(() => new Set<StorageChangeListener>())
+
+const mocks = vi.hoisted(() => ({ listMedia: vi.fn(), request: vi.fn(), user: 1, resolveUser: vi.fn(), messages: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } }))
 vi.mock("@plasmohq/storage", async () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
 vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {
   initialize: async () => {},
+  listMedia: mocks.listMedia,
   ensureConfigForRequest: async () => JSON.parse(window.localStorage.getItem("tldwConfig") || "null")
 } }))
 vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: (...args: unknown[]) => mocks.resolveUser(...args) } }))
@@ -46,11 +50,21 @@ vi.mock("../tabs", async () => ({
   ImportExportTab: (await import("../tabs/ImportExportTab")).ImportExportTab
 }))
 vi.mock("../components", () => ({ KeyboardShortcutsModal: () => null }))
-vi.mock("../tabs/ImportExport/StudyPackPanel", () => ({ StudyPackPanel: () => null }))
 vi.mock("../tabs/ImportExport/ImportPanel", () => ({ ImportPanel: () => null }))
 vi.mock("../tabs/ImportExport/ExportPanel", () => ({ ExportPanel: () => null }))
 vi.mock("../tabs/ImageOcclusionTransferPanel", () => ({ ImageOcclusionTransferPanel: () => null }))
-vi.mock("wxt/browser", () => ({ browser: { runtime: {}, tabs: {} } }))
+vi.mock("wxt/browser", () => ({
+  browser: {
+    runtime: {},
+    tabs: {},
+    storage: {
+      onChanged: {
+        addListener: (listener: StorageChangeListener) => storageListeners.add(listener),
+        removeListener: (listener: StorageChangeListener) => storageListeners.delete(listener)
+      }
+    }
+  }
+}))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({
   t: (key: string, options?: string | Record<string, unknown>) => typeof options === "string" ? options : String(options?.defaultValue || key).replace(/\{\{(\w+)\}\}/g, (_match, name: string) => String(options?.[name] ?? ""))
 }) }))
@@ -137,6 +151,42 @@ describe("actual Flashcards generation private handoff", () => {
     expect(screen.queryByRole("button", { name: "Study this source" })).not.toBeInTheDocument()
     expect(screen.getByTestId("location")).not.toHaveTextContent(/Alice|alice-note|study_pack_handoff/)
     expect(failures).not.toHaveBeenCalled()
+  })
+
+  it("clears picked media on extension account switch after identity lookup failed", async () => {
+    mocks.resolveUser.mockRejectedValue(new Error("Identity endpoint temporarily unavailable"))
+    mocks.listMedia.mockResolvedValue({ items: [
+      { id: 6, title: "Alice private option" },
+      { id: 7, title: "Alice private selected source" }
+    ] })
+
+    mount("/flashcards?tab=importExport")
+    await waitFor(() => expect(screen.getAllByText(
+      "Sign in to the intended account, then reopen the transfer from its source."
+    )).toHaveLength(2))
+
+    fireEvent.click(screen.getByRole("button", { name: "Create study pack" }))
+    const picker = screen.getByRole("combobox", { name: "Search media library" })
+    fireEvent.mouseDown(picker)
+    fireEvent.click(await screen.findByText("Alice private selected source"))
+    expect(screen.getByTestId("study-pack-source-0")).toHaveTextContent("Alice private selected source")
+    if (picker.getAttribute("aria-expanded") === "false") fireEvent.mouseDown(picker)
+    expect(await screen.findByText("Alice private option")).toBeInTheDocument()
+
+    const previous = window.localStorage.getItem("tldwConfig")!
+    const next = JSON.stringify({ ...JSON.parse(previous), accessToken: tokenFor(2), refreshToken: "refresh-2" })
+    mocks.user = 2
+    window.localStorage.setItem("tldwConfig", next)
+    act(() => {
+      for (const listener of storageListeners) {
+        listener({ tldwConfig: { oldValue: previous, newValue: next } }, "local")
+      }
+    })
+    await waitFor(() => {
+      expect(screen.queryByText("Alice private option")).not.toBeInTheDocument()
+      expect(screen.queryByText("Alice private selected source")).not.toBeInTheDocument()
+      expect(screen.queryByRole("dialog", { name: "Create study pack" })).not.toBeInTheDocument()
+    })
   })
 
   it("consumes a Study Pack once under StrictMode and cannot restore it on reload or replay", async () => {

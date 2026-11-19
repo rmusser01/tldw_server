@@ -57,9 +57,6 @@ from tldw_Server_API.app.core.Metrics.stt_metrics import (
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Usage import concurrency_quota, quota_checks
 import tldw_Server_API.app.core.Usage.audio_quota as _audio_quota
-from tldw_Server_API.app.core.Usage.audio_quota import (
-    consume_daily_minutes_with_compat,
-)
 import tldw_Server_API.app.core.Billing.enforcement as _enforcement
 import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy as _stt_policy
 
@@ -208,11 +205,7 @@ async def _consume_daily_minutes(
     *,
     operation_id: str | None = None,
 ) -> tuple[bool, float | None]:
-    return await consume_daily_minutes_with_compat(
-        user_id=user_id,
-        minutes=minutes,
-        operation_id=operation_id,
-    )
+    return await _audio_quota.consume_daily_minutes(user_id, minutes, operation_id=operation_id)
 
 
 def _stt_provider_envelope(stt_registry: Any, provider_name: str) -> Optional[dict[str, Any]]:

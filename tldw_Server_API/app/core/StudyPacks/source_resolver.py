@@ -8,12 +8,12 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_latest_transcription,
     get_media_by_id,
     get_unvectorized_chunks_in_range,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 
 from .types import (
     StudySourceBundle,
@@ -305,9 +305,15 @@ class StudySourceResolver:
                 timestamp_value,
                 "timestamp_seconds",
             )
-        evidence_text, normalized_locator = _prepare_evidence(selection, normalized_locator, transcript)
+        evidence_text, normalized_locator = _prepare_evidence(
+            selection,
+            normalized_locator,
+            transcript,
+            media.get("content") if timestamp_value is None else None,
+        )
         if not evidence_text:
-            raise ValueError(f"Media {media_id} has no transcript evidence to resolve")
+            evidence_kind = "transcript" if timestamp_value is not None else "text"
+            raise ValueError(f"Media {media_id} has no {evidence_kind} evidence to resolve")
 
         return StudySourceBundleItem(
             source_type="media",

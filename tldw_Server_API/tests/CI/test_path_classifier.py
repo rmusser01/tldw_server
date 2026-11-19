@@ -1,4 +1,6 @@
 import pytest
+
+from tldw_Server_API.tests.lint._moved_endpoint_code import REPO_ROOT, moved_files
 from Helper_Scripts.ci.path_classifier import classify_paths
 
 
@@ -124,6 +126,14 @@ def test_moved_endpoint_code_still_enables_e2e() -> None:
         "tldw_Server_API/app/core/Sandbox/default_service.py",
     ):
         assert classify_paths([path])["e2e_changed"] is True
+
+
+def test_every_moved_endpoint_file_still_enables_e2e() -> None:
+    """A file moved out of endpoints/ must keep the required E2E trigger (TASK-13950.20)."""
+    paths = {p.relative_to(REPO_ROOT).as_posix() for p in moved_files()}
+    paths.add("tldw_Server_API/app/core/Prompt_Management/prompt_studio/ws_connections.py")
+    missing = sorted(p for p in paths if not classify_paths([p])["e2e_changed"])
+    assert missing == []
 
 
 def test_backlog_py_change_runs_backend_gate_without_coverage() -> None:
