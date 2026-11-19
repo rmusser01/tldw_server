@@ -79,7 +79,7 @@ describe("sidepanel chat compact toolbar contract", () => {
 
   it("keeps pro composer image attachment visible and accessible", () => {
     expect(controlRowSource).toContain('data-testid="chat-attach-image"')
-    expect(controlRowSource).toContain('sidepanel:controlRow.attachImage", "Attach image"')
+    expect(controlRowSource).toContain('playground:actions.attachImage", "Attach image"')
     expect(controlRowSource).toContain("min-h-[44px]")
   })
 })

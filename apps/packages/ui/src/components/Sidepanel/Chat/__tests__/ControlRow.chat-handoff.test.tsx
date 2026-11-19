@@ -317,3 +317,36 @@ describe("ControlRow Open in full page", () => {
     expect(screen.queryByRole("button", { name: "Open in full page" })).toBeNull()
   })
 })
+
+/**
+ * XP-12 (#3101), decision [12]: the side panel's composer uses the full
+ * page's names and groups, in the full page's order, without a rebuild.
+ */
+describe("ControlRow vocabulary matches the full page (XP-12)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useNativePopover = false
+    mocks.runtimeId = "handoff-extension"
+    mocks.selectedAssistant = null
+  })
+
+  it("names the toolbar controls as the full page does", () => {
+    render(<ControlRow {...defaultProps()} fullPage={fullPage()} />)
+    expect(screen.getByRole("button", { name: "Search & Context" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Web search" })).toBeInTheDocument()
+    expect(screen.getByTestId("chat-attach-image")).toHaveAccessibleName("Attach image")
+    expect(screen.getByRole("button", { name: "Tools" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /knowledge search|more tools|^web$/i })).toBeNull()
+  })
+
+  it("groups Tools like the full page: Context setup, then Response & tools", () => {
+    render(<ControlRow {...defaultProps()} fullPage={fullPage()} />)
+    const menu = screen.getByTestId("mock-popover-content").textContent ?? ""
+    const order = ["Context setup", "Web search", "Vision", "Attach image", "Response & tools", "Tool choice", "MCP tools", "Advanced"]
+      .map((label) => menu.indexOf(label))
+    expect(order.every((index) => index >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    expect(menu).not.toContain("Search & Vision")
+    expect(menu).not.toContain("Upload Image")
+  })
+})

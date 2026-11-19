@@ -28,7 +28,7 @@ test('selected sidepanel expansion opens extension full page with an independent
   } finally { await context.close(); await server.close() }
 })
 
-test('Open in full page from More tools carries the draft to the extension full page (XP-09)', async () => {
+test('Open in full page from Tools carries the draft to the extension full page (XP-09)', async () => {
   const server = await startHistoryServer()
   const { context, page, optionsUrl, extensionId, openSidepanel } = await launchWithExtension(EXT_PATH, { seedConfig: historySeedConfig(server.url) })
   try {

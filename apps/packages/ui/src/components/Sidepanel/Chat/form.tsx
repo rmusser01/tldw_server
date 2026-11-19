@@ -795,7 +795,7 @@ export const SidepanelForm = ({
   }, [markOptionalPanelEngaged, setOptionalPanelVisible, voiceChatEnabled])
 
   const [debouncedPlaceholder, setDebouncedPlaceholder] = React.useState<string>(
-    t("form.textarea.placeholder")
+    t("playground:composer.calmPlaceholder", "Write a message…")
   )
   const placeholderTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const {
@@ -3624,7 +3624,7 @@ export const SidepanelForm = ({
   // Debounce placeholder changes to prevent flashing on flaky connections
   React.useEffect(() => {
     const targetPlaceholder = isConnectionReady
-      ? t("form.textarea.placeholder")
+      ? t("playground:composer.calmPlaceholder", "Write a message…")
       : uxState === "testing"
         ? t(
             "sidepanel:composer.connectingPlaceholder",
@@ -3858,7 +3858,7 @@ export const SidepanelForm = ({
                                 setTyping(false)
                               }
                             }}
-                            placeholder={debouncedPlaceholder || t("form.textarea.placeholder")}
+                            placeholder={debouncedPlaceholder || t("playground:composer.calmPlaceholder", "Write a message…")}
                             {...messageInputProps}
                             onChange={(event) => {
                               messageInputProps.onChange(event)

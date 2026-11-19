@@ -445,9 +445,9 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         }
       }}
     >
-      {/* Search & Vision Section */}
+      {/* XP-12: the full page's groups and names, in its order */}
       <div className="text-caption text-text-muted font-medium">
-        {t("sidepanel:controlRow.searchSection", "Search & Vision")}
+        {t("playground:composer.groups.contextSetup", "Context setup")}
       </div>
 
       {/* Web Search - only show if server supports it */}
@@ -455,7 +455,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm flex items-center gap-2">
             <Globe className="size-3.5" />
-            {t("sidepanel:controlRow.webSearch", "Web Search")}
+            {t("playground:tools.webSearch", "Web search")}
           </span>
           <Switch
             size="small"
@@ -489,9 +489,32 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         </Tooltip>
       </div>
 
+      {/* Upload Image */}
+      <Upload
+        accept="image/*"
+        showUploadList={false}
+        beforeUpload={(file) => {
+          onImageUpload(file)
+          setMoreOpen(false)
+          return false
+        }}
+      >
+        <button
+          data-testid="chat-upload-image"
+          className="w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 hover:bg-surface2"
+          title={t("playground:actions.attachImage", "Attach image")}
+        >
+          <ImageIcon className="size-4 text-text-subtle" />
+          {t("playground:actions.attachImage", "Attach image")}
+        </button>
+      </Upload>
+
       <div className="panel-divider my-1" />
 
       <div className="text-caption text-text-muted font-medium">
+        {t("playground:composer.responseAndTools", "Response & tools")}
+      </div>
+      <div className="text-xs text-text-muted">
         {t("sidepanel:controlRow.toolChoiceLabel", "Tool choice")}
       </div>
       <Tooltip
@@ -696,28 +719,6 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
 
       <div className="panel-divider my-1" />
 
-      {/* Upload Image */}
-      <Upload
-        accept="image/*"
-        showUploadList={false}
-        beforeUpload={(file) => {
-          onImageUpload(file)
-          setMoreOpen(false)
-          return false
-        }}
-      >
-        <button
-          data-testid="chat-upload-image"
-          className="w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 hover:bg-surface2"
-          title={t("sidepanel:controlRow.uploadImage", "Upload Image")}
-        >
-          <ImageIcon className="size-4 text-text-subtle" />
-          {t("sidepanel:controlRow.uploadImage", "Upload Image")}
-        </button>
-      </Upload>
-
-      <div className="panel-divider my-1" />
-
       <button
         type="button"
         onClick={() => setAdvancedToolsExpanded((open) => !open)}
@@ -854,18 +855,18 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
             featureKey={activeHint}
             title={
               activeHint === "knowledge-search"
-                ? t("common:featureHints.knowledge.title", "Search your knowledge")
-                : t("common:featureHints.moreTools.title", "More tools available")
+                ? t("common:featureHints.knowledge.title", "Search & Context")
+                : t("common:featureHints.moreTools.title", "Tools")
             }
             description={
               activeHint === "knowledge-search"
                 ? t(
                     "common:featureHints.knowledge.description",
-                    "Open the knowledge search panel to find snippets and insert them into your chat."
+                    "Open Search & Context to find snippets and insert them into your chat."
                   )
                 : t(
                     "common:featureHints.moreTools.description",
-                    "Access vision mode, image upload, quick ingest, and the full app."
+                    "Vision, image upload, quick ingest and Open in full page are under Tools."
                   )
             }
             className="basis-full"
@@ -965,11 +966,11 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
             data-testid="control-rag-toggle"
             onClick={onToggleRag}
             className="flex items-center gap-2 px-3 py-2 sm:px-2 sm:py-1 rounded text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors min-h-[44px] sm:min-h-0 text-text-muted hover:bg-surface2 hover:text-text"
-            aria-label={t("sidepanel:controlRow.knowledgeSearch", "Open knowledge search")}
-            title={t("sidepanel:controlRow.knowledgeSearch", "Open knowledge search")}
+            aria-label={t("playground:composer.contextKnowledge", "Search & Context")}
+            title={t("playground:composer.contextKnowledge", "Search & Context")}
           >
             <Search className="size-3.5" />
-            <span className="hidden sm:inline">{t("sidepanel:controlRow.knowledge", "Knowledge search")}</span>
+            <span className="hidden sm:inline">{t("playground:composer.contextKnowledge", "Search & Context")}</span>
           </button>
         </div>
 
@@ -984,12 +985,12 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
                 ? "bg-primary/10 text-primary hover:bg-primary/20"
                 : "text-text-muted hover:bg-surface2 hover:text-text"
             }`}
-            aria-label={t("sidepanel:controlRow.webSearch", "Web Search")}
+            aria-label={t("playground:tools.webSearch", "Web search")}
             aria-pressed={webSearch}
-            title={t("sidepanel:controlRow.webSearch", "Web Search")}
+            title={t("playground:tools.webSearch", "Web search")}
           >
             <Globe className="size-3.5" />
-            <span className="hidden sm:inline">{t("sidepanel:controlRow.web", "Web")}</span>
+            <span className="hidden sm:inline">{t("playground:tools.webSearch", "Web search")}</span>
           </button>
         )}
 
@@ -1005,12 +1006,12 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
             type="button"
             data-testid="chat-attach-image"
             className="flex items-center gap-2 px-3 py-2 sm:px-2 sm:py-1 rounded text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors min-h-[44px] sm:min-h-0 text-text-muted hover:bg-surface2 hover:text-text"
-            aria-label={t("sidepanel:controlRow.attachImage", "Attach image")}
-            title={t("sidepanel:controlRow.attachImage", "Attach image")}
+            aria-label={t("playground:actions.attachImage", "Attach image")}
+            title={t("playground:actions.attachImage", "Attach image")}
           >
             <ImageIcon className="size-3.5" />
             <span className="hidden sm:inline">
-              {t("sidepanel:controlRow.attach", "Attach")}
+              {t("playground:actions.attach", "Attach")}
             </span>
           </button>
         </Upload>
@@ -1034,10 +1035,10 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
               type="button"
               data-testid="control-more-menu"
               className="p-2 min-h-[44px] sm:min-h-0 rounded hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-              aria-label={t("sidepanel:controlRow.moreTools", "More tools")}
+              aria-label={t("playground:composer.toolsLabel", "Tools")}
               aria-haspopup="menu"
               aria-expanded={moreOpen}
-              title={t("sidepanel:controlRow.moreTools", "More tools")}
+              title={t("playground:composer.toolsLabel", "Tools")}
             >
               <MoreHorizontal className="size-4 text-text-subtle" />
             </button>

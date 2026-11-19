@@ -553,12 +553,12 @@
   },
   "featureHints": {
     "knowledge": {
-      "title": "Search your knowledge",
-      "description": "Open the knowledge search panel to find snippets and insert them into your chat."
+      "title": "Search & Context",
+      "description": "Open Search & Context to find snippets and insert them into your chat."
     },
     "moreTools": {
-      "title": "More tools available",
-      "description": "Access vision mode, image upload, quick ingest, and the full app."
+      "title": "Tools",
+      "description": "Vision, image upload, quick ingest and Open in full page are under Tools."
     },
     "commandPalette": {
       "title": "Quick commands",
