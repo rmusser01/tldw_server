@@ -17,12 +17,7 @@ Routes are controlled by the route policy in `config.txt` (section `[API-Routes]
   # or
   stable_only = false
   ```
-- Or enable via environment:
-
-  ```bash
-  export ROUTES_ENABLE=tools   # comma/space separated list supported
-  # optional: export ROUTES_STABLE_ONLY=false
-  ```
+- The `ROUTES_STABLE_ONLY`, `ROUTES_DISABLE`, `ROUTES_ENABLE` and `ROUTES_EXPERIMENTAL` environment variables are route-toggle overrides, honoured only in a test runtime (pytest or `TEST_MODE`). In production, `[API-Routes]` in `config.txt` is authoritative.
 
 After restart, the server includes the tools router under `/api/v1`.
 
