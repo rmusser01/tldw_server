@@ -37,7 +37,6 @@ from tldw_Server_API.app.core.exceptions import (
     ChatConfigurationError,
     ChatRateLimitError,
     EgressPolicyError,
-    LLMQuotaExceededError,
     NetworkError,
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
@@ -234,45 +233,6 @@ def _resolve_adapter_timeout(provider: str, app_config: dict[str, Any]) -> Optio
     return None
 
 
-def _override_outcome(provider: str, handle: ProviderCallCredentials, model: str) -> str:
-    """How a call on ``handle`` meets the provider override (TASK-15571).
-
-    ``"handle"``: it stays on the handle, which is the server's key or holds an allowed model. ``"refused"``: a
-    disabled provider, or a policy that cannot be read. ``"server_key"``: a denied model falls back, once the
-    user's LLM quota answers for the call (the boundary admitted the request, or a strict check admits it now).
-    ``"unchecked"``: no check answered, so the fallback is refused (TASK-15481's fail-closed rule). A check that
-    refuses raises the 402.
-    """
-    if handle.credential_source in {"server_default", "none"}:
-        return "handle"
-    # Imported here: a module-level import would add AuthNZ modules to the LLM_Calls load ratchet.
-    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
-    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
-        log_server_key_fallback,
-        server_key_fallback,
-    )
-    from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_sync, user_to_check
-
-    try:
-        if not server_key_fallback(provider, model):
-            return "handle"
-    except ByokResolutionError:  # logged where it was raised
-        return "refused"
-    try:
-        user_id = user_to_check(strict=True)
-        answered = user_id is None or check_user_sync(user_id, strict=True)
-    except LLMQuotaExceededError:
-        log_server_key_fallback(provider, "the user's LLM limit refuses the call on the server key")
-        raise
-    except Exception:  # noqa: BLE001 - the check could not start: no answer
-        answered = False
-    if not answered:
-        log_server_key_fallback(provider, "no LLM quota check answered, so the call is refused")
-        return "unchecked"
-    log_server_key_fallback(provider, "the call falls back to the server key")
-    return "server_key"
-
-
 def _summarize_via_adapter(
     *,
     api_name: str,
@@ -354,7 +314,10 @@ def _summarize_via_adapter(
         model = resolve_provider_model(provider, effective_app_config)
     outcome = None
     if model and provider_credentials is not None:
-        outcome = _override_outcome(provider, provider_credentials, model)
+        # Imported here: a module-level import would add AuthNZ modules to the LLM_Calls load ratchet.
+        from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import override_outcome
+
+        outcome = override_outcome(provider, provider_credentials, model)
     if outcome in {"refused", "unchecked"}:
         return _summary_failure(
             code="configuration",

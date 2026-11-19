@@ -917,6 +917,42 @@ def log_server_key_fallback(provider: str, outcome: str) -> None:
     logger.warning("Provider override for {}: model_not_allowed; {}", canonical_provider_name(provider), outcome)
 
 
+def override_outcome(provider: str, handle: Any, model: str) -> str:
+    """How a call on ``handle`` meets the provider override (TASK-15571).
+
+    ``"handle"``: it stays on the handle, which is the server's key or holds an allowed model. ``"refused"``: a
+    disabled provider, or a policy that cannot be read. ``"server_key"``: a denied model falls back, once the
+    user's LLM quota answers for the call (the boundary admitted the request, or a strict check admits it now).
+    ``"unchecked"``: no check answered, so the fallback is refused (TASK-15481's fail-closed rule). A check that
+    refuses raises the 402. A caller that gets ``"server_key"`` drops the handle and its key, so the call is
+    counted and checked as a server-key call.
+    """
+    if handle.credential_source in {"server_default", "none"}:
+        return "handle"
+    # Imported here: the quota gate must not load with the override module.
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_sync, user_to_check
+
+    try:
+        if not server_key_fallback(provider, model):
+            return "handle"
+    except ByokResolutionError:  # logged where it was raised
+        return "refused"
+    try:
+        user_id = user_to_check(strict=True)
+        answered = user_id is None or check_user_sync(user_id, strict=True)
+    except LLMQuotaExceededError:
+        log_server_key_fallback(provider, "the user's LLM limit refuses the call on the server key")
+        raise
+    except Exception:  # noqa: BLE001 - the check could not start: no answer
+        answered = False
+    if not answered:
+        log_server_key_fallback(provider, "no LLM quota check answered, so the call is refused")
+        return "unchecked"
+    log_server_key_fallback(provider, "the call falls back to the server key")
+    return "server_key"
+
+
 def _get_model_priority_from_override(
     override: LLMProviderOverride,
     objective: str,
