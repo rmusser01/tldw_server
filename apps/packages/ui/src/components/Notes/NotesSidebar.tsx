@@ -177,7 +177,7 @@ export interface NotesSidebarProps {
   addTagsToSelectedBulk: () => Promise<void>
   deleteSelectedBulk: () => Promise<void>
   /** Trash: restore the selected notes (NL-05). */
-  restoreSelectedBulk?: () => Promise<void>
+  restoreSelectedBulk?: () => Promise<unknown>
   /** Trash search (NL-05). */
   trashQuery?: string
   setTrashQuery?: (query: string) => void

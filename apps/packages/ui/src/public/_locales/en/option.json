@@ -6605,17 +6605,17 @@
   "notesSearch_serverUnavailableDescription": {
     "message": "You can keep writing. Your edits are kept on this device and saved when the server is back."
   },
-  "notesSearch_moveToTrashConfirmTitle": {
-    "message": "Move to Trash?"
+  "notesSearch_movedToTrashNamed": {
+    "message": "Moved \"{{title}}\" to Trash."
   },
-  "notesSearch_moveToTrashConfirmOk": {
-    "message": "Move to Trash"
+  "notesSearch_movedToTrashUnnamed": {
+    "message": "Moved this note to Trash."
   },
-  "notesSearch_moveToTrashConfirmNamed": {
-    "message": "Move \"{{title}}\" to Trash? You can restore it from Trash."
+  "notesSearch_bulkMovedToTrash_one": {
+    "message": "Moved {{count}} note to Trash."
   },
-  "notesSearch_moveToTrashConfirmUnnamed": {
-    "message": "Move this note to Trash? You can restore it from Trash."
+  "notesSearch_bulkMovedToTrash_other": {
+    "message": "Moved {{count}} notes to Trash."
   },
   "notesSearch_moveToTrashLinkedOne": {
     "message": "This note is linked from 1 other note. That link will not work while the note is in Trash."

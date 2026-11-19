@@ -813,21 +813,8 @@ describe("NotesManagerPage stage 16 bulk add tags (NL-03)", { timeout: 30_000 },
       expect(screen.getByDisplayValue("Beta")).toBeInTheDocument()
     })
 
-    it.each(["account-return", "server", "unmount"])("abandons bulk Delete after %s while its confirmation is pending", async change => {
-      const view = renderPage()
-      await choose()
-      const confirm = deferred<boolean>()
-      mockConfirmDanger.mockReturnValueOnce(confirm.promise)
-      await user.click(screen.getByTestId("notes-bulk-delete"))
-      await waitFor(() => expect(mockConfirmDanger).toHaveBeenCalledWith(expect.objectContaining({ title: "Delete selected notes?" })))
-      await changeOwner(view, change)
-      const before = requests("DELETE").length
-      await act(async () => { confirm.resolve(true) })
-      expect(requests("DELETE")).toHaveLength(before)
-      expect(findServerNote("n1")?.deleted).not.toBe(true)
-      expect(mockMessageSuccess).not.toHaveBeenCalled()
-    })
-
+    // Bulk Move to Trash no longer asks first (XP-17, decision 8); the owner
+    // fence on its version lookup is covered just below.
     it("does not DELETE after its missing-version lookup crosses an owner change", async () => {
       listVersionlessIds.add("n1")
       const view = renderPage()
@@ -867,19 +854,22 @@ describe("NotesManagerPage stage 16 bulk add tags (NL-03)", { timeout: 30_000 },
       expect(findServerNote("n1")?.deleted).toBe(true)
     })
 
-    it("abandons a single Delete after its original confirmation loses its owner", async () => {
+    // Single Move to Trash no longer asks first (XP-17, decision 8). Its
+    // inbound-link read still runs before the DELETE and is owner-fenced.
+    it("abandons a single Delete after its inbound-link read loses its owner", async () => {
       const view = renderPage()
       await open()
-      const confirm = deferred<boolean>()
-      mockConfirmDanger.mockReturnValueOnce(confirm.promise)
+      const read = gateRequest("GET", "/api/v1/notes/n1/neighbors?edge_types=manual,wikilink,backlink&max_nodes=120&max_edges=240")
       await user.click(screen.getByTestId("notes-overflow-menu-button"))
       await user.click(await screen.findByRole("menuitem", { name: "Delete" }))
-      await waitFor(() => expect(mockConfirmDanger).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining("to Trash?") })))
+      await waitFor(() => expect(read.seen).toHaveLength(1))
+      expect(mockConfirmDanger).not.toHaveBeenCalled()
       await changeOwner(view, "account-return")
       await open("n2")
-      await act(async () => { confirm.resolve(true) })
+      await release(read.gate)
       expect(requests("DELETE")).toHaveLength(0)
       expect(screen.getByDisplayValue("Beta")).toBeInTheDocument()
+      expect(screen.queryByTestId("notes-undo-undo")).not.toBeInTheDocument()
     })
 
     it("does not publish a late applied single Delete acknowledgement into a newer owner/editor", async () => {
@@ -896,6 +886,7 @@ describe("NotesManagerPage stage 16 bulk add tags (NL-03)", { timeout: 30_000 },
       const before = requests("GET").length
       await release(write.gate)
       expect(mockMessageOpen).not.toHaveBeenCalled()
+      expect(screen.queryByTestId("notes-undo-undo")).not.toBeInTheDocument()
       expect(mockMessageSuccess).not.toHaveBeenCalled()
       expect(requests("GET")).toHaveLength(before)
       expect(screen.getByDisplayValue("Beta")).toBeInTheDocument()
@@ -918,16 +909,14 @@ describe("NotesManagerPage stage 16 bulk add tags (NL-03)", { timeout: 30_000 },
       expect(findServerNote("n1")?.deleted).toBe(true)
     })
 
-    it("uses the original owner and versions for a legitimate single Delete and actual toast Undo", async () => {
+    it("uses the original owner and versions for a legitimate single Delete and its inline Undo", async () => {
       renderPage()
       await open()
       await user.click(screen.getByTestId("notes-overflow-menu-button"))
       await user.click(await screen.findByRole("menuitem", { name: "Delete" }))
-      await waitFor(() => expect(mockMessageOpen).toHaveBeenCalledTimes(1))
-      expect(findServerNote("n1")?.deleted).toBe(true)
-      const toast = mockMessageOpen.mock.calls[0][0]
-      render(<>{toast.content}</>)
-      await user.click(screen.getByTestId("notes-delete-undo-n1"))
+      const undo = await screen.findByTestId("notes-undo-undo")
+      await waitFor(() => expect(findServerNote("n1")?.deleted).toBe(true))
+      await user.click(undo)
       await screen.findByDisplayValue("Alpha")
       const deleted = requests("DELETE")[0]
       const trashRead = requests("GET").find(request => String(request.path).startsWith("/api/v1/notes/trash?"))
@@ -1059,18 +1048,16 @@ describe("NotesManagerPage stage 16 bulk add tags (NL-03)", { timeout: 30_000 },
       expect(screen.getByDisplayValue("Beta")).toBeInTheDocument()
     })
 
-    it("does not restore through a prior single Delete toast after the owner changed", async () => {
+    it("retires a single Delete's inline Undo when the owner changes", async () => {
       const view = renderPage()
       await open()
       await user.click(screen.getByTestId("notes-overflow-menu-button"))
       await user.click(await screen.findByRole("menuitem", { name: "Delete" }))
-      await waitFor(() => expect(mockMessageOpen).toHaveBeenCalledTimes(1))
-      const toast = mockMessageOpen.mock.calls[0][0]
-      await changeOwner(view, "account-return")
+      await screen.findByTestId("notes-undo-undo")
       const before = requests("POST").length
-      render(<>{toast.content}</>)
-      await user.click(screen.getByTestId("notes-delete-undo-n1"))
+      await changeOwner(view, "account-return")
       await act(async () => {})
+      expect(screen.queryByTestId("notes-undo-undo")).not.toBeInTheDocument()
       expect(requests("POST")).toHaveLength(before)
       expect(findServerNote("n1")?.deleted).toBe(true)
       expect(mockMessageSuccess).not.toHaveBeenCalled()

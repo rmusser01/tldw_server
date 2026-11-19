@@ -130,7 +130,8 @@ import { revealNotesListAndFocusSearch } from "@/components/Notes/hooks/useNotes
 import { focusActiveNotesListRow } from "@/components/Notes/notes-list-keyboard"
 import { buildNotesTimelineSections } from "@/components/Notes/notes-timeline"
 import { isNotesServerUnavailableError } from "@/components/Notes/notes-list-error"
-import { buildMoveToTrashConfirm, dismissNoteDeletedToast, findNoteTitleForConfirm, notesDeleteToastKey } from "@/components/Notes/notes-trash"
+import { buildMovedToTrashMessage, findNoteTitleForConfirm } from "@/components/Notes/notes-trash"
+import { InlineUndoBanner, useInlineUndo } from "@/components/Common/InlineUndo"
 import NotesTrashGuidance from "@/components/Notes/NotesTrashGuidance"
 import { useLatchedFlag } from "./hooks/useLatchedFlag"
 
@@ -240,6 +241,13 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const modal = useAntdModal()
   const { showUndoNotification } = useUndoNotification()
   const bulkRun = useNotesBulkRun(notesGraphAuthorityScope)
+  // One inline Undo for single and bulk Move to Trash (XP-17, AX-06; #3101).
+  const notesUndo = useInlineUndo()
+  const dismissNotesUndo = notesUndo.dismiss
+  // Another account's deleted notes are not this account's to restore.
+  React.useEffect(() => {
+    dismissNotesUndo()
+  }, [dismissNotesUndo, notesGraphAuthorityScope])
   const rawConfirmDanger = useConfirmDanger()
   const confirmDanger = React.useCallback((options: ConfirmDangerOptions) => {
     useTutorialStore.getState().endTutorial()
@@ -1235,18 +1243,24 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   type NoteMutation = ReturnType<typeof beginNoteMutation>
 
   // Delete note
-  const lookupDeletedNoteVersion = React.useCallback(async (noteId: string, operation: NoteMutation, ownedRequest: NotesOwnedRequestOptions) => {
+  // Reads Trash once for every note in `noteIds`; a note it does not find is left out.
+  const lookupDeletedNoteVersions = React.useCallback(async (noteIds: readonly string[], operation: NoteMutation, ownedRequest: NotesOwnedRequestOptions) => {
     operation.requireCurrent()
+    const versions = new Map<string, number>()
+    const wanted = new Set(noteIds)
     if (list.listMode === 'trash' && Array.isArray(list.data)) {
-      const existing = list.data.find((note) => String(note.id) === noteId)
-      if (existing?.version != null) {
-        return Number(existing.version)
+      for (const note of list.data) {
+        const id = String(note.id)
+        if (wanted.has(id) && note.version != null) {
+          versions.set(id, Number(note.version))
+          wanted.delete(id)
+        }
       }
     }
     try {
       let offset = 0
       let pagesChecked = 0
-      while (pagesChecked < TRASH_LOOKUP_MAX_PAGES) {
+      while (wanted.size > 0 && pagesChecked < TRASH_LOOKUP_MAX_PAGES) {
         const res = await bgRequest<any>({
           ...ownedRequest,
           path: `/api/v1/notes/trash?limit=${TRASH_LOOKUP_PAGE_SIZE}&offset=${offset}` as any,
@@ -1254,10 +1268,15 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         })
         operation.requireCurrent()
         const items = Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []
-        const match = items.find((item: any) => String(item?.id) === noteId)
-        const version = toNoteVersion(match)
-        if (version != null) return version
-        if (items.length === 0) break
+        for (const item of items) {
+          const id = String(item?.id)
+          const version = wanted.has(id) ? toNoteVersion(item) : null
+          if (version != null) {
+            versions.set(id, version)
+            wanted.delete(id)
+          }
+        }
+        if (wanted.size === 0 || items.length === 0) break
         const paginationTotalRaw =
           res && typeof res === 'object' ? Number((res as any)?.pagination?.total_items) : NaN
         const hasPaginationTotal = Number.isFinite(paginationTotalRaw)
@@ -1266,29 +1285,30 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         if (hasPaginationTotal && offset >= paginationTotalRaw) break
         if (items.length < TRASH_LOOKUP_PAGE_SIZE) break
       }
-      return null
     } catch {
       operation.requireCurrent()
-      return null
     }
+    return versions
   }, [list.data, list.listMode])
 
-  const showDeleteUndoToast = React.useCallback(
-    (noteId: string, original: MutationOwner) => {
-      const toastKey = notesDeleteToastKey(noteId)
-      const handleUndo = async () => {
-        if (!original.isOwnerCurrent()) return
+  const lookupDeletedNoteVersion = React.useCallback(
+    async (noteId: string, operation: NoteMutation, ownedRequest: NotesOwnedRequestOptions) =>
+      (await lookupDeletedNoteVersions([noteId], operation, ownedRequest)).get(noteId) ?? null,
+    [lookupDeletedNoteVersions]
+  )
+
+  const showDeleteUndo = React.useCallback(
+    (noteId: string, original: MutationOwner, offerMessage: string) => {
+      const handleUndo = async (): Promise<boolean> => {
+        if (!original.isOwnerCurrent()) return false
         const operation = beginNoteMutation(original)
-        if (typeof (message as any).destroy === 'function') {
-          ;(message as any).destroy(toastKey)
-        }
         try {
           const ownedRequest = await operation.requestOptions()
           const resolvedVersion = await lookupDeletedNoteVersion(noteId, operation, ownedRequest)
           operation.requireCurrent()
           if (resolvedVersion == null) {
             message.warning('Undo unavailable. Open Trash to restore this note.')
-            return
+            return false
           }
           await bgRequest<any>({
             ...ownedRequest,
@@ -1306,35 +1326,21 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           if (operation.isEditorCurrent()) {
             await latestEditorRef.current.loadDetail(noteId, ownedRequest, operation.editRevision)
           }
+          return true
         } catch {
           if (operation.isCurrent()) message.warning('Undo failed. Open Trash to restore this note manually.')
+          return false
         } finally { operation.release() }
       }
 
-      if (typeof (message as any).open === 'function') {
-        ;(message as any).open({
-          key: toastKey,
-          duration: 10,
-          content: (
-            <span className="inline-flex items-center gap-2">
-              <span>Note deleted</span>
-              <Button
-                type="link"
-                size="small"
-                className="!px-0"
-                onClick={() => { void handleUndo() }}
-                data-testid={`notes-delete-undo-${noteId.replace(/[^a-z0-9_-]/gi, '_')}`}
-              >
-                Undo
-              </Button>
-            </span>
-          )
-        })
-        return
-      }
-      message.success('Note deleted')
+      notesUndo.show({
+        key: noteId,
+        message: offerMessage,
+        restoredMessage: t('option:notesSearch.noteRestored', { defaultValue: 'Note restored' }),
+        onUndo: handleUndo
+      })
     },
-    [beginNoteMutation, list, lookupDeletedNoteVersion, message]
+    [beginNoteMutation, list, lookupDeletedNoteVersion, message, notesUndo, t]
   )
 
   const countInboundDeleteReferences = React.useCallback(async (noteId: string, operation: NoteMutation, ownedRequest: NotesOwnedRequestOptions) => {
@@ -1376,8 +1382,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       const inboundReferenceCount = await countInboundDeleteReferences(targetId, operation, ownedRequest)
       operation.requireCurrent()
       const noteTitle = findNoteTitleForConfirm(targetId, { selectedId: ed.selectedId, selectedTitle: ed.title, rows: list.data })
-      const ok = await confirmDanger(buildMoveToTrashConfirm(t, { noteTitle, inboundReferenceCount }))
-      if (!ok || !operation.isCurrent()) return
+      // A soft delete happens at once and offers Undo (XP-17; #3101 decision 8).
       let expectedVersion: number | null = null
       if (ed.selectedId != null && String(ed.selectedId) === targetId) {
         expectedVersion = ed.selectedVersion
@@ -1410,7 +1415,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       })
       operation.requireCurrent()
       latestEditorRef.current.removeRecentNotes([targetId])
-      showDeleteUndoToast(targetId, operation)
+      showDeleteUndo(targetId, operation, buildMovedToTrashMessage(t, { noteTitle, inboundReferenceCount }))
       if (operation.isEditorCurrent() && ed.selectedId != null && String(ed.selectedId) === targetId) resetEditorToEmptyState()
       await operation.refetch()
     } catch (e: any) {
@@ -1441,7 +1446,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       const ownedRequest = await operation.requestOptions()
       const restored = await postNoteRestore(target, expectedVersion, ownedRequest)
       operation.requireCurrent()
-      dismissNoteDeletedToast(message, target)
+      notesUndo.dismiss(target)
       // Stay in Trash so several notes can be restored in a row (NL-05).
       await operation.refetch()
       operation.requireCurrent()
@@ -1486,32 +1491,53 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     await latestEditorRef.current.handleSelectNote(noteId)
   }
 
-  const restoreSelectedBulk = React.useCallback(async (retryTargets?: NoteListItem[]) => {
+  // Restores notes from Trash, and is the bulk delete's Undo (NL-05, XP-17).
+  // Resolves false when no run started, so an Undo offer stays up.
+  const restoreSelectedBulk = React.useCallback(async (
+    retryTargets?: NoteListItem[],
+    { action = 'restore', original }: { action?: 'restore' | 'undoDelete'; original?: MutationOwner } = {}
+  ): Promise<boolean> => {
     const targets = (retryTargets ?? list.selectedBulkNotes).slice()
     if (targets.length === 0) {
       message.info('No selected notes to restore')
-      return
+      return false
     }
-    const run = bulkRun.begin('restore')
-    if (!run) return
+    if (original && !original.isOwnerCurrent()) return false
+    const run = bulkRun.begin(action)
+    if (!run) {
+      if (action === 'undoDelete') {
+        message.info(t('option:notesSearch.bulkRunBusy', { defaultValue: 'Wait for the bulk action to finish.' }))
+      }
+      return false
+    }
     const failedNotes: NoteListItem[] = []
-    const operation = beginNoteMutation()
+    const operation = beginNoteMutation(original)
     try {
       const ownedRequest = await operation.requestOptions()
       const restoredIds = new Set<string>()
       run.start(targets.length)
+      const hasVersion = (note: NoteListItem) => typeof note.version === 'number' && Number.isFinite(note.version)
+      // One Trash read for every note that needs its deleted version.
+      const unknownIds = targets.filter((note) => !hasVersion(note)).map((note) => String(note.id))
+      const deletedVersions = unknownIds.length > 0
+        ? await lookupDeletedNoteVersions(unknownIds, operation, ownedRequest)
+        : new Map<string, number>()
       for (const note of targets) {
         const noteId = String(note.id)
         try {
           operation.requireCurrent()
-          const version = typeof note.version === 'number' && Number.isFinite(note.version)
-            ? note.version
-            : await lookupDeletedNoteVersion(noteId, operation, ownedRequest)
-          if (version == null) { failedNotes.push(note); continue }
+          const version = hasVersion(note) ? Number(note.version) : deletedVersions.get(noteId) ?? null
+          if (version == null) {
+            // Not in Trash: restored elsewhere already, or gone for good.
+            if (await isNoteActive(noteId, ownedRequest)) restoredIds.add(noteId)
+            else failedNotes.push(note)
+            operation.requireCurrent()
+            continue
+          }
           await postNoteRestore(noteId, version, ownedRequest)
           operation.requireCurrent()
           restoredIds.add(noteId)
-          dismissNoteDeletedToast(message, noteId)
+          notesUndo.dismiss(noteId)
         } catch (error) {
           operation.requireCurrent()
           // Restored elsewhere (a single Restore, another tab): that is what the user wanted.
@@ -1544,13 +1570,15 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           defaultValue: count === 1 ? '{{count}} selected note could not be restored' : '{{count}} selected notes could not be restored'
         }).replace('{{count}}', String(count)))
       }
+      return true
     } catch (error) {
       if (operation.isCurrent()) message.error(error instanceof Error ? error.message : 'Operation failed')
+      return false
     } finally {
       operation.release()
       run.finish(failedNotes)
     }
-  }, [beginNoteMutation, bulkRun, ed, list, lookupDeletedNoteVersion, message, t])
+  }, [beginNoteMutation, bulkRun, ed, list, lookupDeletedNoteVersions, message, notesUndo, t])
 
   // Bulk operations: one run at a time, with n/N progress and Retry for failures (NL-05).
   // Retry passes the failed notes back in and skips the confirm the user already gave.
@@ -1567,13 +1595,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     try {
       const okToLeave = await ed.confirmDiscardIfDirty(operation.acceptSavedDraft)
       if (!okToLeave || !operation.isCurrent() || !operation.isEditorCurrent()) return
-      const confirmed = retryTargets != null || await confirmDanger({
-        title: 'Delete selected notes?',
-        content: `Delete ${targets.length} selected notes? This moves them to trash.`,
-        okText: 'Delete selected',
-        cancelText: 'Cancel'
-      })
-      if (!confirmed || !operation.isCurrent()) return
+      // Moving notes to Trash happens at once and offers Undo (XP-17; #3101 decision 8).
       const ownedRequest = await operation.requestOptions()
 
       let deleted = 0
@@ -1618,7 +1640,23 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       const failed = failedNotes.length
 
       if (deleted > 0) {
-        message.success(`Deleted ${deleted} selected note${deleted === 1 ? '' : 's'}`)
+        // Undo puts every deleted note back, through the same bulk run as Restore.
+        const deletedNotes = targets.filter((note) => deletedIds.has(String(note.id)))
+        notesUndo.show({
+          key: `bulk-delete:${Array.from(deletedIds).join(',')}`,
+          message: t('option:notesSearch.bulkMovedToTrash', {
+            count: deleted,
+            defaultValue: deleted === 1 ? 'Moved {{count}} note to Trash.' : 'Moved {{count}} notes to Trash.'
+          }).replace('{{count}}', String(deleted)),
+          restoredMessage: t('option:notesSearch.bulkRestoreSuccess', {
+            count: deleted,
+            defaultValue: deleted === 1 ? 'Restored {{count}} note' : 'Restored {{count}} notes'
+          }).replace('{{count}}', String(deleted)),
+          onUndo: () => restoreSelectedBulk(
+            deletedNotes.map((note) => ({ ...note, version: undefined })),
+            { action: 'undoDelete', original: operation }
+          )
+        })
         const editor = latestEditorRef.current
         editor.removeRecentNotes(Array.from(deletedIds))
         if (operation.isEditorCurrent() && editor.selectedId != null && deletedIds.has(String(editor.selectedId))) {
@@ -1637,7 +1675,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       operation.release()
       run.finish(failedNotes)
     }
-  }, [beginNoteMutation, bulkRun, confirmDanger, ed, list, message, resetEditorToEmptyState])
+  }, [beginNoteMutation, bulkRun, ed, list, message, notesUndo, resetEditorToEmptyState, restoreSelectedBulk, t])
 
   const refreshAfterBulkTagChange = React.useCallback(async (noteIds: readonly string[], operation: NoteMutation, ownedRequest: NotesOwnedRequestOptions) => {
     operation.requireCurrent()
@@ -1829,7 +1867,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     if (!failures || bulkRun.isRunning) return
     if (failures.action === 'delete') void deleteSelectedBulk(failures.notes)
     else if (failures.action === 'addTags') void addTagsToSelectedBulk({ notes: failures.notes, tags: failures.tags ?? [] })
-    else void restoreSelectedBulk(failures.notes)
+    else void restoreSelectedBulk(failures.notes, { action: failures.action })
   }
 
   // Editor input handlers
@@ -2899,6 +2937,16 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         renderKeywordLabelWithFrequency={kw.renderKeywordLabelWithFrequency}
         onOpenSettings={() => navigate('/settings/tldw')}
         onOpenHealth={() => navigate('/settings/health')}
+      />
+      {/* After the list in reading order, floating so it shows on every layout. */}
+      <InlineUndoBanner
+        undo={notesUndo}
+        testId="notes-undo"
+        className="absolute bottom-4 left-1/2 z-40 w-[min(36rem,calc(100%-2rem))] -translate-x-1/2"
+        onReturnFocus={() => {
+          const list = document.getElementById(NOTES_LIST_REGION_ID)
+          if (list && !focusActiveNotesListRow(list)) list.focus()
+        }}
       />
       {!isMobileViewport && (
         <button
