@@ -501,7 +501,7 @@
   "core/Workspaces/file_inventory_jobs.py": {"reads": 1, "import_time": 0, "reason": null},
   "core/Workspaces/service_capabilities.py": {"reads": 2, "import_time": 0, "reason": null},
   "core/Writing/manuscript_annotation_jobs.py": {"reads": 1, "import_time": 0, "reason": null},
-  "core/config.py": {"reads": 358, "import_time": 6, "reason": null},
+  "core/config.py": {"reads": 354, "import_time": 6, "reason": null},
   "core/config_llm_providers.py": {"reads": 2, "import_time": 0, "reason": null},
   "core/config_paths.py": {"reads": 4, "import_time": 0, "reason": null},
   "core/config_sections/precedence.py": {"reads": 1, "import_time": 0, "reason": "the one resolver (TASK-13950.21)"},
