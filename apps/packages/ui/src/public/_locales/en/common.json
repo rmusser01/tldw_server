@@ -1028,6 +1028,12 @@
   "chatSidebar_historyLandmark": {
     "message": "Chat history"
   },
+  "chatSidebar_appNavigation": {
+    "message": "App navigation"
+  },
+  "chatSidebar_menuTitle": {
+    "message": "Menu"
+  },
   "chatSidebar_newChat": {
     "message": "New Chat"
   },

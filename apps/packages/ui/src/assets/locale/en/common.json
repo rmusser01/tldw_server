@@ -572,6 +572,8 @@
   "chatSidebar": {
     "title": "Chats",
     "historyLandmark": "Chat history",
+    "appNavigation": "App navigation",
+    "menuTitle": "Menu",
     "newChat": "New Chat",
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar",

@@ -447,12 +447,13 @@ describe("history-first sidebar navigation", () => {
         <>
           <ChatSidebar />
           <button onClick={() => navigate("/settings")}>Change page</button>
+          <button onClick={() => navigate("/chat")}>Back to chat</button>
         </>
       );
     };
     render(
       <I18nextProvider i18n={translations}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/chat"]}>
           <Harness />
         </MemoryRouter>
       </I18nextProvider>,
@@ -465,6 +466,11 @@ describe("history-first sidebar navigation", () => {
       "aria-expanded",
       "true",
     );
+    // XP-11: the chat list stays on /chat; the saved choice comes back with it.
+    expect(
+      screen.queryByRole("button", { name: "Recent conversations" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
     expect(recentToggle()).toHaveAttribute("aria-expanded", "false");
     expect(preferenceWrites()).toEqual([]);
   });
@@ -504,7 +510,7 @@ describe("history-first sidebar navigation", () => {
     };
     render(
       <I18nextProvider i18n={translations}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/chat"]}>
           <Harness />
         </MemoryRouter>
       </I18nextProvider>,
@@ -531,7 +537,7 @@ describe("history-first sidebar navigation", () => {
     };
     render(
       <I18nextProvider i18n={translations}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/chat"]}>
           <Harness />
         </MemoryRouter>
       </I18nextProvider>,
@@ -592,7 +598,12 @@ describe("history-first sidebar navigation", () => {
       await act(async () => {
         resolve("local");
       });
-      expect(findInput()).not.toHaveFocus();
+      // XP-11: leaving /chat takes the chat list and its search away.
+      if (changed === "route replacement")
+        expect(
+          screen.queryByRole("textbox", { name: "Find conversations" }),
+        ).toBeNull();
+      else expect(findInput()).not.toHaveFocus();
       if (changed === "new control")
         expect(screen.getByRole("button", { name: "New Chat" })).toHaveFocus();
     },
