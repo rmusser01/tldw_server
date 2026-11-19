@@ -21,7 +21,7 @@ const isTimeoutError = (error: unknown): error is Error =>
   error instanceof Error && error.name === "TimeoutError"
 
 async function dismissWelcomeOverlayIfPresent(page: Page) {
-  const heading = page.getByText(/Welcome to tldw Assistant/i).first()
+  const heading = page.getByText(/Welcome to tldw/i).first()
   let visible = false
 
   try {

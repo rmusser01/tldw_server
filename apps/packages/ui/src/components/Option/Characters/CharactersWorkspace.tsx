@@ -158,7 +158,7 @@ export const CharactersWorkspace: React.FC = () => {
                 </span>
                 {t(
                   "playground:composer.persistence.serverCharacterHintBody",
-                  "Create a simple assistant persona (name and a short description are enough). Once it exists, the extension can reuse it when saving chats to your server."
+                  "Create a simple character (a name and a short description are enough). Once it exists, the extension can reuse it when saving chats to your server."
                 )}
               </p>
             )}

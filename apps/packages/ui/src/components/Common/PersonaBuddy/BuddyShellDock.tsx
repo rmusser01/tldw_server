@@ -157,12 +157,12 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
         data-testid="persona-buddy-drag-handle"
         role="button"
         tabIndex={0}
-        aria-label="Move Buddy with arrow keys; Home resets position"
+        aria-label="Move avatar with arrow keys; Home resets position"
         onPointerDown={onDragHandlePointerDown}
         onKeyDown={onDragHandleKeyDown}
         className="shrink-0 cursor-grab rounded-full border border-border bg-bg/95 px-3 py-1 text-xs font-medium text-text-muted shadow-sm backdrop-blur active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
       >
-        Drag Buddy
+        Drag avatar
       </div>
       <button
         type="button"
@@ -170,7 +170,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
         onKeyDown={onBuddyKeyDown}
         disabled={isDormant}
         aria-expanded={isOpen}
-        aria-label={`Buddy for ${buddySummary.persona_name}`}
+        aria-label={`Avatar for ${buddySummary.persona_name}`}
         className="relative flex h-16 w-16 cursor-grab items-center justify-center rounded-2xl border border-border bg-bg/90 p-2 shadow-lg backdrop-blur focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary active:cursor-grabbing"
       >
         {canMountVisualRenderer && visualPack ? (
@@ -217,7 +217,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
 
       <button
         type="button"
-        aria-label="Open Buddy controls"
+        aria-label="Open avatar controls"
         onClick={onOpenControls}
         className="absolute -right-2 -top-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-border bg-bg text-sm text-text opacity-0 shadow-sm transition-opacity focus:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100"
       >

@@ -459,7 +459,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
           }
         } else {
           setGlobalPreferences(previous)
-          setAmbientPreferenceMessage("Buddy settings could not be saved.")
+          setAmbientPreferenceMessage("Avatar settings could not be saved.")
         }
       } finally {
         if (pendingGlobalPreferenceMutationRef.current === generation) {
@@ -509,7 +509,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
           }
         } else {
           setPersonaPreferenceResult({ personaId, preferences: previous })
-          setAmbientPreferenceMessage("Buddy settings could not be saved.")
+          setAmbientPreferenceMessage("Avatar settings could not be saved.")
         }
       }
     },
@@ -1026,7 +1026,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     ? buddySummary
     : {
         has_buddy: false,
-        persona_name: resolvedPersona.fallbackName || "Persona Buddy",
+        persona_name: resolvedPersona.fallbackName || "Persona",
         role_summary: null,
         visual: null
       }

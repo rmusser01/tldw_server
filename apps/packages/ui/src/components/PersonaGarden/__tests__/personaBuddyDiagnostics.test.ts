@@ -153,7 +153,7 @@ describe("buildPersonaBuddyDiagnostics", () => {
           code: "no_active_pack",
           severity: "info",
           title: "No active visual pack",
-          message: "This persona is using the text Buddy fallback."
+          message: "This persona is using the text avatar fallback."
         }
       }
     })

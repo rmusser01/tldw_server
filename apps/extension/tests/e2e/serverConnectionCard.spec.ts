@@ -10,7 +10,7 @@ test.describe('ServerConnectionCard states', () => {
 
     // Card visible with missing-config state (headline + primary CTA)
     await expect(
-      page.getByText(/Connect tldw Assistant to your server/i)
+      page.getByText(/Connect tldw to your server/i)
     ).toBeVisible()
     // Shared server overview block and docs CTA should be present.
     await expect(
@@ -117,7 +117,7 @@ test.describe('ServerConnectionCard states', () => {
 
     // First-run: connection card should be visible with diagnostics entry point
     await expect(
-      page.getByText(/Can.?t reach your tldw server|Connect tldw Assistant to your server/i)
+      page.getByText(/Can.?t reach your tldw server|Connect tldw to your server/i)
     ).toBeVisible()
 
     const [healthPage] = await Promise.all([

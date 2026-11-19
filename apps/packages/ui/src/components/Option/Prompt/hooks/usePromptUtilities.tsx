@@ -20,7 +20,7 @@ export function usePromptUtilities(deps: UsePromptUtilitiesDeps) {
     notification.error({
       message: t(
         "common:privateModeSaveErrorTitle",
-        "tldw Assistant can't save data"
+        "tldw can't save data"
       ),
       description: t(
         "settings:prompts.privateModeDescription",

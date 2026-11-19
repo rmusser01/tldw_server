@@ -2456,7 +2456,7 @@ const SidepanelPersona = ({
                 <div>
                   {t(
                     "sidepanel:persona.buddyReviewSetupNotice",
-                    "Reviewing this Buddy session. Setup is still incomplete."
+                    "Reviewing this avatar session. Setup is still incomplete."
                   )}
                 </div>
                 <button

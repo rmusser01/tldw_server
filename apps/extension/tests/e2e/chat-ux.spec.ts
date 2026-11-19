@@ -35,7 +35,7 @@ test.describe("Chat workspace UX", () => {
       if ((await emptyConnection.count()) > 0) {
         await expect(emptyConnection).toBeVisible()
       } else {
-        await expect(page.getByText(/Finish setup|Connect tldw Assistant/i).first()).toBeVisible()
+        await expect(page.getByText(/Finish setup|Connect tldw/i).first()).toBeVisible()
       }
 
       const connectionCta = page.locator('[data-testid="chat-connection-cta"]')

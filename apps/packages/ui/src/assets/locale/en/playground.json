@@ -615,7 +615,7 @@
       "serverCharacterRequired": "Unable to find or create a default assistant character on the server. Try again from the Characters page.",
       "serverCharacterCta": "Open Characters workspace",
       "serverCharacterHintTitle": "Create a default assistant character",
-      "serverCharacterHintBody": "Create a simple assistant persona (name and a short description are enough). Once it exists, the extension can reuse it when saving chats to your server.",
+      "serverCharacterHintBody": "Create a simple character (a name and a short description are enough). Once it exists, the extension can reuse it when saving chats to your server.",
       "serverInlineTitle": "Saved on your server",
       "serverInlineBody": "This chat is saved on your tldw server and on this device, so you can reopen it from server history, keep a long-term record, and analyze it alongside other conversations.",
       "serverUnconfirmedPill": "Save status unconfirmed",

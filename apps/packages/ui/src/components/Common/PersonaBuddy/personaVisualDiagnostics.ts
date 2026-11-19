@@ -125,7 +125,7 @@ export const resolvePersonaVisualDiagnostics = ({
             "no_active_pack",
             "info",
             "No active visual pack",
-            "This persona is using the text Buddy fallback until a visual pack is activated."
+            "This persona is using the text avatar fallback until a visual pack is activated."
           )
         ]
       : []
@@ -137,7 +137,7 @@ export const resolvePersonaVisualDiagnostics = ({
         "unsupported_renderer",
         "warning",
         "Visual renderer is not supported here",
-        `The Buddy runtime cannot render ${pack.renderer_type} packs yet.`
+        `The avatar runtime cannot render ${pack.renderer_type} packs yet.`
       )
     ]
   }
@@ -148,7 +148,7 @@ export const resolvePersonaVisualDiagnostics = ({
         "missing_manifest",
         "error",
         "Visual pack manifest is missing",
-        "The active visual pack needs a manifest before Buddy can render it."
+        "The active visual pack needs a manifest before the avatar can render it."
       )
     ]
   }
@@ -188,7 +188,7 @@ export const resolvePersonaVisualDiagnostics = ({
         "Visual asset is missing",
         assetId
           ? `The ${resolved.animationId} animation references missing asset ${assetId}.`
-          : `The ${resolved.animationId} animation references an asset Buddy cannot load.`
+          : `The ${resolved.animationId} animation references an asset the avatar cannot load.`
       )
     ]
   }
@@ -199,7 +199,7 @@ export const resolvePersonaVisualDiagnostics = ({
         "unsupported_region",
         "warning",
         "Visual frame region is unsupported",
-        "Buddy fell back because this frame uses an unsupported sprite region."
+        "The avatar fell back because this frame uses an unsupported sprite region."
       )
     ]
   }

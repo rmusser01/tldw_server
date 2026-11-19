@@ -60,7 +60,7 @@ describe("BuddyShellPopover", () => {
     const onClose = vi.fn()
     renderPopover({ onClose })
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Buddy controls" }))
+    fireEvent.click(screen.getByRole("button", { name: "Close avatar controls" }))
 
     expect(onClose).toHaveBeenCalledTimes(1)
   })
@@ -90,7 +90,7 @@ describe("BuddyShellPopover", () => {
       "href",
       "/persona?persona_id=persona-1&tab=live&session_id=live-session-1"
     )
-    expect(screen.getByRole("link", { name: "Choose/Change Buddy" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Choose/Change avatar" })).toHaveAttribute(
       "href",
       "/persona?persona_id=persona-1&tab=visuals"
     )

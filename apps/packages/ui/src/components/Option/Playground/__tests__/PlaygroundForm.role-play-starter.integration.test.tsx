@@ -5396,7 +5396,7 @@ describe("PlaygroundForm role-play starter", () => {
     await user.click(trigger)
     const customization = screen.getByRole("region", { name: "Composer tools" })
     expect(customization).toBeVisible()
-    const buddy = within(customization).getByRole("button", { name: "Buddy & Persona", hidden: true })
+    const buddy = within(customization).getByRole("button", { name: "Avatar", hidden: true })
     expect(buddy).toBeVisible()
     expect(within(screen.getByRole("region", { name: "Prompts & people" })).getByRole("button", { name: "Role-play setup" })).toBeVisible()
   })
@@ -7071,7 +7071,7 @@ describe("PlaygroundForm role-play starter", () => {
       <PlaygroundForm droppedFiles={[]} mobileCockpitModeActive />
       <div role="dialog"><button onClick={() => useBuddyManagementStore.getState().conversationSettings?.()}>Edit conversation settings</button></div>
     </>)
-    const trigger = screen.getByRole("button", { name: "Buddy & Persona" })
+    const trigger = screen.getByRole("button", { name: "Avatar" })
     expect(trigger).toBeVisible()
     await user.click(trigger)
     expect(useBuddyManagementStore.getState()).toMatchObject({ open: true, target: { scope_type: "conversation", scope_id: "mobile-chat" } })

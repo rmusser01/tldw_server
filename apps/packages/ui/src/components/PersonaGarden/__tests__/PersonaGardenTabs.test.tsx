@@ -19,7 +19,7 @@ it("moves section focus and selection with arrows, Home and End", () => {
         items={[
           { key: "live", label: "Live", content: "Conversation" },
           { key: "profile", label: "Profile", content: "Edit profile" },
-          { key: "visuals", label: "Buddies", content: "Buddy gallery" }
+          { key: "visuals", label: "Buddies", content: "Avatar gallery" }
         ]}
       />
     )

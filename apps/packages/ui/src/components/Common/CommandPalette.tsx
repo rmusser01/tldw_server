@@ -662,7 +662,7 @@ export function CommandPalette({
   const allCommands = useMemo(() => {
     const buddyCommand: CommandItem = {
       id: "buddy-persona-management",
-      label: t("sidepanel:buddyManagement.title", "Buddy & Persona Management"),
+      label: t("sidepanel:buddyManagement.title", "Avatar settings"),
       icon: <MessageSquare size={18} />,
       category: "action",
       keywords: ["buddy", "persona", "companion", "workspace"],

@@ -825,7 +825,7 @@
     "message": "Segmentation embeddings model"
   },
   "generalSettings_empty_connectTitle": {
-    "message": "Connect tldw Assistant to your server"
+    "message": "Connect tldw to your server"
   },
   "generalSettings_empty_connectDescription": {
     "message": "Some settings only take effect when your tldw server is reachable. Connect your server to get the full experience."
@@ -837,7 +837,7 @@
     "message": "Use Diagnostics to confirm your server is healthy before trying advanced tools."
   },
   "generalSettings_empty_title": {
-    "message": "Tune how tldw Assistant behaves"
+    "message": "Tune how tldw behaves"
   },
   "generalSettings_empty_description": {
     "message": "Adjust defaults for the Web UI, sidepanel, speech, search, and data handling from one place."
