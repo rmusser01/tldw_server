@@ -2177,6 +2177,18 @@
   "chatSidebar_movedChatsToTrash_other": {
     "message": "Moved {{count}} chats to Trash."
   },
+  "chatSidebar_undoPartialRestored": {
+    "message": "Restored {{restored}} of {{total}} chats."
+  },
+  "chatSidebar_stillInTrashNamed": {
+    "message": "\"{{title}}\" is still in Trash."
+  },
+  "chatSidebar_stillInTrash_one": {
+    "message": "{{count}} chat is still in Trash."
+  },
+  "chatSidebar_stillInTrash_other": {
+    "message": "{{count}} chats are still in Trash."
+  },
   "chatSidebar_viewTrash": {
     "message": "View Trash"
   },
