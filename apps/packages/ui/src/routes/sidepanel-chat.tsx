@@ -80,14 +80,11 @@ import {
   renameTabConversation,
 } from '~/components/Sidepanel/Chat/tab-conversation-actions';
 import { useMessage } from '~/hooks/useMessage';
-import { useSelectedCharacter } from '@/hooks/useSelectedCharacter';
-import { useSelectedAssistant } from '@/hooks/useSelectedAssistant';
 import { useSidepanelChatTabsStore } from '@/store/sidepanel-chat-tabs';
 import {
   SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT,
   SIDEPANEL_STICKY_CHAT_INPUT_KEY,
 } from '@/types/chat-settings';
-import type { Character } from '@/types/character';
 import type {
   ChatModelSettingsSnapshot,
   SidepanelChatSnapshot,
@@ -121,7 +118,6 @@ import {
 import { CommandPaletteHost } from "@/components/Common/CommandPaletteHost"
 import type { CommandItem } from "@/components/Common/CommandPalette"
 import type { ServerChatHistoryItem } from "@/hooks/useServerChatHistory"
-import { buildSidepanelFullAppChatPath } from "@/utils/sidepanel-full-app-route"
 import {
   OPEN_HISTORY_EVENT,
   TIMELINE_ACTION_EVENT,
@@ -667,9 +663,6 @@ const SidepanelChatContent = ({
     messages,
     setMessages
   })
-  const [selectedCharacter] =
-    useSelectedCharacter<Character | null>(null)
-  const [selectedAssistant] = useSelectedAssistant(null)
   const setRagMediaIds = useStoreMessageOption((state) => state.setRagMediaIds)
   const tabs = useSidepanelChatTabsStore((state) => state.tabs)
   const activeTabId = useSidepanelChatTabsStore((state) => state.activeTabId)
@@ -912,47 +905,6 @@ const SidepanelChatContent = ({
     setNoteSaving(false)
     setNoteError(null)
   }, [clearNoteCapture, transferFlashcards, transferStudyPack])
-
-  const openOptionsHashRoute = React.useCallback((route: string) => {
-    const normalizedRoute = route.startsWith("/") ? route : `/${route}`
-    const path = `/options.html#${normalizedRoute}` as const
-
-    try {
-      if (browser?.runtime?.id && browser.runtime.getURL) {
-        const url = browser.runtime.getURL(path)
-        if (browser.tabs?.create) {
-          void browser.tabs.create({ url })
-        } else {
-          window.open(url, "_blank")
-        }
-        return
-      }
-    } catch (error) {
-      console.debug("[sidepanel] openOptionsHashRoute browser API unavailable:", error)
-    }
-
-    try {
-      if (
-        typeof chrome !== "undefined" &&
-        chrome.runtime?.id &&
-        chrome.runtime.getURL
-      ) {
-        const url = chrome.runtime.getURL(path)
-        window.open(url, "_blank")
-        return
-      }
-    } catch (error) {
-      console.debug("[sidepanel] openOptionsHashRoute chrome API unavailable:", error)
-    }
-
-    window.open(normalizedRoute, "_blank")
-  }, [])
-
-  const expandSelectedHistory = async () => {
-    if (isRestoringChatRef.current || !owner.isCurrent()) return
-    const route = await historySelection.prepareExpansionPath()
-    if (route) openOptionsHashRoute(route)
-  }
 
   const handleGenerateFlashcardsFromSelection = React.useCallback(async () => {
     const content = noteDraftContent
@@ -2847,39 +2799,15 @@ const SidepanelChatContent = ({
         })),
     [tabs, t]
   )
-  const selectedCharacterIdForHandoff =
-    selectedCharacter?.id == null ? null : String(selectedCharacter.id)
-  const characterChatFullAppPath = React.useMemo(
-    () =>
-      buildSidepanelFullAppChatPath({
-        selectedAssistant,
-        selectedCharacterId: selectedCharacterIdForHandoff
-      }),
-    [selectedAssistant, selectedCharacterIdForHandoff]
-  )
-  const openCharacterChatInFullAppCommand = React.useMemo<CommandItem[]>(
-    () => {
-      if (characterChatFullAppPath === "/chat") return []
-      return [
-        {
-          id: "action-open-character-chat-full-app",
-          label: t(
-            "common:commandPalette.openCharacterChatFullApp",
-            "Open Character Chat in full app"
-          ),
-          description: t(
-            "common:commandPalette.openCharacterChatFullAppDesc",
-            "Continue the active Character, Persona, or role-play setup in /chat."
-          ),
-          icon: <ExternalLink className="size-4" />,
-          action: () => openOptionsHashRoute(characterChatFullAppPath),
-          category: "action",
-          keywords: ["character", "role-play", "persona", "full app", "chat"]
-        }
-      ]
-    },
-    [characterChatFullAppPath, openOptionsHashRoute, t]
-  )
+  // XP-09: the palette runs the one "Open in full page" action too.
+  const openFullPageCommand = React.useMemo<CommandItem[]>(() => [{
+    id: "action-open-full-page",
+    label: t("sidepanel:openFullPage.label", "Open in full page"),
+    icon: <ExternalLink className="size-4" />,
+    action: () => void openHydratedChatInWebUi(),
+    category: "action",
+    keywords: ["full page", "full app", "expand", "webui", "chat"]
+  }], [openHydratedChatInWebUi, t])
   const ingestStatusLabel = React.useMemo(() => {
     const status = ingestCard?.status
     switch (status) {
@@ -3059,9 +2987,9 @@ const SidepanelChatContent = ({
             sidebarOpen={sidebarOpen}
             setSidebarOpen={setSidebarOpen}
             activeTitle={activeTabLabel}
-            chatReady={!isRestoringChat && owner.isCurrent() && (Boolean(browser.runtime.id) || webUiOpenReady)}
+            chatReady={!isRestoringChat && owner.isCurrent() && webUiOpenReady}
             onRenameTitle={handleRenameActiveTab}
-            onOpenChatInWebUi={browser.runtime.id ? undefined : openHydratedChatInWebUi}
+            onOpenFullPage={openHydratedChatInWebUi}
             loadEditableTitle={loadActiveTabTitle}
           />
           {messages.length > 0 ? <ConnectionBanner className="pt-12" /> : null}
@@ -3303,7 +3231,7 @@ const SidepanelChatContent = ({
                 </div>
               ) : null}
               <div className={historySelection.status === "idle" || freshnessNotice ? undefined : "pt-12"}>
-                <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={getSavedQuestionReview} onRetrySavedQuestion={retrySavedQuestion} onExpand={expandSelectedHistory} onBind={() => void historySelection.bindUnavailableConversation()} />
+                <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={getSavedQuestionReview} onRetrySavedQuestion={retrySavedQuestion} onExpand={openHydratedChatInWebUi} onBind={() => void historySelection.bindUnavailableConversation()} />
               </div>
               <SidePanelBody
                 scrollParentRef={containerRef}
@@ -3328,7 +3256,7 @@ const SidepanelChatContent = ({
                   onComposerReady={focusReadyComposer}
                   onRecoverDraft={handleRecoverDraft}
                   onFindConversations={requestSidebarSearchFocus}
-                  onOpenChatInWebUi={browser.runtime.id ? undefined : openChatInWebUi}
+                  onOpenChatInWebUi={openChatInWebUi}
                 onWebUiOpenReady={handleWebUiOpenReady}
                 />
               </div>
@@ -3361,7 +3289,7 @@ const SidepanelChatContent = ({
                 onComposerReady={focusReadyComposer}
                 onRecoverDraft={handleRecoverDraft}
                   onFindConversations={requestSidebarSearchFocus}
-                onOpenChatInWebUi={browser.runtime.id ? undefined : openChatInWebUi}
+                onOpenChatInWebUi={openChatInWebUi}
                 onWebUiOpenReady={handleWebUiOpenReady}
               />
             </div>
@@ -3444,7 +3372,7 @@ const SidepanelChatContent = ({
           onSearchHistory: requestSidebarSearchFocus,
           onSwitchChat: handleSelectTab,
           sidepanelChats: commandPaletteChats,
-          additionalCommands: openCharacterChatInFullAppCommand
+          additionalCommands: openFullPageCommand
         }}
       />
       <Suspense fallback={null}>

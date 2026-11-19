@@ -2151,5 +2151,23 @@
   },
   "folderPicker_saveError": {
     "message": "Some folder changes couldn't be saved. Try again."
+  },
+  "openFullPage_label": {
+    "message": "Open in full page"
+  },
+  "openFullPage_extensionDescription": {
+    "message": "Opens this chat in a new tab, with your draft and page references. Your draft also stays here."
+  },
+  "openFullPage_webuiDescription": {
+    "message": "Opens this chat in the WebUI, with your draft and attachments. Chats kept only on this device stay here."
+  },
+  "openFullPage_failed": {
+    "message": "Could not open the full page. Your draft stays here."
+  },
+  "openFullPage_partial": {
+    "message": "Opened with a partial copy: some of the draft or page references were shortened or could not be read. Review it there. Your draft stays here."
+  },
+  "openFullPage_characterDraftStays": {
+    "message": "A new character chat opens without your draft. It stays here."
   }
 }

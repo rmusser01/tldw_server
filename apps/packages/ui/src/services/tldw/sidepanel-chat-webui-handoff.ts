@@ -115,6 +115,33 @@ const normalizeOriginBaseUrl = (value: string | null | undefined): URL | null =>
   }
 }
 
+/**
+ * The WebUI address the user configured (`tldwConfig.webUiUrl`, or the legacy
+ * `webUiUrl`/`webuiUrl` keys), or null. Unlike the base-URL fallback below it
+ * never guesses one from the server address (XP-09).
+ */
+export const readExplicitSidepanelChatWebUiUrl = async (
+  read: (key: string) => Promise<unknown>
+): Promise<string | null> => {
+  const safeRead = async (key: string) => {
+    try {
+      return await read(key)
+    } catch {
+      return null
+    }
+  }
+  const config = await safeRead("tldwConfig")
+  const record =
+    config && typeof config === "object" ? (config as Record<string, unknown>) : {}
+  const asString = (value: unknown) => (typeof value === "string" ? value : null)
+  return (
+    normalizeWebUiBaseUrl(asString(record.webUiUrl)) ??
+    normalizeWebUiBaseUrl(asString(record.webuiUrl)) ??
+    normalizeWebUiBaseUrl(asString(await safeRead("webUiUrl"))) ??
+    normalizeWebUiBaseUrl(asString(await safeRead("webuiUrl")))
+  )
+}
+
 export const resolveSidepanelChatWebUiBaseUrl = (
   config: SidepanelChatWebUiConfig = {}
 ) => {

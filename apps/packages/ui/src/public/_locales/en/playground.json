@@ -3474,7 +3474,7 @@
     "message": "Use no prior messages"
   },
   "historySelection_expand": {
-    "message": "Expand in full page"
+    "message": "Open in full page"
   },
   "historySelection_instructions": {
     "message": "Tick the messages the AI should see, in the order it should see them. Arrow keys move between messages; Alt + arrow keys reorder them."

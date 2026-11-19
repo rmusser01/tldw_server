@@ -1,5 +1,4 @@
 import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
-import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { Input, InputNumber, Popover, Radio, Select, Switch, Tooltip, Upload } from "antd"
 import {
   Search,
@@ -29,19 +28,11 @@ import { useMcpTools } from "@/hooks/useMcpTools"
 import { browser } from "wxt/browser"
 import { useStorage } from "@plasmohq/storage/hook"
 import {
-  buildSidepanelChatHandoffRoute,
-  consumeSidepanelChatHandoff,
-  createSidepanelChatHandoff,
-  type SidepanelChatHandoffPageContext
-} from "@/services/sidepanel-chat-handoff"
-import {
   buildQuickIngestOpenDetailFromUrl,
   requestQuickIngestOpen,
   type QuickIngestOpenDetail
 } from "@/utils/quick-ingest-open"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
-import { buildSidepanelFullAppChatPath } from "@/utils/sidepanel-full-app-route"
-import { CHAT_PATH } from "@/routes/route-paths"
 import type { ToolChoice } from "@/store/option"
 import { useStoreChatModelSettings } from "@/store/model"
 import {
@@ -50,7 +41,7 @@ import {
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import type { ConversationContextComposition } from "@/types/conversation-context"
 import type { ConversationContextCompositionStatus } from "@/hooks/chat/useConversationContextComposition"
-import type { SidepanelChatWebUiHandoffOverrides } from "@/services/tldw/sidepanel-chat-webui-handoff"
+import type { SidepanelOpenFullPage } from "./hooks/useSidepanelOpenFullPage"
 
 interface ControlRowProps {
   // Prompt selection
@@ -85,24 +76,14 @@ interface ControlRowProps {
   chatLoopStatus?: "idle" | "running" | "complete" | "error" | "cancelled"
   pendingApprovalsCount?: number
   runningToolCount?: number
-  draftReady: boolean
-  handoffSourceKey: string
-  captureHandoffGuard: () => () => boolean
-  draftMessage?: string
-  hasVisiblePageContextForHandoff?: boolean
-  getVisiblePageContextForHandoff?: () =>
-    | Promise<SidepanelChatHandoffPageContext | undefined>
-    | SidepanelChatHandoffPageContext
-    | undefined
+  /** The side panel's one "Open in full page" action (XP-09). */
+  fullPage?: SidepanelOpenFullPage
   // Image upload
   onImageUpload: (file: File) => void
   // RAG toggle
   onToggleRag: () => void
   // Connection state
   isConnected: boolean
-  onOpenChatInWebUi?: (
-    overrides?: SidepanelChatWebUiHandoffOverrides
-  ) => Promise<boolean | void> | boolean | void
   /** Lets the form open this row's model picker when a Send is blocked by the model (XS-02). */
   modelPickerRef?: React.Ref<ModelSelectHandle>
 }
@@ -131,29 +112,15 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   chatLoopStatus = "idle",
   pendingApprovalsCount = 0,
   runningToolCount = 0,
-  draftReady,
-  handoffSourceKey,
-  captureHandoffGuard,
-  draftMessage = "",
-  hasVisiblePageContextForHandoff = false,
-  getVisiblePageContextForHandoff,
+  fullPage,
   onImageUpload,
   onToggleRag,
   isConnected,
-  onOpenChatInWebUi,
   modelPickerRef
 }) => {
   const { t } = useTranslation(["sidepanel", "playground", "common"])
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const [moreOpen, setMoreOpen] = React.useState(false)
-  const [handoffFeedback, setHandoffFeedback] = React.useState<{
-    tone: "info" | "warning" | "error"
-    message: string
-  } | null>(null)
-  const copyDraftMountedRef = React.useRef(false)
-  const copyDraftPendingRef = React.useRef<{ pending: boolean; isCurrent: () => boolean } | null>(null)
-  const [copyDraftPending, setCopyDraftPending] =
-    React.useState(false)
   const updateScopedChatModelSetting = useStoreChatModelSettings(
     (state) => state.updateScopedSetting
   )
@@ -165,7 +132,6 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const knowledgeBtnRef = React.useRef<HTMLButtonElement>(null)
   const modelSelectRef = React.useRef<ModelSelectHandle | null>(null)
   const fullAppHandoffDescriptionId = React.useId()
-  const copyHandoffDescriptionId = React.useId()
   const { capabilities } = useServerCapabilities()
   const [activePlaylistDetail, setActivePlaylistDetail] =
     React.useState<QuickIngestOpenDetail | null>(null)
@@ -443,56 +409,6 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         }
       )
     : ""
-  const fullAppChatPath = React.useMemo(
-    () =>
-      buildSidepanelFullAppChatPath({
-        selectedAssistant,
-        selectedCharacterId
-      }),
-    [selectedAssistant, selectedCharacterId]
-  )
-  const historySelection = useHistorySelectionContext()
-  const usesExtensionExpansion = Boolean(historySelection && (browser.runtime.id || !onOpenChatInWebUi))
-  const fullAppButtonLabel = usesExtensionExpansion
-    ? t("playground:historySelection.expand", "Expand in full page")
-    : onOpenChatInWebUi
-      ? t("sidepanel:header.openFullChatWebui", "Open full chat in WebUI")
-      : rolePlayActive
-        ? t("sidepanel:controlRow.openCharacterChatInFullExtension", "Open Character Chat in full extension")
-        : t("sidepanel:header.openFullChatExtension", "Open full extension chat")
-  const fullAppHandoffDescription = usesExtensionExpansion
-    ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.")
-    : onOpenChatInWebUi
-      ? t("sidepanel:header.openFullChatWebuiHandoffDescription", "Opens the configured WebUI with a draft and selected chat options. Device-local history may be unavailable there.")
-      : rolePlayActive
-        ? t("sidepanel:controlRow.openCharacterChatExtensionDescription", "Opens the character route in the extension full page. Use Copy draft & page references to carry a bounded copy; history and chat settings are not included.")
-        : t("sidepanel:header.openFullChatExtensionDescription", "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy.")
-  const copyDraftButtonLabel = t("sidepanel:controlRow.copyDraftContext", "Copy draft & page references")
-  const copyDraftDescription = browser.runtime.id
-    ? t("sidepanel:controlRow.copyDraftContextExtensionDescription", "Opens the extension full page with a short-lived copy of your draft and page titles and URLs. Page content, character choices, history, and chat settings are not included. Choose a character there if needed. Review the copy in the destination.")
-    : t("sidepanel:controlRow.copyDraftContextWebuiDescription", "Opens /chat in this WebUI with a short-lived copy of your draft and page titles and URLs. Page content, character choices, history, and chat settings are not included. Choose a character there if needed. Review the copy in the destination.")
-  const draftText = draftMessage ?? ""
-  const hasDraftForHandoff = draftText.trim().length > 0
-  const copyDraftEnabled =
-    draftReady && (hasDraftForHandoff || hasVisiblePageContextForHandoff)
-  const copyDraftButtonDisabled =
-    !copyDraftEnabled || copyDraftPending
-  const webUiOpenAttemptRef = React.useRef(0)
-  const copySourceRef = React.useRef({ draftReady, handoffSourceKey, draftText, fullAppChatPath, hasVisiblePageContextForHandoff, getVisiblePageContextForHandoff, onOpenChatInWebUi })
-  copySourceRef.current = { draftReady, handoffSourceKey, draftText, fullAppChatPath, hasVisiblePageContextForHandoff, getVisiblePageContextForHandoff, onOpenChatInWebUi }
-  React.useLayoutEffect(() => {
-    copyDraftMountedRef.current = true
-    return () => {
-      copyDraftMountedRef.current = false
-      copyDraftPendingRef.current = null
-    }
-  }, [])
-  React.useLayoutEffect(() => {
-    if (copyDraftPendingRef.current?.isCurrent()) return
-    copyDraftPendingRef.current = null
-    setCopyDraftPending(false)
-    setHandoffFeedback(null)
-  }, [draftReady, handoffSourceKey, draftText, fullAppChatPath, hasVisiblePageContextForHandoff, getVisiblePageContextForHandoff, captureHandoffGuard])
   const openRolePlayPicker = React.useCallback(() => {
     if (typeof window === "undefined") return
     window.dispatchEvent(
@@ -516,175 +432,6 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     requestQuickIngestOpen(detail ?? undefined)
     setMoreOpen(false)
     requestAnimationFrame(() => moreBtnRef.current?.focus())
-  }
-
-  const openFullAppPath = React.useCallback(async (routePath: string, isCurrent: () => boolean = () => true) => {
-    if (!isCurrent()) return false
-    const path = `/options.html#${routePath}`
-    const restoreFocus = () => {
-      if (!isCurrent()) return
-      setMoreOpen(false)
-      moreBtnRef.current?.focus()
-    }
-    const openFallback = (url: string) => {
-      if (!isCurrent()) return false
-      const opened = window.open(url, "_blank")
-      if (opened) {
-        restoreFocus()
-        return true
-      }
-      return false
-    }
-
-    try {
-      const runtime = browser.runtime
-      const url = runtime?.id && runtime.getURL ? runtime.getURL(path) : null
-      if (url) {
-        if (browser.tabs?.create) {
-          try {
-            if (!isCurrent()) return false
-            await browser.tabs.create({ url })
-            if (!isCurrent()) return false
-            restoreFocus()
-            return true
-          } catch {
-            return openFallback(url)
-          }
-        }
-        return openFallback(url)
-      }
-    } catch {}
-    return openFallback(routePath)
-  }, [])
-
-  const openFullApp = async () => {
-    if (historySelection && usesExtensionExpansion) { const route = await historySelection.prepareExpansionPath(); if (route) void openFullAppPath(route); return }
-    if (onOpenChatInWebUi) {
-      const sourceIsCurrent = captureHandoffGuard()
-      const expected = copySourceRef.current
-      const attempt = ++webUiOpenAttemptRef.current
-      let completionCurrent = true
-      const current = () => completionCurrent && webUiOpenAttemptRef.current === attempt && copyDraftMountedRef.current && sourceIsCurrent() && copySourceRef.current.draftReady &&
-        copySourceRef.current.handoffSourceKey === expected.handoffSourceKey &&
-        copySourceRef.current.onOpenChatInWebUi === onOpenChatInWebUi
-      if (!current()) return
-      Promise.resolve(onOpenChatInWebUi())
-        .then((opened) => { completionCurrent = opened !== false })
-        .catch((error) => {
-          if (current()) console.error("Failed to open WebUI chat handoff:", error)
-        })
-        .finally(() => {
-          if (!current()) return
-          setMoreOpen(false)
-          moreBtnRef.current?.focus()
-        })
-      return
-    }
-    void openFullAppPath(fullAppChatPath)
-  }
-
-  const pageContextHasVisibleContent = (
-    pageContext: SidepanelChatHandoffPageContext | undefined
-  ) =>
-    Boolean(
-      pageContext &&
-        (pageContext.title?.trim() ||
-          pageContext.url?.trim() ||
-          pageContext.snippets.some((snippet) => snippet.text.trim().length > 0))
-    )
-
-  const copyDraftToFullPage = async () => {
-    if (!copyDraftEnabled || copyDraftPendingRef.current?.pending) return
-    const sourceIsCurrent = captureHandoffGuard()
-    const expected = copySourceRef.current
-    const attempt: { pending: boolean; isCurrent: () => boolean } = { pending: true, isCurrent: () => {
-      const current = copySourceRef.current
-      return copyDraftMountedRef.current && copyDraftPendingRef.current === attempt && sourceIsCurrent() && current.draftReady &&
-        current.handoffSourceKey === expected.handoffSourceKey && current.draftText === expected.draftText &&
-        current.fullAppChatPath === expected.fullAppChatPath && current.hasVisiblePageContextForHandoff === expected.hasVisiblePageContextForHandoff &&
-        current.getVisiblePageContextForHandoff === expected.getVisiblePageContextForHandoff
-    } }
-    copyDraftPendingRef.current = attempt
-    if (!attempt.isCurrent()) { copyDraftPendingRef.current = null; return }
-    setCopyDraftPending(true)
-    setHandoffFeedback(null)
-
-    try {
-      let pageContext: SidepanelChatHandoffPageContext | undefined
-      try {
-        pageContext = await getVisiblePageContextForHandoff?.()
-      } catch {
-        pageContext = undefined
-      }
-
-      if (!attempt.isCurrent()) return
-      if (!hasDraftForHandoff && !pageContextHasVisibleContent(pageContext)) {
-        setHandoffFeedback({
-          tone: "warning",
-          message: hasVisiblePageContextForHandoff || pageContext?.truncated
-            ? t(
-                "sidepanel:controlRow.copyDraftPageReferencesUnavailable",
-                "Page references could not be read. Try again. Your source draft remains here."
-              )
-            : t(
-                "sidepanel:controlRow.copyDraftNothingToSend",
-                "No draft or page references to copy"
-              )
-        })
-        return
-      }
-
-      try {
-        const pkg = await createSidepanelChatHandoff({
-          draftText,
-          pageContext,
-          routeIntent: { path: CHAT_PATH }
-        }, attempt.isCurrent)
-        if (!attempt.isCurrent()) {
-          // This unique copy has not been opened or published to a destination.
-          await consumeSidepanelChatHandoff(pkg.id).catch(() => undefined)
-          return
-        }
-        const handoffPath = buildSidepanelChatHandoffRoute(CHAT_PATH, pkg.id)
-        const opened = await openFullAppPath(handoffPath, attempt.isCurrent)
-        if (!attempt.isCurrent()) return
-        if (!opened) {
-          await consumeSidepanelChatHandoff(pkg.id, attempt.isCurrent).catch(() => undefined)
-          if (!attempt.isCurrent()) return
-          setHandoffFeedback({
-            tone: "error",
-            message: t(
-              "sidepanel:controlRow.copyDraftFailed",
-              "Could not open the full chat page. Your source draft remains here."
-            )
-          })
-        } else {
-          const partial = Boolean(pkg.draft.truncated || pkg.pageContext?.truncated ||
-            pkg.pageContext?.snippets.some(snippet => snippet.truncated) ||
-            (hasVisiblePageContextForHandoff && !pageContextHasVisibleContent(pageContext)))
-          setHandoffFeedback({
-            tone: partial ? "warning" : "info",
-            message: partial
-              ? t("sidepanel:controlRow.copyDraftOpenedPartial", "Opened with a partial copy: some draft or page references were shortened or unavailable. Review the copy there. Your source draft remains here.")
-              : t("sidepanel:controlRow.copyDraftOpened", "Full chat page opened. Review the copy there. Your source draft remains here.")
-          })
-        }
-      } catch {
-        if (!attempt.isCurrent()) return
-        setHandoffFeedback({
-          tone: "error",
-          message: t(
-            "sidepanel:controlRow.copyDraftFailed",
-            "Could not open the full chat page. Your source draft remains here."
-          )
-        })
-      }
-    } finally {
-      if (copyDraftPendingRef.current === attempt) {
-        attempt.pending = false
-        if (copyDraftMountedRef.current) setCopyDraftPending(false)
-      }
-    }
   }
 
   const moreMenuContent = (
@@ -1067,59 +814,40 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         <UploadCloud className="size-4 text-text-subtle" />
         {quickIngestLabel}
       </button>
-      <button
-        type="button"
-        onClick={openFullApp}
-        aria-describedby={fullAppHandoffDescriptionId}
-        data-testid="chat-open-full-app"
-        className="w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 hover:bg-surface2"
-        title={fullAppHandoffDescription}
-      >
-        <ExternalLink className="size-4 text-text-subtle" />
-        {fullAppButtonLabel}
-      </button>
-      <p id={fullAppHandoffDescriptionId} className="px-3 text-xs text-text-muted">
-        {fullAppHandoffDescription}
-      </p>
-      <button
-        type="button"
-        onClick={() => {
-          void copyDraftToFullPage()
-        }}
-        disabled={copyDraftButtonDisabled}
-        aria-disabled={copyDraftButtonDisabled}
-        aria-busy={copyDraftPending || undefined}
-        data-testid="chat-continue-in-webui"
-        aria-label={copyDraftButtonLabel}
-        aria-describedby={copyHandoffDescriptionId}
-        className={`w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 ${
-          !copyDraftButtonDisabled
-            ? "hover:bg-surface2"
-            : "cursor-not-allowed opacity-50"
-        }`}
-        title={copyDraftDescription}
-      >
-        <ExternalLink className="size-4 text-text-subtle" />
-        {copyDraftButtonLabel}
-      </button>
-      <p id={copyHandoffDescriptionId} className="px-3 text-xs text-text-muted">
-        {copyDraftDescription}
-      </p>
+      {fullPage && (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              void fullPage.open()
+              setMoreOpen(false)
+              requestAnimationFrame(() => moreBtnRef.current?.focus())
+            }}
+            disabled={fullPage.disabled || fullPage.pending}
+            aria-busy={fullPage.pending || undefined}
+            aria-describedby={fullAppHandoffDescriptionId}
+            data-testid="chat-open-full-app"
+            className={`w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 ${
+              fullPage.disabled || fullPage.pending
+                ? "cursor-not-allowed opacity-50"
+                : "hover:bg-surface2"
+            }`}
+            title={fullPage.description}
+          >
+            <ExternalLink className="size-4 text-text-subtle" />
+            {fullPage.label}
+          </button>
+          <p id={fullAppHandoffDescriptionId} className="px-3 text-xs text-text-muted">
+            {fullPage.description}
+          </p>
+        </>
+      )}
 
     </div>
   )
 
   return (
     <div data-testid="control-row" className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-        {handoffFeedback && (
-          <div
-            data-testid="chat-handoff-feedback"
-            role={handoffFeedback.tone === "error" ? "alert" : "status"}
-            className={`basis-full text-xs ${handoffFeedback.tone === "error" ? "text-danger" : handoffFeedback.tone === "warning" ? "text-warning" : "text-text-muted"}`}
-          >
-            {handoffFeedback.message}
-          </div>
-        )}
         {activeHint && (
           <FeatureHint
             key={activeHint}

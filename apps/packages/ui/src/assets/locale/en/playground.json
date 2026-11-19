@@ -1409,7 +1409,7 @@
     "roleUser": "You",
     "roleAssistant": "Assistant",
     "empty": "Use no prior messages",
-    "expand": "Expand in full page",
+    "expand": "Open in full page",
     "instructions": "Tick the messages the AI should see, in the order it should see them. Arrow keys move between messages; Alt + arrow keys reorder them.",
     "source": "All messages in this chat",
     "imageOnly": "Image or attachment only",

@@ -1,4 +1,5 @@
 import { useModelPickerOpenRequests } from "./useModelPickerOpenRequests"
+import { useSidepanelOpenFullPage } from "./hooks/useSidepanelOpenFullPage"
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
 import { resolveModelSelectorSelection, type ModelSelectorDescriptor } from "@/hooks/playground/modelSelectorUtils"
@@ -979,9 +980,6 @@ export const SidepanelForm = ({
       return false
     }
   }, [draftReady, captureHandoffGuard, currentDocumentSelectionKey, contextFiles, form, notification, onOpenChatInWebUi, t])
-  React.useLayoutEffect(() => {
-    onWebUiOpenReady?.(draftReady && onOpenChatInWebUi ? openChatInWebUiWithDocumentHandoff : null)
-  }, [draftReady, onOpenChatInWebUi, onWebUiOpenReady, openChatInWebUiWithDocumentHandoff])
   React.useLayoutEffect(() => () => onWebUiOpenReady?.(null), [onWebUiOpenReady])
   const trackedSelectionPendingRef = React.useRef<{
     isCurrent: () => boolean
@@ -1569,6 +1567,11 @@ export const SidepanelForm = ({
   const [selectedCharacterId, setSelectedCharacterId] = React.useState<
     string | null
   >(storedCharacterId)
+  // XP-09: the one "Open in full page" action; the header runs it through onWebUiOpenReady.
+  const fullPage = useSidepanelOpenFullPage({ draftReady, draftText: form.values.message, handoffSourceKey, captureHandoffGuard,
+    hasVisiblePageContext: pageContextActive || selectedDocuments.length > 0, getVisiblePageContext: getVisiblePageContextForHandoff,
+    selectedCharacterId, openInWebUi: onOpenChatInWebUi ? openChatInWebUiWithDocumentHandoff : undefined })
+  React.useLayoutEffect(() => { onWebUiOpenReady?.(draftReady ? fullPage.open : null) }, [draftReady, fullPage.open, onWebUiOpenReady])
 
   React.useEffect(() => {
     setSelectedCharacterId((prev) =>
@@ -4043,19 +4046,7 @@ export const SidepanelForm = ({
                               chatLoopStatus={chatLoopState.status}
                               pendingApprovalsCount={chatLoopState.pendingApprovals.length}
                               runningToolCount={chatLoopState.inflightToolCallIds.length}
-                              draftReady={draftReady}
-                              handoffSourceKey={handoffSourceKey}
-                              captureHandoffGuard={captureHandoffGuard}
-                              draftMessage={form.values.message}
-                              hasVisiblePageContextForHandoff={
-                                pageContextActive || selectedDocuments.length > 0
-                              }
-                              getVisiblePageContextForHandoff={
-                                getVisiblePageContextForHandoff
-                              }
-                              onOpenChatInWebUi={
-                                openChatInWebUiWithDocumentHandoff
-                              }
+                              fullPage={fullPage}
                               modelPickerRef={modelPickerRef}
                             />
                           )}

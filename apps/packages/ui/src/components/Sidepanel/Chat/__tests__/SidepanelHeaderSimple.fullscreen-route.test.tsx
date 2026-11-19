@@ -1,20 +1,31 @@
 // @vitest-environment jsdom
+/**
+ * XP-09 (#3101): the header's full-page button is the side panel's one "Open
+ * in full page" action. The composer owns it, because the draft lives there.
+ */
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
 const browserMocks = vi.hoisted(() => ({
+  runtimeId: "header-extension" as string | undefined,
+  storage: {} as Record<string, unknown>,
   createTab: vi.fn(() => Promise.resolve({ id: 1 })),
   getURL: vi.fn((path: string) => `chrome-extension://tldw${path}`)
 }))
 
 vi.mock("wxt/browser", () => ({
   browser: {
-    runtime: { getURL: browserMocks.getURL },
+    runtime: { get id() { return browserMocks.runtimeId }, getURL: browserMocks.getURL },
     tabs: { create: browserMocks.createTab }
   }
+}))
+
+vi.mock("@/utils/safe-storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/safe-storage")>()),
+  createSafeStorage: () => ({ get: async (key: string) => browserMocks.storage[key] })
 }))
 
 vi.mock("react-i18next", () => ({
@@ -45,59 +56,62 @@ vi.mock("../TtsClipsDrawer", () => ({
 
 import { SidepanelHeaderSimple } from "../SidepanelHeaderSimple"
 
-describe("SidepanelHeaderSimple full-screen route", () => {
+const renderHeader = (props: React.ComponentProps<typeof SidepanelHeaderSimple> = {}) =>
+  render(
+    <MemoryRouter>
+      <SidepanelHeaderSimple activeTitle="Sidepanel chat" {...props} />
+    </MemoryRouter>
+  )
+
+describe("SidepanelHeaderSimple full-page action", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    browserMocks.runtimeId = "header-extension"
+    browserMocks.storage = {}
   })
 
-  it("states that full-screen opens /chat without promising draft or page state loss", () => {
-    render(
-      <MemoryRouter>
-        <SidepanelHeaderSimple activeTitle="Sidepanel chat" />
-      </MemoryRouter>
-    )
-
-    const openFullChat = screen.getByRole("button", {
-      name: "Open full extension chat"
-    })
-
-    expect(openFullChat).toHaveAccessibleDescription(
-      "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy."
-    )
-    expect(openFullChat).toHaveAttribute(
-      "title",
-      "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy."
+  it("names the one action 'Open in full page' and says what it carries", () => {
+    renderHeader({ onOpenFullPage: vi.fn() })
+    const open = screen.getByRole("button", { name: "Open in full page" })
+    expect(open).toHaveAccessibleDescription(
+      "Opens this chat in a new tab, with your draft and page references. Your draft also stays here."
     )
   })
 
-  it("opens the extension full page for the /chat route", async () => {
-    const user = userEvent.setup()
-
-    render(
-      <MemoryRouter>
-        <SidepanelHeaderSimple activeTitle="Sidepanel chat" />
-      </MemoryRouter>
+  it("says when the action opens the WebUI the user configured", async () => {
+    browserMocks.storage = { tldwConfig: { webUiUrl: "https://webui.example.test" } }
+    renderHeader({ onOpenFullPage: vi.fn() })
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Open in full page" })).toHaveAccessibleDescription(
+        "Opens this chat in the WebUI, with your draft and attachments. Chats kept only on this device stay here."
+      )
     )
+  })
 
-    await user.click(screen.getByTestId("chat-open-full-screen"))
+  it("runs the composer's action rather than opening a page itself", async () => {
+    const onOpenFullPage = vi.fn(async () => true)
+    renderHeader({ onOpenFullPage })
+    await act(async () => { fireEvent.click(screen.getByTestId("chat-open-full-screen")) })
+    expect(onOpenFullPage).toHaveBeenCalledOnce()
+    expect(browserMocks.createTab).not.toHaveBeenCalled()
+  })
 
-    expect(browserMocks.getURL).toHaveBeenCalledWith("/options.html#/chat")
-    expect(browserMocks.createTab).toHaveBeenCalledWith({
-      url: "chrome-extension://tldw/options.html#/chat"
-    })
+  it("is disabled until the conversation has restored", () => {
+    const onOpenFullPage = vi.fn()
+    renderHeader({ chatReady: false, onOpenFullPage })
+    const open = screen.getByTestId("chat-open-full-screen")
+    expect(open).toBeDisabled()
+    expect(open).toHaveAccessibleDescription(
+      "Restore or start a conversation before opening it in a full page."
+    )
+    fireEvent.click(open)
+    expect(onOpenFullPage).not.toHaveBeenCalled()
   })
 
   it("keeps the dashboard button on the dashboard route", async () => {
     const user = userEvent.setup()
-
-    render(
-      <MemoryRouter>
-        <SidepanelHeaderSimple activeTitle="Sidepanel chat" />
-      </MemoryRouter>
-    )
-
+    renderHeader({ onOpenFullPage: vi.fn() })
     await user.click(screen.getByTestId("chat-open-dashboard"))
-
     expect(browserMocks.getURL).toHaveBeenCalledWith("/options.html#/flashcards")
     expect(browserMocks.createTab).toHaveBeenCalledWith({
       url: "chrome-extension://tldw/options.html#/flashcards"

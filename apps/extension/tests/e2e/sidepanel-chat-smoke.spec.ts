@@ -19,7 +19,7 @@ const EXT_PATH = path.resolve(
 const MODEL_ID = "mock-model"
 const MODEL_KEY = `tldw:${MODEL_ID}`
 const CHAT_HANDOFF_DESCRIPTION =
-  "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
+  "Opens this chat in a new tab, with your draft and page references. Your draft also stays here."
 
 const buildSeedConfig = (
   baseUrl: string,
@@ -217,7 +217,7 @@ test.describe("Sidepanel chat smoke", () => {
       )
       await expect(headerFullScreen).toHaveAttribute(
         "aria-label",
-        "Open full chat in WebUI"
+        "Open in full page"
       )
 
       await sidepanel.screenshot({
@@ -229,14 +229,10 @@ test.describe("Sidepanel chat smoke", () => {
         context.waitForEvent("page"),
         headerFullScreen.click()
       ])
+      // XP-09: with no WebUI URL configured, the extension opens its own full page.
       await expect
         .poll(() => openedFullChatPage.url(), { timeout: 10_000 })
-        .toContain(`${new URL(baseUrl).origin}/chat`)
-
-      const openedUrl = new URL(openedFullChatPage.url())
-      expect(openedUrl.href).not.toContain("/options.html")
-      expect(openedUrl.searchParams.has("handoff")).toBe(false)
-      expect(new URLSearchParams(openedUrl.hash.slice(1)).get("handoff")).toBeTruthy()
+        .toContain(`${extensionId}/options.html#/chat`)
     } finally {
       await context.close()
       await stopSidepanelMockServer(server)

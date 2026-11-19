@@ -47,6 +47,14 @@
     "openFullChatExtensionDescription": "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy.",
     "openFullChatWebuiHandoffDescription": "Opens the configured WebUI with a draft and selected chat options. Device-local history may be unavailable there."
   },
+  "openFullPage": {
+    "label": "Open in full page",
+    "extensionDescription": "Opens this chat in a new tab, with your draft and page references. Your draft also stays here.",
+    "webuiDescription": "Opens this chat in the WebUI, with your draft and attachments. Chats kept only on this device stay here.",
+    "failed": "Could not open the full page. Your draft stays here.",
+    "partial": "Opened with a partial copy: some of the draft or page references were shortened or could not be read. Review it there. Your draft stays here.",
+    "characterDraftStays": "A new character chat opens without your draft. It stays here."
+  },
   "flashcards": {
     "opening": "Opening Flashcards",
     "openedInTab": "Flashcards opens in the full extension workspace so review, import, and deck management have enough room.",
