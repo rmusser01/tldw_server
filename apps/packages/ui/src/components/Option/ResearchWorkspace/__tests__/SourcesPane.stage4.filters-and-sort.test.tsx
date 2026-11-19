@@ -127,6 +127,12 @@ vi.mock("@/store/workspace", () => ({
   ) => selector(workspaceStoreState)
 }))
 
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    getWorkspaceSourcePreview: vi.fn().mockResolvedValue({ content_available: false, snippets: [] })
+  }
+}))
+
 vi.mock("../SourcesPane/AddSourceModal", () => ({
   AddSourceModal: () => <div data-testid="add-source-modal" />
 }))
@@ -234,7 +240,7 @@ const savedViewsController = (
 
 const getRenderedSourceTitles = (): string[] =>
   Array.from(document.querySelectorAll("[data-source-id]"))
-    .map((element) => element.querySelector("p")?.textContent?.trim() || "")
+    .map((element) => element.querySelector("[data-testid^='preview-source-']")?.getAttribute("aria-label") || "")
     .filter(Boolean)
 
 describe("SourcesPane stage 4 filters and sort", () => {
@@ -257,8 +263,31 @@ describe("SourcesPane stage 4 filters and sort", () => {
     mockGetEffectiveSelectedSources.mockReturnValue([])
   })
 
+  it("keeps the active view, filter and selection visible with the organizer closed", () => {
+    const controller = savedViewsController({ activeViewId: "view-pdfs", modified: true })
+    workspaceStoreState.selectedSourceIds = ["s1"]
+    mockGetEffectiveSelectedSources.mockReturnValue([workspaceStoreState.sources[0]])
+
+    render(
+      <ControlledSourcesPane
+        savedViewsController={controller}
+        initialState={{ ...DEFAULT_SOURCE_LIST_VIEW_STATE, typeFilters: ["pdf"] }}
+        onOpenSourceViewOverlay={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Organize sources" })).toHaveAttribute("aria-expanded", "false")
+    const summary = screen.getByRole("status")
+    expect(summary).toHaveTextContent("Saved PDFs")
+    expect(summary).toHaveTextContent("Modified")
+    expect(summary).toHaveTextContent("Type=PDF")
+    expect(summary).toHaveTextContent("1 selected")
+  })
+
   it("shows a collapsed summary and reveals advanced controls on demand", () => {
     render(<ControlledSourcesPane />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     expect(screen.getByRole("button", { name: "Advanced" })).toBeInTheDocument()
     expect(screen.queryByText(/Sort: Added date/)).not.toBeInTheDocument()
@@ -283,6 +312,20 @@ describe("SourcesPane stage 4 filters and sort", () => {
     expect(document.activeElement).toBe(landmark)
   })
 
+  it("reveals a workspace search target while preserving its matching filters and sort order", () => {
+    workspaceStoreState.sourceFocusTarget = { sourceId: "s1", token: 1 }
+    render(<ControlledSourcesPane initialState={{
+      ...DEFAULT_SOURCE_LIST_VIEW_STATE,
+      typeFilters: ["website"],
+      statusFilters: ["ready"],
+      sort: "name_desc"
+    }} />)
+
+    expect(screen.getByRole("button", { name: "Alpha PDF" })).toHaveFocus()
+    expect(screen.queryByRole("button", { name: "Bravo Website" })).toBeNull()
+    expect(screen.getByRole("status")).toHaveTextContent("Sort: Name (Z-A)")
+  })
+
   it("renders portal-free saved-view controls and preserves search, folder, selection, and expanded state", async () => {
     const user = userEvent.setup()
     const model = savedViewsController()
@@ -298,6 +341,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
         onOpenSourceViewOverlay={openOverlay}
       />
     )
+
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     fireEvent.click(screen.getByRole("button", { name: "Source views" }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "PDFs" }))
@@ -355,6 +400,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
       />
     )
 
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
+
     expect(screen.getByRole("button", { name: "Source views" })).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Source views" }))
     const invalidView = await screen.findByRole("menuitem", {
@@ -397,6 +444,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
         />
       )
 
+      fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
+
       expect(screen.getByText("Alpha PDF")).toBeInTheDocument()
       expect(screen.queryByText("Bravo Website")).not.toBeInTheDocument()
 
@@ -419,6 +468,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
   it("sets a nonnegative minimum on every numeric range input", () => {
     render(<ControlledSourcesPane />)
 
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
+
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }))
 
     for (const label of [
@@ -438,6 +489,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
 
   it("labels quick-add and source search fields beyond placeholders", () => {
     render(<ControlledSourcesPane />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     expect(screen.getByLabelText("Quick add URL")).toBeInTheDocument()
     expect(screen.getByLabelText("Search sources")).toBeInTheDocument()
@@ -465,6 +518,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
 
     const { rerender } = render(<ControlledSourcesPane />)
 
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
+
     fireEvent.change(screen.getByPlaceholderText("Search sources..."), {
       target: { value: "Alpha" }
     })
@@ -479,6 +534,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
 
   it("shows filtered and total counts with a reset control when no sources match", () => {
     const { rerender } = render(<ControlledSourcesPane />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     fireEvent.change(screen.getByPlaceholderText("Search sources..."), {
       target: { value: "delta" }
@@ -540,6 +597,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
 
     render(<ControlledSourcesPane />)
 
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
+
     expect(getRenderedSourceTitles()).toEqual(["Zulu Ready", "Alpha Error"])
 
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }))
@@ -556,6 +615,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
 
   it("uses select visible when advanced filters narrow the rendered list", () => {
     render(<ControlledSourcesPane />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Status Ready" }))
@@ -591,6 +652,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
 
     render(<ControlledSourcesPane />)
 
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
+
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Type PDF" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Select visible" }))
@@ -622,6 +685,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
 
     render(<ControlledSourcesPane />)
 
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
+
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Type PDF" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Select visible" }))
@@ -635,6 +700,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
 
     render(<ControlledSourcesPane />)
 
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
+
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Status Ready" }))
     fireEvent.click(screen.getByRole("button", { name: "Remove (2)" }))
@@ -647,11 +714,14 @@ describe("SourcesPane stage 4 filters and sort", () => {
   it("disables reorder controls while a temporary sort is active", () => {
     render(<ControlledSourcesPane />)
 
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
+
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }))
     fireEvent.change(screen.getByRole("combobox", { name: "Sort by" }), {
       target: { value: "name_asc" }
     })
 
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
     expect(screen.getByTestId("move-source-down-s1")).toBeDisabled()
     expect(
       screen.getByText(/temporary sort is active\. switch back to manual order/i)
@@ -667,6 +737,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
     }))
 
     render(<ControlledSourcesPane />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }))
 
@@ -684,6 +756,8 @@ describe("SourcesPane stage 4 filters and sort", () => {
         }}
       />
     )
+
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     fireEvent.change(screen.getByPlaceholderText("Search sources..."), {
       target: { value: "Alpha" }

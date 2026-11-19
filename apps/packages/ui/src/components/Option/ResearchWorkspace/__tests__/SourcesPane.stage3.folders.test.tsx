@@ -125,6 +125,12 @@ vi.mock("@/store/workspace", () => ({
   ) => selector(workspaceStoreState)
 }))
 
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    getWorkspaceSourcePreview: vi.fn().mockResolvedValue({ content_available: false, snippets: [] })
+  }
+}))
+
 vi.mock("../SourcesPane/AddSourceModal", () => ({
   AddSourceModal: () => <div data-testid="add-source-modal" />
 }))
@@ -167,6 +173,7 @@ describe("SourcesPane Stage 3 source folders", () => {
 
   it("renders nested folders with separate focus and selection controls", () => {
     render(<SourcesPane />)
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     expect(screen.getByText("Evidence")).toBeInTheDocument()
     expect(screen.getByText("Quotes")).toBeInTheDocument()
@@ -193,6 +200,7 @@ describe("SourcesPane Stage 3 source folders", () => {
 
   it("adds a source to multiple folders from the membership menu", () => {
     render(<SourcesPane />)
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
 
     fireEvent.click(
       screen.getByRole("button", { name: "Add Source One to folders" })
@@ -216,6 +224,7 @@ describe("SourcesPane Stage 3 source folders", () => {
     mockGetEffectiveSelectedMediaIds.mockReturnValue([])
 
     render(<SourcesPane />)
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     expect(screen.getByText("No folders yet")).toBeInTheDocument()
 
@@ -245,6 +254,7 @@ describe("SourcesPane Stage 3 source folders", () => {
     })
 
     const { rerender } = render(<SourcesPane />)
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     fireEvent.click(screen.getByRole("button", { name: "New folder" }))
     rerender(<SourcesPane />)
@@ -305,6 +315,7 @@ describe("SourcesPane Stage 3 source folders", () => {
     workspaceStoreState.activeFolderId = "folder-evidence"
 
     render(<SourcesPane />)
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     fireEvent.click(screen.getByRole("button", { name: "All sources" }))
 
@@ -320,6 +331,7 @@ describe("SourcesPane Stage 3 source folders", () => {
     ])
 
     render(<SourcesPane />)
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     expect(screen.getByText("2 selected")).toBeInTheDocument()
     expect(screen.getByTestId("sources-selected-actions")).toBeInTheDocument()
@@ -342,6 +354,7 @@ describe("SourcesPane Stage 3 source folders", () => {
     mockGetEffectiveSelectedSources.mockReturnValue([workspaceStoreState.sources[1]])
 
     render(<SourcesPane />)
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     expect(
       screen.getByRole("button", { name: "Preview selected" })
@@ -351,6 +364,7 @@ describe("SourcesPane Stage 3 source folders", () => {
 
   it("applies selected-source batch removal and restores folders through undo", async () => {
     render(<SourcesPane />)
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     fireEvent.click(screen.getByTestId("batch-remove-sources"))
 
@@ -386,8 +400,9 @@ describe("SourcesPane Stage 3 source folders", () => {
     ])
   })
 
-  it("names removed sources in the undo feedback", async () => {
+  it("names a removed source and restores its folder and direct selection on undo", async () => {
     render(<SourcesPane />)
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
 
     fireEvent.click(screen.getByTestId("remove-source-s1"))
 
@@ -395,6 +410,9 @@ describe("SourcesPane Stage 3 source folders", () => {
       await screen.findByText("Source One removed. You can undo this for a few seconds.")
     ).toBeInTheDocument()
     expect(mockRemoveSource).toHaveBeenCalledWith("s1")
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }))
+    expect(mockRestoreSource).toHaveBeenCalledWith(workspaceStoreState.sources[0], { index: 0, select: true })
+    expect(mockAssignSourceToFolders).toHaveBeenCalledWith("s1", ["folder-evidence"])
   })
 
   it("does not add direct selection when clicking a folder-derived source checkbox", () => {

@@ -25,6 +25,7 @@ export interface ResearchWorkspaceServerClient {
 export interface ResearchWorkspaceServerReconcileResult {
   workspaceReady: boolean
   sourceRowsChecked: boolean
+  sourceSelectionChanged: boolean
   addedSourceIds: string[]
   skippedSourceIds: string[]
   errors: string[]
@@ -126,6 +127,7 @@ export const reconcileResearchWorkspaceServerState = async ({
   const result: ResearchWorkspaceServerReconcileResult = {
     workspaceReady: false,
     sourceRowsChecked: false,
+    sourceSelectionChanged: false,
     addedSourceIds: [],
     skippedSourceIds: [],
     errors: []
@@ -186,6 +188,7 @@ export const reconcileResearchWorkspaceServerState = async ({
     try {
       await client.addWorkspaceSource(workspaceId, sourceRequest)
       result.addedSourceIds.push(source.id)
+      result.sourceSelectionChanged ||= sourceRequest.selected === true
       existingSourceIds.add(source.id)
       existingMediaIds.add(source.mediaId)
     } catch (error) {
@@ -196,21 +199,23 @@ export const reconcileResearchWorkspaceServerState = async ({
     }
   }
 
+  const existingSelectionChanged = existingSources.some(
+    (source) => source.selected !== selectedSourceIdSet?.has(source.id)
+  )
   if (
     Array.isArray(selectedSourceIds) &&
     client.updateWorkspaceSourceSelection &&
     (result.addedSourceIds.length > 0 ||
       existingSources.filter((source) => source.selected).length !==
         selectedSourceIdSet?.size ||
-      existingSources.some(
-        (source) => source.selected !== selectedSourceIdSet?.has(source.id)
-      ))
+      existingSelectionChanged)
   ) {
     try {
       await client.updateWorkspaceSourceSelection(
         workspaceId,
         selectedSourceIds
       )
+      result.sourceSelectionChanged ||= existingSelectionChanged
     } catch (error) {
       appendReconcileError(
         result,

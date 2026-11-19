@@ -212,6 +212,27 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
     })
   })
 
+  it("focuses the requested title before clearing the focus request", async () => {
+    workspaceStoreState.noteFocusTarget = { field: "title", token: 1 }
+    workspaceStoreState.clearNoteFocusTarget.mockImplementationOnce(() => {
+      workspaceStoreState.noteFocusTarget = null
+    })
+    const view = render(<QuickNotesSection />)
+    view.rerender(<QuickNotesSection />)
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Note title" })).toHaveFocus())
+    expect(workspaceStoreState.clearNoteFocusTarget).toHaveBeenCalledOnce()
+  })
+
+  it("returns from preview to the editor for a content focus request", async () => {
+    const view = render(<QuickNotesSection />)
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
+    workspaceStoreState.noteFocusTarget = { field: "content", token: 1 }
+    view.rerender(<QuickNotesSection />)
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Note content" })).toHaveFocus())
+  })
+
   it("toggles between markdown edit and preview modes", async () => {
     workspaceStoreState.currentNote = {
       id: 5,

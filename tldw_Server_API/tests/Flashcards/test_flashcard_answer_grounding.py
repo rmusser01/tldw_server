@@ -71,6 +71,44 @@ def test_question_context_does_not_drop_other_generated_claims():
     ]
 
 
+@pytest.mark.parametrize(
+    ("question", "label", "verdict"),
+    [
+        ("How many herons did the autumn survey count?", "supported", "grounded"),
+        ("How many herons did the spring survey count?", "refuted", "failed"),
+    ],
+)
+def test_verifier_reads_support_beyond_the_start_of_a_long_source(monkeypatch, question, label, verdict):
+    """The same literal answer can support one question and contradict another."""
+    async def no_local_model(_self):
+        return None
+
+    monkeypatch.setattr(HybridClaimVerifier, "_get_nli", no_local_model)
+    passage = "The spring survey counted 37 herons. The autumn survey counted 24 herons."
+    source = ("Field notebooks list the locations of observation posts. " * 16) + passage
+
+    def judge(_provider, claim, prompt, *_args, **_kwargs):
+        if passage not in prompt:
+            return '{"label":"nei","confidence":0.98}'
+        assert claim == f"Question: {question}\nAnswer: 24 herons."  # nosec B101
+        return json.dumps({"label": label, "confidence": 0.95})
+
+    result = asyncio.run(
+        verify_generated_artifact_against_sources(
+            artifact_type="flashcards",
+            units=build_flashcard_verification_units([{"front": question, "back": "24 herons."}]),
+            source_documents=[Document(id="survey", content=source, metadata={})],
+            generation_provider="llamacpp",
+            generation_model="test-model",
+            analyze_fn=judge,
+        )
+    )
+
+    assert result.verdict == verdict  # nosec B101
+    citation = result.report["claims"][0]["citations"][0]
+    assert passage in source[citation["start"]:citation["end"]]  # nosec B101
+
+
 @pytest.mark.parametrize("card_plan", [None, [{"card_type": "basic", "count": 1}]])
 def test_generation_instructs_model_to_use_only_supplied_facts(monkeypatch, card_plan):
     from tldw_Server_API.app.core.Workflows.adapters.content import generation

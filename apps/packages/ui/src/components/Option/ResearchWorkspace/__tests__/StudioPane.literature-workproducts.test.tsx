@@ -343,14 +343,14 @@ const createChatCompletionResponse = (
   )
 
 const expandOutputTypesSection = () => {
-  const toggle = screen.getByRole("button", { name: /Output Types/i })
+  const toggle = screen.getByRole("button", { name: /Create output/i })
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
 }
 
 const expandGeneratedOutputsSection = () => {
-  const toggle = screen.getByRole("button", { name: /Generated Outputs/i })
+  const toggle = screen.getByRole("button", { name: /Saved outputs/i })
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
@@ -368,12 +368,14 @@ const openArtifactViewer = async (viewButton: HTMLElement) => {
   })
 }
 
+const renderSavedOutputs = () => render(
+  <MemoryRouter>
+    <StudioPane />
+  </MemoryRouter>
+)
+
 const renderStudioPane = () => {
-  const renderResult = render(
-    <MemoryRouter>
-      <StudioPane />
-    </MemoryRouter>
-  )
+  const renderResult = renderSavedOutputs()
   expandOutputTypesSection()
   expandGeneratedOutputsSection()
   return renderResult
@@ -1936,7 +1938,7 @@ Proposal
       }
     ]
 
-    renderStudioPane()
+    renderSavedOutputs()
     await openArtifactViewer(screen.getByRole("button", { name: "View" }))
 
     await screen.findByRole("dialog");

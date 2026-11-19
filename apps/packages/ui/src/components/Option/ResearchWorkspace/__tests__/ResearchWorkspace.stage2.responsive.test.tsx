@@ -40,6 +40,7 @@ const {
   mockArtifactSave,
   mockLoadArtifactScope,
   mockFlushArtifactPersistence,
+  mockSourcesPaneProps,
   mockChatPaneProps,
   mockStudioPaneProps,
   mockWorkspaceHeaderProps
@@ -70,6 +71,7 @@ const {
     return { scopeKey: "server:alice", requestScope: { config: { serverUrl: "https://owned.test" }, userId: "alice" },
       scopeSignal: signal, scopeInvalidatedSignal: signal, release: vi.fn() }
   }),
+  mockSourcesPaneProps: [] as any[],
   mockChatPaneProps: [] as any[],
   mockStudioPaneProps: [] as any[],
   mockWorkspaceHeaderProps: [] as any[]
@@ -112,6 +114,7 @@ const testState = {
   migrated: false,
   updateArtifactStatus: vi.fn(),
   isMobile: false,
+  addSourceModalOpen: false,
   storeHydrated: true,
   leftPaneCollapsed: false,
   rightPaneCollapsed: false,
@@ -234,7 +237,10 @@ vi.mock("../WorkspaceHeader", () => ({
 }))
 
 vi.mock("../SourcesPane", () => ({
-  SourcesPane: () => <div data-testid="workspace-sources-pane">Sources</div>
+  SourcesPane: (props: any) => {
+    mockSourcesPaneProps.push(props)
+    return <div data-testid="workspace-sources-pane">Sources</div>
+  }
 }))
 
 vi.mock("../ChatPane", () => ({
@@ -269,41 +275,6 @@ vi.mock("../WorkspaceStatusBar", () => ({
 }))
 
 vi.mock("antd", () => ({
-  Drawer: ({ placement, mask, open, children }: any) => (
-    <div
-      data-testid={`workspace-drawer-${placement}`}
-      data-mask={String(mask)}
-      data-open={String(open)}
-    >
-      {children}
-    </div>
-  ),
-  Tabs: ({ activeKey, items, onChange }: any) => (
-    <div data-testid="workspace-mobile-tabs" data-active-key={String(activeKey)}>
-      {Array.isArray(items)
-        ? items.map((item: any) => (
-            <div key={item.key} data-testid={`tab-label-wrapper-${item.key}`}>
-              <button
-                type="button"
-                data-testid={`tab-label-${item.key}`}
-                onClick={() => onChange?.(item.key)}
-              >
-                {item.label}
-              </button>
-            </div>
-          ))
-        : null}
-      {Array.isArray(items)
-        ? items
-            .filter((item: any) => item.key === activeKey)
-            .map((item: any) => (
-              <div key={item.key} data-testid={`tab-${item.key}`}>
-                {item.children}
-              </div>
-            ))
-        : null}
-    </div>
-  ),
   Modal: ({ open, children, title }: any) =>
     open ? <div aria-label={String(title)}>{children}</div> : null,
   Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
@@ -328,6 +299,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       testState.generatedArtifacts = testState.generatedArtifacts.map(artifact => artifact.id === id ? { ...artifact, ...updates } : artifact)
     })
     onboardingStorageState.value = "1"
+    testState.addSourceModalOpen = false
     testState.isMobile = false
     testState.storeHydrated = true
     testState.leftPaneCollapsed = false
@@ -350,6 +322,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     })
     mockGetResearchWorkspaceCapabilities.mockClear()
     mockGetResearchBundle.mockReset()
+    mockSourcesPaneProps.length = 0
     mockChatPaneProps.length = 0
     mockStudioPaneProps.length = 0
     mockWorkspaceHeaderProps.length = 0
@@ -400,17 +373,58 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     source_trust: [{ source_id: "src_1", snapshot_policy: "full_artifact" }]
   })
 
-  it("uses non-masked tablet drawers so chat remains visible", () => {
-    render(<ResearchWorkspace />)
+  it("switches between all three panes when the workspace is tablet-sized", async () => {
+    const measured = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({ width: 900 } as DOMRect)
+    try {
+      render(<ResearchWorkspace />)
+      const tabs = await screen.findByTestId("workspace-mobile-tabs")
+      for (const pane of ["sources", "studio", "chat"]) {
+        fireEvent.click(within(tabs).getByTestId(`tab-label-${pane}`))
+        expect(tabs).toHaveAttribute("data-active-key", pane)
+      }
+    } finally {
+      measured.mockRestore()
+    }
+  })
 
-    expect(screen.getByTestId("workspace-drawer-left")).toHaveAttribute(
-      "data-mask",
-      "false"
-    )
-    expect(screen.getByTestId("workspace-drawer-right")).toHaveAttribute(
-      "data-mask",
-      "false"
-    )
+  it("keeps a tablet conversation mounted while comparing and switching panes", async () => {
+    const measured = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({ width: 900 } as DOMRect)
+    try {
+      render(<ResearchWorkspace />)
+      const chat = await screen.findByTestId("workspace-chat-pane")
+      act(() => mockWorkspaceHeaderProps.at(-1)?.onToggleLeftPane())
+      expect(await screen.findByTestId("workspace-sources-pane")).toBeVisible()
+      expect(chat).toBeVisible()
+      fireEvent.click(screen.getByRole("tab", { name: /studio/i }))
+      expect(chat).not.toBeVisible()
+      fireEvent.keyDown(screen.getByRole("tab", { name: /studio/i }), { key: "ArrowLeft" })
+      expect(screen.getByRole("tab", { name: /chat/i })).toHaveFocus()
+      expect(screen.getByTestId("workspace-chat-pane")).toBe(chat)
+      expect(chat).toBeVisible()
+    } finally {
+      measured.mockRestore()
+    }
+  })
+
+  it("mounts source intake when Chat opens it before the first visit to Sources", async () => {
+    testState.isMobile = true
+    const { rerender } = render(<ResearchWorkspace />)
+    expect(screen.queryByTestId("workspace-sources-pane")).not.toBeInTheDocument()
+    testState.addSourceModalOpen = true
+    rerender(<ResearchWorkspace />)
+    expect(await screen.findByTestId("workspace-sources-pane")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /chat/i })).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("shows Sources and requests the matched citation preview from tabbed Chat", async () => {
+    testState.isMobile = true
+    render(<ResearchWorkspace />)
+    await screen.findByTestId("workspace-chat-pane")
+    act(() => mockChatPaneProps.at(-1)?.onOpenCitationSource("source-1", "Cited passage"))
+    expect(screen.getByRole("tab", { name: /sources/i })).toHaveAttribute("aria-selected", "true")
+    expect(mockSourcesPaneProps.at(-1)?.citationPreviewRequest).toEqual({ sourceId: "source-1", excerpt: "Cited passage" })
   })
 
   it("loads capability health and passes it to Chat and Studio panes", async () => {
@@ -542,7 +556,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       "studio"
     )
     expect(screen.getByTestId("workspace-studio-pane")).toBeInTheDocument()
-    expect(screen.queryByTestId("workspace-chat-pane")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-chat-pane")).not.toBeVisible()
   })
 
   it("opens Studio from HashRouter mobile ?tab=studio route state", () => {
@@ -560,7 +574,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       "studio"
     )
     expect(screen.getByTestId("workspace-studio-pane")).toBeInTheDocument()
-    expect(screen.queryByTestId("workspace-chat-pane")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-chat-pane")).not.toBeVisible()
   })
 
   it("falls back to Chat for invalid mobile tab route state", () => {
@@ -1190,7 +1204,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       "sources"
     )
     expect(screen.getByTestId("workspace-sources-pane")).toBeInTheDocument()
-    expect(screen.queryByTestId("workspace-studio-pane")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-studio-pane")).not.toBeVisible()
   })
 
   it("focuses the requested Studio pane on desktop without switching layouts", async () => {

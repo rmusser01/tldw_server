@@ -153,6 +153,10 @@ describe("P0/P1 tutorial selector contracts", () => {
     expect(workspaceContent).toContain('id="workspace-main-content"')
     expect(workspaceContent).toContain('id="workspace-studio-panel"')
     expect(headerContent).toContain('data-testid="workspace-workspaces-button"')
+    const paneSteps = getTutorialById("research-workspace-basics")!.steps.slice(1, 4)
+    for (const [index, key] of ["sources", "chat", "studio"].entries()) {
+      expect(paneSteps[index].target.split(", ")).toContain(`#workspace-tab-${key}`)
+    }
   })
 
   it("keeps required media tutorial anchors in source", () => {

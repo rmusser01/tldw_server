@@ -27,7 +27,7 @@ const researchWorkspaceBasics: TutorialDefinition = {
       disableBeacon: true
     },
     {
-      target: '#workspace-sources-panel, [data-testid="workspace-drawer-left"]',
+      target: '#workspace-sources-panel, #workspace-tab-sources',
       titleKey: "tutorials:researchWorkspace.basics.sourcesTitle",
       titleFallback: "Sources Pane",
       contentKey: "tutorials:researchWorkspace.basics.sourcesContent",
@@ -36,7 +36,7 @@ const researchWorkspaceBasics: TutorialDefinition = {
       placement: "right"
     },
     {
-      target: '#workspace-main-content',
+      target: '#workspace-main-content, #workspace-tab-chat',
       titleKey: "tutorials:researchWorkspace.basics.chatTitle",
       titleFallback: "Chat Workspace",
       contentKey: "tutorials:researchWorkspace.basics.chatContent",
@@ -45,7 +45,7 @@ const researchWorkspaceBasics: TutorialDefinition = {
       placement: "left"
     },
     {
-      target: '#workspace-studio-panel, [data-testid="workspace-drawer-right"]',
+      target: '#workspace-studio-panel, #workspace-tab-studio',
       titleKey: "tutorials:researchWorkspace.basics.studioTitle",
       titleFallback: "Studio Outputs",
       contentKey: "tutorials:researchWorkspace.basics.studioContent",

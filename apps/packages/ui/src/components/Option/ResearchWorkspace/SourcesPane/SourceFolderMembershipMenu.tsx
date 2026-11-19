@@ -39,7 +39,7 @@ export const SourceFolderMembershipMenu: React.FC<
         <div
           role="menu"
           aria-label={`Folders for ${sourceTitle}`}
-          className="absolute right-0 z-10 mt-1 min-w-[180px] rounded-md border border-border bg-surface p-2 shadow-lg"
+          className="absolute left-0 z-10 mt-1 min-w-[180px] rounded-md border border-border bg-surface p-2 shadow-lg"
         >
           <div className="space-y-1">
             {folderOptions.map((folder) => {

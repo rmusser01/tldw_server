@@ -306,14 +306,14 @@ if (!(globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver) {
 }
 
 const expandOutputTypesSection = () => {
-  const toggle = screen.getByRole("button", { name: /Output Types/i })
+  const toggle = screen.getByRole("button", { name: /Create output/i })
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
 }
 
 const expandGeneratedOutputsSection = () => {
-  const toggle = screen.getByRole("button", { name: /Generated Outputs/i })
+  const toggle = screen.getByRole("button", { name: /Saved outputs/i })
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }

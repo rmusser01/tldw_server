@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
@@ -299,6 +299,7 @@ describe("ChatPane Stage 5 folder-derived context", () => {
 
   it("shows folder-derived sources in the context indicator and syncs RAG scope", async () => {
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     expect(await screen.findByText("Folder Source")).toBeTruthy()
 

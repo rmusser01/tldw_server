@@ -2066,6 +2066,100 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     )
   })
 
+  it("refreshes grounded-answer readiness after source selection is saved", async () => {
+    const selectionWrite = createDeferred<void>()
+    let selectionSaved = false
+    testState.sources = [
+      {
+        id: "source-ready",
+        mediaId: 404,
+        title: "Ready source",
+        type: "pdf",
+        status: "ready",
+        addedAt: new Date("2026-05-23T12:00:00.000Z")
+      }
+    ]
+    testState.selectedSourceIds = ["source-ready"]
+    mockUpdateWorkspaceSourceSelection.mockImplementation(async () => {
+      await selectionWrite.promise
+      selectionSaved = true
+    })
+    mockGetWorkspaceCapabilities.mockImplementation(async () =>
+      makeCapabilitiesPayload({
+        allowed_actions: {
+          ask_grounded_questions: selectionSaved
+            ? { allowed: true, reason_code: null }
+            : { allowed: false, reason_code: "no_queryable_sources" }
+        }
+      })
+    )
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspaceSourceSelection).toHaveBeenCalledWith(
+        "workspace-1",
+        ["source-ready"]
+      )
+      expect(
+        mockChatPaneProps.at(-1)?.workspaceCapabilities?.allowed_actions
+          .ask_grounded_questions.allowed
+      ).toBe(false)
+    })
+    selectionWrite.resolve()
+
+    await waitFor(() => {
+      expect(
+        mockChatPaneProps.at(-1)?.workspaceCapabilities?.allowed_actions
+          .ask_grounded_questions.allowed
+      ).toBe(true)
+    })
+  })
+
+  it("keeps the latest source selection when a previous write is still pending", async () => {
+    const firstWrite = createDeferred<void>()
+    let savedSelection: string[] = []
+    testState.sources = [
+      {
+        id: "source-ready",
+        mediaId: 404,
+        title: "Ready source",
+        type: "pdf",
+        status: "ready",
+        addedAt: new Date("2026-05-23T12:00:00.000Z")
+      }
+    ]
+    testState.selectedSourceIds = ["source-ready"]
+    mockGetWorkspaceSources.mockImplementation(async () => [
+      { id: "source-ready", media_id: 404, selected: savedSelection.includes("source-ready") }
+    ])
+    mockUpdateWorkspaceSourceSelection.mockImplementation(async (_workspaceId, selected: string[]) => {
+      if (selected.length > 0) await firstWrite.promise
+      savedSelection = selected
+    })
+
+    const { rerender } = render(<ResearchWorkspace />)
+    await waitFor(() => {
+      expect(mockUpdateWorkspaceSourceSelection).toHaveBeenCalledWith(
+        "workspace-1",
+        ["source-ready"]
+      )
+    })
+
+    await act(async () => {
+      testState.selectedSourceIds = []
+      rerender(<ResearchWorkspace />)
+    })
+    await act(async () => {
+      firstWrite.resolve()
+    })
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspaceSourceSelection).toHaveBeenLastCalledWith("workspace-1", [])
+    })
+    expect(savedSelection).toEqual([])
+  })
+
   it("keeps source status projection closed when server bootstrap fails", async () => {
     mockUpsertWorkspace.mockRejectedValueOnce(new Error("database locked"))
 

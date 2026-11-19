@@ -673,7 +673,7 @@ describe("ResearchWorkspace source list view state", () => {
     expect(screen.queryByText(/Source view not found/i)).not.toBeInTheDocument()
   })
 
-  it("preserves source list view state across sources pane remounts", async () => {
+  it("preserves source list view state across collapse and restore", async () => {
     const { rerender } = render(<ResearchWorkspace />)
 
     expect(await screen.findByTestId("source-list-sort-state")).toHaveTextContent(
@@ -686,7 +686,7 @@ describe("ResearchWorkspace source list view state", () => {
 
     testState.leftPaneCollapsed = true
     rerender(<ResearchWorkspace />)
-    expect(screen.queryByTestId("workspace-sources-pane")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-sources-pane")).not.toBeVisible()
 
     testState.leftPaneCollapsed = false
     rerender(<ResearchWorkspace />)
@@ -695,57 +695,32 @@ describe("ResearchWorkspace source list view state", () => {
     )
   })
 
-  it("shares one controller and one real overlay host across desktop and drawer panes", async () => {
+  it("keeps a single Sources controller and overlay when switching between tabs and desktop panes", async () => {
     const user = userEvent.setup()
     testState.isMobile = true
     const { rerender } = render(<ResearchWorkspace />)
-    expect(
-      savedViewHarness.hookInvocations.mock.calls.every(
-        ([workspaceId]) => workspaceId === "workspace-1"
-      )
-    ).toBe(true)
-    await user.click(screen.getByRole("button", { name: "Toggle sources" }))
+    await user.click(screen.getByRole("tab", { name: /Sources/ }))
+    const controller = await screen.findByTestId("saved-view-controller-identity")
+    const invoker = screen.getByRole("button", { name: "Save source view" })
 
-    testState.isMobile = false
-    rerender(<ResearchWorkspace />)
+    for (const isMobile of [true, false]) {
+      testState.isMobile = isMobile
+      rerender(<ResearchWorkspace />)
+      expect(screen.getByTestId("saved-view-controller-identity")).toBe(controller)
+      expect(screen.getByRole("button", { name: "Save source view" })).toBe(invoker)
+      expect(screen.getAllByTestId("source-view-overlay-host")).toHaveLength(1)
 
-    const controllerIdentities = await screen.findAllByTestId(
-      "saved-view-controller-identity"
-    )
-    expect(controllerIdentities).toHaveLength(2)
-    const panes = screen.getAllByTestId("workspace-sources-pane")
-    expect(panes).toHaveLength(2)
-    const simultaneousControllerIds = controllerIdentities.map((identity) =>
-      identity.getAttribute("data-controller-id")
-    )
-    expect(new Set(simultaneousControllerIds)).toEqual(
-      new Set([simultaneousControllerIds[0]])
-    )
-    expect(screen.getAllByTestId("source-view-overlay-host")).toHaveLength(1)
-
-    const invokers = screen.getAllByRole("button", { name: "Save source view" })
-    expect(invokers).toHaveLength(2)
-    await user.click(invokers[0]!)
-    expect(screen.getAllByRole("textbox", { name: "View name" })).toHaveLength(1)
-    let closingDialog = screen.getByRole("textbox", { name: "View name" }).closest("[role=dialog]")!
-    await user.click(screen.getByRole("button", { name: "Cancel" }))
-    await waitFor(() => expect(closingDialog.className).toContain("ant-zoom-leave-active"))
-    expect(invokers[0]).not.toHaveFocus()
-    fireEvent(closingDialog, new Event("webkitAnimationEnd", { bubbles: true }))
-    fireEvent.animationEnd(closingDialog)
-    await waitFor(() => expect(closingDialog).not.toBeInTheDocument())
-    await waitFor(() => expect(document.activeElement).toBe(invokers[0]))
-
-    await user.click(invokers[1]!)
-    expect(screen.getAllByRole("textbox", { name: "View name" })).toHaveLength(1)
-    closingDialog = screen.getByRole("textbox", { name: "View name" }).closest("[role=dialog]")!
-    await user.click(screen.getByRole("button", { name: "Cancel" }))
-    await waitFor(() => expect(closingDialog.className).toContain("ant-zoom-leave-active"))
-    expect(invokers[1]).not.toHaveFocus()
-    fireEvent(closingDialog, new Event("webkitAnimationEnd", { bubbles: true }))
-    fireEvent.animationEnd(closingDialog)
-    await waitFor(() => expect(closingDialog).not.toBeInTheDocument())
-    await waitFor(() => expect(document.activeElement).toBe(invokers[1]))
+      await user.click(invoker)
+      const input = await screen.findByRole("textbox", { name: "View name" })
+      const dialog = input.closest("[role=dialog]")!
+      await user.click(screen.getByRole("button", { name: "Cancel" }))
+      await waitFor(() => expect(dialog.className).toContain("ant-zoom-leave-active"))
+      expect(invoker).not.toHaveFocus()
+      fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }))
+      fireEvent.animationEnd(dialog)
+      await waitFor(() => expect(dialog).not.toBeInTheDocument())
+      await waitFor(() => expect(invoker).toHaveFocus())
+    }
   })
 
   it("passes the raw nullable workspace identity and readiness to the single page controller", async () => {
@@ -839,7 +814,7 @@ describe("ResearchWorkspace source list view state", () => {
     }
   )
 
-  it("restores focus to the real Sources tab after the invoking mobile pane unmounts", async () => {
+  it("restores focus to the real Sources tab after the invoking pane becomes hidden", async () => {
     const user = userEvent.setup()
     testState.isMobile = true
     render(<ResearchWorkspace />)

@@ -71,6 +71,7 @@ const workspaceStoreState = {
   setSourceSearchQuery: mockSetSourceSearchQuery,
   clearSourceFocusTarget: mockClearSourceFocusTarget,
   openAddSourceModal: mockOpenAddSourceModal,
+  addSource: vi.fn(),
   removeSource: mockRemoveSource,
   restoreSource: mockRestoreSource,
   reorderSource: mockReorderSource,
@@ -210,9 +211,44 @@ describe("SourcesPane Stage 2 source highlighting", () => {
   it("opens the upload workflow from the primary source intake action", () => {
     render(<SourcesPane />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Add Sources" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add sources" }))
 
     expect(mockOpenAddSourceModal).toHaveBeenCalledWith("upload")
+  })
+
+  it("puts the source list after intake and opens individual actions from the source title", () => {
+    render(<SourcesPane />)
+
+    const add = screen.getByRole("button", { name: /add sources/i })
+    const title = screen.getByRole("button", { name: "Source One" })
+    const organizer = screen.getByRole("button", { name: "Organize sources" })
+    expect(add.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(title.compareDocumentPosition(organizer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(organizer).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByRole("textbox", { name: "Search sources" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Move source down" })).toBeNull()
+
+    fireEvent.click(organizer)
+    expect(screen.getByRole("textbox", { name: "Quick add URL" })).toBeVisible()
+    expect(screen.getByRole("textbox", { name: "Search sources" })).toBeVisible()
+    fireEvent.click(title)
+    expect(screen.getByRole("button", { name: "Move source down" })).toBeEnabled()
+  })
+
+  it("opens a citation with its supplied excerpt once and clears the excerpt for manual previews", async () => {
+    const opened = vi.fn()
+    const request = { sourceId: "s1", excerpt: "The exact cited passage." }
+    const { rerender } = render(<SourcesPane citationPreviewRequest={request} onCitationPreviewOpened={opened} />)
+
+    expect(await screen.findByRole("dialog", { name: "Source preview and annotations" })).toBeInTheDocument()
+    expect(screen.getByText(request.excerpt).tagName).toBe("BLOCKQUOTE")
+    expect(opened).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    rerender(<SourcesPane citationPreviewRequest={request} onCitationPreviewOpened={opened} />)
+    expect(opened).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole("button", { name: "Source Two" }))
+    expect(screen.queryByText(request.excerpt)).toBeNull()
   })
 
   it("surfaces partial workspace context errors as a compact source warning", () => {
@@ -221,6 +257,21 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     expect(
       screen.getByRole("button", { name: "Source status warning" })
     ).toBeInTheDocument()
+  })
+
+  it("adds a pasted URL through the organizer while the notebook is empty", async () => {
+    workspaceStoreState.sources = []
+    mockAddMedia.mockResolvedValue({ media_id: 43, title: "Field guide" })
+    render(<SourcesPane />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
+    const url = "https://example.com/field-guide"
+    fireEvent.paste(screen.getByRole("textbox", { name: "Quick add URL" }), {
+      clipboardData: { getData: () => url }
+    })
+    await waitFor(() => expect(workspaceStoreState.addSource).toHaveBeenCalledWith({
+      mediaId: 43, title: "Field guide", type: "website", status: "processing", url
+    }))
   })
 
   it("keeps advanced controls scrollable without replacing the source list region", () => {
@@ -233,6 +284,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
       />
     )
 
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
     expect(screen.getByTestId("workspace-sources-pane-root")).toHaveClass(
       "min-h-0",
       "overflow-hidden"
@@ -243,7 +295,6 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     )
     expect(screen.getByTestId("sources-list-region")).toHaveClass(
       "min-h-0",
-      "flex-1",
       "overflow-y-auto"
     )
     expect(screen.getByText("2 source(s)")).toBeInTheDocument()
@@ -359,29 +410,22 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     render(<SourcesPane />)
 
     const checkboxHitArea = screen.getByTestId("source-checkbox-hitarea-s1")
-    expect(checkboxHitArea.className).toContain("[@media(hover:none)]:min-h-11")
-    expect(checkboxHitArea.className).toContain("[@media(hover:none)]:min-w-11")
+    expect(checkboxHitArea.querySelector("label")?.className).toContain("[@media(hover:none)]:min-h-11")
+    expect(checkboxHitArea.querySelector("label")?.className).toContain("[@media(hover:none)]:min-w-11")
   })
 
-  it("keeps remove action visible for keyboard focus and touch devices", () => {
+  it("keeps remove reachable by keyboard in the source preview", () => {
     render(<SourcesPane />)
 
-    const removeButton = screen.getByTestId("remove-source-s1")
-    expect(removeButton.className).toContain("focus-visible:opacity-100")
-    expect(removeButton.className).toContain("[@media(hover:none)]:opacity-100")
-  })
-
-  it("keeps selected-row remove action visible without hover", () => {
-    workspaceStoreState.selectedSourceIds = ["s1"]
-
-    render(<SourcesPane />)
-
-    const removeButton = screen.getByTestId("remove-source-s1")
-    expect(removeButton.className).toContain("opacity-100")
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
+    const removeButton = screen.getByRole("button", { name: "Remove" })
+    removeButton.focus()
+    expect(removeButton).toHaveFocus()
   })
 
   it("provides keyboard-accessible reorder buttons", () => {
     render(<SourcesPane />)
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
 
     const moveUp = screen.getByTestId("move-source-up-s1")
     const moveDown = screen.getByTestId("move-source-down-s1")
@@ -394,6 +438,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
 
   it("offers keyboard users a confirmation path before remove", async () => {
     render(<SourcesPane />)
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
 
     const removeButton = screen.getByTestId("remove-source-s1")
     fireEvent.keyDown(removeButton, { key: "Enter" })
@@ -420,19 +465,11 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     const checkbox = screen
       .getByTestId("source-checkbox-hitarea-s1")
       .querySelector("input[type='checkbox']") as HTMLInputElement | null
-    const removeButton = screen.getByTestId("remove-source-s1")
-
+    const title = screen.getByRole("button", { name: "Source One" })
     expect(checkbox).toBeTruthy()
-    if (checkbox) {
-      const relation = checkbox.compareDocumentPosition(removeButton)
-      expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-
-      checkbox.focus()
-      expect(checkbox).toHaveFocus()
-    }
-
-    removeButton.focus()
-    expect(removeButton).toHaveFocus()
+    expect(title.compareDocumentPosition(checkbox!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    checkbox?.focus()
+    expect(checkbox).toHaveFocus()
   })
 
   it("shows processing status and disables selection for non-ready sources", () => {
@@ -598,6 +635,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     ]
 
     render(<SourcesPane />)
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
 
     expect(screen.getByText("2 MB • 2m 5s")).toBeInTheDocument()
   })
@@ -626,6 +664,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     ]
 
     render(<SourcesPane />)
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
 
     expect(screen.getByText(/^Created /)).toBeInTheDocument()
     expect(screen.queryByText(/^Added /)).not.toBeInTheDocument()
@@ -853,6 +892,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     workspaceStoreState.selectedSourceIds = ["s1"]
 
     render(<SourcesPane />)
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     expect(screen.getByTestId("sources-selected-actions")).toBeInTheDocument()
 
@@ -907,6 +947,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     ])
 
     render(<SourcesPane />)
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
     fireEvent.click(screen.getByTestId("source-review-actions-s1"))
     fireEvent.click(await screen.findByText("Needs review"))
 
@@ -944,6 +985,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     ])
 
     render(<SourcesPane />)
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
     fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }))
 
     await waitFor(() => {
@@ -973,6 +1015,20 @@ describe("SourcesPane Stage 2 source highlighting", () => {
 
     expect(screen.getByTestId("sources-virtualized-list")).toBeInTheDocument()
   })
+
+  it("focuses the source title when workspace search targets a row outside the virtual window", async () => {
+    workspaceStoreState.sources = Array.from({ length: 100 }, (_, index) => ({
+      ...defaultSources[0],
+      id: `source-${index}`,
+      title: `Source ${index}`
+    }))
+    workspaceStoreState.sourceFocusTarget = { sourceId: "source-89", token: 1 }
+
+    render(<SourcesPane />)
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Source 89" })).toHaveFocus())
+    expect(screen.queryByRole("button", { name: "Source 0" })).toBeNull()
+  })
 })
 
 it("capture and refresh are explicit actions while pinned previews request the exact Media version", async () => {
@@ -999,12 +1055,10 @@ it("capture and refresh are explicit actions while pinned previews request the e
   })
   render(<SourcesPane onCaptureArticle={capture} />)
   expect(mockGetWorkspaceSourcePreview).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByTestId("preview-source-s1"))
   expect(
     screen.getByText(/Source snapshot: Media version 9/)
   ).toBeInTheDocument()
-  fireEvent.click(screen.getByRole("button", { name: "Refresh capture" }))
-  expect(capture).toHaveBeenCalledWith(workspaceStoreState.sources[0])
-  fireEvent.click(screen.getByTestId("preview-source-s1"))
   await waitFor(() =>
     expect(mockGetWorkspaceSourcePreview).toHaveBeenCalledWith(
       "workspace-1",
@@ -1014,6 +1068,8 @@ it("capture and refresh are explicit actions while pinned previews request the e
     )
   )
   expect(await screen.findByText("exact article")).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Refresh capture" }))
+  expect(capture).toHaveBeenCalledWith(workspaceStoreState.sources[0])
 })
 
 
@@ -1046,6 +1102,7 @@ it.each([
 ])("hides Capture article for %s source URLs", (_label, url) => {
   workspaceStoreState.sources = [{ ...defaultSources[0], url }];
   render(<SourcesPane onCaptureArticle={vi.fn()} />);
+  fireEvent.click(screen.getByTestId("preview-source-s1"))
   expect(screen.queryByRole("button", { name: "Capture article" })).toBeNull();
 });
 
@@ -1055,6 +1112,7 @@ it.each(["http://example.org/article", "https://example.org/article"])(
     const capture = vi.fn();
     workspaceStoreState.sources = [{ ...defaultSources[0], url }];
     render(<SourcesPane onCaptureArticle={capture} />);
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
     fireEvent.click(screen.getByRole("button", { name: "Capture article" }));
     expect(capture).toHaveBeenCalledWith(workspaceStoreState.sources[0]);
   },
@@ -1083,6 +1141,7 @@ it.each([
     };
     workspaceStoreState.sources = [source];
     render(<SourcesPane onCaptureArticle={capture} />);
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
     const action = screen.queryByRole("button", { name: "Refresh capture" });
     if (eligible) {
       expect(action).not.toBeNull();

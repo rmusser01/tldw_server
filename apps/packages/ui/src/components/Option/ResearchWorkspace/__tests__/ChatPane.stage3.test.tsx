@@ -372,10 +372,10 @@ vi.mock("antd", async () => {
   }
 })
 
-function renderChatPane() {
+function renderChatPane(onRequestChat?: () => void) {
   return render(
     <MemoryRouter>
-      <ChatPane />
+      <ChatPane onRequestChat={onRequestChat} />
     </MemoryRouter>
   )
 }
@@ -883,10 +883,13 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         mockMediaVersions.mockResolvedValueOnce([originalVersion])
       }
       renderChatPane()
-      if (fullSource)
+      if (fullSource) {
+        fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
         fireEvent.click(
           screen.getByRole("checkbox", { name: "Include full source contents" })
         )
+        fireEvent.click(screen.getByRole("button", { name: "Done" }))
+      }
       sendQuestion()
       await waitFor(() =>
         expect(mockMediaVersions).toHaveBeenCalledTimes(priorChecks + 1)
@@ -919,9 +922,11 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
             : { content: "Different bytes" })
         })
       renderChatPane()
+      fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
       fireEvent.click(
         screen.getByRole("checkbox", { name: "Include full source contents" })
       )
+      fireEvent.click(screen.getByRole("button", { name: "Done" }))
       sendQuestion()
       await waitFor(() => expect(mockVersion).toHaveBeenCalledOnce())
       await act(async () => {})
@@ -1065,9 +1070,11 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       content: "exact captured body"
     })
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Include full source contents" })
     )
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
     fireEvent.change(screen.getByPlaceholderText("Ask about your sources..."), {
       target: { value: "Explain" }
     })
@@ -1320,9 +1327,11 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       content: "different text"
     })
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Include full source contents" })
     )
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
     fireEvent.change(screen.getByPlaceholderText("Ask about your sources..."), {
       target: { value: "Explain" }
     })
@@ -1344,13 +1353,16 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     expect(screen.getByText("Start your research")).toBeInTheDocument()
   })
 
-  it("uses contextual source guidance instead of stale left-panel copy", () => {
+  it("offers a first source directly and keeps starter questions and templates in a disclosure", () => {
     renderChatPane()
-
-    const explainer = screen.getByTestId("workspace-chat-sources-explainer")
-
-    expect(explainer).toHaveTextContent("Sources pane")
-    expect(explainer.textContent?.toLowerCase()).not.toContain("left panel")
+    expect(screen.getByTestId("workspace-chat-add-source-button")).toBeVisible()
+    const starters = screen.getByText("More ways to start")
+    const template = screen.getByTestId("workspace-template-card-literature_review")
+    expect(template).not.toBeVisible()
+    fireEvent.click(starters)
+    expect(template).toBeVisible()
+    expect(screen.getByTestId("workspace-chat-empty-prompt-chip-0")).toBeVisible()
+    expect(screen.getByRole("link", { name: /Knowledge QA/ })).toHaveAttribute("href", "/knowledge")
   })
 
   it("adapts empty-state examples based on selected source types", () => {
@@ -1412,12 +1424,14 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
   it("prepends response style and length instructions only when presets are active", async () => {
     renderChatPane()
 
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
     fireEvent.change(screen.getByLabelText("Response style"), {
       target: { value: "explain" }
     })
     fireEvent.change(screen.getByLabelText("Answer length"), {
       target: { value: "brief" }
     })
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
     fireEvent.change(screen.getByLabelText("Chat message"), {
       target: { value: "What should I know?" }
     })
@@ -1448,7 +1462,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     )
   })
 
-  it("groups mode and RAG controls inside one toolbar region", () => {
+  it("keeps the active scope visible and opens secondary controls from response settings", () => {
     workspaceStoreState.selectedSourceIds = ["source-doc-1"]
     workspaceStoreState.getSelectedSources = () => [
       {
@@ -1463,14 +1477,14 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
 
     renderChatPane()
 
-    const toolbar = screen.getByTestId("workspace-chat-controls-toolbar")
-    expect(toolbar).toBeInTheDocument()
-    expect(toolbar).toContainElement(
-      screen.getByRole("button", { name: "General chat" })
-    )
-    expect(toolbar).toContainElement(
-      screen.getByRole("button", { name: "Advanced RAG settings" })
-    )
+    expect(screen.getByRole("heading", { name: "Chat" })).toBeVisible()
+    expect(screen.getByText("1 source selected")).toBeVisible()
+    expect(screen.queryByRole("combobox", { name: "Response style" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
+    const settings = screen.getByRole("dialog", { name: "Response settings" })
+    expect(settings).toContainElement(screen.getByRole("button", { name: "General chat" }))
+    expect(settings).toContainElement(screen.getByRole("button", { name: "Advanced RAG settings" }))
+    expect(settings).toContainElement(screen.getByRole("combobox", { name: "Response style" }))
   })
 
   it("allows explicit general mode override even when sources are selected", async () => {
@@ -1494,7 +1508,10 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       expect(mockSetFileRetrievalEnabled).toHaveBeenCalledWith(true)
     })
 
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
     fireEvent.click(screen.getByRole("button", { name: "General chat" }))
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    expect(screen.getByText("General chat", { selector: "[aria-live] span" })).toBeVisible()
 
     await waitFor(() => {
       expect(mockSetRagMediaIds).toHaveBeenLastCalledWith(null)
@@ -1524,6 +1541,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
 
     renderChatPane()
 
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
     fireEvent.click(
       screen.getByRole("button", { name: "Advanced RAG settings" })
     )
@@ -1546,7 +1564,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     )
   })
 
-  it("injects complete selected source contents when enabled", async () => {
+  it.each(["grounded", "general"])("shows and sends the explicit full-text scope in %s mode", async (mode) => {
     workspaceStoreState.selectedSourceIds = ["source-doc-1", "source-doc-2"]
     workspaceStoreState.getSelectedSources = () => [
       {
@@ -1583,11 +1601,18 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
 
     renderChatPane()
 
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Include full source contents" })
     )
-
-    const textarea = screen.getByPlaceholderText("Ask about your sources...")
+    if (mode === "general") {
+      fireEvent.click(screen.getByRole("button", { name: "General chat" }))
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    if (mode === "general") {
+      expect(screen.getByText("Full source text is included. Retrieval is off.")).toBeVisible()
+    }
+    const textarea = screen.getByRole("textbox", { name: "Chat message" })
     fireEvent.change(textarea, { target: { value: "What's the synopsis?" } })
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
 
@@ -1630,8 +1655,9 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
 
     renderChatPane()
 
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
     fireEvent.change(screen.getByLabelText("Response style"), {
-      target: { value: "source-first" }
+      target: { value: "source_first" }
     })
     fireEvent.change(screen.getByLabelText("Answer length"), {
       target: { value: "detailed" }
@@ -1639,6 +1665,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Include full source contents" })
     )
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
     fireEvent.change(screen.getByLabelText("Chat message"), {
       target: { value: "How do the findings connect?" }
     })
@@ -1647,6 +1674,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
     const submittedMessage = mockOnSubmit.mock.calls.at(-1)?.[0].message
 
+    expect(submittedMessage).toContain("lead with what the selected sources support")
     expect(submittedMessage).toContain("Response preference:")
     expect(submittedMessage).toContain("Source 101: Primary Paper")
     expect(submittedMessage).toContain(
@@ -1655,8 +1683,9 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     expect(submittedMessage.match(/User question:/g)).toHaveLength(1)
   })
 
-  it("shows keyboard shortcut hint below the composer", () => {
+  it("makes the keyboard shortcut hint available in response settings", () => {
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     expect(
       screen.getByText(
@@ -1665,8 +1694,11 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     ).toBeInTheDocument()
   })
 
-  it("submits discuss-artifact payloads from Studio into chat", async () => {
-    renderChatPane()
+  it("opens Chat and submits valid discuss-artifact payloads from Studio", async () => {
+    const requestChat = vi.fn()
+    renderChatPane(requestChat)
+    window.dispatchEvent(new CustomEvent("research-workspace:discuss-artifact", { detail: { content: " " } }))
+    expect(requestChat).not.toHaveBeenCalled()
 
     window.dispatchEvent(
       new CustomEvent("research-workspace:discuss-artifact", {
@@ -1679,6 +1711,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       })
     )
 
+    expect(requestChat).toHaveBeenCalledOnce()
     await waitFor(() => {
       expect(mockOnSubmit).toHaveBeenCalledWith(
         expect.objectContaining({

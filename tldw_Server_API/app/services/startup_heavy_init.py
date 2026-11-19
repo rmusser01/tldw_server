@@ -13,8 +13,6 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.core.testing import is_truthy as _shared_is_truthy
-
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
@@ -221,22 +219,13 @@ async def _init_provider_manager(*, deferred: bool) -> Any | None:
 async def _init_request_queue(*, deferred: bool) -> Any | None:
     try:
         from tldw_Server_API.app.core.Chat.request_queue import initialize_request_queue
-        from tldw_Server_API.app.core.config import load_comprehensive_config
+        from tldw_Server_API.app.core.config import chat_queued_execution_enabled, load_comprehensive_config
 
         cfg = load_comprehensive_config()
         chat_cfg = {}
         if cfg and cfg.has_section("Chat-Module"):
             chat_cfg = dict(cfg.items("Chat-Module"))
-        queued_execution_enabled = False
-        try:
-            env_queued = os.getenv("CHAT_QUEUED_EXECUTION")
-            if env_queued is not None:
-                queued_execution_enabled = _shared_is_truthy(env_queued)
-            else:
-                queued_execution_enabled = _shared_is_truthy(str(chat_cfg.get("queued_execution", "False")))
-        except _STARTUP_GUARD_EXCEPTIONS:
-            queued_execution_enabled = False
-        if queued_execution_enabled:
+        if chat_queued_execution_enabled(chat_cfg):
             request_queue = initialize_request_queue(
                 max_queue_size=int(chat_cfg.get("max_queue_size", 100)),
                 max_concurrent=int(chat_cfg.get("max_concurrent_requests", 10)),

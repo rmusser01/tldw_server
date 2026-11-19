@@ -289,59 +289,6 @@ type DeckListItem = {
 const normalizeWhitespace = (value: string): string =>
   value.replace(/\s+/g, " ").trim()
 
-const normalizeAssistantMessageText = (value: string): string =>
-  value
-    .replace(/▋/g, "")
-    .split(/\n+/)
-    .map((line) => normalizeWhitespace(line))
-    .filter(
-      (line) =>
-        line.length > 0 &&
-        !/^(Mood:|Response complete$|Loading content(?:\.{3}|…)?)$/i.test(line)
-    )
-    .join(" ")
-
-const waitForCompletedAssistantReply = async (
-  workspacePage: ResearchWorkspacePage
-): Promise<string> => {
-  const assistantMessage = workspacePage.chatPanel.locator(
-    "article[aria-label*='Assistant message'], [data-role='assistant'], [data-message-role='assistant'], .assistant-message"
-  ).last()
-
-  await expect(assistantMessage).toBeVisible({ timeout: 30_000 })
-
-  const readCompletedReply = async (): Promise<string> => {
-    const isGenerating = await assistantMessage
-      .getByText(/Generating response/i)
-      .isVisible()
-      .catch(() => false)
-    const hasStopStreaming = await assistantMessage
-      .getByRole("button", {
-        name: /Stop streaming response|Stop Streaming/i
-      })
-      .isVisible()
-      .catch(() => false)
-    const text = normalizeAssistantMessageText(
-      (await assistantMessage.textContent().catch(() => "")) || ""
-    )
-
-    if (isGenerating || hasStopStreaming) {
-      return ""
-    }
-
-    return text
-  }
-
-  await expect
-    .poll(readCompletedReply, {
-      timeout: 90_000,
-      message: "Timed out waiting for the grounded workspace assistant reply"
-    })
-    .not.toBe("")
-
-  return readCompletedReply()
-}
-
 const seedLiveWorkspaceDocument = async (
   title: string,
   content: string
@@ -1174,7 +1121,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     await assertNoCriticalErrors(diagnostics)
   })
 
-  test("grounds live chat requests on the selected source", async ({
+  test("grounds live chat on the selected source and opens its cited passage", async ({
     authedPage,
     serverInfo,
     diagnostics
@@ -1192,16 +1139,16 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     const probeToken = `${fixtureId}-beacon-fox`
     const selectedSource = await seedLiveWorkspaceDocument(
       `WS ${fixtureId} Alpha`,
-      `Workspace chat grounding source. Token ${probeToken}. Deterministic verification requires stable include media ids.`
+      `Field report ${probeToken}. The team counted 37 blue herons at North Marsh.`
     )
     const unselectedSource = await seedLiveWorkspaceDocument(
       `WS ${fixtureId} Beta`,
-      `Workspace chat distractor source. Token ${fixtureId}-distractor.`
+      `Field report ${fixtureId}-distractor. The team counted 82 blue herons at South Marsh.`
     )
 
     const tracker = trackChatBootstrapResponses(authedPage)
     const workspacePage = new ResearchWorkspacePage(authedPage)
-    const question = `What does the source say about ${probeToken}?`
+    const question = `According to field report ${probeToken}, how many blue herons were counted at North Marsh?`
 
     try {
       await workspacePage.goto()
@@ -1218,9 +1165,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
 
       await workspacePage.selectSourceByTitle(selectedSource.title)
       await workspacePage.expectSourceSelectedByTitle(selectedSource.title)
-      await expect(workspacePage.getSelectedSourceTag(selectedSource.title)).toBeVisible({
-        timeout: 10_000
-      })
+      await workspacePage.expectChatSourceInSettings(selectedSource.title)
 
       const ragCall = await waitForRagSearchCall(authedPage, async () => {
         await workspacePage.sendChatMessage(question)
@@ -1230,14 +1175,20 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       expect(ragCall.requestBody.include_media_ids).toEqual([selectedSource.mediaId])
       expect(ragCall.requestBody.sources).toEqual(["media_db"])
       expect(String(ragCall.requestBody.query ?? "")).toContain(probeToken)
-      await expect(workspacePage.chatPanel.getByText(question)).toBeVisible({
-        timeout: 10_000
+      await expect(
+        workspacePage.chatPanel
+          .getByRole("article", { name: /user message/i })
+          .getByText(question, { exact: true })
+      ).toBeVisible({ timeout: 10_000 })
+      const reply = workspacePage.chatPanel.getByRole("article", { name: /assistant message/i }).last()
+      await expect(reply.locator("p").filter({ hasText: /\b37\b|\bthirty[- ]seven\b/i }).first()).toBeVisible({
+        timeout: 90_000
       })
-      const groundedReply = await waitForCompletedAssistantReply(workspacePage)
-      expect(groundedReply.length).toBeGreaterThan(0)
-      expect(groundedReply).not.toMatch(
-        /cannot reach server|unable to reach server|request failed|connection/i
-      )
+      await reply.getByRole("button", { name: /citations/i }).click()
+      await reply.getByTestId("message-sources").locator("summary").first().click()
+      const preview = authedPage.getByRole("dialog", { name: "Source preview and annotations" })
+      await expect(preview.getByText(selectedSource.title, { exact: true })).toBeVisible()
+      await expect(preview.locator("blockquote")).toContainText("37 blue herons at North Marsh")
 
       await ensureNoServerReachabilityDialog(authedPage)
     } finally {
@@ -1292,13 +1243,12 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       await workspacePage.selectSourceByTitle(rightSource.title)
       await workspacePage.expectSourceSelectedByTitle(leftSource.title)
       await workspacePage.expectSourceSelectedByTitle(rightSource.title)
-      await expect(
-        workspacePage.getStudioOutputButton("Compare Sources")
-      ).toBeEnabled({ timeout: 10_000 })
+      const compareButton = await workspacePage.revealStudioOutput("Compare Sources")
+      await expect(compareButton).toBeEnabled({ timeout: 10_000 })
 
       const beforeCount = await workspacePage.getStudioArtifactCards().count()
       const chatCall = await waitForChatCompletionCall(authedPage, async () => {
-        await workspacePage.getStudioOutputButton("Compare Sources").click()
+        await compareButton.click()
       })
 
       expect(chatCall.status).toBe(200)
@@ -1315,12 +1265,9 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       expect(requestText).toContain(
         "Compare the selected sources and produce"
       )
-      expect(
-        String(
-          ((chatCall.responseBody?.choices as Array<Record<string, unknown>> | undefined)?.[0]
-            ?.message as Record<string, unknown> | undefined)?.content ?? ""
-        ).trim().length
-      ).toBeGreaterThan(0)
+      const choices = chatCall.responseBody?.choices as Array<{ message?: { content?: string } }> | undefined
+      const comparison = choices?.[0]?.message?.content?.trim() ?? ""
+      expect(comparison).not.toBe("")
 
       await expect(workspacePage.getStudioArtifactCards()).toHaveCount(
         beforeCount + 1,
@@ -1329,6 +1276,8 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       const artifactCard = workspacePage.getStudioArtifactCards().first()
       await waitForStudioArtifactCompletion(artifactCard)
       await expect(artifactCard).toContainText(/Compare Sources/i)
+      await artifactCard.getByRole("button", { name: "View", exact: true }).click()
+      await expect(authedPage.getByRole("dialog")).toContainText(comparison)
 
       await ensureNoServerReachabilityDialog(authedPage)
     } finally {
@@ -1418,14 +1367,17 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     const chatModelId = requireRealBackendChatModel(serverInfo)
 
     const fixtureId = generateTestId("workspace-study-quiz")
-    const probeToken = `${fixtureId}-quiz-token`
     const selectedSource = await seedLiveWorkspaceDocument(
       `WS ${fixtureId} Quiz`,
-      `Workspace quiz source for ${probeToken}. The source is intentionally specific so the generated study artifact has stable content.`
+      "North Marsh spring survey. Observers counted 37 blue herons on May 12. " +
+        "The team used four observation posts along the eastern reed beds. " +
+        "The count began at 06:00 and ended at 08:00."
     )
     const companionSource = await seedLiveWorkspaceDocument(
       `WS ${fixtureId} Quiz Companion`,
-      `Workspace quiz companion source for ${probeToken}-companion. The second source keeps the generation path aligned with the existing workspace output matrix.`
+      "South Marsh autumn survey. Observers counted 24 blue herons on October 14. " +
+        "The team used three observation posts along the western inlet. " +
+        "The count began at 16:00 and ended at 18:00."
     )
 
     const tracker = trackChatBootstrapResponses(authedPage)
@@ -1453,7 +1405,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
 
       const beforeArtifacts = await workspacePage.getStudioArtifactCards().count()
       await disableNextJsPortalPointerInterception(authedPage)
-      await clickActionable(workspacePage.getStudioOutputButton("Quiz"))
+      await clickActionable(await workspacePage.revealStudioOutput("Quiz"))
 
       await expect(workspacePage.getStudioArtifactCards()).toHaveCount(
         beforeArtifacts + 1,
@@ -1618,7 +1570,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
 
       const beforeArtifacts = await workspacePage.getStudioArtifactCards().count()
       await disableNextJsPortalPointerInterception(authedPage)
-      await clickActionable(workspacePage.getStudioOutputButton("Flashcards"))
+      await clickActionable(await workspacePage.revealStudioOutput("Flashcards"))
 
       await expect(workspacePage.getStudioArtifactCards()).toHaveCount(
         beforeArtifacts + 1,
@@ -1684,9 +1636,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
         timeout: 10_000
       })
       await flashcardsPage.manageMoveScopeButton.click()
-      const flashcardsMoveModal = authedPage
-        .getByRole("dialog")
-        .filter({ hasText: /Move deck scope/i })
+      const flashcardsMoveModal = authedPage.getByRole("dialog", { name: "Edit deck" })
       const workspaceIdInput = flashcardsMoveModal.getByLabel("Workspace ID")
       await expect(workspaceIdInput).toBeVisible({ timeout: 10_000 })
       await workspaceIdInput.fill("")

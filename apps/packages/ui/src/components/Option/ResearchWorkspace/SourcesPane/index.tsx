@@ -15,7 +15,7 @@ import {
   AlertTriangle,
   RefreshCw,
   Info,
-  Eye,
+  ListFilter,
   ClipboardCheck,
   ChevronUp,
   ChevronDown
@@ -392,6 +392,8 @@ const describePreviewUnavailable = (
 
 interface SourcesPaneProps {
   onCaptureArticle?: (source: WorkspaceSource) => void
+  citationPreviewRequest?: { sourceId: string; excerpt?: string } | null
+  onCitationPreviewOpened?: () => void
   /** Callback to hide/collapse the pane */
   onHide?: () => void
   /** Open the shared transfer modal for the current effective selection. */
@@ -423,6 +425,8 @@ interface SourcesPaneProps {
  */
 export const SourcesPane: React.FC<SourcesPaneProps> = ({
   onCaptureArticle,
+  citationPreviewRequest,
+  onCitationPreviewOpened,
   onHide,
   onOpenTransferSources,
   statusGuardrailsEnabled = true,
@@ -508,6 +512,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   const [editingFolderName, setEditingFolderName] = React.useState("")
   const [draggedSourceId, setDraggedSourceId] = React.useState<string | null>(null)
   const [previewSourceId, setPreviewSourceId] = React.useState<string | null>(null)
+  const [citedExcerpt, setCitedExcerpt] = React.useState("")
+  const consumedCitation = React.useRef<SourcesPaneProps["citationPreviewRequest"]>(null)
   const [statusDetailsSourceId, setStatusDetailsSourceId] = React.useState<
     string | null
   >(null)
@@ -528,6 +534,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   const [editingAnnotationId, setEditingAnnotationId] = React.useState<
     string | null
   >(null)
+  const [organizerOpen, setOrganizerOpen] = React.useState(false)
+  const organizerId = React.useId()
   const [quickUrlValue, setQuickUrlValue] = React.useState("")
   const [quickUrlLoading, setQuickUrlLoading] = React.useState(false)
   const [reviewUpdateLoading, setReviewUpdateLoading] = React.useState(false)
@@ -720,8 +728,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     ? filteredSources.slice(virtualStartIndex, virtualEndIndex)
     : filteredSources
   const sourceFilterSummary = React.useMemo(
-    () => buildSourceFilterSummary(sourceListViewState),
-    [sourceListViewState]
+    () => buildSourceFilterSummary(sourceListViewState, t),
+    [sourceListViewState, t]
   )
   const hasFileSizeSources = React.useMemo(
     () => sources.some((source) => Number.isFinite(source.fileSize)),
@@ -813,6 +821,23 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     sourceSearchQuery.trim().length > 0 ||
     hasActiveSourceFilters(sourceListViewState)
   const isTemporarySortActive = sourceListViewState.sort !== "manual"
+  const activeView = sourceSavedViewsController?.views.find(
+    (view) => view.id === sourceSavedViewsController.activeViewId
+  )
+  const organizerSummary = [
+    activeView?.name,
+    activeView && sourceSavedViewsController?.modified && t("playground:sources.modifiedView", "Modified"),
+    activeFolderId && organizationIndex.folderById.get(activeFolderId)?.name,
+    sourceSearchQuery.trim(),
+    sourceFilterSummary,
+    isListNarrowed && t("playground:sources.filteredCountSummary", "Showing {{filtered}} of {{total}} sources.", {
+      filtered: filteredSources.length,
+      total: sources.length
+    }),
+    effectiveSelectedCount > 0 && t("playground:sources.selectedCount", "{{count}} selected", {
+      count: effectiveSelectedCount
+    })
+  ].filter(Boolean).join(" · ")
   const allVisibleSelected =
     visibleReadySourceIds.length > 0 &&
     visibleReadySourceIds.every((sourceId) =>
@@ -1222,8 +1247,9 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   }, [])
 
   const handleOpenPreview = React.useCallback(
-    (sourceId: string) => {
+    (sourceId: string, excerpt = "") => {
       setPreviewSourceId(sourceId)
+      setCitedExcerpt(excerpt)
       resetAnnotationEditor()
     },
     [resetAnnotationEditor]
@@ -1231,8 +1257,18 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
 
   const handleClosePreview = React.useCallback(() => {
     setPreviewSourceId(null)
+    setCitedExcerpt("")
+    setConfirmingRemovalSourceId(null)
     resetAnnotationEditor()
   }, [resetAnnotationEditor])
+
+  React.useEffect(() => {
+    if (!citationPreviewRequest || consumedCitation.current === citationPreviewRequest) return
+    if (!sources.some((source) => source.id === citationPreviewRequest.sourceId)) return
+    consumedCitation.current = citationPreviewRequest
+    handleOpenPreview(citationPreviewRequest.sourceId, citationPreviewRequest.excerpt)
+    onCitationPreviewOpened?.()
+  }, [citationPreviewRequest, handleOpenPreview, onCitationPreviewOpened, sources])
 
   const handleOpenStatusDetails = React.useCallback((sourceId: string) => {
     setStatusDetailsSourceId(sourceId)
@@ -1514,85 +1550,59 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     const targetSourceId = sourceFocusTarget?.sourceId
     if (!targetSourceId) return
 
-    const sourceExists = sources.some((source) => source.id === targetSourceId)
-    if (!sourceExists) {
+    const target = sources.find((source) => source.id === targetSourceId)
+    if (!target) {
       clearSourceFocusTarget()
       return
     }
 
-    const isTargetVisible = filteredSources.some(
-      (source) => source.id === targetSourceId
-    )
-    if (!isTargetVisible && sourceSearchQuery.trim()) {
-      setSourceSearchQuery("")
+    const index = filteredSources.findIndex((source) => source.id === targetSourceId)
+    if (index < 0) {
+      if (activeFolderSourceIds && !activeFolderSourceIds.has(targetSourceId)) setActiveFolder(null)
+      if (!target.title.toLowerCase().includes(sourceSearchQuery.toLowerCase())) setSourceSearchQuery("")
+      if (applyAdvancedSourceFilters([target], sourceListViewState).length === 0) {
+        // Reset only the predicates that hide this result, keeping the rest of the view.
+        const hidingFilters = Object.entries(DEFAULT_SOURCE_LIST_VIEW_STATE).filter(([key]) => {
+          const predicate = {
+            ...DEFAULT_SOURCE_LIST_VIEW_STATE,
+            dateField: sourceListViewState.dateField,
+            [key]: sourceListViewState[key as keyof SourceListViewState]
+          }
+          return applyAdvancedSourceFilters([target], predicate).length === 0
+        })
+        patchSourceListViewState(Object.fromEntries(hidingFilters))
+      }
+      return
     }
 
-    if (useVirtualizedSources && sourceListContainerRef.current) {
-      const targetIndex = filteredSources.findIndex(
-        (source) => source.id === targetSourceId
-      )
-      if (targetIndex >= 0) {
-        const targetScrollTop = targetIndex * SOURCE_VIRTUAL_ROW_HEIGHT
-        sourceListContainerRef.current.scrollTop = targetScrollTop
-        setSourceListScrollTop(targetScrollTop)
-      }
+    const row = sourceItemRefs.current[targetSourceId]
+    if (!row && useVirtualizedSources && sourceListContainerRef.current) {
+      sourceListContainerRef.current.scrollTop = index * SOURCE_VIRTUAL_ROW_HEIGHT
+      setSourceListScrollTop(sourceListContainerRef.current.scrollTop)
+      return
     }
 
-    const revealTimer = window.setTimeout(() => {
-      const element = sourceItemRefs.current[targetSourceId]
-      if (element) {
-        element.scrollIntoView({ behavior: "smooth", block: "nearest" })
-      }
-      setHighlightedSourceId(targetSourceId)
-    }, 0)
-
-    const highlightTimer = window.setTimeout(() => {
-      setHighlightedSourceId((current) =>
-        current === targetSourceId ? null : current
-      )
-    }, 1800)
-
+    row?.scrollIntoView?.({ behavior: "smooth", block: "nearest" })
+    row?.querySelector("button")?.focus({ preventScroll: true })
+    setHighlightedSourceId(targetSourceId)
     clearSourceFocusTarget()
-
-    return () => {
-      window.clearTimeout(revealTimer)
-      window.clearTimeout(highlightTimer)
-    }
   }, [
-    clearSourceFocusTarget,
-    filteredSources,
-    sourceFocusTarget,
-    sourceSearchQuery,
-    sources,
-    setSourceSearchQuery,
-    useVirtualizedSources
+    activeFolderSourceIds, clearSourceFocusTarget, filteredSources, patchSourceListViewState,
+    setActiveFolder, setSourceSearchQuery, sourceFocusTarget, sourceListViewState,
+    sourceSearchQuery, sources, useVirtualizedSources, virtualStartIndex
   ])
 
-  const renderSourceRow = (source: (typeof filteredSources)[number]) => {
-    const Icon = SOURCE_TYPE_ICONS[source.type] || File
-    const selectionOrigin = getSourceSelectionOrigin(
-      source.id,
-      selectedSourceIds,
-      selectedSourceFolderIds,
-      organizationIndex
-    )
-    const isSelected = selectionOrigin !== "none"
-    const isHighlighted = highlightedSourceId === source.id
-    const sourceStatus = statusGuardrailsEnabled
-      ? source.status || "ready"
-      : "ready"
-    const showStatusDrilldown =
-      statusGuardrailsEnabled && hasSourceStatusDrilldown(source, sourceStatus)
-    const isReady = sourceStatus === "ready"
-    const isProcessing = sourceStatus === "processing"
-    const isError = sourceStatus === "error"
-    const isPartiallyQueryable = isWorkspaceSourcePartiallyQueryable(source)
-    const isSelectable = isWorkspaceSourceSelectable(source)
-    const canReorder = !isTemporarySortActive && isReady
-    const processingStatusText =
-      typeof source.statusMessage === "string" && source.statusMessage.trim().length > 0
-        ? source.statusMessage
-        : t("playground:sources.statusProcessing", "Processing")
+  React.useEffect(() => {
+    if (!highlightedSourceId) return
+    const highlightTimer = window.setTimeout(() => setHighlightedSourceId(null), 1800)
+    return () => window.clearTimeout(highlightTimer)
+  }, [highlightedSourceId])
+
+  const renderSourceDetails = (source: WorkspaceSource) => {
+    const canReorder = !isTemporarySortActive &&
+      (!statusGuardrailsEnabled || (source.status || "ready") === "ready")
+    const reviewState = source.reviewState ?? "unset"
+    const assignedFolderIds = organizationIndex.folderIdsBySourceId.get(source.id) || []
     const metadataParts: string[] = []
     const fileSizeLabel = formatFileSize(source.fileSize)
     const durationLabel = formatDuration(source.duration)
@@ -1619,237 +1629,46 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     const canMoveUp = canReorder && sourceOrderIndex > 0
     const canMoveDown =
       canReorder && sourceOrderIndex >= 0 && sourceOrderIndex < sources.length - 1
-    const isDropTarget = draggedSourceId != null && draggedSourceId !== source.id
-    const assignedFolderIds = organizationIndex.folderIdsBySourceId.get(source.id) || []
-    const sourceTypeLabel = t(`playground:sources.type.${source.type}`, source.type)
-    const sourceStatusLabel = isPartiallyQueryable
-      ? t("playground:sources.statusTextSearchable", "Text searchable")
-      : isProcessing
-        ? t("playground:sources.statusProcessing", "Processing")
-      : isError
-        ? t("playground:sources.statusErrorShort", "Error")
-        : readyStateLabel
-    const sourceStatusClass = isPartiallyQueryable
-      ? "border-warning/30 bg-warning/10 text-warning"
-      : isProcessing
-        ? "border-primary/30 bg-primary/10 text-primary"
-      : isError
-        ? "border-error/30 bg-error/10 text-error"
-        : "border-success/30 bg-success/10 text-success"
-    const reviewState = source.reviewState ?? "unset"
-    const reviewBadge = SOURCE_REVIEW_BADGES[reviewState]
 
     return (
-      <div
-        key={source.id}
-        data-source-id={source.id}
-        data-source-draggable="true"
-        data-highlighted={isHighlighted ? "true" : "false"}
-        ref={(element) => {
-          sourceItemRefs.current[source.id] = element
-        }}
-        draggable={canReorder}
-        onDragStart={(event) => {
-          if (!canReorder) {
-            event.preventDefault()
-            return
-          }
-          setDraggedSourceId(source.id)
-          event.dataTransfer.effectAllowed = "copyMove"
-          event.dataTransfer.setData(
-            WORKSPACE_SOURCE_DRAG_TYPE,
-            serializeWorkspaceSourceDragPayload({
-              sourceId: source.id,
-              mediaId: source.mediaId,
-              title: source.title,
-              type: source.type
-            })
-          )
-          event.dataTransfer.setData("text/plain", source.title)
-        }}
-        onDragOver={(event) => {
-          if (!canReorder || !draggedSourceId || draggedSourceId === source.id) return
-          event.preventDefault()
-          event.dataTransfer.dropEffect = "move"
-        }}
-        onDrop={(event) => {
-          if (!canReorder || !draggedSourceId || draggedSourceId === source.id) return
-          event.preventDefault()
-          const targetIndex = sources.findIndex((entry) => entry.id === source.id)
-          if (targetIndex >= 0) {
-            reorderSource(draggedSourceId, targetIndex)
-          }
-          setDraggedSourceId(null)
-        }}
-        onDragEnd={() => setDraggedSourceId(null)}
-        className={`group flex items-start gap-2 rounded-lg p-2 transition-colors ${
-          isSelected
-            ? "bg-primary/10 border border-primary/30"
-            : "hover:bg-surface2 border border-transparent"
-        } ${
-          isHighlighted
-            ? "ring-2 ring-primary/40 border-primary/40 bg-primary/15"
-            : ""
-        } ${
-          isDropTarget ? "border-primary/50 bg-primary/5" : ""
-        } ${canReorder ? "cursor-grab active:cursor-grabbing" : "cursor-default"}`}
-      >
-        <div
-          data-testid={`source-checkbox-hitarea-${source.id}`}
-          className="mt-0.5 flex items-center justify-center [@media(hover:none)]:min-h-11 [@media(hover:none)]:min-w-11"
-        >
-          <Checkbox
-            aria-label={t("playground:sources.selectSource", "Select {{title}}", {
-              title: source.title
-            })}
-            checked={isSelected}
-            disabled={!isSelectable}
-            onChange={() => {
-              if (selectionOrigin === "folder") {
-                return
-              }
-              toggleSourceSelection(source.id)
-            }}
-          />
-        </div>
-        <div className="flex min-w-0 flex-1 items-start gap-2">
-          <div
-            className={`relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded ${
-              isSelected ? "bg-primary/20 text-primary" : "bg-surface2 text-text-muted"
-            }`}
-          >
-            <Icon className="h-4 w-4" />
-            {source.thumbnailUrl && (
-              <img
-                src={source.thumbnailUrl}
-                alt=""
-                aria-hidden="true"
-                data-testid={`source-thumbnail-${source.id}`}
-                className="absolute inset-0 h-full w-full object-cover"
-                onError={(event) => {
-                  event.currentTarget.remove()
-                }}
-              />
+      <>
+        {source.webCapture ? (
+          <p className="text-xs text-text-muted">
+            {t(
+              "playground:sources.extractedSnapshot",
+              "Extracted article snapshot"
+            )}{" "}
+            · {source.webCapture.capturedAt}
+            <br />
+            {t(
+              "playground:sources.snapshotVersion",
+              "Source snapshot: Media version {{version}}",
+              { version: source.webCapture.versionNumber }
             )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-text">
-              {source.title}
+          </p>
+        ) : (
+          source.knowledgeQaEvidence?.snapshot && (
+            <p className="text-xs text-text-muted">
+              {t(
+                "playground:sources.retrievedExcerpt",
+                "Retrieved excerpt"
+              )}
             </p>
-            <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] uppercase tracking-[0.04em]">
-              <span className="rounded-full border border-border bg-surface2 px-1.5 py-0.5 font-medium text-text-muted">
-                {sourceTypeLabel}
-              </span>
-              <span
-                className={`rounded-full border px-1.5 py-0.5 font-medium ${sourceStatusClass}`}
-              >
-                {sourceStatusLabel}
-              </span>
-              <span
-                data-testid={`source-review-state-${source.id}`}
-                className={`rounded-full border px-1.5 py-0.5 font-medium ${reviewBadge.className}`}
-              >
-                {reviewBadge.label}
-              </span>
-              {selectionOrigin === "direct" && (
-                <span className="rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
-                  {t("playground:sources.selectedDirectBadge", "Direct")}
-                </span>
-              )}
-              {selectionOrigin === "folder" && (
-                <span className="rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
-                  {t("playground:sources.selectedFolderBadge", "From folder")}
-                </span>
-              )}
-              {selectionOrigin === "both" && (
-                <span className="rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
-                  {t("playground:sources.selectedBothBadge", "Direct + folder")}
-                </span>
-              )}
-            </div>
-            {source.webCapture ? (
-              <p className="text-xs text-text-muted">
-                {t(
-                  "playground:sources.extractedSnapshot",
-                  "Extracted article snapshot"
-                )}{" "}
-                · {source.webCapture.capturedAt}
-                <br />
-                {t(
-                  "playground:sources.snapshotVersion",
-                  "Source snapshot: Media version {{version}}",
-                  { version: source.webCapture.versionNumber }
-                )}
-              </p>
-            ) : (
-              source.knowledgeQaEvidence?.snapshot && (
-                <p className="text-xs text-text-muted">
-                  {t(
-                    "playground:sources.retrievedExcerpt",
-                    "Retrieved excerpt"
-                  )}
-                </p>
-              )
-            )}
-            <Tooltip title={metadataTooltip}>
-              <p className="mt-0.5 inline-flex max-w-full items-center gap-1 truncate text-[11px] text-text-subtle">
-                <Info className="h-3 w-3 shrink-0" />
-                <span className="truncate">{metadataPreview}</span>
-              </p>
-            </Tooltip>
-            {statusGuardrailsEnabled && isProcessing && (
-              <p
-                className="mt-0.5 flex items-center gap-1 text-[11px] text-primary"
-                title={processingStatusText}
-              >
-                <Loader2 className="h-3 w-3 animate-spin" />
-                {processingStatusText}
-              </p>
-            )}
-            {statusGuardrailsEnabled && isError && (
-              <Tooltip
-                title={
-                  source.statusMessage ? (
-                    <span
-                      className="cursor-text select-all"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        if (source.statusMessage) {
-                          navigator.clipboard.writeText(source.statusMessage).catch(() => {})
-                        }
-                      }}
-                    >
-                      {source.statusMessage}
-                      <span className="ml-1 text-[10px] opacity-70">
-                        {t("playground:sources.clickToCopy", "(click to copy)")}
-                      </span>
-                    </span>
-                  ) : undefined
-                }
-                placement="bottom"
-              >
-                <p className="mt-0.5 flex items-center gap-1 text-[11px] text-error">
-                  <AlertTriangle className="h-3 w-3 shrink-0" />
-                  <span className="line-clamp-1">
-                    {source.statusMessage ||
-                      t(
-                        "playground:sources.statusError",
-                        "Source processing failed"
-                      )}
-                  </span>
-                </p>
-              </Tooltip>
-            )}
-          </div>
-        </div>
-        <div
-          className={`flex shrink-0 items-start gap-1 rounded-md p-0.5 ${
-            isSelected ? "border border-primary/20 bg-primary/5" : ""
-          }`}
-        >
+          )
+        )}
+        <Tooltip title={metadataTooltip}>
+          <p className="mt-0.5 inline-flex max-w-full items-center gap-1 truncate text-[11px] text-text-subtle">
+            <Info className="h-3 w-3 shrink-0" />
+            <span className="truncate">{metadataPreview}</span>
+          </p>
+        </Tooltip>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           {isAbsoluteHttpUrl(source.webCapture?.requestedUrl || source.url) &&
             onCaptureArticle && (
-              <Button size="small" onClick={() => onCaptureArticle(source)}>
+              <Button size="small" onClick={() => {
+                handleClosePreview()
+                onCaptureArticle(source)
+              }}>
                 {source.webCapture
                   ? t("playground:sources.refreshCapture", "Refresh capture")
                   : t("playground:sources.captureArticle", "Capture article")}
@@ -1910,42 +1729,6 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               </button>
             </Tooltip>
           </Dropdown>
-          <Tooltip title={t("playground:sources.previewAnnotate", "Preview & annotate")}>
-            <button
-              type="button"
-              onClick={() => handleOpenPreview(source.id)}
-              data-testid={`preview-source-${source.id}`}
-              className="rounded p-1 text-text-muted transition hover:bg-surface hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-              aria-label={t(
-                "playground:sources.previewAnnotate",
-                "Preview & annotate"
-              )}
-            >
-              <Eye className="h-3.5 w-3.5" />
-            </button>
-          </Tooltip>
-          {showStatusDrilldown && (
-            <Tooltip
-              title={t(
-                "playground:sources.viewStatusDetails",
-                "View source status details"
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => handleOpenStatusDetails(source.id)}
-                data-testid={`source-status-details-${source.id}`}
-                className="rounded p-1 text-text-muted transition hover:bg-surface hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                aria-label={t(
-                  "playground:sources.viewStatusDetailsForSource",
-                  "View source status details for {{title}}",
-                  { title: source.title }
-                )}
-              >
-                <Info className="h-3.5 w-3.5" />
-              </button>
-            </Tooltip>
-          )}
           <div className="flex flex-col">
             <button
               type="button"
@@ -1985,6 +1768,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             cancelText={t("common:cancel", "Cancel")}
             onConfirm={() => {
               setConfirmingRemovalSourceId(null)
+              handleClosePreview()
               removeSourceWithUndo(source)
             }}
             onCancel={() => setConfirmingRemovalSourceId(null)}
@@ -1993,6 +1777,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               type="button"
               onClick={() => {
                 if (confirmingRemovalSourceId === source.id) return
+                handleClosePreview()
                 removeSourceWithUndo(source)
               }}
               onKeyDown={(event) => {
@@ -2002,9 +1787,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                 }
               }}
               data-testid={`remove-source-${source.id}`}
-              className={`rounded p-1 text-text-muted transition hover:bg-error/10 hover:text-error focus-visible:opacity-100 [@media(hover:none)]:min-h-11 [@media(hover:none)]:min-w-11 [@media(hover:none)]:opacity-100 ${
-                isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-              }`}
+              className="rounded p-1 text-text-muted transition hover:bg-error/10 hover:text-error focus-visible:ring-2 focus-visible:ring-focus [@media(hover:none)]:min-h-11 [@media(hover:none)]:min-w-11"
               aria-label={t("common:remove", "Remove")}
             >
               <svg
@@ -2022,6 +1805,261 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               </svg>
             </button>
           </Popconfirm>
+        </div>
+      </>
+    )
+  }
+
+  const renderSourceRow = (source: (typeof filteredSources)[number]) => {
+    const Icon = SOURCE_TYPE_ICONS[source.type] || File
+    const selectionOrigin = getSourceSelectionOrigin(
+      source.id,
+      selectedSourceIds,
+      selectedSourceFolderIds,
+      organizationIndex
+    )
+    const isSelected = selectionOrigin !== "none"
+    const isHighlighted = highlightedSourceId === source.id
+    const sourceStatus = statusGuardrailsEnabled
+      ? source.status || "ready"
+      : "ready"
+    const showStatusDrilldown =
+      statusGuardrailsEnabled && hasSourceStatusDrilldown(source, sourceStatus)
+    const isReady = sourceStatus === "ready"
+    const isProcessing = sourceStatus === "processing"
+    const isError = sourceStatus === "error"
+    const isPartiallyQueryable = isWorkspaceSourcePartiallyQueryable(source)
+    const isSelectable = isWorkspaceSourceSelectable(source)
+    const canReorder = !isTemporarySortActive && isReady
+    const processingStatusText =
+      typeof source.statusMessage === "string" && source.statusMessage.trim().length > 0
+        ? source.statusMessage
+        : t("playground:sources.statusProcessing", "Processing")
+    const isDropTarget = draggedSourceId != null && draggedSourceId !== source.id
+    const sourceTypeLabel = t(
+      `playground:sources.type.${source.type}`,
+      source.type === "pdf" ? "PDF" : source.type
+    )
+    const sourceStatusLabel = isPartiallyQueryable
+      ? t("playground:sources.statusTextSearchable", "Text searchable")
+      : isProcessing
+        ? t("playground:sources.statusProcessing", "Processing")
+      : isError
+        ? t("playground:sources.statusErrorShort", "Error")
+        : readyStateLabel
+    const sourceStatusClass = isPartiallyQueryable
+      ? "border-warning/30 bg-warning/10 text-warning"
+      : isProcessing
+        ? "border-primary/30 bg-primary/10 text-primary"
+      : isError
+        ? "border-error/30 bg-error/10 text-error"
+        : "border-success/30 bg-success/10 text-success"
+    const reviewState = source.reviewState ?? "unset"
+    const reviewBadge = SOURCE_REVIEW_BADGES[reviewState]
+
+    return (
+      <div
+        key={source.id}
+        data-source-id={source.id}
+        data-source-draggable="true"
+        data-highlighted={isHighlighted ? "true" : "false"}
+        ref={(element) => {
+          sourceItemRefs.current[source.id] = element
+        }}
+        style={useVirtualizedSources ? { height: SOURCE_VIRTUAL_ROW_HEIGHT } : undefined}
+        draggable={canReorder}
+        onDragStart={(event) => {
+          if (!canReorder) {
+            event.preventDefault()
+            return
+          }
+          setDraggedSourceId(source.id)
+          event.dataTransfer.effectAllowed = "copyMove"
+          event.dataTransfer.setData(
+            WORKSPACE_SOURCE_DRAG_TYPE,
+            serializeWorkspaceSourceDragPayload({
+              sourceId: source.id,
+              mediaId: source.mediaId,
+              title: source.title,
+              type: source.type
+            })
+          )
+          event.dataTransfer.setData("text/plain", source.title)
+        }}
+        onDragOver={(event) => {
+          if (!canReorder || !draggedSourceId || draggedSourceId === source.id) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = "move"
+        }}
+        onDrop={(event) => {
+          if (!canReorder || !draggedSourceId || draggedSourceId === source.id) return
+          event.preventDefault()
+          const targetIndex = sources.findIndex((entry) => entry.id === source.id)
+          if (targetIndex >= 0) {
+            reorderSource(draggedSourceId, targetIndex)
+          }
+          setDraggedSourceId(null)
+        }}
+        onDragEnd={() => setDraggedSourceId(null)}
+        className={`group flex items-center gap-2 rounded-md px-2 py-2 transition-colors ${
+          isSelected
+            ? "bg-primary/5 border border-transparent"
+            : "hover:bg-surface2 border border-transparent"
+        } ${
+          isHighlighted
+            ? "ring-2 ring-primary/40 border-primary/40 bg-primary/15"
+            : ""
+        } ${
+          isDropTarget ? "border-primary/50 bg-primary/5" : ""
+        } ${canReorder ? "cursor-grab active:cursor-grabbing" : "cursor-default"}`}
+      >
+        <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            data-testid={`preview-source-${source.id}`}
+            aria-label={source.title}
+            aria-describedby={`${organizerId}-meta-${source.id}`}
+            title={source.title}
+            onClick={() => handleOpenPreview(source.id)}
+            className="flex min-h-10 w-full items-center gap-2 rounded text-left text-text hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+          >
+            <span
+              className={`relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded ${
+                isSelected ? "bg-primary/10 text-primary" : "bg-surface2 text-text-muted"
+              }`}
+            >
+              <Icon className="h-4 w-4" aria-hidden="true" />
+              {source.thumbnailUrl && (
+                <img
+                  src={source.thumbnailUrl}
+                  alt=""
+                  aria-hidden="true"
+                  data-testid={`source-thumbnail-${source.id}`}
+                  className="absolute inset-0 h-full w-full object-cover"
+                  onError={(event) => {
+                    event.currentTarget.remove()
+                  }}
+                />
+              )}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold leading-5">
+                {source.title}
+              </span>
+              <span id={`${organizerId}-meta-${source.id}`} className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
+                <span className="capitalize">
+                  {sourceTypeLabel}
+                </span>
+                <span
+                  className={isReady && !isPartiallyQueryable ? "sr-only" : sourceStatusClass}
+                >
+                  {sourceStatusLabel}
+                </span>
+                <span
+                  data-testid={`source-review-state-${source.id}`}
+                  className={reviewState === "unset" ? "sr-only" : reviewBadge.className}
+                >
+                  {reviewBadge.label}
+                </span>
+                {selectionOrigin === "direct" && (
+                  <span className="sr-only">
+                    {t("playground:sources.selectedDirectBadge", "Direct")}
+                  </span>
+                )}
+                {selectionOrigin === "folder" && (
+                  <span className="text-primary">
+                    {t("playground:sources.selectedFolderBadge", "From folder")}
+                  </span>
+                )}
+                {selectionOrigin === "both" && (
+                  <span className="text-primary">
+                    {t("playground:sources.selectedBothBadge", "Direct + folder")}
+                  </span>
+                )}
+              </span>
+            </span>
+          </button>
+          {statusGuardrailsEnabled && isProcessing && (
+            <p
+              className="mt-0.5 flex items-center gap-1 text-[11px] text-primary"
+              title={processingStatusText}
+            >
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span className="truncate">{processingStatusText}</span>
+            </p>
+          )}
+          {statusGuardrailsEnabled && isError && (
+            <Tooltip
+              title={
+                source.statusMessage ? (
+                  <span
+                    className="cursor-text select-all"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (source.statusMessage) {
+                        navigator.clipboard.writeText(source.statusMessage).catch(() => {})
+                      }
+                    }}
+                  >
+                    {source.statusMessage}
+                    <span className="ml-1 text-[10px] opacity-70">
+                      {t("playground:sources.clickToCopy", "(click to copy)")}
+                    </span>
+                  </span>
+                ) : undefined
+              }
+              placement="bottom"
+            >
+              <p className="mt-0.5 flex items-center gap-1 text-[11px] text-error">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                <span className="line-clamp-1">
+                  {source.statusMessage ||
+                    t(
+                      "playground:sources.statusError",
+                      "Source processing failed"
+                    )}
+                </span>
+              </p>
+            </Tooltip>
+          )}
+        </div>
+        {showStatusDrilldown && (
+          <Tooltip
+            title={t(
+              "playground:sources.viewStatusDetails",
+              "View source status details"
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => handleOpenStatusDetails(source.id)}
+              data-testid={`source-status-details-${source.id}`}
+              className="rounded p-1 text-text-muted transition hover:bg-surface hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              aria-label={t(
+                "playground:sources.viewStatusDetailsForSource",
+                "View source status details for {{title}}",
+                { title: source.title }
+              )}
+            >
+              <Info className="h-3.5 w-3.5" />
+            </button>
+          </Tooltip>
+        )}
+        <div data-testid={`source-checkbox-hitarea-${source.id}`} className="shrink-0">
+          <Checkbox
+            className="shrink-0 justify-center [@media(hover:none)]:min-h-11 [@media(hover:none)]:min-w-11"
+            aria-label={t("playground:sources.selectSource", "Select {{title}}", {
+              title: source.title
+            })}
+            checked={isSelected}
+            disabled={!isSelectable}
+            onChange={() => {
+              if (selectionOrigin === "folder") {
+                return
+              }
+              toggleSourceSelection(source.id)
+            }}
+          />
         </div>
       </div>
     )
@@ -2043,8 +2081,15 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           <h2 className="text-sm font-semibold text-text">
             {t("playground:sources.title", "Sources")}
           </h2>
+          <span className="text-xs tabular-nums text-text-muted">
+            <span aria-hidden="true">{sources.length}</span>
+            <span className="sr-only">
+              {t("playground:sources.totalCount", "{{count}} source(s)", { count: sources.length })}
+            </span>
+          </span>
           {statusProjectionError && (
             <Tooltip
+              trigger={["hover", "focus", "click"]}
               title={t(
                 "playground:sources.statusProjectionWarningTooltip",
                 "Some source status details may be incomplete: {{message}}",
@@ -2057,6 +2102,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                   "playground:sources.statusProjectionWarningLabel",
                   "Source status warning"
                 )}
+                aria-description={statusProjectionError}
                 className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-warning transition hover:bg-warning/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning"
               >
                 <AlertTriangle className="h-3.5 w-3.5" />
@@ -2065,14 +2111,6 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            type="primary"
-            size="small"
-            icon={<Plus className="h-3.5 w-3.5" />}
-            onClick={() => openAddSourceModal("upload")}
-          >
-            {t("playground:sources.addSources", "Add Sources")}
-          </Button>
           {onHide && (
             <Tooltip title={t("playground:workspace.hideSources", "Hide sources")}>
               <button
@@ -2088,48 +2126,166 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
         </div>
       </div>
 
-      {/* Quick URL paste */}
-      <div className="shrink-0 border-b border-border px-4 py-1.5">
-        <Input
-          data-testid="quick-url-input"
-          aria-label={t("playground:sources.quickUrlLabel", "Quick add URL")}
-          placeholder={t(
-            "playground:sources.quickUrlPlaceholder",
-            "Paste a URL to add..."
-          )}
-          value={quickUrlValue}
-          onChange={(e) => {
-            setQuickUrlValue(e.target.value)
-          }}
-          onPaste={(e) => {
-            const pasted = e.clipboardData.getData("text/plain").trim()
-            try {
-              new URL(pasted)
-              e.preventDefault()
-              setQuickUrlValue(pasted)
-              handleQuickUrlPaste(pasted)
-            } catch {
-              // Not a URL — let normal paste happen
-            }
-          }}
-          onPressEnter={() => handleQuickUrlPaste(quickUrlValue)}
-          prefix={<Globe className="h-3.5 w-3.5 text-text-muted" />}
-          suffix={
-            quickUrlLoading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-            ) : null
-          }
-          size="small"
-          allowClear
-          disabled={quickUrlLoading}
-        />
+      <div className="shrink-0 px-3 pb-1 pt-3">
+        <button
+          type="button"
+          data-sources-intake
+          onClick={() => openAddSourceModal("upload")}
+          className="flex min-h-9 w-full items-center gap-2 rounded-md bg-primary/10 px-3 text-left text-sm font-semibold text-primary hover:bg-primary/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          {t("playground:sources.addSources", "Add sources")}
+        </button>
       </div>
 
+      {/* Source list */}
       <div
+        data-testid="sources-list-region"
+        ref={sourceListContainerRef}
+        onScroll={(event) =>
+          setSourceListScrollTop(event.currentTarget.scrollTop)
+        }
+        className="custom-scrollbar min-h-0 overflow-y-auto"
+      >
+        {filteredSources.length === 0 ? (
+          <div className="flex h-full items-center justify-center p-4">
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={
+                sources.length === 0 ? (
+                  <div className="text-center">
+                    <p className="text-text-muted">
+                      {t("playground:sources.empty", "No sources yet")}
+                    </p>
+                    <p className="mt-1 text-xs text-text-subtle">
+                      {t(
+                        "playground:sources.emptyHint",
+                        "Add PDFs, web pages, videos, audio, or notes. tldw stores them in your configured local or self-hosted server and shows processing status here."
+                      )}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 text-center">
+                    <p className="text-text-muted">
+                      {t(
+                        "playground:sources.noResultsFiltered",
+                        "No sources match the current filters."
+                      )}
+                    </p>
+                    <p className="text-xs text-text-subtle">
+                      {t(
+                        "playground:sources.filteredCountSummary",
+                        "Showing {{filtered}} of {{total}} sources.",
+                        {
+                          filtered: filteredSources.length,
+                          total: sources.length
+                        }
+                      )}
+                    </p>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setSourceSearchQuery("")
+                        setActiveFolder(null)
+                        resetAdvancedSourceFilters()
+                      }}
+                    >
+                      {t(
+                        "playground:sources.clearSearchAndFilters",
+                        "Clear search and filters"
+                      )}
+                    </Button>
+                  </div>
+                )
+              }
+            />
+          </div>
+        ) : useVirtualizedSources ? (
+          <div
+            data-testid="sources-virtualized-list"
+            style={{
+              height: filteredSources.length * SOURCE_VIRTUAL_ROW_HEIGHT,
+              position: "relative"
+            }}
+          >
+            <div
+              className="px-2"
+              style={{
+                transform: `translateY(${virtualStartIndex * SOURCE_VIRTUAL_ROW_HEIGHT}px)`
+              }}
+            >
+              {visibleSources.map((source) => renderSourceRow(source))}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-1 p-2">
+            {visibleSources.map((source) => renderSourceRow(source))}
+          </div>
+        )}
+      </div>
+
+      <div className="mx-3 shrink-0 border-t border-border">
+        <button
+          type="button"
+          aria-expanded={organizerOpen}
+          aria-controls={organizerId}
+          onClick={() => setOrganizerOpen((open) => !open)}
+          className="flex min-h-10 w-full items-center gap-2 rounded text-left text-xs font-medium text-text-muted hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+        >
+          <ListFilter className="h-4 w-4" aria-hidden="true" />
+          {t("playground:sources.organize", "Organize sources")}
+          <ChevronDown aria-hidden="true" className={`ml-auto h-4 w-4 transition-transform ${organizerOpen ? "rotate-180" : ""}`} />
+        </button>
+        {!organizerOpen && organizerSummary && (
+          <p role="status" title={organizerSummary} className="mb-2 line-clamp-2 break-words text-xs text-text-muted">
+            {organizerSummary}
+          </p>
+        )}
+      </div>
+      <div
+        id={organizerId}
+        hidden={!organizerOpen}
         data-testid="sources-management-controls"
         className="custom-scrollbar shrink-0 overflow-y-auto border-b border-border"
-        style={sources.length > 0 ? { maxHeight: "min(55%, 30rem)" } : undefined}
+        style={{ maxHeight: "min(50%, 30rem)" }}
       >
+        {/* Quick URL paste */}
+        <div className="shrink-0 border-b border-border px-4 py-1.5">
+          <Input
+            data-testid="quick-url-input"
+            aria-label={t("playground:sources.quickUrlLabel", "Quick add URL")}
+            placeholder={t(
+              "playground:sources.quickUrlPlaceholder",
+              "Paste a URL to add..."
+            )}
+            value={quickUrlValue}
+            onChange={(e) => {
+              setQuickUrlValue(e.target.value)
+            }}
+            onPaste={(e) => {
+              const pasted = e.clipboardData.getData("text/plain").trim()
+              try {
+                new URL(pasted)
+                e.preventDefault()
+                setQuickUrlValue(pasted)
+                handleQuickUrlPaste(pasted)
+              } catch {
+                // Not a URL — let normal paste happen
+              }
+            }}
+            onPressEnter={() => handleQuickUrlPaste(quickUrlValue)}
+            prefix={<Globe className="h-3.5 w-3.5 text-text-muted" />}
+            suffix={
+              quickUrlLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+              ) : null
+            }
+            size="small"
+            allowClear
+            disabled={quickUrlLoading}
+          />
+        </div>
+
         {sourceSavedViewsController &&
           onApplySourceListViewState &&
           onOpenSourceViewOverlay && (
@@ -2299,128 +2455,22 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
         )}
 
         <div className="px-4 py-2">
-        <SourceFolderTree
-          nodes={folderTreeNodes}
-          activeFolderId={activeFolderId}
-          selectionStateByFolderId={selectionStateByFolderId}
-          onClearFocus={() => setActiveFolder(null)}
-          onCreateFolder={handleCreateSourceFolder}
-          editingFolderId={editingFolderId}
-          editingFolderName={editingFolderName}
-          onEditingFolderNameChange={setEditingFolderName}
-          onCommitFolderRename={handleCommitFolderRename}
-          onCancelFolderRename={handleCancelFolderRename}
-          onFocusFolder={setActiveFolder}
-          onToggleFolderSelection={toggleSourceFolderSelection}
-        />
+          <SourceFolderTree
+            nodes={folderTreeNodes}
+            activeFolderId={activeFolderId}
+            selectionStateByFolderId={selectionStateByFolderId}
+            onClearFocus={() => setActiveFolder(null)}
+            onCreateFolder={handleCreateSourceFolder}
+            editingFolderId={editingFolderId}
+            editingFolderName={editingFolderName}
+            onEditingFolderNameChange={setEditingFolderName}
+            onCommitFolderRename={handleCommitFolderRename}
+            onCancelFolderRename={handleCancelFolderRename}
+            onFocusFolder={setActiveFolder}
+            onToggleFolderSelection={toggleSourceFolderSelection}
+          />
         </div>
       </div>
-
-      {/* Source list */}
-      <div
-        data-testid="sources-list-region"
-        ref={sourceListContainerRef}
-        onScroll={(event) =>
-          setSourceListScrollTop(event.currentTarget.scrollTop)
-        }
-        className="custom-scrollbar min-h-0 flex-1 overflow-y-auto"
-      >
-        {filteredSources.length === 0 ? (
-          <div className="flex h-full items-center justify-center p-4">
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={
-                sources.length === 0 ? (
-                  <div className="text-center">
-                    <p className="text-text-muted">
-                      {t("playground:sources.empty", "No sources yet")}
-                    </p>
-                    <p className="mt-1 text-xs text-text-subtle">
-                      {t(
-                        "playground:sources.emptyHint",
-                        "Add PDFs, web pages, videos, audio, or notes. tldw stores them in your configured local or self-hosted server and shows processing status here."
-                      )}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-2 text-center">
-                    <p className="text-text-muted">
-                      {t(
-                        "playground:sources.noResultsFiltered",
-                        "No sources match the current filters."
-                      )}
-                    </p>
-                    <p className="text-xs text-text-subtle">
-                      {t(
-                        "playground:sources.filteredCountSummary",
-                        "Showing {{filtered}} of {{total}} sources.",
-                        {
-                          filtered: filteredSources.length,
-                          total: sources.length
-                        }
-                      )}
-                    </p>
-                    <Button
-                      size="small"
-                      onClick={() => {
-                        setSourceSearchQuery("")
-                        setActiveFolder(null)
-                        resetAdvancedSourceFilters()
-                      }}
-                    >
-                      {t(
-                        "playground:sources.clearSearchAndFilters",
-                        "Clear search and filters"
-                      )}
-                    </Button>
-                  </div>
-                )
-              }
-            >
-              {sources.length === 0 && (
-                <Button
-                  type="primary"
-                  size="small"
-                  icon={<Plus className="h-3.5 w-3.5" />}
-                  onClick={() => openAddSourceModal("upload")}
-                >
-                  {t("playground:sources.addFirst", "Add your first source")}
-                </Button>
-              )}
-            </Empty>
-          </div>
-        ) : useVirtualizedSources ? (
-          <div
-            data-testid="sources-virtualized-list"
-            style={{
-              height: filteredSources.length * SOURCE_VIRTUAL_ROW_HEIGHT,
-              position: "relative"
-            }}
-          >
-            <div
-              className="space-y-1 p-2"
-              style={{
-                transform: `translateY(${virtualStartIndex * SOURCE_VIRTUAL_ROW_HEIGHT}px)`
-              }}
-            >
-              {visibleSources.map((source) => renderSourceRow(source))}
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-1 p-2">
-            {visibleSources.map((source) => renderSourceRow(source))}
-          </div>
-        )}
-      </div>
-
-      {/* Footer with source count */}
-      {sources.length > 0 && (
-        <div className="shrink-0 border-t border-border px-4 py-2 text-xs text-text-muted">
-          {t("playground:sources.totalCount", "{{count}} source(s)", {
-            count: sources.length
-          })}
-        </div>
-      )}
 
       {/* Source status details modal */}
       <Modal
@@ -2726,6 +2776,10 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               <p className="text-xs capitalize text-text-muted">
                 {previewSource.type} / {previewStatusLabel}
               </p>
+              <p className="mt-1 text-xs text-text-muted">
+                {SOURCE_REVIEW_BADGES[previewSource.reviewState ?? "unset"].label}
+              </p>
+              {renderSourceDetails(previewSource)}
               {previewSafeUrl && (
                 <a
                   href={previewSafeUrl}
@@ -2739,6 +2793,16 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             </div>
 
             <div className="rounded border border-border bg-surface/50 p-3">
+              {citedExcerpt.trim() && (
+                <section className="mb-4">
+                  <h3 className="mb-1 text-xs font-semibold text-text-muted">
+                    {t("playground:sources.citedPassage", "Cited passage")}
+                  </h3>
+                  <blockquote className="whitespace-pre-wrap break-words border-l-2 border-primary pl-3 text-sm text-text">
+                    {citedExcerpt}
+                  </blockquote>
+                </section>
+              )}
               <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="text-xs font-semibold uppercase text-text-muted">
                   {t("playground:sources.capturedContent", "Captured content")}

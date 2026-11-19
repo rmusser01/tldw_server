@@ -329,16 +329,16 @@ vi.mock("antd", async () => {
   }
 })
 
-function renderChatPaneNode() {
+function renderChatPaneNode(onOpenCitationSource?: (sourceId: string, excerpt?: string) => void) {
   return (
     <MemoryRouter>
-      <ChatPane />
+      <ChatPane onOpenCitationSource={onOpenCitationSource} />
     </MemoryRouter>
   )
 }
 
-function renderChatPane() {
-  return render(renderChatPaneNode())
+function renderChatPane(onOpenCitationSource?: (sourceId: string, excerpt?: string) => void) {
+  return render(renderChatPaneNode(onOpenCitationSource))
 }
 
 describe("ChatPane Stage 2 citation traceability and retrieval transparency", () => {
@@ -397,6 +397,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }))
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     const moreButton = screen.getByRole("button", {
       name: "Show more sources"
@@ -425,16 +426,45 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
         sources: [
           {
             name: "Primary Source",
+            content: "Observation at the stop.",
             metadata: { media_id: 42 }
           }
         ]
       }
     ]
 
-    renderChatPane()
+    const openPreview = vi.fn()
+    renderChatPane(openPreview)
     fireEvent.click(screen.getByRole("button", { name: "Open citation" }))
 
+    expect(openPreview).toHaveBeenCalledWith("source-42", "Observation at the stop.")
     expect(mockFocusSourceByMediaId).toHaveBeenCalledWith(42)
+    expect(mockFocusSourceById).not.toHaveBeenCalled()
+  })
+
+  it("keeps a historical citation from opening a replacement with the same title and URL", () => {
+    mockFocusSourceByMediaId.mockReturnValue(false)
+    const url = "https://example.test/report"
+    workspaceStoreState.sources = [
+      { id: "replacement", mediaId: 101, title: "Report", type: "pdf", url }
+    ]
+    messageOptionState.messages = [
+      {
+        id: "historical-answer",
+        isBot: true,
+        name: "Assistant",
+        message: "A historical answer",
+        sources: [
+          { name: "Report", content: "Original passage", url, metadata: { media_id: 42 } }
+        ]
+      }
+    ]
+
+    const openPreview = vi.fn()
+    renderChatPane(openPreview)
+    fireEvent.click(screen.getByRole("button", { name: "Open citation" }))
+
+    expect(openPreview).not.toHaveBeenCalled()
     expect(mockFocusSourceById).not.toHaveBeenCalled()
   })
 
@@ -458,9 +488,11 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    renderChatPane()
+    const openPreview = vi.fn()
+    renderChatPane(openPreview)
     fireEvent.click(screen.getByRole("button", { name: "Open citation" }))
 
+    expect(openPreview).toHaveBeenCalledWith("source-alpha", undefined)
     expect(mockFocusSourceById).toHaveBeenCalledWith("source-alpha")
   })
 
@@ -529,6 +561,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     ])
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     await waitFor(() => {
       expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
@@ -574,6 +607,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     ])
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     await waitFor(() => {
       expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
@@ -609,6 +643,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     hoistedMocks.fetchChatModels.mockResolvedValue([])
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     await waitFor(() => {
       expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
@@ -640,6 +675,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       ])
 
     renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Response settings" }))
 
     await waitFor(() => {
       expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({

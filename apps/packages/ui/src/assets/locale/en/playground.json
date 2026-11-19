@@ -1156,10 +1156,16 @@
     "shortcutShowShortcuts": "Show shortcuts",
     "clearChat": "Clear chat",
     "messagePlaceholder": "Type your message...",
-    "messagePlaceholderCompare": "Send to {{count}} models..."
+    "messagePlaceholderCompare": "Send to {{count}} models...",
+    "panes": "Workspace panes",
+    "sourcesBesideChat": "Sources beside chat",
+    "studioBesideChat": "Studio beside chat"
   },
   "studio": {
-    "loadingOutputViewer": "Loading output viewer..."
+    "loadingOutputViewer": "Loading output viewer...",
+    "createOutput": "Create output",
+    "savedOutputs": "Saved outputs",
+    "noSavedOutputs": "No saved outputs yet."
   },
   "debug": {
     "title": "Debug Panel",
@@ -1775,7 +1781,20 @@
     "retrievedExcerpt": "Retrieved excerpt",
     "snapshotVersion": "Source snapshot: Media version {{version}}",
     "snapshotChanged": "Snapshot changed outside refresh",
-    "textUnchanged": "Text unchanged"
+    "textUnchanged": "Text unchanged",
+    "organize": "Organize sources",
+    "sourceDate": "Source date",
+    "addedDate": "Added date",
+    "fileSizeBytes": "File size (bytes)",
+    "durationSeconds": "Duration (seconds)",
+    "pages": "Pages",
+    "hasUrl": "Has URL",
+    "hasFileSize": "Has file size",
+    "hasDuration": "Has duration",
+    "hasPageCount": "Has page count",
+    "citedPassage": "Cited passage",
+    "modifiedView": "Modified",
+    "addSources": "Add sources"
   },
   "shortcuts": {
     "openKeyboardHelp": "Open keyboard shortcuts (?)"
@@ -1792,6 +1811,7 @@
     "open": "Search this conversation",
     "openWithShortcut": "Search this conversation ({{shortcut}})",
     "placeholder": "Search messages in this conversation",
+    "workspacePlaceholder": "Search sources, chat, and notes...",
     "matchCount": "{{current}} / {{total}}",
     "noMatches": "No matches"
   },
@@ -1816,5 +1836,18 @@
     "viewToolbar": "Conversation view",
     "noArtifactsYet": "No artifacts yet",
     "artifactsShort": "Artifacts"
+  },
+  "chat": {
+    "emptyQuestionTitle": "What would you like to find out?",
+    "emptyNotebookHint": "Add a source for grounded answers, or start with a general question.",
+    "emptySelectedHint": "Ask a question about the selected sources.",
+    "emptyUnselectedHint": "Select a source for grounded answers, or start with a general question.",
+    "emptyGeneralHint": "Ask a general question.",
+    "addFirstSource": "Add your first source",
+    "moreWaysToStart": "More ways to start",
+    "sourcesSelected_one": "1 source selected",
+    "sourcesSelected_other": "{{count}} sources selected",
+    "lorebookActivity": "Lorebook Activity",
+    "generalModeWithFullSourcesHint": "Full source text is included. Retrieval is off."
   }
 }

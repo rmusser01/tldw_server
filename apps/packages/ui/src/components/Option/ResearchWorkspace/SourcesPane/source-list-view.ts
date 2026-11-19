@@ -330,7 +330,10 @@ export const SOURCE_LIST_SORT_LABELS: Record<
   page_count_asc: "Page count (lowest)"
 }
 
-export const buildSourceFilterSummary = (viewState: SourceListViewState): string => {
+export const buildSourceFilterSummary = (
+  viewState: SourceListViewState,
+  t: (key: string, fallback: string) => string = (_key, fallback) => fallback
+): string => {
   const parts: string[] = []
 
   if (viewState.typeFilters.length > 0) {
@@ -357,6 +360,27 @@ export const buildSourceFilterSummary = (viewState: SourceListViewState): string
       `Lifecycle=${viewState.lifecycleStateFilters.map(humanizeToken).join(", ")}`
     )
   }
+
+  const addRange = (label: string, min: string | number | null, max: string | number | null) => {
+    if (min != null && max != null) parts.push(`${label} ${min}–${max}`)
+    else if (min != null) parts.push(`${label} ≥ ${min}`)
+    else if (max != null) parts.push(`${label} ≤ ${max}`)
+  }
+
+  addRange(
+    viewState.dateField === "sourceCreatedAt"
+      ? t("playground:sources.sourceDate", "Source date")
+      : t("playground:sources.addedDate", "Added date"),
+    viewState.dateFrom,
+    viewState.dateTo
+  )
+  addRange(t("playground:sources.fileSizeBytes", "File size (bytes)"), viewState.fileSizeMin, viewState.fileSizeMax)
+  addRange(t("playground:sources.durationSeconds", "Duration (seconds)"), viewState.durationMin, viewState.durationMax)
+  addRange(t("playground:sources.pages", "Pages"), viewState.pageCountMin, viewState.pageCountMax)
+  if (viewState.requireUrl) parts.push(t("playground:sources.hasUrl", "Has URL"))
+  if (viewState.requireFileSize) parts.push(t("playground:sources.hasFileSize", "Has file size"))
+  if (viewState.requireDuration) parts.push(t("playground:sources.hasDuration", "Has duration"))
+  if (viewState.requirePageCount) parts.push(t("playground:sources.hasPageCount", "Has page count"))
 
   if (viewState.sort !== "manual") {
     parts.push(`Sort: ${SOURCE_LIST_SORT_LABELS[viewState.sort]}`)

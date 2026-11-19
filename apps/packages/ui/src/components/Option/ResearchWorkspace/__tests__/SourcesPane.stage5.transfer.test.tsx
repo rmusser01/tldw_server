@@ -133,6 +133,7 @@ describe("SourcesPane stage 5 transfer launch", () => {
     const mockOpenTransferSources = vi.fn()
 
     render(<SourcesPane onOpenTransferSources={mockOpenTransferSources} />)
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     fireEvent.click(screen.getByRole("button", { name: "Move / Copy" }))
 
@@ -161,6 +162,7 @@ describe("SourcesPane stage 5 transfer launch", () => {
     mockGetEffectiveSelectedSources.mockReturnValue([...workspaceStoreState.sources])
 
     render(<SourcesPane onOpenTransferSources={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }))
 
     expect(
       screen.queryByRole("button", { name: "Move / Copy" })

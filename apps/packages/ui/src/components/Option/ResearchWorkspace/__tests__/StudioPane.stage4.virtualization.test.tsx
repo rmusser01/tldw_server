@@ -218,7 +218,7 @@ if (!(globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver) {
 }
 
 const expandGeneratedOutputsSection = () => {
-  const toggle = screen.getByRole("button", { name: /Generated Outputs/i })
+  const toggle = screen.getByRole("button", { name: /Saved outputs/i })
   if (toggle.getAttribute("aria-expanded") === "false") {
     fireEvent.click(toggle)
   }
