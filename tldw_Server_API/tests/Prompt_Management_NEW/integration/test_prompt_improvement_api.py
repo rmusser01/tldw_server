@@ -48,6 +48,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
 )
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+from tldw_Server_API.tests.helpers.offline_network import stub_host_resolution
 
 pytestmark = pytest.mark.integration
 
@@ -106,6 +107,12 @@ def _test_user() -> SimpleNamespace:
 
 def _configured_providers() -> dict[str, Any]:
     return {"providers": [], "default_provider": "openai"}
+
+
+@pytest.fixture
+def offline_provider_hosts(monkeypatch):
+    """The route's provider listing runs the egress policy, which resolves every configured provider host."""
+    stub_host_resolution(monkeypatch)
 
 
 @contextmanager
@@ -1643,7 +1650,7 @@ async def test_dispatch_maps_rate_limit_retry_after_and_provider_refusal(monkeyp
     byok.touch_last_used.assert_awaited_once_with()
 
 
-def test_llm_quota_refusal_answers_402_not_retryable_provider_unavailable(monkeypatch):
+def test_llm_quota_refusal_answers_402_not_retryable_provider_unavailable(monkeypatch, offline_provider_hosts):
     """The user's LLM limit is let through as the 402, not mapped to a retryable provider outage (TASK-13638)."""
     refusal = LLMQuotaExceededError(
         category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
