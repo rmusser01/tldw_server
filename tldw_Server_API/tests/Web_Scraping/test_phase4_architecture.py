@@ -107,6 +107,23 @@ def _imported_names(path: Path, module: str) -> set[str]:
     return names
 
 
+def _names_taken_from(path: Path, module: str) -> set[str]:
+    """Top-level from-imports of ``module`` plus attributes read through a top-level ``import module as alias``."""
+    tree = _tree(path)
+    aliases = {
+        alias.asname or alias.name
+        for node in tree.body
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name == module
+    }
+    return _imported_names(path, module) | {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in aliases
+    }
+
+
 def _imported_names_at_any_scope(path: Path, module: str) -> set[str]:
     return {
         alias.name
@@ -1089,7 +1106,8 @@ def test_watchlists_endpoint_imports_validation_from_canonical_facade() -> None:
     fetchers_module = "tldw_Server_API.app.core.Watchlists.fetchers"
 
     assert _imported_names(ENDPOINT_PATH, facade_module) == {"validate_selector_rules"}
-    assert _imported_names(ENDPOINT_PATH, fetchers_module) == {
+    # TASK-13950.20 E3 reads collaborators through a module alias (`_fetchers.fetch_site_items_with_rules`).
+    assert _names_taken_from(ENDPOINT_PATH, fetchers_module) == {
         "fetch_rss_feed",
         "fetch_site_items_with_rules",
     }
