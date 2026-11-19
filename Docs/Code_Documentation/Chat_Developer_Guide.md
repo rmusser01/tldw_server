@@ -111,12 +111,12 @@ Provider selection notes:
 ## Validation & Schemas
 
 - `chat_request_schemas.py` defines OpenAI-compatible request models, messages, tools, and response-format constraints.
-- `chat_validators.py` provides additional validators (IDs, temperatures, max tokens, stop sequences, and `MAX_REQUEST_SIZE`).
+- `chat_validators.py` provides additional validators (IDs, temperatures, max tokens, stop sequences, and the request size check `validate_request_size`).
 - The endpoint validates:
   - Message roles and content constraints (assistant/tool message rules)
   - `logprobs/top_logprobs` relationships
   - Tool definitions size limits
-  - Request size limits (`MAX_REQUEST_SIZE`), see `chat_validators.py`
+  - Request size limits: `validate_request_size` reads `config_sections.chat.max_request_size_chars` at call time (`CHAT_REQUEST_MAX_SIZE`, else `[Chat-Module] max_request_size_chars`, default 1,000,000 chars)
   - Model strings with provider prefixes like `anthropic/claude-opus-4.1` (provider extracted automatically)
   - Image inputs on user messages via `image_url` content parts (expects data URI with base64; validated/sanitized)
 

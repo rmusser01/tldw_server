@@ -18,7 +18,10 @@ from tldw_Server_API.app.api.v1.schemas.chat_validators import (
     CONVERSATION_ID_PATTERN,
     CHARACTER_ID_PATTERN,
     MAX_TOOL_DEFINITION_SIZE,
-    MAX_REQUEST_SIZE,
+)
+from tldw_Server_API.app.core.config_sections.chat import (
+    DEFAULT_MAX_REQUEST_SIZE_CHARS,
+    max_request_size_chars,
 )
 
 
@@ -242,9 +245,10 @@ class TestValidateRequestSize:
         result = validate_request_size(request)
         assert result is True
 
-    def test_request_too_large(self):
+    def test_request_too_large(self, monkeypatch):
         """Test request that's too large."""
-        large_request = "x" * (MAX_REQUEST_SIZE + 1)
+        monkeypatch.delenv("CHAT_REQUEST_MAX_SIZE", raising=False)
+        large_request = "x" * (DEFAULT_MAX_REQUEST_SIZE_CHARS + 1)
         with pytest.raises(ValueError, match="Failed to validate request size"):
             validate_request_size(large_request)
 
@@ -423,7 +427,30 @@ class TestSizeConstants:
 
     def test_max_request_size(self):
         """Test max request size constant."""
-        assert MAX_REQUEST_SIZE == 1000000  # 1MB
+        assert max_request_size_chars(None, env={}) == 1_000_000  # 1MB
+
+
+def test_request_size_limit_is_read_at_call_time(monkeypatch):
+    monkeypatch.setenv("CHAT_REQUEST_MAX_SIZE", "50")
+    with pytest.raises(ValueError, match="max 50 chars"):
+        validate_request_size("x" * 60)
+    monkeypatch.setenv("CHAT_REQUEST_MAX_SIZE", "100")
+    assert validate_request_size("x" * 60) is True
+
+
+def test_request_size_limit_falls_back_when_config_cannot_load(monkeypatch):
+    from tldw_Server_API.app.core import config
+
+    def _broken():
+        raise OSError("config.txt unreadable")
+
+    _broken.cache_clear = lambda: None
+    monkeypatch.setattr(config, "load_comprehensive_config", _broken)
+    monkeypatch.delenv("CHAT_REQUEST_MAX_SIZE", raising=False)
+    assert validate_request_size("x" * 60) is True  # the 1M default applies, as today
+    monkeypatch.setenv("CHAT_REQUEST_MAX_SIZE", "50")
+    with pytest.raises(ValueError, match="max 50 chars"):
+        validate_request_size("x" * 60)  # env still applies when config cannot load
 
 
 if __name__ == "__main__":
