@@ -37,7 +37,7 @@ describe("buildPersonaBuddyDiagnostics", () => {
 
     expect(diagnostics.rows).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ label: "Buddy", value: registryLabels.ready }),
+        expect.objectContaining({ label: "Avatar", value: registryLabels.ready }),
         expect.objectContaining({ label: "Profile", value: registryLabels.loading }),
         expect.objectContaining({ label: "Visual pack", value: registryLabels.loading })
       ])
@@ -357,7 +357,7 @@ describe("buildPersonaBuddyDiagnostics", () => {
     expect(diagnostics.rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          label: "Buddy",
+          label: "Avatar",
           value: "Dormant",
           state: "healthy"
         })

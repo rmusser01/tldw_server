@@ -113,7 +113,7 @@ const summarizeBuddy = (
 ): PersonaBuddyDiagnosticRow => {
   if (typeof buddySummary === "string" && buddySummary.trim()) {
     return {
-      label: "Buddy",
+      label: "Avatar",
       value: READY_STATE_LABEL,
       state: "healthy",
       detail: buddySummary.trim()
@@ -124,7 +124,7 @@ const summarizeBuddy = (
     const roleSummary = String(buddySummary.role_summary || "").trim()
     if (buddySummary.has_buddy || roleSummary) {
       return {
-        label: "Buddy",
+        label: "Avatar",
         value: READY_STATE_LABEL,
         state: "healthy",
         detail: roleSummary || "Avatar summary is attached to this persona."
@@ -133,7 +133,7 @@ const summarizeBuddy = (
   }
 
   return {
-    label: "Buddy",
+    label: "Avatar",
     value: "Dormant",
     state: "healthy",
     detail: "No avatar summary is attached to the selected persona."
