@@ -96,7 +96,7 @@ import { useComposerAttachments } from "@/components/Chat/composer/hooks/useComp
 import { useSlashCommands, type SlashCommandItem } from "@/hooks/useSlashCommands"
 import { useTabMentions, type TabInfo } from "~/hooks/useTabMentions"
 import { useDeferredComposerInput } from "@/hooks/playground"
-import { KnowledgePanel } from "@/components/Knowledge"
+import { SidepanelKnowledgeSheet } from "./SidepanelKnowledgeSheet"
 import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel"
 import { ModelSelect, type ModelSelectHandle } from "@/components/Common/ModelSelect"
 import { useSidepanelStartupModel } from "./hooks/useSidepanelStartupModel"
@@ -116,7 +116,7 @@ import {
   shouldEnableOptionalResource,
   useChatSurfaceCoordinatorStore
 } from "@/store/chat-surface-coordinator"
-import { ModelParamsPanel } from "@/components/Sidepanel/Chat/ModelParamsPanel"
+import { SidepanelRuntimeChip } from "./SidepanelRuntimeChip"
 import { CurrentChatModelSettings } from "@/components/Common/Settings/CurrentChatModelSettings"
 import { ActorPopout } from "@/components/Common/Settings/ActorPopout"
 import { DocumentGeneratorDrawer } from "@/components/Common/Playground/DocumentGeneratorDrawer"
@@ -3676,10 +3676,10 @@ export const SidepanelForm = ({
           <div
             className={composerCardClass}>
             <div>
-              {/* Inline Model Parameters Panel (Pro mode only) */}
+              {/* XS-15: model parameters as one Runtime chip (Pro mode only) */}
               {wrapComposerProfile(
                 "sidepanel-model-params-panel",
-                <ModelParamsPanel
+                <SidepanelRuntimeChip
                   onOpenFullSettings={handleOpenModelSettings}
                   selectedModel={selectedModel}
                 />
@@ -3733,11 +3733,11 @@ export const SidepanelForm = ({
                         onOpenSettings={openSettings}
                       />
                     )}
-                    {/* Knowledge Search: search KB, insert snippets, ask directly */}
+                    {/* XS-15: Search & Context opens as an overlay sheet */}
                     {isProMode && (
                       wrapComposerProfile(
                         "sidepanel-knowledge-panel",
-                        <KnowledgePanel
+                        <SidepanelKnowledgeSheet
                           onInsert={handleKnowledgeInsert}
                           onAsk={handleKnowledgeAsk}
                           open={knowledgePanelOpen}

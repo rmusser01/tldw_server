@@ -2169,5 +2169,11 @@
   },
   "openFullPage_characterDraftStays": {
     "message": "A new character chat opens without your draft. It stays here."
+  },
+  "runtimeChip_defaults": {
+    "message": "Model defaults"
+  },
+  "runtimeChip_title": {
+    "message": "Model parameters for this chat"
   }
 }

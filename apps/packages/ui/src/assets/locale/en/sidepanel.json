@@ -55,6 +55,10 @@
     "partial": "Opened with a partial copy: some of the draft or page references were shortened or could not be read. Review it there. Your draft stays here.",
     "characterDraftStays": "A new character chat opens without your draft. It stays here."
   },
+  "runtimeChip": {
+    "defaults": "Model defaults",
+    "title": "Model parameters for this chat"
+  },
   "flashcards": {
     "opening": "Opening Flashcards",
     "openedInTab": "Flashcards opens in the full extension workspace so review, import, and deck management have enough room.",

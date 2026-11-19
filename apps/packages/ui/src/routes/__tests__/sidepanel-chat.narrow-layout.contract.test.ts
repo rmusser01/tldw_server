@@ -66,7 +66,7 @@ describe("sidepanel chat narrow layout contract", () => {
 
   it("allows the sticky composer and control rows to wrap within a 390px sidepanel", () => {
     expect(sidepanelChatSource).toContain(
-      'className="absolute bottom-0 left-0 right-0 z-10 max-h-[60%] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain"',
+      'className="absolute bottom-0 left-0 right-0 z-10 max-h-[40%] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain"',
     )
     expect(sidepanelFormSource).toContain(
       "flex w-full min-w-0 flex-col items-center",

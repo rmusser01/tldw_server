@@ -195,7 +195,13 @@ test.describe("Chat workspace UX", () => {
       if ((await ragPanel.count()) > 0) {
         await expect(ragPanel).toBeVisible()
       }
-      await ragToggle.click()
+      // XS-15: Search & Context opens as a sheet over the composer; close it from the sheet.
+      const knowledgeSheet = chatPage.getByRole("dialog", { name: "Search & Context" })
+      if ((await knowledgeSheet.count()) > 0) {
+        await knowledgeSheet.getByRole("button", { name: "Close" }).first().click()
+      } else {
+        await ragToggle.click()
+      }
       if ((await ragPanel.count()) > 0) {
         await expect(ragPanel).toBeHidden()
       }

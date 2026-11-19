@@ -3277,7 +3277,7 @@ const SidepanelChatContent = ({
             <div
               ref={composerDockRef}
               data-testid="sidepanel-composer-dock"
-              className="absolute bottom-0 left-0 right-0 z-10 max-h-[60%] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain"
+              className="absolute bottom-0 left-0 right-0 z-10 max-h-[40%] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain"
               style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
             >
               <SidepanelForm
