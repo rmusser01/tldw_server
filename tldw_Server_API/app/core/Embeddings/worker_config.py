@@ -1,18 +1,18 @@
 # worker_config.py
 # Configuration schemas for worker pools and orchestration
 
-import os
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from tldw_Server_API.app.core.config_sections.redis import redis_url_env
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 
 class RedisConfig(BaseModel):
     """Redis connection configuration"""
     url: str = Field(
-        default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379"),
+        default_factory=lambda: "redis://localhost:6379" if (url := redis_url_env()) is None else url,
         description="Redis connection URL"
     )
     max_connections: int = Field(default=50, ge=1, description="Maximum connections in pool")

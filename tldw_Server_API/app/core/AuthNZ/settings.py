@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.config_sections.auth import (
     resolve_access_token_expire_minutes,
     resolve_auth_mode,
     resolve_database_url,
+    resolve_redis_url,
 )
 from tldw_Server_API.app.core.config_sections.precedence import resolve
 
@@ -1470,7 +1471,10 @@ def _load_overrides_from_config() -> dict:
             "public_magic_link_path",
             lambda v: v.strip(),
         )
-        maybe_set("REDIS_URL", "redis_url", lambda v: v.strip())
+        resolved_redis = resolve_redis_url(cfg)
+        if resolved_redis.source == "config":
+            with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+                overrides["REDIS_URL"] = str(resolved_redis.value).strip()
         maybe_set("SECURITY_ALERTS_ENABLED", "security_alerts_enabled", _bool_from_str)
         maybe_set("SECURITY_ALERT_MIN_SEVERITY", "security_alert_min_severity", lambda v: v.strip())
         maybe_set("SECURITY_ALERT_FILE_PATH", "security_alert_file_path", lambda v: v.strip())

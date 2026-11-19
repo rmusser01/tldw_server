@@ -63,6 +63,17 @@ def resolve_access_token_expire_minutes(
     )
 
 
+def resolve_redis_url(config_parser: ConfigParserLike | None, env: Mapping[str, str] | None = None) -> Resolved:
+    """The AuthNZ overlay's rule: env ``REDIS_URL``, then ``[AuthNZ] redis_url``; blank values count as set.
+
+    The raw text is never validated here (the ``REDIS_URL`` field's validator does that).
+    """
+    return resolve(
+        ("REDIS_URL",), (("AuthNZ", "redis_url"),), config_parser=config_parser, env=env,
+        blank_env=True, blank_config=True,
+    )
+
+
 def resolve_database_url(config_parser: ConfigParserLike | None, env: Mapping[str, str] | None = None) -> Resolved:
     """AuthNZ's users DB rule: env ``DATABASE_URL``, then ``[AuthNZ] database_url``, then ``db_type``.
 

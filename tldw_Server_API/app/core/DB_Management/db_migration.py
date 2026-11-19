@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.config_sections.redis import redis_url_env
 from tldw_Server_API.app.core.DB_Management.DB_Backups import (
     _sqlite_error_is_busy,
     restore_sqlite_database_file,
@@ -685,7 +686,7 @@ class DatabaseMigrator:
         create_backup: bool = True
     ) -> dict[str, Any]:
         """Migrate database to target version"""
-        redis_url = os.getenv("REDIS_URL")
+        redis_url = redis_url_env()
         lock_dir = str(Path(self.db_path).parent)
 
         with acquire_migration_lock(

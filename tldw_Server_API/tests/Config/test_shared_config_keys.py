@@ -24,12 +24,14 @@ from tldw_Server_API.app.core.AuthNZ import settings as authnz_settings
 from tldw_Server_API.app.core.AuthNZ.db_config import AuthDatabaseConfig
 from tldw_Server_API.app.core.Chat import command_router
 from tldw_Server_API.app.core.config_sections import auth as auth_section
+from tldw_Server_API.app.core.config_sections import redis as redis_section
 from tldw_Server_API.app.core.config_sections.auth import (
     auth_mode_env,
     load_auth_config,
     resolve_access_token_expire_minutes,
     resolve_auth_mode,
     resolve_database_url,
+    resolve_redis_url,
     resolve_single_user_fixed_id,
     single_user_fixed_id_env,
 )
@@ -774,3 +776,52 @@ def test_sandbox_streams_fanout_url_today(monkeypatch, redis_env, state, sandbox
     streams.RunStreamHub()
     assert len(seen) == 1
     assert seen[0] == expected
+
+
+REDIS_AUTHNZ_RESOLVED = {
+    "env_set": Resolved(ENV_URL, "env", "REDIS_URL"),
+    "env_blank": Resolved("", "env", "REDIS_URL"),
+    "env_spaces": Resolved("  ", "env", "REDIS_URL"),
+    "env_invalid": Resolved("http://bad", "env", "REDIS_URL"),
+    "config_only": Resolved(AZ_URL, "config", "AuthNZ.redis_url"),
+    "authnz_only": Resolved(AZ_URL, "config", "AuthNZ.redis_url"),
+    "redis_section_only": Resolved(None, "default", None),
+    "config_blank": Resolved("", "config", "AuthNZ.redis_url"),
+    "neither": Resolved(None, "default", None),
+}
+REDIS_LAZY_RESOLVED = {
+    "env_set": Resolved(ENV_URL, "env", "REDIS_URL"),
+    "env_blank": Resolved(CFG_URL, "config", "Redis.redis_url"),
+    "env_spaces": Resolved("  ", "env", "REDIS_URL"),
+    "env_invalid": Resolved("http://bad", "env", "REDIS_URL"),
+    "config_only": Resolved(CFG_URL, "config", "Redis.redis_url"),
+    "authnz_only": Resolved(None, "default", None),
+    "redis_section_only": Resolved(CFG_URL, "config", "Redis.redis_url"),
+    "config_blank": Resolved(None, "default", None),
+    "neither": Resolved(None, "default", None),
+}
+
+
+@pytest.mark.parametrize("case", list(REDIS_CASES))
+def test_redis_url_resolves_through_config_sections(apply_redis_case, case):
+    parser = apply_redis_case(case)
+    assert resolve_redis_url(parser) == REDIS_AUTHNZ_RESOLVED[case]
+    assert redis_section.resolve_redis_url(parser) == REDIS_LAZY_RESOLVED[case]
+
+
+def test_redis_url_env_is_env_only_blank_kept_and_live(monkeypatch):
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    assert redis_section.redis_url_env() is None
+    monkeypatch.setenv("REDIS_URL", "")
+    assert redis_section.redis_url_env() == ""
+    monkeypatch.setenv("REDIS_URL", "redis://x:1/0")
+    assert redis_section.redis_url_env() == "redis://x:1/0"
+    assert redis_section.redis_url_env({"REDIS_URL": "y"}) == "y"
+    assert redis_section.redis_url_env({}) is None
+
+
+def test_resolve_redis_url_without_a_parser_reads_the_environment_alone():
+    assert redis_section.resolve_redis_url(None, env={"REDIS_URL": "redis://x:1/0"}) == Resolved(
+        "redis://x:1/0", "env", "REDIS_URL"
+    )
+    assert redis_section.resolve_redis_url(None, env={}) == Resolved(None, "default", None)

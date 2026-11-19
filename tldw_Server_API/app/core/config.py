@@ -12,6 +12,7 @@ import platform
 from collections.abc import Mapping, MutableMapping
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urlparse
 
@@ -26,6 +27,7 @@ from tldw_Server_API.app.core.config_paths import resolve_config_file
 from tldw_Server_API.app.core.config_sections.auth import load_auth_config, resolve_single_user_fixed_id
 from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.config_sections.precedence import resolve
+from tldw_Server_API.app.core.config_sections.redis import resolve_redis_url
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
     custom_openai_config_option_names,
@@ -1084,13 +1086,12 @@ def load_settings():
     except _CONFIG_NONCRITICAL_EXCEPTIONS:
         cache_ttl = 300
 
-    config_redis_url = _redis_section_get('redis_url')
-    redis_url_env = os.getenv("REDIS_URL")
-
-    if redis_url_env:
-        redis_url = redis_url_env
-    elif config_redis_url:
-        redis_url = config_redis_url
+    # The resolver reads the same `comprehensive_config` snapshot as the host/port options above.
+    resolved_redis = resolve_redis_url(SimpleNamespace(get=lambda _s, option, *, fallback=None: _redis_section_get(option, fallback)))
+    if resolved_redis.source == "env":
+        redis_url = resolved_redis.value
+    elif resolved_redis.source == "config":
+        redis_url = resolved_redis.value
         try:
             parsed = urlparse(redis_url)
             if parsed.hostname and not os.getenv("REDIS_HOST"):

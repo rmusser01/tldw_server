@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.AuthNZ.sqlite_profile_version_schema import (
     rebuild_sqlite_users_with_profile_version,
     validate_sqlite_profile_version_readiness,
 )
+from tldw_Server_API.app.core.config_sections.redis import redis_url_env
 from tldw_Server_API.app.core.DB_Management.authnz_session_schema import (
     create_sqlite_sessions_table,
     ensure_sqlite_session_last_activity,
@@ -6845,9 +6846,8 @@ def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:
         db_path: Path to the database file
         target_version: Target migration version (None = latest)
     """
-    import os as _os
 
-    redis_url = _os.getenv("REDIS_URL")
+    redis_url = redis_url_env()
     lock_dir = str(Path(db_path).parent) if db_path else None
 
     with acquire_migration_lock(
