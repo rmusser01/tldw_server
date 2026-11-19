@@ -25,6 +25,26 @@ describe("header shortcut items hosted mode", () => {
     )
   })
 
+  it("includes Watchlists in default hosted header and sidebar shortcuts", async () => {
+    vi.doMock("@/services/tldw/deployment-mode", () => ({
+      isHostedTldwDeployment: () => true,
+    }))
+
+    const { normalizeHeaderShortcutSelection } = await import("../header-shortcut-items")
+    const { normalizeSidebarShortcutSelection } = await import("@/components/Common/ChatSidebar/shortcut-actions")
+    const {
+      DEFAULT_HEADER_SHORTCUT_SELECTION,
+      DEFAULT_SIDEBAR_SHORTCUT_SELECTION
+    } = await import("@/services/settings/ui-settings")
+
+    expect(normalizeHeaderShortcutSelection(DEFAULT_HEADER_SHORTCUT_SELECTION)).toContainEqual(
+      expect.objectContaining({ id: "watchlists", to: "/watchlists" })
+    )
+    expect(normalizeSidebarShortcutSelection(DEFAULT_SIDEBAR_SHORTCUT_SELECTION)).toContainEqual(
+      expect.objectContaining({ id: "watchlists", kind: "route", path: "/watchlists" })
+    )
+  })
+
   it("uses dedicated account and billing shortcut ids in hosted mode", async () => {
     vi.doMock("@/services/tldw/deployment-mode", () => ({
       isHostedTldwDeployment: () => true,

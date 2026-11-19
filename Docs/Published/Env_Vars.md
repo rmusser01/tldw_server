@@ -656,7 +656,7 @@ Quick start (local dev):
 - `SCHEDULER_DATABASE_URL`: Database URL for the core task scheduler. Defaults to `sqlite:///PROJECT_ROOT/Databases/scheduler.db` (test mode uses a per-process temp file). Set this to place the scheduler DB alongside other DBs.
 - `SCHEDULER_BASE_PATH`: Base path for the scheduler’s payload storage. Defaults to `PROJECT_ROOT/Databases/scheduler`.
 - `WORKFLOWS_SCHEDULER_DATABASE_URL`: Optional override for the Workflows Scheduler (cron) persistence; if using SQLite and not set, it defaults to the per-user path under `USER_DB_BASE_DIR/<user_id>/workflows/workflows_scheduler.db`.
-- `WORKFLOWS_SCHEDULER_RESCAN_SEC`: Interval (seconds) for the Workflows Scheduler to rescan all users for new/removed schedules. Default: `600`.
+- `WORKFLOWS_SCHEDULER_RESCAN_SEC`: Seconds between recurring schedule reconciliations. Defaults to `30`.
 - `POINTS_MODEL_PATH`: HF model path when running locally (e.g., `tencent/POINTS-Reader`).
 - `POINTS_PROMPT`: Optional prompt override.
 

@@ -80,10 +80,11 @@ def is_truthy(value: str | None) -> bool:
     return _env_truthy(value)
 
 
-def env_flag_enabled(name: str) -> bool:
-    """Return True when the named environment variable is truthy."""
+def env_flag_enabled(name: str, *, default: bool = False) -> bool:
+    """Parse an environment flag, using the default only when unset."""
     try:
-        return _env_truthy(os.getenv(name))
+        value = os.getenv(name)
+        return default if value is None else _env_truthy(value)
     except Exception:
         return False
 

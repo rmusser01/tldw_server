@@ -2,7 +2,6 @@
 # Description: Aggregate audio endpoints and WebSocket routes.
 import asyncio as asyncio
 import importlib
-import os
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -23,7 +22,6 @@ from tldw_Server_API.app.core.config_llm_providers import get_api_keys
 from tldw_Server_API.app.core.Metrics.metrics_manager import (
     get_metrics_registry,
 )
-import tldw_Server_API.app.core.config as _config
 import tldw_Server_API.app.core.Provider_Credentials.byok_runtime as _byok_runtime
 
 from . import (
@@ -198,45 +196,6 @@ async def _resolve_tts_byok(
         return await core_tts_service._resolve_tts_byok(**kwargs)
     except ByokResolutionError as exc:
         raise _tts_credential_http_exception(exc) from None
-
-
-def _get_failopen_cap_minutes() -> float:
-    """Return per-connection fail-open cap in minutes for streaming quotas.
-
-    Resolution order:
-      1) Env var AUDIO_FAILOPEN_CAP_MINUTES (>0)
-      2) Config [Audio-Quota] failopen_cap_minutes (>0)
-      3) Config [Audio] failopen_cap_minutes (>0)
-      4) Default 5.0
-    """
-    v = os.getenv("AUDIO_FAILOPEN_CAP_MINUTES")
-    if v is not None:
-        try:
-            f = float(v)
-            if f > 0:
-                return f
-        except (ValueError, TypeError):
-            logger.debug("AUDIO_FAILOPEN_CAP_MINUTES parse failed")
-    try:
-        cfg = _config.load_comprehensive_config()
-        if cfg is not None:
-            if cfg.has_section("Audio-Quota"):
-                try:
-                    f = float(cfg.get("Audio-Quota", "failopen_cap_minutes", fallback=""))
-                    if f > 0:
-                        return f
-                except (ValueError, TypeError):
-                    logger.debug("[Audio-Quota].failopen_cap_minutes parse failed")
-            if cfg.has_section("Audio"):
-                try:
-                    f = float(cfg.get("Audio", "failopen_cap_minutes", fallback=""))
-                    if f > 0:
-                        return f
-                except (ValueError, TypeError):
-                    logger.debug("[Audio].failopen_cap_minutes parse failed")
-    except Exception:
-        logger.debug("Config read for failopen cap failed")
-    return 5.0
 
 
 async def audio_chat_turn(*args, **kwargs):
