@@ -23,7 +23,7 @@ test.describe('Options first-run and connection panel', () => {
     // First-run path should show onboarding shell + connect form.
     await expect(page.getByText(/Home Onboarding/i)).toBeVisible()
     await expect(
-      page.getByText(/Welcome to tldw Browser Assistant.*connected/i)
+      page.getByText(/Welcome to tldw(?![\s_]*(browser|assistant)).*connected/i)
     ).toBeVisible()
     await expect(page.getByText(/^Server URL$/i)).toBeVisible()
     await expect(page.getByText(/^API Key$/i)).toBeVisible()
@@ -59,7 +59,7 @@ test.describe('Options first-run and connection panel', () => {
     await forceConnected(page, { serverUrl: serverBaseUrl }, 'options-first-run-connected')
 
     // Landing hub should expose Start Chatting and route to the chat composer.
-    const landingDialog = page.getByRole('dialog', { name: /Welcome to tldw/i })
+    const landingDialog = page.getByRole('dialog', { name: /Welcome to tldw(?![\s_]*(browser|assistant))/i })
     const useDialogButton = await landingDialog.isVisible().catch(() => false)
     const startChattingButton = useDialogButton
       ? landingDialog.getByRole('button', { name: /Start Chatting/i }).first()

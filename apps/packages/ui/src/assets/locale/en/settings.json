@@ -1854,7 +1854,7 @@
       },
       "globalEnable": {
         "label": "Enable or Disable Server Integration Globally",
-        "warning": "By disabling the server integration globally, tldw Browser_Assistant won't fetch models from the server. You can still add providers from the <anchor>OpenAI compatible API</anchor> section if needed."
+        "warning": "By disabling the server integration globally, tldw won't fetch models from the server. You can still add providers from the <anchor>OpenAI compatible API</anchor> section if needed."
       },
       "advanced": {
         "label": "Advanced Server URL Configuration",
@@ -1891,9 +1891,9 @@
   "about": {
     "title": "About",
     "heading": "About",
-    "chromeVersion": "tldw Browser_Assistant Version",
+    "chromeVersion": "tldw Version",
     "ollamaVersion": "Server Version",
-    "support": "You can support the tldw Browser_Assistant project by donating or sponsoring through the following platforms:",
+    "support": "You can support the tldw project by donating or sponsoring through the following platforms:",
     "koFi": "Support on Ko-fi",
     "githubSponsor": "Sponsor on GitHub",
     "githubRepo": "GitHub Repository"
@@ -2477,7 +2477,7 @@
   "siteAccessGranted": "Host permission granted for {{origin}}",
   "onboarding": {
     "loginSettingsError": "Login settings could not be opened. Try again.",
-    "title": "Welcome to tldw Browser Assistant— Let’s get you connected",
+    "title": "Welcome to tldw — Let’s get you connected",
     "description": "Connect this extension to your tldw server (a separate app running on your machine or server). We’ll walk through adding the URL, API key, and checking that everything is reachable.",
     "exploreWithoutServer": "You can explore the UI without a server; some features (chat, media ingest, Knowledge search) will stay disabled until you connect.",
     "serverDocsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md",

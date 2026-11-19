@@ -39,17 +39,28 @@ const englishEntries = (): Entry[] => {
   return out
 }
 
-const offending = (pattern: RegExp) =>
+// Links name the tldw_browser_assistant repository, which is not copy.
+const URL_PATTERN = /https?:\/\/\S+/g
+
+const offending = (pattern: RegExp, allowed: RegExp[] = []) =>
   englishEntries()
-    .filter((entry) => !MANIFEST_KEYS.has(entry.key) && pattern.test(entry.value))
+    .filter((entry) => {
+      if (MANIFEST_KEYS.has(entry.key)) return false
+      const text = allowed.reduce(
+        (value, phrase) => value.replace(phrase, ""),
+        entry.value.replace(URL_PATTERN, "")
+      )
+      return pattern.test(text)
+    })
     .map((entry) => `${entry.file} ${entry.key}: ${entry.value}`)
 
 describe("English copy follows the glossary (XP-13)", () => {
   it("calls the persona's artwork an avatar, never a Buddy", () => {
-    expect(offending(/\bbudd(y|ies)\b/i)).toEqual([])
+    // "Study Buddy" is a persona archetype's name, not the artwork.
+    expect(offending(/\bbudd(y|ies)\b/i, [/\bstudy buddy\b/gi])).toEqual([])
   })
 
-  it("names the product tldw, not tldw Assistant", () => {
-    expect(offending(/tldw Assistant/)).toEqual([])
+  it("names the product tldw, not tldw (Browser) Assistant", () => {
+    expect(offending(/tldw[\s_]*(browser[\s_]*)?assistant/i)).toEqual([])
   })
 })

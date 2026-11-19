@@ -25,7 +25,7 @@ async function readChatMode(page: import('@playwright/test').Page): Promise<stri
 }
 
 async function dismissWelcomeOverlay(page: import('@playwright/test').Page) {
-  const welcomeHeading = page.getByText(/Welcome to tldw/i).first()
+  const welcomeHeading = page.getByText(/Welcome to tldw(?![\s_]*(browser|assistant))/i).first()
   const isTimeoutError = (err: unknown): err is Error =>
     err instanceof Error && err.name === 'TimeoutError'
 

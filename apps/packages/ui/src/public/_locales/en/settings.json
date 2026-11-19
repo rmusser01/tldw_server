@@ -1242,7 +1242,7 @@
     "message": "Enable or Disable Server Integration Globally"
   },
   "ollamaSettings_settings_globalEnable_warning": {
-    "message": "By disabling the server integration globally, tldw Browser_Assistant won't fetch models from the server. You can still add providers from the <anchor>OpenAI compatible API</anchor> section if needed."
+    "message": "By disabling the server integration globally, tldw won't fetch models from the server. You can still add providers from the <anchor>OpenAI compatible API</anchor> section if needed."
   },
   "ollamaSettings_settings_advanced_label": {
     "message": "Advanced Server URL Configuration"
@@ -1293,13 +1293,13 @@
     "message": "About"
   },
   "about_chromeVersion": {
-    "message": "tldw Browser_Assistant Version"
+    "message": "tldw Version"
   },
   "about_ollamaVersion": {
     "message": "Server Version"
   },
   "about_support": {
-    "message": "You can support the tldw Browser_Assistant project by donating or sponsoring through the following platforms:"
+    "message": "You can support the tldw project by donating or sponsoring through the following platforms:"
   },
   "about_koFi": {
     "message": "Support on Ko-fi"
@@ -2394,7 +2394,7 @@
     "message": "Host permission granted for {{origin}}"
   },
   "onboarding_title": {
-    "message": "Welcome to tldw Browser Assistant— Let’s get you connected"
+    "message": "Welcome to tldw — Let’s get you connected"
   },
   "onboarding_description": {
     "message": "Connect this extension to your tldw server (a separate app running on your machine or server). We’ll walk through adding the URL, API key, and checking that everything is reachable."
