@@ -197,15 +197,17 @@ class TestWebhookSecurityValidation:
             "http://example.com:6379/webhook",  # Redis
         ]
 
-        for url in blocked_port_urls:
-            result = await validator.validate_webhook_url(
-                url=url,
-                user_id="test_user",
-                check_connectivity=False
-            )
+        # example.com resolves to a public address; no lookup leaves the machine.
+        with patch("socket.getaddrinfo", return_value=[(None, None, None, None, ("93.184.216.34", 0))]):
+            for url in blocked_port_urls:
+                result = await validator.validate_webhook_url(
+                    url=url,
+                    user_id="test_user",
+                    check_connectivity=False
+                )
 
-            assert not result.valid
-            assert any(e.code == "BLOCKED_PORT" for e in result.errors)
+                assert not result.valid
+                assert any(e.code == "BLOCKED_PORT" for e in result.errors)
 
 
 class TestScoreParsingSecurity:
