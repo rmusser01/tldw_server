@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Mapping
 
+from .precedence import resolve
 from .types import ConfigParserLike
 
 
@@ -20,12 +21,12 @@ def load_providers_config(
     env_map: Mapping[str, str] = env if env is not None else os.environ
 
     default_api = str(
-        env_map.get("DEFAULT_API")
+        resolve(("DEFAULT_API",), env=env_map, blank_env=True).value
         or config_parser.get("API", "default_api", fallback="openai")
     ).strip() or "openai"
 
     default_provider = str(
-        env_map.get("DEFAULT_PROVIDER")
+        resolve(("DEFAULT_PROVIDER",), env=env_map, blank_env=True).value
         or config_parser.get("API", "default_provider", fallback=default_api)
     ).strip() or default_api
 
