@@ -1,0 +1,42 @@
+---
+id: TASK-15576
+title: Decide whether the resolve-time provider-override runtimes follow TASK-15571's
+  server-key fallback
+status: To Do
+labels:
+- llm
+- byok
+- policy
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Found by TASK-15571's plan review (I5). TASK-15571 applies the owner's rule (a model the provider-override policy denies falls back to the server key) at analyze dispatch (_summarize_via_adapter), in users_own_key_credentials, and on the MCP authoritative path. The 19 other runtimes built with override_snapshot_resolver still refuse a denied model at resolve time (ProviderCredentialRuntime._capture_override_snapshot / _enforce_call_policy). That covers chat, character chat, chat documents, messages, audio streaming, TTS and realtime, RAG unified, evaluations unified, Prompt Studio and its jobs worker, chunking, moderation, the auto boundary assistant and speech chat. Chat also answers 403 per request (validate_provider_override, chat.py:4468). Some of their handles reach _summarize_via_adapter, for example RAG HyDE (hyde.py:132), so a denied configured model still has two outcomes by endpoint.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 The owner decides whether the server-key fallback extends to these runtimes and to chat's 403
+- [ ] #2 If it does: each runtime family falls back with the same fail-closed quota check, with tests; if not: the docs say which endpoints refuse
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->

@@ -2,7 +2,7 @@
 id: TASK-15571
 title: The provider-override model allowlist gives different outcomes depending on
   where the model came from
-status: To Do
+status: In Progress
 labels:
 - llm
 - byok
@@ -26,6 +26,7 @@ Found by the final review of PR #3500 (TASK-15496), pre-existing. The same admin
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Owner decision (AC #1), 2026-11-19: a model the provider-override policy denies falls back to the server key, whatever its source (configured model, DEFAULT_MODEL_<PROVIDER> fallback, model_override, the MCP authoritative path) and whatever the key (the user's own, a team's, an org's); the call is not refused for the denial itself. This reverses PR #3500 (TASK-15496), which failed a denied DEFAULT_MODEL_* fallback with 'configuration'. Coordinator rulings, 2026-11-19, on the plan review: only model_not_allowed falls back; a disabled provider refuses ('configuration' on analyze, the policy error on MCP); an override store that cannot be read fails closed ('configuration' on analyze, credential_store_unavailable on MCP); on analyze the fallback needs a quota check that answers, and refuses when none does (TASK-15481's fail-closed rule), with 'configuration' and the message 'The LLM usage limit could not be checked.'; a user_to_check failure is no answer; the media ingest worker marks a job admitted only when its start check answered; MCP's reservation already fails closed. With no handle, or a server_default handle, nothing changes and no check applies; AC #4 is read per checked call. AC #2's 'as chat does' is read under this rule: chat refuses a denied model with a 403; the analyze path falls back instead. Plan: Docs/superpowers/plans/2026-11-19-denied-model-server-key-fallback.md.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
