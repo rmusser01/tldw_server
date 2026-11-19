@@ -569,6 +569,11 @@
       "description": "Fine-tune temperature, context length, and other model settings."
     }
   },
+  "undo": {
+    "action": "Undo",
+    "dismiss": "Dismiss",
+    "restoredStatus": "Restored."
+  },
   "chatSidebar": {
     "title": "Chats",
     "historyLandmark": "Chat history",

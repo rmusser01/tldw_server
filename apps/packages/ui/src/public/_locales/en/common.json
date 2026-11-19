@@ -1025,6 +1025,15 @@
   "chatSidebar_title": {
     "message": "Chats"
   },
+  "undo_action": {
+    "message": "Undo"
+  },
+  "undo_dismiss": {
+    "message": "Dismiss"
+  },
+  "undo_restoredStatus": {
+    "message": "Restored."
+  },
   "chatSidebar_historyLandmark": {
     "message": "Chat history"
   },
