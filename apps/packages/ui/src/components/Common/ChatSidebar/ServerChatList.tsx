@@ -565,15 +565,19 @@ export function ServerChatList({
     setBulkTagPickerOpen(false)
     setBulkDeleteConfirmOpen(false)
     setIsBulkDeleting(false)
-    dismissTrashUndo()
   }, [
-    dismissTrashUndo,
     visibleReceipt,
     readOnly,
     restoreRevision,
     sourceSelectionRevision,
     chatDraftRevision
   ])
+  // The Undo offer survives refetches and chat switches: it belongs to the
+  // account that trashed the chats, and ends only when that account, the
+  // server or read-only mode changes.
+  React.useLayoutEffect(() => {
+    dismissTrashUndo()
+  }, [dismissTrashUndo, historyOwnerKey, historyServerScopeKey, readOnly])
   const visibleChatIdSet = React.useMemo(
     () => new Set(visibleChatIds),
     [visibleChatIds]

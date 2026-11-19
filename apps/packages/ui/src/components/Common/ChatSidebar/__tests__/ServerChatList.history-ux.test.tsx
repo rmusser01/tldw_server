@@ -379,6 +379,30 @@ describe("Server chat history list (CS-08, CS-10)", () => {
     )
   })
 
+  // XP-17 review: every Move to Trash refetches the list; the offer must
+  // survive the refetch, and Undo must keep focus.
+  it("keeps the Undo offer and its focus while the list refetches without the trashed chat", async () => {
+    showHistory([
+      createChat({ id: "chat-1", title: "Recovered chat" }),
+      createChat({ id: "chat-2", title: "Other chat" })
+    ])
+    const view = render(<ServerChatList searchQuery="" />)
+
+    fireEvent.click(screen.getAllByRole("button", { name: "delete" })[0])
+    const offer = await screen.findByTestId("server-chat-undo")
+    const undo = await within(offer).findByRole("button", { name: "Undo" })
+    await waitFor(() => expect(undo).toHaveFocus())
+
+    historyState.value = { ...historyState.value, isFetching: true }
+    view.rerender(<ServerChatList searchQuery="" />)
+    expect(within(screen.getByTestId("server-chat-undo")).getByRole("button", { name: "Undo" })).toHaveFocus()
+
+    showHistory([createChat({ id: "chat-2", title: "Other chat" })])
+    view.rerender(<ServerChatList searchQuery="" />)
+    expect(screen.queryByText("Recovered chat")).not.toBeInTheDocument()
+    expect(within(screen.getByTestId("server-chat-undo")).getByRole("button", { name: "Undo" })).toHaveFocus()
+  })
+
   it("opens Trash from the Undo offer's View Trash (CS-10)", async () => {
     showHistory([createChat({ id: "chat-1", title: "Recovered chat", version: 4 })])
     render(<ServerChatList searchQuery="" />)
