@@ -28,6 +28,7 @@ Independent review identified owner filtering, endpoint scope separation, and st
 Verified 32 focused backend tests and 282 AnalysisModal/request-scope tests. The full 1,405,967-byte synthetic source reached the mocked provider for both SSE and JSON. A smaller simulated context returned a typed 413 before provider dispatch. OpenAPI fingerprint and path drift checks passed, patched hosted suites passed, and Bandit reported zero findings.
 Merge review narrowed the lookup to the active text shown by Media and put the source digest check and version insert under the same write transaction. A restricted PostgreSQL 18 test confirmed a second connection cannot acquire a competing row lock until the version commits. The empty media path returned 422. First-frame stream cancellation now releases both the provider iterator and credentials. The updated focused suites passed in both source trees.
 Saved-analysis prompts remain literal when optional chat commands are enabled. The regression covers a slash-prefixed prompt and preserves regular chat command dispatch.
+Public CI follow-up corrected the stale AnalysisModal lint suppression and registered the existing guarded saved-media POST in the expected-user route inventory. The exact ESLint rule counts and focused AuthNZ test passed. The previously failing Service Prompts case passed locally.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

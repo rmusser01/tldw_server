@@ -55,6 +55,7 @@ def test_expected_user_guard_is_bound_only_to_scope_bound_routes() -> None:
         ("character-messages", "DELETE", "/messages/{message_id}"),
         ("character-messages", "GET", "/chats/{chat_id}/messages/search"),
         ("chat", "POST", "/completions"),
+        ("chat", "POST", "/completions/media/{media_analysis_id:int}"),
         ("chat", "POST", "/conversations/{conversation_id}/history/selection"),
         ("chat", "POST", "/conversations/{conversation_id}/history/legacy-projection"),
         ("rag", "POST", "/api/v1/rag/search"),
