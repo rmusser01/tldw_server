@@ -344,6 +344,26 @@ def _offline_provider_model_inventory(request, monkeypatch):
             monkeypatch.setattr(module, "_validate_provider_model_selection", lambda _provider, _request, **_kw: None)
 
 
+@pytest.fixture(autouse=True)
+def _no_live_network(request):
+    """Fail a test that reaches a non-loopback host (TASK-15486).
+
+    Opt out with the ``live_network`` marker (``external_api``, ``local_llm_service``,
+    ``provider_inventory``, ``requires_model`` and ``stt_golden`` count too), by a line in
+    tests/live_network_baseline.txt, or by living under tests/e2e, server_e2e_tests or
+    frontend_e2e; see tests/README.md. Function-scoped: session- and module-scoped
+    fixture setup runs outside it.
+    """
+    from tldw_Server_API.tests.helpers.offline_network import block_live_network, live_network_allowed
+
+    if live_network_allowed(request.node):
+        yield
+        return
+    with block_live_network() as attempts:
+        yield
+    assert attempts == [], "live network attempted: " + repr(list(attempts)) + "\n" + "\n".join(attempts.details)
+
+
 @pytest.fixture()
 def auth_headers():
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings

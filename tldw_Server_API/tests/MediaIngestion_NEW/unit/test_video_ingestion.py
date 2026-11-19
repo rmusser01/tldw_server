@@ -15,6 +15,14 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestio
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import Video_DL_Ingestion_Lib as video_lib
 
 
+@pytest.fixture
+def remote_url_allowed(monkeypatch):
+    """The egress policy admits the example.com URL without resolving it; the test suite runs offline."""
+    monkeypatch.setattr(
+        video_lib, "evaluate_url_policy", lambda *_args, **_kwargs: SimpleNamespace(allowed=True, reason=None)
+    )
+
+
 @pytest.mark.unit
 def test_parse_and_expand_urls_preserves_non_vimeo_entries():
     local_path = "/Users/example/video.mp4"
@@ -444,7 +452,7 @@ def test_resolve_eval_api_key_supports_numbered_custom_openai(monkeypatch):
 
 @pytest.mark.unit
 @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.yt_dlp.YoutubeDL")
-def test_download_video_returns_downloaded_file(mock_ydl_cls, tmp_path):
+def test_download_video_returns_downloaded_file(mock_ydl_cls, tmp_path, remote_url_allowed):
     download_dir = tmp_path / "downloads"
     download_dir.mkdir()
     downloaded_file = download_dir / "sample.m4a"
@@ -472,7 +480,7 @@ def test_download_video_returns_downloaded_file(mock_ydl_cls, tmp_path):
 
 @pytest.mark.unit
 @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.yt_dlp.YoutubeDL")
-def test_download_video_respects_declared_size(mock_ydl_cls, tmp_path):
+def test_download_video_respects_declared_size(mock_ydl_cls, tmp_path, remote_url_allowed):
     info_dict = {"filesize": video_lib.DEFAULT_MAX_VIDEO_FILE_SIZE_BYTES + 1}
 
     with pytest.raises(ValueError):
@@ -496,6 +504,7 @@ def test_process_single_video_remote_download_success(
     mock_download,
     mock_transcribe,
     tmp_path,
+    remote_url_allowed,
 ):
     mock_extract_metadata.return_value = {"title": "Online Clip"}
 
@@ -550,6 +559,7 @@ def test_process_single_video_remote_download_validation_rejected(
     mock_download,
     mock_transcribe,
     tmp_path,
+    remote_url_allowed,
 ):
     mock_extract_metadata.return_value = {"title": "Online Clip"}
     downloaded_file = tmp_path / "downloaded_payload.exe"
@@ -600,6 +610,7 @@ def test_process_single_video_remote_download_rejects_when_quota_exceeded(
     mock_transcribe,
     monkeypatch,
     tmp_path,
+    remote_url_allowed,
 ):
     mock_extract_metadata.return_value = {"title": "Online Clip"}
 
