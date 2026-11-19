@@ -1,6 +1,6 @@
 """One test per shared config key, pinning where it resolves today (TASK-13950.21, Task 7).
 
-Row 1: ``AUTH_MODE`` (alias ``APP_MODE``). Every surface that reads the key is exercised through
+Row 1: ``AUTH_MODE`` (alias ``APP_MODE``). Row 2: ``SINGLE_USER_FIXED_ID``. Every surface that reads the key is exercised through
 its nearest callable, over the same input cases. The commit that moved the key changed only the
 expected values the owner approved (D1 a-c).
 """
@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.External_Sources import connectors_service
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.Sync.v2 import security as sync_security
 from tldw_Server_API.app.core.Web_Scraping import browser_transport
+from tldw_Server_API.app.core.Watchlists import websub
 from tldw_Server_API.app.services import (
     claims_review_metrics_scheduler as claims_scheduler,
 )
@@ -212,3 +213,79 @@ def test_setup_wizard_auth_mode_reads_the_config_file_fresh(monkeypatch, tmp_pat
     for mode in ("multi_user", "single_user"):
         setup_file.write_text(f"[AuthNZ]\nauth_mode = {mode}\n", encoding="utf-8")
         assert setup_endpoint._resolve_auth_mode({}) == mode
+
+
+# ---- Row 2: SINGLE_USER_FIXED_ID ----
+
+# id -> (env SINGLE_USER_FIXED_ID, [AuthNZ] single_user_fixed_id)
+ID_CASES = {
+    "env_set": ("7", "9"),
+    "env_blank": ("", "9"),
+    "env_invalid": ("abc", "9"),
+    "config_only": (UNSET, "9"),
+    "neither": (UNSET, UNSET),
+}
+
+ERR = "raises"
+
+
+def _id_parser(value: str | None) -> configparser.ConfigParser:
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.add_section("AuthNZ")
+    if value is not None:
+        parser.set("AuthNZ", "single_user_fixed_id", value)
+    return parser
+
+
+@pytest.fixture
+def apply_id_case(monkeypatch, tmp_path):
+    def apply(case: str) -> configparser.ConfigParser:
+        config.clear_config_cache()
+        env_id, cfg_id = ID_CASES[case]
+        if env_id is None:
+            monkeypatch.delenv("SINGLE_USER_FIXED_ID", raising=False)
+        else:
+            monkeypatch.setenv("SINGLE_USER_FIXED_ID", env_id)
+        monkeypatch.delenv("AUTH_MODE", raising=False)
+        monkeypatch.setattr(config, "_load_env_files_early", lambda: None)
+        parser = _id_parser(cfg_id)
+        monkeypatch.setattr(config, "load_comprehensive_config", lambda: parser)
+        monkeypatch.setattr(authnz_settings, "load_comprehensive_config", lambda: parser)
+        # websub's directory scan calls DatabasePaths.get_base_directory, which does not exist, so it
+        # always takes the single-user fallback (a latent dead scan, left alone here).
+        authnz_settings.reset_settings()
+        return parser
+
+    yield apply
+    monkeypatch.undo()
+    config.clear_config_cache()
+    authnz_settings.reset_settings()
+
+
+def _outcome(fn):
+    try:
+        return fn()
+    except (ValueError, pydantic.ValidationError):
+        return ERR
+
+
+# config_sections reads [AuthNZ] single_user_fixed_id today; AuthNZ, LazySettings and websub never do.
+ID_EXPECTED = {
+    #                 config_sections AuthNZ  LazySettings websub
+    "env_set": (7, 7, 7, 7),
+    "env_blank": (9, ERR, ERR, 1),
+    "env_invalid": (1, ERR, ERR, ERR),
+    "config_only": (9, 1, 1, 1),
+    "neither": (1, 1, 1, 1),
+}
+
+
+@pytest.mark.parametrize("case", list(ID_CASES))
+def test_single_user_fixed_id_resolution_today(apply_id_case, case):
+    parser = apply_id_case(case)
+    cfg_sections, authnz, lazy, watch = ID_EXPECTED[case]
+
+    assert load_auth_config(parser).single_user_fixed_id == cfg_sections
+    assert _outcome(lambda: authnz_settings.get_settings().SINGLE_USER_FIXED_ID) == authnz
+    assert _outcome(lambda: config.load_settings()["SINGLE_USER_FIXED_ID"]) == lazy
+    assert _outcome(lambda: websub._iter_user_ids_with_websub()) == ([watch] if watch != ERR else ERR)

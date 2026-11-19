@@ -33,3 +33,17 @@ def test_invalid_auth_mode_fails_closed_in_every_source(monkeypatch, source, val
             authnz_settings.get_settings()
     finally:
         authnz_settings.reset_settings()
+
+
+def test_config_file_cannot_set_the_single_user_identity(monkeypatch):
+    """Row 2: AuthNZ's single-user id comes from the environment alone; config.txt never moves it."""
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.add_section("AuthNZ")
+    parser.set("AuthNZ", "single_user_fixed_id", "9")
+    monkeypatch.delenv("SINGLE_USER_FIXED_ID", raising=False)
+    monkeypatch.setattr(authnz_settings, "load_comprehensive_config", lambda: parser)
+    authnz_settings.reset_settings()
+    try:
+        assert authnz_settings.get_settings().SINGLE_USER_FIXED_ID == 1
+    finally:
+        authnz_settings.reset_settings()
