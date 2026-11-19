@@ -430,10 +430,6 @@ class TestSizeConstants:
         assert max_request_size_chars(None, env={}) == 1_000_000  # 1MB
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
-
-
 def test_request_size_limit_is_read_at_call_time(monkeypatch):
     monkeypatch.setenv("CHAT_REQUEST_MAX_SIZE", "50")
     with pytest.raises(ValueError, match="max 50 chars"):
@@ -455,3 +451,7 @@ def test_request_size_limit_falls_back_when_config_cannot_load(monkeypatch):
     monkeypatch.setenv("CHAT_REQUEST_MAX_SIZE", "50")
     with pytest.raises(ValueError, match="max 50 chars"):
         validate_request_size("x" * 60)  # env still applies when config cannot load
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
