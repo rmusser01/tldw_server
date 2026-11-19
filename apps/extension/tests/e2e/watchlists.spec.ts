@@ -146,7 +146,8 @@ const installWatchlistsRuntimeBridge = async (context: BrowserContext) => {
               if (data == null) {
                 return { ok: false, status: 404, error: 'Not found' }
               }
-              return { ok: true, status: 200, data }
+              // Runtime messages return detached snapshots of the backend fixtures.
+              return { ok: true, status: 200, data: structuredClone(data) }
             } catch (error) {
               return { ok: false, status: 500, error: String(error || '') }
             }
