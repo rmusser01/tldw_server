@@ -217,6 +217,21 @@ class TestRedirectFlows:
             await client.aclose()
         assert all(item[1] is scope for item in validations)
 
+    @pytest.fixture
+    def origins_admitted_offline(self, monkeypatch):
+        """The egress policy admits both origins without resolving example.com (the suite runs offline).
+
+        No resolved addresses, so the client does not pin the hop to an IP and the handler sees the host name.
+        """
+        from types import SimpleNamespace
+
+        from tldw_Server_API.app.core.Security import egress as egress_mod
+
+        def policy(url, **_kwargs):
+            return SimpleNamespace(allowed=True, reason=None, reason_code=None, resolved_ips=())
+
+        monkeypatch.setattr(egress_mod, "evaluate_url_policy", policy)
+
     @staticmethod
     def _handler(
         seen: dict[str, dict[str, str]],
@@ -239,7 +254,7 @@ class TestRedirectFlows:
 
         return handler
 
-    async def test_afetch_strips_credentials_on_cross_origin_redirect(self) -> None:
+    async def test_afetch_strips_credentials_on_cross_origin_redirect(self, origins_admitted_offline) -> None:
         """The async loop must not resend credentials to a different origin."""
         from tldw_Server_API.app.core.http_client import afetch, create_async_client
 
@@ -388,7 +403,7 @@ class TestRedirectFlows:
         assert exc.value.reason_code == "origin_mismatch"
         assert calls == [f"{ORIGIN_A}:11434/start"]
 
-    def test_sync_fetch_strips_credentials_on_cross_origin_redirect(self) -> None:
+    def test_sync_fetch_strips_credentials_on_cross_origin_redirect(self, origins_admitted_offline) -> None:
         """The sync loop applies the same stripping as the async loop."""
         from tldw_Server_API.app.core.http_client import create_client, fetch
 
@@ -410,7 +425,7 @@ class TestRedirectFlows:
             assert name not in target_headers, f"{name} leaked to redirect target"
         assert target_headers.get("x-custom") == "keep-me"
 
-    async def test_afetch_clears_ambient_cookie_jar_on_cross_origin_redirect(self) -> None:
+    async def test_afetch_clears_ambient_cookie_jar_on_cross_origin_redirect(self, origins_admitted_offline) -> None:
         """Cookies accumulated in the client's jar are wiped at the origin boundary."""
         from tldw_Server_API.app.core.http_client import afetch, create_async_client
 
@@ -431,7 +446,7 @@ class TestRedirectFlows:
             await client.aclose()
         assert "cookie" not in seen["example.com"]
 
-    async def test_sse_stream_strips_credentials_on_cross_origin_redirect(self) -> None:
+    async def test_sse_stream_strips_credentials_on_cross_origin_redirect(self, origins_admitted_offline) -> None:
         """The SSE streaming redirect loop applies the same stripping."""
         from tldw_Server_API.app.core.http_client import _astream_sse_httpx, create_async_client
 

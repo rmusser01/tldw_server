@@ -70,6 +70,37 @@ Design Rules
 - Prefer composition: re‑use helpers from `tldw_Server_API.tests.e2e.fixtures` to
   avoid duplication and drift.
 
+Offline By Default
+------------------
+
+Every test runs inside `tldw_Server_API/tests/helpers/offline_network.block_live_network()`
+through an autouse fixture in `tldw_Server_API/tests/conftest.py` (TASK-15486). A DNS
+lookup or connect to a non-loopback host raises, and the test errors at teardown with
+`live network attempted: [(kind, host), ...]`, so a failure the code under test swallowed
+still fails the test. Stub the download, provider or DNS call instead.
+
+- Loopback is decided by address: `127.0.0.0/8`, `::1`, IPv4-mapped loopback and `0.0.0.0`,
+  plus the names `localhost`, `testserver`, the machine's own hostname and the host of
+  `TEST_DATABASE_URL` / `TEST_DB_HOST`. The names are allowed at DNS only; a connect to the address
+  they resolve to is judged by address, so a hostname that resolves off loopback is blocked (a
+  false positive, never a leak), and a `TEST_DATABASE_URL` naming a remote numeric address is allowed
+  by design (the developer's own database).
+- A numeric host's lookup passes (nothing leaves the machine); its connect is still blocked.
+- The teardown message lists each attempt with its thread name and a stack tail, so an attempt made by
+  a thread another test left running is attributable.
+- Opt out with `@pytest.mark.live_network`; `external_api`, `local_llm_service`,
+  `provider_inventory`, `requires_model` and `stt_golden` opt out too, as does every test under
+  `tests/e2e/`, `tests/server_e2e_tests/` and `tests/frontend_e2e/` (they drive a live server).
+- A test that still reaches the network and is not yet stubbed is listed by node id in
+  `tldw_Server_API/tests/live_network_baseline.txt`; `tests/lint/test_live_network_baseline_ratchet.py`
+  keeps that list from growing. Stub the seam (`offline_network.stub_host_resolution` for the egress
+  policy's resolver, `allow_egress_hosts` for CI's `WORKFLOWS_EGRESS_ALLOWLIST`, the shared downloader's
+  `_create_async_client` with an `httpx.MockTransport`) and delete the line.
+- Not covered: session- and module-scoped fixture setup (the fixture is function-scoped), the
+  `app/core/MCP_unified/tests` tree (its own conftest), and anything that bypasses Python's
+  `socket.socket`: `_socket.socket.connect` on the C class, UDP `sendto`, `gethostbyname_ex` /
+  `gethostbyaddr`, and resolvers outside Python (libpq, c-ares, grpc).
+
 CI Guard
 --------
 

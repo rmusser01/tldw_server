@@ -2,7 +2,7 @@
 id: TASK-15486
 title: Every test that reaches a real provider or host runs offline, and a session-wide
   blocker fails any new attempt
-status: To Do
+status: Done
 labels:
 - tests
 - ci
@@ -16,29 +16,35 @@ Owner request (2026-11-07), filed by TASK-15485. A test that reaches a real prov
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Each listed test stubs its download, provider or DNS call and passes inside block_live_network() with no attempt
-- [ ] #2 A session-wide blocker in the test config (an autouse fixture in tldw_Server_API/tests/conftest.py around tests/helpers/offline_network.block_live_network(), asserting no attempt at teardown as LLM_Adapters/conftest.py's no_live_network does) makes a new outbound DNS lookup or connect fail loudly in CI, with a test that shows the failure; getaddrinfo on a numeric non-loopback host passes through (no lookup leaves the machine) while its connect stays blocked; loopback is decided with ipaddress.ip_address(host).is_loopback (as tests/helpers/netblock_13956 does), not the four exact strings of offline_network._LOOPBACK (127.0.0.2, ::ffff:127.0.0.1, 0.0.0.0 and the machine's own hostname count as live otherwise), and the host of a developer's configured TEST_DATABASE_URL / TEST_DB_HOST is allowed; a function-scoped autouse fixture does not cover session- or module-scoped fixture setup, so the AC names that ceiling and the notes say which such fixtures were checked
-- [ ] #3 Tests that legitimately need the network opt out: by a new registered live_network marker, by the existing external_api, local_llm_service and provider_inventory markers, and by directory for e2e against a live server (e2e/, server_e2e_tests/, frontend_e2e/); loopback is never blocked; the opt-out is documented in Docs/Development/Testing.md and tldw_Server_API/tests/README.md
-- [ ] #4 A full-suite CI run passes with the blocker on, and the notes record how many tests it failed before the stubs
+- [x] #1 Each listed test stubs its download, provider or DNS call and passes inside block_live_network() with no attempt
+- [x] #2 A session-wide blocker in the test config (an autouse fixture in tldw_Server_API/tests/conftest.py around tests/helpers/offline_network.block_live_network(), asserting no attempt at teardown as LLM_Adapters/conftest.py's no_live_network does) makes a new outbound DNS lookup or connect fail loudly in CI, with a test that shows the failure; getaddrinfo on a numeric non-loopback host passes through (no lookup leaves the machine) while its connect stays blocked; loopback is decided with ipaddress.ip_address(host).is_loopback (as tests/helpers/netblock_13956 does), not the four exact strings of offline_network._LOOPBACK (127.0.0.2, ::ffff:127.0.0.1, 0.0.0.0 and the machine's own hostname count as live otherwise), and the host of a developer's configured TEST_DATABASE_URL / TEST_DB_HOST is allowed; a function-scoped autouse fixture does not cover session- or module-scoped fixture setup, so the AC names that ceiling and the notes say which such fixtures were checked
+- [x] #3 Tests that legitimately need the network opt out: by a new registered live_network marker, by the existing external_api, local_llm_service and provider_inventory markers, and by directory for e2e against a live server (e2e/, server_e2e_tests/, frontend_e2e/); loopback is never blocked; the opt-out is documented in Docs/Development/Testing.md and tldw_Server_API/tests/README.md
+- [x] #4 A full-suite CI run passes with the blocker on, and the notes record how many tests it failed before the stubs
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Correction (TASK-15485 final review, 2026-11-09): AC #2's 'as tests/helpers/netblock_13956 does' names a plugin that lived outside the repo (a TASK-13956 session file). The in-repo precedent for ipaddress.ip_address(host).is_loopback is tldw_Server_API/tests/WebScraping/integration/test_phase3_preflight_browser_smoke.py:34; tests/helpers/offline_network.py is the blocker to extend.
+2026-11-16 owner decisions (baseline split): the blocker lands strict with tldw_Server_API/tests/live_network_baseline.txt filled from the first full CI run; the lint ratchet CEILING equals its count; the PR merges once CI is green with the baseline in. Decisions 1-4 stand: requires_model and stt_golden opt out; stub over mark; skip helpers deleted only because the five files are green under CI's environment (measured: 174 passed, 11 skipped, 1 xfailed, 0 Host not in allowlist); app/core/MCP_unified/tests (157 files) stays outside tests/conftest.py and uncovered.
+AC #4 as the baseline split reads it: A full-suite CI run passes with the blocker on. Every test that still reached the network is listed by node id in tldw_Server_API/tests/live_network_baseline.txt, the notes record that count, a lint test keeps the file from growing, and TASK-15559 stubs them by seam until the file is empty. The AC text itself is unchanged.
+First full CI run 44046470339 (draft PR #3494, 38 of 240 jobs failed): 387 tests surfaced as live network attempted teardown errors, in 37 Full Suite shards, all recorded in the baseline. Hosts: openaipublic.blob.core.windows.net (tiktoken encoding download, the largest group), huggingface.co (tokenizer downloads), api.openai.com and api.anthropic.com (provider DNS), example.com, github.com, hooks.slack.com, 10.255.255.1, invalid hosts. Largest files: Slides/test_standalone_html_provider.py 85, Embeddings/test_embeddings_orchestrator_endpoint_parity.py 83, Evaluations stage1 regressions 13, Workflows adapters 12+6+3. None of the 28 listed tests, nor the 13 the local slice surfaced, surfaced in CI; test_process_audio_url_success_no_analysis_no_chunking passes. Stubbed in this PR beyond the 27+13: none, because no group is closed by one existing helper without per-test work; the count left in the baseline is 387 and TASK-15559 stubs them by seam. Not this PR's: shard gap-verified-12 (22 ubuntu-latest workflow-contract tests in tests/CI) and the Full Suite (Ubuntu / Python 3.12) aggregate. Only the Linux 3.12 shards run on a PR; 3.13, macOS, Windows and release shards run after the merge.
+Session/module fixtures checked for the ceiling: autouse ones touch env, app state or limits only; PostgreSQL fixtures use loopback or TEST_DB_HOST (allowed); mock_openai_server runs on localhost; compiled_runner (Go build) can fetch modules on a cold cache; hf_or_deterministic_embeddings downloads only with RUN_MODEL_TESTS=1. Unwrapped: _socket.socket.connect on the C class, UDP sendto, gethostbyname_ex/gethostbyaddr, libpq, c-ares, grpc. Follow-ups: TASK-15559 (stub the baselined tests by seam, shrink the baseline to empty) and TASK-15560 (decision 6: /media/add PDF path drops enable_contextual_chunking and contextual_llm_model from chunk_options; forward them or document that PDFs ignore them).
+Final review (opus, clean session, 2026-11-17): With fixes, 0 Critical / 1 Important / 7 Minor. Important fixed: a closed block's wrappers were reinstalled by monkeypatch's undo (monkeypatch is set up before the blocker for every test), leaving DNS/connect blocked for the rest of the process; the wrappers now carry an active flag cleared in a finally and pass straight through once closed. test_a_closed_block_stays_closed_after_a_monkeypatch_undo RED 1 failed/26 passed/1 skipped -> GREEN 27 passed/1 skipped (78396458c0). Minors deferred (listed in PR #3494's body). Merged origin/dev after #3492 (c3fd81cc50), clean. Final baseline: 387 node ids, CEILING 387 (CI run 44046470339 surfaced them; runs 44102893954 and 44111853122 were superseded by later pushes). The full-suite run on this PR's final head is the AC #4 evidence: see PR #3494's checks. Bandit (uvx) on tests/helpers/offline_network.py: no issues. Follow-ups: TASK-15559 (shrink the baseline), TASK-15560 (/media/add PDF contextual options).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Every test now runs offline unless it opts out. A function-scoped autouse fixture in tests/conftest.py (tests/helpers/offline_network.py) fails any test that looks up or connects to a non-local host, at teardown, naming the host, thread and stack. Opt-outs: the live_network marker (new) and external_api, local_llm_service, provider_inventory, requires_model, stt_golden; the e2e trees; and tests/live_network_baseline.txt, whose 387 node ids (the tests CI surfaced with the blocker on) a lint ratchet caps at CEILING 387 and TASK-15559 shrinks to empty. The 27 listed tests and 13 locally surfaced ones stub their seam; the skip helpers that hid unreachable hosts are deleted, and the five URL-test files pass under CI's egress allowlist. Ceilings documented: function scope, unwrapped C-level and native calls, MCP_unified/tests uncovered, Linux 3.12 shards only on PRs.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
