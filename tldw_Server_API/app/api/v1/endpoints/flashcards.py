@@ -152,7 +152,7 @@ from tldw_Server_API.app.core.StudyPacks.media_sections import (
     section_passages,
 )
 from tldw_Server_API.app.core.StudyPacks.source_resolver import StudySourceResolver, _max_evidence_chars_per_source
-from tldw_Server_API.app.core.StudyPacks.types import CHAPTER_ID_PATTERN, SECTION_FAILURE_MESSAGES
+from tldw_Server_API.app.core.StudyPacks.types import CHAPTER_ID_PATTERN, STUDY_PACK_FAILURE_MESSAGES
 from tldw_Server_API.app.core.StudySuggestions.jobs import (
     STUDY_SUGGESTIONS_DOMAIN,
     STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
@@ -433,7 +433,7 @@ def _public_study_pack_job_error(job: dict[str, Any]) -> str | None:
     if raw_status not in {"failed", "quarantined"}:
         return None
 
-    message = SECTION_FAILURE_MESSAGES.get(str(job.get("error_code") or ""))
+    message = STUDY_PACK_FAILURE_MESSAGES.get(str(job.get("error_code") or ""))
     if message:
         return message
 
