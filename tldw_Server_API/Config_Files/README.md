@@ -698,7 +698,7 @@ Notes
   - `enable` (csv): Route keys to force-enable (useful when `stable_only=true`).
   - `experimental_routes` (csv): Extend the curated experimental set with more route keys.
 
-Environment overrides
+Environment overrides (honoured only in a test runtime, pytest or `TEST_MODE`; in production `[API-Routes]` is authoritative)
 - `ROUTES_STABLE_ONLY=true|false`
 - `ROUTES_DISABLE="sandbox,connectors"`
 - `ROUTES_ENABLE="workflows"`

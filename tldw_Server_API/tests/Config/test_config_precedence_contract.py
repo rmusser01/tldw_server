@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+import configparser
 from configparser import ConfigParser, InterpolationSyntaxError
+from pathlib import Path
 
 import pytest
 
 from tldw_Server_API.app.core import config
 from tldw_Server_API.app.core.config_sections.precedence import Resolved, resolve
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+# Precedence exceptions: a setting where config.txt, not the environment, is authoritative in production.
+DOCUMENTED_PRECEDENCE_EXCEPTIONS: dict[str, str] = {
+    "core.config._route_toggle_policy": (
+        "ROUTES_* env overrides apply only in a test runtime (pytest or TEST_MODE); "
+        "config.txt [API-Routes] is authoritative in production (ef1088b3c1, TASK-13950.21 D2)"
+    ),
+}
 
 
 @pytest.fixture(autouse=True)
@@ -440,3 +453,46 @@ def test_resolve_reads_os_environ_at_call_time(monkeypatch) -> None:
     assert resolve(("TLDW_RESOLVE_PROBE",)).source == "env"
     monkeypatch.delenv("TLDW_RESOLVE_PROBE")
     assert resolve(("TLDW_RESOLVE_PROBE",)).source == "default"
+
+
+def _routes_loader(stable_only: str):
+    parser = configparser.ConfigParser()
+    parser.add_section("API-Routes")
+    parser.set("API-Routes", "stable_only", stable_only)
+
+    def _load() -> configparser.ConfigParser:
+        return parser
+
+    _load.cache_clear = lambda: None  # the autouse fixture's clear_config_cache() calls it before monkeypatch undoes
+    return _load
+
+
+@pytest.fixture
+def _fresh_route_policy():
+    config._route_toggle_policy.cache_clear()
+    yield
+    config._route_toggle_policy.cache_clear()
+
+
+def test_route_toggle_env_overrides_apply_in_a_test_runtime(monkeypatch, _fresh_route_policy) -> None:
+    monkeypatch.setattr(config, "load_comprehensive_config", _routes_loader("true"))
+    monkeypatch.setenv("ROUTES_DISABLE", "persona")
+    monkeypatch.setenv("ROUTES_STABLE_ONLY", "false")
+    policy = config._route_toggle_policy()
+    assert "persona" in policy["disable"] and policy["stable_only"] is False
+
+
+def test_route_toggle_env_overrides_are_ignored_outside_a_test_runtime(monkeypatch, _fresh_route_policy) -> None:
+    monkeypatch.setattr(config, "load_comprehensive_config", _routes_loader("true"))
+    monkeypatch.setattr(config, "is_explicit_pytest_runtime", lambda: False)
+    monkeypatch.setattr(config, "is_test_mode", lambda: False)
+    monkeypatch.setenv("ROUTES_DISABLE", "persona")
+    monkeypatch.setenv("ROUTES_STABLE_ONLY", "false")
+    policy = config._route_toggle_policy()
+    assert "persona" not in policy["disable"] and policy["stable_only"] is True
+
+
+def test_documented_precedence_exceptions_are_in_the_env_vars_doc() -> None:
+    doc = (REPO_ROOT / "Docs" / "Operations" / "Env_Vars.md").read_text(encoding="utf-8")
+    assert DOCUMENTED_PRECEDENCE_EXCEPTIONS
+    assert all(name in doc for name in ("ROUTES_STABLE_ONLY", "ROUTES_DISABLE", "ROUTES_ENABLE", "ROUTES_EXPERIMENTAL"))

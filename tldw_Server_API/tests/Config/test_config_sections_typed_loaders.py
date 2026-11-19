@@ -728,3 +728,18 @@ def test_slides_standalone_section_loader_rejects_malformed_security_values(
 
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None or caught.value.__suppress_context__ is True
+
+
+@pytest.mark.parametrize(("env", "cfg", "expected"), [
+    ({"CHAT_REQUEST_MAX_SIZE": "200"}, None, 200), ({"CHAT_REQUEST_MAX_SIZE": "0"}, None, 1),
+    ({"CHAT_REQUEST_MAX_SIZE": "-5"}, None, 1), ({"CHAT_REQUEST_MAX_SIZE": "abc"}, "300", 300),
+    ({"CHAT_REQUEST_MAX_SIZE": ""}, "300", 300), ({}, "300", 300), ({}, "x", 1_000_000), ({}, "0", 1), ({}, None, 1_000_000),
+])
+def test_max_request_size_chars_keeps_its_precedence(env, cfg, expected) -> None:
+    from tldw_Server_API.app.core.config_sections.chat import max_request_size_chars
+
+    parser = ConfigParser()
+    if cfg is not None:
+        parser.add_section("Chat-Module")
+        parser.set("Chat-Module", "max_request_size_chars", cfg)
+    assert max_request_size_chars(parser, env=env) == expected
