@@ -263,6 +263,8 @@ export function buildBackendEnv({ profile, mockPort, baseEnv = process.env }) {
     TLDW_CONFIG_FILE: profile.configPath,
     TLDW_ENV_FILE: profile.envPath,
     DATABASE_URL: `sqlite:///${profile.usersDbPath}`,
+    SCHEDULER_DATABASE_URL: `sqlite:///${path.join(profile.databaseDir, "scheduler.db")}`,
+    SCHEDULER_BASE_PATH: path.join(profile.databaseDir, "scheduler"),
     AUTH_MODE: "single_user",
     SINGLE_USER_API_KEY: syntheticApiKey,
     DEFAULT_LLM_PROVIDER: "openai",

@@ -9,7 +9,7 @@ import pytest
 
 from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackSourceSelection as ApiStudyPackSourceSelection
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 pytestmark = pytest.mark.unit
 
@@ -108,7 +108,7 @@ def test_media_source_resolves_chunks_via_package_native_helpers(monkeypatch: py
 
     def fake_get_media_by_id(db: Any, media_id: int, **_: Any):
         calls.append(("get_media_by_id", (db, media_id)))
-        return {"id": media_id, "title": "Lecture 7"}
+        return {"id": media_id, "title": "Lecture 7", "content": "Saved lecture body"}
 
     def fake_get_unvectorized_chunks_in_range(db: Any, media_id: int, start_index: int, end_index: int):
         calls.append(("get_unvectorized_chunks_in_range", (db, media_id, start_index, end_index)))
@@ -270,7 +270,11 @@ def test_media_source_falls_back_to_transcript_without_locator(monkeypatch: pyte
     monkeypatch.setattr(
         resolver_mod,
         "get_media_by_id",
-        lambda db, media_id, **_: {"id": media_id, "title": "Packet Capture Walkthrough"},
+        lambda db, media_id, **_: {
+            "id": media_id,
+            "title": "Packet Capture Walkthrough",
+            "content": "A transcript should take precedence over the saved body.",
+        },
     )
     monkeypatch.setattr(
         resolver_mod,
@@ -290,6 +294,56 @@ def test_media_source_falls_back_to_transcript_without_locator(monkeypatch: pyte
     item = bundle.items[0]
     assert item.locator == {"media_id": 9}  # nosec B101
     assert "without a specific timestamp" in item.evidence_text  # nosec B101
+
+
+@pytest.mark.parametrize("media_type", ["pdf", "ebook"])
+def test_whole_media_uses_saved_content_without_a_transcript(tmp_path, monkeypatch, media_type):
+    monkeypatch.setenv("STUDY_PACK_MAX_EVIDENCE_CHARS_PER_SOURCE", "20")
+    db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="study-pack-test")
+    media_id, _, _ = db.add_media_with_keywords(
+        title="Mercury",
+        media_type=media_type,
+        content="Mercury completes an orbit in 88 Earth days.",
+        keywords=[],
+    )
+
+    (item,) = _resolver(media_db=db).resolve(
+        [_selection(source_type="media", source_id=str(media_id))]
+    ).items
+
+    assert item.label == "Mercury"  # nosec B101
+    assert item.evidence_text == "Mercury completes an"  # nosec B101
+    assert item.locator["media_id"] == media_id  # nosec B101
+    assert item.locator["evidence_truncated"] is True  # nosec B101
+
+    resolver = _resolver(media_db=db)
+    excerpt = _selection(source_type="media", source_id=str(media_id), excerpt_text="88 Earth days")
+    assert resolver.resolve([excerpt]).items[0].evidence_text == "88 Earth days"  # nosec B101
+
+    invented = _selection(source_type="media", source_id=str(media_id), excerpt_text="a year and a day")
+    with pytest.raises(ValueError, match="excerpt_text"):
+        resolver.resolve([invented])
+
+
+def test_saved_document_cannot_supply_timestamp_evidence(tmp_path):
+    db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="study-pack-test")
+    media_id, _, _ = db.add_media_with_keywords(
+        title="Mercury",
+        media_type="ebook",
+        content="Mercury completes an orbit in 88 Earth days.",
+        keywords=[],
+    )
+
+    with pytest.raises(ValueError, match="no transcript evidence"):
+        _resolver(media_db=db).resolve(
+            [
+                _selection(
+                    source_type="media",
+                    source_id=str(media_id),
+                    locator={"timestamp_seconds": 0},
+                )
+            ]
+        )
 
 
 def test_message_source_requires_stable_message_and_conversation_identity():

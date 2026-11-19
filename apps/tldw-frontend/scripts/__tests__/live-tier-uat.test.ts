@@ -120,6 +120,8 @@ describe("live Tier UAT profile", () => {
       expect(env.CUSTOM_OPENAI_API_MODEL).toBe("local-uat-chat")
       expect(env.EVALUATIONS_TEST_DB_PATH).toBe(profile.databasePaths.evaluations)
       expect(env.JOBS_DB_PATH).toBe(profile.databasePaths.jobs)
+      expect(env.SCHEDULER_DATABASE_URL).toBe(`sqlite:///${path.join(profile.databaseDir, "scheduler.db")}`)
+      expect(env.SCHEDULER_BASE_PATH).toBe(path.join(profile.databaseDir, "scheduler"))
       expect(env.USER_DB_BASE_DIR).toBe(profile.userDatabasesDir)
       expect(env.ACP_SESSIONS_DB_PATH).toBe(profile.databasePaths.acpSessions)
       expect(env.ACP_WORKSPACE_ALLOWED_BASE_PATHS).toBe(profile.acpWorkspaceRootBase)

@@ -48,6 +48,17 @@ From AGENTS.md / ADR-003: **Jobs** for user-visible work, admin controls, and an
 
 `JOBS_DB_URL`, `JOBS_DB_PATH`, `JOBS_LEASE_SECONDS` (120), adaptive lease keys (`JOBS_ADAPTIVE_LEASE_*`), `JOBS_POLL_INTERVAL_SECONDS` (1), `JOBS_EXPIRED_RECOVERY_BATCH_SIZE`, `JOBS_MAX_PER_USER` (5) / `JOBS_MAX_PER_ORG` (20), `JOBS_QUARANTINE_THRESHOLD` (2), `JOBS_ARCHIVE_*`, `JOBS_ENCRYPT` + secret-pattern deny keys, `JOBS_ALLOWED_JOB_TYPES` / `JOBS_ALLOWED_QUEUES[_DOMAIN]`, `JOBS_REQUIRE_COMPLETION_TOKEN`, `JOBS_PG_SINGLE_UPDATE_ACQUIRE`, `JOBS_DISABLE_LEASE_ENFORCEMENT`, `SCHEDULER_DATABASE_URL` / `WORKFLOWS_SCHEDULER_DATABASE_URL`, `SCHEDULER_DB_POOL_MIN/MAX`, `REMINDERS_SCHEDULER_ENABLED/_TZ/_RESCAN_SEC`, `SCHEDULED_TASKS_AUTOMATION_SCHEDULER_ENABLED` (off), `AUTOMATION_JOBS_QUEUE`, `WORKFLOWS_SCHEDULER_ENABLED/_TZ`, `TLDW_WORKERS_SIDECAR_MODE`.
 
+The recurring Workflows scheduler starts by default and runs enabled Watchlist
+and workflow schedules. API workers must share the core Scheduler database so
+only the worker holding the recurring dispatch lease submits runs. Schedule
+edits made through another worker are discovered on the next rescan, every 30
+seconds by default. After an unclean stop, another worker takes over when the
+lease expires (300 seconds by default). Dispatch resumes at the next future
+occurrence. Set `WORKFLOWS_SCHEDULER_ENABLED=false` to opt out.
+
+On PostgreSQL, re-save existing Watchlist monitors that show a next run but have
+never run. This registers schedules whose writes failed before the boolean fix.
+
 ## Failure behaviors (verified)
 
 | Case | Behavior |
