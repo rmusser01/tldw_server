@@ -2168,11 +2168,14 @@
   "chatSidebar_groups_older": {
     "message": "Older"
   },
-  "chatSidebar_movedToTrash": {
-    "message": "Moved to Trash"
+  "chatSidebar_movedChatToTrash": {
+    "message": "Moved \"{{title}}\" to Trash."
   },
-  "chatSidebar_undoTrash": {
-    "message": "Undo"
+  "chatSidebar_movedChatsToTrash_one": {
+    "message": "Moved {{count}} chat to Trash."
+  },
+  "chatSidebar_movedChatsToTrash_other": {
+    "message": "Moved {{count}} chats to Trash."
   },
   "chatSidebar_viewTrash": {
     "message": "View Trash"

@@ -21,13 +21,16 @@ type RunBulkDeleteParams = {
   deleteConversation: (conversationId: string) => Promise<void>
   t: TFunction
   isCurrent?: () => boolean
+  /** Skip the success toast when the caller reports success itself (an Undo offer). */
+  quietSuccess?: boolean
 }
 
 export const runBulkDelete = async ({
   selectedConversationIds,
   deleteConversation,
   t,
-  isCurrent = () => true
+  isCurrent = () => true,
+  quietSuccess = false
 }: RunBulkDeleteParams): Promise<BulkDeleteResult | null> => {
   if (selectedConversationIds.length === 0 || !isCurrent()) return null
 
@@ -53,7 +56,7 @@ export const runBulkDelete = async ({
   })
 
   if (failures === 0) {
-    message.success(
+    if (!quietSuccess) message.success(
       t("sidepanel:multiSelect.deleteSuccess", "Chats moved to trash.")
     )
   } else if (failures === selectedConversationIds.length) {
@@ -128,12 +131,16 @@ export const useBulkChatOperations = ({
   }, [folderApiAvailable, selectedConversationIds, setBulkTagPickerOpen, t])
 
   const applyBulkDelete = React.useCallback(
-    async (isCurrent?: () => boolean): Promise<BulkDeleteResult | null> => {
+    async (
+      isCurrent?: () => boolean,
+      options: { quietSuccess?: boolean } = {}
+    ): Promise<BulkDeleteResult | null> => {
       return runBulkDelete({
         selectedConversationIds,
         deleteConversation,
         t,
-        isCurrent
+        isCurrent,
+        quietSuccess: options.quietSuccess
       })
     },
     [deleteConversation, selectedConversationIds, t]

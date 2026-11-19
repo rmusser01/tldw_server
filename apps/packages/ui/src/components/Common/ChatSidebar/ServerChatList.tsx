@@ -50,7 +50,7 @@ import { exportServerChat } from "@/services/chat-transcript-export"
 import { runChatExport } from "@/components/Common/chat-export-action"
 import type { TranscriptFormat } from "@/utils/chat-transcript"
 import { CHAT_RECENCY_GROUP_LABELS, groupChatsByRecency } from "./chat-history-groups"
-import { showMovedToTrashNotice } from "./server-chat-trash-notice"
+import { InlineUndoBanner, useInlineUndo } from "@/components/Common/InlineUndo"
 import { removeLocalCopyOfServerChat } from "@/components/Sidepanel/Chat/tab-conversation-actions"
 
 const FolderPickerModal = React.lazy(
@@ -113,6 +113,9 @@ export function ServerChatList({
   const { isConnected } = useConnectionState()
   const queryClient = useQueryClient()
   const confirmDanger = useConfirmDanger()
+  // Move to Trash offers one inline Undo (XP-17, G07; #3101 decision 8).
+  const trashUndo = useInlineUndo()
+  const dismissTrashUndo = trashUndo.dismiss
   const [pinnedChatIds, setPinnedChatIds] = useStorage<string[]>(
     "tldw:server-chat-pins",
     []
@@ -562,7 +565,9 @@ export function ServerChatList({
     setBulkTagPickerOpen(false)
     setBulkDeleteConfirmOpen(false)
     setIsBulkDeleting(false)
+    dismissTrashUndo()
   }, [
+    dismissTrashUndo,
     visibleReceipt,
     readOnly,
     restoreRevision,
@@ -912,79 +917,111 @@ export function ServerChatList({
     ]
   )
 
-  // Undo right after Move to Trash restores the chat with the account that
-  // trashed it, even though its row has already left the visible list.
+  // Undo right after Move to Trash restores the chats with the account that
+  // trashed them, even though their rows have already left the visible list.
+  // Resolves false when any restore failed, so the offer stays for a retry.
   const undoMoveToTrash = React.useCallback(
     async (
-      chat: ServerChatHistoryItem,
+      chats: ServerChatHistoryItem[],
       action: ServerHistoryAction,
-      wasPinned: boolean
-    ) => {
-      try {
-        await tldwClient.restoreChat(chat.id, {
-          requestScope: action.requestScope,
-          scope: { type: "global" }
-        })
-        if (wasPinned)
-          setPinnedChatIds((prev) =>
-            (prev || []).includes(chat.id) ? prev || [] : [...(prev || []), chat.id]
-          )
-        queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
-        message.success(
-          t("common:chatRestored", {
-            defaultValue: "Chat restored."
+      pinnedIds: ReadonlySet<string>
+    ): Promise<boolean> => {
+      const results = await Promise.allSettled(
+        chats.map((chat) =>
+          tldwClient.restoreChat(chat.id, {
+            requestScope: action.requestScope,
+            scope: { type: "global" }
           })
         )
-      } catch (err) {
-        console.error("[ServerChatList] Failed to undo move to trash", {
-          error: err,
-          chatId: chat.id
-        })
-        message.error(
-          resolveChatMutationErrorMessage(
-            err,
-            "common:restoreChatError",
-            "Failed to restore chat."
-          )
+      )
+      const restoredIds = chats
+        .filter((_chat, index) => results[index]?.status === "fulfilled")
+        .map((chat) => chat.id)
+      const repinned = restoredIds.filter((id) => pinnedIds.has(id))
+      if (repinned.length > 0)
+        setPinnedChatIds((prev) => [
+          ...(prev || []),
+          ...repinned.filter((id) => !(prev || []).includes(id))
+        ])
+      if (restoredIds.length > 0)
+        queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+      const failure = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected"
+      )
+      if (!failure) {
+        message.success(
+          chats.length === 1
+            ? t("common:chatRestored", { defaultValue: "Chat restored." })
+            : t("sidepanel:multiSelect.restoreSuccess", { defaultValue: "Chats restored." })
         )
+        return true
       }
+      console.error("[ServerChatList] Failed to undo move to trash", {
+        error: failure.reason,
+        chatIds: chats.map((chat) => chat.id)
+      })
+      message.error(
+        resolveChatMutationErrorMessage(
+          failure.reason,
+          "common:restoreChatError",
+          "Failed to restore chat."
+        )
+      )
+      return false
     },
     [queryClient, resolveChatMutationErrorMessage, setPinnedChatIds, t]
   )
 
+  const offerTrashUndo = React.useCallback(
+    (chats: ServerChatHistoryItem[], action: ServerHistoryAction, pinnedIds: ReadonlySet<string>) => {
+      const count = chats.length
+      const title = chats[0]?.title?.trim()
+      trashUndo.show({
+        key: chats.map((chat) => chat.id).join(","),
+        message:
+          count === 1 && title
+            ? t("common:chatSidebar.movedChatToTrash", {
+                defaultValue: 'Moved "{{title}}" to Trash.',
+                title
+              })
+            : t("common:chatSidebar.movedChatsToTrash", {
+                defaultValue: count === 1 ? "Moved {{count}} chat to Trash." : "Moved {{count}} chats to Trash.",
+                count
+              }).replace("{{count}}", String(count)),
+        restoredMessage:
+          count === 1
+            ? t("common:chatRestored", { defaultValue: "Chat restored." })
+            : t("sidepanel:multiSelect.restoreSuccess", { defaultValue: "Chats restored." }),
+        onUndo: () => undoMoveToTrash(chats, action, pinnedIds),
+        secondaryAction: {
+          label: t("common:chatSidebar.viewTrash", { defaultValue: "View Trash" }),
+          onClick: () => {
+            trashUndo.dismiss()
+            void setChatTypeFilter("trash")
+          }
+        }
+      })
+    },
+    [setChatTypeFilter, t, trashUndo, undoMoveToTrash]
+  )
+
   const handleMoveChatToTrash = React.useCallback(
     async (chat: ServerChatHistoryItem) => {
+      // A soft delete happens at once and offers Undo (XP-17; #3101 decision 8).
       const action = captureAction([chat.id])
       if (!action) return
-      const ok = await confirmDanger({
-        title: t("common:confirmTitle", { defaultValue: "Please confirm" }),
-        content: t("common:deleteHistoryConfirmation", {
-          defaultValue: "Move this chat to trash?"
-        }),
-        okText: t("common:moveToTrash", { defaultValue: "Move to trash" }),
-        cancelText: t("common:cancel", { defaultValue: "Cancel" })
-      })
-      if (!ok || !action.isCurrent()) return
 
       try {
         await deleteServerChat(chat, action)
         if (!action.isCurrent()) return
-        const wasPinned = (pinnedChatIds || []).includes(chat.id)
+        const pinnedIds = new Set((pinnedChatIds || []).filter((id) => id === chat.id))
         setPinnedChatIds((prev) => (prev || []).filter((id) => id !== chat.id))
         queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
         setOpenMenuFor(null)
         if (serverChatId === chat.id) {
           clearChat()
         }
-        showMovedToTrashNotice({
-          t,
-          onUndo: () => {
-            void undoMoveToTrash(chat, action, wasPinned)
-          },
-          onViewTrash: () => {
-            void setChatTypeFilter("trash")
-          }
-        })
+        offerTrashUndo([chat], action, pinnedIds)
       } catch (err) {
         if (!action.isCurrent()) return
         console.error("[ServerChatList] Failed to delete chat", {
@@ -1004,15 +1041,12 @@ export function ServerChatList({
       captureAction,
       clearChat,
       deleteServerChat,
-      confirmDanger,
+      offerTrashUndo,
       pinnedChatIds,
       queryClient,
       resolveChatMutationErrorMessage,
       serverChatId,
-      setChatTypeFilter,
-      setPinnedChatIds,
-      t,
-      undoMoveToTrash
+      setPinnedChatIds
     ]
   )
 
@@ -1027,6 +1061,7 @@ export function ServerChatList({
           expectedVersion: chat.version ?? undefined
         })
         if (!action.isCurrent()) return
+        trashUndo.dismiss(chat.id)
         queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
         message.success(
           t("common:chatRestored", {
@@ -1048,7 +1083,7 @@ export function ServerChatList({
         )
       }
     },
-    [captureAction, queryClient, resolveChatMutationErrorMessage]
+    [captureAction, queryClient, resolveChatMutationErrorMessage, t, trashUndo]
   )
 
   const handleHardDeleteChat = React.useCallback(
@@ -1205,14 +1240,6 @@ export function ServerChatList({
     [selectionMode, selectedChatIdSet, toggleChatSelected]
   )
 
-  const openBulkDeleteConfirm = React.useCallback(() => {
-    const action = captureAction(selectedConversationIds)
-    if (!action) return
-    managementAction.current = action
-    setBulkConfirmAction("trash")
-    setBulkDeleteConfirmOpen(true)
-  }, [captureAction, selectedConversationIds])
-
   const openBulkHardDeleteConfirm = React.useCallback(() => {
     const action = captureAction(selectedConversationIds)
     if (!action) return
@@ -1344,13 +1371,13 @@ export function ServerChatList({
     }
   }, [captureAction, queryClient, selectedChats, selectedConversationIds, t])
 
-  const handleBulkDelete = React.useCallback(async () => {
+  const handleBulkDelete = React.useCallback(async (kind: BulkConfirmAction = bulkConfirmAction) => {
     const action = managementAction.current
     if (selectedChats.length === 0 || !action?.isCurrent()) return
 
     setIsBulkDeleting(true)
     try {
-      if (bulkConfirmAction === "hard_delete") {
+      if (kind === "hard_delete") {
         const results = await Promise.allSettled(
           selectedChats.map((chat) =>
             deleteServerChat(chat, action, true)
@@ -1401,9 +1428,12 @@ export function ServerChatList({
           clearChat()
         }
       } else {
-        const result = await applyBulkDelete(action.isCurrent)
+        const result = await applyBulkDelete(action.isCurrent, { quietSuccess: true })
         if (!result || !action.isCurrent()) return
         const { deletedConversationIds, failedConversationIds } = result
+        const pinnedIds = new Set(
+          (pinnedChatIds || []).filter((id) => deletedConversationIds.has(id))
+        )
         setPinnedChatIds((prev) =>
           (prev || []).filter((id) => !deletedConversationIds.has(id))
         )
@@ -1413,6 +1443,8 @@ export function ServerChatList({
         if (serverChatId && deletedConversationIds.has(serverChatId)) {
           clearChat()
         }
+        const trashed = selectedChats.filter((chat) => deletedConversationIds.has(chat.id))
+        if (trashed.length > 0) offerTrashUndo(trashed, action, pinnedIds)
       }
       queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
       setBulkDeleteConfirmOpen(false)
@@ -1435,6 +1467,8 @@ export function ServerChatList({
     bulkConfirmAction,
     clearChat,
     deleteServerChat,
+    offerTrashUndo,
+    pinnedChatIds,
     queryClient,
     selectedChats,
     selectedConversationIds,
@@ -1442,6 +1476,30 @@ export function ServerChatList({
     setPinnedChatIds,
     t
   ])
+
+  // Moving chats to Trash happens at once and offers Undo (XP-17); only the
+  // permanent delete in Trash still asks first.
+  const moveSelectedToTrash = React.useCallback(() => {
+    const action = captureAction(selectedConversationIds)
+    if (!action) return
+    managementAction.current = action
+    void handleBulkDelete("trash")
+  }, [captureAction, handleBulkDelete, selectedConversationIds])
+
+  const listRootRef = React.useRef<HTMLDivElement>(null)
+  // In the list's reading order, so keyboard users reach Undo where the chat was.
+  const trashUndoBanner = (
+    <InlineUndoBanner
+      undo={trashUndo}
+      testId="server-chat-undo"
+      className="mx-2"
+      onReturnFocus={() =>
+        listRootRef.current
+          ?.querySelector<HTMLElement>("button:not([disabled]), [href], input:not([disabled])")
+          ?.focus()
+      }
+    />
+  )
 
   const filterControl = (
     <div className="px-2 pt-1">
@@ -1623,8 +1681,9 @@ export function ServerChatList({
     )
   if (orderedChats.length === 0)
     return (
-      <div className={cn("p-3 text-sm", className)}>
+      <div ref={listRootRef} className={cn("p-3 text-sm", className)}>
         {filterControl}
+        {trashUndoBanner}
         <p role="status">
           {hasSearchQuery
             ? t("common:chatSidebar.noSearchMatches", {
@@ -1661,6 +1720,7 @@ export function ServerChatList({
 
   return (
     <div
+      ref={listRootRef}
       className={cn("flex flex-col gap-2", className)}
       aria-busy={isFetching}>
       {!freshResults && !isFetching && (
@@ -1740,6 +1800,7 @@ export function ServerChatList({
         </Modal>
       )}
       {filterControl}
+      {trashUndoBanner}
       {sidebarRefreshState === "recoverable-error" && isShowingStaleData && (
         <div className="mx-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-text-subtle">
           {t("common:serverChatsShowingStaleData", {
@@ -1815,10 +1876,13 @@ export function ServerChatList({
                 </button>
                 <button
                   type="button"
-                  onClick={openBulkDeleteConfirm}
+                  onClick={moveSelectedToTrash}
                   className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-danger hover:bg-surface2"
                   disabled={
-                    readOnly || !freshResults || selectedChatIds.length === 0
+                    readOnly ||
+                    !freshResults ||
+                    selectedChatIds.length === 0 ||
+                    isBulkDeleting
                   }>
                   <Trash2 className="size-3.5" />
                   {t("common:moveToTrash", "Move to trash")}
@@ -1982,7 +2046,7 @@ export function ServerChatList({
       <Modal
         open={bulkDeleteConfirmOpen && !!managementAction.current?.isCurrent()}
         onCancel={handleBulkDeleteConfirmClose}
-        onOk={handleBulkDelete}
+        onOk={() => void handleBulkDelete()}
         okText={
           bulkConfirmAction === "hard_delete"
             ? t("common:deletePermanently", "Delete permanently")

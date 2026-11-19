@@ -683,8 +683,9 @@
       "thisWeek": "This week",
       "older": "Older"
     },
-    "movedToTrash": "Moved to Trash",
-    "undoTrash": "Undo",
+    "movedChatToTrash": "Moved \"{{title}}\" to Trash.",
+    "movedChatsToTrash_one": "Moved {{count}} chat to Trash.",
+    "movedChatsToTrash_other": "Moved {{count}} chats to Trash.",
     "viewTrash": "View Trash",
     "permanentlyDeleted": "Chat permanently deleted.",
     "noSearchMatches": "No chats match “{{query}}”",

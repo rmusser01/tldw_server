@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator"
 
@@ -296,15 +296,6 @@ const showHistory = (data: unknown[]) => {
   } as typeof historyState.value
 }
 
-/** Render the content of the latest success toast so its buttons can be used. */
-const renderLatestSuccessToast = () => {
-  const payload = antdMessage.success.mock.calls.at(-1)?.[0] as
-    | { content?: React.ReactNode }
-    | string
-    | undefined
-  const content = typeof payload === "string" ? payload : payload?.content
-  return render(<div data-testid="toast">{content}</div>)
-}
 
 describe("Server chat history list (CS-08, CS-10)", () => {
   beforeEach(() => {
@@ -363,23 +354,61 @@ describe("Server chat history list (CS-08, CS-10)", () => {
     expect(follows(headings[2], screen.getByText("Spring retrospective"))).toBe(true)
   })
 
-  it("confirms a move to Trash and offers Undo and View Trash (CS-10)", async () => {
+  // XP-17 and the G07 follow-up (#3101, decision 8): Move to Trash happens at
+  // once. Undo sits in the list, takes focus, and has no timer.
+  it("moves a chat to Trash without asking and offers Undo inline (CS-10, XP-17)", async () => {
     showHistory([createChat({ id: "chat-1", title: "Recovered chat", version: 4 })])
     render(<ServerChatList searchQuery="" />)
 
     fireEvent.click(screen.getByRole("button", { name: "delete" }))
-    await waitFor(() => expect(antdMessage.success).toHaveBeenCalled())
 
-    const toast = renderLatestSuccessToast()
-    expect(toast.getByTestId("toast")).toHaveTextContent("Moved to Trash")
-    fireEvent.click(toast.getByRole("button", { name: "Undo" }))
+    const offer = await screen.findByTestId("server-chat-undo")
+    await waitFor(() => expect(offer).toHaveTextContent('Moved "Recovered chat" to Trash.'))
+    expect(mocks.confirmDanger).not.toHaveBeenCalled()
+    const undo = within(offer).getByRole("button", { name: "Undo" })
+    expect(undo).toHaveFocus()
+    expect(antdMessage.success).not.toHaveBeenCalled()
+
+    fireEvent.click(undo)
     await waitFor(() => expect(mocks.restoreChat).toHaveBeenCalledWith("chat-1", expect.any(Object)))
     await waitFor(() =>
       expect(antdMessage.success).toHaveBeenLastCalledWith("Chat restored.")
     )
+    await waitFor(() =>
+      expect(within(offer).queryByRole("button", { name: "Undo" })).not.toBeInTheDocument()
+    )
+  })
 
-    fireEvent.click(toast.getByRole("button", { name: "View Trash" }))
+  it("opens Trash from the Undo offer's View Trash (CS-10)", async () => {
+    showHistory([createChat({ id: "chat-1", title: "Recovered chat", version: 4 })])
+    render(<ServerChatList searchQuery="" />)
+
+    fireEvent.click(screen.getByRole("button", { name: "delete" }))
+    const offer = await screen.findByTestId("server-chat-undo")
+    fireEvent.click(await within(offer).findByRole("button", { name: "View Trash" }))
+
     expect(mocks.setChatTypeFilter).toHaveBeenCalledWith("trash")
+    expect(within(offer).queryByRole("button", { name: "Undo" })).not.toBeInTheDocument()
+  })
+
+  it("moves selected chats to Trash without asking, and Undo restores them all (XP-17)", async () => {
+    showHistory([
+      createChat({ id: "chat-1", title: "First chat" }),
+      createChat({ id: "chat-2", title: "Second chat" })
+    ])
+    render(<ServerChatList searchQuery="" selectionMode />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }))
+    fireEvent.click(screen.getByRole("button", { name: "Move to trash" }))
+
+    const offer = await screen.findByTestId("server-chat-undo")
+    await waitFor(() => expect(offer).toHaveTextContent("Moved 2 chats to Trash."))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(mocks.deleteChat).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(within(offer).getByRole("button", { name: "Undo" }))
+    await waitFor(() => expect(mocks.restoreChat).toHaveBeenCalledTimes(2))
+    expect(mocks.restoreChat.mock.calls.map(([id]) => id).sort()).toEqual(["chat-1", "chat-2"])
   })
 
   it("confirms a permanent delete (CS-10)", async () => {
