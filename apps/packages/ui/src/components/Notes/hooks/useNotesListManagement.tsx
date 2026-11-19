@@ -272,11 +272,14 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     [notebookOptions, selectedNotebookId]
   )
 
-  const effectiveKeywordTokens = React.useMemo(() => {
-    const effectiveNotebookKeywordTokens =
+  const effectiveNotebookKeywordTokens = React.useMemo(
+    () =>
       authorityScope === undefined
         ? notebookKeywordTokens
-        : selectedNotebook?.keywords ?? []
+        : selectedNotebook?.keywords ?? [],
+    [authorityScope, notebookKeywordTokens, selectedNotebook]
+  )
+  const effectiveKeywordTokens = React.useMemo(() => {
     const merged = [
       ...(listViewMode === 'inbox' ? [CAPTURED_NOTE_KEYWORD] : []),
       ...keywordTokens,
@@ -290,11 +293,18 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       deduped.push(normalized)
     }
     return deduped
-  }, [authorityScope, keywordTokens, listViewMode, notebookKeywordTokens, selectedNotebook])
-  // Tags the view implies always match, whatever the any/all toggle says (NL-12).
+  }, [effectiveNotebookKeywordTokens, keywordTokens, listViewMode])
+  // The view's tag and a saved filter's tags always all match, whatever the
+  // any/all toggle says (NL-12, decision 19); the toggle is for picked tags.
   const requiredKeywordTokens = React.useMemo(
-    () => (listViewMode === 'inbox' ? [CAPTURED_NOTE_KEYWORD] : []),
-    [listViewMode]
+    () =>
+      [
+        ...(listViewMode === 'inbox' ? [CAPTURED_NOTE_KEYWORD] : []),
+        ...effectiveNotebookKeywordTokens
+      ]
+        .map((token) => String(token || '').trim().toLowerCase())
+        .filter(Boolean),
+    [effectiveNotebookKeywordTokens, listViewMode]
   )
   /** The toggle applies to the tags the reader picked, so it shows only for two or more. */
   const tagMatchApplies =
