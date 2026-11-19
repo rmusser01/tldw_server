@@ -149,6 +149,49 @@ the tag-match follow-up, NL-06, NL-10, XP-09, XP-12, XP-18, AX-04.
 
 ## Owner decisions
 
+**Answered 2026-11-19:** the owner accepted the recommended answer for every
+question below ("go with your recommendations"):
+
+1. CC-08: keep the redesign's names ("Search & Context", "Runtime") and
+   update the glossary to match. The Modes menu's toggles move to where they
+   belong.
+2. CC-10: search stays in the composer, with its own height cap. Sources are
+   shown first; the generated answer is opt-in.
+3. Sizes: 32px controls on desktop, through the size tokens, and 44px on
+   touch. D9 and D10 are dropped (the redesign replaced them).
+4. Web "@" attaches a note's content as a removable chip. `/note` does the
+   same.
+5. XP-01: a temporary chat's answer may be saved to Notes.
+6. XP-11: the chat list leaves routes that aren't chat.
+7. XP-13: adopt the review's glossary (Character, Persona, Buddy and the
+   product name).
+8. XP-17 and AX-06: soft deletes get a persistent inline Undo, and only
+   permanent deletes ask for confirmation. Message delete keeps its confirm.
+9. Merge `text-subtle` into `text-muted` in the light theme.
+10. XS-12: "Open dashboard" becomes "Flashcards".
+11. XP-09: one "Open in full page" action. The extension may open a configured
+    WebUI.
+12. XP-12: align the side-panel composer's strings and menus only; no
+    rebuild.
+13. XP-18: a server-side pin field for conversations and notes. UI mode stays
+    per surface.
+14. AX-04: in short viewports the composer's toolbar row collapses first; the
+    input and Send stay.
+15. NL-11: add Graph filters and raise the All-notes cap to 500. Picking a
+    note re-centres the graph and opens a preview, without leaving Graph.
+16. NL-12: keep the Inbox view.
+17. NL-06: Trash is auto-purged after 30 days. A permanent delete reaches
+    Sync v2 devices as an id-only tombstone, as in the #3198 rule.
+18. NL-10: server-side pins. Folders go with the notes epic E7 (#3131).
+19. Saved filters always match all of their tags.
+20. #3182: the outbox migration is approved. The current save behaviour stays
+    until it lands.
+21. #3071/#3159: the recommendation was to leave this to the owner, so it
+    stays open. Finishing P5 and CM-14 still waits on it.
+
+The original questions:
+
+
 Chat and composer:
 1. CC-08 names: the review's glossary ("Knowledge", "Compare models",
    "Temporary chat") or the October redesign's ("Search & Context", "Add
@@ -337,5 +380,5 @@ The four lanes were built in the Wave 5 worktrees on new branches, merged into
 |---|---|
 | 5 | Landed (#3461, 2026-11-13) |
 | 6 | In progress |
-| 7 | Waiting on owner decisions |
+| 7 | Decisions answered 2026-11-19; not started |
 | 8 | Blocked |
