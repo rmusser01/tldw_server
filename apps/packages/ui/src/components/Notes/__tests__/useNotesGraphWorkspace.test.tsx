@@ -377,8 +377,8 @@ describe("useNotesGraphWorkspace", () => {
           "note:a",
           null,
           1,
-          120,
-          480,
+          1000,
+          4000,
           false,
           [
             "manual",
@@ -387,6 +387,7 @@ describe("useNotesGraphWorkspace", () => {
             "tag_membership",
             "source_membership"
           ],
+          null,
           null,
           null
         ])
@@ -458,6 +459,7 @@ describe("useNotesGraphWorkspace", () => {
           "tag_membership",
           "source_membership"
         ],
+        null,
         null,
         null
       ])
@@ -787,7 +789,7 @@ describe("useNotesGraphWorkspace", () => {
     expect(mocks.fetchNotesGraph).toHaveBeenCalledTimes(2)
   })
 
-  it("derives All-notes eligibility only from authoritative count, note cap, and max_nodes", async () => {
+  it("derives All-notes eligibility from the authoritative count and All-notes cap, not the focused max_nodes (NL-11)", async () => {
     mocks.fetchNotesGraph.mockResolvedValueOnce(
       graph({
         active_note_count: 81,
@@ -814,8 +816,8 @@ describe("useNotesGraphWorkspace", () => {
 
     expect(result.current.allNotes).toEqual({
       activeNoteCount: 81,
-      effectiveNoteCap: 80,
-      eligible: false
+      effectiveNoteCap: 100,
+      eligible: true
     })
   })
 
@@ -1260,7 +1262,8 @@ describe("useNotesGraphWorkspace", () => {
               true,
               [...ordinaryEdgeTypes, "semantic"],
               0.75,
-              10
+              10,
+              null
             ])
         )
     ).toBe(true)
@@ -1659,8 +1662,9 @@ describe("useNotesGraphWorkspace", () => {
         "tag_membership",
         "source_membership"
       ],
-      maxNodes: 120,
-      maxEdges: 480,
+      maxNodes: 1000,
+      maxEdges: 4000,
+      tag: undefined,
       cursor: undefined,
       semanticThreshold: undefined,
       semanticTopK: undefined

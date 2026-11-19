@@ -446,6 +446,7 @@ class TestLimitHardCaps:
         db = _mock_db(notes=[_note(n1)], note_count=1, all_ids=[n1])
         svc = NoteGraphService(user_id="u1", db=db)
         req = NoteGraphRequest(
+            center_note_id=n1,
             radius=1,
             max_nodes=999,
             max_edges=999,
@@ -457,6 +458,20 @@ class TestLimitHardCaps:
         assert resp.limits.max_nodes == 3
         assert resp.limits.max_edges == 4
         assert resp.limits.max_degree == 2
+
+    def test_a_library_request_is_clamped_by_the_all_notes_cap_not_max_nodes(self, monkeypatch):
+        """With no focus note, NOTES_GRAPH_ALL_NOTES_NOTE_CAP sets the node budget (NL-11)."""
+        monkeypatch.setenv("NOTES_GRAPH_MAX_NODES", "3")
+        monkeypatch.setenv("NOTES_GRAPH_MAX_EDGES", "4")
+        monkeypatch.setenv("NOTES_GRAPH_ALL_NOTES_NOTE_CAP", "10")
+        n1 = _uid()
+        db = _mock_db(notes=[_note(n1)], note_count=1, all_ids=[n1])
+        svc = NoteGraphService(user_id="u1", db=db)
+
+        resp = svc.generate_graph(NoteGraphRequest(radius=1, max_nodes=999, max_edges=999))
+
+        assert resp.limits.max_nodes == 10 + graph_service_module._TAG_CAP + graph_service_module._SOURCE_CAP
+        assert resp.limits.max_edges == 4
 
 
 class TestMaxNodesTruncation:
@@ -705,8 +720,9 @@ class TestSemanticCandidateGeneration:
         assert candidates.public_graph == ordinary
         assert ordinary.limits.max_nodes == 2
         assert ordinary.limits.max_edges == 1
-        assert ordinary.all_notes_note_cap == 2
-        assert ordinary.all_notes_eligible is False
+        # The All-notes cap (500 by default), not this focused graph's max_nodes (NL-11).
+        assert ordinary.all_notes_note_cap == graph_service_module._all_notes_note_cap()
+        assert ordinary.all_notes_eligible is True
         assert len([node for node in ordinary.nodes if node.type == "note"]) <= 2
         assert len(ordinary.edges) <= 1
         assert candidates.candidate_limits.max_nodes == 52

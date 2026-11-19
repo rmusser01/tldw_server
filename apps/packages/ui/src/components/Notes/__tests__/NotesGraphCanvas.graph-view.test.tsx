@@ -363,6 +363,67 @@ describe("NotesGraphCanvas graph view", () => {
     expect(within(legend).queryByText("Source")).not.toBeInTheDocument()
   })
 
+  it("labels links on hover or selection only, and hides them while panning, in a large graph (NL-11)", async () => {
+    const notes = Array.from({ length: 160 }, (_, index) => ({
+      ...graph.nodes[0],
+      id: `note:n${index}`,
+      label: `Note ${index}`
+    }))
+    const links = notes.slice(1).map((note, index) => ({
+      ...graph.edges[0],
+      id: `edge:${index}`,
+      source: "note:n0",
+      target: note.id
+    }))
+    render(
+      <NotesGraphCanvas
+        graph={{ ...graph, nodes: notes, edges: links }}
+        layout="concentric"
+        focusNoteId="n0"
+        selectedNodeId={null}
+        visibleEdgeTypes={new Set(["manual"])}
+        provisionalOverlays={[]}
+        showProvisional={false}
+        onSelectNode={vi.fn()}
+      />
+    )
+
+    await waitFor(() => expect(mockCytoscapeFactory).toHaveBeenCalled())
+    const config = mockCytoscapeFactory.mock.calls[0]?.[0] as CytoscapeTestConfig & {
+      hideEdgesOnViewport?: boolean
+    }
+    const edgeStyle = config.style.find((entry) => entry.selector === "edge")
+    const shownLabel = config.style.find(
+      (entry) => entry.selector === "edge.graph-label-hovered, edge:selected"
+    )
+    expect(edgeStyle?.style.label).toBe("")
+    expect(shownLabel?.style.label).toBe("data(displayLabel)")
+    expect(config.hideEdgesOnViewport).toBe(true)
+  })
+
+  it("keeps every link labelled in a small graph", async () => {
+    render(
+      <NotesGraphCanvas
+        graph={graph}
+        layout="dagre"
+        focusNoteId="a"
+        selectedNodeId={null}
+        visibleEdgeTypes={new Set(["manual", "wikilink"])}
+        provisionalOverlays={[]}
+        showProvisional={false}
+        onSelectNode={vi.fn()}
+      />
+    )
+
+    await waitFor(() => expect(mockCytoscapeFactory).toHaveBeenCalled())
+    const config = mockCytoscapeFactory.mock.calls[0]?.[0] as CytoscapeTestConfig & {
+      hideEdgesOnViewport?: boolean
+    }
+    const edgeStyle = config.style.find((entry) => entry.selector === "edge")
+    expect(edgeStyle?.style.label).toBe("data(displayLabel)")
+    expect(config.hideEdgesOnViewport).toBe(false)
+  })
+
   it("filters authoritative edges and renders provisional nodes and edges with non-color styling", async () => {
     render(
       <NotesGraphCanvas

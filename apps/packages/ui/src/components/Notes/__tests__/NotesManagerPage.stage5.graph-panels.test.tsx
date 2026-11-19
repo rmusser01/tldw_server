@@ -1,6 +1,6 @@
 import React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDesignSystemState } from '@/design-system'
 import type { NotesGraphEdge, NotesGraphNode } from '@/services/note-graph-suggestions'
@@ -58,6 +58,8 @@ const {
     mockClearSetting: vi.fn()
   }
 })
+
+const mockGraphWorkspace = vi.hoisted(() => vi.fn())
 
 const registryLabels = vi.hoisted(() => ({
   unavailable: 'Registry Unavailable'
@@ -185,7 +187,10 @@ vi.mock('@/components/Notes/NotesListPanel', () => ({
 
 // The Graph view replaces the editor pane; a stub is enough to unmount it.
 vi.mock('@/components/Notes/NotesGraphWorkspace', () => ({
-  default: () => <div data-testid='notes-graph-workspace' />
+  default: (props: Record<string, unknown>) => {
+    mockGraphWorkspace(props)
+    return <div data-testid='notes-graph-workspace' />
+  }
 }))
 
 const renderPage = () => {
@@ -705,6 +710,53 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
       )
     })
     expect(await screen.findByTestId('notes-related-list')).toHaveTextContent('Linked note')
+  })
+
+  it('previews the open note in Graph and opens it in the editor from there (NL-11)', async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || '')
+      const method = String(request.method || 'GET').toUpperCase()
+      if (path.startsWith('/api/v1/notes/?')) {
+        return { items: [], pagination: { total_items: 0, total_pages: 1 } }
+      }
+      if (path === '/api/v1/notes/' && method === 'POST') {
+        return { id: 'note-a', version: 1, last_modified: '2026-02-18T10:00:00.000Z' }
+      }
+      if (path === '/api/v1/notes/note-a' && method === 'GET') {
+        return {
+          id: 'note-a',
+          title: 'Graph seed note',
+          content: 'Seed content',
+          metadata: { keywords: [] },
+          version: 1,
+          last_modified: '2026-02-18T10:00:00.000Z'
+        }
+      }
+      return {}
+    })
+
+    renderPage()
+    await seedAndSaveNote()
+    fireEvent.click(screen.getByTestId('notes-view-mode-graph'))
+    await screen.findByTestId('notes-graph-workspace')
+
+    const props = mockGraphWorkspace.mock.calls.at(-1)?.[0] as {
+      notePreview: { noteId: string; title: string; content: string } | null
+      onOpenInEditor: (noteId: string) => void
+      tagOptions: string[]
+    }
+    expect(props.notePreview).toEqual(
+      expect.objectContaining({ noteId: 'note-a', title: 'Graph seed note', content: 'Seed content' })
+    )
+    expect(Array.isArray(props.tagOptions)).toBe(true)
+
+    act(() => props.onOpenInEditor('note-a'))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('notes-graph-workspace')).not.toBeInTheDocument()
+    })
+    expect(screen.getByPlaceholderText('Title')).toHaveValue('Graph seed note')
+    expect(screen.getByTestId('notes-view-mode-list')).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('shows loading and empty states for relation panels', async () => {

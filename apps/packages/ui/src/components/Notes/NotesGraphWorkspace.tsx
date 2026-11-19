@@ -8,11 +8,21 @@ import { NotesEditorEmptyState } from "./NotesEditorPane"
 import NotesGraphCanvas, {
   type NotesGraphCanvasHandle
 } from "./NotesGraphCanvas"
+import NotesGraphFilters from "./NotesGraphFilters"
 import NotesGraphInspector from "./NotesGraphInspector"
+import NotesGraphNotePreview, {
+  type NotesGraphNotePreviewData
+} from "./NotesGraphNotePreview"
 import NotesGraphRelationshipsView from "./NotesGraphRelationshipsView"
 import NotesGraphToolbar from "./NotesGraphToolbar"
 import { useNotesGraphSuggestions } from "./hooks/useNotesGraphSuggestions"
 import { useNotesGraphWorkspace } from "./hooks/useNotesGraphWorkspace"
+import {
+  NOTES_GRAPH_TREE_LAYOUT_LIMIT,
+  countVisibleNotesGraphEdges,
+  keepLinkedNotes,
+  resolveNotesGraphCanvasLayout
+} from "./notes-graph-view"
 import {
   NOTES_EDITOR_REGION_ID,
   normalizeGraphNoteId
@@ -28,6 +38,12 @@ type NotesGraphWorkspaceProps = {
   onCreateNote: () => void
   isMobileViewport?: boolean
   onOpenSidebar?: () => void
+  /** The open note's title and text, previewed beside the graph (NL-11). */
+  notePreview?: NotesGraphNotePreviewData | null
+  /** Leaves Graph for the editor, with the note still open. */
+  onOpenInEditor?: (noteId: string) => void
+  /** Tags offered by the graph's tag filter. */
+  tagOptions?: string[]
 }
 
 const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
@@ -39,7 +55,10 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
   onSelectNote,
   onCreateNote,
   isMobileViewport = false,
-  onOpenSidebar
+  onOpenSidebar,
+  notePreview = null,
+  onOpenInEditor,
+  tagOptions
 }) => {
   const { t } = useTranslation(["option", "common"])
   const rootRef = React.useRef<HTMLElement | null>(null)
@@ -93,6 +112,14 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     setStoredSelection(selection)
   }
   const [showProvisional, setShowProvisional] = React.useState(true)
+  const [linkedOnly, setLinkedOnly] = React.useState(false)
+  // The note last picked in the graph itself: a selection change it causes is
+  // not a list pick, so it must not re-centre the graph (NL-11).
+  const graphPickRef = React.useRef<string | null>(null)
+  const lastSelectionRef = React.useRef({
+    authorityScope,
+    noteId: normalizeGraphNoteId(selectedNoteId) || null
+  })
   const [viewMode, setViewMode] = React.useState<"canvas" | "relationships">(
     "canvas"
   )
@@ -140,6 +167,50 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     () => new Set(workspace.graph?.nodes.map((node) => node.id) ?? []),
     [workspace.graph]
   )
+  const displayGraph = React.useMemo(() => {
+    if (!workspace.graph || !linkedOnly) return workspace.graph
+    const keepNodeId =
+      workspace.scope === "focused" && workspace.focusNoteId
+        ? `note:${workspace.focusNoteId}`
+        : null
+    return keepLinkedNotes(workspace.graph, workspace.visibleEdgeTypes, keepNodeId)
+  }, [
+    linkedOnly,
+    workspace.focusNoteId,
+    workspace.graph,
+    workspace.scope,
+    workspace.visibleEdgeTypes
+  ])
+  // A note picked in the notes list while in Graph re-centres the graph on it
+  // (NL-11): All notes pans to it, a focused graph refocuses on it.
+  const workspaceScope = workspace.scope
+  const focusWorkspaceNote = workspace.focus
+  React.useEffect(() => {
+    const noteId = normalizeGraphNoteId(selectedNoteId) || null
+    const previous = lastSelectionRef.current
+    lastSelectionRef.current = { authorityScope, noteId }
+    if (
+      previous.authorityScope !== authorityScope ||
+      !noteId ||
+      previous.noteId === noteId
+    )
+      return
+    const pickedInGraph = graphPickRef.current === noteId
+    graphPickRef.current = null
+    if (pickedInGraph) return
+    const nodeId = `note:${noteId}`
+    if (workspaceScope === "all" && loadedNodeIds.has(nodeId)) {
+      canvasRef.current?.focusNode(nodeId)
+    } else {
+      focusWorkspaceNote(noteId)
+    }
+  }, [
+    authorityScope,
+    focusWorkspaceNote,
+    loadedNodeIds,
+    selectedNoteId,
+    workspaceScope
+  ])
   const selectedNodeCandidate =
     selection.nodeId ??
     (workspace.focusNoteId ? `note:${workspace.focusNoteId}` : null)
@@ -186,7 +257,11 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
         controlledNodeId: normalizedSelectedId,
         nodeId
       })
-      if (nodeId.startsWith("note:")) onSelectNote(normalizeGraphNoteId(nodeId))
+      if (nodeId.startsWith("note:")) {
+        const noteId = normalizeGraphNoteId(nodeId)
+        graphPickRef.current = noteId
+        onSelectNote(noteId)
+      }
     },
     [authorityScope, normalizedSelectedId, onSelectNote]
   )
@@ -286,8 +361,9 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     )
   }
 
+  const tagFilter = workspace.tagFilter ?? null
   const disabledReason =
-    workspace.graph && !workspace.allNotes.eligible ? (
+    workspace.graph && !workspace.allNotes.eligible && !tagFilter ? (
       <p
         className="border-b border-border bg-surface px-3 py-2 text-xs text-text-muted"
         data-testid="notes-graph-all-disabled-reason">
@@ -296,9 +372,40 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
             "All notes is available for up to {{cap}} active notes. This library has {{count}}.",
           cap: workspace.allNotes.effectiveNoteCap,
           count: workspace.allNotes.activeNoteCount
+        })}{" "}
+        {t("option:notesSearch.graphAllNotesFilterHint", {
+          defaultValue: "Pick a tag to see part of it."
         })}
       </p>
     ) : null
+  const canvasLayout = displayGraph
+    ? resolveNotesGraphCanvasLayout(
+        workspace.layout,
+        displayGraph.nodes.length,
+        countVisibleNotesGraphEdges(displayGraph, workspace.visibleEdgeTypes)
+      )
+    : workspace.layout
+  const layoutFallbackNotice =
+    viewMode === "canvas" && canvasLayout !== workspace.layout ? (
+      <p
+        className="border-b border-border bg-surface px-3 py-2 text-xs text-text-muted"
+        data-testid="notes-graph-layout-fallback"
+        role="status">
+        {t("option:notesSearch.graphLayoutFallback", {
+          defaultValue:
+            "This graph is large, so it uses the Rings layout. Tree works up to {{nodes}} items and {{links}} links.",
+          nodes: NOTES_GRAPH_TREE_LAYOUT_LIMIT.nodes,
+          links: NOTES_GRAPH_TREE_LAYOUT_LIMIT.edges
+        })}
+      </p>
+    ) : null
+  const selectedNoteKey = normalizeGraphNoteId(selectedNoteId) || null
+  const preview =
+    notePreview &&
+    selectedNoteKey &&
+    normalizeGraphNoteId(notePreview.noteId) === selectedNoteKey
+      ? notePreview
+      : null
 
   // With no note open, the focus is a fallback (the most recent or first
   // visible note); say so rather than centring on it silently (NL-14).
@@ -386,6 +493,15 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
           semanticThreshold={workspace.semantic.threshold}
           canExpand={workspace.canExpand}
           isRefreshing={workspace.graphQuery.isFetching}
+          filterControls={
+            <NotesGraphFilters
+              tagOptions={tagOptions ?? []}
+              tag={tagFilter}
+              linkedOnly={linkedOnly}
+              onTagChange={(tag) => workspace.filterByTag?.(tag)}
+              onLinkedOnlyChange={setLinkedOnly}
+            />
+          }
           onSearchChange={workspace.setSearch}
           onViewModeChange={setViewMode}
           onSelectSearchResult={handleSelectSearchResult}
@@ -414,6 +530,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
       )}
       {disabledReason}
       {focusFallbackHint}
+      {layoutFallbackNotice}
       {workspace.isOffline && !workspace.isPermissionDenied ? (
         <p
           className="border-b border-border bg-surface px-3 py-2 text-xs text-text-muted"
@@ -459,7 +576,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
             defaultValue: "Could not load the notes graph."
           })}
         </div>
-      ) : workspace.graph ? (
+      ) : workspace.graph && displayGraph ? (
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           <div
             className="min-h-[420px] min-w-0 flex-1 sm:min-h-[520px]"
@@ -468,8 +585,8 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
               <div className="h-full" data-testid="notes-graph-canvas-slot">
                 <NotesGraphCanvas
                   ref={canvasRef}
-                  graph={workspace.graph}
-                  layout={workspace.layout}
+                  graph={displayGraph}
+                  layout={canvasLayout}
                   focusNoteId={workspace.focusNoteId}
                   selectedNodeId={currentSelectedNodeId}
                   visibleEdgeTypes={workspace.visibleEdgeTypes}
@@ -483,7 +600,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
               </div>
             ) : (
               <NotesGraphRelationshipsView
-                graph={workspace.graph}
+                graph={displayGraph}
                 selectedNodeId={currentSelectedNodeId}
                 visibleEdgeTypes={workspace.visibleEdgeTypes}
                 provisionalOverlays={
@@ -517,6 +634,12 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
           <div
             className="max-h-[min(420px,45vh)] min-h-[280px] flex-none overflow-y-auto scroll-pb-28 border-t border-border pb-28 lg:h-auto lg:max-h-none lg:min-h-0 lg:w-[360px] lg:border-l lg:border-t-0"
             data-testid="notes-graph-inspector-region">
+            {preview ? (
+              <NotesGraphNotePreview
+                preview={preview}
+                onOpenInEditor={onOpenInEditor}
+              />
+            ) : null}
             <NotesGraphInspector
               graph={workspace.graph}
               selectedNodeId={currentSelectedNodeId}

@@ -6176,6 +6176,36 @@
   "notesSearch_graphScopeAll": {
     "message": "All notes"
   },
+  "notesSearch_graphFilters": {
+    "message": "Graph filters"
+  },
+  "notesSearch_graphFilterTag": {
+    "message": "Tag"
+  },
+  "notesSearch_graphFilterAnyTag": {
+    "message": "All tags"
+  },
+  "notesSearch_graphFilterLinkedOnly": {
+    "message": "Linked notes only"
+  },
+  "notesSearch_graphAllNotesFilterHint": {
+    "message": "Pick a tag to see part of it."
+  },
+  "notesSearch_graphLayoutFallback": {
+    "message": "This graph is large, so it uses the Rings layout. Tree works up to {{nodes}} items and {{links}} links."
+  },
+  "notesSearch_graphPreviewHeading": {
+    "message": "Note preview"
+  },
+  "notesSearch_graphPreviewUntitled": {
+    "message": "Untitled note"
+  },
+  "notesSearch_graphPreviewEmpty": {
+    "message": "This note has no text yet."
+  },
+  "notesSearch_graphOpenInEditor": {
+    "message": "Open in editor"
+  },
   "notesSearch_graphFocusCurrent": {
     "message": "Focus current note"
   },

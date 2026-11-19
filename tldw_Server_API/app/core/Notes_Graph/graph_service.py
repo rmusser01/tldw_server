@@ -65,7 +65,9 @@ NOTES_GRAPH_ENABLED = lambda: _env_bool("NOTES_GRAPH_ENABLED", True)  # noqa: E7
 MAX_NODES = lambda: _env_int("NOTES_GRAPH_MAX_NODES", 300)  # noqa: E731
 MAX_EDGES = lambda: _env_int("NOTES_GRAPH_MAX_EDGES", 1200)  # noqa: E731
 MAX_DEGREE = lambda: _env_int("NOTES_GRAPH_MAX_DEGREE", 40)  # noqa: E731
-ALL_NOTES_NOTE_CAP = lambda: _env_int("NOTES_GRAPH_ALL_NOTES_NOTE_CAP", 100)  # noqa: E731
+# The most active notes the All-notes graph shows (NL-11). One setting governs the
+# All-notes eligibility, the seedless guard and the library graph's node budget.
+ALL_NOTES_NOTE_CAP = lambda: _env_int("NOTES_GRAPH_ALL_NOTES_NOTE_CAP", 500)  # noqa: E731
 POPULAR_TAG_CUTOFF = lambda: _env_float("NOTES_GRAPH_POPULAR_TAG_CUTOFF", 0.15)  # noqa: E731
 POPULAR_TAG_ABSOLUTE_MIN = lambda: _env_int("NOTES_GRAPH_POPULAR_TAG_ABSOLUTE_MIN", 25)  # noqa: E731
 
@@ -83,6 +85,16 @@ _CURSOR_MAX_ENCODED_BYTES = 8 * 1024
 _CURSOR_MAX_DECODED_BYTES = 4 * 1024
 _LINK_CURSOR_MAX_BYTES = 4 * 1024
 _SEMANTIC_ADMISSION_ALLOWANCE = DEFAULT_SEMANTIC_INDEX_SETTINGS.max_query_neighbors
+
+
+def _all_notes_note_cap() -> int:
+    """The All-notes cap, leaving the projection's room for tag and source nodes."""
+    return min(max(1, ALL_NOTES_NOTE_CAP()), _PROJECTION_QUERY_MAX_NOTES - _TAG_CAP - _SOURCE_CAP)
+
+
+def _library_node_budget() -> int:
+    """Nodes a graph with no focus note may hold: every note under the cap, its tags and sources."""
+    return _all_notes_note_cap() + _TAG_CAP + _SOURCE_CAP
 
 
 class GraphProjectionNotReadyError(InputError):
@@ -496,7 +508,7 @@ class NoteGraphService:
             else max_edges_override
         )
         active_note_count = self._db.count_user_notes(include_deleted=False)
-        all_notes_note_cap = min(max(1, ALL_NOTES_NOTE_CAP()), eff_max_nodes)
+        all_notes_note_cap = _all_notes_note_cap()
         ordinary_edge_types = [
             edge_type.value
             for edge_type in resolved_edge_types
@@ -667,7 +679,7 @@ class NoteGraphService:
         all_nodes: list[GraphNode] = list(note_node_map.values()) + list(tag_nodes.values()) + list(source_nodes.values())
         all_nodes, edges, truncated, truncated_by = self._apply_pruning(
             all_nodes, edges, eff_max_nodes, eff_max_edges, eff_max_degree,
-            truncated, truncated_by,
+            truncated, truncated_by, library_wide=req.center_note_id is None,
         )
 
         # 12. Build cursor
@@ -814,6 +826,9 @@ class NoteGraphService:
 
         heavy_allowed = bool(req.allow_heavy and self._allow_heavy_limits)
         hard_max_nodes = default_max_nodes * 2 if heavy_allowed else default_max_nodes
+        if req.center_note_id is None:
+            # All notes, or a tag or source filter: room for every note under the cap (NL-11).
+            hard_max_nodes = max(hard_max_nodes, _library_node_budget())
         hard_max_edges = default_max_edges * 2 if heavy_allowed else default_max_edges
         hard_max_degree = default_max_degree * 2 if heavy_allowed else default_max_degree
 
@@ -866,7 +881,7 @@ class NoteGraphService:
         total = self._db.count_user_notes(include_deleted=False)
         if total == 0:
             return []
-        if total <= max_nodes:
+        if total <= min(max_nodes, _all_notes_note_cap()):
             return self._db.get_all_note_ids_for_graph(include_deleted=False, limit=max_nodes)
 
         if req.allow_heavy and self._allow_heavy_limits:
@@ -1275,17 +1290,24 @@ class NoteGraphService:
         max_degree: int,
         truncated: bool,
         truncated_by: list[str],
+        *,
+        library_wide: bool = False,
     ) -> tuple[list[GraphNode], list[GraphEdge], bool, list[str]]:
-        """Apply per-type caps and global limits."""
+        """Apply per-type caps and global limits.
+
+        A graph with no focus note (``library_wide``) keeps every note under the
+        All-notes cap; a focused graph keeps at most ``_NOTE_CAP`` notes.
+        """
         truncated_by = list(truncated_by)  # copy
+        note_cap = max(_NOTE_CAP, _all_notes_note_cap()) if library_wide else _NOTE_CAP
 
         # Per-type node caps
         note_nodes = [n for n in nodes if n.type == "note"]
         tag_nodes = [n for n in nodes if n.type == "tag"]
         source_nodes = [n for n in nodes if n.type == "source"]
 
-        if len(note_nodes) > _NOTE_CAP:
-            note_nodes = note_nodes[:_NOTE_CAP]
+        if len(note_nodes) > note_cap:
+            note_nodes = note_nodes[:note_cap]
             truncated = True
             if "max_nodes" not in truncated_by:
                 truncated_by.append("max_nodes")

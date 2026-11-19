@@ -2936,6 +2936,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           onCreateNote={() => {
             void handleNewNote()
           }}
+          notePreview={ed.selectedId == null ? null : { noteId: String(ed.selectedId), title: ed.title, content: ed.content, loading: ed.loadingDetail }}
+          onOpenInEditor={() => list.setListViewMode('list')}
+          tagOptions={kw.availableKeywords}
         />
       ) : list.listMode === 'trash' && showEditorEmptyState ? (
         <NotesTrashGuidance isMobileViewport={isMobileViewport} onShowTrashList={() => setMobileSidebarOpen(true)} onBackToNotes={() => { void ed.switchListMode('active') }} />

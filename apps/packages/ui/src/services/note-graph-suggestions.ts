@@ -236,6 +236,8 @@ export type FetchNotesGraphInput = {
   centerNoteId?: string
   datasetId?: string
   radius?: 1 | 2
+  /** Seeds a graph with no focus note from the notes with this tag (NL-11). */
+  tag?: string
   edgeTypes?: NotesGraphEdgeType[]
   maxNodes?: number
   maxEdges?: number
@@ -810,6 +812,7 @@ const graphInputSchema = z
       .union([z.literal(1), z.literal(2)])
       .optional()
       .default(1),
+    tag: z.string().trim().min(1).max(255).optional(),
     edgeTypes: z.array(edgeTypeSchema).optional().default([]),
     maxNodes: z.number().int().min(1).optional().default(120),
     maxEdges: z.number().int().min(0).optional().default(480),
@@ -866,6 +869,7 @@ export const fetchNotesGraph = async (
       ["center_note_id", parsed.centerNoteId],
       ["dataset_id", parsed.datasetId],
       ["radius", parsed.radius],
+      ["tag", parsed.tag],
       [
         "edge_types",
         parsed.edgeTypes.length ? parsed.edgeTypes.join(",") : undefined

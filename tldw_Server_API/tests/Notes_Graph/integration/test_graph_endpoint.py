@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Notes_Graph import graph_service as graph_service_module
 
 pytestmark = pytest.mark.integration
 
@@ -242,11 +243,12 @@ def test_cytoscape_format(client_and_db):
     assert "truncated" in data
     assert "limits" in data
     assert data["active_note_count"] == 1
-    assert data["all_notes_note_cap"] == min(100, data["limits"]["max_nodes"])
+    # The All-notes cap, not this focused response's max_nodes (NL-11).
+    assert data["all_notes_note_cap"] == graph_service_module._all_notes_note_cap()
     assert data["all_notes_eligible"] is True
 
 
-def test_graph_read_metadata_is_owner_scoped_and_effective_cap_is_clamped(
+def test_graph_read_metadata_is_owner_scoped_and_reports_the_all_notes_cap(
     client_and_db,
     monkeypatch,
 ):
@@ -268,8 +270,10 @@ def test_graph_read_metadata_is_owner_scoped_and_effective_cap_is_clamped(
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["active_note_count"] == 3
-    assert data["all_notes_note_cap"] == 2
-    assert data["all_notes_eligible"] is False
+    # An All-notes request has its own node budget, so a focused graph's
+    # max_nodes no longer clamps the cap it reports (NL-11).
+    assert data["all_notes_note_cap"] == 100
+    assert data["all_notes_eligible"] is True
     assert data["limits"]["max_nodes"] == 2
 
 

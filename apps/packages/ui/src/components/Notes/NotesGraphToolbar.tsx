@@ -45,6 +45,8 @@ type NotesGraphToolbarProps = {
   semanticThreshold: number
   canExpand: boolean
   isRefreshing: boolean
+  /** Graph filters (NL-11), shown after the scope buttons. */
+  filterControls?: React.ReactNode
   onSearchChange: (value: string) => void
   onViewModeChange: (mode: "canvas" | "relationships") => void
   onSelectSearchResult: (nodeId: string) => void
@@ -124,6 +126,7 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
   semanticThreshold,
   canExpand,
   isRefreshing,
+  filterControls,
   onSearchChange,
   onViewModeChange,
   onSelectSearchResult,
@@ -243,13 +246,16 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
             type="button"
             className={`border-l border-border px-3 text-sm ${scope === "all" ? "bg-primary text-primary-foreground" : "bg-surface text-text"}`}
             aria-pressed={scope === "all"}
-            disabled={!allNotes.eligible}
+            // A tag filter shows part of a library over the cap (NL-11).
+            disabled={!allNotes.eligible && scope !== "all"}
             onClick={onShowAllNotes}>
             {t("option:notesSearch.graphScopeAll", {
               defaultValue: "All notes"
             })}
           </button>
         </div>
+
+        {filterControls}
 
         {semanticAvailable || semanticEnabled ? (
           <fieldset className="flex min-h-11 min-w-0 flex-wrap items-end gap-2 border border-border bg-surface px-2 py-1">

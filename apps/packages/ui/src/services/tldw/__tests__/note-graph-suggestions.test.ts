@@ -657,6 +657,28 @@ describe("Notes graph suggestion client", () => {
     })
   })
 
+  it("sends a tag filter for a graph with no focus note (NL-11)", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      nodes: [],
+      edges: [],
+      truncated: false,
+      truncated_by: [],
+      has_more: false,
+      cursor: null,
+      limits: { max_nodes: 625, max_edges: 1200, max_degree: 40 },
+      radius_cap_applied: false,
+      active_note_count: 2000,
+      all_notes_note_cap: 500,
+      all_notes_eligible: false
+    })
+
+    await fetchNotesGraph({ tag: " reading list ", maxNodes: 1000 })
+
+    expect(mocks.bgRequest.mock.calls[0][0].path).toBe(
+      "/api/v1/notes/graph?radius=1&tag=reading+list&max_nodes=1000&max_edges=480"
+    )
+  })
+
   it("rejects semantic top-k above the backend contract", async () => {
     await expect(
       fetchNotesGraph({ edgeTypes: ["semantic"], semanticTopK: 51 })
