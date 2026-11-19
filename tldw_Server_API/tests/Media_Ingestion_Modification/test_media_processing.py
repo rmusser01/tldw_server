@@ -6,6 +6,7 @@
 import hashlib
 import importlib.util
 import os
+import shutil
 import sqlite3
 import uuid
 from pathlib import Path
@@ -13,6 +14,7 @@ import time
 import json # Added for potential debugging
 from typing import Dict
 from unittest.mock import AsyncMock, patch
+from urllib.parse import urlparse
 
 # 3rd-party Libraries
 import httpx
@@ -25,6 +27,7 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.DB_Manager import get_all_document_versions
 from tldw_Server_API.tests.MediaDB2.test_sqlite_db import get_entity_version, get_latest_log
 from tldw_Server_API.tests.Media_Ingestion_Modification.test_add_media_endpoint import override_get_request_user
+from tldw_Server_API.tests.helpers.offline_network import allow_egress_hosts
 from tldw_Server_API.tests.test_utils import (
     skip_if_transcription_model_unavailable,
     temp_db,
@@ -364,125 +367,35 @@ def check_media_item_result(result, expected_status, check_db_fields=False): # D
         f"Expected None or empty error for Success status, got '{result['error']}'"
 
 
-def _is_fixture_download_failure(message: str) -> bool:
-    normalized = message.lower()
-    return any(
-        marker in normalized
-        for marker in (
-            "download failed",
-            "download/preparation failed",
-            "downloaderror",
-            "url blocked by security policy",
-            "host could not be resolved",
-            "name or service not known",
-            "host not in allowlist",
-            "timed out",
-            "too many requests",
-            "video processing failed",
-        )
-    )
+FIXTURE_DOWNLOADS = {
+    urlparse(VALID_PDF_URL).hostname: ("application/pdf", SAMPLE_PDF_PATH),
+    urlparse(VALID_EPUB_URL).hostname: ("application/epub+zip", SAMPLE_EPUB_PATH),
+    urlparse(VALID_TXT_URL).hostname: ("text/plain", None),
+}
 
 
-def skip_if_external_fixture_url_unreachable(
-    response,
-    fixture_url: str,
-    fixture_label: str,
-    *,
-    allow_single_error_fallback: bool = True,
-) -> None:
-    """Skip tests when an external media fixture is temporarily unavailable."""
-    if response.status_code != 207:
-        return
+@pytest.fixture
+def fixture_downloads_served(monkeypatch):
+    """The shared downloader's HTTP client answers the fixture URLs from the sample files; nothing leaves the machine.
 
-    data = response.json()
-    if data.get("errors_count", 0) <= 0:
-        return
+    INVALID_URL never reaches the client: the downloader fails a ``.invalid`` host fast in tests.
+    """
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import download_utils
 
-    result_errors = [
-        result
-        for result in data.get("results", [])
-        if isinstance(result, dict) and result.get("status") == "Error"
-    ]
-    for result in result_errors:
-        if (
-            result.get("input_ref") == fixture_url
-            and _is_fixture_download_failure(str(result.get("error", "")))
-        ):
-            pytest.skip(f"{fixture_label} download failed - likely due to transient network access")
-
-    combined_errors = " ".join(
-        [str(data.get("errors", []))]
-        + [str(result.get("error", "")) for result in result_errors]
-    )
-    if (
-        allow_single_error_fallback
-        and len(result_errors) == 1
-        and _is_fixture_download_failure(combined_errors)
-    ):
-        pytest.skip(f"{fixture_label} download failed - likely due to transient network access")
-
-
-def skip_if_valid_video_url_unreachable(response) -> None:
-    """Skip tests when the external YouTube fixture is temporarily unavailable."""
-    skip_if_external_fixture_url_unreachable(response, VALID_VIDEO_URL, "YouTube video")
-
-
-class _FakeBatchResponse:
-    def __init__(self, payload: Dict, status_code: int = 207) -> None:
-        self._payload = payload
-        self.status_code = status_code
-
-    def json(self) -> Dict:
-        return self._payload
-
-
-def test_skip_if_external_fixture_url_unreachable_skips_pdf_download_failure() -> None:
-    response = _FakeBatchResponse(
-        {
-            "results": [
-                {
-                    "status": "Error",
-                    "input_ref": VALID_PDF_URL,
-                    "error": "Download/preparation failed",
-                }
-            ],
-            "errors": ["Download/preparation failed"],
-            "errors_count": 1,
-        }
-    )
-
-    with pytest.raises(pytest.skip.Exception, match="PDF fixture download failed"):
-        skip_if_external_fixture_url_unreachable(
-            response,
-            VALID_PDF_URL,
-            "PDF fixture",
+    def respond(request: httpx.Request) -> httpx.Response:
+        content_type, sample = FIXTURE_DOWNLOADS[request.url.host]
+        body = sample.read_bytes() if sample else b"GNU GENERAL PUBLIC LICENSE\nThis license applies to the program."
+        return httpx.Response(
+            200, headers={"content-type": content_type, "content-length": str(len(body))}, content=body
         )
 
+    transport = httpx.MockTransport(respond)
 
-def test_skip_if_external_fixture_url_unreachable_preserves_unrelated_download_error() -> None:
-    response = _FakeBatchResponse(
-        {
-            "results": [
-                {
-                    "status": "Error",
-                    "input_ref": INVALID_URL,
-                    "error": "Download/preparation failed",
-                }
-            ],
-            "errors": ["Download/preparation failed"],
-            "errors_count": 1,
-        }
-    )
+    def create_client(**kwargs):
+        return httpx.AsyncClient(timeout=kwargs.get("timeout", 60.0), transport=transport)
 
-    try:
-        skip_if_external_fixture_url_unreachable(
-            response,
-            VALID_EPUB_URL,
-            "EPUB fixture",
-            allow_single_error_fallback=False,
-        )
-    except pytest.skip.Exception as exc:
-        pytest.fail(f"Unexpected skip for unrelated fixture error: {exc}")
+    monkeypatch.setattr(download_utils, "_create_async_client", create_client)
+    allow_egress_hosts(monkeypatch, *FIXTURE_DOWNLOADS)  # CI's egress allowlist does not name the fixture hosts
 
 
 # --- Test Classes ---
@@ -490,7 +403,26 @@ def test_skip_if_external_fixture_url_unreachable_preserves_unrelated_download_e
 class TestProcessVideos:
     ENDPOINT = "/api/v1/media/process-videos"
 
-    def test_process_video_url_success(self, client, dummy_headers):
+    @pytest.fixture
+    def offline_video_url(self, monkeypatch):
+        """yt-dlp and the STT model stand down: VALID_VIDEO_URL yields the sample video, INVALID_URL has no metadata."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import Video_DL_Ingestion_Lib as lib
+
+        def extract_metadata(url, *_args, **_kwargs):
+            return {"title": "Mock URL video", "webpage_url": url} if url == VALID_VIDEO_URL else None
+
+        def download_video(*, download_path, **_kwargs):
+            target = Path(download_path) / SAMPLE_VIDEO_PATH.name
+            shutil.copyfile(SAMPLE_VIDEO_PATH, target)
+            return str(target)
+
+        monkeypatch.setattr(lib, "extract_metadata", extract_metadata)
+        monkeypatch.setattr(lib, "download_video", download_video)
+        monkeypatch.setattr(lib, "perform_transcription", lambda *_args, **_kwargs: ("Mocked video transcript.", []))
+        # CI's egress allowlist would deny both hosts before yt-dlp is reached; the mixed test asserts the metadata error.
+        allow_egress_hosts(monkeypatch, urlparse(VALID_VIDEO_URL).hostname, urlparse(INVALID_URL).hostname)
+
+    def test_process_video_url_success(self, client, dummy_headers, offline_video_url):
 
         """Test processing a single valid video URL."""
         skip_if_transcription_model_unavailable(TEST_VIDEO_TRANSCRIPTION_MODEL)
@@ -502,7 +434,6 @@ class TestProcessVideos:
             "end_time": TEST_VIDEO_END_TIME,
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
-        skip_if_valid_video_url_unreachable(response)
 
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
@@ -606,7 +537,6 @@ class TestProcessVideos:
 
         if response.status_code == 400 and "error parsing the body" in response.text.lower():
             pytest.fail("Still getting 400 'error parsing body' after auth fix (video multi).")
-        skip_if_valid_video_url_unreachable(response)
 
         data = check_batch_response(response, 200, expected_processed=2, expected_errors=0, check_results_len=2)
         check_media_item_result(data["results"][0], "Success", check_db_fields=True)
@@ -614,7 +544,7 @@ class TestProcessVideos:
         assert {r["media_type"] for r in data["results"]} == {"video"}
         assert {r["input_ref"] for r in data["results"]} == {VALID_VIDEO_URL, SAMPLE_VIDEO_PATH.name}
 
-    def test_process_video_multi_status_mixed(self, client, dummy_headers):
+    def test_process_video_multi_status_mixed(self, client, dummy_headers, offline_video_url):
 
         """Test processing one valid URL and one invalid URL -> 207."""
         skip_if_transcription_model_unavailable(TEST_VIDEO_TRANSCRIPTION_MODEL)
@@ -626,7 +556,6 @@ class TestProcessVideos:
             "end_time": TEST_VIDEO_END_TIME,
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
-        skip_if_valid_video_url_unreachable(response)
 
         # No sleep needed for sync processing endpoint failures
         data = check_batch_response(response, 207, expected_processed=1, expected_errors=1, check_results_len=2)
@@ -724,6 +653,7 @@ class TestProcessAudios:
             Path(dest).write_bytes(b"ID3" + b"\x00" * 512)
 
         monkeypatch.setattr(Audio_Files, "http_download", fake_download)
+        allow_egress_hosts(monkeypatch, urlparse(VALID_AUDIO_URL).hostname)
 
         form_data = {
             "urls": [VALID_AUDIO_URL],
@@ -779,9 +709,15 @@ class TestProcessAudios:
         assert result["chunks"] is not None and len(result["chunks"]) > 0 # Expect chunks due to default
         assert result["analysis"] is not None and len(result["analysis"]) > 0 # Expect analysis due to default
 
-    def test_process_audio_multi_status_mixed(self, client, dummy_headers, controlled_transcription):
+    def test_process_audio_multi_status_mixed(self, client, dummy_headers, controlled_transcription, monkeypatch):
 
         """Test one valid upload and one invalid URL -> 207."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files
+
+        def fake_download(*, url, **_kwargs):
+            raise RuntimeError(f"HTTP 404 for {url}")
+
+        monkeypatch.setattr(Audio_Files, "http_download", fake_download)
         form_data = {
             "urls": [URL_404], # Use a reliable 404 URL
             "perform_analysis": "false", # Disable analysis for faster test
@@ -926,13 +862,12 @@ class TestProcessAudios:
 class TestProcessPdfs:
     ENDPOINT = "/api/v1/media/process-pdfs"
 
-    def test_process_pdf_url_success(self, client, dummy_headers):
+    def test_process_pdf_url_success(self, client, dummy_headers, fixture_downloads_served):
 
         """Test processing a single valid PDF URL."""
         # Use pymupdf4llm parser by default
         form_data = {"urls": [VALID_PDF_URL], "perform_analysis": "false"}
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
-        skip_if_external_fixture_url_unreachable(response, VALID_PDF_URL, "PDF fixture")
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success", check_db_fields=True)
@@ -1083,6 +1018,10 @@ class TestProcessPdfs:
 class TestProcessEbooks:
     ENDPOINT = "/api/v1/media/process-ebooks" # Make sure this path matches your router prefix + endpoint path
 
+    @pytest.fixture(autouse=True)
+    def _offline_epub_download(self, fixture_downloads_served):
+        """VALID_EPUB_URL is served from the sample EPUB; INVALID_URL fails as a download error."""
+
     # --- Happy Path Tests ---
 
     def test_process_ebook_url_success_defaults(self, client, dummy_headers):
@@ -1116,7 +1055,6 @@ class TestProcessEbooks:
             "extraction_method": "basic" # Test another extraction method
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
-        skip_if_external_fixture_url_unreachable(response, VALID_EPUB_URL, "EPUB fixture")
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -1153,7 +1091,6 @@ class TestProcessEbooks:
             files = {"files": (SAMPLE_EPUB_PATH.name, f, "application/epub+zip")}
             response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
-        skip_if_external_fixture_url_unreachable(response, VALID_EPUB_URL, "EPUB fixture")
         data = check_batch_response(response, 200, expected_processed=2, expected_errors=0, check_results_len=2)
         results = data["results"]
         assert len(results) == 2
@@ -1185,7 +1122,6 @@ class TestProcessEbooks:
             "perform_analysis": "false"
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
-        skip_if_external_fixture_url_unreachable(response, VALID_EPUB_URL, "EPUB fixture")
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -1200,15 +1136,6 @@ class TestProcessEbooks:
         """Test processing one valid URL and one invalid URL -> 207."""
         form_data = {"urls": [VALID_EPUB_URL, INVALID_URL], "perform_analysis": "false"}
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
-        skip_if_external_fixture_url_unreachable(
-            response,
-            VALID_EPUB_URL,
-            "EPUB fixture",
-            allow_single_error_fallback=False,
-        )
-
-        # Give potentially slow download/timeout a moment
-        time.sleep(5)
 
         data = check_batch_response(response, 207, expected_processed=1, expected_errors=1, check_results_len=2)
 
@@ -1277,7 +1204,6 @@ class TestProcessEbooks:
             "perform_analysis": "false"
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
-        skip_if_external_fixture_url_unreachable(response, VALID_EPUB_URL, "EPUB fixture")
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -1300,7 +1226,6 @@ class TestProcessEbooks:
             "api_key": "mock_key"       # Depending on process_epub implementation checks
         }
         response = client.post(self.ENDPOINT, data=form_data)
-        skip_if_external_fixture_url_unreachable(response, VALID_EPUB_URL, "EPUB fixture")
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -1333,6 +1258,7 @@ class TestProcessEbooks:
 # =============================================================================
 class TestProcessDocuments:
     ENDPOINT = "/api/v1/media/process-documents" # Adjust if needed
+
 
     # --- Helper to create dummy files ---
     @pytest.fixture(autouse=True, scope="class")
@@ -1452,7 +1378,7 @@ class TestProcessDocuments:
             assert result["error"] is not None
             assert expected_error_part in result["error"]
 
-    def test_process_doc_multiple_success(self, client, dummy_headers):
+    def test_process_doc_multiple_success(self, client, dummy_headers, fixture_downloads_served):
 
         """Test processing multiple valid inputs (URL and Upload)."""
         form_data = {"urls": [VALID_TXT_URL], "perform_analysis": "false"}
@@ -1460,7 +1386,6 @@ class TestProcessDocuments:
             files = {"files": (SAMPLE_MD_PATH.name, f, "text/markdown")}
             response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
-        skip_if_external_fixture_url_unreachable(response, VALID_TXT_URL, "TXT fixture")
         data = check_batch_response(response, 200, expected_processed=2, expected_errors=0, check_results_len=2)
         results = data["results"]
         assert len(results) == 2
@@ -1475,7 +1400,7 @@ class TestProcessDocuments:
                 found_file = True
         assert found_url and found_file
 
-    def test_process_doc_overrides_and_options(self, client, dummy_headers):
+    def test_process_doc_overrides_and_options(self, client, dummy_headers, fixture_downloads_served):
 
         """Test title/author/keywords overrides and disabling chunking."""
         test_title = "My Doc Title"
@@ -1492,7 +1417,6 @@ class TestProcessDocuments:
             "perform_chunking": "false" # Disable chunking
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
-        skip_if_external_fixture_url_unreachable(response, VALID_TXT_URL, "TXT fixture")
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")

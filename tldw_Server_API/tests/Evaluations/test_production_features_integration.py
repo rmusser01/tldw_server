@@ -37,9 +37,21 @@ from tldw_Server_API.app.core.Evaluations.user_rate_limiter import (
 from tldw_Server_API.app.core.Evaluations.webhook_manager import (
     WebhookManager, WebhookEvent, WebhookPayload
 )
+from tldw_Server_API.app.core.Evaluations.webhook_security import WebhookSecurityValidator
 from tldw_Server_API.app.core.Evaluations.metrics_advanced import (
     AdvancedEvaluationMetrics
 )
+
+
+@pytest.fixture
+def offline_webhook_validation():
+    """example.com resolves to a public address and answers the reachability probe; nothing leaves the machine."""
+    with patch("socket.getaddrinfo", return_value=[(None, None, None, None, ("93.184.216.34", 0))]), patch.object(
+        WebhookSecurityValidator,
+        "_test_connectivity",
+        AsyncMock(return_value={"reachable": True, "response_time_ms": 1, "ssl_valid": True, "error": None}),
+    ):
+        yield
 
 
 class TestDatabaseMigration:
@@ -301,7 +313,7 @@ class TestWebhookManager:
     """Test webhook management and delivery."""
 
     @pytest.mark.asyncio
-    async def test_webhook_registration(self, webhook_manager):
+    async def test_webhook_registration(self, webhook_manager, offline_webhook_validation):
         """Test webhook registration."""
         user_id = "webhook_user"
         url = "https://example.com/webhook"
@@ -317,7 +329,7 @@ class TestWebhookManager:
         assert "secret" in result
 
     @pytest.mark.asyncio
-    async def test_webhook_unregistration(self, webhook_manager):
+    async def test_webhook_unregistration(self, webhook_manager, offline_webhook_validation):
         """Test webhook unregistration."""
         user_id = "webhook_user"
         url = "https://example.com/webhook"
@@ -730,7 +742,7 @@ class TestIntegration:
     """Integration tests combining all features."""
 
     @pytest.mark.asyncio
-    async def test_full_evaluation_flow_with_features(self, tmp_path):
+    async def test_full_evaluation_flow_with_features(self, tmp_path, offline_webhook_validation):
         """Test complete evaluation flow with all new features."""
         # Setup temporary environment
         db_path = tmp_path / "integration_test.db"

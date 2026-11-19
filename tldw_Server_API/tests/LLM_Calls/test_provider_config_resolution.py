@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
     valid_provider_config_value,
 )
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+from tldw_Server_API.tests.helpers.offline_network import stub_host_resolution
 
 
 @pytest.mark.parametrize(
@@ -705,6 +706,7 @@ def test_provider_catalog_includes_env_only_numbered_custom_openai_slot(
     monkeypatch.setattr(llm_providers, "get_provider_manager", lambda: None)
     monkeypatch.setattr(llm_providers, "_llm_registry_capability_envelopes", lambda: {})
     monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_readiness.configured_endpoint_probe_enabled", lambda: False)
+    stub_host_resolution(monkeypatch)  # the endpoint policy would resolve slot-2.example
     monkeypatch.setattr(
         llm_providers,
         "_resolve_model_tokenizer_support",
