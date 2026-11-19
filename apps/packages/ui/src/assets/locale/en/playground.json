@@ -1835,5 +1835,12 @@
   },
   "focusBar": {
     "openChatList": "Open chat list"
+  },
+  "answerNote": {
+    "untitled": "Chat answer, {{date}}",
+    "fromChat": "Saved from a chat on {{date}}.",
+    "fromChatModel": "Saved from a chat ({{model}}) on {{date}}.",
+    "fromTemporaryChat": "Saved from a temporary chat on {{date}}.",
+    "fromTemporaryChatModel": "Saved from a temporary chat ({{model}}) on {{date}}."
   }
 }

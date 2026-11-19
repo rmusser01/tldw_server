@@ -2,6 +2,7 @@ import type { ChatMessageView } from "@/services/settings/ui-settings"
 import { getMessageDeleteFeedback } from "@/utils/message-delete-feedback"
 import { replaceUserDisplayNamePlaceholders } from "@/utils/chat-display-name"
 import { ChatAttachmentImage } from "./ChatAttachmentImage"
+import { canSaveAnswerAsNote, saveAnswerAsNote } from "./chat-answer-note"
 import React, { useEffect, useState, useRef } from "react"
 import { App, Tag, Tooltip, Collapse, Avatar, Modal } from "antd"
 import { LoadingStatus } from "./ActionInfo"
@@ -1257,7 +1258,10 @@ const PlaygroundMessageImpl = (props: Props) => {
     Boolean(props.serverMessageId) &&
     !props.temporaryChat &&
     !errorPayload
-  const canSaveToNotes = canSaveKnowledge && Boolean(capabilities?.hasNotes)
+  // XP-01: without a saved server message, Save to Notes makes a plain tagged note.
+  const canSaveAnswerNote = !canSaveKnowledge && canSaveAnswerAsNote({ hasNotes: Boolean(capabilities?.hasNotes),
+    isBot: props.isBot, text: errorFriendlyText || props.message, errored: Boolean(errorPayload), scope: props.scope })
+  const canSaveToNotes = (canSaveKnowledge && Boolean(capabilities?.hasNotes)) || canSaveAnswerNote
   const canSaveToFlashcards =
     canSaveKnowledge && Boolean(capabilities?.hasFlashcards)
   const canSaveToWorkspaceNotes =
@@ -1413,12 +1417,20 @@ const PlaygroundMessageImpl = (props: Props) => {
     makeFlashcard: boolean,
     reviewedCard?: NonNullable<typeof flashcardDraft>
   ) => {
-    if (!props.serverChatId || !props.serverMessageId) return
     const snippet = knowledgeSnippet
     if (!snippet) {
       messageApi.error(t("saveToNotesEmpty", "Nothing to save yet."))
       return
     }
+    if (!makeFlashcard && canSaveAnswerNote) {
+      setSavingKnowledge("note")
+      await saveAnswerAsNote({ answer: snippet, question: props.feedbackQuery, temporaryChat: Boolean(props.temporaryChat), modelName: props.modelName, t })
+        .then(() => messageApi.success(t("savedToNotes", "Saved to Notes")))
+        .catch((err: unknown) => messageApi.error(err instanceof Error ? err.message : t("somethingWentWrong")))
+        .finally(() => setSavingKnowledge(null))
+      return
+    }
+    if (!props.serverChatId || !props.serverMessageId) return
     if (makeFlashcard && !reviewedCard) {
       setFlashcardDraft({ front: "", back: snippet, sourceKey: knowledgeSourceKey })
       return

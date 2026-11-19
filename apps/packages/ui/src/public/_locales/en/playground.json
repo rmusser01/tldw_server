@@ -4967,5 +4967,20 @@
   },
   "historySelection_backToParentStaleDetail": {
     "message": "Open the original chat from the chat list."
+  },
+  "answerNote_untitled": {
+    "message": "Chat answer, {{date}}"
+  },
+  "answerNote_fromChat": {
+    "message": "Saved from a chat on {{date}}."
+  },
+  "answerNote_fromChatModel": {
+    "message": "Saved from a chat ({{model}}) on {{date}}."
+  },
+  "answerNote_fromTemporaryChat": {
+    "message": "Saved from a temporary chat on {{date}}."
+  },
+  "answerNote_fromTemporaryChatModel": {
+    "message": "Saved from a temporary chat ({{model}}) on {{date}}."
   }
 }
