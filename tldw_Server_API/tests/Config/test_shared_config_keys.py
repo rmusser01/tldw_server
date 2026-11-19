@@ -10,14 +10,17 @@ from __future__ import annotations
 import configparser
 from pathlib import Path
 
+from types import SimpleNamespace
+
 import pydantic
 import pytest
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints import setup as setup_endpoint
-from tldw_Server_API.app.core import config
+from tldw_Server_API.app.core import config, startup_preflight
 from tldw_Server_API.app.core.AuthNZ import initialize as authnz_initialize
 from tldw_Server_API.app.core.AuthNZ import settings as authnz_settings
+from tldw_Server_API.app.core.AuthNZ.db_config import AuthDatabaseConfig
 from tldw_Server_API.app.core.Chat import command_router
 from tldw_Server_API.app.core.config_sections import auth as auth_section
 from tldw_Server_API.app.core.config_sections.auth import (
@@ -30,6 +33,7 @@ from tldw_Server_API.app.core.config_sections.auth import (
 )
 from tldw_Server_API.app.core.config_sections.precedence import Resolved
 from tldw_Server_API.app.core.DB_Management import db_path_utils
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.Evaluations.config_validator import (
     EvaluationConfigValidator,
 )
@@ -418,3 +422,107 @@ def test_access_token_expire_minutes_resolves_through_config_sections(apply_ttl_
 def test_access_token_expire_minutes_is_not_in_lazy_settings(apply_ttl_case):
     apply_ttl_case("env_set")
     assert "ACCESS_TOKEN_EXPIRE_MINUTES" not in config.load_settings()
+
+
+# ---- Row 4: DATABASE_URL (split: AuthNZ users DB vs the content-backend override) ----
+
+# id -> (env DATABASE_URL, [AuthNZ] database_url, [AuthNZ] db_type, pg_password)
+DB_CASES = {
+    "env_set": ("sqlite:///./env.db", "sqlite:///./cfg.db", UNSET, UNSET),
+    "env_blank": ("", "sqlite:///./cfg.db", UNSET, UNSET),
+    "config_only": (UNSET, "sqlite:///./cfg.db", UNSET, UNSET),
+    "config_blank": (UNSET, "", "sqlite", UNSET),
+    "synth_sqlite": (UNSET, UNSET, "sqlite", UNSET),
+    "synth_postgres": (UNSET, UNSET, "postgres", "pw"),
+    "synth_postgres_no_password": (UNSET, UNSET, "postgres", UNSET),
+    "neither": (UNSET, UNSET, UNSET, UNSET),
+}
+
+
+def _db_parser(cfg_url, db_type, pg_password) -> configparser.ConfigParser:
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.add_section("AuthNZ")
+    for option, value in (("database_url", cfg_url), ("db_type", db_type), ("pg_password", pg_password)):
+        if value is not None:
+            parser.set("AuthNZ", option, value)
+    if db_type == "sqlite":
+        parser.set("AuthNZ", "sqlite_path", "./synth.db")
+    return parser
+
+
+@pytest.fixture
+def apply_db_case(monkeypatch):
+    def apply(case: str) -> configparser.ConfigParser:
+        config.clear_config_cache()
+        env_url, cfg_url, db_type, pg_password = DB_CASES[case]
+        if env_url is None:
+            monkeypatch.delenv("DATABASE_URL", raising=False)
+        else:
+            monkeypatch.setenv("DATABASE_URL", env_url)
+        monkeypatch.delenv("AUTH_MODE", raising=False)
+        monkeypatch.setattr(config, "_load_env_files_early", lambda: None)
+        parser = _db_parser(cfg_url, db_type, pg_password)
+        monkeypatch.setattr(config, "load_comprehensive_config", lambda: parser)
+        monkeypatch.setattr(authnz_settings, "load_comprehensive_config", lambda: parser)
+        authnz_settings.reset_settings()
+        return parser
+
+    yield apply
+    monkeypatch.undo()
+    config.clear_config_cache()
+    authnz_settings.reset_settings()
+
+
+AUTHNZ_DEFAULT_URL = "sqlite:///./Databases/users.db"
+DB_AUTHNZ_EXPECTED = {
+    "env_set": "sqlite:///./env.db",
+    "env_blank": "",
+    "config_only": "sqlite:///./cfg.db",
+    "config_blank": "",
+    "synth_sqlite": "sqlite:///./synth.db",
+    "synth_postgres": "postgresql://tldw_user:pw@localhost:5432/tldw_users?sslmode=prefer",
+    "synth_postgres_no_password": AUTHNZ_DEFAULT_URL,
+    "neither": AUTHNZ_DEFAULT_URL,
+}
+
+
+@pytest.mark.parametrize("case", list(DB_CASES))
+def test_database_url_resolution_today(apply_db_case, monkeypatch, case):
+    apply_db_case(case)
+    env_url = DB_CASES[case][0]
+
+    assert _outcome(lambda: authnz_settings.get_settings().DATABASE_URL) == DB_AUTHNZ_EXPECTED[case]
+
+    # LazySettings, the generic content backend and preflight read the environment alone (blank kept).
+    lazy = config.load_settings()["DATABASE_URL"]
+    assert (lazy == env_url) if env_url is not None else lazy.startswith("sqlite:///")
+
+    backend = DatabaseConfig.from_env()
+    if env_url:
+        assert backend.connection_string == env_url
+    else:
+        assert backend.connection_string is None or backend.connection_string != "sqlite:///./cfg.db"
+
+    assert startup_preflight.check_database_connectivity()["status"] == "ok"  # no case sets a postgres URL
+
+
+def test_auth_database_url_reader_prefers_the_environment_today(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@envhost:5432/envdb")
+    reader = AuthDatabaseConfig.__new__(AuthDatabaseConfig)
+    reader.settings = SimpleNamespace(DATABASE_URL="postgresql://u:p@settingshost:5432/settingsdb")
+    assert reader._get_postgresql_config().connection_string == "postgresql://u:p@envhost:5432/envdb"
+    monkeypatch.setenv("DATABASE_URL", "")
+    assert reader._get_postgresql_config().connection_string.endswith("@localhost:5432/tldw_users")
+    monkeypatch.delenv("DATABASE_URL")
+    assert reader._get_postgresql_config().connection_string == "postgresql://u:p@settingshost:5432/settingsdb"
+
+
+def test_preflight_reads_the_live_database_url_today(monkeypatch):
+    def refuse(*_a, **_k):
+        raise OSError("blocked")
+
+    monkeypatch.setattr("socket.create_connection", refuse)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@dbhost:6543/x")
+    assert startup_preflight.check_database_connectivity()["message"].startswith("Cannot reach Postgres at dbhost:6543")
+    monkeypatch.setenv("DATABASE_URL", "")
+    assert startup_preflight.check_database_connectivity()["status"] == "ok"
