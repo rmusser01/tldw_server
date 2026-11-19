@@ -3234,7 +3234,7 @@ const PlaygroundContent = () => {
         kind: "media" as const,
         label: toText(t("playground:cockpit.media", "Media")),
         title: toText(
-          t("playground:cockpit.mediaScopeLabel", "Media scope {{id}}", {
+          t("playground:cockpit.mediaScopeLabel", "Media item {{id}}", {
             id: mediaId,
           }),
         ),
@@ -3248,10 +3248,10 @@ const PlaygroundContent = () => {
         onOpen: () => openSearchAndContext({ tab: "context" }),
         onRemove: () => removeRagMediaAt(index),
         openLabel: toText(
-          t("playground:cockpit.openMediaSource", "Open media scope"),
+          t("playground:cockpit.openMediaSource", "Open media item"),
         ),
         removeLabel: toText(
-          t("playground:cockpit.removeMediaSource", "Remove media scope"),
+          t("playground:cockpit.removeMediaSource", "Remove media item"),
         ),
       })),
     ] satisfies Array<PlaygroundContextSource | null>
@@ -3551,11 +3551,11 @@ const PlaygroundContent = () => {
       : null,
     ragMediaIdCount > 0
       ? ragMediaIdCount === 1
-        ? toText(t("playground:cockpit.contextMediaCountOne", "1 media scope"))
+        ? toText(t("playground:cockpit.contextMediaCountOne", "1 media item"))
         : toText(
             t(
               "playground:cockpit.contextMediaCountMany",
-              `${ragMediaIdCount} media scopes`,
+              `${ragMediaIdCount} media items`,
               { count: ragMediaIdCount },
             ),
           )

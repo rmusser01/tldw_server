@@ -147,6 +147,43 @@ for (const viewport of [
   }
 }
 
+// CO-04 (#3113): at 1024px both rails left the transcript a few hundred px.
+// Below the threshold one rail is open at a time; the other waits behind its
+// tab, and swapping does not change the saved preferences.
+test('opens one rail at a time at 1024px and keeps the transcript usable', async ({ page }) => {
+  await prepareOfflinePreview(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('playgroundChatContextRailVisible', 'true');
+    localStorage.setItem('playgroundChatRuntimeRailVisible', 'true');
+    localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
+  });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 60_000 });
+  const exitFocus = page.getByRole('button', { name: 'Exit focus', exact: true });
+  if (await exitFocus.isVisible()) await exitFocus.click();
+  const left = page.getByTestId('playground-cockpit-left-rail');
+  const right = page.getByTestId('playground-cockpit-right-rail');
+  await expect(left.or(right)).toHaveCount(1);
+  const main = page.getByTestId('playground-cockpit-main');
+  const mainWidth = (await main.boundingBox())!.width;
+  expect(mainWidth, `transcript column ${mainWidth}px`).toBeGreaterThanOrEqual(480);
+  const restore = page.getByTestId('playground-cockpit-right-rail-restore');
+  if (await restore.isVisible()) {
+    await restore.click();
+    await expect(right).toBeVisible();
+    await expect(left).toHaveCount(0);
+  }
+  expect(
+    await page.evaluate(() => [
+      localStorage.getItem('playgroundChatContextRailVisible'),
+      localStorage.getItem('playgroundChatRuntimeRailVisible'),
+    ])
+  ).toEqual(['true', 'true']);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+  expect(overflow).toBe(false);
+});
+
 test('keeps independent rail visibility after reload', async ({ page }) => {
   await prepareOfflinePreview(page);
   await page.setViewportSize({ width: 1440, height: 1000 });

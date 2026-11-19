@@ -850,7 +850,7 @@ describe("Playground cockpit controls", () => {
       expect(
         within(contextRail).getByText("1 knowledge item"),
       ).toBeInTheDocument();
-      expect(within(contextRail).getByText("2 media scopes")).toBeInTheDocument();
+      expect(within(contextRail).getByText("2 media items")).toBeInTheDocument();
       expect(
         screen.queryByRole("status", { name: "Chat status" }),
       ).not.toBeInTheDocument();
@@ -887,7 +887,7 @@ describe("Playground cockpit controls", () => {
       );
       fireEvent.click(
         within(contextRail).getByRole("button", {
-          name: "Clear media scopes",
+          name: "Clear media items",
         }),
       );
       expect(messageOptionState.value.setContextFiles).toHaveBeenCalledWith([]);

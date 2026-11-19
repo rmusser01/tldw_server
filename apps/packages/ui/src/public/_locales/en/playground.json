@@ -2901,13 +2901,13 @@
     "message": "Clear knowledge"
   },
   "cockpit_contextMediaCountOne": {
-    "message": "1 media scope"
+    "message": "1 media item"
   },
   "cockpit_contextMediaCountMany": {
-    "message": "{{count}} media scopes"
+    "message": "{{count}} media items"
   },
   "cockpit_clearMediaScopes": {
-    "message": "Clear media scopes"
+    "message": "Clear media items"
   },
   "cockpit_webSearch": {
     "message": "Web search"
@@ -3240,7 +3240,7 @@
     "message": "Media"
   },
   "cockpit_mediaScopeLabel": {
-    "message": "Media scope {{id}}"
+    "message": "Media item {{id}}"
   },
   "cockpit_nextReply": {
     "message": "Used on next reply"
@@ -3251,17 +3251,8 @@
   "cockpit_turnRunning": {
     "message": "Turn running"
   },
-  "cockpit_turnIdle": {
-    "message": "Turn idle"
-  },
-  "cockpit_providerRoute": {
-    "message": "Provider route"
-  },
   "cockpit_stop": {
     "message": "Stop"
-  },
-  "cockpit_scopedSettings": {
-    "message": "Scoped settings"
   },
   "cockpit_settingsDefault": {
     "message": "Default settings for this provider:model."

@@ -344,7 +344,7 @@ describe("PlaygroundContextRail first-slice controls", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Clear files" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear knowledge" }));
-    fireEvent.click(screen.getByRole("button", { name: "Clear media scopes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear media items" }));
     fireEvent.click(
       screen.getByRole("button", { name: "Clear research context" }),
     );
@@ -554,7 +554,7 @@ describe("PlaygroundContextRail first-slice controls", () => {
 
     expect(screen.getByText("2 files")).toBeInTheDocument();
     expect(screen.getByText("1 knowledge item")).toBeInTheDocument();
-    expect(screen.getByText("3 media scopes")).toBeInTheDocument();
+    expect(screen.getByText("3 media items")).toBeInTheDocument();
     expect(screen.getByText("1 research attachment")).toBeInTheDocument();
   });
 
@@ -571,7 +571,7 @@ describe("PlaygroundContextRail first-slice controls", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clear files" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear knowledge" }));
-    fireEvent.click(screen.getByRole("button", { name: "Clear media scopes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear media items" }));
     fireEvent.click(
       screen.getByRole("button", { name: "Clear research context" }),
     );

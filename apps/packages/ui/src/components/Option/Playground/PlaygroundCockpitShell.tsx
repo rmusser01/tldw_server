@@ -9,6 +9,11 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { COCKPIT_LEFT_RESTORE_WRAPPER_CLASS } from "@/components/Layouts/chat-rail-positioning";
+import {
+  resolveCockpitRailLayout,
+  useCockpitBodyWidth,
+  type CockpitRail,
+} from "./playground-cockpit-rail-layout";
 
 export type PlaygroundCockpitMode = "cockpit" | "focus";
 export type PlaygroundCockpitMobilePanel = "context" | "runtime" | null;
@@ -133,13 +138,45 @@ export const PlaygroundCockpitShell = ({
   const [uncontrolledMobilePanel, setUncontrolledMobilePanel] =
     React.useState<PlaygroundCockpitMobilePanel>("context");
   const focusMode = mode === "focus";
+  // Width-aware rails (CO-04): measure the body, and when only one rail
+  // fits, show the one opened last. The saved preferences stay as they are.
+  const bodyRef = React.useRef<HTMLDivElement | null>(null);
+  const bodyWidth = useCockpitBodyWidth(bodyRef);
+  const [preferredRail, setPreferredRail] =
+    React.useState<CockpitRail>("context");
+  const previousRailVisibilityRef = React.useRef({
+    context: leftRailVisible,
+    runtime: rightRailVisible,
+  });
+  React.useEffect(() => {
+    const previous = previousRailVisibilityRef.current;
+    if (rightRailVisible && !previous.runtime) setPreferredRail("runtime");
+    else if (leftRailVisible && !previous.context) setPreferredRail("context");
+    previousRailVisibilityRef.current = {
+      context: leftRailVisible,
+      runtime: rightRailVisible,
+    };
+  }, [leftRailVisible, rightRailVisible]);
+  const railLayout = resolveCockpitRailLayout({
+    width: bodyWidth,
+    contextVisible: leftRailVisible,
+    runtimeVisible: rightRailVisible,
+    preferred: preferredRail,
+  });
+  const openRail = (rail: CockpitRail) => {
+    setPreferredRail(rail);
+    if (rail === "context") onLeftRailVisibleChange?.(true);
+    else onRightRailVisibleChange?.(true);
+  };
   const mobileContextButtonId = "playground-cockpit-mobile-context-tab";
   const mobileRuntimeButtonId = "playground-cockpit-mobile-runtime-tab";
   const mobileContextPanelId = "playground-cockpit-mobile-context-panel";
   const mobileRuntimePanelId = "playground-cockpit-mobile-runtime-panel";
   const mobilePanelSummaryId = "playground-cockpit-mobile-panel-summary";
-  const showLeftRail = !focusMode && leftRailVisible;
-  const showRightRail = !focusMode && rightRailVisible;
+  const showLeftRail = !focusMode && railLayout.context !== "hidden";
+  const showRightRail = !focusMode && railLayout.runtime !== "hidden";
+  const leftRailInline = showLeftRail && railLayout.context === "inline";
+  const rightRailInline = showRightRail && railLayout.runtime === "inline";
   const resolvedMobilePanel =
     mobilePanel !== undefined ? mobilePanel : uncontrolledMobilePanel;
   const setMobilePanel = React.useCallback(
@@ -188,12 +225,12 @@ export const PlaygroundCockpitShell = ({
     "cockpit.restoreRuntimeSidechannel",
     "Show runtime",
   );
-  const contextRailTabLabel = t("cockpit.contextRailTab", "Context rail");
-  const runtimeRailTabLabel = t("cockpit.runtimeRailTab", "Runtime rail");
+  const contextRailTabLabel = t("cockpit.contextRailTab", "Context");
+  const runtimeRailTabLabel = t("cockpit.runtimeRailTab", "Runtime");
   const modeSummaryKey = buildModeSummaryKey(
     focusMode,
-    leftRailVisible,
-    rightRailVisible,
+    showLeftRail,
+    showRightRail,
   );
   const modeSummary =
     modeSummaryKey === "focus"
@@ -223,11 +260,11 @@ export const PlaygroundCockpitShell = ({
   const bodyClassName = focusMode
     ? "flex min-h-0 w-full min-w-0 flex-1 justify-center overflow-hidden"
     : "grid min-h-0 w-full min-w-0 flex-1 grid-cols-1 overflow-hidden lg:[grid-template-columns:var(--cockpit-grid-columns)]";
-  const cockpitGridColumns = showLeftRail
-    ? showRightRail
+  const cockpitGridColumns = leftRailInline
+    ? rightRailInline
       ? "minmax(220px,280px) minmax(0,1fr) minmax(240px,300px)"
       : "minmax(220px,280px) minmax(0,1fr)"
-    : showRightRail
+    : rightRailInline
       ? "minmax(0,1fr) minmax(240px,300px)"
       : "minmax(0,1fr)";
   const cockpitGridStyle = focusMode
@@ -235,8 +272,8 @@ export const PlaygroundCockpitShell = ({
     : ({
         "--cockpit-grid-columns": cockpitGridColumns,
       } as React.CSSProperties);
-  const showLeftRestore = !focusMode && !leftRailVisible;
-  const showRightRestore = !focusMode && !rightRailVisible;
+  const showLeftRestore = !focusMode && !showLeftRail;
+  const showRightRestore = !focusMode && !showRightRail;
   const leftRestoreWrapperClassName = showLeftRestore
     ? COCKPIT_LEFT_RESTORE_WRAPPER_CLASS
     : "absolute left-0 top-[clamp(18rem,36vh,24rem)] z-50 hidden";
@@ -384,14 +421,32 @@ export const PlaygroundCockpitShell = ({
         </div>
       )}
 
-      <div className={`${bodyClassName} relative`} style={cockpitGridStyle}>
+      <div
+        ref={bodyRef}
+        className={`${bodyClassName} relative`}
+        style={cockpitGridStyle}
+      >
         {showLeftRail && (
           <aside
             key="left-rail"
             id="playground-cockpit-left-rail"
             data-testid="playground-cockpit-left-rail"
+            data-placement={railLayout.context}
             aria-label={t("cockpit.contextLandmark", "Chat cockpit context")}
-            className="hidden min-h-0 overflow-y-auto border-r border-border bg-surface px-4 py-2 lg:block"
+            onKeyDown={
+              leftRailInline
+                ? undefined
+                : (event) => {
+                    if (event.key !== "Escape" || event.defaultPrevented) return;
+                    event.preventDefault();
+                    onLeftRailVisibleChange?.(false);
+                  }
+            }
+            className={`hidden min-h-0 overflow-y-auto border-r border-border bg-surface px-4 py-2 lg:block ${
+              leftRailInline
+                ? ""
+                : "absolute inset-y-0 left-0 z-40 w-[280px] max-w-[85%] shadow-xl"
+            }`}
           >
             <div className="sticky top-0 z-10 mb-1 flex min-h-12 items-center justify-between gap-2 border-b border-border bg-surface py-2 text-sm text-text-muted">
               <span className="font-semibold text-text">
@@ -437,8 +492,22 @@ export const PlaygroundCockpitShell = ({
             key="right-rail"
             id="playground-cockpit-right-rail"
             data-testid="playground-cockpit-right-rail"
+            data-placement={railLayout.runtime}
             aria-label={t("cockpit.runtimeLandmark", "Chat cockpit runtime")}
-            className="hidden min-h-0 overflow-y-auto border-l border-border bg-surface px-4 py-2 lg:block"
+            onKeyDown={
+              rightRailInline
+                ? undefined
+                : (event) => {
+                    if (event.key !== "Escape" || event.defaultPrevented) return;
+                    event.preventDefault();
+                    onRightRailVisibleChange?.(false);
+                  }
+            }
+            className={`hidden min-h-0 overflow-y-auto border-l border-border bg-surface px-4 py-2 lg:block ${
+              rightRailInline
+                ? ""
+                : "absolute inset-y-0 right-0 z-40 w-[300px] max-w-[85%] shadow-xl"
+            }`}
           >
             <div className="sticky top-0 z-10 mb-1 flex min-h-12 items-center justify-between gap-2 border-b border-border bg-surface py-2 text-sm text-text-muted">
               <span className="font-semibold text-text">
@@ -468,7 +537,7 @@ export const PlaygroundCockpitShell = ({
           aria-label={restoreContextSidechannelLabel}
           aria-controls="playground-cockpit-left-rail"
           aria-expanded="false"
-          onClick={() => onLeftRailVisibleChange?.(true)}
+          onClick={() => openRail("context")}
           tooltip={restoreContextSidechannelLabel}
           tooltipId="playground-cockpit-left-rail-restore-tooltip"
           tooltipPlacement="right"
@@ -488,7 +557,7 @@ export const PlaygroundCockpitShell = ({
           aria-label={restoreRuntimeSidechannelLabel}
           aria-controls="playground-cockpit-right-rail"
           aria-expanded="false"
-          onClick={() => onRightRailVisibleChange?.(true)}
+          onClick={() => openRail("runtime")}
           tooltip={restoreRuntimeSidechannelLabel}
           tooltipId="playground-cockpit-right-rail-restore-tooltip"
           tooltipPlacement="left"

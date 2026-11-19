@@ -192,15 +192,14 @@ export const PlaygroundContextRail = ({
         "Select a prompt to add system instructions.",
       )
     : effectivePromptSummary.detail;
+  // An idle session shows no status badge (CO-04: no "Idle" jargon).
   const effectiveSessionStatusLabel =
     sessionStatusLabel ||
     (sessionStatus === "failed"
       ? t("cockpit.sessionLoadFailed", "Load failed")
       : sessionStatus === "loading"
         ? t("cockpit.sessionLoading", "Loading conversation")
-        : sessionStatus === "loaded"
-          ? t("cockpit.sessionReady", READY_STATE_LABEL)
-          : t("cockpit.sessionIdle", "Idle"));
+        : t("cockpit.sessionReady", READY_STATE_LABEL));
   const sourceCountLabel =
     selectedSourceCount === 1
       ? t("cockpit.selectedSourceCountOne", "1 selected source")
@@ -272,17 +271,17 @@ export const PlaygroundContextRail = ({
       contextCounts.media > 0
         ? contextCounts.media === 1
           ? {
-              label: t("cockpit.contextMediaCountOne", "1 media scope"),
-              clearLabel: t("cockpit.clearMediaScopes", "Clear media scopes"),
+              label: t("cockpit.contextMediaCountOne", "1 media item"),
+              clearLabel: t("cockpit.clearMediaScopes", "Clear media items"),
               onClear: onClearMedia,
             }
           : {
               label: t(
                 "cockpit.contextMediaCountMany",
-                `${contextCounts.media} media scopes`,
+                `${contextCounts.media} media items`,
                 { count: contextCounts.media },
               ),
-              clearLabel: t("cockpit.clearMediaScopes", "Clear media scopes"),
+              clearLabel: t("cockpit.clearMediaScopes", "Clear media items"),
               onClear: onClearMedia,
             }
         : null,
