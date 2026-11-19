@@ -14,7 +14,7 @@ Base path: `/api/v1/storage`
 
 Downloads and cleanup operations validate resolved filesystem paths stay inside the correct per-user base directory:
 - Download traversal guard: `tldw_Server_API/app/api/v1/endpoints/storage_download.py:62`
-- Category-based base dir resolution (outputs vs voices): `tldw_Server_API/app/api/v1/endpoints/storage_helpers.py:77`
+- Category-based base dir resolution (outputs vs voices): `tldw_Server_API/app/api/v1/utils/storage_helpers.py:77`
 - Cleanup safe resolver: `tldw_Server_API/app/services/storage_cleanup_service.py:56`
 
 Voice clones (`file_category == voice_clone`) are resolved under the voices directory; other files use the outputs directory.

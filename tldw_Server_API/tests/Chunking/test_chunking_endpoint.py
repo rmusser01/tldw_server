@@ -181,11 +181,11 @@ def isolate_provider_override_store(monkeypatch):
 
 
 # --- Path for Patching `improved_chunking_process` and other direct calls ---
-# This path MUST point to where the function is imported and used
-# by your ACTUAL endpoint module (e.g., chunking.py).
-PATH_TO_ICP_IN_ENDPOINT_MODULE = "tldw_Server_API.app.core.Chunking.improved_chunking_process"
-PATH_TO_LOAD_CONFIGS_IN_ENDPOINT_MODULE = "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot"
-PATH_TO_LLM_ANALYZER_IN_ENDPOINT_MODULE = "tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze"
+# These paths name the home modules the endpoint looks the collaborators up in, so a patch
+# at the home is seen by the endpoint.
+PATH_TO_ICP_HOME = "tldw_Server_API.app.core.Chunking.improved_chunking_process"
+PATH_TO_LOAD_CONFIGS_HOME = "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.load_server_config_snapshot"
+PATH_TO_LLM_ANALYZER_HOME = "tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze"
 def _install_chunking_snapshot_rotation(monkeypatch, initial_key):
     """Install an A→B (or absent→B) static credential source for one request."""
     initial_config = {"ollama_api": {"base_url": "http://snapshot-a.invalid"}}
@@ -292,7 +292,7 @@ def _assert_chunking_boundary_snapshot(
 # --- Endpoint Test Cases ---
 
 
-@patch(PATH_TO_ICP_IN_ENDPOINT_MODULE)
+@patch(PATH_TO_ICP_HOME)
 def test_chunk_text_simple_words(mock_icp, client: TestClient):
     mock_icp.return_value = [
         {"text": "This is", "metadata": {"method": "words", "chunk_index": 1, "total_chunks": 2}},
@@ -316,7 +316,7 @@ def test_chunk_text_simple_words(mock_icp, client: TestClient):
     assert passed_options["overlap"] == 0
 
 
-@patch(PATH_TO_ICP_IN_ENDPOINT_MODULE)
+@patch(PATH_TO_ICP_HOME)
 def test_chunk_text_method_sentences(mock_icp, client: TestClient):
     mock_icp.return_value = [
         {"text": "Sentence one.", "metadata": {"method": "sentences", "chunk_index": 1, "total_chunks": 1}}
@@ -339,7 +339,7 @@ def test_chunk_text_method_sentences(mock_icp, client: TestClient):
     assert passed_options["overlap"] == 0
 
 
-@patch(PATH_TO_ICP_IN_ENDPOINT_MODULE)
+@patch(PATH_TO_ICP_HOME)
 def test_chunk_text_method_paragraphs(mock_icp, client: TestClient):
     mock_icp.return_value = [
         {
@@ -383,7 +383,7 @@ def test_chunk_text_validation_overlap_too_large(client: TestClient):
     assert "Overlap (10) must be less than max_size (5)" in response.json()["detail"][0]["msg"]
 
 
-@patch(PATH_TO_ICP_IN_ENDPOINT_MODULE)
+@patch(PATH_TO_ICP_HOME)
 def test_chunk_text_empty_content(mock_icp, client: TestClient):
     mock_icp.return_value = []  # Simulate no chunks produced
     payload = {"text_content": "", "options": {"method": "words"}}
@@ -397,7 +397,7 @@ def test_chunk_text_empty_content(mock_icp, client: TestClient):
     assert call_args_list[1]["method"] == "words"  # effective_options
 
 
-@patch(PATH_TO_ICP_IN_ENDPOINT_MODULE)
+@patch(PATH_TO_ICP_HOME)
 def test_chunk_text_sanitizes_unexpected_error(mock_icp, client: TestClient):
     mock_icp.side_effect = RuntimeError("chunking backend exploded")
 
@@ -410,9 +410,9 @@ def test_chunk_text_sanitizes_unexpected_error(mock_icp, client: TestClient):
 
 # For rolling_summarize tests, we need to patch load_server_configs and general_llm_analyzer
 # where they are used in the endpoint (chunking.py)
-@patch(PATH_TO_LOAD_CONFIGS_IN_ENDPOINT_MODULE, new=mock_load_server_configs_for_test)
-@patch(PATH_TO_LLM_ANALYZER_IN_ENDPOINT_MODULE, new=mock_general_llm_analyzer_for_test)
-@patch(PATH_TO_ICP_IN_ENDPOINT_MODULE)
+@patch(PATH_TO_LOAD_CONFIGS_HOME, new=mock_load_server_configs_for_test)
+@patch(PATH_TO_LLM_ANALYZER_HOME, new=mock_general_llm_analyzer_for_test)
+@patch(PATH_TO_ICP_HOME)
 def test_chunk_text_rolling_summarize_server_determines_llm(
     mock_icp, client: TestClient
 ):  # Order of args for mocks is inner-to-outer patch
@@ -468,9 +468,9 @@ def test_chunk_text_rolling_summarize_server_determines_llm(
     assert passed_llm_config["max_tokens"] == 25
 
 
-@patch(PATH_TO_LOAD_CONFIGS_IN_ENDPOINT_MODULE, new=mock_load_server_configs_for_test)
-@patch(PATH_TO_LLM_ANALYZER_IN_ENDPOINT_MODULE, new=mock_general_llm_analyzer_for_test)
-@patch(PATH_TO_ICP_IN_ENDPOINT_MODULE)
+@patch(PATH_TO_LOAD_CONFIGS_HOME, new=mock_load_server_configs_for_test)
+@patch(PATH_TO_LLM_ANALYZER_HOME, new=mock_general_llm_analyzer_for_test)
+@patch(PATH_TO_ICP_HOME)
 def test_chunk_file_rolling_summarize(mock_icp_file, client: TestClient):
     global mock_general_llm_analyzer_call_history_for_test
     mock_general_llm_analyzer_call_history_for_test = []
@@ -681,7 +681,7 @@ def test_chunk_template_rolling_summarize_keeps_static_snapshot_at_analyzer_boun
     )
 
 
-@patch(PATH_TO_ICP_IN_ENDPOINT_MODULE)
+@patch(PATH_TO_ICP_HOME)
 def test_chunk_text_endpoint_no_options(mock_icp, client: TestClient):
     mock_icp.return_value = [
         {
@@ -709,7 +709,7 @@ def test_chunk_text_endpoint_no_options(mock_icp, client: TestClient):
     assert passed_options_to_icp["max_size"] == DEFAULT_CHUNK_OPTIONS_REAL.get("max_size")
 
 
-@patch(PATH_TO_ICP_IN_ENDPOINT_MODULE)
+@patch(PATH_TO_ICP_HOME)
 def test_chunk_file_sanitizes_unexpected_error(mock_icp, client: TestClient):
     mock_icp.side_effect = RuntimeError("chunking backend exploded")
 

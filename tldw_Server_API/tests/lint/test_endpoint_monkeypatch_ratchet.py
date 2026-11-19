@@ -30,8 +30,8 @@ first). Only module bindings give a path: ``import a.b`` (``a``), ``import a.b a
 tuple unpacking) is unresolved, and so is anything it shadows.
 
 Exit metric. Only ``monkeypatch`` counts toward the exit (``other`` is a ceiling too, but no target).
-Phase 2 of TASK-13950.20 drains it from SEED, the total on dev when this ratchet landed (5810 on
-3c91d1a279), to EXIT_TARGET, 55% of it, or below.
+Phase 2 of TASK-13950.20 drains it from SEED, the total on dev when this ratchet landed (5829 on
+cc2108f319), to EXIT_TARGET, 55% of it, or below.
 
 Known limits. These escape the count: the builtin ``setattr(ep, ...)``; ``patch.dict``,
 ``patch.multiple`` and ``monkeypatch.setitem(<endpoint>.X, ...)``; a module object supplied by a

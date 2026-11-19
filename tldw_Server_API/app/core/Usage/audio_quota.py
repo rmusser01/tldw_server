@@ -18,11 +18,9 @@ import configparser
 import contextlib
 import os
 import uuid
-from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from functools import lru_cache
-from typing import Any
 
 from loguru import logger
 
@@ -641,69 +639,6 @@ async def consume_daily_minutes(
     except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Audio quotas consume failed")
         raise AudioQuotaStoreUnavailable("audio quota daily ledger consume failed") from exc
-
-
-AudioQuotaCheckFn = Callable[[int, float], Awaitable[tuple[bool, float | None]]]
-AudioQuotaAddFn = Callable[[int, float], Awaitable[Any]]
-AudioQuotaConsumeFn = Callable[..., Awaitable[tuple[bool, float | None]]]
-AudioQuotaHelperResolver = Callable[[str], Any]
-
-
-def _resolve_audio_quota_helper(
-    resolver: AudioQuotaHelperResolver | None,
-    name: str,
-    default: Any,
-    *,
-    optional: bool = False,
-) -> Any:
-    """Resolve an endpoint shim helper while preserving core defaults."""
-    if resolver is None:
-        return default
-    try:
-        return resolver(name)
-    except (AttributeError, KeyError, NameError):
-        if optional:
-            return None
-        return default
-
-
-async def consume_daily_minutes_with_compat(
-    user_id: int,
-    minutes: float,
-    *,
-    operation_id: str | None = None,
-    quota_helper_resolver: AudioQuotaHelperResolver | None = None,
-) -> tuple[bool, float | None]:
-    """Consume daily minutes while honoring legacy endpoint quota shims."""
-    check_fn: AudioQuotaCheckFn = _resolve_audio_quota_helper(
-        quota_helper_resolver,
-        "check_daily_minutes_allow",
-        check_daily_minutes_allow,
-    )
-    add_fn: AudioQuotaAddFn = _resolve_audio_quota_helper(
-        quota_helper_resolver,
-        "add_daily_minutes",
-        add_daily_minutes,
-    )
-    consume_fn: AudioQuotaConsumeFn | None = _resolve_audio_quota_helper(
-        quota_helper_resolver,
-        "consume_daily_minutes",
-        consume_daily_minutes,
-        optional=True,
-    )
-    legacy_quota_override = (
-        consume_fn is None
-        or (
-            consume_fn is consume_daily_minutes
-            and (check_fn is not check_daily_minutes_allow or add_fn is not add_daily_minutes)
-        )
-    )
-    if legacy_quota_override:
-        allowed, remaining_after = await check_fn(user_id, minutes)
-        if allowed:
-            await add_fn(user_id, minutes)
-        return allowed, remaining_after
-    return await consume_fn(user_id, minutes, operation_id=operation_id)
 
 
 async def consume_daily_minutes_if_allowed(

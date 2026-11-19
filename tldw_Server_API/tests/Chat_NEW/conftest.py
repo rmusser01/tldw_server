@@ -99,8 +99,6 @@ def _mock_perform_chat_api_call(monkeypatch, request):
     if request.node.get_closest_marker("real_chat_service"):
         # The fake sits on chat_service itself, so tests that drive the real adapter opt out.
         return
-    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-
     def _stream_generator():
 
         chunks = [
