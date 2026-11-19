@@ -1,6 +1,6 @@
 """One test per shared config key, pinning where it resolves today (TASK-13950.21, Task 7).
 
-Row 1: ``AUTH_MODE`` (alias ``APP_MODE``). Row 2: ``SINGLE_USER_FIXED_ID``. Row 3: ``ACCESS_TOKEN_EXPIRE_MINUTES``. Every surface that reads the key is exercised through
+Row 1: ``AUTH_MODE`` (alias ``APP_MODE``). Row 2: ``SINGLE_USER_FIXED_ID``. Row 3: ``ACCESS_TOKEN_EXPIRE_MINUTES``. Row 5: ``REDIS_URL``. Every surface that reads the key is exercised through
 its nearest callable, over the same input cases. The commit that moved the key changed only the
 expected values the owner approved (D1 a-c).
 """
@@ -8,6 +8,7 @@ expected values the owner approved (D1 a-c).
 from __future__ import annotations
 
 import configparser
+import contextlib
 from pathlib import Path
 
 from types import SimpleNamespace
@@ -572,3 +573,204 @@ def test_resolve_database_url_logs_the_password_warning_without_a_secret():
     text = "".join(seen)
     assert "pg_password not set in config.txt; not synthesizing DATABASE_URL." in text
     assert "someone" not in text and "pw@" not in text
+
+
+# ---- Row 5: REDIS_URL (split: AuthNZ overlay, LazySettings, env-layer readers) ----
+
+AZ_URL, CFG_URL, ENV_URL = "redis://az:6379/2", "redis://cfg:6380/3", "redis://env:6379/1"
+# id -> (env REDIS_URL, [AuthNZ] redis_url, [Redis] redis_url)
+REDIS_CASES = {
+    "env_set": (ENV_URL, AZ_URL, CFG_URL),
+    "env_blank": ("", AZ_URL, CFG_URL),
+    "env_spaces": ("  ", AZ_URL, CFG_URL),
+    "env_invalid": ("http://bad", AZ_URL, CFG_URL),
+    "config_only": (UNSET, AZ_URL, CFG_URL),
+    "authnz_only": (UNSET, AZ_URL, UNSET),
+    "redis_section_only": (UNSET, UNSET, CFG_URL),
+    "config_blank": (UNSET, "", ""),
+    "neither": (UNSET, UNSET, UNSET),
+}
+SYNTH = "redis://localhost:6379/0"
+
+
+@pytest.fixture
+def apply_redis_case(monkeypatch):
+    def apply(case: str) -> configparser.ConfigParser:
+        config.clear_config_cache()
+        env_url, authnz_url, redis_url = REDIS_CASES[case]
+        for key in ("REDIS_HOST", "REDIS_PORT", "REDIS_DB", "AUTH_MODE"):
+            monkeypatch.delenv(key, raising=False)
+        if env_url is None:
+            monkeypatch.delenv("REDIS_URL", raising=False)
+        else:
+            monkeypatch.setenv("REDIS_URL", env_url)
+        parser = configparser.ConfigParser(interpolation=None)
+        for section, value in (("AuthNZ", authnz_url), ("Redis", redis_url)):
+            parser.add_section(section)
+            if value is not None:
+                parser.set(section, "redis_url", value)
+        monkeypatch.setattr(config, "_load_env_files_early", lambda: None)
+        monkeypatch.setattr(config, "load_comprehensive_config", lambda: parser)
+        monkeypatch.setattr(authnz_settings, "load_comprehensive_config", lambda: parser)
+        authnz_settings.reset_settings()
+        return parser
+
+    yield apply
+    monkeypatch.undo()
+    config.clear_config_cache()
+    authnz_settings.reset_settings()
+
+
+# AuthNZ's field; LazySettings' (url, host, port, db): the URL's parts fill the host, port and db
+# only when it came from config and REDIS_HOST/PORT/DB are unset.
+REDIS_AUTHNZ_EXPECTED = {
+    "env_set": ENV_URL,
+    "env_blank": "",
+    "env_spaces": ERR,
+    "env_invalid": ERR,
+    "config_only": AZ_URL,
+    "authnz_only": AZ_URL,
+    "redis_section_only": UNSET,
+    "config_blank": "",
+    "neither": UNSET,
+}
+REDIS_LAZY_EXPECTED = {
+    "env_set": (ENV_URL, "localhost", 6379, 0),
+    "env_blank": (CFG_URL, "cfg", 6380, 3),
+    "env_spaces": ("  ", "localhost", 6379, 0),
+    "env_invalid": ("http://bad", "localhost", 6379, 0),
+    "config_only": (CFG_URL, "cfg", 6380, 3),
+    "authnz_only": (SYNTH, "localhost", 6379, 0),
+    "redis_section_only": (CFG_URL, "cfg", 6380, 3),
+    "config_blank": (SYNTH, "localhost", 6379, 0),
+    "neither": (SYNTH, "localhost", 6379, 0),
+}
+
+
+@pytest.mark.parametrize("case", list(REDIS_CASES))
+def test_redis_url_resolution_today(apply_redis_case, case):
+    apply_redis_case(case)
+
+    assert _outcome(lambda: authnz_settings.get_settings().REDIS_URL) == REDIS_AUTHNZ_EXPECTED[case]
+
+    lazy = config.load_settings()
+    assert (lazy["REDIS_URL"], lazy["REDIS_HOST"], lazy["REDIS_PORT"], lazy["REDIS_DB"]) == REDIS_LAZY_EXPECTED[case]
+
+
+REDIS_ENV_STATES = {"unset": UNSET, "blank": "", "set": "redis://h:1/0"}
+
+
+@pytest.fixture
+def redis_env(monkeypatch):
+    def apply(state: str) -> str | None:
+        value = REDIS_ENV_STATES[state]
+        if value is None:
+            monkeypatch.delenv("REDIS_URL", raising=False)
+        else:
+            monkeypatch.setenv("REDIS_URL", value)
+        return value
+
+    return apply
+
+
+@pytest.mark.parametrize("state", list(REDIS_ENV_STATES))
+def test_migration_lock_readers_pass_the_live_redis_url_today(monkeypatch, tmp_path, redis_env, state):
+    from contextlib import contextmanager
+
+    from tldw_Server_API.app.core.AuthNZ import migrations as authnz_migrations
+    from tldw_Server_API.app.core.DB_Management import db_migration
+
+    seen: list[object] = []
+
+    @contextmanager
+    def fake_lock(**kwargs):
+        seen.append(kwargs["redis_url"])
+        yield object()
+
+    expected = redis_env(state)
+    monkeypatch.setattr(authnz_migrations, "acquire_migration_lock", fake_lock)
+    monkeypatch.setattr(authnz_migrations, "_apply_authnz_migrations_locked", lambda *_a, **_k: None)
+    authnz_migrations.apply_authnz_migrations(tmp_path / "users.db")
+
+    migrator = db_migration.DatabaseMigrator(str(tmp_path / "x.db"), str(tmp_path / "migrations"))
+    monkeypatch.setattr(db_migration, "acquire_migration_lock", fake_lock)
+    with contextlib.suppress(Exception):  # only the lock call matters; the rest of the migration may fail
+        migrator.migrate_to_version(create_backup=False)
+
+    assert len(seen) == 2  # one lock per reader
+    assert seen == [expected, expected]
+
+
+@pytest.mark.parametrize("state, expected", [("unset", "redis://localhost:6379"), ("blank", ""), ("set", "redis://h:1/0")])
+def test_embeddings_worker_redis_default_today(redis_env, state, expected):
+    from tldw_Server_API.app.core.Embeddings.worker_config import RedisConfig
+
+    redis_env(state)
+    assert RedisConfig().url == expected
+
+
+@pytest.mark.parametrize("state, expected", [("unset", None), ("blank", None), ("set", "redis://h:1/0")])
+def test_governor_factory_probes_the_live_redis_url_today(monkeypatch, redis_env, state, expected):
+    import redis as redis_lib
+
+    from tldw_Server_API.app.core.Resource_Governance.governor_factory import create_governor
+
+    probed: list[str] = []
+
+    def refuse(url, **_kwargs):
+        probed.append(url)
+        raise OSError("blocked")
+
+    redis_env(state)
+    monkeypatch.setattr(redis_lib, "from_url", refuse)
+    create_governor(policies={})
+    assert (probed[0] if probed else None) == expected
+
+
+@pytest.mark.parametrize(
+    "state, embeddings_url, expected",
+    [("unset", None, False), ("blank", None, False), ("set", None, True), ("blank", "redis://e:1/0", True)],
+)
+def test_embeddings_backpressure_redis_switch_today(monkeypatch, redis_env, state, embeddings_url, expected):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as embeddings_endpoint
+
+    redis_env(state)
+    monkeypatch.delenv("REDIS_ENABLED", raising=False)
+    monkeypatch.setattr(config, "settings", {})
+    if embeddings_url is None:
+        monkeypatch.delenv("EMBEDDINGS_REDIS_URL", raising=False)
+    else:
+        monkeypatch.setenv("EMBEDDINGS_REDIS_URL", embeddings_url)
+    assert embeddings_endpoint._is_embeddings_backpressure_redis_enabled() is expected
+
+
+@pytest.mark.parametrize(
+    "state, sandbox_url, expected",
+    [
+        ("unset", None, "redis://127.0.0.1:6379/0"),
+        ("blank", None, "redis://127.0.0.1:6379/0"),
+        ("set", None, "redis://h:1/0"),
+        ("set", "redis://sandbox:1/0", "redis://sandbox:1/0"),
+    ],
+)
+def test_sandbox_streams_fanout_url_today(monkeypatch, redis_env, state, sandbox_url, expected):
+    from tldw_Server_API.app.core.Sandbox import streams
+
+    redis_env(state)
+    for key in ("REDIS_HOST", "REDIS_PORT", "REDIS_DB"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("SANDBOX_WS_REDIS_FANOUT", "1")
+    if sandbox_url is None:
+        monkeypatch.delenv("SANDBOX_REDIS_URL", raising=False)
+    else:
+        monkeypatch.setenv("SANDBOX_REDIS_URL", sandbox_url)
+    seen: list[str] = []
+
+    def refuse(*, preferred_url, **_kwargs):
+        seen.append(preferred_url)
+        raise OSError("blocked")
+
+    monkeypatch.setattr(streams, "create_sync_redis_client", refuse)
+    streams.RunStreamHub()
+    assert len(seen) == 1
+    assert seen[0] == expected
