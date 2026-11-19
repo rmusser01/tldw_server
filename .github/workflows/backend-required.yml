@@ -443,6 +443,7 @@ jobs:
             tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py \
             tldw_Server_API/tests/lint/test_test_mode_branch_ratchet.py \
             tldw_Server_API/tests/lint/test_env_read_ratchet.py \
+            tldw_Server_API/tests/lint/test_env_vars_docs_ratchet.py \
             tldw_Server_API/tests/lint/test_keyword_identity_ratchet.py \
             tldw_Server_API/tests/lint/test_endpoint_auth_deps_import_boundary.py \
             tldw_Server_API/tests/lint/test_no_raw_sql_in_endpoints.py \
