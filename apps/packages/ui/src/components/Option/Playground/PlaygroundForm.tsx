@@ -253,6 +253,7 @@ import {
   usePlaygroundChatErrorBanner,
 } from "./PlaygroundChatErrorBanner";
 import { PlaygroundKnowledgeSection } from "./PlaygroundKnowledgeSection";
+import { SHORT_VIEWPORT_COMPOSER_ROW, SHORT_VIEWPORT_INPUT, SHORT_VIEWPORT_TOOLBAR_SLOT } from "./composer-short-viewport";
 import { PlaygroundMcpControl } from "./PlaygroundMcpControl";
 import { PlaygroundModelCatalogControls } from "./PlaygroundModelCatalogControls";
 import { PlaygroundModeLauncher } from "./PlaygroundModeLauncher";
@@ -6988,7 +6989,7 @@ export const PlaygroundForm = ({
                           ) : null;
 
                         const composerTextareaNode = (
-                          <div className="relative min-w-0">
+                          <div className={`relative min-w-0 ${SHORT_VIEWPORT_INPUT}`}>
                             {replyTargetNode}
                                 {wrapComposerProfile(
                                   "composer-textarea",
@@ -7252,7 +7253,7 @@ export const PlaygroundForm = ({
                         );
 
                         const composerToolbarNode = (
-                          <div className="w-full">
+                          <div className={`w-full ${SHORT_VIEWPORT_TOOLBAR_SLOT}`}>
                             {wrapComposerProfile(
                               "composer-toolbar",
                               <ComposerToolbar
@@ -7515,8 +7516,10 @@ export const PlaygroundForm = ({
 
                         return (
                           <>
-                            {composerTextareaNode}
-                            {composerToolbarSlot}
+                            <div className={`flex w-full min-w-0 flex-col ${SHORT_VIEWPORT_COMPOSER_ROW}`}>
+                              {composerTextareaNode}
+                              {composerToolbarSlot}
+                            </div>
                             {composerInlineMessagesNode}
                             {composerNoticesNode}
                           </>

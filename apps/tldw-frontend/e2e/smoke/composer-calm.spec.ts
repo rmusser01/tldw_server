@@ -62,6 +62,8 @@ for (const viewport of [
       const tools = page.getByTestId('composer-options-toggle');
       await expect(tools).toHaveAccessibleName('Tools');
       await expect(tools).toHaveAttribute('aria-expanded', 'false');
+      // The short-viewport collapse (AX-04) stays out of taller windows.
+      await expect(page.getByTestId('composer-short-options-toggle')).toBeHidden();
       for (const control of [
         page.getByTestId('model-selector'),
         page.getByTestId('attachment-button'),
@@ -269,6 +271,69 @@ for (const viewport of [
     }
     const sectionBox = (await section.boundingBox())!;
     expect(sectionBox.height).toBeLessThanOrEqual(Math.min(viewport.height * 0.3, 352) + 1);
+  });
+}
+
+// AX-04 (#3124), decision [14]: at 200-400% zoom the window is a few hundred
+// CSS px tall. The toolbar row collapses first behind "Composer options"; the
+// textarea and Send stay, and the message log keeps a usable height. The log
+// is measured by its scroll viewport (the transcript), since an empty chat's
+// role=log has no height of its own.
+for (const viewport of [
+  { width: 320, height: 256 },
+  { width: 640, height: 400 },
+]) {
+  test(`reflows the composer at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
+    await prepareOfflinePreview(page);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.setViewportSize(viewport);
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+    const input = page.getByTestId('chat-input');
+    await expect(input).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+    });
+    const send = page.getByRole('button', { name: 'Send message', exact: true });
+    const transcript = page.getByTestId('playground-chat-transcript');
+    const dock = page.getByTestId('playground-chat-composer-dock');
+    const expectUncovered = async () => {
+      for (const control of [input, send]) {
+        await expect(control).toBeInViewport({ ratio: 1 });
+        const box = (await control.boundingBox())!;
+        const covered = await control.evaluate(
+          (element, point) => {
+            const hit = document.elementFromPoint(point.x, point.y);
+            return !(hit && (hit === element || element.contains(hit)));
+          },
+          { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+        );
+        expect(covered, 'the control is not covered').toBe(false);
+      }
+    };
+    await expect(page.getByTestId('composer-options-toggle')).toBeHidden();
+    await expectUncovered();
+    const log = (await transcript.boundingBox())!;
+    const composer = (await dock.boundingBox())!;
+    expect(log.height, `log ${log.height}px, composer ${composer.height}px`).toBeGreaterThanOrEqual(100);
+    testInfo.annotations.push({
+      type: 'composer share',
+      description: `${viewport.width}x${viewport.height}: composer ${Math.round(composer.height)}px (${Math.round((composer.height / viewport.height) * 100)}%), log ${Math.round(log.height)}px`,
+    });
+    await page.screenshot({
+      animations: 'disabled',
+      path: testInfo.outputPath(`reflow-${viewport.width}x${viewport.height}.png`),
+    });
+
+    const options = page.getByTestId('composer-short-options-toggle');
+    await expect(options).toHaveAccessibleName('Composer options');
+    await options.click();
+    await expect(options).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('composer-options-toggle')).toBeVisible();
+    expect((await transcript.boundingBox())!.height).toBeGreaterThanOrEqual(100);
+    await options.click();
+    await expect(page.getByTestId('composer-options-toggle')).toBeHidden();
   });
 }
 

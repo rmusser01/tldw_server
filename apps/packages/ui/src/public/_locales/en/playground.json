@@ -4860,6 +4860,9 @@
   "composer_toolsLabel": {
     "message": "Tools"
   },
+  "composer_shortOptions": {
+    "message": "Composer options"
+  },
   "composer_shortcutHint": {
     "message": "/ commands · @ mentions"
   },

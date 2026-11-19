@@ -190,6 +190,7 @@ import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedH
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
 import { isEditableTarget } from "@/utils/editable-target"
 import { useFocusReturn } from "./hooks/useFocusReturn";
+import { useKeepFocusedComposerControlInView } from "./composer-dock-scroll";
 
 const readSidepanelChatWebUiHandoffFromLocation = () => {
   if (typeof window === "undefined") return null;
@@ -411,6 +412,8 @@ const PlaygroundContent = () => {
   const threadSearchInputRef = React.useRef<HTMLInputElement>(null);
   const { ref: composerDockRef, height: composerDockHeight } =
     useComposerDockHeight()
+  const composerDockScrollRef = React.useRef<HTMLDivElement>(null);
+  useKeepFocusedComposerControlInView(composerDockScrollRef, composerDockHeight);
 
   const [droppedFiles, setDroppedFiles] = React.useState<File[]>([]);
   const researchAttachmentIntentRef = React.useRef(0);
@@ -4108,7 +4111,7 @@ const PlaygroundContent = () => {
                 data-testid={
                   stickyChatInput ? "playground-chat-transcript" : undefined
                 }
-                className={`custom-scrollbar flex-1 min-h-[20%] w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4 ${
+                className={`custom-scrollbar flex-1 min-h-[20%] w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4 [@media(max-height:500px)]:min-h-[40dvh] ${
                   exitFocusPillVisible ? "pt-14 scroll-pt-14" : ""
                 }`}
               >
@@ -4161,7 +4164,10 @@ const PlaygroundContent = () => {
                   className="absolute -top-12 right-4"
                 />
               )}
-              <div className="min-h-0 overflow-y-auto overscroll-contain">
+              <div
+                ref={composerDockScrollRef}
+                className="min-h-0 overflow-y-auto overscroll-contain"
+              >
                 <PlaygroundForm
                   connectionSetupInTimeline={showStarterDeck && !characterWorkflowActive}
                   onCharacterRouteApplyReady={onCharacterRouteApplyReady}

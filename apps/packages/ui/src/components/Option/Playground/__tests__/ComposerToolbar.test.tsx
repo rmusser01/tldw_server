@@ -370,6 +370,38 @@ describe("calm composer", () => {
     }
   });
 
+  // AX-04 (#3124), decision [14]: in short viewports (max-height 500px, e.g.
+  // 400% zoom) the toolbar row collapses behind one "Composer options" button
+  // first; the input and Send stay. The layout is measured in
+  // e2e/smoke/composer-calm.spec.ts.
+  it("collapses the toolbar row in short viewports but keeps Send", () => {
+    const shortHidden = "[@media(max-height:500px)]:hidden";
+    render(<ToolbarHarness hasDictation speechAvailable isListening />);
+    const toggle = screen.getByTestId("composer-short-options-toggle");
+    expect(toggle).toHaveAccessibleName("Composer options");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.className).toContain("[@media(max-height:500px)]:inline-flex");
+    const collapsed = [
+      screen.getByRole("button", { name: "Attach" }),
+      screen.getByTestId("composer-options-toggle"),
+      screen.getByTestId("composer-persistence"),
+      screen.getByRole("button", { name: "Model selector" }),
+      screen.getByTestId("dictation-button"),
+    ];
+    for (const control of collapsed) {
+      expect(control.closest(`[class*="${shortHidden}"]`)).not.toBeNull();
+    }
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send.closest(`[class*="${shortHidden}"]`)).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    for (const control of collapsed) {
+      expect(control.closest(`[class*="${shortHidden}"]`)).toBeNull();
+    }
+  });
+
   it("toggles the formatting guide inside Tools", () => {
     render(<ToolbarHarness optionsExpanded />);
     const toggle = screen.getByRole("button", { name: "Formatting guide" });
