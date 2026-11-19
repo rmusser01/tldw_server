@@ -897,7 +897,7 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
             prefix = "${{ github.workflow }}" if name == "jobs-suite.yml" else name.removesuffix(".yml")
             expected_group = f"{prefix}-{concurrency_suffix}"
             if name == "ci.yml":
-                expected_group = "${{ github.workflow }}-" + expected_group + "${{ inputs.nightly && '-nightly' || '' }}"
+                expected_group += "${{ inputs.nightly && '-nightly' || '' }}-${{ github.workflow }}"
             if name == "pypi-package.yml":
                 expected_group += "${{ inputs.qualification && format('-qualification-{0}', github.workflow) || '' }}"
             assert data["concurrency"]["group"] == expected_group, name

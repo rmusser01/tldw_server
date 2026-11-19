@@ -25,7 +25,7 @@ env:
 
 concurrency:
   # Ensure newer PR commits cancel older queued runs for the same PR.
-  group: ${{ github.workflow }}-ci-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}${{ inputs.nightly && '-nightly' || '' }}
+  group: ci-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}${{ inputs.nightly && '-nightly' || '' }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
