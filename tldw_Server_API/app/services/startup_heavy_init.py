@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 from tldw_Server_API.app.core.testing import is_truthy as _shared_is_truthy
 
 if TYPE_CHECKING:
@@ -402,7 +403,7 @@ async def _init_embeddings_dim_check(*, deferred: bool) -> None:
                 mgr.close()
             return mismatches
 
-        auth_mode = str(_emb_settings.get("AUTH_MODE", os.getenv("AUTH_MODE", "single_user")))
+        auth_mode = str(_emb_settings.get("AUTH_MODE") or load_auth_config().mode)
         mismatches: list[tuple[str, int, int, str]] = []
         if auth_mode == "multi_user":
             base: Path = _emb_settings.get("USER_DB_BASE_DIR")

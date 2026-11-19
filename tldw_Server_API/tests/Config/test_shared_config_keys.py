@@ -1,8 +1,8 @@
 """One test per shared config key, pinning where it resolves today (TASK-13950.21, Task 7).
 
 Row 1: ``AUTH_MODE`` (alias ``APP_MODE``). Every surface that reads the key is exercised through
-its nearest callable, over the same five input cases, so a move to ``config_sections`` shows up
-as a reviewed change in an expected value and nowhere else.
+its nearest callable, over the same input cases. The commit that moved the key changed only the
+expected values the owner approved (D1 a-c).
 """
 
 from __future__ import annotations
@@ -18,14 +18,23 @@ from tldw_Server_API.app.core import config
 from tldw_Server_API.app.core.AuthNZ import initialize as authnz_initialize
 from tldw_Server_API.app.core.AuthNZ import settings as authnz_settings
 from tldw_Server_API.app.core.Chat import command_router
-from tldw_Server_API.app.core.config_sections.auth import load_auth_config
+from tldw_Server_API.app.core.config_sections.auth import (
+    auth_mode_env,
+    load_auth_config,
+    resolve_auth_mode,
+)
+from tldw_Server_API.app.core.config_sections.precedence import Resolved
 from tldw_Server_API.app.core.DB_Management import db_path_utils
-from tldw_Server_API.app.core.Evaluations.config_validator import EvaluationConfigValidator
+from tldw_Server_API.app.core.Evaluations.config_validator import (
+    EvaluationConfigValidator,
+)
 from tldw_Server_API.app.core.External_Sources import connectors_service
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.Sync.v2 import security as sync_security
 from tldw_Server_API.app.core.Web_Scraping import browser_transport
-from tldw_Server_API.app.services import claims_review_metrics_scheduler as claims_scheduler
+from tldw_Server_API.app.services import (
+    claims_review_metrics_scheduler as claims_scheduler,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -100,41 +109,41 @@ def _authnz_mode() -> str:
         return REJECTED
 
 
-# Today every reader but AuthNZ and config_sections looks at the environment only.
-TODAY = {
-    #               config_sections  AuthNZ         SINGLE_USER_MODE (APP_MODE)
-    "env_set": ("multi_user", "multi_user", True),
-    "env_blank": ("multi_user", REJECTED, True),
-    "env_invalid": ("multi_user", REJECTED, True),
-    "config_only": ("multi_user", "multi_user", True),
-    "neither": ("single_user", "single_user", True),
-    "app_mode_only": ("single_user", "single_user", False),
-    "config_invalid_app_mode": ("multi_user", REJECTED, False),
+# config_sections and AuthNZ are unchanged by the move. Every other reader follows the effective mode
+# (env, then [AuthNZ] auth_mode, then the tolerant APP_MODE fallback) since D1(a)-(c): before, LazySettings
+# read APP_MODE and the rest read the environment only.
+EXPECTED = {
+    #               config_sections  AuthNZ
+    "env_set": ("multi_user", "multi_user"),
+    "env_blank": ("multi_user", REJECTED),
+    "env_invalid": ("multi_user", REJECTED),
+    "config_only": ("multi_user", "multi_user"),
+    "neither": ("single_user", "single_user"),
+    "app_mode_only": ("single_user", "single_user"),
+    "config_invalid_app_mode": ("multi_user", REJECTED),
 }
 
 
 @pytest.mark.parametrize("case", list(CASES))
 def test_auth_mode_resolution_today(apply_case, case):
     minimal = apply_case(case)
-    env_only = CASES[case][0]
-    single_user_default = "single_user"
-    expected_cs, expected_authnz, expected_single_user_mode = TODAY[case]
+    effective, expected_authnz = EXPECTED[case]
+    single_user = effective == "single_user"
 
-    assert load_auth_config(minimal).mode == expected_cs
+    assert load_auth_config(minimal).mode == effective
     assert _authnz_mode() == expected_authnz
-    assert config.load_settings()["SINGLE_USER_MODE"] is expected_single_user_mode
+    assert config.load_settings()["SINGLE_USER_MODE"] is single_user  # D1(a): follows the effective mode
 
-    # env-only readers: the effective mode is invisible to them today
-    stripped = (env_only or "").strip().lower()
-    assert command_router.is_single_user_mode() is (stripped == "single_user")
-    assert db_path_utils._get_auth_mode() == (stripped or "single_user")
-    assert setup_endpoint._resolve_auth_mode({}) == ((env_only or "").strip() or CASES[case][2] or "single_user")
-    assert connectors_service._connector_secret_encryption_required() is (stripped == "multi_user")
-    assert claims_scheduler.resolve_scheduler_config({}).single_user_mode is ((single_user_default if env_only is None else env_only).lower() == "single_user")
-    assert sync_security.server_trusted_encryption_status_from_env().auth_mode == ((env_only or "").strip() or None)
+    # D1(b)/(c): the setting readers follow the effective mode too
+    assert command_router.is_single_user_mode() is single_user
+    assert db_path_utils._get_auth_mode() == effective
+    assert setup_endpoint._resolve_auth_mode({}) == effective
+    assert connectors_service._connector_secret_encryption_required() is (not single_user)
+    assert claims_scheduler.resolve_scheduler_config({}).single_user_mode is single_user
+    assert sync_security.server_trusted_encryption_status_from_env().auth_mode == effective
     validator = EvaluationConfigValidator()
     validator._validate_authentication()
-    assert any("single-user mode" in issue.message for issue in validator.issues) is ((single_user_default if env_only is None else env_only) == "single_user")
+    assert any("single-user mode" in issue.message for issue in validator.issues) is single_user
 
 
 @pytest.mark.parametrize(
@@ -159,3 +168,36 @@ def test_browser_transport_effective_auth_mode_today(apply_case, environment, ex
 def test_setup_wizard_env_check_today(apply_case, case, expected):
     apply_case(case)
     assert authnz_initialize._effective_env_value("AUTH_MODE", {"AUTH_MODE": "from_dotenv"}) == expected
+
+
+# resolve_auth_mode is the AuthNZ overlay's rule: exact-case env, then [AuthNZ] auth_mode, then single_user.
+RESOLVED = {
+    "env_set": Resolved("multi_user", "env", "AUTH_MODE"),
+    "env_blank": Resolved("", "env", "AUTH_MODE"),
+    "env_invalid": Resolved("multi-user", "env", "AUTH_MODE"),
+    "config_only": Resolved("multi_user", "config", "AuthNZ.auth_mode"),
+    "neither": Resolved("single_user", "default", None),
+    "app_mode_only": Resolved("single_user", "default", None),
+    "config_invalid_app_mode": Resolved("bogus", "config", "AuthNZ.auth_mode"),
+}
+
+
+@pytest.mark.parametrize("case", list(CASES))
+def test_auth_mode_resolves_through_config_sections(apply_case, case):
+    minimal = apply_case(case)
+    assert resolve_auth_mode(minimal) == RESOLVED[case]
+    assert auth_mode_env() == CASES[case][0]
+
+
+def test_resolve_auth_mode_passes_a_blank_through():
+    blank_config = _parser("")
+    assert resolve_auth_mode(_parser("multi_user"), {"AUTH_MODE": ""}) == Resolved("", "env", "AUTH_MODE")
+    assert resolve_auth_mode(blank_config, {}) == Resolved("", "config", "AuthNZ.auth_mode")
+    assert load_auth_config(_parser("multi_user"), env={"AUTH_MODE": ""}).mode == "multi_user"
+    assert resolve_auth_mode(None, {}) == Resolved("single_user", "default", None)
+
+
+def test_auth_mode_env_is_exact_case_and_live():
+    assert auth_mode_env({"AUTH_MODE": " Multi "}) == " Multi "
+    assert auth_mode_env({"auth_mode": "multi_user"}) is None
+    assert auth_mode_env({}) is None

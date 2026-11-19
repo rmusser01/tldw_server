@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.config import (
     web_browser_transport_mode,
     web_outbound_policy_mode,
 )
-from tldw_Server_API.app.core.config_sections.auth import load_auth_config
+from tldw_Server_API.app.core.config_sections.auth import auth_mode_env, load_auth_config
 from tldw_Server_API.app.core.Security.egress import public_url_policy_active
 
 ConfiguredBrowserTransportMode = Literal[
@@ -209,7 +209,7 @@ def _invalid_browser_transport_decision() -> BrowserTransportDecision:
 
 def _effective_auth_mode(environment: Mapping[str, str]) -> str:
     """Resolve absent auth mode canonically while rejecting explicit invalid input."""
-    explicit = environment.get("AUTH_MODE")
+    explicit = auth_mode_env(environment)
     if explicit is not None:
         normalized = _normalize_profile_value(explicit)
         return normalized if normalized in {"single_user", "multi_user"} else ""

@@ -5,12 +5,10 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
-import os
 import re
 import sys
 import uuid
 from collections.abc import Callable
-from configparser import ConfigParser
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from typing import Any
@@ -21,6 +19,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import AnyHttpUrl, BaseModel, Field, model_validator
 
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     RequireRole,
@@ -792,19 +791,8 @@ async def _require_system_configure_access(request: Request) -> AuthPrincipal:
     return principal
 
 
-def _read_config_auth_mode() -> str | None:
-    try:
-        parser = ConfigParser()
-        parser.read(setup_manager.get_config_file_path(), encoding="utf-8")
-        auth_mode = parser.get("AuthNZ", "auth_mode", fallback=None)
-    except Exception as exc:  # noqa: BLE001 - metadata should remain best-effort
-        logger.debug("Unable to read auth mode for first-run metadata: {}", type(exc).__name__)
-        return None
-    return auth_mode.strip() if auth_mode else None
-
-
 def _resolve_auth_mode(status_snapshot: dict[str, Any]) -> str:
-    raw_auth_mode = status_snapshot.get("auth_mode") or os.getenv("AUTH_MODE") or _read_config_auth_mode()
+    raw_auth_mode = status_snapshot.get("auth_mode") or load_auth_config().mode
     return str(raw_auth_mode or "single_user").strip() or "single_user"
 
 
