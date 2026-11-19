@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from tldw_Server_API.app.core.testing import is_truthy
 
+from .precedence import resolve
 from .types import ConfigParserLike
 
 
@@ -39,11 +40,10 @@ def _get_raw(
     default: str,
 ) -> str:
     """Return an environment override, parser value, or default for a database option."""
-    raw = env_map.get(f"DB_{option.upper()}")
-    if raw is None or str(raw).strip() == "":
-        raw = config_parser.get("Database", option, fallback=default)
-    text = str(raw).strip()
-    return text or default
+    resolved = resolve(
+        (f"DB_{option.upper()}",), (("Database", option),), config_parser=config_parser, env=env_map, default=default
+    )
+    return str(resolved.value).strip() or default
 
 
 def _parse_bool(raw: object, default: bool) -> bool:

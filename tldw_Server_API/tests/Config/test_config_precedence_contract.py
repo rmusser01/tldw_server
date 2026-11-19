@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from configparser import ConfigParser, InterpolationSyntaxError
+
 import pytest
 
 from tldw_Server_API.app.core import config
+from tldw_Server_API.app.core.config_sections.precedence import Resolved, resolve
 
 
 @pytest.fixture(autouse=True)
@@ -399,3 +402,41 @@ def test_runtime_config_never_returns_placeholder_literals():
     assert "FIXME" not in str(runtime_cfg)  # nosec B101
     assert not _contains_placeholder_literal(runtime_cfg.get("tts_settings", {}))  # nosec B101
     assert not _contains_placeholder_literal(config.APP_CONFIG)  # nosec B101
+
+
+def _parser(**options: str) -> ConfigParser:
+    parser = ConfigParser()
+    parser.add_section("S")
+    for key, value in options.items():
+        parser.set("S", key, value)
+    return parser
+
+
+def test_resolve_takes_the_first_set_env_key_then_config_then_default() -> None:
+    parser = _parser(o1="", o2="cfg")
+    assert resolve(("A", "B"), (("S", "o1"), ("S", "o2")), config_parser=parser, env={"B": " b "}, default="d") == Resolved(" b ", "env", "B")
+    assert resolve(("A",), (("S", "o1"), ("S", "o2")), config_parser=parser, env={"A": "  "}, default="d") == Resolved("cfg", "config", "S.o2")
+    assert resolve(("A",), (("S", "missing"), ("Nope", "o")), config_parser=parser, env={}, default="d") == Resolved("d", "default", None)
+
+
+def test_resolve_can_let_a_blank_env_or_config_value_win() -> None:
+    assert resolve(("A",), env={"A": ""}, blank_env=True) == Resolved("", "env", "A")
+    assert resolve((), (("S", "o1"),), config_parser=_parser(o1=""), env={}, blank_config=True) == Resolved("", "config", "S.o1")
+
+
+def test_resolve_without_a_parser_skips_the_config_layer() -> None:
+    assert resolve((), (("S", "o"),), config_parser=None, env={}, default="d") == Resolved("d", "default", None)
+
+
+def test_resolve_lets_a_parser_error_propagate() -> None:
+    parser = ConfigParser()
+    parser.read_string("[S]\no = p%40ss\n")
+    with pytest.raises(InterpolationSyntaxError):
+        resolve((), (("S", "o"),), config_parser=parser, env={})
+
+
+def test_resolve_reads_os_environ_at_call_time(monkeypatch) -> None:
+    monkeypatch.setenv("TLDW_RESOLVE_PROBE", "1")
+    assert resolve(("TLDW_RESOLVE_PROBE",)).source == "env"
+    monkeypatch.delenv("TLDW_RESOLVE_PROBE")
+    assert resolve(("TLDW_RESOLVE_PROBE",)).source == "default"

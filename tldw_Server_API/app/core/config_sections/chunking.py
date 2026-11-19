@@ -4,6 +4,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from .precedence import resolve
 from .types import ConfigParserLike
 
 _TRUE_VALUES = {"1", "true", "yes", "y", "on"}
@@ -54,14 +55,9 @@ def _get_raw(
     default: str,
 ) -> str:
     """Return a chunking value with env -> parser -> default precedence."""
-    for env_key in _ENV_KEYS.get(option, (option.upper(),)):
-        env_value = env_map.get(env_key)
-        if env_value is not None and str(env_value).strip() != "":
-            return str(env_value).strip()
-
-    raw = config_parser.get("Chunking", option, fallback=default)
-    text = str(raw).strip()
-    return text or default
+    env_keys = _ENV_KEYS.get(option, (option.upper(),))
+    resolved = resolve(env_keys, (("Chunking", option),), config_parser=config_parser, env=env_map, default=default)
+    return str(resolved.value).strip() or default
 
 
 def load_chunking_config(
