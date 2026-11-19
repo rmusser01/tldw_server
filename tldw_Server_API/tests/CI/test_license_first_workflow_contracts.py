@@ -1581,7 +1581,13 @@ def test_backend_required_enforces_endpoint_scope_guards(guard: str) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("ratchet", ["tldw_Server_API/tests/lint/test_env_read_ratchet.py"])
+@pytest.mark.parametrize(
+    "ratchet",
+    [
+        "tldw_Server_API/tests/lint/test_env_read_ratchet.py",
+        "tldw_Server_API/tests/lint/test_env_vars_docs_ratchet.py",
+    ],
+)
 def test_backend_required_enforces_config_ratchets(ratchet: str) -> None:
     """TASK-13950.21: the config ratchets run in a required step, with the PR base their reason check reads."""
     import shlex
