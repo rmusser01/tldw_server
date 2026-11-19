@@ -131,10 +131,69 @@ Started 2026-11-13 on `ux/burndown-wave6` from dev @ 4b6b9ec446 (#3461).
 
 ### Wave 7: after owner decisions
 
-CC-08, CC-10, toolbar size tokens, CO-04, CC-11 "@ Notes" (with XP-04),
-XP-01 (temporary chats), XP-11, XP-13, XP-17 with the Trash Undo follow-up
-and AX-06, `text-subtle`/`text-muted`, XS-12 "Open dashboard", NL-11, NL-12,
-the tag-match follow-up, NL-06, NL-10, XP-09, XP-12, XP-18, AX-04.
+Started 2026-11-19, after the owner's answers (see "Owner decisions"). It is
+built on `ux/burndown-wave7`, from the Wave 6 head 45188b5e13, while #3526
+lands. The numbers in brackets are the decision numbers.
+
+**Lane 7A — Composer names, search and size**
+- CC-08 [1]:
+  - Keep the redesign's names ("Search & Context", "Runtime") and update the
+    glossary.
+  - Move the Modes menu's toggles to where they belong.
+  - Give web search one home and one spelling.
+- CC-10 [2]:
+  - Search stays in the composer, with its own height cap.
+  - Sources are shown first.
+  - The generated answer is opt-in.
+- Size tokens [3]: 32px desktop controls and 44px touch, applied to the
+  remaining toolbar controls. D9 and D10 are dropped.
+- CO-04: the rails at 1024px (width-aware, one rail at a time), and the
+  leftover jargon, using the names from [1].
+- AX-04 [14]:
+  - In short viewports the toolbar row collapses first; the input and Send
+    stay.
+  - Reflow tests at 320×256 and 640×400.
+  - Measure the composer share.
+
+**Lane 7B — Notes views, Graph and filters**
+- NL-11 [15]:
+  - Graph filters, and an All-notes cap of 500.
+  - Picking a note re-centres the graph and opens a preview without leaving
+    Graph.
+- NL-12 [16]: keep the Inbox view, and fix the tag-match toggle counting
+  Inbox's hidden token.
+- Move notes search above Views.
+- Saved filters always match all of their tags [19].
+
+**Lane 7C — Delete policy, Undo and shared copy**
+- XP-17 and AX-06 [8]:
+  - One delete policy: soft deletes get a persistent inline Undo, and only
+    permanent deletes ask for confirmation. Message delete keeps its confirm.
+  - A shared undo helper, which also covers the G07 Trash Undo keyboard
+    follow-up and Undo for the Notes bulk delete.
+- XP-13 [7]: the glossary terms (Character, Persona, Buddy and the product
+  name).
+- XP-11 [6]: the chat list leaves routes that aren't chat.
+- `text-subtle` merges into `text-muted` in the light theme [9].
+- XS-12 [10]: "Open dashboard" becomes "Flashcards".
+
+**Lane 7D — Side panel, temporary chats and notes in chat**
+- XP-09 [11]: one "Open in full page" action. The extension may open a
+  configured WebUI.
+- XP-12 [12]: align the side-panel composer's strings and menus with the full
+  page; no rebuild.
+- XS-15: the Pro composer's share of the side panel, as the review specifies
+  it, plus the measurement.
+- XP-01 [5]: a temporary chat's answer can be saved to Notes.
+- Web "@" Notes and `/note` [4]: attach a note's content as a removable chip
+  in the composer. XP-04's note-side action waits for #3226.
+
+**Still blocked (Wave 8):**
+- NL-06 [17] and NL-10 [18] wait for #3226.
+- XP-18 [13] needs D7 P7 and the server pin field, which collides with #3226's
+  migrations.
+- #3182 [20]: the outbox is approved, but it is sequenced after #3226 and
+  #3071/#3159.
 
 ### Wave 8: blocked by other work
 
@@ -379,6 +438,6 @@ The four lanes were built in the Wave 5 worktrees on new branches, merged into
 | Wave | Status |
 |---|---|
 | 5 | Landed (#3461, 2026-11-13) |
-| 6 | In progress |
-| 7 | Decisions answered 2026-11-19; not started |
+| 6 | PR #3526 landing |
+| 7 | In progress |
 | 8 | Blocked |
