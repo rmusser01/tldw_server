@@ -16,7 +16,9 @@ from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
     ModelDiscoveryResult,
     provider_readiness,
 )
+from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver
 from tldw_Server_API.app.core.Security.egress import URLPolicyResult
+from tldw_Server_API.tests.helpers.offline_network import stub_host_resolution
 
 pytestmark = pytest.mark.usefixtures("healthy_no_override_tts_credential_snapshot")
 
@@ -37,6 +39,11 @@ def _config(sections: dict[str, dict[str, str]]) -> ConfigParser:
         for key, value in values.items():
             parser.set(section, key, value)
     return parser
+
+
+def _api_openai_com_admitted_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The endpoint policy would resolve api.openai.com; the suite runs offline, so it resolves without a lookup."""
+    stub_host_resolution(monkeypatch)
 
 
 def _client_for_config(monkeypatch: pytest.MonkeyPatch, parser: ConfigParser) -> TestClient:
@@ -482,6 +489,11 @@ def test_catalog_computes_discovery_once_and_passes_same_result_to_readiness(
     client = _client_for_config(monkeypatch, parser)
     monkeypatch.setattr(llm_providers, "discover_models_from_endpoint", discover)
     monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_readiness.provider_readiness", reduce_readiness)
+    # The tokenizer runtime probe would POST to the configured endpoint; the suite runs offline.
+    def unreachable_probe(**_kwargs):
+        raise tokenizer_resolver.TokenizerUnavailable("offline test: no tokenizer endpoint")
+
+    monkeypatch.setattr(tokenizer_resolver, "_http_post", unreachable_probe)
     with client:
         response = client.get("/api/v1/llm/providers")
 
@@ -650,6 +662,7 @@ def test_llm_provider_readiness_marks_external_custom_openai_without_key_unavail
             }
         }
     )
+    _api_openai_com_admitted_offline(monkeypatch)
 
     with _client_for_config(monkeypatch, parser) as client:
         response = client.get("/api/v1/llm/providers")
@@ -747,6 +760,7 @@ def test_external_custom_openai_env_placeholder_key_is_missing_credentials(
     monkeypatch.setenv("CUSTOM_OPENAI_API_MODEL", "gpt-4.1-2025-04-14")
     monkeypatch.setenv("CUSTOM_OPENAI_API_KEY", "CHANGE_ME_TO_SECURE_API_KEY")
     parser = _config({})
+    _api_openai_com_admitted_offline(monkeypatch)
 
     with _client_for_config(monkeypatch, parser) as client:
         providers_response = client.get("/api/v1/llm/providers")
