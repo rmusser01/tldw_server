@@ -25,6 +25,7 @@ Found by TASK-15571's plan review (I5). TASK-15571 applies the owner's rule (a m
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 From the final review of PR #3523: hyde.py:132-150 marks the user's handle used after sgl.analyze returns, even when the call ran on the server key (a denied-model fallback), so only the key's last-used time is wrong. Any change to the 19 runtimes inherits it. Also for the owner's decision: server-key calls are never checked against the override, so a disabled provider stops BYOK handle calls but not server-key calls on these paths (plan Decision 2).
+From PR #3523's final review (2026-11-19): (1) the study assistants also refuse a denied model on every key: resolve_chat_target calls validate_provider_override (core/Chat/chat_target_resolution.py, from API_Deps/study_assistant_deps.py and core/Flashcards/study_assistant.py) and answers 'Provider configuration is unavailable.', as chat does; the docs say so. (2) 'still refuse a denied model at resolve time' holds for the configured model only: Prompt Studio's direct-adapter helpers (evaluation_manager._call_adapter_text, prompt_executor.py, test_runner.py) take model or resolve_provider_model(provider, handle.app_config), and the resolve-time _enforce_call_policy checks only the configured model (configured_provider_model_from_snapshot ignores DEFAULT_MODEL_*), so a denied DEFAULT_MODEL_<PROVIDER> can still run there on a user or team key. Same bug class as TASK-15571's dispatch-time case; decide it with the rest.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

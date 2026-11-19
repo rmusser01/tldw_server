@@ -19,6 +19,7 @@ Found by TASK-15571's plan review. The except clause of users_own_key_credential
 <!-- AC:BEGIN -->
 - [ ] #1 A disabled provider and an unreadable override store refuse an own-key analyze request at the boundary instead of running it on the server key, with tests
 - [ ] #2 The other resolution failures keep their current server-key behaviour, or the owner decides otherwise
+- [ ] #3 The two deferred minors of PR #3523's final review in this task's notes (M1: a fallback with no user in the call context runs unchecked; M2: the MCP tests conftest store fixture) are each fixed or explicitly closed with a reason
 <!-- AC:END -->
 
 ## Implementation Notes
