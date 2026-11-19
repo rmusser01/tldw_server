@@ -18,13 +18,8 @@ type InlineUndoBannerProps = {
   onReturnFocus?: () => void
 }
 
-const isTextEntry = (element: Element): boolean => {
-  if (element instanceof HTMLTextAreaElement) return true
-  if (element instanceof HTMLInputElement) {
-    return !["button", "checkbox", "radio", "submit", "reset", "file", "range", "color"].includes(element.type)
-  }
-  return element instanceof HTMLElement && element.isContentEditable
-}
+const focusIsLost = (active: Element | null): boolean =>
+  !active || active === document.body || !active.isConnected
 
 const actionClass = cn(
   "inline-flex min-h-8 items-center rounded px-1.5 font-medium text-primary hover:underline aria-disabled:cursor-wait aria-disabled:opacity-70",
@@ -38,7 +33,8 @@ const actionClass = cn(
  * end of the document. It has no timer: it stays until the user undoes or
  * dismisses it, a newer delete replaces it, or the page that owns it goes
  * away. Its message is a polite status, and Undo takes focus when the delete
- * left focus nowhere, so keyboard users can reach it at once.
+ * left focus nowhere (or still on the control that started it), so keyboard
+ * users can reach it at once. A failed Undo says so in the same status.
  */
 export const InlineUndoBanner: React.FC<InlineUndoBannerProps> = ({
   undo,
@@ -48,7 +44,7 @@ export const InlineUndoBanner: React.FC<InlineUndoBannerProps> = ({
 }) => {
   const { t } = useTranslation(["common"])
   const { offer, dismiss } = undo
-  const messageId = React.useId()
+  const descriptionId = React.useId()
   const containerRef = React.useRef<HTMLDivElement>(null)
   const undoButtonRef = React.useRef<HTMLButtonElement>(null)
   const offerIdRef = React.useRef<number | null>(null)
@@ -56,16 +52,32 @@ export const InlineUndoBanner: React.FC<InlineUndoBannerProps> = ({
   const pendingRef = React.useRef<number | null>(null)
   const [pendingId, setPendingId] = React.useState<number | null>(null)
   const [announcement, setAnnouncement] = React.useState("")
+  const [failedId, setFailedId] = React.useState<number | null>(null)
   const returnFocusRequestedRef = React.useRef(false)
   const offerId = offer?.id ?? null
+  const initiatorRef = React.useRef<Element | null | undefined>(null)
+  initiatorRef.current = offer?.initiator
 
   React.useEffect(() => {
     if (offerId == null) return
     setAnnouncement("")
+    const focusUndo = () => undoButtonRef.current?.focus()
     const active = document.activeElement
-    // Someone typing keeps their place; anywhere else, Undo is next.
-    if (active && active !== document.body && active.isConnected && isTextEntry(active)) return
-    undoButtonRef.current?.focus()
+    if (focusIsLost(active) || (initiatorRef.current && active === initiatorRef.current)) {
+      focusUndo()
+      return
+    }
+    // Focus stays where the user is. If that element leaves the page later
+    // (its row is removed when the list refetches), Undo takes focus instead
+    // of <body>.
+    const watched = active as Element
+    const observer = new MutationObserver(() => {
+      if (watched.isConnected) return
+      observer.disconnect()
+      if (focusIsLost(document.activeElement)) focusUndo()
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
+    return () => observer.disconnect()
   }, [offerId])
 
   const onReturnFocusRef = React.useRef(onReturnFocus)
@@ -88,17 +100,25 @@ export const InlineUndoBanner: React.FC<InlineUndoBannerProps> = ({
     const { id, onUndo, restoredMessage } = offer
     pendingRef.current = id
     setPendingId(id)
-    let restored = false
+    setFailedId((current) => (current === id ? null : current))
+    let outcome: Awaited<ReturnType<typeof onUndo>> = false
     try {
-      restored = (await onUndo()) !== false
+      outcome = await onUndo()
     } catch {
-      restored = false
+      outcome = false
     }
     if (pendingRef.current === id) pendingRef.current = null
     setPendingId((current) => (current === id ? null : current))
-    if (!restored || offerIdRef.current !== id) return
+    // A newer offer, or the host's own follow-up offer, owns the banner now.
+    if (offerIdRef.current !== id) return
+    if (outcome === false) {
+      setFailedId(id)
+      return
+    }
     setAnnouncement(
-      restoredMessage ?? t("common:undo.restoredStatus", { defaultValue: "Restored." })
+      typeof outcome === "string" && outcome
+        ? outcome
+        : restoredMessage ?? t("common:undo.restoredStatus", { defaultValue: "Restored." })
     )
     close()
   }
@@ -110,6 +130,7 @@ export const InlineUndoBanner: React.FC<InlineUndoBannerProps> = ({
   }
 
   const pending = offer != null && pendingId === offer.id
+  const failed = offer != null && failedId === offer.id
 
   return (
     <div
@@ -126,22 +147,39 @@ export const InlineUndoBanner: React.FC<InlineUndoBannerProps> = ({
       onKeyDown={offer ? handleKeyDown : undefined}
     >
       <span
-        id={messageId}
         role="status"
         aria-live="polite"
         aria-atomic="true"
         className={offer ? "min-w-0 flex-1 break-words" : undefined}
       >
         {/* A new node per offer, so a repeated message is announced again. */}
-        {offer ? <span key={offer.id}>{offer.message}</span> : announcement}
+        {offer ? (
+          <span key={offer.id}>
+            {offer.message}
+            {failed && (
+              <>
+                {" "}
+                <span className="font-medium text-danger">
+                  {t("common:undo.failed", { defaultValue: "Couldn't restore. Try again." })}
+                </span>
+              </>
+            )}
+          </span>
+        ) : (
+          announcement
+        )}
       </span>
       {offer && (
         <>
+          {/* Undo's description: a quiet copy, so the live message isn't read twice. */}
+          <span id={descriptionId} hidden>
+            {offer.message}
+          </span>
           <button
             ref={undoButtonRef}
             type="button"
             className={actionClass}
-            aria-describedby={messageId}
+            aria-describedby={descriptionId}
             aria-disabled={pending || undefined}
             aria-busy={pending || undefined}
             onClick={() => {
@@ -155,7 +193,10 @@ export const InlineUndoBanner: React.FC<InlineUndoBannerProps> = ({
             <button
               type="button"
               className={actionClass}
-              onClick={offer.secondaryAction.onClick}
+              onClick={() => {
+                offer.secondaryAction?.onClick()
+                close()
+              }}
               data-testid={`${testId}-secondary`}
             >
               {offer.secondaryAction.label}

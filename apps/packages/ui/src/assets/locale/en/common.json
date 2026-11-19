@@ -572,6 +572,7 @@
   "undo": {
     "action": "Undo",
     "dismiss": "Dismiss",
+    "failed": "Couldn't restore. Try again.",
     "restoredStatus": "Restored."
   },
   "chatSidebar": {

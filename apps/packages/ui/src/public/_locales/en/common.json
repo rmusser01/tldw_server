@@ -1031,6 +1031,9 @@
   "undo_dismiss": {
     "message": "Dismiss"
   },
+  "undo_failed": {
+    "message": "Couldn't restore. Try again."
+  },
   "undo_restoredStatus": {
     "message": "Restored."
   },
