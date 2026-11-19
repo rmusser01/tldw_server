@@ -889,6 +889,34 @@ def validate_provider_override(provider: str, model: str | None) -> dict[str, st
     return capture_provider_override_call_snapshot(provider).policy_error(model)
 
 
+def server_key_fallback(provider: str, model: str | None) -> bool:
+    """Whether a call for ``model`` on a key that is not the server's falls back to the server key (TASK-15571).
+
+    True when the override's allowlist denies the model (``model_not_allowed``): the owner's rule. The caller
+    logs that denial once it knows the outcome (``log_server_key_fallback``). A provider the override disables
+    raises its ``ProviderOverridePolicyError``, and a policy that cannot be read raises
+    ``ByokResolutionError("credential_store_unavailable")``: both refuse the call, and are logged here.
+    """
+    provider_norm = canonical_provider_name(provider)
+    try:
+        error = capture_provider_override_call_snapshot(provider_norm).policy_error(model)
+    except ByokResolutionError as exc:
+        logger.warning("Provider override for {}: {}; the call is refused", provider_norm, exc.code)
+        raise
+    if error is None:
+        return False
+    reason = error["error_code"]
+    if reason != "model_not_allowed":
+        logger.warning("Provider override for {}: {}; the call is refused", provider_norm, reason)
+        raise ProviderOverridePolicyError(reason, provider_norm)
+    return True
+
+
+def log_server_key_fallback(provider: str, outcome: str) -> None:
+    """The one warning for a denied model, written with what became of the call (TASK-15571)."""
+    logger.warning("Provider override for {}: model_not_allowed; {}", canonical_provider_name(provider), outcome)
+
+
 def _get_model_priority_from_override(
     override: LLMProviderOverride,
     objective: str,

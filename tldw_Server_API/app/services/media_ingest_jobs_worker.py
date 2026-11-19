@@ -379,7 +379,9 @@ async def _admit_or_refuse_analysis(form_data: AddMediaForm) -> LLMQuotaExceeded
     """Check the owner's LLM quota once, before any work, when the job asks for analysis (TASK-13864).
 
     Admitted, the rest of the job runs as an admitted request does (LLM usage accounting
-    spec §4a), so no refusal lands part-way through an item. Refused, the refusal is
+    spec §4a), so no refusal lands part-way through an item. The exception is a job whose
+    start check got no answer (a timeout or a failure): it is admitted without the mark,
+    so each call is checked, and a call may be refused mid-item (TASK-15571). Refused, the refusal is
     returned and the job runs without analysis. The analysis runs on the owner's own key
     when they stored one (TASK-15426); an over-limit owner whose analysis runs on it, and
     who turned on no other LLM stage, is admitted without the mark, so each call is
@@ -391,12 +393,14 @@ async def _admit_or_refuse_analysis(form_data: AddMediaForm) -> LLMQuotaExceeded
     user_id = user_to_check()
     if user_id is not None:
         try:
-            await check_user_async(user_id)
+            answered = await check_user_async(user_id, strict=True)
         except LLMQuotaExceededError as refusal:
             if handle is None or media_analysis_provider(form_data) is None:
                 return refusal  # the server's key, or another LLM stage: refused as before, no key bound
         else:
-            mark_llm_quota_prechecked()
+            # A check that timed out or failed admits the job unmarked, so each call is checked (TASK-15571).
+            if answered:
+                mark_llm_quota_prechecked()
     bind_provider_credentials(handle)
     return None
 

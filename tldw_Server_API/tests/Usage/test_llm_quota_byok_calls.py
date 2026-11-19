@@ -1,12 +1,13 @@
 """A call made with the user's own provider key is recorded as such and never checked against the LLM quotas (TASK-13955)."""
 
 import asyncio
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
@@ -473,6 +474,166 @@ async def test_a_provider_method_nested_in_a_stream_is_not_checked_again(refused
         else:
             chunks = [chunk async for chunk in await _AwaitedFirst().astream(request)]
     assert (chunks, checks) == (["hi"], ["body"] if source == "user" else [7, "body"])
+
+
+_OVERRIDE_MODULE = "tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides"
+_NO_ANSWER_LINE = "Provider override for openai: model_not_allowed; no LLM quota check answered, so the call is refused"
+
+
+async def _denied_model_fallback(
+    monkeypatch: pytest.MonkeyPatch, *, streaming: bool = False, raise_on_error: bool = True
+) -> tuple[list[str], Callable[[], str]]:
+    """A summary on the user's own key whose model the override denies (TASK-15571).
+
+    The provider is accounted and records the key each call runs on; the server's key is ``sk-server``.
+    Returns those keys and the call, which raises on a refusal when ``raise_on_error``.
+    """
+    from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as sgl
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    keys: list[str] = []
+
+    class _Summarizer(_Provider):
+        """The accounted provider, recording the key each call runs on."""
+
+        def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+            """Record the key, then answer."""
+            keys.append(request["api_key"])
+            return {"choices": [{"message": {"content": "hi"}}], "usage": dict(USAGE)}
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+            """Record the key, then stream."""
+            keys.append(request["api_key"])
+            yield from super().stream(request, timeout=timeout)
+
+    handle = await _handle("user")
+    monkeypatch.setattr(sgl, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: _Summarizer()))
+    monkeypatch.setattr(sgl, "load_and_log_configs", dict)
+    monkeypatch.setattr(sgl, "resolve_provider_api_key_from_config", lambda *_args, **_kwargs: "sk-server")
+    set_llm_provider_overrides_cache_for_tests({"openai": LLMProviderOverride(provider="openai", allowed_models=["x"])})
+
+    def _summarize() -> str:
+        result = sgl._summarize_via_adapter(
+            api_name="openai", text_to_summarize="source", custom_prompt_arg=None, api_key=None, temp=None,
+            system_message=None, streaming=streaming, model_override="gpt-denied", app_config=None,
+            credentials_resolved=False, raise_on_error=raise_on_error, provider_credentials=handle,
+        )
+        return result if isinstance(result, str) else "".join(result)
+
+    return keys, _summarize
+
+
+@pytest.mark.parametrize("streaming", [False, True], ids=["chat", "stream"])
+@pytest.mark.parametrize("admitted", [False, True], ids=["over-limit-unmarked", "admitted-at-the-boundary"])
+async def test_a_denied_model_falls_back_to_the_server_key_under_the_users_limit(
+    refused, monkeypatch, admitted, streaming
+) -> None:
+    """TASK-15571: the fallback call carries no handle, so an over-limit user admitted unmarked on their own key is
+    refused before the provider runs; an admitted user's fallback runs on the server key and counts."""
+    keys, summarize = await _denied_model_fallback(monkeypatch, streaming=streaming)
+
+    with llm_call_context(user_id=7, prechecked=admitted):
+        if admitted:
+            assert await asyncio.to_thread(summarize) == "hi"  # off the loop, where a check can run
+        else:
+            with pytest.raises(LLMQuotaExceededError):
+                await asyncio.to_thread(summarize)
+    await llm_accounting.drain_accounting()
+    assert keys == (["sk-server"] if admitted else [])
+    assert [row["credential_source"] for row in refused] == ([None] if admitted else [])
+
+
+async def _slow_decision(user_id: Any, requested_tokens: int = 1) -> LLMQuotaRefusal | None:
+    """A decision that outlasts the check's timeout."""
+    await asyncio.sleep(1)
+    return REFUSAL
+
+
+async def _failing_decision(user_id: Any, requested_tokens: int = 1) -> LLMQuotaRefusal | None:
+    """A decision that fails, like a broken pool."""
+    raise RuntimeError("pool gone")
+
+
+@pytest.mark.parametrize(
+    ("accounting_loop", "decision", "on_the_loop"),
+    [(False, None, False), (True, None, True), (True, _slow_decision, False), (True, _failing_decision, False)],
+    ids=["no-accounting-loop", "on-the-loop-thread", "check-times-out", "check-fails"],
+)
+async def test_a_fallback_no_quota_check_answers_for_is_refused(
+    refused, monkeypatch, accounting_loop, decision, on_the_loop
+) -> None:
+    """TASK-15571 (B1): where the call-site check would admit an over-limit user unchecked, the fallback is refused
+    instead (TASK-15481's fail-closed rule), and nothing runs on the server key."""
+    from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import SummaryProviderError
+
+    if not accounting_loop:
+        monkeypatch.setattr(llm_accounting, "_accounting_loop", None)
+    if decision is not None:
+        monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", decision)
+        monkeypatch.setattr(llm_quota_gate, "CHECK_TIMEOUT_SECONDS", 0.05)
+    keys, summarize = await _denied_model_fallback(monkeypatch)
+    lines: list[str] = []
+    sink = logger.add(lambda message: lines.append(message.record["message"]), level="WARNING", filter=_OVERRIDE_MODULE)
+    try:
+        with llm_call_context(user_id=7), pytest.raises(SummaryProviderError) as refusal:
+            if on_the_loop:
+                summarize()
+            else:
+                await asyncio.to_thread(summarize)
+    finally:
+        logger.remove(sink)
+    assert (refusal.value.code, keys, lines) == ("configuration", [], [_NO_ANSWER_LINE])
+
+
+async def test_a_fallback_whose_check_cannot_start_is_refused_with_its_own_message(refused, monkeypatch) -> None:
+    """TASK-15571 (R6, R5): a check that cannot start is no answer either; a caller that takes error strings is told
+    the limit could not be checked, not that the credentials are invalid."""
+
+    def _broken_cache(_user_id: Any) -> dict[str, Any]:
+        """Fail like a broken limits cache."""
+        raise RuntimeError("cache broken")
+
+    keys, summarize = await _denied_model_fallback(monkeypatch, raise_on_error=False)
+    monkeypatch.setattr(llm_quota_gate, "cached_limits", _broken_cache)
+    with llm_call_context(user_id=7):
+        assert await asyncio.to_thread(summarize) == "Error: The LLM usage limit could not be checked."
+    assert keys == []
+
+
+@pytest.mark.parametrize("decision", [_slow_decision, _failing_decision], ids=["check-times-out", "check-fails"])
+async def test_a_job_admitted_without_an_answer_is_not_marked_so_its_fallback_is_checked(
+    refused, monkeypatch, decision
+) -> None:
+    """TASK-15571 (I-R1): the media ingest job's start check marks the job admitted only when the check answered.
+    An over-limit owner's later denied-model fallback then meets the strict check; nothing runs on the server key."""
+    from tldw_Server_API.app.services import media_ingest_jobs_worker as worker
+
+    handle = await _handle("user")
+
+    async def _credentials(_user_id: Any, _form: Any) -> Any:
+        """The owner's own key."""
+        return handle
+
+    monkeypatch.setattr(worker, "media_analysis_requested", lambda _form: True)
+    monkeypatch.setattr(worker, "media_analysis_credentials", _credentials)
+    monkeypatch.setattr(worker, "media_analysis_provider", lambda _form: "openai")
+    monkeypatch.setattr(llm_quota_gate, "CHECK_TIMEOUT_SECONDS", 0.05)
+    keys, summarize = await _denied_model_fallback(monkeypatch)
+    refusing = llm_quota_gate.llm_quota_refusal
+
+    async def _job() -> None:
+        """A job off the accounting loop, where a check can time out: no answer at the start, then one analysis."""
+        monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", decision)
+        assert await worker._admit_or_refuse_analysis(object()) is None
+        monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", refusing)
+        summarize()
+
+    with llm_call_context(user_id=7), pytest.raises(LLMQuotaExceededError):
+        await asyncio.to_thread(asyncio.run, _job())
+    assert keys == []
 
 
 def _chat_request() -> SimpleNamespace:
