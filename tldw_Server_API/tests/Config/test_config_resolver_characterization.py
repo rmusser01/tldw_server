@@ -12,6 +12,7 @@ Regenerate (only on unmodified code):
 from __future__ import annotations
 
 import configparser
+import contextlib
 import dataclasses
 import json
 import os
@@ -23,6 +24,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core import config as config_mod
+from tldw_Server_API.app.core.AuthNZ import settings as authnz_settings
 from tldw_Server_API.app.core.config_sections import (
     load_audio_config,
     load_auth_config,
@@ -97,6 +99,28 @@ class _AnyParser:
         self._ask(section, option)
         return self.value is not None
 
+    def getboolean(self, section: str, option: str, fallback: Any = None, **_: Any) -> Any:
+        raw = self.get(section, option, fallback=None)
+        if raw is None:
+            return fallback
+        try:
+            return configparser.ConfigParser.BOOLEAN_STATES[str(raw).lower()]
+        except KeyError:
+            raise ValueError(f"Not a boolean: {raw}") from None
+
+    def __getitem__(self, section: str) -> "_AnySection":
+        return _AnySection(self, section)
+
+
+class _AnySection:
+    """What ``parser[section]`` returns: ``get`` asks the parser."""
+
+    def __init__(self, parser: _AnyParser, section: str) -> None:
+        self.parser, self.section = parser, section
+
+    def get(self, option: str, fallback: Any = None, **_: Any) -> Any:
+        return self.parser.get(self.section, option, fallback=fallback)
+
 
 SCENARIOS: dict[str, tuple[str | None, str | None | BaseException]] = {
     "none": (None, None),
@@ -111,6 +135,75 @@ SCENARIOS: dict[str, tuple[str | None, str | None | BaseException]] = {
     "env_blank_cfg": ("", "9"),
     "cfg_raises": (None, configparser.InterpolationSyntaxError("o", "S", "bad %")),
 }
+
+def _loader(parser: Any) -> Callable[..., Any]:
+    def _load(*_: Any, **__: Any) -> Any:
+        return parser
+
+    _load.cache_clear = lambda: None  # type: ignore[attr-defined]  # clear_config_cache() calls it
+    return _load
+
+
+def _in_runtime(call: Callable[[Any], object], *, not_pytest: bool = False) -> Callable[[Mapping[str, str], Any], object]:
+    """Run ``call(parser)`` with os.environ swapped for the spy env and config.txt loading swapped for the spy parser."""
+
+    def run(env: Mapping[str, str], parser: Any) -> object:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(os, "environ", env)
+            for name in ("load_comprehensive_config", "_load_config_parser"):
+                mp.setattr(config_mod, name, _loader(parser))
+            mp.setattr(authnz_settings, "load_comprehensive_config", _loader(parser))
+            if not_pytest:  # rg_enabled returns False under pytest before it reads config.txt
+                mp.setattr(config_mod, "is_test_mode", lambda: False)
+                mp.setattr(config_mod, "is_explicit_pytest_runtime", lambda: False)
+                mp.delitem(sys.modules, "pytest")
+            return call(parser)
+
+    return run
+
+
+_GETTERS: dict[str, Callable[[], object]] = {
+    name: getattr(config_mod, name)
+    for name in (
+        "rag_enable_structure_index",
+        "rag_strict_extractive",
+        "rag_require_hard_citations",
+        "rag_low_confidence_behavior",
+        "rag_agentic_cache_backend",
+        "rag_agentic_cache_ttl_sec",
+        "implicit_feedback_enabled",
+        "web_outbound_policy_mode",
+        "web_browser_transport_mode",
+        "rg_enabled",
+        "rg_policy_store",
+        "rg_policy_reload_enabled",
+        "rg_policy_reload_interval_sec",
+        "rg_backend",
+        "rg_redis_fail_mode",
+        "rg_policy_path",
+        "resolve_governance_rollout_mode",
+        "usage_quotas_enabled",
+        "get_llamacpp_handler_settings",
+        "get_ingestion_source_allowed_roots",
+        "get_workspace_project_root_allowed_roots",
+        "resolve_chat_run_first_rollout_mode",
+        "resolve_chat_run_first_provider_allowlist",
+        "resolve_chat_run_first_presentation_variant",
+        "_resolve_disable_cors_value_and_source",
+        "_resolve_cors_allow_credentials_value_and_source",
+    )
+}
+
+GETTER_SUBJECTS: dict[str, Callable[[Mapping[str, str], Any], object]] = {
+    f"getter:{name}": _in_runtime(lambda parser, fn=fn: fn()) for name, fn in _GETTERS.items()
+}
+GETTER_SUBJECTS["getter:rg_enabled_outside_pytest"] = _in_runtime(lambda parser: config_mod.rg_enabled(), not_pytest=True)
+GETTER_SUBJECTS["getter:_load_claims_review_metrics_settings"] = _in_runtime(
+    lambda parser: config_mod._load_claims_review_metrics_settings(parser)
+)
+GETTER_SUBJECTS["authnz:_load_overrides_from_config"] = _in_runtime(
+    lambda parser: authnz_settings._load_overrides_from_config()
+)
 
 SUBJECTS: dict[str, Callable[[Mapping[str, str], Any], object]] = {
     "load_audio_config": lambda env, parser: load_audio_config(parser, env),
@@ -137,6 +230,7 @@ SUBJECTS: dict[str, Callable[[Mapping[str, str], Any], object]] = {
     "_first_config_option_value": lambda env, parser: config_mod._first_config_option_value(
         parser, "S", ("o1", "o2"), fallback="d"
     ),
+    **GETTER_SUBJECTS,
 }
 
 

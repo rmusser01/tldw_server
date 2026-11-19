@@ -21,6 +21,8 @@ from pydantic import Field, field_validator
 # 3rd-party imports
 from pydantic_settings import BaseSettings, NoDecode
 
+from tldw_Server_API.app.core.config_sections.precedence import resolve
+
 _SETTINGS_IMPORT_EXCEPTIONS = (
     ImportError,
     RuntimeError,
@@ -1370,10 +1372,10 @@ def _load_overrides_from_config() -> dict:
 
         def maybe_set(field: str, key: str, caster=lambda v: v):
             # Map config key to Settings field if env var not set
-            env_name = field
-            if os.getenv(env_name) is None and cfg.has_option("AuthNZ", key):
+            resolved = resolve((field,), (("AuthNZ", key),), config_parser=cfg, blank_env=True, blank_config=True)
+            if resolved.source == "config":
                 with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
-                    overrides[field] = caster(cfg.get("AuthNZ", key))
+                    overrides[field] = caster(resolved.value)
 
         maybe_set("AUTH_MODE", "auth_mode", lambda v: v.strip())
         maybe_set("DATABASE_URL", "database_url", lambda v: v.strip())

@@ -102,6 +102,7 @@ Config file overrides (`Config_Files/config.txt`)
 - `TEST_MODE`: Enables test-friendly behaviors (`true|1|yes`). Used across modules to:
   - Relax or bypass certain rate limiter keys (e.g., client IP) to avoid false positives in tests.
   - Prefer offline/test-safe code paths (e.g., RAG/Chunking avoid network downloads; health endpoints may expose additional diagnostics in tests).
+- `ROUTES_STABLE_ONLY`, `ROUTES_DISABLE`, `ROUTES_ENABLE`, `ROUTES_EXPERIMENTAL`: route-toggle overrides, honoured only in a test runtime (pytest or `TEST_MODE`). In production, `[API-Routes]` in `config.txt` is authoritative.
 - `DISABLE_NLTK_DOWNLOADS`: Prevent NLTK dataset downloads (`1|true|yes`).
   - RAG query features and Chunking modules will not attempt to download `punkt`, `wordnet`, or `stopwords` when this is set; they degrade gracefully to local fallbacks.
 - `ALLOW_NLTK_DOWNLOADS`: Force-enable NLTK downloads even when running tests (`1|true|yes`).
