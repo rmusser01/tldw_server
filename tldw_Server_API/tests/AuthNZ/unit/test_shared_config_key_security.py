@@ -5,6 +5,7 @@ Run by security-required's TEST_MODE-unset step (C4), which runs this directory.
 
 from __future__ import annotations
 
+import base64
 import configparser
 
 import pydantic
@@ -14,6 +15,10 @@ from tldw_Server_API.app.core.AuthNZ import settings as authnz_settings
 from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 
 pytestmark = pytest.mark.unit
+
+# The webhook ring takes base64-encoded 32-byte keys.
+_KEY_X = base64.b64encode(b"X" * 32).decode()
+_KEY_Y = base64.b64encode(b"Y" * 32).decode()
 
 
 @pytest.mark.parametrize("source", ["env", "config"])
@@ -55,3 +60,24 @@ def test_auth_config_repr_hides_secrets():
     parser = configparser.ConfigParser(interpolation=None)
     parser.add_section("AuthNZ")
     assert "s3cret" not in repr(load_auth_config(parser, env={"DATABASE_URL": "s3cret"}))
+
+
+def test_webhook_secret_ring_still_decrypts(monkeypatch):
+    """Rows 6 and 7: a secret stored under the single-user key id keeps decrypting."""
+    from tldw_Server_API.app.core.AuthNZ import admin_webhook_secrets as ring
+
+    for key in (
+        "SINGLE_USER_API_KEY", "JWT_SECRET_KEY", "BYOK_ENCRYPTION_KEY",
+        "BYOK_SECONDARY_ENCRYPTION_KEY", "SESSION_ENCRYPTION_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("API_KEY", _KEY_X)
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.add_section("AuthNZ")
+    parser.set("AuthNZ", "single_user_api_key", _KEY_Y)
+    monkeypatch.setattr(authnz_settings, "load_comprehensive_config", lambda: parser)
+
+    stored = ring.encrypt_admin_webhook_secret("s")
+
+    assert stored.key_id == "single_user_api_key"
+    assert ring.decrypt_admin_webhook_secret(stored.encrypted_blob) == "s"

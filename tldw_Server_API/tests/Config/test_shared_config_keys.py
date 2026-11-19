@@ -1,6 +1,6 @@
 """One test per shared config key, pinning where it resolves today (TASK-13950.21, Task 7).
 
-Row 1: ``AUTH_MODE`` (alias ``APP_MODE``). Row 2: ``SINGLE_USER_FIXED_ID``. Row 3: ``ACCESS_TOKEN_EXPIRE_MINUTES``. Row 5: ``REDIS_URL``. Every surface that reads the key is exercised through
+Row 1: ``AUTH_MODE`` (alias ``APP_MODE``). Row 2: ``SINGLE_USER_FIXED_ID``. Row 3: ``ACCESS_TOKEN_EXPIRE_MINUTES``. Row 5: ``REDIS_URL``. Row 6: ``JWT_SECRET_KEY``. Every surface that reads the key is exercised through
 its nearest callable, over the same input cases. The commit that moved the key changed only the
 expected values the owner approved (D1 a-c).
 """
@@ -825,3 +825,153 @@ def test_resolve_redis_url_without_a_parser_reads_the_environment_alone():
         "redis://x:1/0", "env", "REDIS_URL"
     )
     assert redis_section.resolve_redis_url(None, env={}) == Resolved(None, "default", None)
+
+
+# ---- Row 6: JWT_SECRET_KEY (AuthNZ overlay, LazySettings, setting readers, env-layer readers) ----
+
+JWT_ENV, JWT_CFG, JWT_DEFAULT = "e" * 32, "c" * 32, "a_very_insecure_default_secret_key_for_dev_only"
+# id -> (env JWT_SECRET_KEY, [AuthNZ] jwt_secret_key)
+JWT_CASES = {
+    "env_set": (JWT_ENV, JWT_CFG),
+    "env_blank": ("", JWT_CFG),
+    "env_short": ("short", JWT_CFG),
+    "config_only": (UNSET, JWT_CFG),
+    "config_short": (UNSET, "short"),
+    "config_blank": (UNSET, ""),
+    "neither": (UNSET, UNSET),
+}
+
+
+@pytest.fixture
+def apply_jwt_case(monkeypatch):
+    def apply(case: str) -> configparser.ConfigParser:
+        config.clear_config_cache()
+        env_secret, cfg_secret = JWT_CASES[case]
+        for key in ("AUTH_MODE", "KNOWLEDGE_QA_SHARE_LINK_SECRET"):
+            monkeypatch.delenv(key, raising=False)
+        if env_secret is None:
+            monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+        else:
+            monkeypatch.setenv("JWT_SECRET_KEY", env_secret)
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.add_section("AuthNZ")
+        if cfg_secret is not None:
+            parser.set("AuthNZ", "jwt_secret_key", cfg_secret)
+        monkeypatch.setattr(config, "_load_env_files_early", lambda: None)
+        monkeypatch.setattr(config, "load_comprehensive_config", lambda: parser)
+        monkeypatch.setattr(authnz_settings, "load_comprehensive_config", lambda: parser)
+        authnz_settings.reset_settings()
+        return parser
+
+    yield apply
+    monkeypatch.undo()
+    config.clear_config_cache()
+    authnz_settings.reset_settings()
+
+
+# AuthNZ's field (single-user mode, so no secret is required); LazySettings' entry; the validator's
+# "no JWT secret" error; the notes cursor secret; the share-link fallback after a failed derivation.
+JWT_EXPECTED = {
+    #                 AuthNZ    LazySettings  validator_error  share fallback
+    "env_set": (JWT_ENV, JWT_ENV, False, JWT_ENV),
+    "env_blank": ("", "", True, None),
+    "env_short": ("short", "short", False, "short"),
+    "config_only": (JWT_CFG, JWT_DEFAULT, True, None),
+    "config_short": ("short", JWT_DEFAULT, True, None),
+    "config_blank": ("", JWT_DEFAULT, True, None),
+    "neither": (UNSET, JWT_DEFAULT, True, None),
+}
+
+
+def _share_fallback_secret(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import chat as chat_mod
+
+    def boom(*_args, **_kwargs):
+        raise ValueError("no usable HMAC key material")
+
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.crypto_utils.derive_hmac_key", boom)
+    chat_mod._get_knowledge_qa_share_signing_key.cache_clear()
+    try:
+        return chat_mod._get_knowledge_qa_share_signing_key().decode()
+    except RuntimeError:
+        return None
+    finally:
+        chat_mod._get_knowledge_qa_share_signing_key.cache_clear()
+
+
+@pytest.mark.parametrize("case", list(JWT_CASES))
+def test_jwt_secret_key_resolution_today(apply_jwt_case, monkeypatch, case):
+    apply_jwt_case(case)
+    authnz_expected, lazy_expected, validator_error, share_expected = JWT_EXPECTED[case]
+
+    assert _outcome(lambda: authnz_settings.get_settings().JWT_SECRET_KEY) == authnz_expected
+    assert config.load_settings()["JWT_SECRET_KEY"] == lazy_expected
+
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    validator = EvaluationConfigValidator()
+    validator._validate_authentication()
+    assert any("No JWT secret key" in issue.message for issue in validator.issues) is validator_error
+
+    assert _share_fallback_secret(monkeypatch) == share_expected
+
+
+@pytest.mark.parametrize("case", ["env_set", "env_blank", "config_only", "neither"])
+def test_notes_cursor_secret_follows_lazy_settings_today(apply_jwt_case, case):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
+
+    apply_jwt_case(case)
+    try:
+        secret = notes_endpoint._attachment_cursor_secret().decode()
+    except HTTPException:
+        secret = None
+    assert secret == {"env_set": JWT_ENV, "env_blank": None, "config_only": JWT_DEFAULT, "neither": JWT_DEFAULT}[case]
+
+
+JWT_RING_STATES = {"unset": UNSET, "blank": "", "spaces": "  ", "set": "ring-secret"}
+
+
+@pytest.mark.parametrize("state", list(JWT_RING_STATES))
+def test_webhook_key_ring_lists_the_jwt_secret_today(monkeypatch, state):
+    from tldw_Server_API.app.core.AuthNZ.admin_webhook_secrets import _iter_admin_webhook_secret_keys
+
+    for key in ("BYOK_ENCRYPTION_KEY", "BYOK_SECONDARY_ENCRYPTION_KEY", "SESSION_ENCRYPTION_KEY", "SINGLE_USER_API_KEY", "API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    if JWT_RING_STATES[state] is None:
+        monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+    else:
+        monkeypatch.setenv("JWT_SECRET_KEY", JWT_RING_STATES[state])
+    assert _iter_admin_webhook_secret_keys() == ([("jwt_secret", "ring-secret")] if state == "set" else [])
+
+
+@pytest.mark.parametrize("state", list(JWT_RING_STATES))
+def test_prototype_signing_secret_readers_use_the_live_env_jwt_secret_today(monkeypatch, state):
+    from tldw_Server_API.app.core.Prototype_Workspaces import access, preview_broker
+
+    monkeypatch.setattr(access, "get_settings", lambda: SimpleNamespace(JWT_SECRET_KEY=None, SINGLE_USER_API_KEY=None))
+    monkeypatch.setattr(preview_broker, "get_settings", lambda: SimpleNamespace(JWT_SECRET_KEY=None, SINGLE_USER_API_KEY=None))
+    for key in ("SINGLE_USER_API_KEY", "PROTOTYPE_PREVIEW_SIGNING_SECRET"):
+        monkeypatch.delenv(key, raising=False)
+    if JWT_RING_STATES[state] is None:
+        monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+    else:
+        monkeypatch.setenv("JWT_SECRET_KEY", JWT_RING_STATES[state])
+    for module in (access, preview_broker):
+        if state == "set":
+            assert module._resolve_stable_signing_secret(None) == "ring-secret"
+        else:
+            with pytest.raises(RuntimeError):
+                module._resolve_stable_signing_secret(None)
+
+
+@pytest.mark.parametrize(
+    "state, expected",
+    [("unset", True), ("blank", True), ("set", False)],
+)
+def test_setup_wizard_jwt_check_today(monkeypatch, state, expected):
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+    if state != "unset":
+        monkeypatch.setenv("JWT_SECRET_KEY", "" if state == "blank" else "j" * 40)
+    _missing, issues = authnz_initialize._detect_env_issues("multi_user", {"JWT_SECRET_KEY": ""})
+    assert any("JWT_SECRET_KEY must be set" in issue for issue in issues) is expected
