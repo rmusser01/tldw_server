@@ -7148,6 +7148,9 @@
   "notesSearch_tagMatchAny": {
     "message": "Any of these tags"
   },
+  "notesSearch_viewModeInboxDescription": {
+    "message": "Notes saved from browser capture."
+  },
   "notesSearch_sortRelevance": {
     "message": "Best match"
   },

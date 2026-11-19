@@ -38,6 +38,7 @@ import {
 import { normalizeNoteSearchSnippet } from '../NoteSearchSnippet'
 import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
 import { isSameNotesListRowsKind } from '../notes-list-cache'
+import { buildNotesTagSearchParams, pickedTagMatchTokens } from '../notes-tag-match'
 import {
   SELECT_ALL_MATCHING_CAP,
   useNotesMatchingSelection,
@@ -290,6 +291,14 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     }
     return deduped
   }, [authorityScope, keywordTokens, listViewMode, notebookKeywordTokens, selectedNotebook])
+  // Tags the view implies always match, whatever the any/all toggle says (NL-12).
+  const requiredKeywordTokens = React.useMemo(
+    () => (listViewMode === 'inbox' ? [CAPTURED_NOTE_KEYWORD] : []),
+    [listViewMode]
+  )
+  /** The toggle applies to the tags the reader picked, so it shows only for two or more. */
+  const tagMatchApplies =
+    pickedTagMatchTokens(effectiveKeywordTokens, requiredKeywordTokens).length > 1
 
   const clearSearchQueryTimeout = React.useCallback(() => {
     if (searchQueryTimeoutRef.current != null) {
@@ -325,15 +334,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     params.set('include_keywords', 'true')
     params.set('sort_by', NOTE_SORT_API_PARAMS[fetchSort].sortBy)
     params.set('sort_order', NOTE_SORT_API_PARAMS[fetchSort].sortOrder)
-    let tokenCount = 0
-    toks.forEach((tok) => {
-      const v = tok.trim()
-      if (v.length > 0) {
-        params.append('tokens', v)
-        tokenCount += 1
-      }
+    buildNotesTagSearchParams(params, {
+      picked: toks.filter((tok) => !requiredKeywordTokens.includes(tok.trim().toLowerCase())),
+      required: toks.filter((tok) => requiredKeywordTokens.includes(tok.trim().toLowerCase())),
+      match: tagMatch
     })
-    if (tokenCount > 1) params.set('tokens_match', tagMatch)
     // `items` is all the list reads; skip the duplicate arrays (NS-04).
     params.set('legacy_aliases', 'false')
     // Gathering ids (select all, export) needs no match excerpts.
@@ -373,7 +378,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     }
 
     return { items: sortNoteRows(items, fetchSort), total: totalVal }
-  }, [authorityOwner, isCurrentAuthority, searchSortOption, sortOption, tagMatch])
+  }, [authorityOwner, isCurrentAuthority, requiredKeywordTokens, searchSortOption, sortOption, tagMatch])
 
   /**
    * One page of the current list: Trash, a search or tag filter, or the whole
@@ -1407,6 +1412,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     effectiveKeywordTokens,
     tagMatch,
     setTagMatch,
+    tagMatchApplies,
     rawNotes, filteredCount,
     orderedVisibleNoteIds,
     bulkSelectedIdSet, selectedBulkNotes,

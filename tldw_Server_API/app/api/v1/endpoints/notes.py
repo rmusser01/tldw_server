@@ -3036,6 +3036,15 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 )
             ),
         ] = "all",
+        required_tokens: Annotated[
+            Optional[list[str]],
+            Query(
+                description=(
+                    "Keyword tokens a note must have, every one of them, whatever tokens_match says: the tags "
+                    "a view implies, such as the Inbox's 'captured'. Matched like tokens."
+                )
+            ),
+        ] = None,
         title_only: bool = Query(
             False,
             description=(
@@ -3083,15 +3092,16 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                                 detail="Rate limit exceeded for notes.search",
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
         token_list = _normalize_keyword_tokens(tokens)
+        required_list = _normalize_keyword_tokens(required_tokens)
         query_term = query.strip() if query else ""
-        if not query_term and not token_list:
+        if not query_term and not token_list and not required_list:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="query or tokens is required")
         search_sort_by, search_sort_order = _normalize_note_search_sort(sort_by, sort_order)
         logger.debug(
             f"User (DB client_id: {db.client_id}) searching notes: query='{query_term}', limit={limit}, offset={offset}, tokens={token_list}")
         total = None
-        if token_list:
+        if token_list or required_list:
             notes_data = db.search_notes_with_keywords(
                 search_term=query_term or None,
                 keyword_tokens=token_list,
@@ -3100,12 +3110,14 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 match=tokens_match,
                 sort_by=search_sort_by,
                 sort_order=search_sort_order,
+                required_tokens=required_list,
             )
             try:
                 total = db.count_notes_matching_keywords(
                     search_term=query_term or None,
                     keyword_tokens=token_list,
                     match=tokens_match,
+                    required_tokens=required_list,
                 )
             except _NOTES_NONCRITICAL_EXCEPTIONS:
                 total = offset + len(notes_data)
@@ -3123,7 +3135,7 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 total = db.count_notes_matching(query_term)
             except _NOTES_NONCRITICAL_EXCEPTIONS:
                 total = offset + len(notes_data)
-        if include_snippets and query_term and (token_list or not title_only):  # title_only matches titles alone
+        if include_snippets and query_term and (token_list or required_list or not title_only):  # title_only matches titles alone
             _attach_search_snippets(db, query_term, notes_data)
         _attach_folders_bulk(db, notes_data)
         # Attach keywords inline (optional)

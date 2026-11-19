@@ -1767,6 +1767,7 @@
     "tagMatchLabel": "Show notes with",
     "tagMatchAll": "All these tags",
     "tagMatchAny": "Any of these tags",
+    "viewModeInboxDescription": "Notes saved from browser capture.",
     "sortRelevance": "Best match",
     "resultsRegionLabel": "Notes results",
     "shortcutGroupList": "Notes list",
