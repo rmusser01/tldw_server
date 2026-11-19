@@ -454,12 +454,6 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
         owner: { ...owner, isCurrent: () => current }
       })
       await chooseTabMenuItem("Quarterly plan", "Delete")
-      const dialog = await screen.findByRole("dialog", {
-        name: "Delete conversation"
-      })
-      fireEvent.click(
-        within(dialog).getByRole("button", { name: "Move to Trash" })
-      )
       await waitFor(() => expect(io.deleteChat).toHaveBeenCalledTimes(1))
       if (ending === "owner") current = false
       else props.view.unmount()
@@ -483,12 +477,6 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
       )
     })
     await chooseTabMenuItem("Quarterly plan", "Delete")
-    const dialog = await screen.findByRole("dialog", {
-      name: "Delete conversation"
-    })
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Move to Trash" })
-    )
     await waitFor(() => expect(props.onCloseTab).toHaveBeenCalled())
     expect(io.removeServerChatMirror).toHaveBeenCalledWith(
       expect.objectContaining({ chatId: "chat-1", ownerKey: "alice-owner" })
@@ -501,7 +489,7 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
       requestScope: owner.snapshot.requestScope
     })
     // Trash already succeeded; keep its Undo available even when the tab stays open.
-    expect(io.showUndoNotification).toHaveBeenCalledTimes(1)
+    expect(await screen.findByTestId("sidepanel-chat-undo-undo")).toBeInTheDocument()
   })
   it.each(["cancel", "binding", "owner"])(
     "retires held compact cleanup at %s before any close or aggregate feedback",
@@ -580,41 +568,41 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
     expect(io.messageSuccess).toHaveBeenCalledWith("Chats moved to trash.")
   })
 
-  it("moves a server chat to Trash, drops its local copy and closes its tab, with Undo", async () => {
+  // XP-17 (#3101, decision 8): Move to Trash happens at once, with no
+  // dialog, and Undo stays inline in the panel until it is dismissed.
+  it("moves a server chat to Trash without asking, drops its local copy and closes its tab, with inline Undo", async () => {
     const props = renderSidebar()
     await chooseTabMenuItem("Quarterly plan", "Delete")
-    const dialog = await screen.findByRole("dialog", { name: "Delete conversation" })
-    expect(dialog).not.toHaveTextContent(/cannot be undone/i)
-    expect(dialog).toHaveTextContent(/Trash/)
-    fireEvent.click(within(dialog).getByRole("button", { name: "Move to Trash" }))
 
     await waitFor(() => expect(props.onCloseTab).toHaveBeenCalledWith("tab-server"))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     expect(io.deleteChat).toHaveBeenCalledWith("chat-1", { requestScope: owner.snapshot.requestScope })
     expect(io.deleteChat.mock.calls[0][1]).not.toHaveProperty("hardDelete")
     expect(io.removeServerChatMirror).toHaveBeenCalledWith(expect.objectContaining({ chatId: "chat-1", ownerKey: "alice-owner" }))
-    expect(io.showUndoNotification).toHaveBeenCalledTimes(1)
+    expect(io.showUndoNotification).not.toHaveBeenCalled()
 
-    const undo = io.showUndoNotification.mock.calls[0][0] as { title: string; onUndo: () => Promise<void> }
-    expect(undo.title).toBe("Moved to Trash")
-    await act(async () => {
-      await undo.onUndo()
-    })
-    expect(io.restoreChat).toHaveBeenCalledWith("chat-1", { requestScope: owner.snapshot.requestScope })
-    expect(props.onOpenServerChat).toHaveBeenCalledWith(expect.objectContaining({ id: "chat-1", title: "Quarterly plan" }))
+    const offer = await screen.findByTestId("sidepanel-chat-undo")
+    expect(offer).toHaveTextContent('Moved "Quarterly plan" to Trash.')
+    fireEvent.click(within(offer).getByRole("button", { name: "Undo" }))
+
+    await waitFor(() =>
+      expect(io.restoreChat).toHaveBeenCalledWith("chat-1", { requestScope: owner.snapshot.requestScope })
+    )
+    await waitFor(() =>
+      expect(props.onOpenServerChat).toHaveBeenCalledWith(expect.objectContaining({ id: "chat-1", title: "Quarterly plan" }))
+    )
+    await waitFor(() => expect(within(offer).queryByRole("button", { name: "Undo" })).not.toBeInTheDocument())
   })
 
-  it("keeps the tab and the dialog when the server cannot move the chat to Trash", async () => {
+  it("keeps the tab and offers no Undo when the server cannot move the chat to Trash", async () => {
     io.deleteChat.mockRejectedValue(new Error("HTTP 500"))
     const props = renderSidebar()
     await chooseTabMenuItem("Quarterly plan", "Delete")
-    const dialog = await screen.findByRole("dialog", { name: "Delete conversation" })
-    fireEvent.click(within(dialog).getByRole("button", { name: "Move to Trash" }))
 
     await waitFor(() => expect(io.messageError).toHaveBeenCalled())
     expect(props.onCloseTab).not.toHaveBeenCalled()
     expect(io.removeServerChatMirror).not.toHaveBeenCalled()
-    expect(io.showUndoNotification).not.toHaveBeenCalled()
-    expect(isClosing(screen.getByRole("dialog", { name: "Delete conversation" }))).toBe(false)
+    expect(screen.queryByTestId("sidepanel-chat-undo-undo")).not.toBeInTheDocument()
   })
 
   it("offers 'Close tab' rather than 'Delete' for a tab with no server chat", async () => {

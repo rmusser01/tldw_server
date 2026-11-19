@@ -43,7 +43,7 @@ import { exportServerChat } from "@/services/chat-transcript-export"
 import { runChatExport } from "@/components/Common/chat-export-action"
 import type { TranscriptFormat } from "@/utils/chat-transcript"
 import { ConversationMenuButton } from "./ConversationMenuButton"
-import { useUndoNotification } from "@/hooks/useUndoNotification"
+import { InlineUndoBanner, useInlineUndo } from "@/components/Common/InlineUndo"
 import {
   moveServerChatToTrash,
   readTabConversationTitle,
@@ -341,7 +341,14 @@ export const SidepanelChatSidebar = ({
 
   // Context menu handlers. Rename and Delete act on the tab's conversation
   // (XS-07); each resolves false to keep its dialog open after a failure.
-  const { showUndoNotification } = useUndoNotification()
+  // Move to Trash offers Undo inline, with no dialog first (XP-17; #3101).
+  const tabUndo = useInlineUndo()
+  const dismissTabUndo = tabUndo.dismiss
+  const undoOwnerKey = owner?.ownerKey
+  // Another account's Trash is not this account's to undo.
+  React.useEffect(() => {
+    dismissTabUndo()
+  }, [dismissTabUndo, undoOwnerKey])
   // Undo can run after this sidebar re-renders or closes; reopen through the
   // latest handler, whose tab list no longer holds the deleted tab.
   const openServerChatRef = React.useRef(onOpenServerChat)
@@ -464,24 +471,36 @@ export const SidepanelChatSidebar = ({
         )
       if (currentTarget()) await onCloseTab(tabId)
       if (!owner.isCurrent() || !mountedRef.current) return true
-      showUndoNotification({
-        title: t("sidepanel:contextMenu.movedToTrash", "Moved to Trash"),
-        description: t("sidepanel:contextMenu.movedToTrashDescription", {
-          defaultValue: '"{{title}}" is in Trash.',
+      tabUndo.show({
+        key: chatId,
+        message: t("sidepanel:contextMenu.movedChatToTrash", {
+          defaultValue: 'Moved "{{title}}" to Trash.',
           title: tab.label
         }),
+        restoredMessage: t("common:chatRestored", "Chat restored."),
         onUndo: async () => {
           if (!owner.isCurrent()) {
-            throw new Error(unverifiedAccountMessage)
+            message.error(unverifiedAccountMessage)
+            return false
           }
-          const restored = await restoreServerChatFromTrash(
-            chatId,
-            owner.snapshot.requestScope
-          )
+          let restored: Awaited<ReturnType<typeof restoreServerChatFromTrash>>
+          try {
+            restored = await restoreServerChatFromTrash(
+              chatId,
+              owner.snapshot.requestScope
+            )
+          } catch (error) {
+            console.error("[sidepanel] Failed to restore chat from Trash", error)
+            if (owner.isCurrent() && mountedRef.current)
+              message.error(
+                t("common:restoreChatError", "Failed to restore chat.")
+              )
+            return false
+          }
           void queryClient.invalidateQueries({
             queryKey: ["serverChatHistory"]
           })
-          if (!owner.isCurrent()) return
+          if (!owner.isCurrent()) return true
           const createdAtMs = Date.parse(restored?.created_at ?? "")
           openServerChatRef.current?.({
             ...restored,
@@ -489,6 +508,7 @@ export const SidepanelChatSidebar = ({
             title: restored?.title || tab.label,
             createdAtMs: Number.isNaN(createdAtMs) ? Date.now() : createdAtMs
           })
+          return true
         }
       })
       return true
@@ -497,8 +517,8 @@ export const SidepanelChatSidebar = ({
       onCloseTab,
       owner,
       queryClient,
-      showUndoNotification,
       t,
+      tabUndo,
       tabs,
       unverifiedAccountMessage
     ]
@@ -1316,6 +1336,13 @@ export const SidepanelChatSidebar = ({
           </div>
         </div>
       )}
+
+      <InlineUndoBanner
+        undo={tabUndo}
+        testId="sidepanel-chat-undo"
+        className="mx-3 mt-2"
+        onReturnFocus={() => searchInputRef?.current?.focus()}
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
         {hasSearch ? (

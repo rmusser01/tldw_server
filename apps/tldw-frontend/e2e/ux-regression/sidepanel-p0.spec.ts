@@ -127,11 +127,11 @@ test.describe("Extension side-panel P0 reproductions", () => {
     await panel.openServerChatFromSearch(chat.title, chat.chatId)
     await panel.clearSearch()
 
+    // XP-17 (#3101, decision 8): Delete moves the chat to Trash at once, with
+    // no dialog, and offers Undo inline.
     await panel.chooseTabMenuItem(chat.title, "Delete")
-    const dialog = panel.page.getByRole("dialog", { name: "Delete conversation" })
-    await expect(dialog).toContainText("moves to Trash")
-    await dialog.getByRole("button", { name: "Move to Trash", exact: true }).click()
-    await expect(dialog).toBeHidden()
+    await expect(panel.page.getByTestId("sidepanel-chat-undo")).toContainText("to Trash.")
+    await expect(panel.page.getByTestId("sidepanel-chat-undo-undo")).toBeVisible()
     // Precondition: the delete went through in the UI (the tab is gone).
     await expect(panel.tabRow(chat.title)).toHaveCount(0)
 
