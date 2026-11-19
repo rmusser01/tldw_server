@@ -6,6 +6,8 @@ import {
 } from "@/components/Sidepanel/Chat/SlashCommandMenu"
 import { MentionsDropdown } from "./MentionsDropdown"
 import { useComposerCombobox } from "@/hooks/useComposerCombobox"
+import { useNoteMentions } from "./hooks/useNoteMentions"
+import { AttachedNoteChips, NoteMentionMenu } from "./NoteMentionMenu"
 
 export type ComposerTextareaProps = {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
@@ -48,6 +50,8 @@ export type ComposerTextareaProps = {
   onMentionsOpen: () => Promise<void>
   // Draft
   draftSaved: boolean
+  /** Replaces the draft. Turns on the note picker: "@" on the web, /note everywhere (decision [4]). */
+  onSetMessage?: (value: string) => void
 }
 
 export const ComposerTextarea = React.memo(function ComposerTextarea({
@@ -84,7 +88,8 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
   onMentionsClose,
   onMentionRefetch,
   onMentionsOpen,
-  draftSaved
+  draftSaved,
+  onSetMessage
 }: ComposerTextareaProps) {
   const { t } = useTranslation(["sidepanel"])
   // The slash menu is the textarea's listbox (AX-12).
@@ -92,6 +97,12 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
     open: showSlashMenu,
     count: slashCommands.length,
     activeIndex: slashActiveIndex
+  })
+  const noteMentions = useNoteMentions({ value, textareaRef, onSetMessage })
+  const noteCombobox = useComposerCombobox({
+    open: noteMentions.open,
+    count: noteMentions.results.length,
+    activeIndex: noteMentions.activeIndex
   })
   const minHeight = isMobile
     ? "40px"
@@ -115,6 +126,16 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         className="relative mx-3 mb-2"
         listboxId={slashCombobox.listboxId}
       />
+      <AttachedNoteChips />
+      {onSetMessage && <NoteMentionMenu
+        open={noteMentions.open}
+        notes={noteMentions.results}
+        status={noteMentions.status}
+        activeIndex={noteMentions.activeIndex}
+        onActiveIndexChange={noteMentions.setActiveIndex}
+        onSelect={noteMentions.select}
+        listboxId={noteCombobox.listboxId}
+      />}
       <textarea
         id="textarea-message"
         data-testid="chat-input"
@@ -124,6 +145,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         onMouseUp={onMouseUp}
         onKeyDown={(e) => {
           try {
+            if (noteMentions.handleKeyDown(e)) return
             onKeyDown(e)
           } catch (err) {
             console.error("[ComposerTextarea] onKeyDown error:", err)
@@ -146,11 +168,14 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         tabIndex={0}
         placeholder={placeholder}
         aria-label={t("sidepanel:composer.messageAriaLabel", "Message input")}
-        {...slashCombobox.inputProps}
+        {...(noteMentions.open ? noteCombobox.inputProps : slashCombobox.inputProps)}
         {...formInputProps}
         value={displayValue}
         onChange={onChange}
-        onSelect={onSelect}
+        onSelect={() => {
+          onSelect()
+          noteMentions.syncCaret()
+        }}
       />
 
       <MentionsDropdown

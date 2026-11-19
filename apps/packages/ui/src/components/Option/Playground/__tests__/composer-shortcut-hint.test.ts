@@ -7,11 +7,16 @@ import {
 const t = (_key: string, defaultValue: string) => defaultValue
 
 describe("composer shortcut hint (CC-11)", () => {
-  it("mentions '@' only in the extension with tab mentions turned on", () => {
+  it("mentions '@' in the extension with tab mentions turned on", () => {
     expect(composerMentionsAvailable(true, true)).toBe(true)
     expect(composerMentionsAvailable(false, true)).toBe(false)
     expect(composerMentionsAvailable(undefined, true)).toBe(false)
-    expect(composerMentionsAvailable(true, false)).toBe(false)
+  })
+
+  // Decision [4]: on the web '@' searches notes, whatever the tab setting says.
+  it("mentions '@' on the web, where it attaches notes", () => {
+    expect(composerMentionsAvailable(true, false)).toBe(true)
+    expect(composerMentionsAvailable(false, false)).toBe(true)
   })
 
   it("advertises only slash commands when mentions are unavailable", () => {

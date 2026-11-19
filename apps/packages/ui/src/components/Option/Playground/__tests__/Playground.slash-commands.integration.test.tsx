@@ -105,14 +105,37 @@ describe("Playground slash commands", { timeout: 60_000 }, () => {
     expect(useStoreMessageOption.getState().webSearch).toBe(false)
   })
 
-  // CC-11: '@' mentions are browser tabs, which only the extension can read.
-  it("does not promise @ mentions in the web app's composer", async () => {
+  // Decision [4]: on the web '@' attaches notes, so the hint names it (CC-11
+  // kept it out while '@' meant browser tabs, which only the extension reads).
+  it("names @ mentions in the web app's composer, where they attach notes", async () => {
     const server = createFakeTldwServer()
     const view = await renderPlayground({ server })
 
     expect(view.composer.getAttribute("placeholder")).not.toContain("@")
-    expect(screen.getByText("/ commands")).toBeInTheDocument()
-    expect(screen.queryByText(/@ mentions/)).toBeNull()
+    expect(screen.getByText("/ commands · @ mentions")).toBeInTheDocument()
+  })
+
+  // Decision [4]: '@' picks a note; its content goes out with the message as
+  // pinned context does, and it stays as a removable chip linking to the note.
+  it("attaches a note picked with @ and sends its content with the message", async () => {
+    const server = createFakeTldwServer({
+      notes: [{ id: 7, title: "Rebase notes", content: "Use git rebase -i to squash." }]
+    })
+    const view = await renderPlayground({ server })
+    await view.user.click(view.composer)
+    await view.user.type(view.composer, "@Reb")
+    await screen.findByRole("option", { name: /Rebase notes/ }, HARNESS_WAIT)
+    await view.user.keyboard("{Enter}")
+    expect(view.composer).toHaveValue("")
+    expect(screen.getByRole("link", { name: "Rebase notes" })).toHaveAttribute("href", "/notes?note=7")
+    await view.user.type(view.composer, "Summarize this")
+    await view.user.keyboard("{Enter}")
+    await waitForChatIdle()
+    const completions = server.completionRequests()
+    expect(completions).toHaveLength(1)
+    const sent = String(completionMessages(completions[0]).at(-1)?.content)
+    expect(sent).toContain("Summarize this")
+    expect(sent).toContain("Use git rebase -i to squash.")
   })
 
   // AX-01: '/model' opens the composer's model picker (search focused), not

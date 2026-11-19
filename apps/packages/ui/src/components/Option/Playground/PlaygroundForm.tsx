@@ -7029,19 +7029,13 @@ export const PlaygroundForm = ({
                                     isMobile={isMobileViewport}
                                     isConnectionReady={isConnectionReady}
                                     isCollapsed={isMessageCollapsed}
-                                    compactWhenInactive={
-                                      shouldCompactComposerTextarea
-                                    }
-                                    formInputProps={form.getInputProps(
-                                      "message",
-                                    )}
+                                    compactWhenInactive={shouldCompactComposerTextarea}
+                                    formInputProps={form.getInputProps("message")}
                                     showSlashMenu={showSlashMenu}
                                     slashCommands={filteredSlashCommands}
                                     slashActiveIndex={slashActiveIndex}
                                     onSlashSelect={handleSlashCommandSelect}
-                                    onSlashActiveIndexChange={
-                                      setSlashActiveIndex
-                                    }
+                                    onSlashActiveIndexChange={setSlashActiveIndex}
                                     slashEmptyLabel={t(
                                       "common:commandPalette.noResults",
                                       "No results found",
@@ -7054,6 +7048,7 @@ export const PlaygroundForm = ({
                                     onMentionRefetch={handleMentionRefetch}
                                     onMentionsOpen={handleMentionsOpen}
                                     draftSaved={draftSaved}
+                                    onSetMessage={setMessageValue}
                                   />,
                                 )}
                           </div>

@@ -4982,5 +4982,44 @@
   },
   "answerNote_fromTemporaryChatModel": {
     "message": "Saved from a temporary chat ({{model}}) on {{date}}."
+  },
+  "composer_slashNote": {
+    "message": "Attach a note"
+  },
+  "composer_slashNoteDesc": {
+    "message": "Search your notes and attach one to this message"
+  },
+  "noteMentions_label": {
+    "message": "Notes"
+  },
+  "noteMentions_count": {
+    "message": "{{count}} notes"
+  },
+  "noteMentions_count_one": {
+    "message": "{{count}} note"
+  },
+  "noteMentions_count_other": {
+    "message": "{{count}} notes"
+  },
+  "noteMentions_searching": {
+    "message": "Searching notes…"
+  },
+  "noteMentions_error": {
+    "message": "Couldn't search your notes."
+  },
+  "noteMentions_empty": {
+    "message": "No notes found"
+  },
+  "noteMentions_untitled": {
+    "message": "Untitled note"
+  },
+  "noteMentions_attached": {
+    "message": "Attached notes"
+  },
+  "noteMentions_open": {
+    "message": "Open this note"
+  },
+  "noteMentions_remove": {
+    "message": "Remove note {{title}}"
   }
 }
