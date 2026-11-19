@@ -40,6 +40,11 @@ export type InlineUndoController = {
   show: (offer: InlineUndoOffer) => void
   /** Closes the offer; with a key, only when the offer is for that key. Stable. */
   dismiss: (key?: string) => void
+  /**
+   * The offer as of the last show or dismiss, before React re-renders, so an
+   * Undo that replaced its own offer can tell. Stable.
+   */
+  current: () => InlineUndoShownOffer | null
 }
 
 /**
@@ -49,19 +54,28 @@ export type InlineUndoController = {
 export function useInlineUndo(): InlineUndoController {
   const [offer, setOffer] = React.useState<InlineUndoShownOffer | null>(null)
   const sequenceRef = React.useRef(0)
+  // Updated with every show and dismiss, so callers never read a stale offer.
+  const currentRef = React.useRef<InlineUndoShownOffer | null>(null)
 
   const show = React.useCallback((next: InlineUndoOffer) => {
     sequenceRef.current += 1
-    setOffer({ ...next, id: sequenceRef.current })
+    const shown = { ...next, id: sequenceRef.current }
+    currentRef.current = shown
+    setOffer(shown)
   }, [])
 
   const dismiss = React.useCallback((key?: string) => {
-    setOffer((current) => {
-      if (!current) return current
-      if (key !== undefined && current.key !== key) return current
-      return null
-    })
+    const current = currentRef.current
+    if (!current) return
+    if (key !== undefined && current.key !== key) return
+    currentRef.current = null
+    setOffer(null)
   }, [])
 
-  return React.useMemo(() => ({ offer, show, dismiss }), [dismiss, offer, show])
+  const current = React.useCallback(() => currentRef.current, [])
+
+  return React.useMemo(
+    () => ({ offer, show, dismiss, current }),
+    [current, dismiss, offer, show]
+  )
 }

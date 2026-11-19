@@ -261,11 +261,32 @@ describe("InlineUndoBanner", () => {
     await waitFor(() => expect(screen.getByTestId("list")).toHaveFocus())
   })
 
+  it("leaves a follow-up offer the Undo showed in place of its own", async () => {
+    const { api, show } = renderHost()
+    show(
+      offer({
+        key: "a,b",
+        message: "Moved 2 chats to Trash.",
+        onUndo: async () => {
+          api.current!.show(offer({ key: "b", message: "Restored 1 of 2 chats; 1 is still in Trash." }))
+        }
+      })
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }))
+
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("Restored 1 of 2 chats; 1 is still in Trash.")
+    )
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument()
+  })
+
   it("keeps show and dismiss stable across offers", () => {
     const { api, show } = renderHost()
     const first = api.current!
     show(offer())
     expect(api.current!.show).toBe(first.show)
     expect(api.current!.dismiss).toBe(first.dismiss)
+    expect(api.current!.current).toBe(first.current)
   })
 })

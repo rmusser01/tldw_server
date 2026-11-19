@@ -43,12 +43,10 @@ export const InlineUndoBanner: React.FC<InlineUndoBannerProps> = ({
   onReturnFocus
 }) => {
   const { t } = useTranslation(["common"])
-  const { offer, dismiss } = undo
+  const { offer, dismiss, current } = undo
   const descriptionId = React.useId()
   const containerRef = React.useRef<HTMLDivElement>(null)
   const undoButtonRef = React.useRef<HTMLButtonElement>(null)
-  const offerIdRef = React.useRef<number | null>(null)
-  offerIdRef.current = offer?.id ?? null
   const pendingRef = React.useRef<number | null>(null)
   const [pendingId, setPendingId] = React.useState<number | null>(null)
   const [announcement, setAnnouncement] = React.useState("")
@@ -110,7 +108,7 @@ export const InlineUndoBanner: React.FC<InlineUndoBannerProps> = ({
     if (pendingRef.current === id) pendingRef.current = null
     setPendingId((current) => (current === id ? null : current))
     // A newer offer, or the host's own follow-up offer, owns the banner now.
-    if (offerIdRef.current !== id) return
+    if (current()?.id !== id) return
     if (outcome === false) {
       setFailedId(id)
       return
