@@ -357,7 +357,7 @@
     "message": "Image attachments disabled"
   },
   "attachments_imageDisabledBody": {
-    "message": "Disable Knowledge Search to attach images."
+    "message": "Turn off Search & Context answers to attach images."
   },
   "attachments_tabs": {
     "message": "Web Pages"
@@ -372,7 +372,7 @@
     "message": "When enabled, attached files and pinned results will be searched for relevant context"
   },
   "attachments_manageContext": {
-    "message": "Manage in Knowledge Panel"
+    "message": "Manage in Search & Context"
   },
   "attachments_processingBlocked": {
     "message": "Blocked"
@@ -783,7 +783,7 @@
     "message": "+Tools"
   },
   "composer_manageContextHint": {
-    "message": "Manage Knowledge Search in the Context tab."
+    "message": "Manage Search & Context sources in its Context tab."
   },
   "composer_queuedBanner_title": {
     "message": "Queued from existing drafts"
@@ -2915,9 +2915,6 @@
   "cockpit_webSearchOn": {
     "message": "Web search on"
   },
-  "cockpit_webSearchOff": {
-    "message": "Web search off"
-  },
   "cockpit_openSearchContext": {
     "message": "Open Search & Context"
   },
@@ -4890,6 +4887,9 @@
   "cockpit_addSources": {
     "message": "Add sources"
   },
+  "cockpit_addSourcesFromSearchContext": {
+    "message": "Add sources from Search & Context"
+  },
   "cockpit_conversation": {
     "message": "Conversation"
   },
@@ -4967,5 +4967,8 @@
   },
   "historySelection_backToParentStaleDetail": {
     "message": "Open the original chat from the chat list."
+  },
+  "tools_images": {
+    "message": "Images"
   }
 }

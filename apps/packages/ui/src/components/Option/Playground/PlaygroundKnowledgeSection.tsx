@@ -53,8 +53,7 @@ export const PlaygroundKnowledgeSection = React.memo(
       onRemoveFile,
       onClearFiles,
       onFileRetrievalChange,
-      wrapComposerProfile,
-      t
+      wrapComposerProfile
     } = props
 
     return (
@@ -62,15 +61,10 @@ export const PlaygroundKnowledgeSection = React.memo(
         className={contextToolsOpen ? "mb-2" : "hidden"}
         aria-hidden={!contextToolsOpen}
       >
+        {/* The panel titles itself "Search & Context" (CC-08); no second heading. */}
         <div className="rounded-md bg-surface2/50 p-3">
           <div className="flex flex-col gap-4">
             <div>
-              <div className="mb-2 text-xs font-semibold text-text">
-                {t(
-                  "playground:composer.knowledgeSearch",
-                  "Search & Context"
-                )}
-              </div>
               {wrapComposerProfile(
                 "knowledge-panel",
                 <KnowledgePanel

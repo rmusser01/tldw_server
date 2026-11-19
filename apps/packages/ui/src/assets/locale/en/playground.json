@@ -196,12 +196,12 @@
     "image": "Image",
     "imageLabel": "Attached image",
     "imageDisabledTitle": "Image attachments disabled",
-    "imageDisabledBody": "Disable Knowledge Search to attach images.",
+    "imageDisabledBody": "Turn off Search & Context answers to attach images.",
     "tabs": "Web Pages",
     "files": "Uploaded Files",
     "enableKnowledgeSearch": "Enable Knowledge Search",
     "enableKnowledgeSearchTooltip": "When enabled, attached files and pinned results will be searched for relevant context",
-    "manageContext": "Manage in Knowledge Panel",
+    "manageContext": "Manage in Search & Context",
     "processingBlocked": "Blocked",
     "processingFailed": "Failed",
     "processing": "Processing",
@@ -501,7 +501,7 @@
     "favorites": "Favorites",
     "favoriteAdd": "Add to favorites",
     "favoriteRemove": "Remove from favorites",
-    "manageContextHint": "Manage Knowledge Search in the Context tab.",
+    "manageContextHint": "Manage Search & Context sources in its Context tab.",
     "sort": {
       "favorites": "Favorites",
       "az": "A-Z",
@@ -1256,7 +1256,6 @@
     "clearMediaScopes": "Clear media scopes",
     "webSearch": "Web search",
     "webSearchOn": "Web search on",
-    "webSearchOff": "Web search off",
     "web": "Web",
     "webSearchDetail": "Enabled for the next reply.",
     "disableWebSearch": "Disable web search",
@@ -1374,6 +1373,7 @@
     "sources": "Sources",
     "noSourcesAttached": "No sources attached.",
     "addSources": "Add sources",
+    "addSourcesFromSearchContext": "Add sources from Search & Context",
     "conversation": "Conversation",
     "requestPreview": "Request preview",
     "currentRun": "Current run",
@@ -1835,5 +1835,8 @@
   },
   "focusBar": {
     "openChatList": "Open chat list"
+  },
+  "tools": {
+    "images": "Images"
   }
 }

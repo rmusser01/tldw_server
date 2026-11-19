@@ -300,7 +300,7 @@ const KnowledgePanelBase: React.FC<KnowledgePanelProps> = ({
           onClick={() => setOpenState(true)}
           className="flex items-center gap-2 px-3 py-1.5 text-sm text-text-muted hover:text-text transition-colors"
         >
-          {t("sidepanel:rag.show", "Show Knowledge Search")}
+          {t("sidepanel:rag.show", "Show Search & Context")}
         </button>
       )
     }
@@ -322,7 +322,7 @@ const KnowledgePanelBase: React.FC<KnowledgePanelProps> = ({
         <div className="flex items-center justify-between px-3 py-2 border-b border-border">
           <div className="min-w-0 pr-3">
             <h3 className="text-sm font-semibold text-text">
-              {t("sidepanel:knowledge.title", "Knowledge Search")}
+              {t("sidepanel:knowledge.title", "Search & Context")}
             </h3>
             <p className="mt-0.5 text-[11px] leading-4 text-text-muted">
               {t(

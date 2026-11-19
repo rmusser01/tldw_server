@@ -3581,8 +3581,6 @@ const PlaygroundContent = () => {
       sessionDetail={sessionSummary.detail}
       sessionError={sessionSummary.error}
       historyLinked={Boolean(historyId)}
-      webSearch={webSearch}
-      onToggleWebSearch={toggleWebSearchFromCockpit}
       temporaryChat={temporaryChat}
       onToggleTemporaryChat={setTemporaryChatFromCockpit}
       contextCounts={{

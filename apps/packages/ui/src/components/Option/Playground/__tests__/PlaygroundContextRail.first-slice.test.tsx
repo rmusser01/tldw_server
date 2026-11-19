@@ -20,8 +20,6 @@ const renderRail = (
     contextSummary: [],
     sessionLabel: "Local chat",
     historyLinked: false,
-    webSearch: false,
-    onToggleWebSearch: vi.fn(),
     temporaryChat: false,
     onToggleTemporaryChat: vi.fn(),
     contextCounts: {
@@ -250,10 +248,7 @@ describe("PlaygroundContextRail first-slice controls", () => {
       screen.getByRole("heading", { name: "Sources" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open Search & Context" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Web search" }),
+      screen.getByRole("button", { name: "Add sources from Search & Context" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Conversation" }),
@@ -325,7 +320,6 @@ describe("PlaygroundContextRail first-slice controls", () => {
     const props = renderRail({
       compositionPreviewSummary: compositionSummary(),
       hasContext: true,
-      webSearch: false,
       promptSummary: {
         state: "system",
         label: "Research brief",
@@ -345,9 +339,8 @@ describe("PlaygroundContextRail first-slice controls", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Clear prompt" }));
-    fireEvent.click(screen.getByRole("button", { name: "Web search" }));
     fireEvent.click(
-      screen.getByRole("button", { name: "Open Search & Context" }),
+      screen.getByRole("button", { name: "Add sources from Search & Context" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Clear files" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear knowledge" }));
@@ -357,7 +350,6 @@ describe("PlaygroundContextRail first-slice controls", () => {
     );
 
     expect(props.onClearPrompt).toHaveBeenCalledTimes(1);
-    expect(props.onToggleWebSearch).toHaveBeenCalledTimes(1);
     expect(props.onOpenSearchContext).toHaveBeenCalledTimes(1);
     expect(props.onClearFiles).toHaveBeenCalledTimes(1);
     expect(props.onClearKnowledge).toHaveBeenCalledTimes(1);
@@ -412,31 +404,41 @@ describe("PlaygroundContextRail first-slice controls", () => {
     ).toBeInTheDocument();
   });
 
-  it("exposes web search as a pressed-state control", () => {
-    const props = renderRail();
+  // CC-08: the Tools tray is web search's one toggle; the rail lists it as a
+  // source while it is on (see contextSources).
+  it("does not offer a second web search toggle", () => {
+    renderRail();
 
-    const toggle = screen.getByRole("button", { name: "Web search" });
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-
-    fireEvent.click(toggle);
-
-    expect(props.onToggleWebSearch).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("button", { name: /web search/i }),
+    ).not.toBeInTheDocument();
   });
 
-  it("reflects enabled web search state", () => {
-    renderRail({ webSearch: true });
+  it("lists active web search as a removable source", () => {
+    const onRemove = vi.fn();
+    renderRail({
+      contextSources: [
+        {
+          id: "web-search",
+          kind: "web",
+          label: "Web",
+          title: "Web search",
+          state: "active",
+          onRemove,
+          removeLabel: "Disable web search",
+        },
+      ],
+    });
 
-    expect(screen.getByRole("button", { name: "Web search" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Disable web search" }));
+    expect(onRemove).toHaveBeenCalledTimes(1);
   });
 
   it("opens Search & Context through the supplied callback", () => {
     const props = renderRail();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open Search & Context" }),
+      screen.getByRole("button", { name: "Add sources from Search & Context" }),
     );
 
     expect(props.onOpenSearchContext).toHaveBeenCalledTimes(1);
@@ -585,7 +587,7 @@ describe("PlaygroundContextRail first-slice controls", () => {
 
     expect(screen.getByText("No sources attached.")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open Search & Context" }),
+      screen.getByRole("button", { name: "Add sources from Search & Context" }),
     ).toBeInTheDocument();
   });
 });

@@ -77,8 +77,6 @@ export type PlaygroundContextRailProps = {
   sessionDetail?: string | null;
   sessionError?: string | null;
   historyLinked: boolean;
-  webSearch: boolean;
-  onToggleWebSearch: () => void;
   temporaryChat: boolean;
   onToggleTemporaryChat: (next: boolean) => void;
   contextCounts: {
@@ -142,8 +140,6 @@ export const PlaygroundContextRail = ({
   sessionDetail,
   sessionError,
   historyLinked,
-  webSearch,
-  onToggleWebSearch,
   temporaryChat,
   onToggleTemporaryChat,
   contextCounts,
@@ -435,27 +431,20 @@ export const PlaygroundContextRail = ({
             ))}
           </ul>
         )}
+        {/* One home per feature (CC-08): web search is toggled in the Tools
+            tray and listed here as a source while it is on. */}
         <div className="mt-3 flex flex-wrap gap-1">
           <button
             type="button"
             onClick={onOpenSearchContext}
             className={railActionClass}
-            aria-label={t("cockpit.openSearchContext", "Open Search & Context")}
+            aria-label={t(
+              "cockpit.addSourcesFromSearchContext",
+              "Add sources from Search & Context",
+            )}
           >
             <Search className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
             {t("cockpit.addSources", "Add sources")}
-          </button>
-          <button
-            type="button"
-            onClick={onToggleWebSearch}
-            className={`${railActionClass} ${webSearch ? "bg-primary/10 text-primaryStrong" : ""}`}
-            aria-label={t("cockpit.webSearch", "Web search")}
-            aria-pressed={webSearch}
-          >
-            <Globe2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-            {webSearch
-              ? t("cockpit.webSearchOn", "Web search on")
-              : t("cockpit.webSearchOff", "Web search off")}
           </button>
         </div>
         {countLabels.length > 0 && (

@@ -187,7 +187,7 @@
     "saveFailedDescription": "Chat is now saving locally only. Check your connection and try again."
   },
   "knowledge": {
-    "title": "Knowledge Search",
+    "title": "Search & Context",
     "scopeNote": "Search and insert context for this chat. Open /knowledge for the full QA workspace.",
     "tabs": {
       "search": "Search",
@@ -247,7 +247,7 @@
     "search": "Search",
     "searchAllSettings": "Search all settings",
     "searchSettings": "Search settings...",
-    "show": "Show Knowledge Search",
+    "show": "Show Search & Context",
     "hide": "Hide Knowledge Search",
     "addTagPlaceholder": "Add tag (Enter)",
     "add": "Add",

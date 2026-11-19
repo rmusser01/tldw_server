@@ -51,7 +51,7 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
       chatMode === "rag"
         ? t(
             "playground:attachments.imageDisabledBody",
-            "Disable Knowledge Search to attach images."
+            "Turn off Search & Context answers to attach images."
           )
         : null
 
@@ -85,7 +85,7 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
           <span>
             {t(
               "playground:attachments.manageContext",
-              "Manage in Knowledge Panel"
+              "Manage in Search & Context"
             )}
           </span>
           <Settings2 className="h-4 w-4" />

@@ -3770,7 +3770,7 @@ export const PlaygroundForm = ({
       ),
       description: t(
         "playground:attachments.imageDisabledBody",
-        "Disable Knowledge Search to attach images.",
+        "Turn off Search & Context answers to attach images.",
       ),
     });
   }, [notificationApi, t]);
@@ -5606,16 +5606,6 @@ export const PlaygroundForm = ({
       onToggleCompare={toggleCompareMode}
       selectedCharacterName={selectedCharacter?.name || null}
       onOpenActorSettings={() => setOpenActorSettings(true)}
-      contextToolsOpen={contextToolsOpen}
-      onToggleKnowledgePanel={toggleKnowledgePanel}
-      voiceChatEnabled={voiceChatEnabled}
-      voiceChatAvailable={voiceChatAvailable}
-      voiceChatUnavailableReason={voiceChatUnavailableReason}
-      isSending={isSending}
-      onVoiceChatToggle={handleVoiceChatToggle}
-      webSearch={webSearch}
-      hasWebSearch={!!capabilities?.hasWebSearch}
-      onToggleWebSearch={handleToggleWebSearch}
       onModeAnnouncement={setModeAnnouncement}
       t={t}
     />
@@ -5999,12 +5989,9 @@ export const PlaygroundForm = ({
       onToolsPopoverChange={handleToolsPopoverChange}
       isProMode={isProMode}
       onOpenImageGenerate={openImageGenerateModal}
-      onOpenKnowledgePanel={openKnowledgePanel}
       useOCR={useOCR}
       onUseOCRChange={setUseOCR}
       hasWebSearch={!!capabilities?.hasWebSearch}
-      webSearch={webSearch}
-      onWebSearchChange={setWebSearch}
       simpleInternetSearch={simpleInternetSearch}
       onSimpleInternetSearchChange={setSimpleInternetSearch}
       defaultInternetSearchOn={defaultInternetSearchOn}
@@ -7436,7 +7423,7 @@ export const PlaygroundForm = ({
                                   uploadedFiles.length >
                                 0,
                               onClick: () => toggleKnowledgePanel(),
-                              "aria-label": "Open knowledge panel",
+                              "aria-label": "Open Search & Context",
                             },
                             {
                               id: "web",

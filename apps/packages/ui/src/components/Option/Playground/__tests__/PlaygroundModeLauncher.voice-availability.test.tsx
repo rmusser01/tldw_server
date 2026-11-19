@@ -52,9 +52,11 @@ vi.mock("@/components/Common/Button", () => ({
   )
 }))
 
+// CC-08 (#3101), decision [1]: Modes holds conversation modes. Voice has its
+// own composer button, and More tools' Voice settings explains when voice is
+// unavailable (PlaygroundToolsPopover.voice-availability.test.tsx).
 describe("PlaygroundModeLauncher voice availability", () => {
-  it("keeps Voice mode visible and disabled with the shared unavailable reason", () => {
-    const reason = "This server does not advertise voice conversation streaming."
+  it("leaves Voice to the composer's voice controls", () => {
     const props = {
       open: true,
       onOpenChange: vi.fn(),
@@ -63,29 +65,14 @@ describe("PlaygroundModeLauncher voice availability", () => {
       onToggleCompare: vi.fn(),
       selectedCharacterName: null,
       onOpenActorSettings: vi.fn(),
-      contextToolsOpen: false,
-      onToggleKnowledgePanel: vi.fn(),
-      voiceChatEnabled: false,
-      voiceChatAvailable: false,
-      isSending: false,
-      onVoiceChatToggle: vi.fn(),
-      webSearch: false,
-      hasWebSearch: false,
-      onToggleWebSearch: vi.fn(),
       onModeAnnouncement: vi.fn(),
-      t: (key: string, fallback?: string) => fallback || key,
-      voiceChatUnavailableReason: reason
-    } satisfies React.ComponentProps<typeof PlaygroundModeLauncher> & {
-      voiceChatUnavailableReason: string
-    }
+      t: (key: string, fallback?: string) => fallback || key
+    } satisfies React.ComponentProps<typeof PlaygroundModeLauncher>
 
     render(<PlaygroundModeLauncher {...props} />)
 
-    const voiceModeButton = screen.getByRole("button", {
-      name: /Voice mode/i
-    })
-
-    expect(voiceModeButton).toBeDisabled()
-    expect(voiceModeButton).toHaveAttribute("title", reason)
+    expect(
+      screen.queryByRole("button", { name: /Voice mode/i })
+    ).not.toBeInTheDocument()
   })
 })

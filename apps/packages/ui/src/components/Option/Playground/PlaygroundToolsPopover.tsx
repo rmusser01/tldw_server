@@ -1,5 +1,4 @@
 import { Button as TldwButton } from "@/components/Common/Button"
-import type { KnowledgeTab } from "@/components/Knowledge"
 import { Popover, Radio, Switch, Tooltip } from "antd"
 import {
   ArrowRight,
@@ -8,10 +7,8 @@ import {
   EraserIcon,
   FileText,
   GitBranch,
-  Globe,
   Headphones,
   ImageIcon,
-  Settings2,
   SlidersHorizontal,
   WandSparkles
 } from "lucide-react"
@@ -28,18 +25,13 @@ export interface PlaygroundToolsPopoverProps {
   onToolsPopoverChange: (open: boolean) => void
   isProMode: boolean
 
-  // Attachments
+  // Images
   onOpenImageGenerate: () => void
-  onOpenKnowledgePanel: (tab: KnowledgeTab) => void
-
-  // OCR
   useOCR: boolean
   onUseOCRChange: (value: boolean) => void
 
-  // Web search
+  // Web search settings (its on/off toggle lives in the Tools tray, CC-08)
   hasWebSearch: boolean
-  webSearch: boolean
-  onWebSearchChange: (checked: boolean) => void
   simpleInternetSearch: boolean
   onSimpleInternetSearchChange: (checked: boolean) => void
   defaultInternetSearchOn: boolean
@@ -88,12 +80,9 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
       onToolsPopoverChange,
       isProMode,
       onOpenImageGenerate,
-      onOpenKnowledgePanel,
       useOCR,
       onUseOCRChange,
       hasWebSearch,
-      webSearch,
-      onWebSearchChange,
       simpleInternetSearch,
       onSimpleInternetSearchChange,
       defaultInternetSearchOn,
@@ -138,10 +127,10 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
 
     const content = (
       <div onKeyDown={handleEscape} className="flex w-72 flex-col gap-2 p-1">
-        {/* ATTACHMENTS Section */}
+        {/* IMAGES Section. Search & Context has its own homes (CC-08). */}
         <div className="flex flex-col gap-2">
           <span className="text-[10px] font-semibold uppercase text-text-muted tracking-wider px-2">
-            {t("playground:tools.attachments", "Attachments")}
+            {t("playground:tools.images", "Images")}
           </span>
           <button
             type="button"
@@ -155,31 +144,16 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
             </span>
             <WandSparkles className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            onClick={() => onOpenKnowledgePanel("context")}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2">
-            <span>
-              {t(
-                "playground:attachments.manageContext",
-                "Manage in Knowledge Panel"
-              )}
+          <div className="flex items-center justify-between px-2">
+            <span className="text-sm text-text">
+              {t("playground:tools.useOCR", "Use OCR")}
             </span>
-            <Settings2 className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="border-t border-border my-1" />
-
-        <div className="flex items-center justify-between px-2">
-          <span className="text-sm text-text">
-            {t("playground:tools.useOCR", "Use OCR")}
-          </span>
-          <Switch
-            size="small"
-            checked={useOCR}
-            onChange={(value) => onUseOCRChange(value)}
-          />
+            <Switch
+              size="small"
+              checked={useOCR}
+              onChange={(value) => onUseOCRChange(value)}
+            />
+          </div>
         </div>
 
         <div className="border-t border-border my-1" />
@@ -187,21 +161,10 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
         {/* WEB SEARCH Section */}
         <div className="flex flex-col gap-2">
           <span className="px-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-            {t("playground:tools.webSearch", "Web Search")}
+            {t("playground:tools.webSearch", "Web search")}
           </span>
           {hasWebSearch ? (
             <>
-              <div className="flex items-center justify-between gap-2 px-2">
-                <span className="flex items-center gap-2 text-sm text-text">
-                  <Globe className="h-4 w-4 text-text-subtle" />
-                  {t("playground:tools.webSearchEnabled", "Enable web search")}
-                </span>
-                <Switch
-                  size="small"
-                  checked={webSearch}
-                  onChange={(checked) => onWebSearchChange(checked)}
-                />
-              </div>
               <div className="flex items-center justify-between gap-2 px-2">
                 <span className="text-sm text-text">
                   {t(
