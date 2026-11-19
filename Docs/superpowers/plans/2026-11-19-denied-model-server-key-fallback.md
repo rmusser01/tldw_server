@@ -1380,3 +1380,13 @@ git commit -m "chore(backlog): close TASK-15571; file TASK-15576 and TASK-15577"
 - Measured only by the plan review in a full checkout: `tests/Docs` 214 after the refresh, `tests/CI`
   (environment-only failures), `tests/lint` 318, and `test_eval_runner.py` 75 (default basetemp).
 - Bandit is not in the shared venv.
+
+## Final review fix (2026-11-19)
+
+The whole-branch review found that the two evaluation judges that call the adapter directly with the run's handle
+(`Evaluations/eval_runner.py` and `Evaluations/ms_g_eval.py`, `_call_adapter_text`) still ran a denied
+`DEFAULT_MODEL_<PROVIDER>` on the user's own key. `_override_outcome` moved to
+`llm_provider_overrides.override_outcome`, and both handle branches now use it: a fallback drops the handle and key
+(checked as a server-key call), a refusal or an unanswered check raises `ChatConfigurationError`. Pinned by
+`test_an_evaluation_judge_*` in `test_llm_quota_byok_calls.py`. Minors: the HyDE last-used note went to TASK-15576;
+the no-user fallback and the MCP conftest fixture went to TASK-15577; the Usage_Quotas logging sentence is exact.

@@ -24,6 +24,7 @@ Found by TASK-15571's plan review (I5). TASK-15571 applies the owner's rule (a m
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+From the final review of PR #3523: hyde.py:132-150 marks the user's handle used after sgl.analyze returns, even when the call ran on the server key (a denied-model fallback), so only the key's last-used time is wrong. Any change to the 19 runtimes inherits it. Also for the owner's decision: server-key calls are never checked against the override, so a disabled provider stops BYOK handle calls but not server-key calls on these paths (plan Decision 2).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

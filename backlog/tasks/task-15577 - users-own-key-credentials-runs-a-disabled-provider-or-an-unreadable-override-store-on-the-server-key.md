@@ -24,6 +24,7 @@ Found by TASK-15571's plan review. The except clause of users_own_key_credential
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Deferred from the final review of PR #3523. M1: a fallback with no user in the call context runs unchecked and unrecorded (Summarization_General_Lib.py, user_to_check(strict=True) returns None for no user as well as for exempt/quotas off). Unreachable today because every executor carries the LLM call state. The fix is to treat current_llm_user_id() is None as no answer when quotas are on (override_outcome in llm_provider_overrides.py now holds the check); the boundary tests' _summary helper then needs llm_call_context(user_id=...). M2: the MCP tests conftest fixture patches three private globals instead of set_llm_provider_overrides_cache_for_tests with the ambient_llm_provider_override_store opt-out marker, and leaves _OVERRIDE_RECOVERY_NEXT_RETRY_AT behind after an unhealthy-store test. Fix it if that directory grows store-sensitive tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
