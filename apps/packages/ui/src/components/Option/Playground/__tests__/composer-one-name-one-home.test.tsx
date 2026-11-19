@@ -184,7 +184,6 @@ describe("CC-08: one name and one home per composer feature", () => {
     render(
       <PlaygroundAttachmentButton
         isProMode={false}
-        isMobileViewport={false}
         chatMode="rag"
         onImageUpload={vi.fn()}
         onDocumentUpload={vi.fn()}
@@ -246,7 +245,7 @@ describe("CC-08: one name and one home per composer feature", () => {
 
     const entries = screen
       .getAllByRole("button")
-      .filter((button) => button.getAttribute("aria-label") !== "Modes")
+      .filter((button) => button.textContent !== "Modes")
     expect(entries).toHaveLength(1)
     fireEvent.click(screen.getByRole("button", { name: /Character \/ Scene/ }))
     expect(props.onOpenActorSettings).toHaveBeenCalledTimes(1)

@@ -1,4 +1,4 @@
-import { Button as TldwButton } from "@/components/Common/Button"
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens"
 import { Popover, Radio, Switch, Tooltip } from "antd"
 import {
   ArrowRight,
@@ -403,16 +403,15 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
         classNames={{ root: "playground-more-tools" }}
         open={toolsPopoverOpen}
         onOpenChange={onToolsPopoverChange}>
-        <TldwButton
+        {/* Toolbar size tokens: 32px desktop, 44px touch (decision [3]). */}
+        <button
           ref={triggerRef}
+          type="button"
           onKeyDown={toolsPopoverOpen ? handleEscape : undefined}
-          variant="outline"
-          size="sm"
-          shape={isProMode ? "rounded" : "pill"}
-          iconOnly={!isProMode}
-          ariaLabel={t("playground:composer.moreTools", "More tools") as string}
+          aria-label={t("playground:composer.moreTools", "More tools") as string}
           title={t("playground:composer.moreTools", "More tools") as string}
-          data-testid="tools-button">
+          data-testid="tools-button"
+          className={`${isProMode ? COMPOSER_TOOLBAR_TOKENS.textControl : COMPOSER_TOOLBAR_TOKENS.iconButton} border border-border bg-transparent text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus`}>
           {isProMode ? (
             <span>{t("playground:composer.toolsButton", "+Tools")}</span>
           ) : (
@@ -423,7 +422,7 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
               </span>
             </>
           )}
-        </TldwButton>
+        </button>
       </Popover>
     )
   })

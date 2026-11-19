@@ -6024,7 +6024,6 @@ export const PlaygroundForm = ({
   const attachmentButton = (
     <PlaygroundAttachmentButton
       isProMode={isProMode}
-      isMobileViewport={isMobileViewport}
       chatMode={chatMode}
       onImageUpload={handleImageUpload}
       onDocumentUpload={handleDocumentUpload}

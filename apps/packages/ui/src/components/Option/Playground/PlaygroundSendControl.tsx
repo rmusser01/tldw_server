@@ -23,7 +23,6 @@ import type { KnowledgeTab } from "@/components/Knowledge"
 
 export interface PlaygroundAttachmentButtonProps {
   isProMode: boolean
-  isMobileViewport: boolean
   chatMode: string
   onImageUpload: () => void
   onDocumentUpload: () => void
@@ -37,7 +36,6 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
   React.memo(function PlaygroundAttachmentButton(props) {
     const {
       isProMode,
-      isMobileViewport,
       chatMode,
       onImageUpload,
       onDocumentUpload,
@@ -93,16 +91,20 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
       </div>
     )
 
+    // Toolbar size tokens: 32px desktop, 44px touch (decision [3]).
+    const attachControlClass = `${
+      isProMode
+        ? COMPOSER_TOOLBAR_TOKENS.textControl
+        : COMPOSER_TOOLBAR_TOKENS.iconButton
+    } border border-border bg-transparent text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50`
+
     return (
       <div className="inline-flex items-center">
         <Tooltip title={imageAttachmentDisabled || undefined}>
           <span>
-            <TldwButton
-              variant="outline"
-              size={isMobileViewport ? "lg" : "sm"}
-              shape={isProMode ? "rounded" : "pill"}
-              iconOnly={!isProMode}
-              ariaLabel={
+            <button
+              type="button"
+              aria-label={
                 t(
                   "playground:actions.attachImage",
                   "Attach image"
@@ -117,7 +119,7 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
               disabled={chatMode === "rag"}
               data-testid="attachment-button"
               onClick={onImageUpload}
-              className="rounded-r-none"
+              className={`${attachControlClass} rounded-r-none`}
             >
               {isProMode ? (
                 <span className="inline-flex items-center gap-1.5">
@@ -132,7 +134,7 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
                   </span>
                 </>
               )}
-            </TldwButton>
+            </button>
           </span>
         </Tooltip>
         <Popover
@@ -143,12 +145,9 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
           open={attachmentMenuOpen}
           onOpenChange={onAttachmentMenuChange}
         >
-          <TldwButton
-            variant="outline"
-            size={isMobileViewport ? "lg" : "sm"}
-            shape={isProMode ? "rounded" : "pill"}
-            iconOnly
-            ariaLabel={
+          <button
+            type="button"
+            aria-label={
               t(
                 "playground:actions.attachMore",
                 "More attachments"
@@ -160,10 +159,10 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
                 "More attachments"
               ) as string
             }
-            className="-ml-px rounded-l-none"
+            className={`${COMPOSER_TOOLBAR_TOKENS.iconButton} -ml-px rounded-l-none border border-border bg-transparent text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus`}
           >
             <ChevronDown className="h-4 w-4" aria-hidden="true" />
-          </TldwButton>
+          </button>
         </Popover>
       </div>
     )

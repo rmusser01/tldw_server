@@ -3,6 +3,7 @@ import React from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens";
 import { ComposerToolbar } from "../ComposerToolbar";
 
 const assistantSelectMock = vi.hoisted(() => vi.fn());
@@ -349,6 +350,24 @@ describe("calm composer", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
     expect(onDictationToggle).toHaveBeenCalledOnce();
+  });
+
+  // Decision [3]: toolbar controls use the size tokens (32px desktop, 44px touch).
+  it("sizes Tools, persistence and dictation with the text-control token", () => {
+    render(
+      <ToolbarHarness hasDictation speechAvailable isListening optionsExpanded />,
+    );
+    for (const control of [
+      screen.getByTestId("composer-options-toggle"),
+      screen.getByTestId("composer-persistence"),
+      screen.getByTestId("dictation-button"),
+      screen.getByTestId("knowledge-search-toggle"),
+    ]) {
+      for (const className of COMPOSER_TOOLBAR_TOKENS.textControl.split(" ")) {
+        expect(control).toHaveClass(className);
+      }
+      expect(control.className).not.toMatch(/(^|\s)(min-h-9|text-sm)(\s|$)/);
+    }
   });
 
   it("toggles the formatting guide inside Tools", () => {

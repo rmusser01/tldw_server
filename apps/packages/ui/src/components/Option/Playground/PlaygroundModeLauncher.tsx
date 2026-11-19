@@ -1,4 +1,4 @@
-import { Button as TldwButton } from "@/components/Common/Button"
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens"
 import { Popover } from "antd"
 import { Settings2 } from "lucide-react"
 import React from "react"
@@ -126,20 +126,16 @@ export const PlaygroundModeLauncher: React.FC<PlaygroundModeLauncherProps> =
         content={content}
         open={open}
         onOpenChange={onOpenChange}>
-        <TldwButton
+        {/* Toolbar size tokens: 32px desktop, 44px touch (decision [3]). */}
+        <button
           ref={triggerRef}
+          type="button"
           onKeyDown={open ? handleEscape : undefined}
-          variant="outline"
-          size="sm"
-          shape="pill"
-          ariaLabel={t("playground:composer.modes", "Modes") as string}
           title={t("playground:composer.modes", "Modes") as string}
-          className="min-h-[44px]">
-          <span className="inline-flex items-center gap-1.5">
-            <Settings2 className="h-4 w-4" aria-hidden="true" />
-            <span>{t("playground:composer.modes", "Modes")}</span>
-          </span>
-        </TldwButton>
+          className={`${COMPOSER_TOOLBAR_TOKENS.textControl} border border-border bg-transparent text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus`}>
+          <Settings2 className="h-4 w-4" aria-hidden="true" />
+          <span>{t("playground:composer.modes", "Modes")}</span>
+        </button>
       </Popover>
     )
   })

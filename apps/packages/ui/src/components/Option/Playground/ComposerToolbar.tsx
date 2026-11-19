@@ -21,6 +21,7 @@ import { AssistantSelect } from "@/components/Common/AssistantSelect";
 import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton";
 import { PromptSelect } from "@/components/Common/PromptSelect";
 import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY } from "@/utils/output-formatting-guide";
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens";
 import type { ComposerToolbarRolePlayActions } from "./ComposerToolbarOverflow";
 import { composerShortcutHint } from "./composer-shortcut-hint";
 import {
@@ -340,8 +341,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     t,
     temporaryChat,
   );
-  const controlClass =
-    "inline-flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
+  // One size grammar for toolbar controls: 32px desktop, 44px touch ([3]).
+  const controlClass = `${COMPOSER_TOOLBAR_TOKENS.textControl} text-text-muted transition-colors hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus`;
   const activeContextItems = contextItems.filter(
     (item) =>
       item.id !== "model" &&
@@ -914,7 +915,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
                 aria-pressed={!temporaryChat}
                 aria-label={persistenceControlLabel}
                 data-testid="composer-persistence"
-                className={`min-h-9 rounded-md px-2 transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed ${temporaryChat ? "bg-warn/10 text-text" : "text-text-muted"}`}
+                className={`${COMPOSER_TOOLBAR_TOKENS.textControl} transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed ${temporaryChat ? "bg-warn/10 text-text" : "text-text-muted"}`}
               >
                 {persistenceLabel}
               </button>
