@@ -1,6 +1,6 @@
 """One test per shared config key, pinning where it resolves today (TASK-13950.21, Task 7).
 
-Row 1: ``AUTH_MODE`` (alias ``APP_MODE``). Row 2: ``SINGLE_USER_FIXED_ID``. Every surface that reads the key is exercised through
+Row 1: ``AUTH_MODE`` (alias ``APP_MODE``). Row 2: ``SINGLE_USER_FIXED_ID``. Row 3: ``ACCESS_TOKEN_EXPIRE_MINUTES``. Every surface that reads the key is exercised through
 its nearest callable, over the same input cases. The commit that moved the key changed only the
 expected values the owner approved (D1 a-c).
 """
@@ -332,3 +332,66 @@ def test_config_only_fixed_id_warns_once_per_process():
         logger.remove(sink)
     hits = [m for m in messages if "single_user_fixed_id" in m and "SINGLE_USER_FIXED_ID" in m]
     assert len(hits) == 1
+
+
+# ---- Row 3: ACCESS_TOKEN_EXPIRE_MINUTES ----
+
+# id -> (env ACCESS_TOKEN_EXPIRE_MINUTES, [AuthNZ] access_token_expire_minutes)
+TTL_CASES = {
+    "env_set": ("7", "45"),
+    "env_blank": ("", "45"),
+    "env_invalid": ("abc", "45"),
+    "config_only": (UNSET, "45"),
+    "neither": (UNSET, UNSET),
+}
+
+
+def _ttl_parser(value: str | None) -> configparser.ConfigParser:
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.add_section("AuthNZ")
+    if value is not None:
+        parser.set("AuthNZ", "access_token_expire_minutes", value)
+    return parser
+
+
+@pytest.fixture
+def apply_ttl_case(monkeypatch):
+    def apply(case: str) -> configparser.ConfigParser:
+        config.clear_config_cache()
+        env_ttl, cfg_ttl = TTL_CASES[case]
+        if env_ttl is None:
+            monkeypatch.delenv("ACCESS_TOKEN_EXPIRE_MINUTES", raising=False)
+        else:
+            monkeypatch.setenv("ACCESS_TOKEN_EXPIRE_MINUTES", env_ttl)
+        monkeypatch.delenv("AUTH_MODE", raising=False)
+        monkeypatch.setattr(config, "_load_env_files_early", lambda: None)
+        parser = _ttl_parser(cfg_ttl)
+        monkeypatch.setattr(config, "load_comprehensive_config", lambda: parser)
+        monkeypatch.setattr(authnz_settings, "load_comprehensive_config", lambda: parser)
+        authnz_settings.reset_settings()
+        return parser
+
+    yield apply
+    monkeypatch.undo()
+    config.clear_config_cache()
+    authnz_settings.reset_settings()
+
+
+# config_sections has no function for this key today. LazySettings ignores config.txt.
+TTL_EXPECTED = {
+    #                 AuthNZ LazySettings
+    "env_set": (7, 7),
+    "env_blank": (ERR, ERR),
+    "env_invalid": (ERR, ERR),
+    "config_only": (45, 30),
+    "neither": (30, 30),
+}
+
+
+@pytest.mark.parametrize("case", list(TTL_CASES))
+def test_access_token_expire_minutes_resolution_today(apply_ttl_case, case):
+    apply_ttl_case(case)
+    authnz, lazy = TTL_EXPECTED[case]
+
+    assert _outcome(lambda: authnz_settings.get_settings().ACCESS_TOKEN_EXPIRE_MINUTES) == authnz
+    assert _outcome(lambda: config.load_settings()["ACCESS_TOKEN_EXPIRE_MINUTES"]) == lazy
