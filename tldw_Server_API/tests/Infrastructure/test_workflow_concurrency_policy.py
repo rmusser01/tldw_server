@@ -84,15 +84,21 @@ def _concurrency(name: str) -> dict:
     return concurrency
 
 
-def _suffix(name: str, group: str) -> str:
-    """Strip the per-workflow prefix, leaving the shared identity expression."""
+def _identity_expression(name: str, group: str) -> str:
+    """Strip the workflow and reusable-call qualifiers from the run identity."""
     prefix = f"{name.removesuffix('.yml')}-"
     assert group.startswith(prefix), (
         f"{name} has concurrency group {group!r}, which does not start with "
         f"{prefix!r}. The prefix is what keeps one workflow's runs from "
         f"cancelling another's."
     )
-    return group.removeprefix(prefix)
+    caller_suffixes = {
+        "ci.yml": "${{ inputs.nightly && '-nightly' || '' }}-${{ github.workflow }}",
+        "pypi-package.yml": "${{ inputs.qualification && format('-qualification-{0}', github.workflow) || '' }}",
+    }
+    caller_suffix = caller_suffixes.get(name, "")
+    assert group.endswith(caller_suffix), f"{name} must isolate reusable qualification runs"
+    return group.removeprefix(prefix).removesuffix(caller_suffix)
 
 
 @pytest.mark.unit
@@ -138,14 +144,14 @@ def test_required_workflow_groups_on_the_pull_request(name: str) -> None:
 def test_required_workflows_agree_on_one_identity_expression() -> None:
     """One workflow drifting is the failure this guard exists to catch.
 
-    They are prefixed per workflow and otherwise identical, so comparing the
-    suffixes catches a single file being edited in isolation -- which is how
-    this last broke.
+    The event and PR identity must stay identical across the required workflows.
+    Compare it after validating the workflow and reusable-call qualifiers.
     """
-    suffixes = {name: _suffix(name, _concurrency(name).get("group", "")) for name in TARGET_WORKFLOWS}
+    identities = {name: _identity_expression(name, _concurrency(name).get("group", "")) for name in TARGET_WORKFLOWS}
 
-    distinct = set(suffixes.values())
+    distinct = set(identities.values())
     assert len(distinct) == 1, (
         "required workflows disagree on how they identify a run, so their runs "
-        "will not collapse together:\n" + "\n".join(f"  {name}: {suffix}" for name, suffix in sorted(suffixes.items()))
+        "will not collapse together:\n"
+        + "\n".join(f"  {name}: {identity}" for name, identity in sorted(identities.items()))
     )
