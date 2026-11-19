@@ -2689,15 +2689,13 @@ def _env_then_loaded_config(
     section: str,
     option: str,
     default: str,
-    *,
-    environment: Mapping[str, str] | None = None,
 ) -> str:
     """Resolve one setting: a set env var (blank counts) wins, else config.txt (blank counts), else ``default``.
 
     config.txt is loaded only when the environment does not decide, so a config that cannot be
     loaded never hides a set env var. A config that cannot be loaded or read yields ``default``.
     """
-    env = resolve((env_key,), env=environment, blank_env=True)
+    env = resolve((env_key,), blank_env=True)
     if env.source == "env":
         return str(env.value)
     try:
