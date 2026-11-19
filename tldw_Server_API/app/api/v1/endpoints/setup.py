@@ -9,6 +9,7 @@ import re
 import sys
 import uuid
 from collections.abc import Callable
+from configparser import ConfigParser
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from typing import Any
@@ -791,8 +792,19 @@ async def _require_system_configure_access(request: Request) -> AuthPrincipal:
     return principal
 
 
+def _read_setup_config() -> ConfigParser:
+    """Re-read config.txt on every call: the wizard rewrites it, so the shared cached load is stale."""
+    parser = ConfigParser()
+    try:
+        parser.read(setup_manager.get_config_file_path(), encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 - metadata should remain best-effort
+        logger.debug("Unable to read auth mode for first-run metadata: {}", type(exc).__name__)
+        return ConfigParser()
+    return parser
+
+
 def _resolve_auth_mode(status_snapshot: dict[str, Any]) -> str:
-    raw_auth_mode = status_snapshot.get("auth_mode") or load_auth_config().mode
+    raw_auth_mode = status_snapshot.get("auth_mode") or load_auth_config(_read_setup_config()).mode
     return str(raw_auth_mode or "single_user").strip() or "single_user"
 
 

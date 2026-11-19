@@ -42,7 +42,7 @@ def load_auth_config(
 
         try:
             config_parser = load_comprehensive_config() or configparser.ConfigParser()
-        except (OSError, configparser.Error):
+        except (OSError, configparser.Error, ValueError):
             config_parser = configparser.ConfigParser()
     env_map: Mapping[str, str] = env if env is not None else os.environ
 

@@ -110,7 +110,7 @@ def _authnz_mode() -> str:
 
 
 # config_sections and AuthNZ are unchanged by the move. Every other reader follows the effective mode
-# (env, then [AuthNZ] auth_mode, then the tolerant APP_MODE fallback) since D1(a)-(c): before, LazySettings
+# (env, then [AuthNZ] auth_mode, then single_user; APP_MODE counts only when both are invalid) since D1(a)-(c): before, LazySettings
 # read APP_MODE and the rest read the environment only.
 EXPECTED = {
     #               config_sections  AuthNZ
@@ -201,3 +201,14 @@ def test_auth_mode_env_is_exact_case_and_live():
     assert auth_mode_env({"AUTH_MODE": " Multi "}) == " Multi "
     assert auth_mode_env({"auth_mode": "multi_user"}) is None
     assert auth_mode_env({}) is None
+
+
+def test_setup_wizard_auth_mode_reads_the_config_file_fresh(monkeypatch, tmp_path):
+    """The wizard rewrites config.txt; first-run metadata must see the new mode without a restart."""
+    monkeypatch.delenv("AUTH_MODE", raising=False)
+    monkeypatch.delenv("APP_MODE", raising=False)
+    setup_file = tmp_path / "config.txt"
+    monkeypatch.setattr(setup_manager, "get_config_file_path", lambda: setup_file)
+    for mode in ("multi_user", "single_user"):
+        setup_file.write_text(f"[AuthNZ]\nauth_mode = {mode}\n", encoding="utf-8")
+        assert setup_endpoint._resolve_auth_mode({}) == mode
