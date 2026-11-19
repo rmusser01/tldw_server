@@ -1,5 +1,6 @@
 import React from "react"
-import { Spin } from "antd"
+import { Button, Spin } from "antd"
+import { Sparkles } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type { RagPinnedResult } from "@/utils/rag-format"
 import type { QASearchResponse, QADocument } from "../hooks/useQASearch"
@@ -15,6 +16,10 @@ type QAResultsViewProps = {
   query?: string
   pinnedResults: RagPinnedResult[]
   onRetry?: () => void
+  /** Generate an answer from the shown sources; omit to hide the action. */
+  onGenerateAnswer?: () => void
+  answerLoading?: boolean
+  answerError?: string | null
   onCopyAnswer: () => void
   onInsertAnswer: () => void
   onCopyChunk: (doc: QADocument) => void
@@ -24,8 +29,8 @@ type QAResultsViewProps = {
 }
 
 /**
- * Orchestrates the QA Search results display:
- * generated answer card on top, source chunks below.
+ * Orchestrates the QA Search results display: source chunks first, then the
+ * generated answer, which the user asks for (CC-10, owner decision [2]).
  */
 export const QAResultsView: React.FC<QAResultsViewProps> = ({
   response,
@@ -35,6 +40,9 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
   query,
   pinnedResults,
   onRetry,
+  onGenerateAnswer,
+  answerLoading = false,
+  answerError = null,
   onCopyAnswer,
   onInsertAnswer,
   onCopyChunk,
@@ -85,17 +93,6 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
         </div>
       )}
 
-      {/* Generated Answer */}
-      {hasAnswer && (
-        <GeneratedAnswerCard
-          answer={response.generatedAnswer!}
-          totalTime={response.totalTime}
-          cacheHit={response.cacheHit}
-          onCopy={onCopyAnswer}
-          onInsert={onInsertAnswer}
-        />
-      )}
-
       {/* Source Chunks */}
       {hasDocs && (
         <SourceChunksList
@@ -108,6 +105,36 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
           onPreview={onPreviewChunk}
         />
       )}
+
+      {/* Generated Answer, after the sources and only on request */}
+      {hasAnswer ? (
+        <GeneratedAnswerCard
+          answer={response.generatedAnswer!}
+          totalTime={response.totalTime}
+          cacheHit={response.cacheHit}
+          onCopy={onCopyAnswer}
+          onInsert={onInsertAnswer}
+        />
+      ) : hasDocs && onGenerateAnswer ? (
+        <div className="flex flex-col items-start gap-2">
+          <Button
+            size="small"
+            onClick={onGenerateAnswer}
+            disabled={answerLoading}
+            aria-busy={answerLoading}
+            icon={<Sparkles className="h-3 w-3" aria-hidden="true" />}
+          >
+            {answerLoading
+              ? t("sidepanel:qaSearch.generatingAnswer", "Generating answer…")
+              : t("sidepanel:qaSearch.generateAnswer", "Generate answer")}
+          </Button>
+          {answerError && (
+            <p role="alert" className="text-xs text-danger">
+              {answerError}
+            </p>
+          )}
+        </div>
+      ) : null}
     </div>
   )
 }

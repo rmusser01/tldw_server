@@ -39,6 +39,11 @@ type QASearchTabProps = {
   // Pinned results
   pinnedResults: RagPinnedResult[]
 
+  // Opt-in answer (CC-10)
+  onGenerateAnswer?: () => void
+  answerLoading?: boolean
+  answerError?: string | null
+
   // Result actions
   onCopyAnswer: () => void
   onInsertAnswer: () => void
@@ -54,7 +59,7 @@ type QASearchTabProps = {
 }
 
 /**
- * QA Search tab — full RAG pipeline search with answer generation.
+ * QA Search tab: retrieves source chunks; an answer is generated on request.
  */
 export const QASearchTab: React.FC<QASearchTabProps> = ({
   query,
@@ -78,6 +83,9 @@ export const QASearchTab: React.FC<QASearchTabProps> = ({
   hasAttemptedSearch,
   timedOut,
   pinnedResults,
+  onGenerateAnswer,
+  answerLoading,
+  answerError,
   onCopyAnswer,
   onInsertAnswer,
   onCopyChunk,
@@ -131,6 +139,9 @@ export const QASearchTab: React.FC<QASearchTabProps> = ({
         query={query}
         pinnedResults={pinnedResults}
         onRetry={onSearch}
+        onGenerateAnswer={onGenerateAnswer}
+        answerLoading={answerLoading}
+        answerError={answerError}
         onCopyAnswer={onCopyAnswer}
         onInsertAnswer={onInsertAnswer}
         onCopyChunk={onCopyChunk}

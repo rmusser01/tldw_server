@@ -1274,6 +1274,18 @@
   "qaSearch_insertAnswer": {
     "message": "Insert answer"
   },
+  "qaSearch_generateAnswer": {
+    "message": "Generate answer"
+  },
+  "qaSearch_generatingAnswer": {
+    "message": "Generating answer…"
+  },
+  "qaSearch_noAnswerGenerated": {
+    "message": "No answer was generated from these sources."
+  },
+  "qaSearch_generateAnswerFailed": {
+    "message": "Couldn't generate an answer. Try again, or check the model in Settings."
+  },
   "qaSearch_copyChunk": {
     "message": "Copy chunk"
   },
@@ -2151,5 +2163,17 @@
   },
   "folderPicker_saveError": {
     "message": "Some folder changes couldn't be saved. Try again."
+  },
+  "qaSearch_relevance_best": {
+    "message": "Best match"
+  },
+  "qaSearch_relevance_good": {
+    "message": "Good match"
+  },
+  "qaSearch_relevance_weaker": {
+    "message": "Weaker match"
+  },
+  "qaSearch_relevance_tooltip": {
+    "message": "Compared with the other results. Score {{score}}"
   }
 }

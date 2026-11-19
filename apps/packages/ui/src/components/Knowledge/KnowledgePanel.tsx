@@ -71,7 +71,7 @@ const noop = () => {}
  * KnowledgePanel - Main container for the 4-tab RAG interface
  *
  * Implements the 4-tab architecture:
- * - QA Search tab: Full RAG pipeline with generated answers and source chunks
+ * - QA Search tab: source chunks first; an answer is generated on request
  * - File Search tab: Media library search for document discovery and attachment
  * - Settings tab: All RAG settings organized in collapsible sections
  * - Context tab: Manage attached tabs, files, and pinned results
@@ -381,6 +381,9 @@ const KnowledgePanelBase: React.FC<KnowledgePanelProps> = ({
             hasAttemptedSearch={qaSearch.hasAttemptedSearch}
             timedOut={qaSearch.timedOut}
             pinnedResults={search.pinnedResults}
+            onGenerateAnswer={qaSearch.generateAnswer}
+            answerLoading={qaSearch.answerLoading}
+            answerError={qaSearch.answerError}
             onCopyAnswer={qaSearch.copyAnswer}
             onInsertAnswer={qaSearch.insertAnswer}
             onCopyChunk={qaSearch.copyChunk}

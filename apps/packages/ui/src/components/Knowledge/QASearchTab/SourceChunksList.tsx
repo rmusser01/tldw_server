@@ -4,6 +4,7 @@ import type { RagPinnedResult } from "@/utils/rag-format"
 import type { QADocument } from "../hooks/useQASearch"
 import { SourceChunkItem } from "./SourceChunkItem"
 import { toPinnedResult } from "../hooks"
+import { topChunkScore } from "./relevance-label"
 
 type SourceChunksListProps = {
   documents: QADocument[]
@@ -30,7 +31,7 @@ const getChunkScore = (doc: QADocument): number => {
 }
 
 /**
- * Scrollable list of retrieved source chunks with relevance scores.
+ * Scrollable list of retrieved source chunks with plain relevance labels.
  */
 export const SourceChunksList: React.FC<SourceChunksListProps> = ({
   documents,
@@ -74,6 +75,7 @@ export const SourceChunksList: React.FC<SourceChunksListProps> = ({
 
     return decorated.map((item) => item.doc)
   }, [documents, sortMode])
+  const topScore = topChunkScore(documents)
 
   const isPinned = (doc: QADocument): boolean => {
     const ragResult = {
@@ -148,6 +150,7 @@ export const SourceChunksList: React.FC<SourceChunksListProps> = ({
               onPin={onPin}
               onPreview={onPreview}
               isPinned={isPinned(doc)}
+              topScore={topScore}
             />
           </div>
         ))}

@@ -234,6 +234,44 @@ test('leaves the transcript most of a 1024x768 window', async ({ page }, testInf
   ).toBeGreaterThanOrEqual(viewport.height * 0.6);
 });
 
+// CC-10 (#3101), decision [2]: Search & Context stays in the composer with its
+// own height cap, so the textarea and Send stay in view while it is open.
+for (const viewport of [
+  { width: 1440, height: 1000 },
+  { width: 1024, height: 768 },
+]) {
+  test(`keeps the input and Send in view with Search & Context open at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    await prepareOfflinePreview(page);
+    await page.addInitScript(() => {
+      localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
+    });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.setViewportSize(viewport);
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+    const input = page.getByTestId('chat-input');
+    await expect(input).toBeVisible({ timeout: 30_000 });
+    const tools = page.getByTestId('composer-options-toggle');
+    if ((await tools.getAttribute('aria-expanded')) !== 'true') await tools.click();
+    await page.getByTestId('knowledge-search-toggle').click();
+    if ((await tools.getAttribute('aria-expanded')) === 'true') await tools.click();
+    await expect(tools).toHaveAttribute('aria-expanded', 'false');
+    const section = page.getByTestId('composer-knowledge-section');
+    await expect(section.getByRole('heading', { name: 'Search & Context', exact: true })).toBeVisible();
+    const send = page.getByRole('button', { name: 'Send message', exact: true });
+    for (const control of [input, send]) {
+      await expect(control).toBeInViewport({ ratio: 1 });
+      const box = (await control.boundingBox())!;
+      const hit = await page.evaluate(
+        ({ x, y }) => document.elementFromPoint(x, y)?.closest('textarea, button')?.outerHTML.slice(0, 80) ?? null,
+        { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+      );
+      expect(hit, 'nothing covers the control').not.toBeNull();
+    }
+    const sectionBox = (await section.boundingBox())!;
+    expect(sectionBox.height).toBeLessThanOrEqual(Math.min(viewport.height * 0.3, 352) + 1);
+  });
+}
+
 test('remembers whether Tools was expanded across reload', async ({ page }) => {
   await prepareOfflinePreview(page);
   await page.goto('/chat', { waitUntil: 'domcontentloaded' });

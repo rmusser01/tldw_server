@@ -6,12 +6,10 @@ import type { QADocument } from "../../hooks/useQASearch"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string, vars?: Record<string, unknown>) => {
-      if (fallback && typeof vars?.count === "number") {
-        return fallback.replace("{{count}}", String(vars.count))
-      }
-      return fallback ?? _key
-    }
+    t: (_key: string, fallback?: string, vars?: Record<string, unknown>) =>
+      (fallback ?? _key).replace(/\{\{(\w+)\}\}/g, (token, name) =>
+        vars && name in vars ? String(vars[name]) : token
+      )
   })
 }))
 
@@ -109,5 +107,29 @@ describe("SourceChunksList", () => {
         metadata: expect.objectContaining({ title: "Alpha Doc" })
       })
     )
+  })
+
+  // CC-10 (#3101), decision [2]: relevance reads as a plain label, compared
+  // with the other results; the raw score stays in the tooltip.
+  it("shows relevance as a plain label instead of a raw score", () => {
+    render(
+      <SourceChunksList
+        documents={documents}
+        pinnedResults={[]}
+        onCopy={vi.fn()}
+        onInsert={vi.fn()}
+        onPin={vi.fn()}
+        onPreview={vi.fn()}
+      />
+    )
+
+    const items = screen.getAllByRole("listitem")
+    expect(within(items[0]).getByText("Best match")).toBeInTheDocument()
+    expect(within(items[2]).getByText("Weaker match")).toBeInTheDocument()
+    expect(within(items[2]).getByText("Weaker match")).toHaveAttribute(
+      "title",
+      "Compared with the other results. Score 0.40"
+    )
+    expect(screen.queryByText(/^\d\.\d{3}$/)).not.toBeInTheDocument()
   })
 })

@@ -310,4 +310,103 @@ describe("useQASearch", () => {
       })
     )
   })
+
+  // CC-10 (#3101), decision [2]: Search & Context lists sources first and
+  // generates an answer only when the user asks for one.
+  it("searches without generating an answer, even when settings enable it", async () => {
+    vi.mocked(tldwClient.ragSearch).mockResolvedValue({
+      documents: [{ content: "Source chunk" }]
+    })
+    const { result } = renderHook(() =>
+      useQASearch({
+        resolvedQuery: "knowledge query",
+        draftSettings: { ...baseSettings, enable_generation: true },
+        applySettings: vi.fn(),
+        onInsert: vi.fn(),
+        pinnedResults: [],
+        onPin: vi.fn()
+      })
+    )
+
+    await act(async () => {
+      await result.current.runQASearch()
+    })
+
+    expect(buildRagSearchRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: "knowledge query",
+        enable_generation: false
+      })
+    )
+    expect(result.current.response?.documents).toHaveLength(1)
+  })
+
+  it("generates an answer for the last search on request and keeps the sources meanwhile", async () => {
+    vi.mocked(tldwClient.ragSearch).mockResolvedValueOnce({
+      documents: [{ content: "Source chunk" }]
+    })
+    const { result, rerender } = createHook("first query")
+
+    await act(async () => {
+      await result.current.runQASearch()
+    })
+
+    let resolveAnswer: (value: unknown) => void = () => {}
+    vi.mocked(tldwClient.ragSearch).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveAnswer = resolve
+      }) as ReturnType<typeof tldwClient.ragSearch>
+    )
+    rerender()
+    let pending: Promise<void> = Promise.resolve()
+    act(() => {
+      pending = result.current.generateAnswer()
+    })
+
+    expect(result.current.answerLoading).toBe(true)
+    expect(result.current.response?.documents[0].content).toBe("Source chunk")
+
+    await act(async () => {
+      resolveAnswer({
+        generated_answer: "An answer from the sources",
+        documents: [{ content: "Source chunk" }]
+      })
+      await pending
+    })
+
+    expect(buildRagSearchRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        query: "first query",
+        enable_generation: true
+      })
+    )
+
+    expect(result.current.answerLoading).toBe(false)
+    expect(result.current.response?.generatedAnswer).toBe(
+      "An answer from the sources"
+    )
+    expect(result.current.answerError).toBeNull()
+  })
+
+  it("keeps the sources and reports an error when answer generation fails", async () => {
+    vi.mocked(tldwClient.ragSearch).mockResolvedValueOnce({
+      documents: [{ content: "Source chunk" }]
+    })
+    const { result } = createHook("first query")
+
+    await act(async () => {
+      await result.current.runQASearch()
+    })
+    vi.mocked(tldwClient.ragSearch).mockRejectedValueOnce(new Error("boom"))
+
+    await act(async () => {
+      await result.current.generateAnswer()
+    })
+
+    expect(result.current.response?.documents[0].content).toBe("Source chunk")
+    expect(result.current.response?.generatedAnswer).toBeNull()
+    expect(result.current.answerError).toBe(
+      "Couldn't generate an answer. Try again, or check the model in Settings."
+    )
+  })
 })

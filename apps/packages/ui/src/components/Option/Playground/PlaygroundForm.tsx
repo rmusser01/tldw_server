@@ -6957,7 +6957,6 @@ export const PlaygroundForm = ({
                           setFileRetrievalEnabled(enabled);
                         }}
                         wrapComposerProfile={wrapComposerProfile}
-                        t={t}
                       />
                       {(() => {
                         const replyTargetNode =

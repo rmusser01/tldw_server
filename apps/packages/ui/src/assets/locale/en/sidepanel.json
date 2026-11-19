@@ -207,6 +207,10 @@
     "copied": "Copied",
     "copy": "Copy",
     "insertAnswer": "Insert answer",
+    "generateAnswer": "Generate answer",
+    "generatingAnswer": "Generating answer…",
+    "noAnswerGenerated": "No answer was generated from these sources.",
+    "generateAnswerFailed": "Couldn't generate an answer. Try again, or check the model in Settings.",
     "copyChunk": "Copy chunk",
     "insertChunk": "Insert chunk",
     "sourceChunks": "Source Chunks ({{count}})",
@@ -219,6 +223,12 @@
       "label": "Sort source chunks",
       "relevance": "Relevance",
       "source": "Source"
+    },
+    "relevance": {
+      "best": "Best match",
+      "good": "Good match",
+      "weaker": "Weaker match",
+      "tooltip": "Compared with the other results. Score {{score}}"
     }
   },
   "fileSearch": {
