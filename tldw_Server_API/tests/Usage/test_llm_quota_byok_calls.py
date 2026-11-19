@@ -636,6 +636,87 @@ async def test_a_job_admitted_without_an_answer_is_not_marked_so_its_fallback_is
     assert keys == []
 
 
+async def _evaluation_judge(monkeypatch: pytest.MonkeyPatch, module: Any) -> tuple[list[tuple], Callable[[], str]]:
+    """An evaluation judge call on the user's own key, with a DEFAULT_MODEL_OPENAI the override denies (TASK-15571).
+
+    Returns what the adapter received, (model, key, handle in the request), and the call.
+    """
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    sent: list[tuple] = []
+
+    def _adapter(_provider: str) -> SimpleNamespace:
+        """An adapter that records what it was asked to run."""
+
+        def chat(request: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
+            """Record the call, then answer."""
+            sent.append((request["model"], request["api_key"], PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY in request))
+            return {"choices": [{"message": {"content": "A"}}]}
+
+        return SimpleNamespace(chat=chat)
+
+    handle = await _handle("user")
+    monkeypatch.setattr(module, "get_adapter_or_raise", _adapter)
+    monkeypatch.setattr(module, "resolve_provider_api_key_from_config", lambda *_args, **_kwargs: "sk-server")
+    monkeypatch.setenv("DEFAULT_MODEL_OPENAI", "gpt-denied")
+    set_llm_provider_overrides_cache_for_tests({"openai": LLMProviderOverride(provider="openai", allowed_models=["x"])})
+
+    def _judge() -> str:
+        """One call with no model in the spec, so DEFAULT_MODEL_OPENAI applies."""
+        return module._call_adapter_text(
+            api_endpoint="openai", messages_payload=[{"role": "user", "content": "q"}], provider_credentials=handle
+        )
+
+    return sent, _judge
+
+
+def _judge_modules() -> Any:
+    """The two evaluation judges that call the adapter with the run's handle."""
+    from tldw_Server_API.app.core.Evaluations import eval_runner, ms_g_eval
+
+    return pytest.mark.parametrize("module", [eval_runner, ms_g_eval], ids=["eval_runner", "ms_g_eval"])
+
+
+@_judge_modules()
+async def test_an_evaluation_judge_runs_a_denied_default_model_on_the_server_key_under_the_limit(
+    refused, monkeypatch, module
+) -> None:
+    """TASK-15571: a denied DEFAULT_MODEL_<PROVIDER> on the run's own key runs on the server key, no handle."""
+    sent, judge = await _evaluation_judge(monkeypatch, module)
+
+    with llm_call_context(user_id=7, prechecked=True):  # admitted at the boundary
+        assert await asyncio.to_thread(judge) == "A"
+    assert sent == [("gpt-denied", "sk-server", False)]
+
+
+@_judge_modules()
+async def test_an_evaluation_judge_denied_default_model_is_refused_over_the_limit(refused, monkeypatch, module) -> None:
+    """TASK-15571: an over-limit user's fallback meets the strict check and gets the 402; nothing runs."""
+    sent, judge = await _evaluation_judge(monkeypatch, module)
+
+    with llm_call_context(user_id=7), pytest.raises(LLMQuotaExceededError):
+        await asyncio.to_thread(judge)
+    assert sent == []
+
+
+@_judge_modules()
+async def test_an_evaluation_judge_denied_default_model_is_refused_when_no_check_answers(
+    refused, monkeypatch, module
+) -> None:
+    """TASK-15571 (B1): with no accounting loop no check answers, so the fallback is refused, not run unchecked."""
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+
+    monkeypatch.setattr(llm_accounting, "_accounting_loop", None)
+    sent, judge = await _evaluation_judge(monkeypatch, module)
+
+    with llm_call_context(user_id=7), pytest.raises(ChatConfigurationError, match="could not be checked"):
+        await asyncio.to_thread(judge)
+    assert sent == []
+
+
 def _chat_request() -> SimpleNamespace:
     """A /chat/completions request for user 7."""
     return SimpleNamespace(
