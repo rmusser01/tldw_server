@@ -34,6 +34,7 @@ Review and dry run (2026-10-25): Moderation decision as applied in .27: global [
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-10-30 TASK-13950.17 Phase 1 exit figures: layering baseline 223 pairs / 528 statements / 297 modules -> 222 / 519 / 289; package SCC raw (module-level / with function-level) 92/113, folded with Provider_Credentials into AuthNZ 91/112 (unchanged); LLM_Calls -> AuthNZ 9 -> 0; AuthNZ -> LLM_Calls/Chat/TTS 27 -> 0.
+2026-11-18 TASK-13950.20 Phase 2 metric: endpoint-module monkeypatches 5829 (seed) -> 3032 (52.0%, exit target 3205 met); 'other' endpoint patches 937 -> 513; route-less endpoint modules moved 22 (control_plane.py and evaluations_auth.py kept by ruling); core -> endpoints layering lines left: embeddings_v5 (7 statements, TASK-13950.28) and core.Setup -> audio (TASK-13950.114).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
