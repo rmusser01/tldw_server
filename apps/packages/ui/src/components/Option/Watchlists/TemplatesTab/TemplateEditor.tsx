@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   Button,
   Checkbox,
@@ -13,6 +13,7 @@ import {
   message
 } from "antd"
 import { useTranslation } from "react-i18next"
+import { useFetchWatchlistsQuery, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { Alert } from "@/components/ui/primitives"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
@@ -26,8 +27,7 @@ import {
 } from "@/services/watchlists"
 import type {
   WatchlistTemplate,
-  WatchlistTemplateCreate,
-  WatchlistTemplateVersionSummary
+  WatchlistTemplateCreate
 } from "@/types/watchlists"
 import {
   buildWatchlistsModalChrome,
@@ -85,7 +85,6 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
   const [loadingVersion, setLoadingVersion] = useState(false)
   const [activeTab, setActiveTab] = useState<"visual" | "editor" | "preview" | "docs">("visual")
   const [authoringMode, setAuthoringMode] = useState<TemplateAuthoringMode>("basic")
-  const [templateVersions, setTemplateVersions] = useState<WatchlistTemplateVersionSummary[]>([])
   const [selectedVersion, setSelectedVersion] = useState<number | undefined>(undefined)
   const [loadedVersion, setLoadedVersion] = useState<number | null>(null)
   const [loadedContentBaseline, setLoadedContentBaseline] = useState("")
@@ -94,7 +93,18 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
   const [selectedComposeRunId, setSelectedComposeRunId] = useState<number | undefined>(undefined)
   const editorRef = useRef<TemplateCodeEditorHandle>(null)
   const [validationErrors, setValidationErrors] = useState<Array<{ line?: number | null; column?: number | null; message: string }>>([])
-  const [availableRuns, setAvailableRuns] = useState<Array<{ id: number; label: string }>>([])
+  const fetchQuery = useFetchWatchlistsQuery()
+  const templateName = template?.name
+  const versionsQuery = useWatchlistsQuery("template-versions", templateName,
+    ({ signal }) => getWatchlistTemplateVersions(templateName!, signal), { enabled: open && Boolean(templateName) })
+  const templateVersions = versionsQuery.data?.items ?? []
+  const runParams = { watchlist_id: selectedWatchlistId ?? undefined, q: "completed", size: 20 }
+  const runsQuery = useWatchlistsQuery("runs", runParams,
+    ({ signal }) => fetchWatchlistRuns(runParams, signal), { enabled: open })
+  const availableRuns = (runsQuery.data?.items ?? []).map((run) => ({
+    id: run.id,
+    label: `Run #${run.id}${run.started_at ? ` - ${run.started_at}` : ""}`
+  }))
   const [selectedRecipeId, setSelectedRecipeId] = useState<TemplateRecipeId>("briefing_md")
   const [recipeOptions, setRecipeOptions] = useState<TemplateRecipeOptions>(
     createDefaultTemplateRecipeOptions()
@@ -144,32 +154,41 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
     }
   }, [open])
 
-  const loadTemplate = async (templateName: string, version?: number) => {
+  const fetchTemplate = useCallback((name: string, version?: number) =>
+    fetchQuery("template", { name, version }, ({ signal }) =>
+      getWatchlistTemplate(name, version == null ? undefined : { version }, signal)),
+  [fetchQuery])
+
+  const applyLoadedTemplate = useCallback((result: WatchlistTemplate) => {
+    const resolvedContent = result.content || ""
+    const resolvedComposerAst =
+      result.composer_ast && typeof result.composer_ast === "object"
+        ? (result.composer_ast as unknown as ComposerAst)
+        : parseTemplateToComposerAst(resolvedContent)
+    form.setFieldsValue({
+      name: result.name,
+      description: result.description || "",
+      content: resolvedContent,
+      format: result.format || "html"
+    })
+    setLoadedVersion(typeof result.version === "number" ? result.version : null)
+    setLoadedContentBaseline(resolvedContent)
+    setComposerAst(resolvedComposerAst)
+    setComposerNeedsRepair(result.composer_sync_status === "needs_repair")
+  }, [form])
+
+  const loadTemplate = async (name: string, version?: number) => {
     setLoadingVersion(true)
     try {
-      const result = await getWatchlistTemplate(templateName, version ? { version } : undefined)
-      const resolvedContent = result.content || ""
-      const resolvedComposerAst =
-        result.composer_ast && typeof result.composer_ast === "object"
-          ? (result.composer_ast as unknown as ComposerAst)
-          : parseTemplateToComposerAst(resolvedContent)
-      form.setFieldsValue({
-        name: result.name,
-        description: result.description || "",
-        content: resolvedContent,
-        format: result.format || "html"
-      })
-      setLoadedVersion(typeof result.version === "number" ? result.version : null)
-      setLoadedContentBaseline(resolvedContent)
-      setComposerAst(resolvedComposerAst)
-      setComposerNeedsRepair(result.composer_sync_status === "needs_repair")
+      applyLoadedTemplate(await fetchTemplate(name, version))
     } finally {
       setLoadingVersion(false)
     }
   }
 
   useEffect(() => {
-    if (open && template) {
+    let active = true
+    if (open && templateName) {
       setSelectedComposeRunId(undefined)
       void trackWatchlistsPreventionTelemetry({
         type: "watchlists_authoring_started",
@@ -177,27 +196,10 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
         mode: "advanced",
         context: "edit"
       })
-      Promise.all([
-        getWatchlistTemplate(template.name),
-        getWatchlistTemplateVersions(template.name).catch(() => ({ items: [] }))
-      ])
-        .then(([result, versions]) => {
-          const resolvedContent = result.content || ""
-          const resolvedComposerAst =
-            result.composer_ast && typeof result.composer_ast === "object"
-              ? (result.composer_ast as unknown as ComposerAst)
-              : parseTemplateToComposerAst(resolvedContent)
-          form.setFieldsValue({
-            name: result.name,
-            description: result.description || "",
-            content: resolvedContent,
-            format: result.format || "html"
-          })
-          setLoadedVersion(typeof result.version === "number" ? result.version : null)
-          setLoadedContentBaseline(resolvedContent)
-          setComposerAst(resolvedComposerAst)
-          setComposerNeedsRepair(result.composer_sync_status === "needs_repair")
-          setTemplateVersions(Array.isArray(versions.items) ? versions.items : [])
+      fetchTemplate(templateName)
+        .then((result) => {
+          if (!active) return
+          applyLoadedTemplate(result)
           setSelectedVersion(undefined)
           setAuthoringMode("advanced")
           setActiveTab("visual")
@@ -205,9 +207,9 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
           setRecipeOptions(createDefaultTemplateRecipeOptions())
         })
         .catch((err) => {
+          if (!active) return
           console.error("Failed to load template:", err)
           message.error(t("watchlists:templates.loadError", "Failed to load template"))
-          setTemplateVersions([])
           setSelectedVersion(undefined)
           setLoadedVersion(null)
           setLoadedContentBaseline("")
@@ -228,7 +230,6 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
       })
       form.resetFields()
       form.setFieldsValue({ format: "html", content: DEFAULT_HTML_TEMPLATE })
-      setTemplateVersions([])
       setSelectedVersion(undefined)
       setLoadedVersion(null)
       setLoadedContentBaseline(DEFAULT_HTML_TEMPLATE)
@@ -239,7 +240,8 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
       setSelectedRecipeId("briefing_md")
       setRecipeOptions(createDefaultTemplateRecipeOptions())
     }
-  }, [open, template, form, t])
+    return () => { active = false }
+  }, [applyLoadedTemplate, fetchTemplate, open, templateName, form, t])
 
   useEffect(() => {
     if (!open || activeTab !== "visual") return
@@ -249,37 +251,6 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
       setComposerNeedsRepair(true)
     }
   }, [activeTab, composerAst, contentValue, open])
-
-  // Fetch recent completed runs for live preview
-  useEffect(() => {
-    if (!open) {
-      setAvailableRuns([])
-      return
-    }
-    let active = true
-    fetchWatchlistRuns({
-      watchlist_id: selectedWatchlistId ?? undefined,
-      q: "completed",
-      size: 20
-    })
-      .then((res) => {
-        if (!active) return
-        setAvailableRuns(
-          (res.items || []).map((r) => ({
-            id: r.id,
-            label: `Run #${r.id}${r.started_at ? ` - ${r.started_at}` : ""}`,
-          }))
-        )
-      })
-      .catch(() => {
-        if (!active) return
-        setAvailableRuns([])
-      })
-
-    return () => {
-      active = false
-    }
-  }, [open, selectedWatchlistId])
 
   const handleLoadSelectedVersion = async () => {
     if (!template || !selectedVersion) return

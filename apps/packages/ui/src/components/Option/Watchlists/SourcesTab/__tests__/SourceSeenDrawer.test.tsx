@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { SourceSeenDrawer } from "../SourceSeenDrawer"
 
@@ -165,6 +166,22 @@ describe("SourceSeenDrawer", () => {
       expect(screen.getByTestId("desc-value-Seen Count")).toHaveTextContent("15")
     })
     expect(screen.getByTestId("desc-value-Latest Seen")).toHaveTextContent("relative(2026-02-06T12:00:00Z)")
+  })
+
+  it("keeps the selected feed's stats when an earlier feed responds late", async () => {
+    let finishFirstRequest!: (stats: typeof sampleStats) => void
+    mockState.getSourceSeenStatsMock
+      .mockReturnValueOnce(new Promise((resolve) => { finishFirstRequest = resolve }))
+      .mockResolvedValueOnce({ ...sampleStats, source_id: 43, seen_count: 27 })
+
+    const onClose = vi.fn()
+    const { rerender } = render(<SourceSeenDrawer open onClose={onClose} sourceId={42} />)
+    rerender(<SourceSeenDrawer open onClose={onClose} sourceId={43} />)
+    await waitFor(() => expect(screen.getByTestId("desc-value-Seen Count")).toHaveTextContent("27"))
+
+    await act(async () => { finishFirstRequest(sampleStats) })
+
+    expect(screen.getByTestId("desc-value-Seen Count")).toHaveTextContent("27")
   })
 
   it("shows backoff badge", async () => {

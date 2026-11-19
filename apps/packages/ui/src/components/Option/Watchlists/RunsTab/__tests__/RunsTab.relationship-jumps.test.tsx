@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, screen } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunsTab } from "../RunsTab"
 
@@ -109,8 +110,7 @@ vi.mock("../RunDetailDrawer", () => ({
   RunDetailDrawer: () => null
 }))
 
-const baseState = (overrides: Record<string, unknown> = {}) => ({
-  runs: [
+const runs = [
     {
       id: 33,
       job_id: 5,
@@ -124,18 +124,15 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
         items_errored: 0
       }
     }
-  ],
-  runsLoading: false,
-  runsTotal: 1,
+  ]
+
+const baseState = (overrides: Record<string, unknown> = {}) => ({
   runsPage: 1,
   runsPageSize: 20,
   runsJobFilter: null,
   runsStatusFilter: null,
-  pollingActive: false,
   runDetailOpen: false,
   selectedRunId: null,
-  setRuns: vi.fn(),
-  setRunsLoading: vi.fn(),
   setRunsPage: vi.fn(),
   setRunsPageSize: vi.fn(),
   setRunsJobFilter: vi.fn(),
@@ -146,7 +143,6 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
   setOutputsRunFilter: vi.fn(),
   openRunDetail: vi.fn(),
   closeRunDetail: vi.fn(),
-  updateRunInList: vi.fn(),
   ...overrides
 })
 
@@ -154,16 +150,16 @@ describe("RunsTab relationship jump actions", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.storeStateRef.current = baseState()
-    mocks.fetchWatchlistRunsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+    mocks.fetchWatchlistRunsMock.mockResolvedValue({ items: runs, total: 1, has_more: false })
     mocks.fetchJobRunsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
     mocks.fetchWatchlistJobsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
     mocks.exportRunsCsvMock.mockResolvedValue("")
   })
 
-  it("opens reports destination with run and monitor filters", () => {
+  it("opens reports destination with run and monitor filters", async () => {
     render(<RunsTab />)
 
-    fireEvent.click(screen.getByTestId("watchlists-run-open-outputs-33"))
+    fireEvent.click(await screen.findByTestId("watchlists-run-open-outputs-33"))
 
     expect(mocks.storeStateRef.current.setOutputsJobFilter).toHaveBeenCalledWith(5)
     expect(mocks.storeStateRef.current.setOutputsRunFilter).toHaveBeenCalledWith(33)

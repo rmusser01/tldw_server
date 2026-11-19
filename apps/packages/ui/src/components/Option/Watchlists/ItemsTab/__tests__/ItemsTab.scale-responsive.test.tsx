@@ -2,7 +2,8 @@
 
 import React from "react"
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { ItemsTab } from "../ItemsTab"
 import { useWatchlistsStore } from "@/store/watchlists"
 
@@ -291,6 +292,7 @@ describe("ItemsTab scale and responsive behavior", () => {
     })
 
     const initialFetchCallCount = (serviceMocks.fetchScrapedItems as Mock).mock.calls.length
+    const initialCountCalls = serviceMocks.fetchScrapedItemSmartCounts.mock.calls.length
 
     fireEvent.click(await screen.findByRole("button", { name: "Refresh" }))
 
@@ -303,5 +305,6 @@ describe("ItemsTab scale and responsive behavior", () => {
     const additionalCalls =
       (serviceMocks.fetchScrapedItems as Mock).mock.calls.length - initialFetchCallCount
     expect(additionalCalls).toBeLessThanOrEqual(2)
+    expect(serviceMocks.fetchScrapedItemSmartCounts).toHaveBeenCalledTimes(initialCountCalls)
   }, 15_000)
 })

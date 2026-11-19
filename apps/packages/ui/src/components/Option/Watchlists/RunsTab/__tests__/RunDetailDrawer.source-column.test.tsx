@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunDetailDrawer } from "../RunDetailDrawer"
 
@@ -16,8 +17,6 @@ const mocks = vi.hoisted(() => ({
   cancelWatchlistRunMock: vi.fn(),
   messageErrorMock: vi.fn(),
   messageSuccessMock: vi.fn(),
-  updateRunInListMock: vi.fn(),
-  addRunMock: vi.fn(),
   setActiveTabMock: vi.fn(),
   setOutputsJobFilterMock: vi.fn(),
   setOutputsRunFilterMock: vi.fn(),
@@ -129,8 +128,6 @@ vi.mock("antd", () => {
 vi.mock("@/store/watchlists", () => ({
   useWatchlistsStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
-      updateRunInList: mocks.updateRunInListMock,
-      addRun: mocks.addRunMock,
       setActiveTab: mocks.setActiveTabMock,
       setOutputsJobFilter: mocks.setOutputsJobFilterMock,
       setOutputsRunFilter: mocks.setOutputsRunFilterMock,
@@ -507,7 +504,6 @@ describe("RunDetailDrawer source column", () => {
 
     await waitFor(() => {
       expect(mocks.triggerWatchlistRunMock).toHaveBeenCalledWith(1)
-      expect(mocks.addRunMock).toHaveBeenCalled()
       expect(mocks.setActiveTabMock).toHaveBeenCalledWith("runs")
       expect(onClose).toHaveBeenCalled()
     })

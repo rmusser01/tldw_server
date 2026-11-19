@@ -2,7 +2,8 @@
 
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { message } from "antd"
 import type { MessageType } from "antd/es/message/interface"
 import { TemplateEditor } from "../TemplateEditor"
@@ -282,8 +283,8 @@ describe("TemplateEditor authoring mode contract", () => {
     render(<TemplateEditor open template={buildTemplate()} onClose={vi.fn()} />)
 
     await waitFor(() => {
-      expect(serviceMocks.getWatchlistTemplate).toHaveBeenCalledWith("daily-brief")
-      expect(serviceMocks.getWatchlistTemplateVersions).toHaveBeenCalledWith("daily-brief")
+      expect(serviceMocks.getWatchlistTemplate).toHaveBeenCalledWith("daily-brief", undefined, expect.any(AbortSignal))
+      expect(serviceMocks.getWatchlistTemplateVersions).toHaveBeenCalledWith("daily-brief", expect.any(AbortSignal))
     })
 
     expect(
@@ -535,7 +536,7 @@ describe("TemplateEditor authoring mode contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load version" }))
 
     await waitFor(() => {
-      expect(serviceMocks.getWatchlistTemplate).toHaveBeenCalledWith("daily-brief", { version: 2 })
+      expect(serviceMocks.getWatchlistTemplate).toHaveBeenCalledWith("daily-brief", { version: 2 }, expect.any(AbortSignal))
       expect(screen.getByTestId("template-code-editor")).toHaveValue("# Historical version")
       expect(
         screen.getByText("Currently loaded: v2. Saving restores this content as a new latest version.")
@@ -548,7 +549,7 @@ describe("TemplateEditor authoring mode contract", () => {
     fireEvent.click(screen.getByRole("button", { name: /Load latest/i }))
 
     await waitFor(() => {
-      expect(serviceMocks.getWatchlistTemplate).toHaveBeenCalledWith("daily-brief", undefined)
+      expect(serviceMocks.getWatchlistTemplate).toHaveBeenCalledWith("daily-brief", undefined, expect.any(AbortSignal))
       expect(screen.getByTestId("template-code-editor")).toHaveValue("# Latest version")
       expect(
         screen.getByText("Currently loaded: v4. Saving restores this content as a new latest version.")

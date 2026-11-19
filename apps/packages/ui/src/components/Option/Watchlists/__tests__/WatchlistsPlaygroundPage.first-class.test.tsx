@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
 import { useTutorialStore } from "@/store/tutorials"
@@ -33,41 +34,13 @@ const mocks = vi.hoisted(() => {
       | "outputs"
       | "templates"
       | "settings",
-    overviewHealth: null as null | Record<string, unknown>,
     pollingActive: false,
-    watchlists: [] as Array<Record<string, unknown>>,
-    watchlistsLoading: false,
-    watchlistsError: null as string | null,
     selectedWatchlistId: null as number | null,
     setActiveTab: vi.fn((next: string) => {
       state.activeTab = next as typeof state.activeTab
     }),
-    setWatchlists: vi.fn((nextWatchlists: Array<Record<string, unknown>>, selectedId?: number | null) => {
-      state.watchlists = nextWatchlists
-      state.selectedWatchlistId = selectedId !== undefined
-        ? selectedId
-        : typeof state.selectedWatchlistId === "number" &&
-            nextWatchlists.some((watchlist) => watchlist.id === state.selectedWatchlistId)
-          ? state.selectedWatchlistId
-          : Number(nextWatchlists[0]?.id ?? null) || null
-    }),
-    setWatchlistsLoading: vi.fn((loading: boolean) => {
-      state.watchlistsLoading = loading
-    }),
-    setWatchlistsError: vi.fn((error: string | null) => {
-      state.watchlistsError = error
-    }),
     setSelectedWatchlistId: vi.fn((nextId: number | null) => {
       state.selectedWatchlistId = nextId
-    }),
-    addWatchlist: vi.fn((watchlist: Record<string, unknown>) => {
-      state.watchlists = [watchlist, ...state.watchlists]
-      state.selectedWatchlistId = Number(watchlist.id)
-    }),
-    updateWatchlistInList: vi.fn((watchlistId: number, updates: Record<string, unknown>) => {
-      state.watchlists = state.watchlists.map((watchlist) =>
-        watchlist.id === watchlistId ? { ...watchlist, ...updates } : watchlist
-      )
     }),
     resetStore: vi.fn()
   }
@@ -232,6 +205,10 @@ vi.mock("@/utils/watchlists-onboarding-telemetry", () => ({
     mocks.trackWatchlistsOnboardingTelemetryMock(...args)
 }))
 
+vi.mock("@/services/watchlists-overview", () => ({
+  fetchWatchlistsOverviewData: async () => ({ health: null })
+}))
+
 vi.mock("@/store/watchlists", () => ({
   useWatchlistsStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
@@ -310,9 +287,6 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     mocks.recordWatchlistsIaExperimentTelemetryMock.mockResolvedValue({ accepted: true })
     mocks.trackWatchlistsOnboardingTelemetryMock.mockResolvedValue(undefined)
     mocks.state.activeTab = "sources"
-    mocks.state.watchlists = []
-    mocks.state.watchlistsLoading = false
-    mocks.state.watchlistsError = null
     mocks.state.selectedWatchlistId = null
     useTutorialStore.getState().endTutorial()
     delete (window as { __TLDW_WATCHLISTS_IA_EXPERIMENT__?: unknown }).__TLDW_WATCHLISTS_IA_EXPERIMENT__
@@ -334,7 +308,6 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
       localStorage.setItem(keys[0], "false")
       localStorage.setItem(keys[1], "{}")
       mocks.state.activeTab = primary
-      mocks.state.watchlists = [container]
       mocks.state.selectedWatchlistId = container.id
       const view = render(<WatchlistsPlaygroundPage />)
       const header = within(await screen.findByTestId(`watchlists-secondary-${section}`)).getByRole("button")
@@ -361,7 +334,6 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
   it("exposes distinct canonical workflow controls while Watchlists Basics is active", async () => {
     setViewport(420)
     mocks.state.activeTab = "overview"
-    mocks.state.watchlists = [container]
     mocks.state.selectedWatchlistId = container.id
     useTutorialStore.getState().startTutorial("watchlists-basics")
 
@@ -393,9 +365,8 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
   it("loads Watchlists, selects the first container, and shows project metadata", async () => {
     const view = render(<WatchlistsPlaygroundPage />)
 
-    await waitFor(() => expect(mocks.fetchWatchlistsMock).toHaveBeenCalledWith({ page: 1, size: 100 }))
-    await waitFor(() => expect(mocks.state.setWatchlists).toHaveBeenCalledWith([container], container.id))
-    expect(mocks.state.setSelectedWatchlistId).not.toHaveBeenCalledWith(container.id)
+    await waitFor(() => expect(mocks.fetchWatchlistsMock).toHaveBeenCalledWith({ page: 1, size: 100 }, expect.any(AbortSignal)))
+    await waitFor(() => expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(container.id))
     view.rerender(<WatchlistsPlaygroundPage />)
 
     expect(await screen.findByRole("heading", { name: "Healthcare ransomware" })).toBeInTheDocument()
@@ -407,7 +378,6 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
 
   it("leads Overview with identity and Latest while keeping project and health controls in Help or below", async () => {
     mocks.state.activeTab = "overview"
-    mocks.state.watchlists = [container]
     mocks.state.selectedWatchlistId = container.id
     render(<WatchlistsPlaygroundPage />)
 
@@ -428,7 +398,7 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     expect(screen.getByText(/Review current health and attention signals/)).toBeInTheDocument()
   })
 
-  it("loads Watchlists with the preferred active selection in one store update", async () => {
+  it("selects the preferred active Watchlist when the list loads", async () => {
     const importedPlaceholder = {
       ...container,
       id: 7,
@@ -460,28 +430,21 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     render(<WatchlistsPlaygroundPage />)
 
     await waitFor(() => {
-      expect(mocks.state.setWatchlists).toHaveBeenCalledWith(items, activeNewsWatchlist.id)
+      expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledExactlyOnceWith(activeNewsWatchlist.id)
     })
-    expect(mocks.state.setSelectedWatchlistId).not.toHaveBeenCalledWith(activeNewsWatchlist.id)
   })
 
-  it("uses the canonical alert for container loading and error states", () => {
-    mocks.state.watchlists = []
+  it("uses the canonical alert for container loading and error states", async () => {
     mocks.state.selectedWatchlistId = null
-    mocks.state.watchlistsLoading = true
-
-    const view = render(<WatchlistsPlaygroundPage />)
+    mocks.fetchWatchlistsMock.mockRejectedValueOnce(new Error("Backend is offline"))
+    render(<WatchlistsPlaygroundPage />)
 
     const loadingTitle = screen.getByText("Loading Watchlists")
     expect(loadingTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
 
-    mocks.state.watchlistsLoading = false
-    mocks.state.watchlistsError = "Backend is offline"
-    view.rerender(<WatchlistsPlaygroundPage />)
-
-    const errorTitle = screen.getByText("Watchlists unavailable")
+    const errorTitle = await screen.findByText("Watchlists unavailable")
     expect(errorTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
-    expect(screen.getByText("Backend is offline")).toBeInTheDocument()
+    expect(screen.getByText("Failed to load Watchlists")).toBeInTheDocument()
   })
 
   it("creates a News Watchlist through the canonical container-first flow and opens Feeds", async () => {
@@ -493,9 +456,11 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
       priority: "medium",
       tags: ["elections"]
     }
-    mocks.createWatchlistMock.mockResolvedValue(created)
+    mocks.createWatchlistMock.mockImplementation(async () => {
+      mocks.fetchWatchlistsMock.mockResolvedValue({ items: [created, container], total: 2 })
+      return created
+    })
     mocks.state.activeTab = "overview"
-    mocks.state.watchlists = [container]
     mocks.state.selectedWatchlistId = container.id
 
     render(<WatchlistsPlaygroundPage />)
@@ -525,9 +490,7 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     const pipeline = within(await screen.findByRole("dialog", { name: "Set up briefing" }))
     fireEvent.click(pipeline.getAllByRole("button", { name: "Cancel" }).at(-1)!)
 
-    await waitFor(() => expect(mocks.state.addWatchlist).toHaveBeenCalledWith(created))
-    expect(mocks.state.addWatchlist).toHaveBeenCalledWith(created)
-    expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(77)
+    await waitFor(() => expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(77))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("sources")
   })
 
@@ -537,9 +500,11 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
       id: 88,
       name: "Healthcare ransomware"
     }
-    mocks.createWatchlistMock.mockResolvedValue(created)
+    mocks.createWatchlistMock.mockImplementation(async () => {
+      mocks.fetchWatchlistsMock.mockResolvedValue({ items: [created, container], total: 2 })
+      return created
+    })
     mocks.state.activeTab = "overview"
-    mocks.state.watchlists = [container]
     mocks.state.selectedWatchlistId = container.id
 
     render(<WatchlistsPlaygroundPage />)
@@ -570,8 +535,7 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     const pipeline = within(await screen.findByRole("dialog", { name: "Set up briefing" }))
     fireEvent.click(pipeline.getAllByRole("button", { name: "Cancel" }).at(-1)!)
 
-    await waitFor(() => expect(mocks.state.addWatchlist).toHaveBeenCalledWith(created))
-    expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(88)
+    await waitFor(() => expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(88))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("sources")
   })
 })

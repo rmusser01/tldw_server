@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react"
+import React, { useEffect, useMemo, useState } from "react"
 import {
   Button,
   Card,
@@ -15,7 +15,7 @@ import type { ColumnsType } from "antd/es/table"
 import { Clock, RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Alert } from "@/components/ui/primitives/Alert"
-import { useWatchlistsStore } from "@/store/watchlists"
+import { useInvalidateWatchlists, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import {
   fetchClaimClusters,
   fetchJobClaimClusters,
@@ -30,106 +30,46 @@ import { formatRelativeTime } from "@/utils/dateFormatters"
 import { useWatchlistsViewport, WatchlistsHelpTooltip } from "../shared"
 import { WATCHLISTS_HELP_DOCS } from "../shared/help-docs"
 
+const JOBS_PAGE = { page: 1, size: 200 }
+const EMPTY_JOBS: WatchlistJob[] = []
+const EMPTY_CLUSTERS: ClaimCluster[] = []
+const EMPTY_SUBSCRIPTIONS: WatchlistClusterSubscription[] = []
+
 export const SettingsTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
   const showInternalDiagnostics = process.env.NEXT_PUBLIC_WATCHLISTS_SHOW_INTERNAL_DIAGNOSTICS === "true"
   const { isConstrained } = useWatchlistsViewport()
 
-  // Store state
-  const settings = useWatchlistsStore((s) => s.settings)
-  const settingsLoading = useWatchlistsStore((s) => s.settingsLoading)
-
-  // Store actions
-  const setSettings = useWatchlistsStore((s) => s.setSettings)
-  const setSettingsLoading = useWatchlistsStore((s) => s.setSettingsLoading)
-
-  const [jobs, setJobs] = useState<WatchlistJob[]>([])
-  const [jobsLoading, setJobsLoading] = useState(false)
-  const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
-  const [clusters, setClusters] = useState<ClaimCluster[]>([])
-  const [clustersLoading, setClustersLoading] = useState(false)
-  const [clustersError, setClustersError] = useState<string | null>(null)
+  const [preferredJobId, setSelectedJobId] = useState<number | null>(null)
   const [clusterSearch, setClusterSearch] = useState("")
-  const [jobClusters, setJobClusters] = useState<WatchlistClusterSubscription[]>([])
   const [clusterUpdates, setClusterUpdates] = useState<number[]>([])
+  const settingsQuery = useWatchlistsQuery("settings", {}, ({ signal }) => getWatchlistSettings(signal))
+  const settings = settingsQuery.data
+  const settingsLoading = settingsQuery.isFetching
+  const jobsQuery = useWatchlistsQuery("jobs", JOBS_PAGE, ({ signal }) => fetchWatchlistJobs(JOBS_PAGE, signal))
+  const jobs = Array.isArray(jobsQuery.data?.items) ? jobsQuery.data.items : EMPTY_JOBS
+  const jobsLoading = jobsQuery.isFetching
+  const selectedJobId = jobs.some((job) => job.id === preferredJobId) ? preferredJobId : jobs[0]?.id ?? null
+  const clusterParams = { limit: 200, offset: 0, keyword: clusterSearch || undefined }
+  const clustersQuery = useWatchlistsQuery("claim-clusters", clusterParams,
+    ({ signal }) => fetchClaimClusters(clusterParams, signal))
+  const clusters = Array.isArray(clustersQuery.data) ? clustersQuery.data : EMPTY_CLUSTERS
+  const clustersLoading = clustersQuery.isFetching
+  const clustersError = clustersQuery.isError
+    ? clustersQuery.error?.message || t("watchlists:settings.clusters.fetchError", "Failed to load claim clusters")
+    : null
+  const jobClustersQuery = useWatchlistsQuery("job-clusters", selectedJobId,
+    ({ signal }) => selectedJobId == null ? Promise.resolve(EMPTY_SUBSCRIPTIONS) : fetchJobClaimClusters(selectedJobId, signal),
+    { enabled: selectedJobId != null })
+  const jobClusters = Array.isArray(jobClustersQuery.data) ? jobClustersQuery.data : EMPTY_SUBSCRIPTIONS
+  const invalidate = useInvalidateWatchlists()
+  const loadClusters = () => { void clustersQuery.refetch() }
 
-  // Fetch settings
-  const loadSettings = useCallback(async () => {
-    setSettingsLoading(true)
-    try {
-      const result = await getWatchlistSettings()
-      setSettings(result)
-    } catch (err) {
-      console.error("Failed to fetch settings:", err)
+  useEffect(() => {
+    if (settingsQuery.errorUpdatedAt) {
       message.error(t("watchlists:settings.fetchError", "Failed to load settings"))
-    } finally {
-      setSettingsLoading(false)
     }
-  }, [setSettings, setSettingsLoading, t])
-
-  // Initial load
-  useEffect(() => {
-    loadSettings()
-  }, [loadSettings])
-
-  const loadJobs = useCallback(async () => {
-    setJobsLoading(true)
-    try {
-      const result = await fetchWatchlistJobs({ page: 1, size: 200 })
-      const items = Array.isArray(result.items) ? result.items : []
-      setJobs(items)
-      setSelectedJobId((prev) => (prev == null && items.length > 0 ? items[0].id : prev))
-    } catch (err) {
-      console.error("Failed to fetch jobs:", err)
-      setJobs([])
-    } finally {
-      setJobsLoading(false)
-    }
-  }, [])
-
-  const loadClusters = useCallback(async () => {
-    setClustersLoading(true)
-    setClustersError(null)
-    try {
-      const result = await fetchClaimClusters({
-        limit: 200,
-        offset: 0,
-        keyword: clusterSearch || undefined
-      })
-      setClusters(Array.isArray(result) ? result : [])
-    } catch (err: any) {
-      console.error("Failed to fetch claim clusters:", err)
-      setClusters([])
-      setClustersError(
-        err?.message || t("watchlists:settings.clusters.fetchError", "Failed to load claim clusters")
-      )
-    } finally {
-      setClustersLoading(false)
-    }
-  }, [clusterSearch, t])
-
-  const loadJobClusters = useCallback(async () => {
-    if (!selectedJobId) {
-      setJobClusters([])
-      return
-    }
-    try {
-      const result = await fetchJobClaimClusters(selectedJobId)
-      setJobClusters(Array.isArray(result) ? result : [])
-    } catch (err) {
-      console.error("Failed to fetch watchlist clusters:", err)
-      setJobClusters([])
-    }
-  }, [selectedJobId])
-
-  useEffect(() => {
-    loadJobs()
-    loadClusters()
-  }, [loadClusters, loadJobs])
-
-  useEffect(() => {
-    loadJobClusters()
-  }, [loadJobClusters])
+  }, [settingsQuery.errorUpdatedAt, t])
 
   const subscribedClusterIds = useMemo(() => {
     return new Set(jobClusters.map((entry) => entry.cluster_id))
@@ -144,11 +84,10 @@ export const SettingsTab: React.FC = () => {
     try {
       if (enabled) {
         await subscribeJobToCluster(selectedJobId, cluster.id)
-        setJobClusters((prev) => [...prev, { cluster_id: cluster.id }])
       } else {
         await unsubscribeJobFromCluster(selectedJobId, cluster.id)
-        setJobClusters((prev) => prev.filter((entry) => entry.cluster_id !== cluster.id))
       }
+      await invalidate("job-clusters")
     } catch (err) {
       console.error("Failed to update cluster subscription:", err)
       message.error(t("watchlists:settings.clusters.updateError", "Failed to update cluster subscription"))
@@ -307,10 +246,7 @@ export const SettingsTab: React.FC = () => {
         <Button
           icon={<RefreshCw className="h-4 w-4" />}
           onClick={() => {
-            loadSettings()
-            loadJobs()
-            loadClusters()
-            loadJobClusters()
+            void invalidate("settings", "jobs", "claim-clusters", "job-clusters")
           }}
           loading={settingsLoading}
         >

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SourcesTab } from "../SourcesTab"
 
@@ -174,6 +175,7 @@ vi.mock("@/utils/dateFormatters", () => ({
 }))
 
 vi.mock("@/services/watchlists", () => ({
+  getWatchlistSettings: vi.fn().mockResolvedValue({ forums_enabled: false }),
   checkWatchlistSourcesNow: (...args: unknown[]) => mocks.checkWatchlistSourcesNowMock(...args),
   createWatchlistSource: (...args: unknown[]) => mocks.createWatchlistSourceMock(...args),
   deleteWatchlistSource: (...args: unknown[]) => mocks.deleteWatchlistSourceMock(...args),
@@ -273,10 +275,12 @@ describe("SourcesTab constrained management", () => {
     mocks.createWatchlistSourceMock.mockResolvedValue(buildSource())
     mocks.deleteWatchlistSourceMock.mockResolvedValue({})
     mocks.exportOpmlMock.mockResolvedValue("<opml></opml>")
-    mocks.fetchWatchlistGroupsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+    mocks.fetchWatchlistGroupsMock.mockResolvedValue({
+      items: [{ id: 7, name: "Advisories", parent_group_id: null }], total: 1, has_more: false
+    })
     mocks.fetchWatchlistJobsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
     mocks.fetchWatchlistSourcesMock.mockResolvedValue({ items: [buildSource()], total: 1, has_more: false })
-    mocks.fetchWatchlistTagsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+    mocks.fetchWatchlistTagsMock.mockResolvedValue({ items: [{ id: 1, name: "cve" }], total: 1, has_more: false })
     mocks.getSourceSeenStatsMock.mockResolvedValue({
       source_id: 101,
       defer_until: null,
@@ -299,7 +303,7 @@ describe("SourcesTab constrained management", () => {
     expect(screen.getByLabelText("Search sources...")).toBeInTheDocument()
     expect(screen.getByLabelText("Filter by tag")).toBeInTheDocument()
     expect(screen.getByLabelText("Filter by type")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Group filter Advisories" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "Group filter Advisories" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Show advanced details" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Import OPML" })).toBeInTheDocument()
