@@ -66,7 +66,6 @@
   "api/v1/endpoints/workflows.py": {"reads": 28, "import_time": 0, "reason": null},
   "api/v1/endpoints/writing.py": {"reads": 1, "import_time": 0, "reason": null},
   "api/v1/router_groups/minimal.py": {"reads": 1, "import_time": 0, "reason": null},
-  "api/v1/schemas/chat_validators.py": {"reads": 1, "import_time": 1, "reason": null},
   "api/v1/schemas/data_tables_schemas.py": {"reads": 1, "import_time": 1, "reason": null},
   "api/v1/utils/chat_import_transport.py": {"reads": 1, "import_time": 0, "reason": null},
   "api/v1/utils/chatops/discord_support.py": {"reads": 3, "import_time": 0, "reason": null},
