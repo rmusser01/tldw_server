@@ -216,7 +216,11 @@ export type SidepanelWebUiOpenSource = {
   draft: string
   state: ReturnType<typeof useStoreMessageOption.getState>
   isCurrent: () => boolean
+  /** The configured WebUI ("Open in WebUI"); otherwise the opener resolves one. */
+  webUiUrl?: string
 }
+/** What the header shows for the composer's "Open in full page". */
+export type SidepanelFullPageInfo = { description?: string; notReadyReason?: string | null }
 
 type Props = {
   dropedFile: File | undefined;
@@ -230,7 +234,7 @@ type Props = {
     overrides: SidepanelChatWebUiHandoffOverrides | undefined,
     source: SidepanelWebUiOpenSource
   ) => Promise<boolean | void> | boolean | void
-  onWebUiOpenReady?: (action: (() => Promise<boolean>) | null) => void
+  onWebUiOpenReady?: (action: (() => Promise<boolean>) | null, info?: SidepanelFullPageInfo) => void
 }
 
 
@@ -947,7 +951,7 @@ export const SidepanelForm = ({
         current.historyId === expected.historyId && current.serverChatId === expected.serverChatId
     }
   }, [handoffSelectionIsCurrent, isDraftOwnerCurrent, getHandoffInputRevision, handoffInputRevision, draftAddress, sourceDraftRevision, historyId, serverChatId])
-  const openChatInWebUiWithDocumentHandoff = React.useCallback(async () => {
+  const openChatInWebUiWithDocumentHandoff = React.useCallback(async (webUiUrl?: string) => {
     if (!draftReady || !onOpenChatInWebUi) return false
     const sourceIsCurrent = captureHandoffGuard()
     if (!sourceIsCurrent() || currentDocumentSelectionKeyRef.current !== currentDocumentSelectionKey) return false
@@ -957,7 +961,7 @@ export const SidepanelForm = ({
     const state = useStoreMessageOption.getState()
     const current = () => !controller.signal.aborted && documentWebUiHandoffRef.current === controller && sourceIsCurrent() &&
       currentDocumentSelectionKeyRef.current === currentDocumentSelectionKey
-    const source: SidepanelWebUiOpenSource = { draft: form.getValues().message, state, isCurrent: current }
+    const source: SidepanelWebUiOpenSource = { draft: form.getValues().message, state, isCurrent: current, webUiUrl }
     try {
       if (contextFiles.length === 0) {
         const opened = await onOpenChatInWebUi(undefined, source)
@@ -1570,8 +1574,10 @@ export const SidepanelForm = ({
   // XP-09: the one "Open in full page" action; the header runs it through onWebUiOpenReady.
   const fullPage = useSidepanelOpenFullPage({ draftReady, draftText: form.values.message, handoffSourceKey, captureHandoffGuard,
     hasVisiblePageContext: pageContextActive || selectedDocuments.length > 0, getVisiblePageContext: getVisiblePageContextForHandoff,
-    selectedCharacterId, openInWebUi: onOpenChatInWebUi ? openChatInWebUiWithDocumentHandoff : undefined })
-  React.useLayoutEffect(() => { onWebUiOpenReady?.(draftReady ? fullPage.open : null) }, [draftReady, fullPage.open, onWebUiOpenReady])
+    selectedCharacterId, openInWebUi: onOpenChatInWebUi ? openChatInWebUiWithDocumentHandoff : undefined, hasConversation: Boolean(historyId || serverChatId) && !temporaryChat,
+    hasAttachments: contextFiles.length > 0 || Boolean(form.values.image), draftOwnerState: draftOwnerVerificationState })
+  React.useLayoutEffect(() => { onWebUiOpenReady?.(draftReady ? fullPage.open : null, { description: fullPage.description, notReadyReason: fullPage.disabledReason }) },
+    [draftReady, fullPage.open, fullPage.description, fullPage.disabledReason, onWebUiOpenReady])
 
   React.useEffect(() => {
     setSelectedCharacterId((prev) =>

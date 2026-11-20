@@ -81,6 +81,7 @@ const io = vi.hoisted(() => ({
   server: vi.fn(),
   submit: vi.fn(),
   notifyError: vi.fn(),
+  notifyInfo: vi.fn(),
   capture: vi.fn(),
   settle: vi.fn()
 }))
@@ -232,7 +233,7 @@ vi.mock("@/hooks/useConnectionState", () => ({
 }))
 vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: io.noop }))
 vi.mock("@/hooks/useAntdNotification", () => {
-  const notification = { warning: io.noop, error: io.notifyError }
+  const notification = { warning: io.noop, error: io.notifyError, info: io.notifyInfo }
   return { useAntdNotification: () => notification }
 })
 vi.mock("@/hooks/useCharacterGreeting", () => ({
@@ -343,6 +344,8 @@ const openingCode = ts.transpileModule(`function useFormOpening(props, composer)
   const selectedDocuments = [];
   const getVisiblePageContextForHandoff = undefined;
   const selectedCharacterId = null;
+  const temporaryChat = false;
+  const draftOwnerVerificationState = "ready";
   ${openingNames.map(name => `const ${openingDeclaration(name)!.getText(formAst)};`).join("\n")}
   ${openingCleanup?.getText(formAst) ?? ""}
   ${registrations.map(node => node.getText(formAst)).join("\n")}
@@ -2724,9 +2727,10 @@ describe.each([
     fireEvent.click(await screen.findByRole("button", { name: "Open cached history" }))
     await screen.findByText("OWNED REVIEW TEXT")
     expect(screen.queryByRole("button", { name: "Expand in full page" })).toBeNull()
-    // No composer is mounted here, so nothing has published the action and nothing opens on its own.
+    // No composer is mounted here, so nothing has published the action: it says why, and opens nothing.
     await act(async () => { fireEvent.click(await screen.findByRole("button", { name: "Open in full page" })) })
     expect(window.open).not.toHaveBeenCalled()
+    expect(io.notifyInfo).toHaveBeenCalledWith({ message: "Restore or start a conversation before opening it in a full page." })
   })
 
   it.each(["pending", "target failure"])("does not expand unresolved %s restoration from the header", async state => {

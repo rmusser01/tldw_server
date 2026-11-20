@@ -62,7 +62,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 import {
-  resolveSidepanelFullPageTarget,
+  readConfiguredWebUiUrl,
   useSidepanelOpenFullPage,
   type SidepanelOpenFullPageDeps
 } from "../useSidepanelOpenFullPage"
@@ -104,25 +104,22 @@ beforeEach(() => {
   })
 })
 
-describe("resolveSidepanelFullPageTarget", () => {
-  it("opens the extension's own full page when no WebUI URL is configured", async () => {
+describe("readConfiguredWebUiUrl", () => {
+  it("is null when no WebUI URL is configured", async () => {
     mocks.storage = { tldwConfig: { serverUrl: "http://127.0.0.1:8000" } }
-    await expect(resolveSidepanelFullPageTarget()).resolves.toBe("extension")
+    await expect(readConfiguredWebUiUrl()).resolves.toBeNull()
   })
 
-  it("opens the WebUI the user configured", async () => {
-    mocks.storage = { tldwConfig: { webUiUrl: "https://notes.example.test" } }
-    await expect(resolveSidepanelFullPageTarget()).resolves.toBe("webui")
-  })
-
-  it("reads the legacy WebUI URL setting too", async () => {
+  it("reads the WebUI the user configured, and the legacy setting", async () => {
+    mocks.storage = { tldwConfig: { webUiUrl: "https://notes.example.test/" } }
+    await expect(readConfiguredWebUiUrl()).resolves.toBe("https://notes.example.test")
     mocks.storage = { webuiUrl: "http://localhost:8080" }
-    await expect(resolveSidepanelFullPageTarget()).resolves.toBe("webui")
+    await expect(readConfiguredWebUiUrl()).resolves.toBe("http://localhost:8080")
   })
 
-  it("always opens the WebUI from the web-hosted panel", async () => {
-    mocks.runtimeId = undefined
-    await expect(resolveSidepanelFullPageTarget()).resolves.toBe("webui")
+  it("ignores an invalid one rather than guessing from the server URL", async () => {
+    mocks.storage = { tldwConfig: { webUiUrl: "not a url", serverUrl: "http://127.0.0.1:8000" } }
+    await expect(readConfiguredWebUiUrl()).resolves.toBeNull()
   })
 })
 
@@ -166,7 +163,7 @@ describe("useSidepanelOpenFullPage", () => {
     expect(openedUrl()).toBe("chrome-extension://ext/options.html#/chat?handoff=pkg-1")
   })
 
-  it("opens a new character chat on its character route", async () => {
+  it("opens a new Character chat on its character route", async () => {
     mocks.selectedAssistant = { kind: "character", id: "42", name: "Ada" }
     const { result } = renderHookWith(baseDeps({ draftText: "Hello Ada" }))
     await act(async () => { await result.current.open() })
@@ -178,15 +175,76 @@ describe("useSidepanelOpenFullPage", () => {
     expect(mocks.notification.warning).toHaveBeenCalledOnce()
   })
 
-  it("opens a configured WebUI instead of the extension page", async () => {
+  // Coordinator's decision: in the extension "Open in full page" always opens
+  // the extension's page (the one target that carries the chat); a configured
+  // WebUI is a separate "Open in WebUI" action.
+  it("keeps the extension's page for Open in full page when a WebUI is configured", async () => {
     mocks.storage = { tldwConfig: { webUiUrl: "https://webui.example.test" } }
     const openInWebUi = vi.fn(async () => true)
     const { result } = renderHookWith(baseDeps({ draftText: "Draft", openInWebUi }))
-    await waitFor(() => expect(result.current.target).toBe("webui"))
+    await waitFor(() => expect(result.current.webUi).not.toBeNull())
     await act(async () => { await result.current.open() })
-    expect(openInWebUi).toHaveBeenCalledOnce()
-    expect(mocks.tabsCreate).not.toHaveBeenCalled()
-    expect(mocks.createSidepanelChatHandoff).not.toHaveBeenCalled()
+    expect(openInWebUi).not.toHaveBeenCalled()
+    expect(openedUrl()).toContain("chrome-extension://ext/options.html#/chat")
+  })
+
+  it("offers Open in WebUI, with the configured URL and accurate copy", async () => {
+    mocks.storage = { tldwConfig: { webUiUrl: "https://webui.example.test/", serverUrl: "http://127.0.0.1:8000" } }
+    const openInWebUi = vi.fn(async (_url?: string) => true)
+    const { result } = renderHookWith(baseDeps({ draftText: "Draft", openInWebUi }))
+    await waitFor(() => expect(result.current.webUi).not.toBeNull())
+    expect(result.current.webUi?.label).toBe("Open in WebUI")
+    expect(result.current.webUi?.description).toBe(
+      "Opens the WebUI with your draft. You can bring this chat's settings along there. This chat and its attachments stay here."
+    )
+    await act(async () => { await result.current.webUi!.open() })
+    expect(openInWebUi).toHaveBeenCalledWith("https://webui.example.test")
+  })
+
+  it("has no Open in WebUI when none is configured", async () => {
+    const { result } = renderHookWith(baseDeps({ openInWebUi: vi.fn(async () => true) }))
+    await act(async () => {})
+    expect(result.current.webUi).toBeNull()
+  })
+
+  it("describes the web-hosted panel's hand-off accurately", () => {
+    mocks.runtimeId = undefined
+    const { result } = renderHookWith(baseDeps({ openInWebUi: vi.fn(async () => true) }))
+    expect(result.current.description).toBe(
+      "Opens the full page with your draft. You can bring this chat's settings along there. This chat and its attachments stay here."
+    )
+  })
+
+  it("does not say \"this chat\" for a new or temporary chat", () => {
+    const { result } = renderHookWith(baseDeps({ hasConversation: false }))
+    expect(result.current.description).toBe(
+      "Opens the chat page in a new tab, with your draft and page references. Your draft also stays here."
+    )
+  })
+
+  it("warns that attachments stay in the side panel", async () => {
+    const { result } = renderHookWith(baseDeps({ draftText: "Look", hasAttachments: true }))
+    await act(async () => { await result.current.open() })
+    expect(mocks.tabsCreate).toHaveBeenCalledOnce()
+    expect(mocks.notification.warning).toHaveBeenCalledWith({
+      message: "Attachments stay in the side panel. Add them again on the full page."
+    })
+  })
+
+  it("names a Persona chat as one", async () => {
+    mocks.selectedAssistant = { kind: "persona", id: "p1", name: "Guide" } as unknown as typeof mocks.selectedAssistant
+    const { result } = renderHookWith(baseDeps({ draftText: "Hi" }))
+    await act(async () => { await result.current.open() })
+    expect(mocks.notification.warning).toHaveBeenCalledWith({
+      message: "A new Persona chat opens without your draft. It stays here."
+    })
+  })
+
+  it("explains why it can't open while the draft is being checked", () => {
+    const { result } = renderHookWith(baseDeps({ draftReady: false, draftOwnerState: "pending" }))
+    expect(result.current.disabledReason).toBe("Checking which account this draft belongs to…")
+    const failed = renderHookWith(baseDeps({ draftReady: false, draftOwnerState: "error" }))
+    expect(failed.result.current.disabledReason).toBe("This draft's account couldn't be checked. Retry from the draft notice.")
   })
 
   it("says so when the WebUI could not be opened", async () => {

@@ -122,7 +122,16 @@ const normalizeOriginBaseUrl = (value: string | null | undefined): URL | null =>
  */
 export const readExplicitSidepanelChatWebUiUrl = async (
   read: (key: string) => Promise<unknown>
-): Promise<string | null> => {
+): Promise<string | null> => (await readSidepanelChatWebUiConfig(read)).webUiUrl ?? null
+
+/**
+ * The config a WebUI hand-off opens with: the configured WebUI URL when it is
+ * valid, otherwise only the server URL for the base-URL fallback below. Both
+ * the extension's "Open in WebUI" and the web-hosted panel read it here.
+ */
+export const readSidepanelChatWebUiConfig = async (
+  read: (key: string) => Promise<unknown>
+): Promise<SidepanelChatWebUiConfig> => {
   const safeRead = async (key: string) => {
     try {
       return await read(key)
@@ -134,12 +143,12 @@ export const readExplicitSidepanelChatWebUiUrl = async (
   const record =
     config && typeof config === "object" ? (config as Record<string, unknown>) : {}
   const asString = (value: unknown) => (typeof value === "string" ? value : null)
-  return (
+  const webUiUrl =
     normalizeWebUiBaseUrl(asString(record.webUiUrl)) ??
     normalizeWebUiBaseUrl(asString(record.webuiUrl)) ??
     normalizeWebUiBaseUrl(asString(await safeRead("webUiUrl"))) ??
     normalizeWebUiBaseUrl(asString(await safeRead("webuiUrl")))
-  )
+  return webUiUrl ? { webUiUrl } : { serverUrl: asString(record.serverUrl) }
 }
 
 export const resolveSidepanelChatWebUiBaseUrl = (

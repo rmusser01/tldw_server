@@ -43,7 +43,7 @@ import { usePageChatModeToggle } from "@/components/Sidepanel/Chat/page-chat-mod
 import { useTTS } from "@/hooks/useTTS"
 import { copilotResumeLastChat } from "@/services/app"
 import {
-  buildSidepanelChatWebUiHandoffUrl, SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
+  buildSidepanelChatWebUiHandoffUrl, readSidepanelChatWebUiConfig, SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
   type SidepanelChatWebUiConfig, type SidepanelChatWebUiHandoffOverrides
 } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -65,7 +65,7 @@ import { Drawer } from 'antd';
 import { ChatErrorBoundary } from '@/components/Common/Playground/ChatErrorBoundary';
 import { useTranslation } from 'react-i18next';
 import { SidePanelBody } from '~/components/Sidepanel/Chat/body';
-import { SidepanelForm, type SidepanelWebUiOpenSource } from '~/components/Sidepanel/Chat/form';
+import { SidepanelForm, type SidepanelFullPageInfo, type SidepanelWebUiOpenSource } from '~/components/Sidepanel/Chat/form';
 import { SidepanelHeaderSimple } from '~/components/Sidepanel/Chat/SidepanelHeaderSimple';
 import { ConnectionBanner } from '~/components/Sidepanel/Chat/ConnectionBanner';
 import { ServerChatFreshnessNotice } from '~/components/Sidepanel/Chat/ServerChatFreshnessNotice';
@@ -2744,12 +2744,17 @@ const SidepanelChatContent = ({
 
   const webUiOpenActionRef = React.useRef<(() => Promise<boolean>) | null>(null)
   const [webUiOpenReady, setWebUiOpenReady] = React.useState(false)
-  const handleWebUiOpenReady = React.useCallback((action: (() => Promise<boolean>) | null) => {
+  // The composer's "Open in full page" and its copy (XP-09); the header, strip and palette run it.
+  const [fullPageInfo, setFullPageInfo] = React.useState<SidepanelFullPageInfo>({})
+  const fullPageInfoRef = React.useRef(fullPageInfo)
+  const handleWebUiOpenReady = React.useCallback((action: (() => Promise<boolean>) | null, info: SidepanelFullPageInfo = {}) => {
     const wasReady = webUiOpenActionRef.current !== null
     webUiOpenActionRef.current = action
     if (wasReady !== (action !== null)) setWebUiOpenReady(action !== null)
+    if (info.description !== fullPageInfoRef.current.description || info.notReadyReason !== fullPageInfoRef.current.notReadyReason) setFullPageInfo(fullPageInfoRef.current = info)
   }, [])
-  const openHydratedChatInWebUi = React.useCallback(() => webUiOpenActionRef.current?.(), [])
+  const openHydratedChatInWebUi = React.useCallback(() => webUiOpenActionRef.current ? webUiOpenActionRef.current()
+    : notification.info({ message: fullPageInfoRef.current.notReadyReason ?? t("sidepanel:header.restoreBeforeExpand", "Restore or start a conversation before opening it in a full page.") }), [notification, t])
   const openChatInWebUi = React.useCallback(async (
     overrides: SidepanelChatWebUiHandoffOverrides = {}, source: SidepanelWebUiOpenSource
   ) => {
@@ -2764,17 +2769,9 @@ const SidepanelChatContent = ({
     const read = async <T,>(key: string): Promise<T | null> => {
       try { return await storageRef.current.get<T>(key) ?? null } catch { return null }
     }
-    const stored = await read<Record<string, unknown>>("tldwConfig")
+    // "Open in WebUI" passes the configured URL; the web-hosted panel reads it (or the server URL) here.
+    const config: SidepanelChatWebUiConfig = source.webUiUrl ? { webUiUrl: source.webUiUrl } : await readSidepanelChatWebUiConfig(read)
     if (!current()) return false
-    let legacy = await read<string>("webUiUrl")
-    if (!current()) return false
-    if (legacy === null) legacy = await read<string>("webuiUrl")
-    if (!current()) return false
-    const config: SidepanelChatWebUiConfig = {
-      serverUrl: typeof stored?.serverUrl === "string" ? stored.serverUrl : null,
-      webUiUrl: typeof stored?.webUiUrl === "string" ? stored.webUiUrl
-        : typeof stored?.webuiUrl === "string" ? stored.webuiUrl : legacy
-    }
     const url = buildSidepanelChatWebUiHandoffUrl({ config, payload: {
       source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft,
       historyId: snapshot.temporaryChat ? null : snapshot.historyId,
@@ -2989,7 +2986,7 @@ const SidepanelChatContent = ({
             activeTitle={activeTabLabel}
             chatReady={!isRestoringChat && owner.isCurrent() && webUiOpenReady}
             onRenameTitle={handleRenameActiveTab}
-            onOpenFullPage={openHydratedChatInWebUi}
+            onOpenFullPage={openHydratedChatInWebUi} fullPageDescription={fullPageInfo.description} notReadyReason={fullPageInfo.notReadyReason}
             loadEditableTitle={loadActiveTabTitle}
           />
           {messages.length > 0 ? <ConnectionBanner className="pt-12" /> : null}

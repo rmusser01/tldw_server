@@ -264,6 +264,8 @@ const fullPage = (overrides: Record<string, unknown> = {}) => ({
   pending: false,
   disabled: false,
   target: "extension" as const,
+  disabledReason: null,
+  webUi: null,
   open: vi.fn(async () => true),
   ...overrides
 })
@@ -310,6 +312,15 @@ describe("ControlRow Open in full page", () => {
     expect(open).toBeDisabled()
     fireEvent.click(open)
     expect(action.open).not.toHaveBeenCalled()
+  })
+
+  it("adds Open in WebUI, with its own description, when a WebUI is configured", () => {
+    const openWebUi = vi.fn(async () => true)
+    render(<ControlRow {...defaultProps()} fullPage={fullPage({ webUi: { label: "Open in WebUI", description: "Opens the WebUI with your draft.", open: openWebUi } })} />)
+    const item = screen.getByRole("button", { name: "Open in WebUI" })
+    expect(item).toHaveAccessibleDescription("Opens the WebUI with your draft.")
+    fireEvent.click(item)
+    expect(openWebUi).toHaveBeenCalledOnce()
   })
 
   it("leaves the action out when the composer offers none", () => {

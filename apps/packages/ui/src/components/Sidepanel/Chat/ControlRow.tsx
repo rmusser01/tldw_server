@@ -132,6 +132,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const knowledgeBtnRef = React.useRef<HTMLButtonElement>(null)
   const modelSelectRef = React.useRef<ModelSelectHandle | null>(null)
   const fullAppHandoffDescriptionId = React.useId()
+  const webUiHandoffDescriptionId = React.useId()
   const { capabilities } = useServerCapabilities()
   const [activePlaylistDetail, setActivePlaylistDetail] =
     React.useState<QuickIngestOpenDetail | null>(null)
@@ -841,6 +842,30 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           <p id={fullAppHandoffDescriptionId} className="px-3 text-xs text-text-muted">
             {fullPage.description}
           </p>
+          {fullPage.webUi && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  void fullPage.webUi?.open()
+                  setMoreOpen(false)
+                  requestAnimationFrame(() => moreBtnRef.current?.focus())
+                }}
+                disabled={fullPage.disabled || fullPage.pending}
+                aria-describedby={webUiHandoffDescriptionId}
+                data-testid="chat-open-webui"
+                className={`w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 ${
+                  fullPage.disabled || fullPage.pending ? "cursor-not-allowed opacity-50" : "hover:bg-surface2"
+                }`}
+              >
+                <ExternalLink className="size-4 text-text-subtle" />
+                {fullPage.webUi.label}
+              </button>
+              <p id={webUiHandoffDescriptionId} className="px-3 text-xs text-text-muted">
+                {fullPage.webUi.description}
+              </p>
+            </>
+          )}
         </>
       )}
 

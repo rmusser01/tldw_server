@@ -6,13 +6,15 @@
  * and "Copy draft & page references" (the draft, into whichever chat the full
  * page restored).
  *
- * - In the extension it opens the extension's own full page with the open
- *   chat (the history-selection address) and a short-lived copy of the draft
- *   and page references. A new character chat opens on its character route
- *   without the copy, because a copy retires that route on arrival.
- * - When the user has configured a WebUI URL, the extension opens that WebUI
- *   instead, as the web-hosted panel always does. The WebUI hand-off carries
- *   the draft and attachments; chats kept only on this device stay here.
+ * - In the extension it always opens the extension's own full page, the one
+ *   target that carries the open chat (the history-selection address), with a
+ *   short-lived copy of the draft and page references. A new Character or
+ *   Persona chat opens on its route without the copy, because a copy retires
+ *   that route on arrival. Attachments stay in the panel, and it says so.
+ * - When the user has configured a WebUI URL, the Tools menu also offers
+ *   "Open in WebUI" (`webUi`): the draft, and settings if the user allows it
+ *   there. The chat and its attachments stay here.
+ * - The web-hosted panel's "Open in full page" is that WebUI hand-off.
  */
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -43,52 +45,53 @@ const isExtensionRuntime = () => {
   }
 }
 
-/** Where "Open in full page" goes: the WebUI, or the extension's own page. */
-export const resolveSidepanelFullPageTarget =
-  async (): Promise<SidepanelFullPageTarget> => {
-    if (!isExtensionRuntime()) return "webui"
-    const storage = createSafeStorage({ area: "local" })
-    const webUiUrl = await readExplicitSidepanelChatWebUiUrl((key) =>
-      storage.get(key)
-    )
-    return webUiUrl ? "webui" : "extension"
-  }
+/** Where "Open in full page" goes: the extension's own page, or (web-hosted) the WebUI. */
+export const sidepanelFullPageTarget = (): SidepanelFullPageTarget =>
+  isExtensionRuntime() ? "extension" : "webui"
 
-/** The target, for copy; the extension's own page until storage answers. */
-export const useSidepanelFullPageTarget = (): SidepanelFullPageTarget => {
-  const [target, setTarget] = React.useState<SidepanelFullPageTarget>(() =>
-    isExtensionRuntime() ? "extension" : "webui"
-  )
+/** The WebUI URL the user configured, or null; never guessed from the server URL. */
+export const readConfiguredWebUiUrl = async (): Promise<string | null> => {
+  if (!isExtensionRuntime()) return null
+  const storage = createSafeStorage({ area: "local" })
+  return await readExplicitSidepanelChatWebUiUrl((key) => storage.get(key)).catch(() => null)
+}
+
+const useConfiguredWebUiUrl = (): string | null => {
+  const [url, setUrl] = React.useState<string | null>(null)
   React.useEffect(() => {
     let active = true
-    void resolveSidepanelFullPageTarget()
-      .then((next) => {
-        if (active) setTarget(next)
-      })
-      .catch(() => undefined)
+    void readConfiguredWebUiUrl().then((next) => {
+      if (active) setUrl(next)
+    })
     return () => {
       active = false
     }
   }, [])
-  return target
+  return url
 }
 
-/** The action's one name, and what it carries to each target. */
+/** The action's one name, and what it carries (`hasConversation`: a saved or local chat is open). */
 export const sidepanelFullPageCopy = (
   t: Translate,
-  target: SidepanelFullPageTarget
+  target: SidepanelFullPageTarget,
+  hasConversation = true
 ) => ({
   label: t("sidepanel:openFullPage.label", "Open in full page"),
   description:
     target === "webui"
       ? t(
-          "sidepanel:openFullPage.webuiDescription",
-          "Opens this chat in the WebUI, with your draft and attachments. Chats kept only on this device stay here."
+          "sidepanel:openFullPage.webHostedDescription",
+          "Opens the full page with your draft. You can bring this chat's settings along there. This chat and its attachments stay here."
         )
-      : t(
-          "sidepanel:openFullPage.extensionDescription",
-          "Opens this chat in a new tab, with your draft and page references. Your draft also stays here."
-        )
+      : hasConversation
+        ? t(
+            "sidepanel:openFullPage.extensionDescription",
+            "Opens this chat in a new tab, with your draft and page references. Your draft also stays here."
+          )
+        : t(
+            "sidepanel:openFullPage.newChatDescription",
+            "Opens the chat page in a new tab, with your draft and page references. Your draft also stays here."
+          )
 })
 
 type PageContextGetter = () =>
@@ -107,8 +110,14 @@ export type SidepanelOpenFullPageDeps = {
   hasVisiblePageContext: boolean
   getVisiblePageContext?: PageContextGetter
   selectedCharacterId: string | null
-  /** Opens the WebUI with the draft and attachments (the WebUI target). */
-  openInWebUi?: () => Promise<boolean>
+  /** A saved or local chat is open (not a new or temporary one). */
+  hasConversation?: boolean
+  /** Files or an image are attached in the panel. */
+  hasAttachments?: boolean
+  /** The draft owner's account check, while the draft isn't ready. */
+  draftOwnerState?: "pending" | "ready" | "error"
+  /** Opens the WebUI hand-off: the configured URL, or the web-hosted panel's own resolution. */
+  openInWebUi?: (webUiUrl?: string) => Promise<boolean>
 }
 
 export type SidepanelOpenFullPage = {
@@ -117,7 +126,11 @@ export type SidepanelOpenFullPage = {
   target: SidepanelFullPageTarget
   pending: boolean
   disabled: boolean
+  /** Why it is disabled, when it is. */
+  disabledReason: string | null
   open: () => Promise<boolean>
+  /** "Open in WebUI", only in the extension with a configured WebUI URL. */
+  webUi: { label: string; description: string; open: () => Promise<boolean> } | null
 }
 
 const pageContextHasContent = (
@@ -163,7 +176,8 @@ export function useSidepanelOpenFullPage(
   const notification = useAntdNotification()
   const historySelection = useHistorySelectionContext()
   const [selectedAssistant] = useSelectedAssistant(null)
-  const target = useSidepanelFullPageTarget()
+  const target = sidepanelFullPageTarget()
+  const configuredWebUiUrl = useConfiguredWebUiUrl()
   const [pending, setPending] = React.useState(false)
   const fullAppChatPath = React.useMemo(
     () =>
@@ -198,6 +212,16 @@ export function useSidepanelOpenFullPage(
     deps.captureHandoffGuard,
     fullAppChatPath
   ])
+
+  const warnAttachmentsStay = React.useCallback((expected: { hasAttachments?: boolean }) => {
+    if (!expected.hasAttachments) return
+    notification.warning({
+      message: t(
+        "sidepanel:openFullPage.attachmentsStay",
+        "Attachments stay in the side panel. Add them again on the full page."
+      )
+    })
+  }, [notification, t])
 
   const notifyFailure = React.useCallback(() => {
     notification.error({
@@ -234,11 +258,12 @@ export function useSidepanelOpenFullPage(
         if (!opened) notifyFailure()
         else if (characterRoute && wantsCopy)
           notification.warning({
-            message: t(
-              "sidepanel:openFullPage.characterDraftStays",
-              "A new character chat opens without your draft. It stays here."
-            )
+            message:
+              selectedAssistant?.kind === "persona"
+                ? t("sidepanel:openFullPage.personaDraftStays", "A new Persona chat opens without your draft. It stays here.")
+                : t("sidepanel:openFullPage.characterDraftStays", "A new Character chat opens without your draft. It stays here.")
           })
+        if (opened) warnAttachmentsStay(expected)
         return opened
       }
 
@@ -291,6 +316,7 @@ export function useSidepanelOpenFullPage(
         if (isCurrent()) notifyFailure()
         return false
       }
+      warnAttachmentsStay(expected)
       if (shortened || pageReadFailed)
         notification.warning({
           message: t(
@@ -300,10 +326,10 @@ export function useSidepanelOpenFullPage(
         })
       return true
     },
-    [notification, notifyFailure, t]
+    [notification, notifyFailure, selectedAssistant?.kind, t, warnAttachmentsStay]
   )
 
-  const open = React.useCallback(async (): Promise<boolean> => {
+  const run = React.useCallback(async (webUiUrl?: string): Promise<boolean> => {
     const expected = sourceRef.current
     if (!expected.draftReady || attemptRef.current) return false
     const sourceIsCurrent = expected.captureHandoffGuard()
@@ -327,13 +353,10 @@ export function useSidepanelOpenFullPage(
     }
     setPending(true)
     try {
-      const resolved = await resolveSidepanelFullPageTarget().catch(
-        () => "extension" as const
-      )
-      if (!isCurrent()) return false
-      if (resolved === "webui" && expected.openInWebUi) {
+      if (webUiUrl !== undefined || target === "webui") {
+        if (!expected.openInWebUi) return false
         try {
-          return await expected.openInWebUi()
+          return await expected.openInWebUi(webUiUrl)
         } catch (error) {
           if (!isCurrent()) return false
           console.error("[sidepanel] Could not open the WebUI:", error)
@@ -348,15 +371,39 @@ export function useSidepanelOpenFullPage(
         if (mountedRef.current) setPending(false)
       }
     }
-  }, [notifyFailure, openInExtension])
+  }, [notifyFailure, openInExtension, target])
+  const open = React.useCallback(() => run(), [run])
+  const openWebUi = React.useCallback(
+    () => (configuredWebUiUrl ? run(configuredWebUiUrl) : Promise.resolve(false)),
+    [configuredWebUiUrl, run]
+  )
 
-  const copy = sidepanelFullPageCopy(t, target)
+  const copy = sidepanelFullPageCopy(t, target, deps.hasConversation ?? true)
+  const disabledReason = deps.draftReady
+    ? null
+    : deps.draftOwnerState === "pending"
+      ? t("sidepanel:openFullPage.checkingDraft", "Checking which account this draft belongs to…")
+      : deps.draftOwnerState === "error"
+        ? t("sidepanel:openFullPage.draftCheckFailed", "This draft's account couldn't be checked. Retry from the draft notice.")
+        : t("sidepanel:header.restoreBeforeExpand", "Restore or start a conversation before opening it in a full page.")
   return {
     label: copy.label,
     description: copy.description,
     target,
     pending,
     disabled: !deps.draftReady,
-    open
+    disabledReason,
+    open,
+    webUi:
+      target === "extension" && configuredWebUiUrl && deps.openInWebUi
+        ? {
+            label: t("sidepanel:openFullPage.webuiLabel", "Open in WebUI"),
+            description: t(
+              "sidepanel:openFullPage.webuiDescription",
+              "Opens the WebUI with your draft. You can bring this chat's settings along there. This chat and its attachments stay here."
+            ),
+            open: openWebUi
+          }
+        : null
   }
 }

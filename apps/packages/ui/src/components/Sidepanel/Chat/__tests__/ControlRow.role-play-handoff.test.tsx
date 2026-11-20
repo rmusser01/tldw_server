@@ -312,7 +312,7 @@ describe("ControlRow role-play handoff behavior", () => {
 
   it("offers the one Open in full page action for a character chat too", () => {
     const open = vi.fn(async () => true)
-    render(<ControlRow {...defaultProps()} fullPage={{ label: "Open in full page", description: "Opens this chat in a new tab.", pending: false, disabled: false, target: "extension", open }} />)
+    render(<ControlRow {...defaultProps()} fullPage={{ label: "Open in full page", description: "Opens this chat in a new tab.", pending: false, disabled: false, disabledReason: null, webUi: null, target: "extension", open }} />)
     fireEvent.click(screen.getByRole("button", { name: "Open in full page" }))
     expect(open).toHaveBeenCalledOnce()
     expect(screen.queryByTestId("chat-continue-in-webui")).toBeNull()
@@ -402,7 +402,7 @@ describe("ControlRow first-use guidance", () => {
 
 it("closes More and returns focus to it when Open in full page is chosen", async () => {
   const open = vi.fn(async () => true)
-  render(<ControlRow {...defaultProps()} fullPage={{ label: "Open in full page", description: "Opens this chat in a new tab.", pending: false, disabled: false, target: "extension", open }} />)
+  render(<ControlRow {...defaultProps()} fullPage={{ label: "Open in full page", description: "Opens this chat in a new tab.", pending: false, disabled: false, disabledReason: null, webUi: null, target: "extension", open }} />)
   const more = screen.getByRole("button", { name: "Tools" })
   fireEvent.click(more)
   fireEvent.click(screen.getByTestId("chat-open-full-app"))

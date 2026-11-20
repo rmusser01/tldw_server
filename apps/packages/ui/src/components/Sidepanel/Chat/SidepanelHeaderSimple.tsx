@@ -11,7 +11,7 @@ import { TtsClipsDrawer } from "./TtsClipsDrawer"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import {
   sidepanelFullPageCopy,
-  useSidepanelFullPageTarget
+  sidepanelFullPageTarget
 } from "./hooks/useSidepanelOpenFullPage"
 
 /**
@@ -48,6 +48,10 @@ type SidepanelHeaderSimpleProps = {
   loadEditableTitle?: () => Promise<string | null>
   /** The composer's one "Open in full page" action (XP-09). */
   onOpenFullPage?: () => Promise<boolean | void> | boolean | void
+  /** The composer's description of what it carries. */
+  fullPageDescription?: string
+  /** Why the composer can't open it yet (draft not restored or not verified). */
+  notReadyReason?: string | null
   /**
    * The page's visually hidden h1; the chat page leaves it as "Chat"
    * (AX-14). `null` for a page that renders its own h1.
@@ -72,11 +76,13 @@ export const SidepanelHeaderSimple = ({
   onRenameTitle,
   loadEditableTitle,
   onOpenFullPage,
+  fullPageDescription,
+  notReadyReason,
   heading
 }: SidepanelHeaderSimpleProps = {}) => {
   const { temporaryChat } = useMessage()
   const { t } = useTranslation(["sidepanel", "common", "option"])
-  const fullPageTarget = useSidepanelFullPageTarget()
+  const fullPageTarget = sidepanelFullPageTarget()
   const { capabilities } = useServerCapabilities()
   const [localSidebarOpen, setLocalSidebarOpen] = React.useState(false)
   const [ttsClipsOpen, setTtsClipsOpen] = React.useState(false)
@@ -103,9 +109,9 @@ export const SidepanelHeaderSimple = ({
   const fullPageCopy = sidepanelFullPageCopy(t, fullPageTarget)
   const openFullChatLabel = fullPageCopy.label
   const openFullChatDescription = !chatReady
-    ? t("sidepanel:header.restoreBeforeExpand", "Restore or start a conversation before opening it in a full page.")
+    ? notReadyReason ?? t("sidepanel:header.restoreBeforeExpand", "Restore or start a conversation before opening it in a full page.")
     : onOpenFullPage
-      ? fullPageCopy.description
+      ? fullPageDescription ?? fullPageCopy.description
       : t("sidepanel:openFullPage.routeOnlyDescription", "Opens the chat page in a new tab. Drafts and page references stay here.")
 
   const handleSidebarToggle = React.useCallback(() => {

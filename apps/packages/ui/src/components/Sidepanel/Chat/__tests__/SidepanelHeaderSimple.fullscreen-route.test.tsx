@@ -78,14 +78,23 @@ describe("SidepanelHeaderSimple full-page action", () => {
     )
   })
 
-  it("says when the action opens the WebUI the user configured", async () => {
+  // Coordinator's decision: the header always opens the extension's page;
+  // a configured WebUI is a Tools item only.
+  it("keeps the extension's page when a WebUI is configured", async () => {
     browserMocks.storage = { tldwConfig: { webUiUrl: "https://webui.example.test" } }
     renderHeader({ onOpenFullPage: vi.fn() })
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Open in full page" })).toHaveAccessibleDescription(
-        "Opens this chat in the WebUI, with your draft and attachments. Chats kept only on this device stay here."
-      )
+    await act(async () => {})
+    expect(screen.getByRole("button", { name: "Open in full page" })).toHaveAccessibleDescription(
+      "Opens this chat in a new tab, with your draft and page references. Your draft also stays here."
     )
+  })
+
+  it("shows the composer's own description and not-ready reason", () => {
+    const view = renderHeader({ onOpenFullPage: vi.fn(), fullPageDescription: "Opens the chat page in a new tab." })
+    expect(screen.getByTestId("chat-open-full-screen")).toHaveAccessibleDescription("Opens the chat page in a new tab.")
+    view.unmount()
+    renderHeader({ chatReady: false, onOpenFullPage: vi.fn(), notReadyReason: "Checking which account this draft belongs to…" })
+    expect(screen.getByTestId("chat-open-full-screen")).toHaveAccessibleDescription("Checking which account this draft belongs to…")
   })
 
   it("runs the composer's action rather than opening a page itself", async () => {
