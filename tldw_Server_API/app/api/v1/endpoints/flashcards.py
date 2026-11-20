@@ -108,7 +108,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.session import MediaDbSession
-from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
+from tldw_Server_API.app.core.DB_Management.scope_context import ScopeContext, get_scope, scoped_context
 from tldw_Server_API.app.core.Flashcards.apkg_exporter import export_apkg_from_rows
 from tldw_Server_API.app.core.Flashcards.apkg_importer import (
     APKGImportError,
@@ -2310,10 +2310,10 @@ def preview_study_pack_media_sections(
     media_id: int,
     media_db: MediaDbSession = Depends(get_media_db_for_user),
     current_user: User = Depends(get_request_user),
+    request_scope: ScopeContext | None = Depends(get_scope),
 ) -> StudyPackMediaSectionPreview:
     """Show the saved source's chapter and section boundaries without returning its body."""
     try:
-        request_scope = get_scope()
         # A preview must use the same media visibility as the queued owner job.
         with scoped_context(
             user_id=current_user.id,

@@ -461,7 +461,7 @@ def test_preview_saved_media_sections_returns_titles_without_book_text(client: T
     assert isinstance(app, FastAPI)  # nosec B101
 
     async def media_db_with_request_scope():
-        with scoped_context(user_id=1, org_ids=[4], team_ids=[7], is_admin=True):
+        with scoped_context(user_id=1, org_ids=[4], team_ids=[7], is_admin=True, session_role="media_reader"):
             yield media_db
 
     original_resolve = StudySourceResolver.resolve
@@ -470,6 +470,7 @@ def test_preview_saved_media_sections_returns_titles_without_book_text(client: T
         scope = get_scope()
         assert scope is not None and scope.user_id == 1  # nosec B101
         assert not scope.org_ids and not scope.team_ids and not scope.is_admin  # nosec B101
+        assert scope.session_role == "media_reader"  # nosec B101
         return original_resolve(resolver, selections)
 
     app.dependency_overrides[get_media_db_for_user] = media_db_with_request_scope
