@@ -464,7 +464,7 @@ def _build_initializer_env(env_path: Path, updates: dict[str, str | None]) -> di
 @app.command()
 def init(
     default: bool = typer.Option(False, "--default", help="Apply safe defaults without prompting"),
-    install_dir: Path = typer.Option(Path.cwd(), "--install-dir", help="Installation directory (default: CWD)"),
+    install_dir: Path | None = typer.Option(None, "--install-dir", help="Installation directory (default: CWD)"),
     profile: str | None = typer.Option(None, "--profile", help="Public setup profile"),
     env_file: Path | None = typer.Option(None, "--env-file", help="Explicit env file path"),
     admin_username: str | None = typer.Option(None, "--admin-username", help="Initial multi-user admin username"),
@@ -484,7 +484,7 @@ def init(
         logger.remove()
         logger.add(lambda m: typer.echo(m, nl=False), level="DEBUG")
 
-    base = Path(install_dir).resolve()
+    base = (install_dir or Path.cwd()).resolve()
     facts = {
         "cwd": str(Path.cwd()),
         "install_dir": str(base),
