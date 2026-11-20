@@ -34,7 +34,8 @@ export const relevanceLevel = (
   score: number | null,
   topScore: number | null
 ): RelevanceLevel | null => {
-  if (score === null || topScore === null || topScore <= 0) return null
+  if (score === null || !Number.isFinite(score)) return null
+  if (topScore === null || !Number.isFinite(topScore) || topScore <= 0) return null
   const ratio = score / topScore
   if (ratio >= 0.9) return "best"
   if (ratio >= 0.6) return "good"

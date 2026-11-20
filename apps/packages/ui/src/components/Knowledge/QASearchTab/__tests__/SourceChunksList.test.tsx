@@ -132,4 +132,25 @@ describe("SourceChunksList", () => {
     )
     expect(screen.queryByText(/^\d\.\d{3}$/)).not.toBeInTheDocument()
   })
+
+  // CC-10 review: the comparison and score reach screen readers too, not
+  // only a hover title on a non-focusable span.
+  it("exposes the comparison and the score as text, not only as a title", () => {
+    render(
+      <SourceChunksList
+        documents={documents}
+        pinnedResults={[]}
+        onCopy={vi.fn()}
+        onInsert={vi.fn()}
+        onPin={vi.fn()}
+        onPreview={vi.fn()}
+      />
+    )
+
+    const items = screen.getAllByRole("listitem")
+    const hidden = within(items[2]).getByText(
+      "Compared with the other results. Score 0.40"
+    )
+    expect(hidden).toHaveClass("sr-only")
+  })
 })

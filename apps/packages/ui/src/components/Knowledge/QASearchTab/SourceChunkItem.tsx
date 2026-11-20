@@ -60,6 +60,14 @@ export const SourceChunkItem: React.FC<SourceChunkItemProps> = React.memo(
           : level === "weaker"
             ? t("sidepanel:qaSearch.relevance.weaker", "Weaker match")
             : null
+    const relevanceDetail =
+      score === null
+        ? ""
+        : (t(
+            "sidepanel:qaSearch.relevance.tooltip",
+            "Compared with the other results. Score {{score}}",
+            { score: score.toFixed(2) }
+          ) as string)
 
     const handleCopy = () => {
       onCopy(document)
@@ -87,17 +95,14 @@ export const SourceChunkItem: React.FC<SourceChunkItemProps> = React.memo(
             )}
           </div>
           {relevanceText && score !== null && (
+            // The comparison and score are text too, so screen readers get
+            // them; the hover title repeats them (CC-10 review).
             <span
               className="text-xs text-text-muted whitespace-nowrap"
-              title={
-                t(
-                  "sidepanel:qaSearch.relevance.tooltip",
-                  "Compared with the other results. Score {{score}}",
-                  { score: score.toFixed(2) }
-                ) as string
-              }
+              title={relevanceDetail}
             >
               {relevanceText}
+              <span className="sr-only">{relevanceDetail}</span>
             </span>
           )}
         </div>
