@@ -40,6 +40,20 @@ def _seed_single_user_admin_rbac():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _healthy_empty_llm_provider_override_store(monkeypatch):
+    """Every test starts with the healthy, empty provider-override store app startup gives production.
+
+    The tldw_Server_API/tests conftest does the same for its tests; this directory is outside it. The MCP
+    authoritative path reads the store since TASK-15571, and fails closed when it cannot.
+    """
+    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides
+
+    monkeypatch.setattr(llm_provider_overrides, "_OVERRIDE_CACHE", {})
+    monkeypatch.setattr(llm_provider_overrides, "_OVERRIDE_CACHE_HEALTHY", True)
+    monkeypatch.setattr(llm_provider_overrides, "_OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS", True)
+
+
 @pytest.fixture
 def mcp_ws_client(monkeypatch):
     """Reusable MCP WS client with auth disabled and relaxed IP checks.
