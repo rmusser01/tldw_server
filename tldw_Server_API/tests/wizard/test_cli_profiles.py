@@ -283,6 +283,8 @@ def test_init_profile_does_not_format_unrelated_repo_changes_by_default(tmp_path
     )
 
     assert result.exit_code == 0, result.output
+    # --install-dir defaults to the cwd at call time, so init writes this repo's .env, not the real checkout's.
+    assert (repo / "tldw_Server_API" / "Config_Files" / ".env").is_file()
 
 
 def test_init_profile_rewrites_legacy_single_user_api_key(tmp_path: Path, monkeypatch) -> None:

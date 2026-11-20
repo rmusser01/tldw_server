@@ -30,6 +30,8 @@ The shared repositories expose distinct resolved, authorized-absent, unauthorize
 
 Checks are authoritative at the database read; they do not promise a transaction spanning credential selection and an outbound network request. Later MCP admission and dispatch checks remain necessary. The additional reads are an accepted cost of preserving scope authority.
 
+Amendment (TASK-15571, 2026-11-19): after every supplied scope is validated, a user, team or organization credential whose model the admin provider override's allowlist denies (`model_not_allowed`) is replaced by the server credential from the same frozen snapshot. This is the owner's rule that a denied model falls back to the server key. It is a policy fallback after authority is established, not a fallback on absence, and the reservation then counts and checks the call as a server-key call. A provider the override disables fails closed with its policy error, and an override store that cannot be read fails closed with `credential_store_unavailable`, as other store failures do. A server credential is not checked.
+
 ## Follow-up
 
 Stage 3 adds conservative accounting; Stages 4 and 5 certify the bounded transport and compose the host adapter. ADR-025 continues to govern shared provider adapter routing.
