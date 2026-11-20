@@ -55,6 +55,7 @@ def _moonshot_request(
     base_url: str | None = None,
     timeout: float | None = None,
     credentials_resolved: bool = False,
+    max_completion_tokens: int | None = None,
 ):
     if credentials_resolved:
         loaded_config_data = app_config if isinstance(app_config, dict) else {}
@@ -71,7 +72,7 @@ def _moonshot_request(
 
     logging.debug("Moonshot: Using configured API key")
 
-    final_model = model if model is not None else moonshot_config.get("model", "moonshot-v1-8k")
+    final_model = model if model is not None else moonshot_config.get("model", "kimi-k3.1-pro")
     final_temp = temp if temp is not None else _safe_cast(moonshot_config.get("temperature"), float, 0.7)
     final_top_p = maxp if maxp is not None else _safe_cast(moonshot_config.get("top_p"), float, 0.95)
 
@@ -151,23 +152,29 @@ def _moonshot_request(
         else:
             api_messages.append({"role": role, "content": content})
 
+    from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import is_bundled_model_endpoint
+
+    api_base_url = base_url or moonshot_config.get("api_base_url", "https://api.moonshot.cn/v1")
+    fixed_sampling = is_bundled_model_endpoint("moonshot", final_model, api_base_url)
     payload: dict[str, Any] = {
         "model": final_model,
         "messages": api_messages,
         "stream": final_streaming,
     }
 
-    if final_temp is not None:
+    if not fixed_sampling and final_temp is not None:
         payload["temperature"] = final_temp
-    if final_top_p is not None:
+    if not fixed_sampling and final_top_p is not None:
         payload["top_p"] = final_top_p
-    if final_max_tokens is not None:
-        payload["max_tokens"] = final_max_tokens
-    if frequency_penalty is not None:
+    if max_completion_tokens is not None:
+        payload["max_completion_tokens"] = max_completion_tokens
+    elif final_max_tokens is not None:
+        payload["max_completion_tokens" if fixed_sampling else "max_tokens"] = final_max_tokens
+    if not fixed_sampling and frequency_penalty is not None:
         payload["frequency_penalty"] = frequency_penalty
-    if final_n is not None:
+    if not fixed_sampling and final_n is not None:
         payload["n"] = final_n
-    if presence_penalty is not None:
+    if not fixed_sampling and presence_penalty is not None:
         payload["presence_penalty"] = presence_penalty
     if response_format is not None:
         payload["response_format"] = response_format
@@ -187,7 +194,6 @@ def _moonshot_request(
     }
     headers = merge_extra_headers(headers, {"extra_headers": extra_headers})
 
-    api_base_url = base_url or moonshot_config.get("api_base_url", "https://api.moonshot.cn/v1")
     api_url = api_base_url.rstrip("/") + "/chat/completions"
 
     payload = merge_extra_body(payload, {"extra_body": extra_body})
@@ -288,6 +294,7 @@ class MoonshotAdapter(ChatProvider):
             "streaming": stream_flag,
             "frequency_penalty": request.get("frequency_penalty"),
             "max_tokens": request.get("max_tokens"),
+            "max_completion_tokens": request.get("max_completion_tokens"),
             "n": request.get("n"),
             "presence_penalty": request.get("presence_penalty"),
             "response_format": request.get("response_format"),

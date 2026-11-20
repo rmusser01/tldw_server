@@ -136,7 +136,7 @@ class GoogleAdapter(ChatProvider):
         if merged.get("api_key") is None and cfg.get("api_key") is not None:
             merged["api_key"] = cfg.get("api_key")
         if merged.get("model") is None:
-            merged["model"] = cfg.get("model") or "gemini-2.5-flash"
+            merged["model"] = cfg.get("model") or "gemini-3.5-flash-lite"
         if merged.get("temperature") is None and cfg.get("temperature") is not None:
             merged["temperature"] = cfg.get("temperature")
         if merged.get("top_p") is None:
@@ -208,6 +208,7 @@ class GoogleAdapter(ChatProvider):
     @staticmethod
     def _to_gemini_contents(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         contents: list[dict[str, Any]] = []
+        tool_names: dict[str, str] = {}
         allow_image_urls = _env_flag("LLM_ADAPTERS_GEMINI_IMAGE_URLS_BETA")
         allow_audio_urls = _env_flag("LLM_ADAPTERS_GEMINI_AUDIO_URLS_BETA")
         allow_video_urls = _env_flag("LLM_ADAPTERS_GEMINI_VIDEO_URLS_BETA")
@@ -215,6 +216,19 @@ class GoogleAdapter(ChatProvider):
             role = m.get("role") or "user"
             # Gemini handles system via systemInstruction; skip system messages here.
             if role == "system":
+                continue
+            if role == "tool" and (name := tool_names.get(m.get("tool_call_id"))):
+                output = m.get("content")
+                try:
+                    result = json.loads(output) if isinstance(output, str) else output
+                except ValueError:
+                    result = output
+                response = result if isinstance(result, dict) else {"output": result}
+                part = {"functionResponse": {"name": name, "response": response}}
+                if contents and "functionResponse" in contents[-1]["parts"][-1]:
+                    contents[-1]["parts"].append(part)
+                else:
+                    contents.append({"role": "user", "parts": [part]})
                 continue
             # Gemini uses "model" instead of "assistant"
             if role == "assistant":
@@ -290,6 +304,27 @@ class GoogleAdapter(ChatProvider):
                                 parts.append({"fileData": {"mimeType": "video/*", "fileUri": u}})
                             else:
                                 parts.append({"text": f"Video: {u}"})
+            if role == "model":
+                for call in m.get("tool_calls") or []:
+                    if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
+                        continue
+                    function = call["function"]
+                    name = function.get("name")
+                    call_id = call.get("id")
+                    if not isinstance(name, str) or not isinstance(call_id, str):
+                        continue
+                    try:
+                        args = json.loads(function.get("arguments") or "{}")
+                    except (TypeError, ValueError):
+                        args = {}
+                    part = {"functionCall": {"name": name, "args": args if isinstance(args, dict) else {}}}
+                    extra = call.get("extra_content")
+                    google = extra.get("google") if isinstance(extra, dict) else None
+                    signature = google.get("thought_signature") if isinstance(google, dict) else None
+                    if isinstance(signature, str) and signature:
+                        part["thoughtSignature"] = signature
+                    parts.append(part)
+                    tool_names[call_id] = name
             contents.append({"role": role, "parts": parts or [{"text": ""}]})
         return contents
 
@@ -420,10 +455,13 @@ class GoogleAdapter(ChatProvider):
                                 arg_str = _json.dumps(args if args is not None else {})
                             except (TypeError, ValueError):
                                 arg_str = "{}"
+                            signature = p.get("thoughtSignature")
                             tool_calls.append({
                                 "id": f"call_{tc_idx}",
                                 "type": "function",
                                 "function": {"name": name, "arguments": arg_str},
+                                **({"extra_content": {"google": {"thought_signature": signature}}}
+                                   if isinstance(signature, str) and signature else {}),
                             })
                             tc_idx += 1
                 message: dict[str, Any] = {"role": "assistant", "content": text_accum or None}
@@ -526,6 +564,7 @@ class GoogleAdapter(ChatProvider):
                         arg_str = json.dumps(args if args is not None else {})
                     except (TypeError, ValueError):
                         arg_str = "{}"
+                    signature = part.get("thoughtSignature")
                     yield sse_data({
                         "choices": [{
                             "index": idx,
@@ -535,6 +574,8 @@ class GoogleAdapter(ChatProvider):
                                     "id": f"call_{tool_index}",
                                     "type": "function",
                                     "function": {"name": name, "arguments": arg_str},
+                                    **({"extra_content": {"google": {"thought_signature": signature}}}
+                                       if isinstance(signature, str) and signature else {}),
                                 }]
                             },
                         }],
