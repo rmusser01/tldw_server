@@ -10,6 +10,7 @@ import json
 import os
 import platform
 from collections.abc import Mapping, MutableMapping
+from dataclasses import asdict
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -23,8 +24,6 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file
-from dataclasses import asdict
-
 from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 from tldw_Server_API.app.core.config_sections.precedence import resolve
 from tldw_Server_API.app.core.config_sections.rag import contextual_defaults
