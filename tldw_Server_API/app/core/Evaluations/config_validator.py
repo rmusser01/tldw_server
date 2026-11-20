@@ -11,7 +11,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.config_sections.auth import load_auth_config
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config, resolve_jwt_secret_key
 
 
 @dataclass
@@ -112,7 +112,9 @@ class EvaluationConfigValidator:
 
         elif auth_mode == "multi_user":
             # Check JWT configuration
-            jwt_secret = os.getenv("JWT_SECRET_KEY")
+            from tldw_Server_API.app.core.config import load_comprehensive_config
+
+            jwt_secret = resolve_jwt_secret_key(load_comprehensive_config()).value
             if not jwt_secret:
                 self.issues.append(ConfigurationIssue(
                     severity="error",

@@ -24,7 +24,11 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file
-from tldw_Server_API.app.core.config_sections.auth import load_auth_config, resolve_single_user_fixed_id
+from tldw_Server_API.app.core.config_sections.auth import (
+    load_auth_config,
+    resolve_jwt_secret_key,
+    resolve_single_user_fixed_id,
+)
 from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.config_sections.precedence import resolve
 from tldw_Server_API.app.core.config_sections.redis import resolve_redis_url
@@ -998,7 +1002,7 @@ def load_settings():
     single_user_api_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
 
     # --- Multi-User Settings (JWT) ---
-    jwt_secret_key = os.getenv("JWT_SECRET_KEY", "a_very_insecure_default_secret_key_for_dev_only")
+    jwt_secret_key = resolve_jwt_secret_key(load_comprehensive_config(), default="a_very_insecure_default_secret_key_for_dev_only").value  # D1(f)
     jwt_algorithm = "HS256"
 
     # --- Redis Configuration ---

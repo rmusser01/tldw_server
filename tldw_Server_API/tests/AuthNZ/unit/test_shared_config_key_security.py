@@ -55,11 +55,12 @@ def test_config_file_cannot_set_the_single_user_identity(monkeypatch):
         authnz_settings.reset_settings()
 
 
-def test_auth_config_repr_hides_secrets():
-    """Row 4: a URL that can carry a password never shows in the typed auth view's repr."""
+@pytest.mark.parametrize("key", ["DATABASE_URL", "JWT_SECRET_KEY"])
+def test_auth_config_repr_hides_secrets(key):
+    """Rows 4 and 6: a URL that can carry a password, and the JWT secret, never show in the typed auth view's repr."""
     parser = configparser.ConfigParser(interpolation=None)
     parser.add_section("AuthNZ")
-    assert "s3cret" not in repr(load_auth_config(parser, env={"DATABASE_URL": "s3cret"}))
+    assert "s3cret" not in repr(load_auth_config(parser, env={key: "s3cret"}))
 
 
 def test_webhook_secret_ring_still_decrypts(monkeypatch):

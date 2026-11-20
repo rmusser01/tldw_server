@@ -45,7 +45,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.username_utils import normalize_admin_username
 from tldw_Server_API.app.core.config import get_tldw_env_file_path, is_tldw_env_file_exclusive
-from tldw_Server_API.app.core.config_sections.auth import auth_mode_env
+from tldw_Server_API.app.core.config_sections.auth import auth_mode_env, jwt_secret_key_env
 from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.DB_Management.Users_DB import ensure_user_directories, get_users_db
 from tldw_Server_API.app.core.testing import is_test_mode
@@ -267,7 +267,7 @@ def _detect_env_issues(auth_mode: str, env_values: dict[str, str]) -> tuple[set[
             issues.append("SINGLE_USER_API_KEY must be at least 16 characters")
 
     if mode == "multi_user":
-        jwt_key = _effective_env_value("JWT_SECRET_KEY", env_values)
+        jwt_key = _normalize_env_value(jwt_secret_key_env() or env_values.get("JWT_SECRET_KEY"))
         if not jwt_key:
             missing_keys.add("JWT_SECRET_KEY")
             issues.append("JWT_SECRET_KEY must be set for multi-user mode")

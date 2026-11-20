@@ -17,6 +17,7 @@ import pydantic
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.endpoints import chat as chat_mod
 from tldw_Server_API.app.api.v1.endpoints import setup as setup_endpoint
 from tldw_Server_API.app.core import config, startup_preflight
 from tldw_Server_API.app.core.AuthNZ import initialize as authnz_initialize
@@ -30,7 +31,9 @@ from tldw_Server_API.app.core.config_sections.auth import (
     load_auth_config,
     resolve_access_token_expire_minutes,
     resolve_auth_mode,
+    jwt_secret_key_env,
     resolve_database_url,
+    resolve_jwt_secret_key,
     resolve_redis_url,
     resolve_single_user_fixed_id,
     single_user_fixed_id_env,
@@ -870,26 +873,33 @@ def apply_jwt_case(monkeypatch):
 
 
 # AuthNZ's field (single-user mode, so no secret is required); LazySettings' entry; the validator's
-# "no JWT secret" error; the notes cursor secret; the share-link fallback after a failed derivation.
+# "no JWT secret" error; the share-link fallback after a failed derivation. D1(f): LazySettings, the
+# validator and the share-link fallback now see `[AuthNZ] jwt_secret_key` (config_only, config_short,
+# config_blank); before, each saw the environment alone (LazySettings: its public default).
 JWT_EXPECTED = {
     #                 AuthNZ    LazySettings  validator_error  share fallback
     "env_set": (JWT_ENV, JWT_ENV, False, JWT_ENV),
     "env_blank": ("", "", True, None),
     "env_short": ("short", "short", False, "short"),
-    "config_only": (JWT_CFG, JWT_DEFAULT, True, None),
-    "config_short": ("short", JWT_DEFAULT, True, None),
-    "config_blank": ("", JWT_DEFAULT, True, None),
+    "config_only": (JWT_CFG, JWT_CFG, False, JWT_CFG),
+    "config_short": ("short", "short", False, "short"),
+    "config_blank": ("", "", True, None),
     "neither": (UNSET, JWT_DEFAULT, True, None),
 }
 
 
-def _share_fallback_secret(monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import chat as chat_mod
-
+def _share_fallback_secret(monkeypatch, tmp_path, parser):
     def boom(*_args, **_kwargs):
         raise ValueError("no usable HMAC key material")
 
     monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.crypto_utils.derive_hmac_key", boom)
+    # chat.py holds its own reference to the loader, so hand it the case's parser through a real file.
+    config_file = tmp_path / "config.txt"
+    with config_file.open("w") as handle:
+        parser.write(handle)
+    monkeypatch.setenv("TLDW_CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(config, "_CONFIG_PARSER_CACHE", None)
+    chat_mod.load_comprehensive_config.cache_clear()  # chat.py's import-time reference: the real loader
     chat_mod._get_knowledge_qa_share_signing_key.cache_clear()
     try:
         return chat_mod._get_knowledge_qa_share_signing_key().decode()
@@ -897,11 +907,12 @@ def _share_fallback_secret(monkeypatch):
         return None
     finally:
         chat_mod._get_knowledge_qa_share_signing_key.cache_clear()
+        chat_mod.load_comprehensive_config.cache_clear()
 
 
 @pytest.mark.parametrize("case", list(JWT_CASES))
-def test_jwt_secret_key_resolution_today(apply_jwt_case, monkeypatch, case):
-    apply_jwt_case(case)
+def test_jwt_secret_key_resolution_today(apply_jwt_case, monkeypatch, tmp_path, case):
+    parser = apply_jwt_case(case)
     authnz_expected, lazy_expected, validator_error, share_expected = JWT_EXPECTED[case]
 
     assert _outcome(lambda: authnz_settings.get_settings().JWT_SECRET_KEY) == authnz_expected
@@ -912,11 +923,11 @@ def test_jwt_secret_key_resolution_today(apply_jwt_case, monkeypatch, case):
     validator._validate_authentication()
     assert any("No JWT secret key" in issue.message for issue in validator.issues) is validator_error
 
-    assert _share_fallback_secret(monkeypatch) == share_expected
+    assert _share_fallback_secret(monkeypatch, tmp_path, parser) == share_expected
 
 
 @pytest.mark.parametrize("case", ["env_set", "env_blank", "config_only", "neither"])
-def test_notes_cursor_secret_follows_lazy_settings_today(apply_jwt_case, case):
+def test_notes_cursor_secret_follows_lazy_settings(apply_jwt_case, case):
     from fastapi import HTTPException
 
     from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
@@ -926,7 +937,7 @@ def test_notes_cursor_secret_follows_lazy_settings_today(apply_jwt_case, case):
         secret = notes_endpoint._attachment_cursor_secret().decode()
     except HTTPException:
         secret = None
-    assert secret == {"env_set": JWT_ENV, "env_blank": None, "config_only": JWT_DEFAULT, "neither": JWT_DEFAULT}[case]
+    assert secret == {"env_set": JWT_ENV, "env_blank": None, "config_only": JWT_CFG, "neither": JWT_DEFAULT}[case]
 
 
 JWT_RING_STATES = {"unset": UNSET, "blank": "", "spaces": "  ", "set": "ring-secret"}
@@ -975,3 +986,53 @@ def test_setup_wizard_jwt_check_today(monkeypatch, state, expected):
         monkeypatch.setenv("JWT_SECRET_KEY", "" if state == "blank" else "j" * 40)
     _missing, issues = authnz_initialize._detect_env_issues("multi_user", {"JWT_SECRET_KEY": ""})
     assert any("JWT_SECRET_KEY must be set" in issue for issue in issues) is expected
+
+
+JWT_RESOLVED = {
+    "env_set": Resolved(JWT_ENV, "env", "JWT_SECRET_KEY"),
+    "env_blank": Resolved("", "env", "JWT_SECRET_KEY"),
+    "env_short": Resolved("short", "env", "JWT_SECRET_KEY"),
+    "config_only": Resolved(JWT_CFG, "config", "AuthNZ.jwt_secret_key"),
+    "config_short": Resolved("short", "config", "AuthNZ.jwt_secret_key"),
+    "config_blank": Resolved("", "config", "AuthNZ.jwt_secret_key"),
+    "neither": Resolved(None, "default", None),
+}
+
+
+@pytest.mark.parametrize("case", list(JWT_CASES))
+def test_jwt_secret_key_resolves_through_config_sections(apply_jwt_case, case):
+    parser = apply_jwt_case(case)
+    assert resolve_jwt_secret_key(parser) == JWT_RESOLVED[case]
+
+
+def test_resolve_jwt_secret_key_default_applies_only_when_unset():
+    parser = _jwt_parser(None)
+    assert resolve_jwt_secret_key(parser, env={}, default="d") == Resolved("d", "default", None)
+    assert resolve_jwt_secret_key(parser, env={"JWT_SECRET_KEY": ""}, default="d").value == ""
+
+
+def _jwt_parser(value):
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.add_section("AuthNZ")
+    if value is not None:
+        parser.set("AuthNZ", "jwt_secret_key", value)
+    return parser
+
+
+def test_jwt_secret_key_env_is_env_only_blank_kept_and_live(monkeypatch):
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+    assert jwt_secret_key_env() is None
+    monkeypatch.setenv("JWT_SECRET_KEY", "")
+    assert jwt_secret_key_env() == ""
+    monkeypatch.setenv("JWT_SECRET_KEY", "s3cret")
+    assert jwt_secret_key_env() == "s3cret"
+    assert jwt_secret_key_env({"JWT_SECRET_KEY": "y"}) == "y"
+    assert jwt_secret_key_env({}) is None
+
+
+def test_resolve_jwt_secret_key_never_puts_the_secret_in_origin():
+    for resolved in (
+        resolve_jwt_secret_key(_jwt_parser("s3cret"), env={}),
+        resolve_jwt_secret_key(_jwt_parser(None), env={"JWT_SECRET_KEY": "s3cret"}),
+    ):
+        assert resolved.value == "s3cret" and "s3cret" not in str(resolved.origin)

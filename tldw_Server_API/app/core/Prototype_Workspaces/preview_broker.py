@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
     PrototypeWorkspacesRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.config_sections.auth import jwt_secret_key_env
 from tldw_Server_API.app.core.exceptions import PrototypeTerminalRuntimeError
 
 from .models import (
@@ -60,7 +61,7 @@ def _resolve_stable_signing_secret(signing_secret: str | None) -> str:
         os.getenv("PROTOTYPE_PREVIEW_SIGNING_SECRET"),
         getattr(settings, "JWT_SECRET_KEY", None),
         getattr(settings, "SINGLE_USER_API_KEY", None),
-        os.getenv("JWT_SECRET_KEY"),
+        jwt_secret_key_env(),
         os.getenv("SINGLE_USER_API_KEY"),
     )
     for candidate in candidates:

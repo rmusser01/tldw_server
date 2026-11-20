@@ -63,6 +63,26 @@ def resolve_access_token_expire_minutes(
     )
 
 
+def resolve_jwt_secret_key(
+    config_parser: ConfigParserLike | None, env: Mapping[str, str] | None = None, *, default: str | None = None
+) -> Resolved:
+    """The AuthNZ overlay's rule: env ``JWT_SECRET_KEY``, then ``[AuthNZ] jwt_secret_key``; blank values count as set.
+
+    ``default`` is what a caller wants when neither layer sets it (LazySettings' public dev default).
+    The raw text is never validated here (the ``JWT_SECRET_KEY`` field's validator does that). The
+    secret is never logged and never put in ``origin``.
+    """
+    return resolve(
+        ("JWT_SECRET_KEY",), (("AuthNZ", "jwt_secret_key"),), config_parser=config_parser, env=env,
+        default=default, blank_env=True, blank_config=True,
+    )
+
+
+def jwt_secret_key_env(env: Mapping[str, str] | None = None) -> str | None:
+    """The environment layer alone: the live ``JWT_SECRET_KEY`` text, blank kept, ``None`` when unset."""
+    return resolve(("JWT_SECRET_KEY",), env=env, blank_env=True).value
+
+
 def resolve_redis_url(config_parser: ConfigParserLike | None, env: Mapping[str, str] | None = None) -> Resolved:
     """The AuthNZ overlay's rule: env ``REDIS_URL``, then ``[AuthNZ] redis_url``; blank values count as set.
 

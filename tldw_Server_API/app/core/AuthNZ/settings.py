@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.config_sections.auth import (
     resolve_access_token_expire_minutes,
     resolve_auth_mode,
     resolve_database_url,
+    resolve_jwt_secret_key,
     resolve_redis_url,
 )
 from tldw_Server_API.app.core.config_sections.precedence import resolve
@@ -1390,7 +1391,10 @@ def _load_overrides_from_config() -> dict:
         resolved_url = resolve_database_url(cfg)
         if resolved_url.source == "config":
             overrides["DATABASE_URL"] = str(resolved_url.value).strip()
-        maybe_set("JWT_SECRET_KEY", "jwt_secret_key", lambda v: v.strip())
+        resolved_jwt = resolve_jwt_secret_key(cfg)
+        if resolved_jwt.source == "config":
+            with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+                overrides["JWT_SECRET_KEY"] = str(resolved_jwt.value).strip()
         maybe_set("SINGLE_USER_API_KEY", "single_user_api_key", lambda v: v.strip())
         for field, key in _AUTHNZ_TRANSACTION_POLICY_CONFIG_KEYS:
             maybe_set(field, key, lambda v: v.strip())
