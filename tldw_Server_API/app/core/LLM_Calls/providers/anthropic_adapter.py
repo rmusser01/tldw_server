@@ -255,9 +255,19 @@ class AnthropicAdapter(ChatProvider):
             if parts:
                 messages.append({"role": role, "content": parts})
 
+        model = canonical_anthropic_model_id(request["model"]) if request.get("model") else None
+        if model == "claude-sonnet-4-6" and messages and messages[-1]["role"] == "assistant":
+            from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import is_bundled_model_endpoint
+
+            if all(part.get("type") == "text" for part in messages[-1]["content"]) and is_bundled_model_endpoint(
+                self.name, model, self._resolve_base_url(request)
+            ):
+                messages.append({
+                    "role": "user",
+                    "content": "Continue from where your previous response ended. Return only the continuation.",
+                })
         payload = {
-            # Anthropic accepts only its documented IDs; a saved dotted name (claude-sonnet-4.5) is sent dashed.
-            "model": canonical_anthropic_model_id(request.get("model")) if request.get("model") else request.get("model"),
+            "model": model,
             "messages": messages,
             "max_tokens": request.get("max_tokens") or 1024,
         }
@@ -451,7 +461,7 @@ class AnthropicAdapter(ChatProvider):
         return sse_data(payload)
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
-        request = self._bind_request_credentials(request)
+        request = self._bind_request_credentials({**request, "stream": True})
         request = validate_payload(self.name, request or {})
         if self._use_native_http():
             api_key = request.get("api_key")

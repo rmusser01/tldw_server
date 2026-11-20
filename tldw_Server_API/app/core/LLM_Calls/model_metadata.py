@@ -827,9 +827,9 @@ def get_model_metadata(provider: str, model: str) -> dict[str, Any]:
     lookup = canonical_anthropic_model_id(model) if provider == "anthropic" else model
     md = MODEL_METADATA.get(provider, {}).get(lookup)
     base = _default_model_metadata(provider, model)
-    if md is None:
-        return merge_routing_metadata(base, provider=provider, model=model)
-    # Merge on top of defaults to ensure stable schema
-    merged = {**base, **{k: v for k, v in md.items() if k != "name"}}
-    merged["name"] = model
-    return merge_routing_metadata(merged, provider=provider, model=model)
+    from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import commercial_model_limits
+
+    if md is not None:
+        base.update({key: value for key, value in md.items() if key != "name"})
+    base.update(commercial_model_limits(provider, lookup))
+    return merge_routing_metadata(base, provider=provider, model=model)
