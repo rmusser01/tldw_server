@@ -408,6 +408,44 @@ for (const viewport of [
   });
 }
 
+// Decision [3]: toolbar controls are 32px on desktop and 44px on touch.
+const sizedControls = (page: Page) => [
+  page.getByTestId('composer-options-toggle'),
+  page.getByTestId('attachment-button'),
+  page.getByTestId('model-selector'),
+  page.getByTestId('composer-persistence'),
+];
+const openComposerAt1440 = async (page: Page) => {
+  await prepareOfflinePreview(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 30_000 });
+};
+
+test('sizes toolbar controls at 32px on a desktop pointer', async ({ page }) => {
+  await openComposerAt1440(page);
+  expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(false);
+  for (const control of sizedControls(page)) {
+    const box = (await control.boundingBox())!;
+    expect(Math.round(box.height), await control.getAttribute('data-testid') ?? '').toBe(32);
+  }
+});
+
+test.describe('on a touch screen', () => {
+  test.use({ hasTouch: true });
+  test('sizes toolbar controls at 44px for a coarse pointer, even at 1440px', async ({ page }) => {
+    await openComposerAt1440(page);
+    expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+    for (const control of sizedControls(page)) {
+      const box = (await control.boundingBox())!;
+      expect(Math.round(box.height), await control.getAttribute('data-testid') ?? '').toBe(44);
+    }
+  });
+});
+
 test('remembers whether Tools was expanded across reload', async ({ page }) => {
   await prepareOfflinePreview(page);
   await page.goto('/chat', { waitUntil: 'domcontentloaded' });
