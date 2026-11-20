@@ -500,7 +500,9 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
       {/* Text Selection Popover */}
       {selection && selection.text.length > 0 && (
         <TextSelectionPopover
+          documentId={documentId}
           text={selection.text}
+          pdfPage={selection.page ?? currentPage}
           position={{
             x: selection.rect.left + selection.rect.width / 2 - 80, // Center above selection
             y: selection.rect.bottom + 8 // Below selection

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, Suspense, useEffect, useLayoutEffect, useId } from "react"
+import React, { useState, useRef, useCallback, Suspense, useLayoutEffect, useId } from "react"
 import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
 import { Empty, Spin, Switch, Tooltip } from "antd"
@@ -42,10 +42,12 @@ export const DocumentChat: React.FC<{
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const activeTurn = useRef<AbortController | null>(null)
   const activeTabRef = useRef<HTMLButtonElement | null>(null)
+  const focusDraftRef = useRef<string | null>(null)
   const panelId = useId()
 
   // Get active document from workspace store
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
+  const pendingSelectionPrompt = useDocumentWorkspaceStore(s => s.pendingSelectionPrompt)
   const activeDocumentType = useDocumentWorkspaceStore(
     (s) => s.activeDocumentType
   )
@@ -136,28 +138,23 @@ export const DocumentChat: React.FC<{
     activeTabRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" })
   }, [activeConversationKey])
 
-  // Listen for "Ask AI" events from the text selection popover
-  useEffect(() => {
-    const handleAskAI = (event: CustomEvent<{ text: string; prompt: string }>) => {
-      const { prompt } = event.detail
-      setInputValue(prompt)
-      // Focus the input after a short delay to ensure the tab switch has completed
-      setTimeout(() => {
-        textareaRef.current?.focus()
-      }, 100)
-    }
+  useLayoutEffect(() => {
+    if (!activeConversationKey || !pendingSelectionPrompt || !operation.isCurrent() ||
+        pendingSelectionPrompt.documentId !== activeDocumentId ||
+        useDocumentWorkspaceStore.getState().pendingSelectionPrompt !== pendingSelectionPrompt) return
+    useDocumentWorkspaceStore.setState({ pendingSelectionPrompt: null })
+    const { prompt } = pendingSelectionPrompt
+    setInputValue(draft => draft.trim() ? `${draft}\n\n${prompt}` : prompt)
+    focusDraftRef.current = activeConversationKey
+  }, [activeConversationKey, activeDocumentId, operation, pendingSelectionPrompt, setInputValue])
 
-    window.addEventListener(
-      "document-workspace-ask-ai",
-      handleAskAI as EventListener
-    )
-    return () => {
-      window.removeEventListener(
-        "document-workspace-ask-ai",
-        handleAskAI as EventListener
-      )
-    }
-  }, [setInputValue])
+  useLayoutEffect(() => {
+    const input = textareaRef.current
+    if (!activeConversationKey || focusDraftRef.current !== activeConversationKey || !input || input.disabled) return
+    focusDraftRef.current = null
+    input.focus({ preventScroll: true })
+    input.setSelectionRange(input.value.length, input.value.length)
+  }, [activeConversationKey, hasSelectedModel, inputValue, isChatReady])
 
   const stopConversationTurn = useCallback(() => {
     const controller = activeTurn.current

@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_rate_limit,
     get_auth_principal,
     get_request_user,
+    require_expected_user_if_present,
 )
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
@@ -724,6 +725,7 @@ async def get_tts_service() -> TTSServiceV2:
     summary="Generates audio from text input.",
     response_class=Response,
     dependencies=[
+        Depends(require_expected_user_if_present),
         Depends(check_rate_limit),
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.speech", count_as="call")),
     ],

@@ -170,6 +170,7 @@ export interface DocumentWorkspaceState {
   rightPanelCollapsed: boolean
   activeSidebarTab: SidebarTab
   activeRightTab: RightPanelTab
+  pendingSelectionPrompt: { documentId: number; prompt: string } | null
 
   // Viewer (PDF uses page numbers, EPUB uses CFI + percentage)
   currentPage: number
@@ -225,6 +226,7 @@ export interface DocumentWorkspaceActions {
   setRightPanelCollapsed: (collapsed: boolean) => void
   setActiveSidebarTab: (tab: SidebarTab) => void
   setActiveRightTab: (tab: RightPanelTab) => void
+  queueSelectionPrompt: (documentId: number, workspaceAuthority: string | null, prompt: string) => boolean
 
   // Viewer
   setCurrentPage: (page: number) => void
@@ -287,6 +289,7 @@ export const DEFAULT_DOCUMENT_WORKSPACE_STATE: DocumentWorkspaceState = {
   rightPanelCollapsed: false,
   activeSidebarTab: "insights",
   activeRightTab: "chat",
+  pendingSelectionPrompt: null,
   currentPage: 1,
   totalPages: 0,
   zoomLevel: DEFAULT_ZOOM_LEVEL,

@@ -1,11 +1,13 @@
 import { useMutation } from "@tanstack/react-query"
 import { tldwClient } from "@/services/tldw"
+import { useDocumentOperation } from "./useDocumentOperation"
 
 export interface TranslateParams {
   text: string
   targetLanguage?: string
   model?: string
   provider?: string
+  signal?: AbortSignal
 }
 
 export interface TranslateResult {
@@ -29,9 +31,14 @@ export interface TranslateResult {
  * })
  */
 export function useTranslate() {
+  const operation = useDocumentOperation()
   return useMutation<TranslateResult, Error, TranslateParams>({
-    mutationFn: async ({ text, targetLanguage = "English", model, provider }) => {
-      return await tldwClient.translate(text, targetLanguage, { model, provider })
+    mutationFn: async ({ text, targetLanguage = "English", model, provider, signal }) => {
+      if (!operation?.isCurrent()) throw new Error("Document access changed")
+      return await tldwClient.translate(text, targetLanguage, {
+        model, provider, requestScope: operation.requestScope,
+        signal: signal ? AbortSignal.any([signal, operation.signal]) : operation.signal
+      })
     }
   })
 }
