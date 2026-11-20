@@ -28,6 +28,7 @@ import {
 } from "lucide-react"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { useDocumentOperation } from "@/hooks/document-workspace/useDocumentOperation"
+import type { DocumentChatCache } from "@/hooks/document-workspace/useDocumentChat"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 import { useMobile, useTablet } from "@/hooks/useMediaQuery"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
@@ -258,7 +259,10 @@ const LeftSidebarContent: React.FC = () => {
 const RIGHT_PRIMARY_KEYS: RightPanelTab[] = ["chat", "annotations"]
 const RIGHT_SECONDARY_KEYS: RightPanelTab[] = ["citations", "quiz"]
 
-const RightPanelContent: React.FC<{ operation: QuickIngestOperation }> = ({ operation }) => {
+const RightPanelContent: React.FC<{
+  operation: QuickIngestOperation
+  conversations: DocumentChatCache
+}> = ({ operation, conversations }) => {
   const { t } = useTranslation(["option", "common"])
   const activeRightTab = useDocumentWorkspaceStore((s) => s.activeRightTab)
   const setActiveRightTab = useDocumentWorkspaceStore(
@@ -268,7 +272,7 @@ const RightPanelContent: React.FC<{ operation: QuickIngestOperation }> = ({ oper
   const renderRightTab = (tab: RightPanelTab) => {
     switch (tab) {
       case "chat":
-        return <DocumentChat operation={operation} />
+        return <DocumentChat operation={operation} conversations={conversations} />
       case "annotations":
         return <AnnotationsPanel />
       case "citations":
@@ -552,6 +556,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
   const isMobile = useMobile()
   const isTablet = useTablet()
   const message = useAntdMessage()
+  const conversations = useRef<DocumentChatCache>(new Map()).current
 
   // Get active document for hooks
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
@@ -1083,7 +1088,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
           />
         </Suspense>
       ),
-      chat: <RightPanelContent operation={owner} />
+      chat: <RightPanelContent operation={owner} conversations={conversations} />
     }
 
     return (
@@ -1254,7 +1259,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
           )}
           {!isTablet && rightPaneOpen && (
             <aside className="hidden shrink-0 border-l border-border bg-surface lg:flex lg:flex-col" style={{ width: rightPanel.width }}>
-              <RightPanelContent operation={owner} />
+              <RightPanelContent operation={owner} conversations={conversations} />
             </aside>
           )}
 
@@ -1273,7 +1278,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
             className="lg:hidden"
             styles={{ body: { padding: 0 } }}
           >
-            {isTablet && rightDrawerOpen && <RightPanelContent operation={owner} />}
+            {isTablet && rightDrawerOpen && <RightPanelContent operation={owner} conversations={conversations} />}
           </Drawer>
         </div>
       </div>

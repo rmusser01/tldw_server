@@ -119,6 +119,7 @@ const physical = vi.hoisted(() => {
         })
       },
       toArray: async () => structuredClone([...rows.values()]),
+      reverse: () => collection(() => true),
       where: (key: string) => ({
         equals: (value: unknown) => collection((row) => row[key] === value)
       })
@@ -465,23 +466,32 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it("sends a typed Document Workspace question without a Chat history provider", async () => {
+it("sends and reopens separate Document Workspace conversations without a Chat history provider", async () => {
   const connection = useConnectionStore.getState().state
   const workspace = useDocumentWorkspaceStore.getState()
   useConnectionStore.setState({ state: { ...connection, isConnected: true, mode: "normal" } })
   useDocumentWorkspaceStore.setState({ activeDocumentId: 81, activeDocumentType: "pdf" })
   useStoreMessageOption.setState({ temporaryChat: false })
   physical.control.allowDurableHistory = true
-  physical.control.beforeFetch = async (url) => {
+  const serverChats = new Map<string, string>()
+  let messageNumber = 0
+  physical.control.beforeFetch = async (url, init) => {
     const path = new URL(url).pathname
     if (path === "/api/v1/media/81")
       return Response.json({ id: 81, title: "Synthetic document", type: "pdf" })
-    if (path === "/api/v1/chats/")
-      return Response.json({ id: "document-chat", title: "Synthetic document", version: 1 })
-    if (path === "/api/v1/chats/document-chat/messages")
-      return Response.json({ id: "acknowledged-message", version: 2 })
-    if (path === "/api/v1/chats/document-chat")
-      return Response.json({ id: "document-chat", title: "Synthetic document", version: 2 })
+    if (path === "/api/v1/chats/" && init.method === "POST") {
+      const id = `document-chat-${serverChats.size + 1}`
+      const { title } = JSON.parse(String(init.body)) as { title: string }
+      serverChats.set(id, title)
+      return Response.json({ id, title, version: 1 })
+    }
+    const chat = path.match(/^\/api\/v1\/chats\/(document-chat-\d+)(\/messages)?\/?$/)
+    if (chat?.[2]) {
+      return init.method === "POST"
+        ? Response.json({ id: `acknowledged-${++messageNumber}`, version: 2 })
+        : Response.json([])
+    }
+    if (chat) return Response.json({ id: chat[1], title: serverChats.get(chat[1]!), scope_type: "global", version: 2 })
     return undefined
   }
   const operation = {
@@ -506,7 +516,7 @@ it("sends a typed Document Workspace question without a Chat history provider", 
   )
   let view = render(panel)
   try {
-    const suggestion = screen.getByRole("button", { name: "Summarize this document" })
+    const suggestion = await screen.findByRole("button", { name: "Summarize this document" })
     await waitFor(() => expect(suggestion).toBeEnabled())
     const input = screen.getByRole("textbox", { name: "Ask about this document..." })
     fireEvent.change(input, { target: { value: "What does this document say?" } })
@@ -517,11 +527,42 @@ it("sends a typed Document Workspace question without a Chat history provider", 
     ]))
     await waitFor(() => expect(physical.tables.messages.rows.size).toBe(2))
     expect([...physical.tables.chatHistories.rows.values()]).toEqual([
-      expect.objectContaining({ doc_id: "document:81", server_chat_id: "document-chat" })
+      expect.objectContaining({ doc_id: "document:81", server_chat_id: "document-chat-1" })
     ])
+
+    const firstTab = await screen.findByRole("tab", { name: "What does this document say?" })
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
+    fireEvent.change(input, { target: { value: "First conversation draft" } })
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }))
+    const draft = screen.getByRole("tab", { name: /Draft/ })
+    expect(input).toHaveValue("")
+    fireEvent.click(firstTab)
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(true))
+    expect(input).toHaveValue("First conversation draft")
+    fireEvent.click(draft)
+    const secondQuestion = "How does the author test this?"
+    fireEvent.change(input, { target: { value: secondQuestion } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(wires).toHaveLength(2))
+    expect(wires[1].body.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "user", content: secondQuestion })
+    ]))
+    expect(JSON.stringify(wires[1].body.messages)).not.toContain("What does this document say?")
+    const secondTab = await screen.findByRole("tab", { name: secondQuestion })
+    expect(secondTab).toHaveAttribute("aria-selected", "true")
+    expect([...physical.tables.chatHistories.rows.values()]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ doc_id: "document:81", server_chat_id: "document-chat-1" }),
+      expect.objectContaining({ doc_id: "document:81", server_chat_id: "document-chat-2" })
+    ]))
+    fireEvent.click(firstTab)
+    await waitFor(() => expect(useStoreMessageOption.getState().messages[0]?.message).toBe("What does this document say?"))
+    expect(input).toHaveValue("First conversation draft")
     view.unmount()
     view = render(panel)
-    await waitFor(() => expect(useStoreMessageOption.getState().messages.at(-1)?.message).toBe("Seed answer"))
+    const reopenedSecond = await screen.findByRole("tab", { name: secondQuestion })
+    fireEvent.click(reopenedSecond)
+    await waitFor(() => expect(useStoreMessageOption.getState().messages.map(row => row.message))
+      .toEqual([secondQuestion, "Seed answer"]))
   } finally {
     view.unmount()
     if (scrollIntoView) Object.defineProperty(Element.prototype, "scrollIntoView", scrollIntoView)
