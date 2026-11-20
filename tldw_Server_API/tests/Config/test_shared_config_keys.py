@@ -1036,3 +1036,128 @@ def test_resolve_jwt_secret_key_never_puts_the_secret_in_origin():
         resolve_jwt_secret_key(_jwt_parser(None), env={"JWT_SECRET_KEY": "s3cret"}),
     ):
         assert resolved.value == "s3cret" and "s3cret" not in str(resolved.origin)
+
+
+# ---- Row 7: SINGLE_USER_API_KEY (alias API_KEY) ----
+
+SUK_E, SUK_A, SUK_C = "e" * 24, "a" * 24, "c" * 24
+# id -> (env SINGLE_USER_API_KEY, env API_KEY, [AuthNZ] single_user_api_key)
+SUK_CASES = {
+    "env_set": (SUK_E, UNSET, SUK_C),
+    "env_blank": ("", UNSET, SUK_C),
+    "api_key_only": (UNSET, SUK_A, SUK_C),
+    "env_and_api_key": (SUK_E, SUK_A, SUK_C),
+    "config_only": (UNSET, UNSET, SUK_C),
+    "config_blank": (UNSET, UNSET, ""),
+    "neither": (UNSET, UNSET, UNSET),
+}
+
+
+@pytest.fixture
+def apply_suk_case(monkeypatch):
+    def apply(case: str) -> configparser.ConfigParser:
+        config.clear_config_cache()
+        env_key, env_alias, cfg_key = SUK_CASES[case]
+        for key in ("SINGLE_USER_TEST_API_KEY", "API_BEARER"):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("AUTH_MODE", "single_user")
+        for name, value in (("SINGLE_USER_API_KEY", env_key), ("API_KEY", env_alias)):
+            if value is None:
+                monkeypatch.delenv(name, raising=False)
+            else:
+                monkeypatch.setenv(name, value)
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.add_section("AuthNZ")
+        if cfg_key is not None:
+            parser.set("AuthNZ", "single_user_api_key", cfg_key)
+        monkeypatch.setattr(config, "_load_env_files_early", lambda: None)
+        monkeypatch.setattr(config, "load_comprehensive_config", lambda: parser)
+        monkeypatch.setattr(authnz_settings, "load_comprehensive_config", lambda: parser)
+        authnz_settings.reset_settings()
+        return parser
+
+    yield apply
+    monkeypatch.undo()
+    config.clear_config_cache()
+    authnz_settings.reset_settings()
+
+
+# AuthNZ's field (single-user mode); LazySettings' entry; the validator's "no API key" error;
+# the setup wizard's "required" issue.
+SUK_EXPECTED = {
+    #                    AuthNZ  LazySettings validator_error wizard_required
+    "env_set": (SUK_E, SUK_E, False, False),
+    "env_blank": (ERR, None, True, True),
+    "api_key_only": (SUK_C, SUK_A, True, False),  # the config overlay beats the API_KEY fallback
+    "env_and_api_key": (SUK_E, SUK_E, False, False),
+    "config_only": (SUK_C, None, True, True),
+    "config_blank": (ERR, None, True, True),
+    "neither": (ERR, None, True, True),
+}
+
+
+@pytest.mark.parametrize("case", list(SUK_CASES))
+def test_single_user_api_key_resolution_today(apply_suk_case, case):
+    apply_suk_case(case)
+    authnz_expected, lazy_expected, validator_error, wizard_required = SUK_EXPECTED[case]
+
+    assert _outcome(lambda: authnz_settings.get_settings().SINGLE_USER_API_KEY) == authnz_expected
+    assert config.load_settings()["SINGLE_USER_API_KEY"] == lazy_expected
+
+    validator = EvaluationConfigValidator()
+    validator._validate_authentication()
+    assert any("No API key configured" in issue.message for issue in validator.issues) is validator_error
+
+    _missing, issues = authnz_initialize._detect_env_issues("single_user", {})
+    assert any("SINGLE_USER_API_KEY is required" in issue for issue in issues) is wizard_required
+
+
+SUK_RING_STATES = {
+    "unset": (UNSET, UNSET),
+    "blank": ("", UNSET),
+    "primary": ("ring-primary", UNSET),
+    "alias_only": (UNSET, "ring-alias"),
+    "both": ("ring-primary", "ring-alias"),
+    "blank_primary_alias": ("", "ring-alias"),
+}
+
+
+@pytest.mark.parametrize("state", list(SUK_RING_STATES))
+def test_webhook_key_ring_lists_the_single_user_key_today(monkeypatch, state):
+    from tldw_Server_API.app.core.AuthNZ.admin_webhook_secrets import _iter_admin_webhook_secret_keys
+
+    for key in ("BYOK_ENCRYPTION_KEY", "BYOK_SECONDARY_ENCRYPTION_KEY", "SESSION_ENCRYPTION_KEY", "JWT_SECRET_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    for name, value in zip(("SINGLE_USER_API_KEY", "API_KEY"), SUK_RING_STATES[state]):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    expected = {
+        "unset": [], "blank": [], "primary": ["ring-primary"], "alias_only": ["ring-alias"],
+        "both": ["ring-primary"], "blank_primary_alias": ["ring-alias"],
+    }[state]
+    assert _iter_admin_webhook_secret_keys() == [("single_user_api_key", v) for v in expected]
+
+
+@pytest.mark.parametrize("state", ["unset", "blank", "primary", "alias_only"])
+def test_prototype_signing_secret_readers_use_the_live_env_single_user_key_today(monkeypatch, state):
+    from tldw_Server_API.app.core.Prototype_Workspaces import access, preview_broker
+
+    monkeypatch.setattr(access, "get_settings", lambda: SimpleNamespace(JWT_SECRET_KEY=None, SINGLE_USER_API_KEY=None))
+    monkeypatch.setattr(preview_broker, "get_settings", lambda: SimpleNamespace(JWT_SECRET_KEY=None, SINGLE_USER_API_KEY=None))
+    for key in ("JWT_SECRET_KEY", "PROTOTYPE_PREVIEW_SIGNING_SECRET", "API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    env_key, env_alias = SUK_RING_STATES[state]
+    if env_key is None:
+        monkeypatch.delenv("SINGLE_USER_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("SINGLE_USER_API_KEY", env_key)
+    if env_alias is not None:
+        monkeypatch.setenv("API_KEY", env_alias)
+    for module in (access, preview_broker):
+        if state == "primary":
+            assert module._resolve_stable_signing_secret(None) == "ring-primary"
+        else:  # the alias is not read here
+            with pytest.raises(RuntimeError):
+                module._resolve_stable_signing_secret(None)
