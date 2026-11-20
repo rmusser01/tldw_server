@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useCallback, useState } from "react"
 import { useStoreMessageOption } from "@/store/option"
 import type { Knowledge, State, Message as StoreMessage } from "@/store/option"
 import { useConnectionStore } from "@/store/connection"
@@ -11,6 +11,10 @@ import {
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
+import { captureActorSceneSendForTarget } from "@/hooks/chat/actor-scene-source"
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
 import { runChatPersistenceTransaction } from "@/db/dexie/chat-persistence-transaction"
 import { PageAssistDatabase } from "@/db/dexie/chat"
 import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
@@ -62,7 +66,8 @@ const createEmptySession = (): DocumentChatSession => ({
  */
 async function persistDocumentSession(
   mediaId: number,
-  session: DocumentChatSession
+  session: DocumentChatSession,
+  requestScope: ServicePromptSnapshot["requestScope"]
 ): Promise<string | null> {
   // Don't persist empty sessions
   if (session.messages.length === 0) {
@@ -74,7 +79,7 @@ async function persistDocumentSession(
   let owner: ServicePromptSnapshot | undefined
 
   try {
-    owner = await loadServicePromptSnapshot([])
+    owner = await loadServicePromptSnapshot([], { requestScope })
     if (revision !== usePlaygroundSessionStore.getState().restoreRevision || owner.scopeSignal.aborted || owner.scopeInvalidatedSignal.aborted) return null
     const capturedOwner = owner
     return await runChatPersistenceTransaction(owner.scopeSignal, async () => {
@@ -137,13 +142,14 @@ async function persistDocumentSession(
  * Load a document chat session from IndexedDB.
  */
 async function loadDocumentSession(
-  mediaId: number
+  mediaId: number,
+  operation: QuickIngestOperation
 ): Promise<DocumentChatSession | null> {
   const docId = `document:${mediaId}`
   let owner: ServicePromptSnapshot | undefined
 
   try {
-    owner = await loadServicePromptSnapshot([])
+    owner = await loadServicePromptSnapshot([], { requestScope: operation.requestScope, signal: operation.signal })
     const history = await getHistoryByDocId(docId, owner.requestScope)
     if (!history) {
       return null
@@ -151,7 +157,7 @@ async function loadDocumentSession(
 
     // Load full chat data including messages
     const chatData = await getFullChatData(history.id)
-    if (!chatData || owner.scopeSignal.aborted || owner.scopeInvalidatedSignal.aborted) {
+    if (!chatData || !operation.isCurrent() || owner.scopeSignal.aborted || owner.scopeInvalidatedSignal.aborted) {
       return null
     }
 
@@ -233,8 +239,11 @@ const isMediaDbOnlySources = (sources: string[] | null | undefined) =>
  *
  * @param mediaId - The active document's media ID (null when no document is open)
  */
-export function useDocumentChat(mediaId: number | null) {
+export function useDocumentChat(mediaId: number | null, operation: QuickIngestOperation) {
+  const { requestScope, isCurrent: accountIsCurrent } = operation
+  const historyDocumentId = mediaId === null ? undefined : documentKnowledgeId(mediaId)
   const [accountRevision, setAccountRevision] = useState(0)
+  const [readySession, setReadySession] = useState<{ mediaId: number; generation: number } | null>(null)
   const previousMediaIdRef = useRef<number | null>(null)
   const activeMediaIdRef = useRef<number | null>(mediaId)
   const loadGenerationRef = useRef(0)
@@ -293,6 +302,7 @@ export function useDocumentChat(mediaId: number | null) {
   }, [])
 
   const applySession = useCallback((session: DocumentChatSession) => {
+    usePlaygroundSessionStore.getState().markSourceSelectionIntent()
     useStoreMessageOption.setState({
       messages: session.messages,
       history: session.history,
@@ -316,9 +326,11 @@ export function useDocumentChat(mediaId: number | null) {
 
   useEffect(() => watchChatAccountChanges(invalidated => {
     if (!invalidated) return
+    loadGenerationRef.current += 1
     sessionsRef.current.clear()
     baselineSessionRef.current = null
     previousMediaIdRef.current = null
+    setReadySession(null)
     applySession(createEmptySession())
     setAccountRevision(revision => revision + 1)
   }), [applySession])
@@ -359,7 +371,7 @@ export function useDocumentChat(mediaId: number | null) {
     [ensureDocumentSources, mediaId, restoreRagSources, setSelectedKnowledge]
   )
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     activeMediaIdRef.current = mediaId
   }, [mediaId])
 
@@ -382,6 +394,7 @@ export function useDocumentChat(mediaId: number | null) {
 
     const previousMediaId = previousMediaIdRef.current
     const loadGeneration = ++loadGenerationRef.current
+    setReadySession(null)
 
     // Save previous session to memory and persist to IndexedDB
     if (previousMediaId !== null) {
@@ -389,7 +402,7 @@ export function useDocumentChat(mediaId: number | null) {
       const revision = usePlaygroundSessionStore.getState().restoreRevision
       sessionsRef.current.set(previousMediaId, session)
       // Persist to IndexedDB in background (don't await)
-      persistDocumentSession(previousMediaId, session).then((historyId) => {
+      persistDocumentSession(previousMediaId, session, requestScope).then((historyId) => {
         if (historyId && revision === usePlaygroundSessionStore.getState().restoreRevision) {
           const savedSession = sessionsRef.current.get(previousMediaId)
           if (savedSession === session) {
@@ -412,6 +425,7 @@ export function useDocumentChat(mediaId: number | null) {
         // Use cached in-memory session
         applySession(session)
         setRagMediaIds([mediaId])
+        setReadySession({ mediaId, generation: loadGeneration })
         if (isDocumentKnowledge(session.selectedKnowledge, mediaId)) {
           ensureDocumentSources()
         } else {
@@ -420,14 +434,15 @@ export function useDocumentChat(mediaId: number | null) {
       } else {
         // Try to load from IndexedDB
         const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision
-        loadDocumentSession(mediaId).then((loadedSession) => {
+        loadDocumentSession(mediaId, operation).then((loadedSession) => {
           // Only apply if we're still on the same document
-          if (loadGeneration === loadGenerationRef.current && activeMediaIdRef.current === mediaId && restoreRevision === usePlaygroundSessionStore.getState().restoreRevision) {
+          if (operation.isCurrent() && loadGeneration === loadGenerationRef.current && activeMediaIdRef.current === mediaId && restoreRevision === usePlaygroundSessionStore.getState().restoreRevision) {
             const sessionToUse = loadedSession ?? createEmptySession()
             sessionsRef.current.set(mediaId, sessionToUse)
             applySession(sessionToUse)
             // Scope RAG to this specific document
             setRagMediaIds([mediaId])
+            setReadySession({ mediaId, generation: loadGeneration })
             if (isDocumentKnowledge(sessionToUse.selectedKnowledge, mediaId)) {
               ensureDocumentSources()
             } else {
@@ -452,6 +467,8 @@ export function useDocumentChat(mediaId: number | null) {
     applySession,
     ensureDocumentSources,
     mediaId,
+    operation,
+    requestScope,
     restoreRagSources,
     setRagMediaIds,
     snapshotSession
@@ -465,7 +482,7 @@ export function useDocumentChat(mediaId: number | null) {
       if (currentMediaId !== null) {
         const session = snapshotSession()
         // Persist to IndexedDB (fire-and-forget since we're unmounting)
-        persistDocumentSession(currentMediaId, session)
+        persistDocumentSession(currentMediaId, session, requestScope)
       }
       // StrictMode replays effects after cleanup; the replacement mount must
       // start a fresh read instead of retaining the cancelled load's marker.
@@ -486,6 +503,7 @@ export function useDocumentChat(mediaId: number | null) {
     }
   }, [
     applySession,
+    requestScope,
     restoreRagSources,
     setRagMediaIds,
     setRagSources,
@@ -518,11 +536,37 @@ export function useDocumentChat(mediaId: number | null) {
     if (currentMediaId !== null) {
       sessionsRef.current.set(currentMediaId, clearedSession)
     }
+    const generation = ++loadGenerationRef.current
     applySession(clearedSession)
+    setReadySession(currentMediaId === null ? null : { mediaId: currentMediaId, generation })
   }, [applySession, snapshotSession])
 
-  // Check if chat is ready for use
-  const isChatReady = isServerAvailable && mediaId !== null
+  const isChatReady = isServerAvailable && mediaId !== null &&
+    readySession?.mediaId === mediaId && accountIsCurrent()
+
+  const capturePrivateScene = useCallback((commandIsCurrent: () => boolean) => {
+    if (!isChatReady || !readySession || !historyDocumentId || !accountIsCurrent()) return null
+    const isCurrent = () =>
+      activeMediaIdRef.current === readySession.mediaId &&
+      loadGenerationRef.current === readySession.generation &&
+      commandIsCurrent()
+    if (!isCurrent()) return null
+
+    const source = captureChatDraftSource(isCurrent)
+    // The workspace transcript owns this private scene independently of main Chat history.
+    const target = captureActorSettingsTarget({
+      address: {
+        kind: "fresh",
+        id: historyDocumentId,
+        scope: { type: "global" },
+        temporary: useStoreMessageOption.getState().temporaryChat
+      },
+      requestScope,
+      accountIsCurrent,
+      isCurrent: source.isCurrent
+    })
+    return captureActorSceneSendForTarget(target, target?.account, source.isCurrent, isCurrent)
+  }, [accountIsCurrent, historyDocumentId, isChatReady, readySession, requestScope])
 
   // Check if document is currently scoped for RAG
   const isDocumentScoped =
@@ -537,6 +581,7 @@ export function useDocumentChat(mediaId: number | null) {
     isProcessing,
     isDocumentScoped,
     isChatReady,
+    historyDocumentId,
     isServerAvailable,
     ragEnabled,
 
@@ -547,6 +592,7 @@ export function useDocumentChat(mediaId: number | null) {
     ragTopK,
 
     // Actions
+    capturePrivateScene,
     clearDocumentChat,
     setRagEnabled,
     setMessages

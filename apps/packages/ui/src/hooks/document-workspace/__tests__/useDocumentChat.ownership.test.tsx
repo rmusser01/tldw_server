@@ -5,13 +5,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useDocumentChat } from "../useDocumentChat"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
 import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 
 const io = vi.hoisted(() => ({
   loadSnapshot: vi.fn(), getHistory: vi.fn(), getHistoryInfo: vi.fn(), getFull: vi.fn(), saveHistory: vi.fn(), saveMessage: vi.fn(), release: vi.fn(),
   requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }
 }))
-vi.mock("@/services/service-prompts", () => ({ loadServicePromptSnapshot: (...args: unknown[]) => io.loadSnapshot(...args) }))
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: (...args: unknown[]) => io.loadSnapshot(...args)
+}))
 vi.mock("@/store/connection", () => ({ useConnectionStore: (select: (state: unknown) => unknown) => select({ state: { isConnected: true, mode: "normal" } }) }))
 vi.mock("@/db/dexie/helpers", () => ({
   getHistoryByDocId: (...args: unknown[]) => io.getHistory(...args), getFullChatData: (...args: unknown[]) => io.getFull(...args),
@@ -19,6 +22,15 @@ vi.mock("@/db/dexie/helpers", () => ({
 }))
 vi.mock("@/db/dexie/chat-persistence-transaction", () => ({ runChatPersistenceTransaction: async (_signal: AbortSignal, operation: () => Promise<unknown>) => operation() }))
 vi.mock("@/db/dexie/chat", () => ({ PageAssistDatabase: class { getHistoryInfo = io.getHistoryInfo } }))
+
+const operation: QuickIngestOperation = {
+  authorityKey: "verified-account",
+  authorityRevision: 1,
+  requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" },
+  signal: new AbortController().signal,
+  isCurrent: () => true,
+  assertCurrent: () => {}
+}
 
 describe("document Chat fallback ownership", () => {
   beforeEach(() => {
@@ -36,7 +48,7 @@ describe("document Chat fallback ownership", () => {
   })
 
   const mountWithUnpersistedMessage = async () => {
-    const view = renderHook(({ id }) => useDocumentChat(id), { initialProps: { id: 1 } })
+    const view = renderHook(({ id }) => useDocumentChat(id, operation), { initialProps: { id: 1 } })
     await waitFor(() => expect(io.getHistory).toHaveBeenCalled())
     await act(async () => { await Promise.resolve() })
     act(() => useStoreMessageOption.setState({
@@ -45,6 +57,45 @@ describe("document Chat fallback ownership", () => {
     }))
     return view
   }
+
+  it("prepares the active document's private scene for shared chat submission", async () => {
+    const view = renderHook(({ id }) => useDocumentChat(id, operation), { initialProps: { id: 1 } })
+    await waitFor(() => expect(view.result.current.isChatReady).toBe(true))
+
+    const capture = view.result.current.capturePrivateScene?.(() => true)
+    expect(capture?.isCurrent()).toBe(true)
+    const send = await capture!.read()
+    expect(send.requestScope).toEqual(io.requestScope)
+    expect(send.scene).toMatchObject({
+      target: { address: { kind: "fresh", id: "document:1" } },
+      origin: "default"
+    })
+
+    view.rerender({ id: 2 })
+    await waitFor(() => expect(view.result.current.isChatReady).toBe(true))
+    expect(send.isCurrent()).toBe(false)
+    const next = await view.result.current.capturePrivateScene!(() => true)!.read()
+    expect(next.scene.target.key).not.toBe(send.scene.target.key)
+    view.unmount()
+    expect(next.isCurrent()).toBe(false)
+  })
+
+  it("waits for the document transcript and revokes a scene when its chat is cleared", async () => {
+    let finish!: (history: { id: string }) => void
+    io.getHistory.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    io.getFull.mockResolvedValue({ historyInfo: { id: "owned-document" }, messages: [] })
+    const view = renderHook(() => useDocumentChat(1, operation))
+    await waitFor(() => expect(io.getHistory).toHaveBeenCalled())
+    expect(view.result.current.isChatReady).toBe(false)
+    expect(view.result.current.capturePrivateScene?.(() => true) ?? null).toBeNull()
+
+    await act(async () => { finish({ id: "owned-document" }) })
+    await waitFor(() => expect(view.result.current.isChatReady).toBe(true))
+    const capture = view.result.current.capturePrivateScene!(() => true)!
+    act(() => view.result.current.clearDocumentChat())
+    expect(capture.isCurrent()).toBe(false)
+    expect(view.result.current.capturePrivateScene!(() => true)?.isCurrent()).toBe(true)
+  })
 
   it("stamps fallback history with the verified source owner", async () => {
     const view = await mountWithUnpersistedMessage()
@@ -105,7 +156,10 @@ describe("document Chat fallback ownership", () => {
   it("discards document memory and baseline on an account change", async () => {
     const view = await mountWithUnpersistedMessage()
     await act(async () => { view.rerender({ id: 2 }); await Promise.resolve() })
+    await waitFor(() => expect(view.result.current.isChatReady).toBe(true))
+    const capture = view.result.current.capturePrivateScene(() => true)!
     act(() => { window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed")) })
+    expect(capture.isCurrent()).toBe(false)
     await act(async () => { view.rerender({ id: 1 }); await Promise.resolve() })
     expect(useStoreMessageOption.getState().messages).toEqual([])
     view.unmount()
@@ -118,7 +172,7 @@ describe("document Chat fallback ownership", () => {
     let finish!: (history: { id: string }) => void
     io.getHistory.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     io.getFull.mockResolvedValue({ historyInfo: { id: "document-history" }, messages: [{ id: "doc-message", role: "user", content: "Old document question" }] })
-    const view = renderHook(() => useDocumentChat(1))
+    const view = renderHook(() => useDocumentChat(1, operation))
     await waitFor(() => expect(io.getHistory).toHaveBeenCalled())
     view.unmount()
     await act(async () => { finish({ id: "document-history" }); await Promise.resolve() })
@@ -128,7 +182,7 @@ describe("document Chat fallback ownership", () => {
   it("restarts document restoration after StrictMode effect cleanup", async () => {
     io.getHistory.mockResolvedValue({ id: "owned-document" })
     io.getFull.mockResolvedValue({ historyInfo: { id: "owned-document" }, messages: [{ id: "owned-message", role: "user", content: "Owned document question" }] })
-    const view = renderHook(() => useDocumentChat(1), { wrapper: StrictMode })
+    const view = renderHook(() => useDocumentChat(1, operation), { wrapper: StrictMode })
     await waitFor(() => expect(useStoreMessageOption.getState().messages[0]?.message).toBe("Owned document question"))
     view.unmount()
   })
