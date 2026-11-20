@@ -8,7 +8,7 @@ import type {
   NotesGraphResponse
 } from "@/services/note-graph-suggestions"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -248,7 +248,7 @@ describe("NotesGraphWorkspace list picks and filters (NL-11)", () => {
     expect(screen.queryByText("Alpha body")).not.toBeInTheDocument()
   })
 
-  it("filters the graph by tag", () => {
+  it("filters the graph by tag", async () => {
     const state = workspaceState()
     mockUseNotesGraphWorkspace.mockReturnValue(state)
     renderWorkspace({ tagOptions: ["reading", "work"] })
@@ -257,7 +257,8 @@ describe("NotesGraphWorkspace list picks and filters (NL-11)", () => {
       target: { value: "reading" }
     })
 
-    expect(state.filterByTag).toHaveBeenCalledWith("reading")
+    // The select settles before it refetches (NL-11 review).
+    await waitFor(() => expect(state.filterByTag).toHaveBeenCalledWith("reading"))
   })
 
   it("hides notes without links when 'Linked notes only' is on", () => {
@@ -286,7 +287,7 @@ describe("NotesGraphWorkspace list picks and filters (NL-11)", () => {
     )
   })
 
-  it("lays out a large graph as Rings and says why", () => {
+  it("lays out a large graph as Rings by itself, without a notice (NL-11 review)", () => {
     const nodes = Array.from({ length: 201 }, (_, index) => noteNode(`note:n${index}`))
     mockUseNotesGraphWorkspace.mockReturnValue(
       workspaceState({ graph: { ...baseGraph, nodes, edges: [] }, scope: "all" })
@@ -294,8 +295,6 @@ describe("NotesGraphWorkspace list picks and filters (NL-11)", () => {
     renderWorkspace()
 
     expect(lastCanvasProps().layout).toBe("concentric")
-    expect(screen.getByTestId("notes-graph-layout-fallback")).toHaveTextContent(
-      "This graph is large, so it uses the Rings layout."
-    )
+    expect(screen.queryByTestId("notes-graph-layout-fallback")).not.toBeInTheDocument()
   })
 })

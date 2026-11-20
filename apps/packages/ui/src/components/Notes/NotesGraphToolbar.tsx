@@ -29,7 +29,8 @@ type NotesGraphToolbarProps = {
   maxNodes: number
   maxNodeCap: number
   layout: NotesGraphLayout
-  scope: "focused" | "all"
+  /** "tag": a tag-filtered library graph, which is neither Focused nor All notes. */
+  scope: "focused" | "all" | "tag"
   allNotes: {
     activeNoteCount: number
     effectiveNoteCap: number
@@ -222,6 +223,7 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
           maxNodes={maxNodes}
           maxNodeCap={maxNodeCap}
           layout={layout}
+          libraryScope={scope !== "focused"}
           onRadiusChange={onRadiusChange}
           onMaxNodesChange={onMaxNodesChange}
           onLayoutChange={onLayoutChange}
@@ -246,8 +248,7 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
             type="button"
             className={`border-l border-border px-3 text-sm ${scope === "all" ? "bg-primary text-primary-foreground" : "bg-surface text-text"}`}
             aria-pressed={scope === "all"}
-            // A tag filter shows part of a library over the cap (NL-11).
-            disabled={!allNotes.eligible && scope !== "all"}
+            disabled={!allNotes.eligible}
             onClick={onShowAllNotes}>
             {t("option:notesSearch.graphScopeAll", {
               defaultValue: "All notes"

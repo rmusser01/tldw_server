@@ -1668,7 +1668,8 @@ describe("useNotesGraphWorkspace", () => {
       includeLinkStatus: true,
       cursor: undefined,
       semanticThreshold: undefined,
-      semanticTopK: undefined
+      semanticTopK: undefined,
+      signal: expect.any(AbortSignal)
     })
   })
 

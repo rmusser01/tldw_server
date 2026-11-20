@@ -1,6 +1,8 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 
+const TAG_SETTLE_MS = 300
+
 type NotesGraphFiltersProps = {
   tagOptions: string[]
   tag: string | null
@@ -23,6 +25,23 @@ const NotesGraphFilters: React.FC<NotesGraphFiltersProps> = ({
 }) => {
   const { t } = useTranslation(["option"])
   const tagLabel = t("option:notesSearch.graphFilterTag", { defaultValue: "Tag" })
+  // A native select fires change on every arrow key; wait for the reader to
+  // settle before refetching the graph (NL-11 review).
+  const [pendingTag, setPendingTag] = React.useState<string | null | undefined>(
+    undefined
+  )
+  const onTagChangeRef = React.useRef(onTagChange)
+  React.useEffect(() => {
+    onTagChangeRef.current = onTagChange
+  }, [onTagChange])
+  React.useEffect(() => {
+    if (pendingTag === undefined) return
+    const timer = window.setTimeout(() => {
+      setPendingTag(undefined)
+      onTagChangeRef.current(pendingTag)
+    }, TAG_SETTLE_MS)
+    return () => window.clearTimeout(timer)
+  }, [pendingTag])
   const options = React.useMemo(
     () => (tag && !tagOptions.includes(tag) ? [tag, ...tagOptions] : tagOptions),
     [tag, tagOptions]
@@ -40,8 +59,8 @@ const NotesGraphFilters: React.FC<NotesGraphFiltersProps> = ({
         <select
           aria-label={tagLabel}
           className="h-8 max-w-[180px] border border-border bg-bg px-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-          value={tag ?? ""}
-          onChange={(event) => onTagChange(event.target.value || null)}>
+          value={(pendingTag === undefined ? tag : pendingTag) ?? ""}
+          onChange={(event) => setPendingTag(event.target.value || null)}>
           <option value="">
             {t("option:notesSearch.graphFilterAnyTag", {
               defaultValue: "All tags"

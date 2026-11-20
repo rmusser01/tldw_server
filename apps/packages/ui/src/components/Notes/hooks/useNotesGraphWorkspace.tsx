@@ -304,7 +304,8 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
           maxEdges,
           cursor: pageParam,
           semanticThreshold: includeSemantic ? semanticThreshold : undefined,
-          semanticTopK: includeSemantic ? semanticTopK : undefined
+          semanticTopK: includeSemantic ? semanticTopK : undefined,
+          signal
         })
       } catch (error) {
         if (isPermissionError(error) && !signal.aborted) {
@@ -505,6 +506,15 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     }
   }, [graph])
 
+  // While a graph loads there is no response to read eligibility from, so
+  // keep the last one for this authority (NL-11 review).
+  const lastEligibilityRef = React.useRef({ authorityScope, eligible: false })
+  if (graph) lastEligibilityRef.current = { authorityScope, eligible: allNotes.eligible }
+  const eligibleNow = graph
+    ? allNotes.eligible
+    : lastEligibilityRef.current.authorityScope === authorityScope &&
+      lastEligibilityRef.current.eligible
+
   const searchResults = React.useMemo(() => {
     const needle = search.trim().toLocaleLowerCase()
     if (!needle || !graph) return []
@@ -626,12 +636,12 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
         return {
           inputIdentity,
           focusNoteId,
-          scope: nextTag || allNotes.eligible ? "all" : "focused",
+          scope: nextTag || eligibleNow ? "all" : "focused",
           tag: nextTag
         }
       })
     },
-    [allNotes.eligible, inputIdentity, options.initialFocusNoteId]
+    [eligibleNow, inputIdentity, options.initialFocusNoteId]
   )
 
   const toggleEdgeType = React.useCallback((edgeType: NotesGraphEdgeType) => {

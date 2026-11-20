@@ -242,6 +242,8 @@ export type FetchNotesGraphInput = {
   tag?: string
   /** Asks for each note's has_note_links; older servers ignore it. */
   includeLinkStatus?: boolean
+  /** Cancels the request when its query is superseded (NL-11 review). */
+  signal?: AbortSignal
   edgeTypes?: NotesGraphEdgeType[]
   maxNodes?: number
   maxEdges?: number
@@ -869,7 +871,8 @@ const normalizeGraph = (value: unknown): NotesGraphResponse => {
 export const fetchNotesGraph = async (
   input: FetchNotesGraphInput
 ): Promise<NotesGraphResponse> => {
-  const parsed = parseInput(graphInputSchema, input)
+  const { signal, ...graphInput } = input
+  const parsed = parseInput(graphInputSchema, graphInput)
   const payload = await request<unknown>({
     path: queryPath("/api/v1/notes/graph", [
       ["center_note_id", parsed.centerNoteId],
@@ -888,7 +891,8 @@ export const fetchNotesGraph = async (
       ["cursor", parsed.cursor],
       ["include_link_status", parsed.includeLinkStatus ? "true" : undefined]
     ]),
-    method: "GET"
+    method: "GET",
+    ...(signal ? { abortSignal: signal } : {})
   })
   return normalizeGraph(payload)
 }

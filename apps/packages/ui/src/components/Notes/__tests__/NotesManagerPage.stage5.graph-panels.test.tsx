@@ -757,6 +757,12 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
     })
     expect(screen.getByPlaceholderText('Title')).toHaveValue('Graph seed note')
     expect(screen.getByTestId('notes-view-mode-list')).toHaveAttribute('aria-pressed', 'true')
+    // Keyboard focus follows the reader into the editor (NL-11 review).
+    await waitFor(() => {
+      expect(
+        screen.getByPlaceholderText('Write your note here... (Markdown supported)')
+      ).toHaveFocus()
+    })
   })
 
   it('shows loading and empty states for relation panels', async () => {

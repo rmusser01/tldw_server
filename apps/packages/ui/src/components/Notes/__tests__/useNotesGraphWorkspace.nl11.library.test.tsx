@@ -132,6 +132,31 @@ describe("useNotesGraphWorkspace library graphs (NL-11)", () => {
     )
   })
 
+  it("passes the query's abort signal, so a superseded library request is cancelled", async () => {
+    mocks.fetchNotesGraph.mockResolvedValue(graph())
+    renderWorkspace()
+    await flush()
+
+    const input = mocks.fetchNotesGraph.mock.calls.at(-1)?.[0] as { signal?: unknown }
+    expect(input.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it("clears the tag filter back to All notes while the filtered graph loads", async () => {
+    mocks.fetchNotesGraph
+      .mockResolvedValueOnce(graph())
+      .mockImplementationOnce(() => new Promise(() => {}))
+    const { result } = renderWorkspace()
+    await flush()
+    act(() => result.current.filterByTag("reading"))
+    await flush()
+    expect(result.current.graph).toBeNull()
+
+    act(() => result.current.filterByTag(null))
+
+    expect(result.current.scope).toBe("all")
+    expect(result.current.tagFilter).toBeNull()
+  })
+
   it("filters a library over the cap by tag", async () => {
     mocks.fetchNotesGraph.mockResolvedValue(
       graph({ active_note_count: 2_000, all_notes_eligible: false })
