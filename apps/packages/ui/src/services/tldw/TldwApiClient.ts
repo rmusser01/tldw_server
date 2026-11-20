@@ -4120,10 +4120,6 @@ export class TldwApiClientBase {
     })
   }
 
-  async getNote(noteId: string | number, options?: ScopedRequestOptions): Promise<any> {
-    return collectionsMethods.getNote.call(this, noteId, options)
-  }
-
   async searchNotes(
     query: string,
     params?: NoteSearchParams,
