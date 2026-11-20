@@ -6,6 +6,7 @@ import {
 } from "@/components/Sidepanel/Chat/SlashCommandMenu"
 import { MentionsDropdown } from "./MentionsDropdown"
 import { useComposerCombobox } from "@/hooks/useComposerCombobox"
+import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useNoteMentions } from "./hooks/useNoteMentions"
 import { AttachedNoteChips, NoteMentionMenu } from "./NoteMentionMenu"
 
@@ -98,7 +99,14 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
     count: slashCommands.length,
     activeIndex: slashActiveIndex
   })
-  const noteMentions = useNoteMentions({ value, textareaRef, onSetMessage })
+  const { capabilities } = useServerCapabilities()
+  const noteMentions = useNoteMentions({
+    value,
+    textareaRef,
+    onSetMessage,
+    // A collapsed paste shows other text than the draft, so the caret can't be mapped.
+    enabled: Boolean(capabilities?.hasNotes) && !isCollapsed && displayValue === value
+  })
   const noteCombobox = useComposerCombobox({
     open: noteMentions.open,
     count: noteMentions.results.length,
@@ -171,15 +179,22 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         {...(noteMentions.open ? noteCombobox.inputProps : slashCombobox.inputProps)}
         {...formInputProps}
         value={displayValue}
-        onChange={onChange}
+        onChange={(event) => {
+          onChange(event)
+          noteMentions.syncCaret()
+        }}
         onSelect={() => {
           onSelect()
           noteMentions.syncCaret()
         }}
+        onBlur={(event) => {
+          formInputProps.onBlur?.(event)
+          noteMentions.clearCaret()
+        }}
       />
 
       <MentionsDropdown
-        show={showMentions}
+        show={showMentions && !noteMentions.commandOpen}
         tabs={filteredTabs}
         mentionPosition={mentionPosition}
         onSelectTab={onMentionSelect}

@@ -1118,6 +1118,8 @@ export type NoteSearchParams = {
   limit?: number
   offset?: number
   legacy_aliases?: boolean
+  /** False skips the highlighted excerpts (Wave 6, NL-07). */
+  include_snippets?: boolean
 }
 
 export type ScopedRequestOptions = {
@@ -4095,6 +4097,7 @@ export class TldwApiClientBase {
       limit?: number
       offset?: number
       include_keywords?: boolean
+      legacy_aliases?: boolean
     },
     options?: { signal?: AbortSignal }
   ): Promise<any> {
@@ -4107,13 +4110,18 @@ export class TldwApiClientBase {
     const query = this.buildQuery({
       limit,
       offset,
-      include_keywords: params?.include_keywords
+      include_keywords: params?.include_keywords,
+      legacy_aliases: params?.legacy_aliases
     } as Record<string, any>)
     return await bgRequest<any>({
       path: `/api/v1/notes/${query}`,
       method: "GET",
       abortSignal: options?.signal
     })
+  }
+
+  async getNote(noteId: string | number, options?: ScopedRequestOptions): Promise<any> {
+    return collectionsMethods.getNote.call(this, noteId, options)
   }
 
   async searchNotes(

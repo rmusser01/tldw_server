@@ -220,7 +220,7 @@ export const createFakeTldwServer = ({
    * chat commands are enabled, and only the ones the user may run.
    */
   chatCommands?: Array<{ name: string; description: string }>
-  /** What the notes list and search return (`GET /api/v1/notes/`, `/notes/search/`). */
+  /** What the notes list, search and by-id reads return (`GET /api/v1/notes/…`). */
   notes?: Array<{ id: number; title: string; content: string }>
   /**
    * Advertise `native_completion_v1` on send captures, like the real server
@@ -590,7 +590,9 @@ export const createFakeTldwServer = ({
     if (OPTIONAL_UNSUPPORTED.has(path)) {
       return json({ detail: "Not supported by the harness server" }, 404)
     }
-    if (path === "/openapi.json") return json(OPENAPI_SPEC)
+    // A server seeded with notes advertises Notes, as the real one does.
+    if (path === "/openapi.json")
+      return json(notes.length ? { ...OPENAPI_SPEC, paths: { ...OPENAPI_SPEC.paths, "/api/v1/notes/": { get: {}, post: {} } } } : OPENAPI_SPEC)
     if (path === "/api/v1/config/docs-info") {
       return json({ capabilities: {}, supported_features: {}, ffmpeg_available: false })
     }
@@ -612,6 +614,11 @@ export const createFakeTldwServer = ({
     }
     if ((path === "/api/v1/notes/" || path === "/api/v1/notes/search/") && method === "GET") {
       return json({ items: notes })
+    }
+    const noteById = method === "GET" ? path.match(/^\/api\/v1\/notes\/(\d+)$/) : null
+    if (noteById) {
+      const note = notes.find((item) => String(item.id) === noteById[1])
+      return note ? json(note) : json({ detail: "Note not found" }, 404)
     }
     if (path === "/api/v1/llm/providers") {
       return json({

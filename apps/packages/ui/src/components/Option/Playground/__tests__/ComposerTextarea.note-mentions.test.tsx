@@ -13,6 +13,12 @@ import { useStoreMessageOption } from "@/store/option"
 
 const io = vi.hoisted(() => ({
   extension: false,
+  hasNotes: true,
+  getNote: vi.fn(async (noteId: string | number, _options?: unknown) => ({
+    id: Number(noteId),
+    title: "Rebase notes",
+    content: "Full content from the server."
+  })),
   searchNotes: vi.fn(async (_query: string, _params?: unknown, _options?: unknown) => ({
     items: [
       { id: 7, title: "Rebase notes", content: "Use git rebase -i.", snippet: [{ text: "Use git rebase" }] },
@@ -26,7 +32,10 @@ vi.mock("@/utils/browser-runtime", async (importOriginal) => ({
   isExtensionRuntime: () => io.extension
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
-  tldwClient: { searchNotes: io.searchNotes }
+  tldwClient: { searchNotes: io.searchNotes, getNote: io.getNote }
+}))
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => ({ capabilities: { hasNotes: io.hasNotes }, loading: false })
 }))
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -87,8 +96,21 @@ const renderComposer = (overrides: Record<string, unknown> = {}) => {
   return { ...view, props: all }
 }
 
+/** Puts the caret at the end, as typing there would. */
+const typedAtEnd = () => {
+  const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement
+  act(() => {
+    textarea.focus()
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    fireEvent.select(textarea)
+  })
+  return textarea
+}
+
 beforeEach(() => {
   io.extension = false
+  io.hasNotes = true
+  io.getNote.mockClear()
   io.searchNotes.mockClear()
   useStoreMessageOption.setState({ ragPinnedResults: [] })
 })
@@ -96,9 +118,10 @@ beforeEach(() => {
 describe("ComposerTextarea note mentions", () => {
   it("lists matching notes as the textarea's suggestions when @ is typed", async () => {
     renderComposer({ value: "Compare @reb", displayValue: "Compare @reb" })
+    typedAtEnd()
     const listbox = await screen.findByRole("listbox", { name: "Notes" })
     expect(within(listbox).getByRole("option", { name: /Rebase notes/ })).toHaveAttribute("aria-selected", "true")
-    await waitFor(() => expect(io.searchNotes).toHaveBeenCalledWith("reb", expect.anything(), expect.anything()))
+    await waitFor(() => expect(io.searchNotes).toHaveBeenCalledWith("reb", { limit: 8, legacy_aliases: false, include_snippets: false }, expect.anything()))
     const textarea = screen.getByTestId("chat-input")
     expect(textarea).toHaveAttribute("aria-controls", listbox.id)
     expect(textarea.getAttribute("aria-activedescendant")).toBeTruthy()
@@ -106,13 +129,15 @@ describe("ComposerTextarea note mentions", () => {
 
   it("attaches the picked note as pinned context and removes the @ text", async () => {
     const { props } = renderComposer({ value: "Compare @reb", displayValue: "Compare @reb" })
+    const textarea = typedAtEnd()
     await screen.findByRole("option", { name: /Rebase notes/ })
-    const textarea = screen.getByTestId("chat-input")
     await act(async () => { fireEvent.keyDown(textarea, { key: "Enter" }) })
     expect(props.onKeyDown).not.toHaveBeenCalled()
-    expect(props.onSetMessage).toHaveBeenCalledWith("Compare ")
+    // The search row may be trimmed; the attached content is the note itself.
+    await waitFor(() => expect(io.getNote).toHaveBeenCalledWith(7, expect.anything()))
+    await waitFor(() => expect(props.onSetMessage).toHaveBeenCalledWith("Compare "))
     expect(useStoreMessageOption.getState().ragPinnedResults).toEqual([
-      expect.objectContaining({ id: "note:7", type: "note", title: "Rebase notes", snippet: "Use git rebase -i." })
+      expect.objectContaining({ id: "note:7", type: "note", title: "Rebase notes", snippet: "Full content from the server." })
     ])
   })
 
@@ -129,8 +154,8 @@ describe("ComposerTextarea note mentions", () => {
 
   it("moves through the notes with the arrow keys and closes on Escape", async () => {
     renderComposer({ value: "@", displayValue: "@" })
+    const textarea = typedAtEnd()
     await screen.findByRole("option", { name: /Release checklist/ })
-    const textarea = screen.getByTestId("chat-input")
     fireEvent.keyDown(textarea, { key: "ArrowDown" })
     expect(screen.getByRole("option", { name: /Release checklist/ })).toHaveAttribute("aria-selected", "true")
     fireEvent.keyDown(textarea, { key: "Escape" })
@@ -140,6 +165,7 @@ describe("ComposerTextarea note mentions", () => {
   it("opens the same picker for /note", async () => {
     io.extension = true
     renderComposer({ value: "/note release", displayValue: "/note release" })
+    typedAtEnd()
     await screen.findByRole("listbox", { name: "Notes" })
     await waitFor(() => expect(io.searchNotes).toHaveBeenCalledWith("release", expect.anything(), expect.anything()))
   })
@@ -147,8 +173,87 @@ describe("ComposerTextarea note mentions", () => {
   it("keeps @ for tab mentions in the extension", async () => {
     io.extension = true
     renderComposer({ value: "Compare @reb", displayValue: "Compare @reb" })
+    typedAtEnd()
     await act(async () => {})
     expect(screen.queryByRole("listbox", { name: "Notes" })).toBeNull()
     expect(io.searchNotes).not.toHaveBeenCalled()
+  })
+
+  it("does not attach the previous query's top note while a new search loads", async () => {
+    const { props, rerender } = renderComposer({ value: "@reb", displayValue: "@reb" })
+    typedAtEnd()
+    await screen.findByRole("option", { name: /Rebase notes/ })
+    io.searchNotes.mockImplementationOnce(() => new Promise(() => {}))
+    rerender(<MemoryRouter><ComposerTextarea {...({ ...props, value: "@rel", displayValue: "@rel" } as any)} /></MemoryRouter>)
+    const textarea = typedAtEnd()
+    await waitFor(() => expect(screen.queryByRole("option", { name: /Rebase notes/ })).toBeNull())
+    await waitFor(() => expect(io.searchNotes).toHaveBeenCalledWith("rel", expect.anything(), expect.anything()))
+    await act(async () => { fireEvent.keyDown(textarea, { key: "Enter" }) })
+    expect(useStoreMessageOption.getState().ragPinnedResults).toEqual([])
+    expect(io.getNote).not.toHaveBeenCalled()
+  })
+
+  it("searches again after the account changes", async () => {
+    renderComposer({ value: "@reb", displayValue: "@reb" })
+    typedAtEnd()
+    await screen.findByRole("option", { name: /Rebase notes/ })
+    const calls = io.searchNotes.mock.calls.length
+    await act(async () => { window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed")) })
+    await waitFor(() => expect(io.searchNotes.mock.calls.length).toBeGreaterThan(calls))
+  })
+
+  it.each([
+    ["Shift+Tab", { key: "Tab", shiftKey: true }],
+    ["Ctrl+Enter", { key: "Enter", ctrlKey: true }],
+    ["Cmd+Enter", { key: "Enter", metaKey: true }],
+    ["an IME commit", { key: "Enter", keyCode: 229 }]
+  ])("leaves %s to the composer", async (_name, init) => {
+    const { props } = renderComposer({ value: "@reb", displayValue: "@reb" })
+    const textarea = typedAtEnd()
+    await screen.findByRole("option", { name: /Rebase notes/ })
+    await act(async () => { fireEvent.keyDown(textarea, init) })
+    expect(props.onKeyDown).toHaveBeenCalledOnce()
+    expect(useStoreMessageOption.getState().ragPinnedResults).toEqual([])
+  })
+
+  it("does not open for a draft set from code", async () => {
+    renderComposer({ value: "@reb", displayValue: "@reb" })
+    await act(async () => {})
+    expect(screen.queryByText("Searching notes…")).toBeNull()
+    expect(screen.queryByRole("listbox", { name: "Notes" })).toBeNull()
+    expect(io.searchNotes).not.toHaveBeenCalled()
+  })
+
+  it("closes when the textarea loses focus", async () => {
+    renderComposer({ value: "@reb", displayValue: "@reb" })
+    const textarea = typedAtEnd()
+    await screen.findByRole("listbox", { name: "Notes" })
+    act(() => { fireEvent.blur(textarea) })
+    expect(screen.queryByRole("listbox", { name: "Notes" })).toBeNull()
+  })
+
+  it("stays off while a long paste is collapsed", async () => {
+    renderComposer({ value: "@reb", displayValue: "@reb", isCollapsed: true })
+    typedAtEnd()
+    await act(async () => {})
+    expect(screen.queryByText("Searching notes…")).toBeNull()
+    expect(screen.queryByRole("listbox", { name: "Notes" })).toBeNull()
+  })
+
+  it("shows only the note list while /note is open, not tab mentions", async () => {
+    io.extension = true
+    renderComposer({ value: "/note @x", displayValue: "/note @x", showMentions: true, filteredTabs: [{ id: 1, title: "Tab", url: "https://a.test" }] })
+    typedAtEnd()
+    await screen.findByRole("listbox", { name: "Notes" })
+    expect(screen.queryByRole("listbox", { name: "Tab mention suggestions" })).toBeNull()
+  })
+
+  it("is off when the server has no Notes", async () => {
+    io.hasNotes = false
+    renderComposer({ value: "@reb", displayValue: "@reb" })
+    typedAtEnd()
+    await act(async () => {})
+    expect(screen.queryByText("Searching notes…")).toBeNull()
+    expect(screen.queryByRole("listbox", { name: "Notes" })).toBeNull()
   })
 })
