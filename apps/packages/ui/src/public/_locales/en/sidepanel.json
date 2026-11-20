@@ -2171,7 +2171,7 @@
     "message": "A new Character chat opens without your draft. It stays here."
   },
   "runtimeChip_defaults": {
-    "message": "Model defaults"
+    "message": "Defaults"
   },
   "runtimeChip_title": {
     "message": "Model parameters for this chat"

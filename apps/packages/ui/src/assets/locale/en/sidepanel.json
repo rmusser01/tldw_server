@@ -64,7 +64,7 @@
     "draftCheckFailed": "This draft's account couldn't be checked. Retry from the draft notice."
   },
   "runtimeChip": {
-    "defaults": "Model defaults",
+    "defaults": "Defaults",
     "title": "Model parameters for this chat"
   },
   "flashcards": {

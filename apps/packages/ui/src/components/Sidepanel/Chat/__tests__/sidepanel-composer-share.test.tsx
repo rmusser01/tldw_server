@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import React from "react"
-import { act, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useStoreChatModelSettings } from "@/store/model"
@@ -92,9 +92,34 @@ describe("SidepanelRuntimeChip", () => {
     expect(screen.queryByTestId("model-params-panel")).toBeNull()
   })
 
-  it("says the model's defaults are in use when nothing is set here", () => {
+  it("says the defaults are in use when nothing is set here", () => {
     render(withQuery(<SidepanelRuntimeChip selectedModel="openai/gpt-4o" />))
-    expect(screen.getByRole("button", { name: /Runtime/ })).toHaveTextContent("Model defaults")
+    expect(screen.getByRole("button", { name: /Runtime/ })).toHaveTextContent("Defaults")
+    expect(screen.getByRole("button", { name: /Runtime/ })).not.toHaveTextContent("Model defaults")
+  })
+
+  // Review fix: the chip shows what is set here, and counts the rest.
+  it("shows the first two values set here and counts the others", () => {
+    const state = useStoreChatModelSettings.getState()
+    state.setTemperature(0.4)
+    state.setTopP(0.9)
+    state.setSeed(7)
+    state.setJsonMode(true)
+    render(withQuery(<SidepanelRuntimeChip selectedModel="openai/gpt-4o" />))
+    expect(screen.getByRole("button", { name: /Runtime/ })).toHaveTextContent("temp 0.4 · top-p 0.9 · +2")
+  })
+
+  it("is keyboard-operable: focus moves in, Escape closes and returns to the chip", async () => {
+    render(withQuery(<SidepanelRuntimeChip selectedModel="openai/gpt-4o" />))
+    const chip = screen.getByRole("button", { name: /Runtime/ })
+    expect(chip).toHaveAttribute("aria-haspopup", "dialog")
+    chip.focus()
+    await act(async () => { fireEvent.click(chip) })
+    const dialog = await screen.findByRole("dialog", { name: "Runtime" })
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Provider & API" })).toHaveFocus())
+    await act(async () => { fireEvent.keyDown(within(dialog).getByRole("button", { name: "Provider & API" }), { key: "Escape" }) })
+    await waitFor(() => expect(chip).toHaveAttribute("aria-expanded", "false"))
+    await waitFor(() => expect(chip).toHaveFocus())
   })
 
   it("opens the parameters in a popover", async () => {
