@@ -1208,3 +1208,91 @@ def test_resolve_single_user_api_key_never_puts_the_secret_in_origin():
         resolve_single_user_api_key(_suk_parser(None), env={"SINGLE_USER_API_KEY": "s3cret"}),
     ):
         assert resolved.value == "s3cret" and "s3cret" not in str(resolved.origin)
+
+
+# ---- Row 8: RAG_DEFAULT_LLM_PROVIDER / RAG_DEFAULT_LLM_MODEL (LazySettings, load_and_log_configs, RAGConfig, generation) ----
+
+# id -> (env provider, env model, [RAG] default_llm_provider, [RAG] default_llm_model)
+RAG_LLM_CASES = {
+    "env_set": ("envp", "envm", "cfgp", "cfgm"),
+    "env_blank": ("", "", "cfgp", "cfgm"),
+    "env_provider_only": ("envp", UNSET, "cfgp", "cfgm"),
+    "config_only": (UNSET, UNSET, "cfgp", "cfgm"),
+    "config_blank": (UNSET, UNSET, "", ""),
+    "neither": (UNSET, UNSET, UNSET, UNSET),
+}
+
+
+@pytest.fixture
+def apply_rag_llm_case(monkeypatch):
+    def apply(case: str) -> configparser.ConfigParser:
+        config.clear_config_cache()
+        env_p, env_m, cfg_p, cfg_m = RAG_LLM_CASES[case]
+        for key, value in (("RAG_DEFAULT_LLM_PROVIDER", env_p), ("RAG_DEFAULT_LLM_MODEL", env_m)):
+            if value is None:
+                monkeypatch.delenv(key, raising=False)
+            else:
+                monkeypatch.setenv(key, value)
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.add_section("RAG")
+        for option, value in (("default_llm_provider", cfg_p), ("default_llm_model", cfg_m)):
+            if value is not None:
+                parser.set("RAG", option, value)
+        monkeypatch.setattr(config, "_load_env_files_early", lambda: None)
+        monkeypatch.setattr(config, "load_comprehensive_config", lambda: parser)
+        return parser
+
+    yield apply
+    monkeypatch.undo()
+    config.clear_config_cache()
+
+
+
+def _rag_llm_outcomes():
+    from tldw_Server_API.app.core.config_sections.rag import load_rag_config
+    from tldw_Server_API.app.core.RAG.rag_service.generation_defaults import resolve_generation_defaults
+
+    parser = config.load_comprehensive_config()
+    lazy = config.load_settings()
+    logged = config.load_and_log_configs()
+    legacy = configparser.ConfigParser(interpolation=None)  # RAGConfig reads the option names it always read
+    legacy.add_section("RAG")
+    for new, old in (("default_llm_provider", "rag_default_llm_provider"), ("default_llm_model", "rag_default_llm_model")):
+        if parser.has_option("RAG", new):
+            legacy.set("RAG", old, parser.get("RAG", new))
+    typed = load_rag_config(legacy)
+    flat = {k: parser.get("RAG", o, fallback=None) for k, o in (
+        ("RAG_DEFAULT_LLM_PROVIDER", "default_llm_provider"), ("RAG_DEFAULT_LLM_MODEL", "default_llm_model"))}
+    return {
+        "lazy": (lazy["RAG_DEFAULT_LLM_PROVIDER"], lazy["RAG_DEFAULT_LLM_MODEL"]),
+        "logged": (logged["RAG_DEFAULT_LLM_PROVIDER"], logged["RAG_DEFAULT_LLM_MODEL"]),
+        "typed": (typed.default_llm_provider, typed.default_llm_model),
+        "generation": resolve_generation_defaults({k: v for k, v in flat.items() if v is not None}),
+    }
+
+
+# reader -> (provider, model). Today a blank env value wins in LazySettings and generation, and falls
+# through to config in load_and_log_configs and RAGConfig. RAGConfig reads the options it always has.
+RAG_LLM_TODAY = {
+    "env_set": {r: ("envp", "envm") for r in ("lazy", "logged", "typed", "generation")},
+    "env_blank": {
+        "lazy": ("", ""), "logged": ("cfgp", "cfgm"), "typed": ("cfgp", "cfgm"), "generation": ("openai", "gpt-4o-mini"),
+    },
+    "env_provider_only": {
+        "lazy": ("envp", "cfgm"), "logged": ("envp", None), "typed": ("envp", "cfgm"), "generation": ("envp", None),
+    },
+    "config_only": {r: ("cfgp", "cfgm") for r in ("lazy", "logged", "typed", "generation")},
+    "config_blank": {
+        "lazy": ("", ""), "logged": ("", ""), "typed": ("openai", "gpt-4o-mini"), "generation": ("openai", "gpt-4o-mini"),
+    },
+    "neither": {
+        "lazy": (None, None), "logged": (None, None), "typed": ("openai", "gpt-4o-mini"),
+        "generation": ("openai", "gpt-4o-mini"),
+    },
+}
+
+
+@pytest.mark.parametrize("case", list(RAG_LLM_CASES))
+def test_rag_default_llm_resolution_today(apply_rag_llm_case, case):
+    apply_rag_llm_case(case)
+    assert _rag_llm_outcomes() == RAG_LLM_TODAY[case]
