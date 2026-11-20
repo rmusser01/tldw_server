@@ -30,10 +30,10 @@
 - [x] In the same test module, exercise the resolved budget with official endpoints and mocked adapter payloads. Assert that DeepSeek Flash sends 200,000, a 4,096 request or operator override still wins, alternate models and custom endpoints retain the previous fallback, and Anthropic's streaming and non-streaming budgets respect the transport.
 - [x] Run those assertions against the old provider payloads. Confirm the new defaults fail and the existing override cases pass.
 - [x] Add `apply_commercial_output_default(provider: str, request: dict[str, Any]) -> None` at the common bound-request boundary. Resolve the model and official endpoint before applying a verified bundled budget. Keep configured limits first and allow the adapter to produce the native field. Handle model-specific sampling or streaming requirements in the relevant adapter.
-- [ ] Run the focused defaults, adapter, summary, inventory, and pricing tests. Run Ruff, Bandit, and git diff checks on the affected scope. Review the entire public diff, commit the verified work, and open the `dev` PR.
+- [x] Run the focused defaults, adapter, summary, inventory, and pricing tests. Run Ruff, Bandit, and git diff checks on the affected scope. Review the entire public diff, commit the verified work, and open the `dev` PR.
 
 ## 3. Backport to hosted
 
 - [x] Translate the verified public diff into a numbered backend patch for the hosted pin `b2c791d060645da16c93471d65c9395551e611b2`. Adapt catalog metadata to the pinned module layout. Preserve existing hosted overlays and DeepSeek-specific explicit limits in other features.
 - [x] Stage the patch so the materializer includes it. Run the complete patch replay and repeat equivalent offline config, inventory, and payload assertions against the generated runtime.
-- [ ] Review the hosted diff and patch replay. Update the hosted Backlog record, commit, and open the hosted `main` PR with the public PR link and distinct verification results.
+- [x] Review the hosted diff and patch replay. Update the hosted Backlog record, commit, and open the hosted `main` PR with the public PR link and distinct verification results.
