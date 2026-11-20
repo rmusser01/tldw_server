@@ -1651,6 +1651,9 @@ def build_call_params_from_request(
     else:
         call_params.pop("model", None)
 
+    if call_params.get("max_completion_tokens") is not None:
+        call_params.pop("max_tokens", None)
+
     # Rename keys to match chat_api_call's generic signature
     if "temperature" in call_params:
         call_params["temp"] = call_params.pop("temperature")
@@ -4150,9 +4153,13 @@ def _evaluate_chat_prompt_cost_guardrails(
                 *envelope_messages,
             ]
         envelope = build_prompt_cost_envelope(envelope_messages)
+        from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import apply_commercial_output_default
+
+        request_options = dict(cleaned_args, model=model, messages=templated_llm_payload, stream=streaming)
+        apply_commercial_output_default(selected_provider, request_options)
         decision = evaluate_prompt_cost_guardrails(
             envelope,
-            request_options=cleaned_args,
+            request_options=request_options,
             previous_fingerprints=_extract_previous_prompt_guardrail_fingerprints(
                 cleaned_args=cleaned_args,
                 continuation_metadata=continuation_metadata,
@@ -4501,6 +4508,13 @@ async def execute_streaming_call(
                                             )
                                         ]
                                     )
+                                _evaluate_chat_prompt_cost_guardrails(
+                                    cleaned_args=refreshed_args,
+                                    templated_llm_payload=refreshed_args["messages_payload"],
+                                    selected_provider=fallback_provider,
+                                    model=refreshed_model or model,
+                                    streaming=True,
+                                )
                                 model = refreshed_model or model
                                 def llm_call_func_fb():
                                     return perform_chat_api_call(**refreshed_args)
@@ -4754,6 +4768,13 @@ async def execute_streaming_call(
                         )
                         raise
                     try:
+                        _evaluate_chat_prompt_cost_guardrails(
+                            cleaned_args=refreshed_args,
+                            templated_llm_payload=refreshed_args["messages_payload"],
+                            selected_provider=fallback_provider,
+                            model=refreshed_model or model,
+                            streaming=True,
+                        )
                         ensure_tool_autoexec_supports_request(
                             cleaned_args=refreshed_args,
                             should_run_tool_autoexec=should_run_legacy_tool_autoexec,
@@ -6226,6 +6247,13 @@ async def _execute_non_stream_call_impl(
                         bounded_error = _bound_provider_http_exception(refresh_error)
                         raise_detached_error(bounded_error)
                     try:
+                        _evaluate_chat_prompt_cost_guardrails(
+                            cleaned_args=refreshed_args,
+                            templated_llm_payload=refreshed_args["messages_payload"],
+                            selected_provider=fallback_provider,
+                            model=refreshed_model or model,
+                            streaming=False,
+                        )
                         ensure_tool_autoexec_supports_request(
                             cleaned_args=refreshed_args,
                             should_run_tool_autoexec=should_run_legacy_tool_autoexec,
@@ -6533,6 +6561,10 @@ async def _execute_non_stream_call_impl(
                         assistant_context_message["tool_calls"] = tool_calls_to_save
                     if function_call_to_save is not None:
                         assistant_context_message["function_call"] = function_call_to_save
+                    if selected_provider == "moonshot" and first_choice is not None:
+                        reasoning = first_choice.message.get("reasoning_content")
+                        if isinstance(reasoning, str):
+                            assistant_context_message["reasoning_content"] = reasoning
                     if len(assistant_context_message) > 1:
                         continuation_messages.append(assistant_context_message)
                     continuation_messages.extend(tool_messages)

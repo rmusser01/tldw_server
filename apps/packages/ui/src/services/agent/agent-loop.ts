@@ -11,6 +11,7 @@
 
 import { bgStream } from "@/services/background-proxy"
 import * as nativeClient from "@/services/native/native-client"
+import { preserveGoogleToolCallSignature } from "@/utils/chat-tools"
 import type {
   AgentEvent,
   AgentMessage,
@@ -22,6 +23,9 @@ import type {
   ToolDefinition
 } from "./types"
 import { DEFAULT_AGENT_SETTINGS, TOOL_TIERS } from "./types"
+
+const MOONSHOT_MODEL = /^(?:moonshot[:/].+|(?:kimi-k|moonshot-v)[0-9][a-z0-9._-]*)$/i
+const MAX_REASONING_LENGTH = 100_000
 
 const AGENT_SYSTEM_PROMPT = `You are an AI coding assistant with access to workspace tools. You can:
 - Read and search files in the user's codebase
@@ -349,15 +353,9 @@ export class AgentLoop {
           return result
         }
 
-        // Process tool calls
+        // Record calls before their tool responses so providers can match them.
+        this.session.messages.push({ role: "assistant", ...llmResponse })
         await this.processToolCalls(llmResponse.tool_calls)
-
-        // Add assistant message to history
-        this.session.messages.push({
-          role: "assistant",
-          content: llmResponse.content,
-          tool_calls: llmResponse.tool_calls
-        })
 
         this.session.updatedAt = new Date()
       }
@@ -385,8 +383,9 @@ export class AgentLoop {
   /**
    * Call the LLM
    */
-  private async callLLM(): Promise<{ content: string; tool_calls?: ToolCall[] }> {
+  private async callLLM(): Promise<Pick<AgentMessage, "content" | "tool_calls" | "reasoning_content">> {
     let content = ""
+    let reasoning: string | null = ""
     let tool_calls: ToolCall[] = []
 
     // Use streaming to collect response
@@ -417,6 +416,19 @@ export class AgentLoop {
             this.emit({ type: "llm_chunk", content: delta.content })
           }
 
+          const reasoningDelta = delta?.reasoning_content ?? parsed.additional_kwargs?.reasoning_content
+          const model = this.settings.model || parsed.model
+          if (
+            reasoning !== null &&
+            typeof reasoningDelta === "string" &&
+            typeof model === "string" &&
+            MOONSHOT_MODEL.test(model.trim())
+          ) {
+            reasoning = reasoning.length + reasoningDelta.length <= MAX_REASONING_LENGTH
+              ? reasoning + reasoningDelta
+              : null
+          }
+
           if (delta?.tool_calls) {
             // Aggregate tool calls across chunks
             for (const tc of delta.tool_calls) {
@@ -429,6 +441,10 @@ export class AgentLoop {
                 }
               }
               if (tc.id) tool_calls[idx].id = tc.id
+              preserveGoogleToolCallSignature(
+                tool_calls[idx],
+                tc.extra_content?.google?.thought_signature
+              )
               if (tc.function?.name) tool_calls[idx].function.name += tc.function.name
               if (tc.function?.arguments) tool_calls[idx].function.arguments += tc.function.arguments
             }
@@ -442,7 +458,12 @@ export class AgentLoop {
     // Filter out empty tool calls
     tool_calls = tool_calls.filter(tc => tc.function.name)
 
-    return { content, tool_calls: tool_calls.length > 0 ? tool_calls : undefined }
+    if (tool_calls.length === 0) return { content }
+    return {
+      content,
+      tool_calls,
+      ...(reasoning ? { reasoning_content: reasoning } : {})
+    }
   }
 
   /**

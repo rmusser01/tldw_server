@@ -2,6 +2,8 @@
  * Types for the agent loop orchestration
  */
 
+import type { ToolCall as ChatToolCall } from "@/types/tool-calls"
+
 /**
  * Message in the conversation history
  */
@@ -9,6 +11,7 @@ export interface AgentMessage {
   role: "system" | "user" | "assistant" | "tool"
   content: string
   tool_calls?: ToolCall[]
+  reasoning_content?: string
   tool_call_id?: string
   name?: string
 }
@@ -16,14 +19,7 @@ export interface AgentMessage {
 /**
  * Tool call from the LLM
  */
-export interface ToolCall {
-  id: string
-  type: "function"
-  function: {
-    name: string
-    arguments: string // JSON string
-  }
-}
+export type ToolCall = ChatToolCall & { function: { arguments: string } }
 
 /**
  * Tool definition for the LLM
