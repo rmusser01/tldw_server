@@ -83,6 +83,9 @@ export const PlaygroundFocusBar = ({
       <button
         type="button"
         data-testid="playground-chat-layout-mode-trigger"
+        // The bar only shows in Focus, so the layout toggle reads as pressed,
+        // like the wide-screen pill and the header toggle.
+        aria-pressed={true}
         onClick={onExitFocus}
         title={exitFocusLabel}
         className={`${actionClass} text-xs font-semibold text-text`}

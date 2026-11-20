@@ -1597,6 +1597,9 @@ describe("Playground cockpit controls", () => {
     expect(exitFocus).toHaveAttribute("data-testid", "playground-chat-layout-mode-trigger");
     expect(screen.getAllByTestId("playground-chat-layout-mode-trigger")).toHaveLength(1);
     expect(exitFocus.className).not.toMatch(/\bfixed\b/);
+    // Like the other layout triggers, it reports Focus as pressed; the
+    // character-chat journey reads aria-pressed to decide whether to exit.
+    expect(exitFocus).toHaveAttribute("aria-pressed", "true");
   });
 
   // CO-01 review: ☰ opens the chat list over Focus without leaving it, so
