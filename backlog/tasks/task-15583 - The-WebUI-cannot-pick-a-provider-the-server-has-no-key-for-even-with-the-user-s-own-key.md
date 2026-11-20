@@ -21,6 +21,7 @@ Found by TASK-15581's plan (2026-11-19). The owner's rule: a provider that is on
 - [ ] #2 A provider the admin explicitly disables (is_enabled=False), or a model off its allowed_models, stays unselectable for every user, own key or not
 - [ ] #3 The listing for one user never reveals another user's keys or models, and a server-key-only user's listing is unchanged
 - [ ] #4 The docs that describe the provider listing say how a user's own key affects it
+- [ ] #5 With no server key there is no model inventory, so the picker gets the provider's models from the user's own key (or accepts a typed model ID), never from another user's key
 <!-- AC:END -->
 
 ## Implementation Notes

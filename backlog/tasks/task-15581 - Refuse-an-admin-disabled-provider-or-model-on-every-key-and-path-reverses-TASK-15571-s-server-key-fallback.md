@@ -2,7 +2,7 @@
 id: TASK-15581
 title: Refuse an admin-disabled provider or model on every key and path (reverses
   TASK-15571's server-key fallback)
-status: To Do
+status: In Progress
 labels:
 - llm
 - byok
@@ -17,12 +17,13 @@ The owner's rule, 2026-11-19, verbatim: "if a user tries to use a model/service 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every provider adapter call (chat, achat, stream, astream) refuses an admin-disabled provider or model on every key (own, team, org, server, no handle) before the quota check, with ChatConfigurationError carrying the reason as error_code, with tests
-- [ ] #2 The analyze path (_summarize_via_adapter) refuses with 'configuration' on every key and with no handle, whatever the model's source (configured, DEFAULT_MODEL_<PROVIDER>, model_override); the evaluation judges and Prompt Studio's direct adapter calls refuse a disallowed DEFAULT_MODEL_<PROVIDER>; the MCP model_completion authoritative path refuses on every key after its scope check, with tests
-- [ ] #3 An override store that cannot be read refuses (credential_store_unavailable) on each path above, with tests
-- [ ] #4 A provider the server has no key or credits for still serves a user's own key: with no override, or one that only leaves it on, an own-key call runs and is not checked against the LLM limit, with a test
-- [ ] #5 PR #3523's fallback is removed (server_key_fallback, log_server_key_fallback, override_outcome, the quota gate's strict parameters, the media ingest worker's answered marking, the judges' and MCP's server-key branches) and llm_quota_gate.py, media_ingest_jobs_worker.py, eval_runner.py and ms_g_eval.py are as before #3523
-- [ ] #6 ADR-086 is amended with the reversal and the owner's rule; Usage_Quotas.md, the BYOK guide (and its Docs/Published mirror) and Docs/Architecture/llm-providers.md say a disabled provider or model is refused on every key
+- [ ] #1 The analyze path (_summarize_via_adapter) refuses with 'configuration' on every key and with no handle, whatever the model's source (configured, DEFAULT_MODEL_<PROVIDER>, model_override); the evaluation judges and Prompt Studio's direct adapter calls refuse a disallowed DEFAULT_MODEL_<PROVIDER>; the MCP model_completion authoritative path refuses on every key after its scope check, with tests
+- [ ] #2 An override store that cannot be read refuses (credential_store_unavailable) on each path above, with tests
+- [ ] #3 A provider the server has no key or credits for still serves a user's own key: with no override, or one that only leaves it on, an own-key call runs and is not checked against the LLM limit, with a test
+- [ ] #4 PR #3523's fallback is removed (server_key_fallback, log_server_key_fallback, override_outcome, the quota gate's strict parameters, the media ingest worker's answered marking, the judges' and MCP's server-key branches) and llm_quota_gate.py, media_ingest_jobs_worker.py, eval_runner.py and ms_g_eval.py are as before #3523
+- [ ] #5 ADR-086 is amended with the reversal and the owner's rule; Usage_Quotas.md, the BYOK guide (and its Docs/Published mirror) and Docs/Architecture/llm-providers.md say a disabled provider or model is refused on every key
+- [ ] #6 Every provider adapter call (chat, achat, stream, astream) refuses an admin-disabled provider or model, and each OpenRouter fallback model, on every key (own, team, org, server, no handle) before the quota check, with ChatConfigurationError carrying the reason as error_code, with tests
+- [ ] #7 Every standalone worker process and CLI that can make an LLM call loads and refreshes the provider-override store at start, so a provider with no override is unaffected outside the app process, with tests
 <!-- AC:END -->
 
 ## Implementation Notes

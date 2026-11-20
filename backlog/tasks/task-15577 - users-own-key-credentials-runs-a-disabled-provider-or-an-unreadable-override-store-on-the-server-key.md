@@ -2,7 +2,7 @@
 id: TASK-15577
 title: users_own_key_credentials runs a disabled provider or an unreadable override
   store on the server key
-status: To Do
+status: In Progress
 labels:
 - llm
 - byok
@@ -26,6 +26,7 @@ Found by TASK-15571's plan review. The except clause of users_own_key_credential
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Deferred from the final review of PR #3523. M1: a fallback with no user in the call context runs unchecked and unrecorded (Summarization_General_Lib.py, user_to_check(strict=True) returns None for no user as well as for exempt/quotas off). Unreachable today because every executor carries the LLM call state. The fix is to treat current_llm_user_id() is None as no answer when quotas are on (override_outcome in llm_provider_overrides.py now holds the check); the boundary tests' _summary helper then needs llm_call_context(user_id=...). M2: the MCP tests conftest fixture patches three private globals instead of set_llm_provider_overrides_cache_for_tests with the ambient_llm_provider_override_store opt-out marker, and leaves _OVERRIDE_RECOVERY_NEXT_RETRY_AT behind after an unhealthy-store test. Fix it if that directory grows store-sensitive tests.
+TASK-15581 does this task (2026-11-19). AC #1 is met at dispatch, not at the boundary (Decision D1 of TASK-15581's plan): users_own_key_credentials still returns None for a policy or store failure, and the server-key call it leaves is refused by the analyze path's check and the provider base class, as for a user with no stored key; an over-limit own-key user of a disabled provider gets the 402. M1 is moot: there is no fallback any more. M2 is fixed: the MCP tests' store fixture uses set_llm_provider_overrides_cache_for_tests and restores the store.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
