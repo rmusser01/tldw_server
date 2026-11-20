@@ -233,21 +233,6 @@ def _resolve_adapter_timeout(provider: str, app_config: dict[str, Any]) -> Optio
     return None
 
 
-def _model_allowed_by_override(provider: str, model: str) -> bool:
-    """Whether the admin provider override allows ``model``; an unreadable policy denies."""
-    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
-    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
-        capture_provider_override_call_snapshot,
-    )
-
-    # Imported here: a module-level import would add AuthNZ modules to the LLM_Calls load ratchet.
-    try:
-        capture_provider_override_call_snapshot(provider).enforce(model)
-    except ByokResolutionError:
-        return False
-    return True
-
-
 def _summarize_via_adapter(
     *,
     api_name: str,
@@ -323,19 +308,33 @@ def _summarize_via_adapter(
         model = provider_config.get("model") or provider_config.get("model_id")
         if provider == "mlx":
             model = model or provider_config.get("model_path") or provider_config.get("mlx_model_path")
-        if not model:
-            # Same fallback as the server-key path (DEFAULT_MODEL_<PROVIDER>), but this model was
-            # not seen at resolve time, so it meets the provider-override policy here (TASK-15496).
-            model = resolve_provider_model(provider, effective_app_config)
-            if model and not _model_allowed_by_override(provider, model):
-                return _summary_failure(
-                    code="configuration",
-                    provider=provider,
-                    raise_on_error=raise_on_error,
-                    legacy_message="Error: Provider credential context is invalid.",
-                )
+        # Same fallback as the server-key path, DEFAULT_MODEL_<PROVIDER> (TASK-15496).
+        model = model or resolve_provider_model(provider, effective_app_config)
     else:
         model = resolve_provider_model(provider, effective_app_config)
+    outcome = None
+    if model and provider_credentials is not None:
+        # Imported here: a module-level import would add AuthNZ modules to the LLM_Calls load ratchet.
+        from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import override_outcome
+
+        outcome = override_outcome(provider, provider_credentials, model)
+    if outcome in {"refused", "unchecked"}:
+        return _summary_failure(
+            code="configuration",
+            provider=provider,
+            raise_on_error=raise_on_error,
+            legacy_message=(
+                "Error: The LLM usage limit could not be checked."
+                if outcome == "unchecked"
+                else "Error: Provider credential context is invalid."
+            ),
+        )
+    if outcome == "server_key":
+        # The same model on the server key, as a call with no handle (TASK-15571). The request then carries no
+        # handle, so the call-site check counts it as a server-key call.
+        provider_credentials = api_key = None
+        explicit_credentials = False
+        effective_app_config = ensure_app_config(load_and_log_configs())
     if not model:
         return _summary_failure(
             code="missing_model",

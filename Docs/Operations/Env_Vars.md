@@ -128,6 +128,10 @@ Config file overrides (`Config_Files/config.txt`)
 - `RAG_PRECOMPUTED_SPANS_MAX_VECTORS_PER_CORPUS`: Cap on stored span vectors per corpus (default `200000`). Config key: `[RAG] precomputed_spans_max_vectors_per_corpus`.
 - `RAG_PRECOMPUTED_SPANS_MAX_MB_PER_CORPUS`: Cap on precomputed span storage per corpus in MB (default `512`). Config key: `[RAG] precomputed_spans_max_mb_per_corpus`.
 - `RAG_PRECOMPUTED_SPANS_RETENTION_DAYS`: Retention window for precomputed spans before GC (default `30`). Config key: `[RAG] precomputed_spans_retention_days`.
+- `RAG_INCLUDE_PARENT_DOCUMENT`: Default for `include_parent_document` when a RAG request leaves it unset (`true` enables; default `false`). Config key: `[RAG] include_parent_document`. An explicit request value or a `rag_profile` still wins.
+- `RAG_PARENT_MAX_TOKENS`: Default for `parent_max_tokens` when a RAG request leaves it unset (default `1200`). Config key: `[RAG] parent_max_tokens`.
+- `RAG_INCLUDE_SIBLING_CHUNKS`: Default for `include_sibling_chunks` on `/rag/search` requests that leave it unset (`true` enables; default `false`). Config key: `[RAG] include_sibling_chunks`.
+- `RAG_SIBLING_WINDOW`: Default for `sibling_window` when a RAG request leaves it unset (0-50; default `1`). Config key: `[RAG] sibling_window`.
 
 ### RAG Guardrails (Production Defaults)
 - `RAG_GUARDRAILS_STRICT`: When `true`, enable strict guardrails in the unified pipeline (enables numeric fidelity and hard citations by default). Useful for non-prod environments where you still want strict behavior.

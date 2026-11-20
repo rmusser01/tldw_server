@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.MCP_unified.tests.test_model_completion_integratio
 from tldw_Server_API.app.core.MCP_unified.tests.test_model_completion_integration import (
     reservation_schema as reservation_schema,
 )
+from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides
 from tldw_Server_API.app.core.Usage import quota_resolver
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 
@@ -84,6 +85,26 @@ async def test_vendor_own_key_skips_hosted_and_user_limits_and_records_source(co
         usage = await usage_rows(env.pool, invocation.execution_id)
         assert row["credential_source"] == usage[0]["credential_source"] == "user"
         assert len(env.provider.requests) == 1
+    finally:
+        quota_resolver.invalidate_all()
+
+
+async def test_an_own_key_completion_whose_model_the_override_denies_obeys_the_users_limit(composed, monkeypatch):
+    """TASK-15571: the denied model falls back to the server key, so the user's limit applies before dispatch."""
+    env = composed
+    await seed_keys(env, ("user",))
+    await set_user_limit(env, monkeypatch, USER_LIMITS[0])
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        {"openai": llm_provider_overrides.LLMProviderOverride(provider="openai", allowed_models=["x"])}
+    )
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    port = env.build(server_config=VENDOR_CONFIG)
+    try:
+        with pytest.raises(ModelCompletionFailure) as error:
+            await port.complete(request(), invocation)
+        assert (error.value.code, error.value.domain) == ("model_quota_exceeded", ModelFailureDomain.REQUEST)
+        assert env.provider.requests == []
     finally:
         quota_resolver.invalidate_all()
 

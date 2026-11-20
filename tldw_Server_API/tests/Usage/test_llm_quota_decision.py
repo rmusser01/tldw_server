@@ -377,6 +377,33 @@ async def test_a_failed_resolution_keeps_the_servers_key(monkeypatch) -> None:
     assert await usage_quota_deps.users_own_key_credentials(1, "openai") is None
 
 
+async def test_a_configured_model_the_override_denies_keeps_the_servers_key_and_its_limit(monkeypatch) -> None:
+    """TASK-15571: denied at resolution, so no handle: the server's key, and an over-limit user is refused at the
+    boundary. One warning names the provider and the reason, and no key."""
+    from loguru import logger
+
+    from tldw_Server_API.app.core.Provider_Credentials import provider_credential_runtime as runtime_module
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work, users_own_key
+
+    users_own_key(monkeypatch, "openai")
+    monkeypatch.setattr(runtime_module, "load_server_config_snapshot", lambda: {"openai_api": {"model": "gpt-denied"}})
+    set_llm_provider_overrides_cache_for_tests({"openai": LLMProviderOverride(provider="openai", allowed_models=["x"])})
+    warnings: list[str] = []
+    sink = logger.add(lambda message: warnings.append(message.record["message"]), level="WARNING")
+    try:
+        assert await usage_quota_deps.users_own_key_credentials(1, "openai") is None
+    finally:
+        logger.remove(sink)
+    assert warnings == ["Own-key credential resolution for openai failed: model_not_allowed; the server key is used"]
+    refuse_llm_work(monkeypatch)
+    with pytest.raises(LLMQuotaExceededError):
+        await usage_quota_deps.enforce_llm_quota_on_own_key(1, "openai")
+
+
 async def test_enforce_on_own_key_asks_once_and_admits_only_with_a_handle(monkeypatch) -> None:
     """Over the limit, the handle for the user's own key admits it unmarked; no handle is the 402 (TASK-15426)."""
     from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work, users_own_key
