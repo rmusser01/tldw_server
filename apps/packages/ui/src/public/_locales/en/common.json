@@ -2278,5 +2278,11 @@
   },
   "chatSidebar_exportTooLarge": {
     "message": "This chat is too large to export here. Use Chatbooks to export it."
+  },
+  "saveToNotesUnavailable": {
+    "message": "Notes isn't available on this server."
+  },
+  "openNote": {
+    "message": "Open note"
   }
 }

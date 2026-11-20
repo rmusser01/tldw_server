@@ -3,6 +3,7 @@ import { getMessageDeleteFeedback } from "@/utils/message-delete-feedback"
 import { replaceUserDisplayNamePlaceholders } from "@/utils/chat-display-name"
 import { ChatAttachmentImage } from "./ChatAttachmentImage"
 import { canSaveAnswerAsNote, saveAnswerAsNote } from "./chat-answer-note"
+import { savedAnswerNoteToast } from "./saved-answer-note-toast"
 import React, { useEffect, useState, useRef } from "react"
 import { App, Tag, Tooltip, Collapse, Avatar, Modal } from "antd"
 import { LoadingStatus } from "./ActionInfo"
@@ -1262,6 +1263,9 @@ const PlaygroundMessageImpl = (props: Props) => {
   const canSaveAnswerNote = !canSaveKnowledge && canSaveAnswerAsNote({ hasNotes: Boolean(capabilities?.hasNotes),
     isBot: props.isBot, text: errorFriendlyText || props.message, errored: Boolean(errorPayload), scope: props.scope })
   const canSaveToNotes = (canSaveKnowledge && Boolean(capabilities?.hasNotes)) || canSaveAnswerNote
+  // Shown disabled, with why, where the server has no Notes (XP-01 review).
+  const saveToNotesUnavailableReason = capabilities && !capabilities.hasNotes && canSaveAnswerAsNote({ hasNotes: true, isBot: props.isBot,
+    text: errorFriendlyText || props.message, errored: Boolean(errorPayload), scope: props.scope }) ? t("saveToNotesUnavailable", "Notes isn't available on this server.") : null
   const canSaveToFlashcards =
     canSaveKnowledge && Boolean(capabilities?.hasFlashcards)
   const canSaveToWorkspaceNotes =
@@ -1425,7 +1429,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     if (!makeFlashcard && canSaveAnswerNote) {
       setSavingKnowledge("note")
       await saveAnswerAsNote({ answer: snippet, question: props.feedbackQuery, temporaryChat: Boolean(props.temporaryChat), modelName: props.modelName, t })
-        .then(() => messageApi.success(t("savedToNotes", "Saved to Notes")))
+        .then((created) => messageApi.success(savedAnswerNoteToast(t, created)))
         .catch((err: unknown) => messageApi.error(err instanceof Error ? err.message : t("somethingWentWrong")))
         .finally(() => setSavingKnowledge(null))
       return
@@ -3253,6 +3257,7 @@ const PlaygroundMessageImpl = (props: Props) => {
               canSaveToWorkspaceNotes={canSaveToWorkspaceNotes}
               onSaveToWorkspaceNotes={handleSaveToWorkspaceNotes}
               canSaveToNotes={canSaveToNotes}
+              saveToNotesUnavailableReason={saveToNotesUnavailableReason}
               canSaveToFlashcards={canSaveToFlashcards}
               canGenerateDocument={canGenerateDocument}
               onGenerateDocument={handleGenerateDocument}

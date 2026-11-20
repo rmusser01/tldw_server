@@ -929,5 +929,7 @@
     "scope": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat.",
     "unsupported": "This reply can't be continued here. Your original exchange and draft are kept. To keep going, use New Branch on this reply or send a follow-up message.",
     "failed": "We could not confirm the continued reply. Your original exchange and draft are kept. Reload this chat and check for the saved reply before trying again."
-  }
+  },
+  "saveToNotesUnavailable": "Notes isn't available on this server.",
+  "openNote": "Open note"
 }

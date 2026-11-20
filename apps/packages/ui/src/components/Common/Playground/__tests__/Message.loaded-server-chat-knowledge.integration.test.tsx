@@ -33,7 +33,8 @@ import { SidePanelBody } from "@/components/Sidepanel/Chat/body"
 import { FeedbackButtons } from "@/components/Sidepanel/Chat/FeedbackButtons"
 
 const saveChatKnowledgeMock = vi.hoisted(() => vi.fn(async () => undefined))
-const createNoteMock = vi.hoisted(() => vi.fn(async () => ({ id: 41 })))
+const createNoteMock = vi.hoisted(() => vi.fn(async (_content: string, _metadata: unknown): Promise<{ id: number }> => ({ id: 41 })))
+const capabilityState = vi.hoisted(() => ({ hasNotes: true }))
 const messageApiMock = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
@@ -105,7 +106,7 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
     capabilities: {
       hasChatKnowledgeSave: true,
-      hasNotes: true,
+      hasNotes: capabilityState.hasNotes,
       hasFlashcards: true,
       hasFeedbackExplicit: true,
       hasFeedbackImplicit: false
@@ -467,9 +468,41 @@ describe.each(surfaces)("$surface Save to Notes in a temporary chat (XP-01)", { 
     expect(content.startsWith(ANSWER)).toBe(true)
     expect(content).toContain("Saved from a temporary chat")
     expect(metadata.keywords).toEqual(["from-chat"])
-    expect(metadata.title.trim().length).toBeGreaterThan(0)
+    expect(metadata.title).toBe("How do I undo a rebase?")
     expect(saveChatKnowledgeMock).not.toHaveBeenCalled()
-    expect(messageApiMock.success).toHaveBeenCalledWith("Saved to Notes")
+    // The toast offers the new note (review fix): its id is what createNote returned.
+    await waitFor(() => expect(messageApiMock.success).toHaveBeenCalledOnce())
+    const toast = (messageApiMock.success.mock.calls[0] as unknown as [{ content: React.ReactNode }])[0]
+    const rendered = render(<>{toast.content}</>)
+    expect(within(rendered.container).getByText(/Saved to Notes/)).toBeInTheDocument()
+    expect(within(rendered.container).getByRole("link", { name: "Open note" })).toHaveAttribute("href", "/notes?note=41")
+  })
+
+  it("says why a save failed and keeps the answer", async () => {
+    createNoteMock.mockRejectedValueOnce(new Error("Notes storage is full"))
+    renderChat()
+    const assistant = messageCard("assistant")
+    openMoreActions(assistant)
+    fireEvent.click(within(assistant).getByRole("menuitem", { name: "Save to Notes" }))
+    await waitFor(() => expect(messageApiMock.error).toHaveBeenCalledWith("Notes storage is full"))
+    expect(messageApiMock.success).not.toHaveBeenCalled()
+    expect(assistant).toHaveTextContent(ANSWER)
+  })
+
+  it("shows Save to Notes disabled, with the reason, when the server has no Notes", () => {
+    capabilityState.hasNotes = false
+    try {
+      renderChat()
+      const assistant = messageCard("assistant")
+      openMoreActions(assistant)
+      const item = within(assistant).getByRole("menuitem", { name: "Save to Notes" })
+      expect(item).toHaveAttribute("aria-disabled", "true")
+      expect(within(assistant).getByText("Notes isn't available on this server.")).toBeInTheDocument()
+      fireEvent.click(item)
+      expect(createNoteMock).not.toHaveBeenCalled()
+    } finally {
+      capabilityState.hasNotes = true
+    }
   })
 })
 
