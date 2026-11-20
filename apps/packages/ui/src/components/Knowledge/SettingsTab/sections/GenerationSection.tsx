@@ -73,9 +73,11 @@ export const GenerationSection: React.FC<GenerationSectionProps> = ({
     "sidepanel:rag.enableGeneration",
     "Enable generation"
   )
+  // QA search answers only on request (CC-10); this switch feeds chat's
+  // answers from your sources (useKnowledgeSettings -> ragEnableGeneration).
   const enableGenerationHelper = t(
     "sidepanel:rag.enableGenerationHelper",
-    "Generate answers from retrieved context"
+    "Chat answers from your sources. QA search writes one only when you click Generate answer."
   )
   const strictExtractiveLabel = t(
     "sidepanel:rag.strictExtractive",

@@ -333,7 +333,7 @@
     "rerankSentinel": "Sentinel margin",
     "generation": "Answer Generation",
     "enableGeneration": "Enable generation",
-    "enableGenerationHelper": "Generate answers from retrieved context",
+    "enableGenerationHelper": "Chat answers from your sources. QA search writes one only when you click Generate answer.",
     "strictExtractive": "Strict extractive",
     "strictExtractiveHelper": "Only use verbatim quotes from sources",
     "generationModel": "Generation model",

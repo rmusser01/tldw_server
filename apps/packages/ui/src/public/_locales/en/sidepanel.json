@@ -756,7 +756,7 @@
     "message": "Enable generation"
   },
   "rag_enableGenerationHelper": {
-    "message": "Generate answers from retrieved context"
+    "message": "Chat answers from your sources. QA search writes one only when you click Generate answer."
   },
   "rag_strictExtractive": {
     "message": "Strict extractive"
