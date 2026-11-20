@@ -50,12 +50,7 @@ _CONFIG = f"{_PKG}.core.config"
 _TARGET = f"{_PKG}.api.v1.schemas.chat_request_schemas"
 _SCHEMAS = f"{_PKG}.api.v1.schemas"
 
-IMPORT_TIME_CONFIG_ALLOWLIST: dict[str, str] = {
-    "api/v1/schemas/chat_validators.py": (
-        "MAX_REQUEST_SIZE reads [Chat-Module] max_request_size_chars once at import, and tests patch and import the "
-        "constant; config reads move to call time under TASK-13950.21"
-    ),
-}
+IMPORT_TIME_CONFIG_ALLOWLIST: dict[str, str] = {}
 CHAT_REQUEST_SCHEMAS_CORE_IMPORTERS: dict[str, str] = {}
 
 
