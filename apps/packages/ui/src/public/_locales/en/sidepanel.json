@@ -2175,5 +2175,8 @@
   },
   "runtimeChip_title": {
     "message": "Model parameters for this chat"
+  },
+  "openFullPage_routeOnlyDescription": {
+    "message": "Opens the chat page in a new tab. Drafts and page references stay here."
   }
 }

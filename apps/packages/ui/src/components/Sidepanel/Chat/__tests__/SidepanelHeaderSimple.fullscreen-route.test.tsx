@@ -108,6 +108,17 @@ describe("SidepanelHeaderSimple full-page action", () => {
     expect(onOpenFullPage).not.toHaveBeenCalled()
   })
 
+  // Review fix: Clipper, Companion and Persona have no composer to run the action.
+  it("opens the extension's chat page on routes without a composer", async () => {
+    const user = userEvent.setup()
+    renderHeader()
+    const open = screen.getByTestId("chat-open-full-screen")
+    expect(open).toBeEnabled()
+    expect(open).toHaveAccessibleDescription("Opens the chat page in a new tab. Drafts and page references stay here.")
+    await user.click(open)
+    expect(browserMocks.createTab).toHaveBeenCalledWith({ url: "chrome-extension://tldw/options.html#/chat" })
+  })
+
   it("keeps the dashboard button on the dashboard route", async () => {
     const user = userEvent.setup()
     renderHeader({ onOpenFullPage: vi.fn() })

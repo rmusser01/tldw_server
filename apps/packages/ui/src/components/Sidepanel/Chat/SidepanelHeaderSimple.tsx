@@ -22,6 +22,18 @@ const HEADER_FOCUS_RING_CLASS =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
 const HEADER_ICON_CONTROL_CLASS = `rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2 ${HEADER_FOCUS_RING_CLASS}`
 
+/** Opens an extension full-page route in a new tab (a plain window on the web). */
+const openOptionsRoute = (route: string) => {
+  const url = browser.runtime?.getURL ? browser.runtime.getURL(`/options.html#${route}` as "/options.html") : route
+  if (browser.tabs?.create) {
+    browser.tabs.create({ url }).catch(() => {
+      window.open(url, "_blank")
+    })
+    return
+  }
+  window.open(url, "_blank")
+}
+
 type SidepanelHeaderSimpleProps = {
   chatReady?: boolean
   sidebarOpen?: boolean
@@ -92,7 +104,9 @@ export const SidepanelHeaderSimple = ({
   const openFullChatLabel = fullPageCopy.label
   const openFullChatDescription = !chatReady
     ? t("sidepanel:header.restoreBeforeExpand", "Restore or start a conversation before opening it in a full page.")
-    : fullPageCopy.description
+    : onOpenFullPage
+      ? fullPageCopy.description
+      : t("sidepanel:openFullPage.routeOnlyDescription", "Opens the chat page in a new tab. Drafts and page references stay here.")
 
   const handleSidebarToggle = React.useCallback(() => {
     const next = !sidebarOpen
@@ -160,22 +174,18 @@ export const SidepanelHeaderSimple = ({
   }, [activeTitle, draftTitle, onRenameTitle, titleBaseline, titleLoading])
 
   const openFullScreen = React.useCallback(() => {
-    if (!chatReady || !onOpenFullPage) return
-    void Promise.resolve(onOpenFullPage()).catch((error) => {
-      console.error("[sidepanel] Open in full page failed:", error)
-    })
-  }, [chatReady, onOpenFullPage])
-
-  const openDashboard = React.useCallback(() => {
-    const url = browser.runtime.getURL("/options.html#/flashcards")
-    if (browser.tabs?.create) {
-      browser.tabs.create({ url }).catch(() => {
-        window.open(url, "_blank")
+    if (!chatReady) return
+    if (onOpenFullPage) {
+      void Promise.resolve(onOpenFullPage()).catch((error) => {
+        console.error("[sidepanel] Open in full page failed:", error)
       })
       return
     }
-    window.open(url, "_blank")
-  }, [])
+    // Clipper, Companion and Persona have no composer: open the chat page alone.
+    openOptionsRoute("/chat")
+  }, [chatReady, onOpenFullPage])
+
+  const openDashboard = React.useCallback(() => openOptionsRoute("/flashcards"), [])
 
   return (
     <div
@@ -325,7 +335,7 @@ export const SidepanelHeaderSimple = ({
           <button
             type="button"
             onClick={openFullScreen}
-            disabled={!chatReady || !onOpenFullPage}
+            disabled={!chatReady}
             aria-describedby={fullChatHandoffDescriptionId}
             aria-label={openFullChatLabel}
             className={HEADER_ICON_CONTROL_CLASS}
