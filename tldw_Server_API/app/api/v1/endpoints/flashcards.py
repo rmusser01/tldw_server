@@ -108,6 +108,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.session import MediaDbSession
+from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
 from tldw_Server_API.app.core.Flashcards.apkg_exporter import export_apkg_from_rows
 from tldw_Server_API.app.core.Flashcards.apkg_importer import (
     APKGImportError,
@@ -2308,11 +2309,19 @@ def delete_source_review_plan(
 def preview_study_pack_media_sections(
     media_id: int,
     media_db: MediaDbSession = Depends(get_media_db_for_user),
+    current_user: User = Depends(get_request_user),
 ) -> StudyPackMediaSectionPreview:
     """Show the saved source's chapter and section boundaries without returning its body."""
     try:
-        resolver = StudySourceResolver(media_db=media_db, expand_whole_media=True)
-        (item,) = resolver.resolve([{"source_type": "media", "source_id": str(media_id)}]).items
+        request_scope = get_scope()
+        # A preview must use the same media visibility as the queued owner job.
+        with scoped_context(
+            user_id=current_user.id,
+            is_admin=False,
+            session_role=request_scope.session_role if request_scope else None,
+        ):
+            resolver = StudySourceResolver(media_db=media_db, expand_whole_media=True)
+            (item,) = resolver.resolve([{"source_type": "media", "source_id": str(media_id)}]).items
         limit = _max_evidence_chars_per_source()
         revision, sections = plan_media_sections(item.evidence_text, limit)
     except ValueError as exc:

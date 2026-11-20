@@ -231,7 +231,7 @@ async def test_worker_finishes_only_after_citation_validation(
     jm = JobManager(db_path=jobs_db_path, backend="sqlite")
     job = jm.create_job(
         domain="study_packs", queue="default", job_type="study_pack_generate",
-        payload=_request().model_dump(), owner_user_id="1", max_retries=0,
+        payload=_request().model_dump(), owner_user_id="1", max_retries=2,
     )
     job_id = int(job["id"])
     sdk = WorkerSDK(jm, WorkerConfig(domain="study_packs", queue="default", worker_id="citation-test"))
@@ -242,7 +242,8 @@ async def test_worker_finishes_only_after_citation_validation(
         return db, SimpleNamespace()
 
     async def generate(**kwargs):
-        assert not jm.get_job(job_id).get("result")  # nosec B101
+        running = jm.get_job(job_id)
+        assert running is not None and not running.get("result")  # nosec B101
         assert db.get_study_pack(1) is None  # nosec B101
         calls.append(kwargs)
         if kwargs["system_message"].startswith("Verify each flashcard"):
@@ -266,11 +267,12 @@ async def test_worker_finishes_only_after_citation_validation(
     await asyncio.wait_for(sdk.run(handler=handler), timeout=10)
 
     stored = jm.get_job(job_id)
+    assert stored is not None  # nosec B101
     assert len(calls) == (3 if repair_succeeds else 2)  # nosec B101
     if repair_succeeds:
         assert stored["status"] == "completed"  # nosec B101
         pack = db.get_study_pack(stored["result"]["pack_id"])
-        assert pack["deck_id"] == stored["result"]["deck_id"]  # nosec B101
+        assert pack is not None and pack["deck_id"] == stored["result"]["deck_id"]  # nosec B101
     else:
         assert stored["status"] == "failed"  # nosec B101
         assert stored["error_code"] == "study_pack_invalid_citations"  # nosec B101

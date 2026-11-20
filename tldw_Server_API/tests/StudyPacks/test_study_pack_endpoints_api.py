@@ -15,7 +15,9 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.StudyPacks.source_resolver import StudySourceResolver
 
 pytestmark = pytest.mark.integration
 
@@ -455,7 +457,23 @@ def test_preview_saved_media_sections_returns_titles_without_book_text(client: T
     title = "Study guide"
     book = "# Introduction\nIntroductory material.\nChapter 1: Seedlings\n" + "Seeds germinate with water. " * 8
     media_id, _, _ = media_db.add_media_with_keywords(title=title, content=book, media_type="ebook", keywords=[])
-    client.app.dependency_overrides[get_media_db_for_user] = lambda: media_db
+    app = client.app
+    assert isinstance(app, FastAPI)  # nosec B101
+
+    async def media_db_with_request_scope():
+        with scoped_context(user_id=1, org_ids=[4], team_ids=[7], is_admin=True):
+            yield media_db
+
+    original_resolve = StudySourceResolver.resolve
+
+    def resolve_in_worker_equivalent_scope(resolver, selections):
+        scope = get_scope()
+        assert scope is not None and scope.user_id == 1  # nosec B101
+        assert not scope.org_ids and not scope.team_ids and not scope.is_admin  # nosec B101
+        return original_resolve(resolver, selections)
+
+    app.dependency_overrides[get_media_db_for_user] = media_db_with_request_scope
+    monkeypatch.setattr(StudySourceResolver, "resolve", resolve_in_worker_equivalent_scope)
     try:
         response = client.get(f"/api/v1/flashcards/study-packs/media/{media_id}/sections")
     finally:

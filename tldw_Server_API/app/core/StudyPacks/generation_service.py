@@ -70,7 +70,9 @@ _MAX_DECK_NAME_ATTEMPTS = 1000
 
 
 class StudyPackGenerationError(ValueError):
-    """Base error for study-pack generation failures."""
+    """Terminal generation error after the affected batch exhausts its recovery."""
+
+    retryable = False
 
 
 class StudyPackMalformedResponseError(StudyPackGenerationError):
@@ -294,10 +296,18 @@ def _split_generation_batch(batch: StudySourceBundle) -> list[StudySourceBundle]
     (item,) = items
     text = item.evidence_text
     _, cut = next(bounded_spans(text, 0, len(text), len(text) // 2))
-    return [
-        StudySourceBundle(items=[replace(item, evidence_text=passage)])
-        for passage in (text[:cut], text[cut:])
-    ]
+    start = item.locator.get("start_char")
+    end = item.locator.get("end_char")
+    batches = []
+    for left, right in ((0, cut), (cut, len(text))):
+        raw_passage = text[left:right]
+        passage = raw_passage.strip()
+        locator = item.locator
+        if type(start) is int and type(end) is int and end - start == len(text):
+            first_char = start + left + len(raw_passage) - len(raw_passage.lstrip())
+            locator = {**locator, "start_char": first_char, "end_char": first_char + len(passage)}
+        batches.append(StudySourceBundle(items=[replace(item, evidence_text=passage, locator=locator)]))
+    return batches
 
 
 class StudyPackGenerationService:
