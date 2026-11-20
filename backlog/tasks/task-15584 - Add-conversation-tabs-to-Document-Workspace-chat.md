@@ -1,7 +1,7 @@
 ---
 id: TASK-15584
 title: Add conversation tabs to Document Workspace chat
-status: To Do
+status: In Progress
 labels:
 - document-workspace
 - chat
@@ -9,6 +9,7 @@ labels:
 dependencies:
 - TASK-15579
 references:
+- Docs/superpowers/specs/2026-11-20-document-workspace-conversation-tabs-design.md
 - Docs/ADR/049-chat-history-selection-ownership.md
 - https://github.com/rmusser01/tldw_server/pull/3534
 ---
@@ -30,6 +31,7 @@ Let a user start and switch among multiple independent conversations for the ope
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Document Workspace currently loads the newest owner-matching history for each document. The existing history store can hold multiple rows for a document. Reuse the existing document association and history identities. ADR-049 governs owner-bound history. A new ADR is unnecessary if the implementation retains the existing storage and ownership contracts. Include document and account switches plus the live duplicate-reply reproduction in the restoration checks.
+The requester selected browser-scoped tabs. The design applies ADR-049 to the existing document index and ownership contract. Cross-device conversation discovery is tracked in TASK-15586.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
