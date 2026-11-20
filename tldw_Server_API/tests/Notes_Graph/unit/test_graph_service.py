@@ -446,7 +446,6 @@ class TestLimitHardCaps:
         db = _mock_db(notes=[_note(n1)], note_count=1, all_ids=[n1])
         svc = NoteGraphService(user_id="u1", db=db)
         req = NoteGraphRequest(
-            center_note_id=n1,
             radius=1,
             max_nodes=999,
             max_edges=999,
@@ -459,10 +458,10 @@ class TestLimitHardCaps:
         assert resp.limits.max_edges == 4
         assert resp.limits.max_degree == 2
 
-    def test_a_library_request_is_clamped_by_the_all_notes_cap_not_max_nodes(self, monkeypatch):
-        """With no focus note, NOTES_GRAPH_ALL_NOTES_NOTE_CAP sets the node budget (NL-11)."""
-        monkeypatch.setenv("NOTES_GRAPH_MAX_NODES", "3")
-        monkeypatch.setenv("NOTES_GRAPH_MAX_EDGES", "4")
+    def test_a_library_request_reports_the_configured_all_notes_cap(self, monkeypatch):
+        """With no focus note and no operator limit, the node limit is the larger of MAX_NODES and the library budget (NL-11)."""
+        monkeypatch.delenv("NOTES_GRAPH_MAX_NODES", raising=False)
+        monkeypatch.delenv("NOTES_GRAPH_MAX_EDGES", raising=False)
         monkeypatch.setenv("NOTES_GRAPH_ALL_NOTES_NOTE_CAP", "10")
         n1 = _uid()
         db = _mock_db(notes=[_note(n1)], note_count=1, all_ids=[n1])
@@ -470,8 +469,10 @@ class TestLimitHardCaps:
 
         resp = svc.generate_graph(NoteGraphRequest(radius=1, max_nodes=999, max_edges=999))
 
-        assert resp.limits.max_nodes == 10 + graph_service_module._TAG_CAP + graph_service_module._SOURCE_CAP
-        assert resp.limits.max_edges == 4
+        budget = 10 + graph_service_module._TAG_CAP + graph_service_module._SOURCE_CAP
+        assert resp.limits.max_nodes == max(graph_service_module.MAX_NODES(), budget)
+        assert resp.limits.max_edges == 999
+        assert resp.all_notes_note_cap == 10
 
 
 class TestMaxNodesTruncation:

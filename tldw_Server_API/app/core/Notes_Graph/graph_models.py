@@ -289,7 +289,7 @@ class NoteGraphResponse(BaseModel):
                 "cursor": None,
                 "limits": {"max_nodes": 300, "max_edges": 1200, "max_degree": 40},
                 "active_note_count": 2,
-                "all_notes_note_cap": 100,
+                "all_notes_note_cap": 500,
                 "all_notes_eligible": True,
                 "suggestions_authorized": False,
                 "manual_link_authorized": False,
