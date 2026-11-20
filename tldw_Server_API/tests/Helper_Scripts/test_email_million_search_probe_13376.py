@@ -86,6 +86,7 @@ def test_reuse_rejects_symlink_database(runner, reusable_fixture):
         runner["_load_sqlite_provenance"](database, "email-benchmark:42", 120)
 
 
+@pytest.mark.skipif(os.name != "posix", reason="Requires POSIX file modes")
 def test_postgres_manifest_validation_rejects_unrelated_and_public_credentials(runner, tmp_path):
     manifest = tmp_path / "private.json"
     data = {

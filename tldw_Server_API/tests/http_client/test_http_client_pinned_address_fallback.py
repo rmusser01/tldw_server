@@ -492,11 +492,13 @@ def ipv4_only_server() -> Iterator[tuple[int, list[bytes]]]:
 
 
 @pytest.mark.asyncio
-async def test_localhost_answering_ipv6_first_reaches_an_ipv4_only_server_once(dns, ipv4_only_server):
+async def test_localhost_answering_ipv6_first_reaches_an_ipv4_only_server_once(dns, ipv4_only_server, monkeypatch):
     port, bodies = ipv4_only_server
     url = f"http://localhost:{port}/echo"
     scope = ConfiguredEndpointScope.from_url(url)
     request = {"method": "POST", "url": url, "configured_endpoint": scope, "retry": _ONE_ATTEMPT, "timeout": 2.0}
+    # A refused IPv6 connection can take the full connect timeout on Windows.
+    monkeypatch.setattr(http_client, "DEFAULT_CONNECT_TIMEOUT", 0.5)
 
     async with http_client.create_async_client(timeout=2.0) as client:
         via_httpx = await http_client.afetch(client=client, json={"via": "httpx"}, **request)

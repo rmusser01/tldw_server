@@ -15,11 +15,24 @@ from tldw_Server_API.app.core import http_client as hc
 
 pytestmark = pytest.mark.unit
 URL = "http://93.184.216.34/models"
+# A blocking step that ignores the deadline runs for UNCUT_SECONDS; one cut at the
+# (<=0.25 s) deadline must finish below half of that. The wide gap keeps CPU load from
+# pushing a correct run over the bound while a regression still fails clearly.
+UNCUT_SECONDS = 4
+CUT_BOUND_SECONDS = UNCUT_SECONDS / 2
+TRICKLE_INTERVAL_SECONDS = 0.15  # 33-40 trickled bytes ~ 5-6 s if never cut
+DEADLINE_SECONDS = 0.25
+
+
+@pytest.fixture
+def precise_deadline_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Python 3.12 on Windows can report a stale monotonic tick after a timed thread wait.
+    monkeypatch.setattr(time, "monotonic", time.perf_counter)
 
 
 @pytest.mark.parametrize("phase", ["connect", "handshake"])
 def test_sync_deadline_bounds_certificate_pinning(
-    monkeypatch: pytest.MonkeyPatch, phase: str,
+    monkeypatch: pytest.MonkeyPatch, precise_deadline_clock: None, phase: str,
 ) -> None:
     """Pin preflight cannot consume an independent connect/handshake budget."""
     budgets: list[float] = []
@@ -42,13 +55,13 @@ def test_sync_deadline_bounds_certificate_pinning(
         """Never create a real network socket."""
         budgets.append(timeout)
         if phase == "connect":
-            time.sleep(min(timeout, 0.3))
+            time.sleep(min(timeout, UNCUT_SECONDS))
             raise TimeoutError("synthetic sensitive connect failure")
         return Socket()
 
     def handshake(sock: Socket, **_kwargs: Any) -> None:
         """Simulate a handshake that exhausts its socket timeout."""
-        time.sleep(min(sock.timeout, 0.3))
+        time.sleep(min(sock.timeout, UNCUT_SECONDS))
         raise TimeoutError("synthetic sensitive handshake failure")
 
     monkeypatch.setattr(hc.socket, "create_connection", connect)
@@ -60,16 +73,17 @@ def test_sync_deadline_bounds_certificate_pinning(
     with pytest.raises(hc.NetworkError, match="^TimeoutError$"):
         hc.fetch(
             method="GET", url="https://93.184.216.34/models",
-            max_response_bytes=4, deadline=started + 0.1,
+            max_response_bytes=4, deadline=started + DEADLINE_SECONDS,
             cert_pinning={"93.184.216.34": {"0" * 64}}, sensitive_observability=True,
         )
-    assert time.monotonic() - started < 0.25
-    assert budgets and all(0 < budget <= 0.1 for budget in budgets)
+    assert time.monotonic() - started < CUT_BOUND_SECONDS
+    assert len(budgets) == (1 if phase == "connect" else 2)
+    assert all(0 < budget <= DEADLINE_SECONDS for budget in budgets)
 
 
 @pytest.mark.parametrize("slow_lookup", [1, 2])
 def test_sync_deadline_bounds_dns_before_transport(
-    monkeypatch: pytest.MonkeyPatch, slow_lookup: int,
+    monkeypatch: pytest.MonkeyPatch, precise_deadline_clock: None, slow_lookup: int,
 ) -> None:
     """Initial and pinned revalidation DNS share the request deadline."""
     from tldw_Server_API.app.core.Security import egress
@@ -81,20 +95,21 @@ def test_sync_deadline_bounds_dns_before_transport(
         """Simulate slow DNS without contacting a resolver."""
         calls.append(1)
         if len(calls) == slow_lookup:
-            release.wait(0.4)
+            release.wait(UNCUT_SECONDS)
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
 
     monkeypatch.setattr(egress.socket, "getaddrinfo", resolve)
+    monkeypatch.setattr(hc, "create_async_client", lambda **_: pytest.fail("DNS deadline allowed HTTP to start"))
     scope = egress.ConfiguredEndpointScope.from_url("https://deadline.example.invalid/v1")
     started = time.monotonic()
     try:
         with pytest.raises(hc.NetworkError, match="^TimeoutError$"):
             hc.fetch(
                 method="GET", url="https://deadline.example.invalid/v1/models",
-                max_response_bytes=4, deadline=started + 0.1,
+                max_response_bytes=4, deadline=started + DEADLINE_SECONDS,
                 configured_endpoint=scope, sensitive_observability=True,
             )
-        assert time.monotonic() - started < 0.25
+        assert time.monotonic() - started < 1.0
         assert len(calls) == slow_lookup
     finally:
         release.set()
@@ -110,7 +125,7 @@ def test_sync_deadline_bounds_retry_sleep_without_late_dispatch(monkeypatch, fai
         if failure == "network":
             raise httpx.ReadError("synthetic-secret must not escape", request=request)
         status = 429 if failure == "retry_after" else 302
-        return httpx.Response(status, headers={"Retry-After": "1"}, content=b"synthetic-secret")
+        return httpx.Response(status, headers={"Retry-After": str(UNCUT_SECONDS)}, content=b"synthetic-secret")
 
     create_async_client = hc.create_async_client
 
@@ -120,14 +135,14 @@ def test_sync_deadline_bounds_retry_sleep_without_late_dispatch(monkeypatch, fai
         return client
 
     monkeypatch.setattr(hc, "create_async_client", owned_client)
-    monkeypatch.setattr(hc, "_decorrelated_jitter_sleep", lambda *_args: 1.0)
+    monkeypatch.setattr(hc, "_decorrelated_jitter_sleep", lambda *_args: UNCUT_SECONDS)
     started = time.monotonic()
     with pytest.raises(hc.NetworkError, match="^TimeoutError$"):
         hc.fetch(
             method="GET", url=URL, max_response_bytes=4, deadline=started + 0.15,
             sensitive_observability=True,
         )
-    assert time.monotonic() - started < 0.65
+    assert time.monotonic() - started < CUT_BOUND_SECONDS
     assert len(calls) == 1
     assert clients and all(client.is_closed for client in clients)
 
@@ -182,7 +197,7 @@ def trickling_server(phase):
                         trickle = b"0" * 40
                         tail = f"{len(body):x}\r\n".encode() + body + b"\r\n0\r\n\r\n"
                     for byte in trickle:
-                        if stop.wait(0.03):
+                        if stop.wait(TRICKLE_INTERVAL_SECONDS):
                             return
                         connection.sendall(bytes([byte]))
                     connection.sendall(tail)
@@ -244,7 +259,7 @@ def test_discovery_deadline_interrupts_trickling_network_reads(monkeypatch, phas
             for thread in set(threading.enumerate()) - threads_before
         )
     assert result.status == "unreachable"
-    assert elapsed < 0.8
+    assert elapsed < CUT_BOUND_SECONDS
     if running_loop:
         assert clients == []  # refused on a loop thread instead of blocking it (review M8)
     else:

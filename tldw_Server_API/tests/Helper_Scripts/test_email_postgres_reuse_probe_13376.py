@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+import os
 import runpy
 from pathlib import Path
 from secrets import token_urlsafe
@@ -202,6 +203,9 @@ def test_postgres_reuse_validates_before_timing_skips_seed_and_preserves_mainten
         "--postgres-maintenance-report", str(maintenance_path), "--out", str(tmp_path / "rerun.json"),
     ])
     namespace = runner["_run"].__globals__
+    if os.name != "posix":
+        # Test reuse orchestration on platforms without private POSIX manifest modes.
+        monkeypatch.setitem(namespace, "_validate_postgres_manifest", lambda _: manifest)
     events = []
     identity = runner["_source_identity"]()
     monkeypatch.setitem(namespace, "_source_identity", lambda: identity)
