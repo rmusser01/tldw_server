@@ -1648,7 +1648,9 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
             ? metadata.local_history
             : undefined
         ) as Record<string, unknown> | undefined
-        const moonshotReasoning = (local?.generationInfo as { moonshotReasoning?: unknown } | undefined)?.moonshotReasoning
+        const moonshotReasoning = historyTurn.owner.kind === "native" && metadata.provider === "moonshot"
+          ? metadata.moonshot_reasoning_content
+          : (local?.generationInfo as { moonshotReasoning?: unknown } | undefined)?.moonshotReasoning
 
         return {
           id: node.id,

@@ -73,11 +73,11 @@ from tldw_Server_API.app.core.Chat.chat_logging import (
 )
 from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
 from tldw_Server_API.app.core.Chat.generation_metadata import (
+    GENERATION_STATUS_COMPLETE,
+    GENERATION_STATUS_LENGTH,
     MOONSHOT_REASONING_EVENT,
     MOONSHOT_REASONING_KEY,
     bounded_moonshot_reasoning,
-    GENERATION_STATUS_COMPLETE,
-    GENERATION_STATUS_LENGTH,
     build_generation_metadata,
 )
 from tldw_Server_API.app.core.Chat.history_selection import (
@@ -196,6 +196,7 @@ from tldw_Server_API.app.core.LLM_Calls.gateway import (  # used by build_call_p
     CHAT_COMPLETIONS_SURFACE,
     _provider_inventory_endpoint,
     _raise_inventory_failure,
+    official_moonshot_chat_base_url,
 )
 from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_request_extensions,
@@ -4577,6 +4578,7 @@ async def execute_streaming_call(
                                     )
                                     if not hasattr(result, "__aiter__") and hasattr(result, "__iter__"):
                                         result = wrap_sync_stream(result)
+                                    cst.cleaned_args = refreshed_args
                                     cst.selected_provider = fallback_provider
                                     cst.usage_credential_source = call_credential_source(refreshed_args)
                                     # Update run-first metric context to reflect fallback provider/model
@@ -4999,6 +5001,8 @@ async def execute_streaming_call(
                     "Self-monitoring output check (streaming) skipped error_type={}",
                     type(e).__name__,
                 )
+                if enforce_resolved_action:
+                    return None, True
 
         try:
             _get_mod = cst.moderation_getter or get_moderation_service
@@ -5145,7 +5149,8 @@ async def execute_streaming_call(
                             )
                             cst.stream_mod_state["warn_capture_logged"] = True
         except _CHAT_NONCRITICAL_EXCEPTIONS:
-            pass
+            if enforce_resolved_action:
+                return None, True
 
         return full_reply_to_save, post_stream_blocked
 
@@ -5166,22 +5171,33 @@ async def execute_streaming_call(
     # needs the failed turn to have no saved reply.
     cst.keep_partial_replies = bool(cst.should_persist and cst.native_persistence)
 
-    async def _prepare_saved_stream_reply(full_reply: str) -> tuple[str | None, bool]:
-        """Apply save policies to answer and thinking without checking synthetic tags."""
+    async def _approve_provider_reasoning(reasoning: str | None) -> str | None:
+        if not reasoning:
+            return None
+        approved, blocked = await _apply_stream_output_policies(reasoning, enforce_resolved_action=True)
+        return reasoning if not blocked and approved == reasoning else None
+
+    async def _prepare_saved_stream_reply(
+        full_reply: str, provider_reasoning: str | None = None
+    ) -> tuple[str | None, bool, str | None]:
+        """Apply save policies to answer and thinking, sharing the typed verdict when possible."""
         if cst.native_persistence != "retain_reasoning" or not cst.keep_partial_replies or cst.structured_request_context is not None:
-            return await _apply_stream_output_policies(full_reply)
+            approved, blocked = await _apply_stream_output_policies(full_reply)
+            if blocked or approved != full_reply:
+                return approved, blocked, None
+            return approved, False, await _approve_provider_reasoning(provider_reasoning)
         answer, thinking = split_reasoning_text(full_reply)
         approved_answer, blocked = await _apply_stream_output_policies(answer)
         if blocked or approved_answer != answer:
-            return approved_answer, blocked
+            return approved_answer, blocked, None
         if thinking:
             thinking = html.unescape(thinking)
-            approved_thinking, thinking_blocked = await _apply_stream_output_policies(
-                thinking, enforce_resolved_action=True
-            )
-            if thinking_blocked or approved_thinking != thinking:
-                return answer, False
-        return full_reply, False
+            approved_thinking = await _approve_provider_reasoning(thinking)
+            if approved_thinking is None:
+                return answer, False, None
+            if thinking == provider_reasoning:
+                return full_reply, False, approved_thinking
+        return full_reply, False, await _approve_provider_reasoning(provider_reasoning)
 
     async def partial_save_callback(full_reply: str, *, generation: dict[str, Any]) -> str | None:
         """Keep an unfinished reply after a disconnect, stop or provider failure (D7 S3-1).
@@ -5194,7 +5210,7 @@ async def execute_streaming_call(
             return None
         if cst.stream_mod_state.get("pending_stop_error") is not None:
             return None
-        full_reply_to_save, post_stream_blocked = await _prepare_saved_stream_reply(full_reply)
+        full_reply_to_save, post_stream_blocked, _ = await _prepare_saved_stream_reply(full_reply)
         if post_stream_blocked or not isinstance(full_reply_to_save, str) or not full_reply_to_save.strip():
             return None
         message_payload = build_assistant_message_payload(
@@ -5252,7 +5268,10 @@ async def execute_streaming_call(
         saved_message_id: str | None = None
         tool_execution_payload: list[dict[str, Any]] | None = None
         structured_events: list[dict[str, Any]] = []
-        full_reply_to_save, post_stream_blocked = await _prepare_saved_stream_reply(full_reply)
+        full_reply_to_save, post_stream_blocked, moonshot_reasoning = await _prepare_saved_stream_reply(
+            full_reply,
+            provider_reasoning if provider_reasoning and official_moonshot_chat_base_url(cst.selected_provider, cst.cleaned_args) else None,
+        )
 
         if cst.structured_request_context is not None:
             try:
@@ -5311,19 +5330,14 @@ async def execute_streaming_call(
             outcome="blocked" if post_stream_blocked else "success",
         )
 
-        moonshot_reasoning = None
-        if not post_stream_blocked and cst.selected_provider == "moonshot" and provider_reasoning:
-            approved, blocked = await _apply_stream_output_policies(provider_reasoning, enforce_resolved_action=True)
-            if not blocked and approved == provider_reasoning:
-                moonshot_reasoning = provider_reasoning
-                if client_moonshot_history:
-                    structured_events.append({
-                        "event": MOONSHOT_REASONING_EVENT,
-                        "data": {
-                            "event": MOONSHOT_REASONING_EVENT,
-                            "data": {"reasoning_content": moonshot_reasoning},
-                        },
-                    })
+        if moonshot_reasoning and client_moonshot_history:
+            structured_events.append({
+                "event": MOONSHOT_REASONING_EVENT,
+                "data": {
+                    "event": MOONSHOT_REASONING_EVENT,
+                    "data": {"reasoning_content": moonshot_reasoning},
+                },
+            })
 
         if cst.should_persist and cst.final_conversation_id and not post_stream_blocked and (
             full_reply_to_save or tool_calls or function_call

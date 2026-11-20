@@ -17,6 +17,20 @@ from typing import Any, Optional, Union
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    SanitizedProviderStreamError,
+)
+from tldw_Server_API.app.core.Chat.generation_metadata import (
+    GENERATION_STATUS_COMPLETE,
+    GENERATION_STATUS_INTERRUPTED,
+    GENERATION_STATUS_LENGTH,
+    GENERATION_STATUS_STOPPED,
+    MAX_MOONSHOT_REASONING_LENGTH,
+    MOONSHOT_REASONING_EVENT,
+    sanitize_usage,
+)
+from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import (
     DaemonCapacityError,
@@ -25,24 +39,10 @@ from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import (
     start_bounded_stream_cleanup_daemon,
     start_bounded_stream_daemon,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
-    ChatAPIError,
-    SanitizedProviderStreamError,
-)
-from tldw_Server_API.app.core.Chat.generation_metadata import (
-    MAX_MOONSHOT_REASONING_LENGTH,
-    MOONSHOT_REASONING_EVENT,
-    GENERATION_STATUS_COMPLETE,
-    GENERATION_STATUS_INTERRUPTED,
-    GENERATION_STATUS_LENGTH,
-    GENERATION_STATUS_STOPPED,
-    sanitize_usage,
-)
-from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.LLM_Calls.provider_results import (  # noqa: F401 - re-exported
-    PROVIDER_STREAM_ERROR_MESSAGES,
     _ALWAYS_SSE_CONTROL_PREFIXES,
     _FRAMED_ONLY_SSE_CONTROL_PREFIXES,
+    PROVIDER_STREAM_ERROR_MESSAGES,
     _extract_text_from_upstream_sse,
     _normalize_unframed_provider_stream_error,
     normalize_provider_stream_error,
@@ -1621,6 +1621,58 @@ class StreamingResponseHandler:
                         type(callback_error).__name__,
                     )
 
+            def process_plain_text(text_piece: str) -> tuple[list[str], bool]:
+                nonlocal first_output_pending
+                outputs: list[str] = []
+                if text_piece:
+                    self.semantic_output_seen = True
+                    first_output_pending = True
+                    self.stream_usage.chars += len(text_piece)  # counted for the usage row, like a content delta
+                try:
+                    if self.text_transform:
+                        text_piece = self.text_transform(text_piece)
+                except StopStreamWithError as stopper:
+                    err_payload = {
+                        "error": {
+                            "message": str(stopper) or "Stream blocked by policy",
+                            "type": stopper.error_type,
+                        }
+                    }
+                    self._attach_stream_metadata(err_payload)
+                    outputs.append(
+                        _trusted_local_stream_frame(
+                            sse_data(err_payload)
+                        )
+                    )
+                    self.error_occurred = True
+                    return outputs, True
+                except StopIteration:
+                    return outputs, True
+                except _STREAMING_NONCRITICAL_EXCEPTIONS as transform_err:
+                    logger.error(
+                        "text_transform failed for {} error_type={}",
+                        self.conversation_id,
+                        type(transform_err).__name__,
+                    )
+                    err_payload = {
+                        "error": {
+                            "message": "Stream transform failed",
+                            "type": "stream_transform_error",
+                        }
+                    }
+                    self._attach_stream_metadata(err_payload)
+                    outputs.append(sse_data(err_payload))
+                    self.error_occurred = True
+                    return outputs, True
+                if not self._append_response_content(text_piece):
+                    return [response_size_error()], True
+                if text_piece:
+                    content_payload = {"choices": [{"delta": {"content": text_piece}}]}
+                    self._attach_stream_metadata(content_payload)
+                    outputs.append(sse_data(content_payload))
+                    self.update_activity()
+                return outputs, False
+
             def process_line(raw_line: str, *, sse_framed: bool) -> tuple[list[str], bool]:
                 nonlocal first_output_pending
                 outputs: list[str] = []
@@ -1642,12 +1694,7 @@ class StreamingResponseHandler:
                     try:
                         data = json.loads(payload_str)
                     except _STREAMING_NONCRITICAL_EXCEPTIONS:
-                        if payload_str:
-                            self.semantic_output_seen = True
-                            first_output_pending = True
-                        outputs.append(f"data: {payload_str}\n\n")
-                        self.update_activity()
-                        return outputs, False
+                        return process_plain_text(payload_str)
                     if isinstance(data, dict) and data.get("event") == MOONSHOT_REASONING_EVENT:
                         # Only local settlement can issue a reasoning history event.
                         return outputs, False
@@ -1810,58 +1857,7 @@ class StreamingResponseHandler:
                     if normalized_error is not None:
                         outputs.append(canonical_provider_error(normalized_error.code))
                         return outputs, True
-                # Non-SSE chunk: preserve spaces (avoid stripping)
-                text_piece = stripped_leading
-                with contextlib.suppress(_STREAMING_NONCRITICAL_EXCEPTIONS):
-                    text_piece = str(text_piece)
-                if text_piece:
-                    self.semantic_output_seen = True
-                    first_output_pending = True
-                    self.stream_usage.chars += len(text_piece)  # counted for the usage row, like a content delta
-                try:
-                    if self.text_transform:
-                        text_piece = self.text_transform(text_piece)
-                except StopStreamWithError as stopper:
-                    err_payload = {
-                        "error": {
-                            "message": str(stopper) or "Stream blocked by policy",
-                            "type": stopper.error_type,
-                        }
-                    }
-                    self._attach_stream_metadata(err_payload)
-                    outputs.append(
-                        _trusted_local_stream_frame(
-                            sse_data(err_payload)
-                        )
-                    )
-                    self.error_occurred = True
-                    return outputs, True
-                except StopIteration:
-                    return outputs, True
-                except _STREAMING_NONCRITICAL_EXCEPTIONS as transform_err:
-                    logger.error(
-                        "text_transform failed for {} error_type={}",
-                        self.conversation_id,
-                        type(transform_err).__name__,
-                    )
-                    err_payload = {
-                        "error": {
-                            "message": "Stream transform failed",
-                            "type": "stream_transform_error",
-                        }
-                    }
-                    self._attach_stream_metadata(err_payload)
-                    outputs.append(sse_data(err_payload))
-                    self.error_occurred = True
-                    return outputs, True
-                if not self._append_response_content(text_piece):
-                    return [response_size_error()], True
-                if text_piece:
-                    content_payload = {"choices": [{"delta": {"content": text_piece}}]}
-                    self._attach_stream_metadata(content_payload)
-                    outputs.append(sse_data(content_payload))
-                    self.update_activity()
-                return outputs, False
+                return process_plain_text(stripped_leading)
 
             # Process the stream
             # Hard timeouts require every synchronous provider iterator to stay

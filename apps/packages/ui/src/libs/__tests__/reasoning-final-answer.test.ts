@@ -109,3 +109,11 @@ describe("orphan reasoning delimiter boundaries", () => {
     );
   });
 });
+
+
+it.each(["</think>", "</reason>"])(
+  "omits legacy reasoning with a literal closing delimiter %s from inference",
+  (delimiter) => {
+    expect(removeReasoning(`<think>Trace ${delimiter} private text</think>Answer`)).toBe("Answer");
+  }
+);

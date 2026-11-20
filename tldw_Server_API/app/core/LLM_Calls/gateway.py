@@ -739,6 +739,26 @@ def _resolve_base_url_override(provider: str, chat_args: dict[str, Any]) -> str 
         raise ChatBadRequestError(provider=provider_key or None, message=str(exc)) from exc
 
 
+def official_moonshot_chat_base_url(provider: str, chat_args: dict[str, Any]) -> str | None:
+    """Return the official endpoint for the same credential scope used for dispatch."""
+    if provider != "moonshot":
+        return None
+    from tldw_Server_API.app.core.LLM_Calls.adapter_utils import bind_provider_call_credentials
+    from tldw_Server_API.app.core.LLM_Calls.providers.moonshot_adapter import (
+        _moonshot_api_config,
+        _moonshot_base_url,
+        is_official_moonshot_endpoint,
+    )
+
+    try:
+        bound_args, credentials = bind_provider_call_credentials(provider, chat_args, consume=False)
+        config = _moonshot_api_config(bound_args.get("app_config"), credentials is not None)
+        base = _moonshot_base_url(config, _resolve_base_url_override(provider, bound_args))
+        return base if is_official_moonshot_endpoint(base) else None
+    except (ChatBadRequestError, ChatConfigurationError, OSError, RuntimeError, ValueError):
+        return None
+
+
 def _resolve_chat_provider_name(provider: str | None) -> str:
     """Return the canonical chat provider key used for adapter dispatch."""
     provider_key = (provider or "").strip().lower()
@@ -895,29 +915,15 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
     from tldw_Server_API.app.core.Chat.generation_metadata import MOONSHOT_REASONING_KEY, bounded_moonshot_reasoning
 
     if any(isinstance(message, dict) and MOONSHOT_REASONING_KEY in message for message in messages_payload):
-        replay_reasoning = False
-        if provider == "moonshot":
-            from urllib.parse import urlsplit
-
-            from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import resolve_provider_models_base_url
-
-            base = resolve_provider_models_base_url(
-                provider, app_config, credentials_resolved=credentials_resolved, base_url=base_url_override
-            )
-            if base:
-                endpoint = urlsplit(base)
-                replay_reasoning = (
-                    endpoint.scheme == "https"
-                    and endpoint.hostname in {"api.moonshot.ai", "api.moonshot.cn"}
-                    and endpoint.port in (None, 443)
-                )
+        replay_base_url = official_moonshot_chat_base_url(provider, chat_args)
         messages_payload = list(messages_payload)
         for index, message in enumerate(messages_payload):
             if not isinstance(message, dict) or MOONSHOT_REASONING_KEY not in message:
                 continue
             message = dict(message)
             reasoning = bounded_moonshot_reasoning(message.pop(MOONSHOT_REASONING_KEY))
-            if replay_reasoning and message.get("role") == "assistant" and reasoning is not None:
+            if replay_base_url and message.get("role") == "assistant" and reasoning is not None:
+                request["base_url"] = replay_base_url
                 message.setdefault("reasoning_content", reasoning)
             messages_payload[index] = message
         request["messages"] = messages_payload
