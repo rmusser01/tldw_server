@@ -242,6 +242,9 @@ describe("CommandPalette shortcut hints", () => {
         expectedShortcutLabel(mockShortcutConfig.toggleSidebar)
       )
     ).toBeInTheDocument()
+    // XP-11: off /chat the sidebar holds no chats, so it isn't "the chat sidebar".
+    expect(toggleSidebar).toHaveTextContent("Show or hide the sidebar")
+    expect(toggleSidebar).not.toHaveTextContent(/chat sidebar/i)
 
     const goToMedia = screen.getByRole("option", { name: /Go to Media/i })
     expect(goToMedia.querySelector("kbd")).toBeNull()

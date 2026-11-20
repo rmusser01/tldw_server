@@ -71,7 +71,7 @@ vi.mock("@/components/Common/PromptSelect", () => ({
   }
 }))
 vi.mock("@/components/Common/PersonaBuddy/BuddyManagementButton", () => ({
-  BuddyManagementButton: () => <button type="button">Buddy & Persona</button>
+  BuddyManagementButton: () => <button type="button">Avatar</button>
 }))
 vi.mock("@/components/Layouts/ConnectionStatus", () => ({
   ConnectionStatus: () => <span>Connection status</span>

@@ -31,6 +31,7 @@ import { BuddyShellHost, BuddyShellRenderContextProvider } from '@/components/Co
 import { CurrentChatModelSettings } from '@/components/Common/Settings/CurrentChatModelSettings';
 import { Sidebar } from '@/components/Option/Sidebar';
 import { Header } from '@/components/Layouts/Header';
+import { isMainChatRoute } from '@/components/Layouts/header-action-policy';
 import { QuickIngestModalHost } from '@/components/Layouts/QuickIngestButton';
 import { useMigration } from '@/hooks/useMigration';
 import { useStorageMigrations } from '@/hooks/useStorageMigrations';
@@ -595,7 +596,12 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           {/* Mobile Drawer for ChatSidebar when the persistent sidebar is enabled */}
           {shellSidebarEnabled && showChatSidebar && isMobileViewport && (
             <Drawer
-              title={t('common:chatSidebar.title', 'Chats')}
+              title={
+                // Named after what ChatSidebar shows on this route (XP-11).
+                isMainChatRoute(location.pathname)
+                  ? t('common:chatSidebar.title', 'Chats')
+                  : t('common:chatSidebar.menuTitle', 'Menu')
+              }
               styles={{ header: { display: 'none' }, body: { padding: 0, overflow: 'hidden' } }}
               placement="left"
               closeIcon={null}

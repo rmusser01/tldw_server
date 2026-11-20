@@ -212,7 +212,9 @@ describe("NotesManagerPage stage 33 link-aware delete warnings", () => {
     mockClearSetting.mockResolvedValue(undefined)
   })
 
-  it("adds reference-count warning text when inbound links exist", async () => {
+  // XP-17 (#3101, decision 8): Move to Trash happens at once; the inline Undo
+  // offer names the note and, when other notes link to it, says so.
+  it("adds reference-count warning text to the Undo offer when inbound links exist", async () => {
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request.path || "")
       const method = String(request.method || "GET").toUpperCase()
@@ -248,14 +250,13 @@ describe("NotesManagerPage stage 33 link-aware delete warnings", () => {
     await screen.findByDisplayValue("Delete me")
     fireEvent.click(await screen.findByTestId("mock-delete-note"))
 
-    await waitFor(() => {
-      expect(mockConfirmDanger).toHaveBeenCalled()
-    })
-    const deleteDialogArgs = mockConfirmDanger.mock.calls[0][0]
-    expect(String(deleteDialogArgs.content)).toContain("This note is linked from 2 other notes")
+    const offer = await screen.findByTestId("notes-undo")
+    await waitFor(() => expect(offer).toHaveTextContent('Moved "Delete me" to Trash.'))
+    expect(offer).toHaveTextContent("This note is linked from 2 other notes")
+    expect(mockConfirmDanger).not.toHaveBeenCalled()
   })
 
-  it("keeps baseline delete confirmation copy when inbound links are absent", async () => {
+  it("names the note in the Undo offer when inbound links are absent", async () => {
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request.path || "")
       const method = String(request.method || "GET").toUpperCase()
@@ -285,19 +286,10 @@ describe("NotesManagerPage stage 33 link-aware delete warnings", () => {
     await screen.findByDisplayValue("Delete me")
     fireEvent.click(await screen.findByTestId("mock-delete-note"))
 
-    await waitFor(() => {
-      expect(mockConfirmDanger).toHaveBeenCalled()
-    })
-    expect(mockEndTutorial).toHaveBeenCalled()
-    expect(mockEndTutorial.mock.invocationCallOrder[0]).toBeLessThan(
-      mockConfirmDanger.mock.invocationCallOrder[0]
-    )
-    const deleteDialogArgs = mockConfirmDanger.mock.calls[0][0]
-    // NL-15: the confirm names the note and says it can be restored from Trash.
-    expect(deleteDialogArgs).toMatchObject({
-      title: "Move to Trash?",
-      content: 'Move "Delete me" to Trash? You can restore it from Trash.',
-      okText: "Move to Trash"
-    })
+    const offer = await screen.findByTestId("notes-undo")
+    await waitFor(() => expect(offer).toHaveTextContent('Moved "Delete me" to Trash.'))
+    expect(offer).not.toHaveTextContent("linked from")
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument()
+    expect(mockConfirmDanger).not.toHaveBeenCalled()
   })
 })

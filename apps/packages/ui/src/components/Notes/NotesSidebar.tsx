@@ -177,7 +177,9 @@ export interface NotesSidebarProps {
   addTagsToSelectedBulk: () => Promise<void>
   deleteSelectedBulk: () => Promise<void>
   /** Trash: restore the selected notes (NL-05). */
-  restoreSelectedBulk?: () => Promise<void>
+  restoreSelectedBulk?: () => Promise<unknown>
+  /** The Move to Trash Undo offer, shown above the list while the list is visible (XP-17). */
+  undoBanner?: React.ReactNode
   /** Trash search (NL-05). */
   trashQuery?: string
   setTrashQuery?: (query: string) => void
@@ -210,6 +212,7 @@ export interface NotesSidebarProps {
 // ---------------------------------------------------------------------------
 
 const NotesSidebar: React.FC<NotesSidebarProps> = ({
+  undoBanner,
   // Layout
   isMobileViewport,
   mobileSidebarOpen,
@@ -1058,6 +1061,8 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
               </div>
             )}
           </div>
+
+          {undoBanner}
 
           {/* Notes List Section */}
           <div className="min-h-[240px] flex-1 overflow-y-auto" data-testid="notes-sidebar-results">

@@ -1,8 +1,8 @@
 {
-  "pageAssist": "tldw Assistant",
+  "pageAssist": "tldw",
   "titles": {
-    "options": "tldw Assistant",
-    "sidepanel": "tldw Assistant"
+    "options": "tldw",
+    "sidepanel": "tldw"
   },
   "dismiss": "Dismiss",
   "confirmTitle": "Please confirm",
@@ -411,7 +411,7 @@
   "cancelPullingModel": {
     "confirm": "Are you sure you want to cancel the download? This will stop the download process. If supported by the provider, you can resume later."
   },
-  "privateModeSaveErrorTitle": "tldw Assistant can't save data",
+  "privateModeSaveErrorTitle": "tldw can't save data",
   "error": {
     "label": "Error",
     "friendlyApiKeySummary": "We couldn't reach your tldw server.",
@@ -528,7 +528,7 @@
     "ingestDesc": "Save this page to your knowledge base",
     "switchModel": "Switch Model",
     "toggleSidebar": "Toggle Sidebar",
-    "toggleSidebarDesc": "Show or hide the chat sidebar",
+    "toggleSidebarDesc": "Show or hide the sidebar",
     "placeholder": "Search commands, settings, and prompts…",
     "noResults": "No results found",
     "title": "Search commands",
@@ -569,9 +569,16 @@
       "description": "Fine-tune temperature, context length, and other model settings."
     }
   },
+  "undo": {
+    "action": "Undo",
+    "dismiss": "Dismiss",
+    "failed": "Couldn't restore. Try again.",
+    "restoredStatus": "Restored."
+  },
   "chatSidebar": {
     "title": "Chats",
     "historyLandmark": "Chat history",
+    "menuTitle": "Menu",
     "newChat": "New Chat",
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar",
@@ -676,8 +683,13 @@
       "thisWeek": "This week",
       "older": "Older"
     },
-    "movedToTrash": "Moved to Trash",
-    "undoTrash": "Undo",
+    "movedChatToTrash": "Moved \"{{title}}\" to Trash.",
+    "movedChatsToTrash_one": "Moved {{count}} chat to Trash.",
+    "movedChatsToTrash_other": "Moved {{count}} chats to Trash.",
+    "undoPartialRestored": "Restored {{restored}} of {{total}} chats.",
+    "stillInTrashNamed": "\"{{title}}\" is still in Trash.",
+    "stillInTrash_one": "{{count}} chat is still in Trash.",
+    "stillInTrash_other": "{{count}} chats are still in Trash.",
     "viewTrash": "View Trash",
     "permanentlyDeleted": "Chat permanently deleted.",
     "noSearchMatches": "No chats match “{{query}}”",
@@ -706,7 +718,7 @@
   "contextCopilotPopup": "Contextual action",
   "contextCopilotPopupNoSelection": "Select text first to use contextual action.",
   "contextCopilotPopupNoTab": "No active tab found for contextual action.",
-  "contextCopilotPopupDeliveryFailed": "Could not open the contextual popup. Check that tldw Assistant is allowed on this site and try again.",
+  "contextCopilotPopupDeliveryFailed": "Could not open the contextual popup. Check that tldw is allowed on this site and try again.",
   "popupStop": "Stop",
   "popupOpenSidepanel": "Open sidepanel",
   "popupCopy": "Copy",
@@ -729,19 +741,19 @@
   "contextSaveToNotesNoSelection": "Select text first to save to Notes.",
   "contextSidebarOpening": "Opening sidebar...",
   "contextSaveToNotesOpeningSidebar": "Opening sidebar to save note...",
-  "contextSaveToNotesDeliveryFailed": "Could not open the sidebar to save this note. Check that the tldw Assistant sidebar is allowed on this site and try again.",
+  "contextSaveToNotesDeliveryFailed": "Could not open the sidebar to save this note. Check that the tldw sidebar is allowed on this site and try again.",
   "hfSendPageRejected": "[tldw] Page send request rejected by tldw_server",
   "hfSendPageErrorWithDetail": "[tldw] Failed to send this page to tldw_server: $1. Check Settings → tldw server and try again.",
   "hfSendPageError": "[tldw] Failed to send this page to tldw_server. Check Settings → tldw server and try again.",
   "hfSendPageSuccess": "[tldw] Sent page to tldw_server for processing",
   "hfSendPageException": "[tldw] Something went wrong while sending this page to tldw_server. Check that your tldw_server and the extension are running, then try again.",
-  "hfPullInProgress": "[tldw Assistant] A model pull request is already in progress. Please wait for it to finish before starting another one.",
-  "hfPullConfirm": "[tldw Assistant] Do you want to send a request to your tldw_server to pull the \"$1\" model? This is independent of the huggingface.co website. Your server will start pulling the model after you confirm.",
-  "hfPullSending": "[tldw Assistant] Sending a request to your tldw_server to pull \"$1\". Check the extension icon or your tldw_server logs for progress.",
-  "hfPullErrorWithDetail": "[tldw Assistant] Failed to send a pull request for \"$1\": $2. Check Settings → tldw server and try again.",
-  "hfPullError": "[tldw Assistant] Failed to send a pull request for \"$1\". Check Settings → tldw server and try again.",
-  "hfPullSuccess": "[tldw Assistant] Request sent to your tldw_server to pull \"$1\". Monitor the extension icon or tldw_server logs for status.",
-  "hfPullException": "[tldw Assistant] Something went wrong while sending a pull request for \"$1\" to your tldw_server. Check that your tldw_server and the extension are running, then try again.",
+  "hfPullInProgress": "[tldw] A model pull request is already in progress. Please wait for it to finish before starting another one.",
+  "hfPullConfirm": "[tldw] Do you want to send a request to your tldw_server to pull the \"$1\" model? This is independent of the huggingface.co website. Your server will start pulling the model after you confirm.",
+  "hfPullSending": "[tldw] Sending a request to your tldw_server to pull \"$1\". Check the extension icon or your tldw_server logs for progress.",
+  "hfPullErrorWithDetail": "[tldw] Failed to send a pull request for \"$1\": $2. Check Settings → tldw server and try again.",
+  "hfPullError": "[tldw] Failed to send a pull request for \"$1\". Check Settings → tldw server and try again.",
+  "hfPullSuccess": "[tldw] Request sent to your tldw_server to pull \"$1\". Monitor the extension icon or tldw_server logs for status.",
+  "hfPullException": "[tldw] Something went wrong while sending a pull request for \"$1\" to your tldw_server. Check that your tldw_server and the extension are running, then try again.",
   "stepLabel": "Welcome",
   "path": "How would you like to get started?",
   "nextSteps": "You’re ready to go",

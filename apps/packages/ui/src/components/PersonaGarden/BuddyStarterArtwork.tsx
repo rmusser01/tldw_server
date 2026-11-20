@@ -131,7 +131,7 @@ export const BuddyStarterArtwork = ({
         <>
           <p role="status">
             {t("personaGarden.visuals.builder.previewUnavailable", {
-              defaultValue: "Preview unavailable. Retry to view this Buddy."
+              defaultValue: "Preview unavailable. Retry to view this avatar."
             })}
           </p>
           <Button size="small" onClick={() => setAttempt((value) => value + 1)}>

@@ -9,7 +9,7 @@ export const OptionsRouteShell = () => {
   const { t } = useTranslation()
   // The tab title follows the route, as on the WebUI (XP-19).
   useRouteDocumentTitle(
-    t("common:titles.options", { defaultValue: "tldw Assistant — Options" })
+    t("common:titles.options", { defaultValue: "Options | tldw" })
   )
   return (
     <RouteShell

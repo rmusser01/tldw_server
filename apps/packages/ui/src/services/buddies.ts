@@ -64,7 +64,7 @@ export async function buddyRequest<T>(
     const message = typeof detail === "string" ? detail : detail?.message
     throw new Error(
       message ||
-        `Buddy request failed (${response.status}). Refresh and try again.`
+        `Avatar request failed (${response.status}). Refresh and try again.`
     )
   }
   return payload as T
@@ -239,7 +239,7 @@ export async function readBuddyConversation(
     attachment.scope_type === "conversation" &&
     attachment.scope_id !== conversationId
   ) {
-    throw new Error("This Buddy is attached to a different conversation.")
+    throw new Error("This avatar is attached to a different conversation.")
   }
   const scopedWorkspace =
     attachment.scope_type === "workspace" ? attachment.scope_id : workspaceId

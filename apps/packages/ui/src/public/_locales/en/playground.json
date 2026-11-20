@@ -1056,7 +1056,7 @@
     "message": "Create a default assistant character"
   },
   "composer_persistence_serverCharacterHintBody": {
-    "message": "Create a simple assistant persona (name and a short description are enough). Once it exists, the extension can reuse it when saving chats to your server."
+    "message": "Create a simple character (a name and a short description are enough). Once it exists, the extension can reuse it when saving chats to your server."
   },
   "composer_persistence_serverInlineTitle": {
     "message": "Saved on your server"

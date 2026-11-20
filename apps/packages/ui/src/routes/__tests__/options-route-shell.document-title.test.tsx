@@ -52,7 +52,7 @@ const renderShell = (path: string) =>
 
 describe("options page titles (XP-19)", () => {
   beforeEach(() => {
-    document.title = "tldw Assistant — Options"
+    document.title = "Options | tldw"
   })
 
   it("names the page the route shows", () => {
@@ -83,6 +83,6 @@ describe("options page titles (XP-19)", () => {
       fireEvent.click(screen.getByRole("button", { name: "Go to an unknown page" }))
     })
 
-    expect(document.title).toBe("tldw Assistant — Options")
+    expect(document.title).toBe("Options | tldw")
   })
 })

@@ -87,7 +87,9 @@ describe("SidepanelHeaderSimple full-screen route", () => {
     })
   })
 
-  it("keeps the dashboard button on the dashboard route", async () => {
+  // XS-12 (#3101, decision 10): the button opens Flashcards, so it is called
+  // "Flashcards", not "Open dashboard".
+  it("names the Flashcards button after the page it opens", async () => {
     const user = userEvent.setup()
 
     render(
@@ -96,7 +98,8 @@ describe("SidepanelHeaderSimple full-screen route", () => {
       </MemoryRouter>
     )
 
-    await user.click(screen.getByTestId("chat-open-dashboard"))
+    expect(screen.queryByRole("button", { name: /dashboard/i })).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Flashcards" }))
 
     expect(browserMocks.getURL).toHaveBeenCalledWith("/options.html#/flashcards")
     expect(browserMocks.createTab).toHaveBeenCalledWith({

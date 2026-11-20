@@ -113,7 +113,7 @@ const summarizeBuddy = (
 ): PersonaBuddyDiagnosticRow => {
   if (typeof buddySummary === "string" && buddySummary.trim()) {
     return {
-      label: "Buddy",
+      label: "Avatar",
       value: READY_STATE_LABEL,
       state: "healthy",
       detail: buddySummary.trim()
@@ -124,19 +124,19 @@ const summarizeBuddy = (
     const roleSummary = String(buddySummary.role_summary || "").trim()
     if (buddySummary.has_buddy || roleSummary) {
       return {
-        label: "Buddy",
+        label: "Avatar",
         value: READY_STATE_LABEL,
         state: "healthy",
-        detail: roleSummary || "Buddy summary is attached to this persona."
+        detail: roleSummary || "Avatar summary is attached to this persona."
       }
     }
   }
 
   return {
-    label: "Buddy",
+    label: "Avatar",
     value: "Dormant",
     state: "healthy",
-    detail: "No Buddy summary is attached to the selected persona."
+    detail: "No avatar summary is attached to the selected persona."
   }
 }
 
@@ -153,7 +153,7 @@ const summarizeVisual = (
   if (diagnostic?.code === "no_active_pack") {
     return {
       label: "Visual pack",
-      value: "Default Buddy fallback",
+      value: "Default avatar fallback",
       state: "healthy",
       detail: joinDetails([diagnostic.message, packIdDetail, renderState])
     }
@@ -196,7 +196,7 @@ const summarizeVisual = (
       : packTitle || packId || ""
   return {
     label: "Visual pack",
-    value: activePack || "Default Buddy fallback",
+    value: activePack || "Default avatar fallback",
     state: "healthy",
     detail: renderState
   }
@@ -553,7 +553,7 @@ const deriveTitleAndMessage = (
   if (state === "unavailable") {
     const unavailable = rows.find((row) => row.state === "unavailable")
     return {
-      title: "Persona Buddy unavailable",
+      title: "Persona avatar unavailable",
       message:
         unavailable?.detail ||
         "Persona support is not available from the current server state."
@@ -561,21 +561,21 @@ const deriveTitleAndMessage = (
   }
   if (state === "recovering") {
     return {
-      title: "Persona Buddy recovering",
+      title: "Persona avatar recovering",
       message:
         "Live session or voice state is reconnecting. Existing controls remain available."
     }
   }
   if (state === "degraded") {
     return {
-      title: "Persona Buddy degraded",
+      title: "Persona avatar degraded",
       message:
         "Core controls are available, but one or more assistant surfaces need attention."
     }
   }
   return {
-    title: "Persona Buddy ready",
-    message: "Persona Live, Buddy, wake, MCP, and visual state are ready."
+    title: "Persona avatar ready",
+    message: "Persona Live, avatar, wake, MCP, and visual state are ready."
   }
 }
 
@@ -599,7 +599,7 @@ export const buildPersonaBuddyDiagnostics = ({
     label: "Persona",
     value: personaName ? String(personaName) : "Not selected",
     state: personaName ? "healthy" : "unavailable",
-    detail: selectedPersona?.id ? `ID: ${selectedPersona.id}` : "Select a persona to use Buddy."
+    detail: selectedPersona?.id ? `ID: ${selectedPersona.id}` : "Select a persona to use its avatar."
   }
   rows.push(personaRow)
   state = worseState(state, personaRow.state || "healthy")

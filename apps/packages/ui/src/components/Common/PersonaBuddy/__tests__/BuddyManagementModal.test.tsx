@@ -84,7 +84,7 @@ const props = {
   onClose: vi.fn(),
   onApplied: vi.fn()
 }
-it("Cancel does not attach the selected Buddy or change a Persona", async () => {
+it("Cancel does not attach the selected avatar or change a Persona", async () => {
   render(<BuddyManagementModal {...props} />)
   await screen.findByRole("option", { name: "Research" })
   fireEvent.click(screen.getByRole("button", { name: "Use Duck" }))
@@ -193,7 +193,7 @@ it("waits for preview and prevents follow-up attachment writes after unmount", a
     })
   )
   const { unmount } = render(<BuddyManagementModal {...props} profiles={[]} />)
-  const use = await screen.findByRole("button", { name: "Use this Buddy" })
+  const use = await screen.findByRole("button", { name: "Use this avatar" })
   expect(use).toBeDisabled()
   fireEvent.click(screen.getByRole("button", { name: "Load preview" }))
   fireEvent.click(use)
@@ -306,7 +306,7 @@ it("retains saved artwork without attaching or replacing the new draft after ret
     await screen.findByRole("button", { name: "Load preview", hidden: true })
   )
   fireEvent.click(
-    screen.getByRole("button", { name: "Use this Buddy", hidden: true })
+    screen.getByRole("button", { name: "Use this avatar", hidden: true })
   )
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled()
@@ -335,9 +335,9 @@ it("retains saved artwork without attaching or replacing the new draft after ret
     screen.getByRole("button", { name: "Use Saved Lens" })
   ).toBeInTheDocument()
   expect(screen.getByLabelText("Conversation")).toHaveValue("next")
-  expect(screen.getByRole("status")).toHaveTextContent("Buddy artwork saved")
+  expect(screen.getByRole("status")).toHaveTextContent("Avatar artwork saved")
   fireEvent.click(
-    screen.getByRole("button", { name: "Use this Buddy", hidden: true })
+    screen.getByRole("button", { name: "Use this avatar", hidden: true })
   )
   mocks.putBuddyAttachment.mockResolvedValue({ version: 1 })
   fireEvent.click(screen.getByRole("button", { name: "Apply" }))
@@ -480,7 +480,7 @@ it.each(["attachment", "refresh"])(
     expect(callbacks.onClose).not.toHaveBeenCalled()
     expect(screen.getByLabelText("Conversation")).toHaveValue("next")
     expect(screen.getByRole("status")).toHaveTextContent(
-      "previous Buddy attachment was saved"
+      "previous avatar attachment was saved"
     )
     expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled()
   }

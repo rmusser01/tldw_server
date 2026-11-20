@@ -772,7 +772,7 @@ test.describe("Persona Buddy interaction", () => {
     })
     const buddyDock = authedPage.getByTestId("persona-buddy-dock")
     const buddyButton = authedPage.getByRole("button", {
-      name: "Buddy for Visual Persona"
+      name: "Avatar for Visual Persona"
     })
     await expect(buddyButton).toBeVisible({ timeout: 15_000 })
     await expect(buddyButton).toHaveCSS("width", "64px")
@@ -788,7 +788,7 @@ test.describe("Persona Buddy interaction", () => {
     await expect(buddyDock).toHaveAttribute("data-companion-phase", "idle")
 
     await authedPage
-      .getByRole("button", { name: "Open Buddy controls" })
+      .getByRole("button", { name: "Open avatar controls" })
       .click()
     await expect(authedPage.getByTestId("persona-buddy-popover")).toBeVisible()
     await expect(
@@ -860,7 +860,7 @@ test.describe("Persona Buddy interaction", () => {
     await expect(dock).toHaveAttribute("data-companion-transient-offset-x", "0")
 
     await authedPage
-      .getByRole("button", { name: "Buddy for Visual Persona" })
+      .getByRole("button", { name: "Avatar for Visual Persona" })
       .click()
     await authedPage.clock.runFor(299)
     await expect(dock).toHaveAttribute("data-companion-phase", "idle")
@@ -886,7 +886,7 @@ test.describe("Persona Buddy interaction", () => {
     await pauseBrowserClock(authedPage)
 
     const buddyButton = authedPage.getByRole("button", {
-      name: "Buddy for Visual Persona"
+      name: "Avatar for Visual Persona"
     })
     await buddyButton.dblclick()
     await expect(authedPage.getByTestId("persona-buddy-popover")).toBeVisible()
@@ -904,7 +904,7 @@ test.describe("Persona Buddy interaction", () => {
     await pauseBrowserClock(authedPage)
 
     const keyboardBuddyButton = authedPage.getByRole("button", {
-      name: "Buddy for Visual Persona"
+      name: "Avatar for Visual Persona"
     })
     await keyboardBuddyButton.focus()
     await keyboardBuddyButton.press("Enter")
@@ -927,10 +927,10 @@ test.describe("Persona Buddy interaction", () => {
     const dock = await gotoPersonaBuddy(authedPage, "expressive")
     await pauseBrowserClock(authedPage)
 
-    await authedPage.getByRole("button", { name: "Open Buddy controls" }).click()
+    await authedPage.getByRole("button", { name: "Open avatar controls" }).click()
     await expect(dock).toHaveAttribute("data-companion-suspension", "controls")
     await authedPage.clock.runFor(90_000)
-    await authedPage.getByRole("button", { name: "Close Buddy controls" }).click()
+    await authedPage.getByRole("button", { name: "Close avatar controls" }).click()
     await expect(authedPage.getByTestId("persona-buddy-popover")).toHaveCount(0)
     await expect(dock).toHaveAttribute("data-companion-suspension", "none")
     const generationAtClose = Number(
@@ -948,7 +948,7 @@ test.describe("Persona Buddy interaction", () => {
       "ambient.look"
     )
 
-    await authedPage.getByRole("button", { name: "Open Buddy controls" }).click()
+    await authedPage.getByRole("button", { name: "Open avatar controls" }).click()
     await authedPage.keyboard.press("Escape")
     await expect(authedPage.getByTestId("persona-buddy-popover")).toHaveCount(0)
     expect(diagnostics.pageErrors).toHaveLength(0)
@@ -966,7 +966,7 @@ test.describe("Persona Buddy interaction", () => {
     const dock = await gotoPersonaBuddy(authedPage, "off")
     await pauseBrowserClock(authedPage)
     const buddyButton = authedPage.getByRole("button", {
-      name: "Buddy for Visual Persona"
+      name: "Avatar for Visual Persona"
     })
 
     await buddyButton.focus()
@@ -1232,7 +1232,7 @@ test.describe("Persona Buddy interaction", () => {
       .click()
     await expect(
       authedPage.getByRole("button", {
-        name: "Buddy for Second Persona"
+        name: "Avatar for Second Persona"
       })
     ).toBeVisible()
     await expect(
@@ -1381,7 +1381,7 @@ test.describe("Persona Buddy interaction", () => {
     ).toEqual(persistedBeforeAmbient)
 
     const buddyButton = authedPage.getByRole("button", {
-      name: "Buddy for Visual Persona"
+      name: "Avatar for Visual Persona"
     })
     const dragBox = await buddyButton.boundingBox()
     if (!dragBox) throw new Error("expected visible Buddy button")
