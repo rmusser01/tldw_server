@@ -233,6 +233,7 @@ import { isFreshChatSelectionPending } from "~/hooks/chat/fresh-chat-selection";
 import { useMessageOption } from "~/hooks/useMessageOption";
 import { useTabMentions } from "~/hooks/useTabMentions";
 import { composerMentionsAvailable } from "./composer-shortcut-hint";
+import { sendablePins } from "@/utils/note-pins";
 import { isAwaitingFirstConnectionCheck, notifySendNeedsConnection } from "./composer-connection";
 import { hasSendableDraft } from "./composer-draft-content";
 import { useWebUI } from "~/store/webui";
@@ -5108,7 +5109,7 @@ export const PlaygroundForm = ({
     navigate("/settings");
   }, [navigate]);
 
-  const composerDraftSendable = hasSendableDraft({ message: form.values.message, image: form.values.image, attachmentCount: selectedDocuments.length + uploadedFiles.length, hasImportedContext: Boolean(importedSidepanelContext), pinnedResultCount: fileRetrievalEnabled ? 0 : ragPinnedResults.length });
+  const composerDraftSendable = hasSendableDraft({ message: form.values.message, image: form.values.image, attachmentCount: selectedDocuments.length + uploadedFiles.length, hasImportedContext: Boolean(importedSidepanelContext), pinnedResultCount: sendablePins(ragPinnedResults, { fileRetrievalEnabled }).length });
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!isFirefoxTarget) {
       if (e.key === "Process" || e.key === "229") return;
@@ -7015,19 +7016,13 @@ export const PlaygroundForm = ({
                                     isMobile={isMobileViewport}
                                     isConnectionReady={isConnectionReady}
                                     isCollapsed={isMessageCollapsed}
-                                    compactWhenInactive={
-                                      shouldCompactComposerTextarea
-                                    }
-                                    formInputProps={form.getInputProps(
-                                      "message",
-                                    )}
+                                    compactWhenInactive={shouldCompactComposerTextarea}
+                                    formInputProps={form.getInputProps("message")}
                                     showSlashMenu={showSlashMenu}
                                     slashCommands={filteredSlashCommands}
                                     slashActiveIndex={slashActiveIndex}
                                     onSlashSelect={handleSlashCommandSelect}
-                                    onSlashActiveIndexChange={
-                                      setSlashActiveIndex
-                                    }
+                                    onSlashActiveIndexChange={setSlashActiveIndex}
                                     slashEmptyLabel={t(
                                       "common:commandPalette.noResults",
                                       "No results found",
@@ -7040,6 +7035,7 @@ export const PlaygroundForm = ({
                                     onMentionRefetch={handleMentionRefetch}
                                     onMentionsOpen={handleMentionsOpen}
                                     draftSaved={draftSaved}
+                                    onSetMessage={setMessageValue}
                                   />,
                                 )}
                           </div>
@@ -7260,7 +7256,7 @@ export const PlaygroundForm = ({
                                 isProMode={isProMode}
                                 isMobile={isMobileViewport}
                                 isConnectionReady={isConnectionReady}
-                                mentionsAvailable={composerMentionsAvailable(tabMentionsEnabled)}
+                                mentionsAvailable={composerMentionsAvailable(tabMentionsEnabled, undefined, Boolean(capabilities?.hasNotes))}
                                 isSending={isSending}
                                 optionsExpanded={composerOptionsExpanded}
                                 optionsLoading={composerOptionsLoading}

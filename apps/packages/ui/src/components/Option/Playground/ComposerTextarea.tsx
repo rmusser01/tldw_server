@@ -6,6 +6,9 @@ import {
 } from "@/components/Sidepanel/Chat/SlashCommandMenu"
 import { MentionsDropdown } from "./MentionsDropdown"
 import { useComposerCombobox } from "@/hooks/useComposerCombobox"
+import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import { useNoteMentions } from "./hooks/useNoteMentions"
+import { AttachedNoteChips, NoteMentionMenu } from "./NoteMentionMenu"
 
 export type ComposerTextareaProps = {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
@@ -48,6 +51,8 @@ export type ComposerTextareaProps = {
   onMentionsOpen: () => Promise<void>
   // Draft
   draftSaved: boolean
+  /** Replaces the draft. Turns on the note picker: "@" on the web, /note everywhere (decision [4]). */
+  onSetMessage?: (value: string) => void
 }
 
 export const ComposerTextarea = React.memo(function ComposerTextarea({
@@ -84,7 +89,8 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
   onMentionsClose,
   onMentionRefetch,
   onMentionsOpen,
-  draftSaved
+  draftSaved,
+  onSetMessage
 }: ComposerTextareaProps) {
   const { t } = useTranslation(["sidepanel"])
   // The slash menu is the textarea's listbox (AX-12).
@@ -92,6 +98,19 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
     open: showSlashMenu,
     count: slashCommands.length,
     activeIndex: slashActiveIndex
+  })
+  const { capabilities } = useServerCapabilities()
+  const noteMentions = useNoteMentions({
+    value,
+    textareaRef,
+    onSetMessage,
+    // A collapsed paste shows other text than the draft, so the caret can't be mapped.
+    enabled: Boolean(capabilities?.hasNotes) && !isCollapsed && displayValue === value
+  })
+  const noteCombobox = useComposerCombobox({
+    open: noteMentions.open,
+    count: noteMentions.results.length,
+    activeIndex: noteMentions.activeIndex
   })
   const minHeight = isMobile
     ? "40px"
@@ -116,6 +135,16 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         className="relative mx-3 mb-2"
         listboxId={slashCombobox.listboxId}
       />
+      <AttachedNoteChips onRemoved={() => textareaRef.current?.focus()} />
+      {onSetMessage && <NoteMentionMenu
+        open={noteMentions.open}
+        notes={noteMentions.results}
+        status={noteMentions.status}
+        activeIndex={noteMentions.activeIndex}
+        onActiveIndexChange={noteMentions.setActiveIndex}
+        onSelect={noteMentions.select}
+        listboxId={noteCombobox.listboxId}
+      />}
       <textarea
         id="textarea-message"
         data-testid="chat-input"
@@ -125,6 +154,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         onMouseUp={onMouseUp}
         onKeyDown={(e) => {
           try {
+            if (noteMentions.handleKeyDown(e)) return
             onKeyDown(e)
           } catch (err) {
             console.error("[ComposerTextarea] onKeyDown error:", err)
@@ -147,15 +177,25 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         tabIndex={0}
         placeholder={placeholder}
         aria-label={t("sidepanel:composer.messageAriaLabel", "Message input")}
-        {...slashCombobox.inputProps}
+        {...(noteMentions.open ? noteCombobox.inputProps : slashCombobox.inputProps)}
         {...formInputProps}
         value={displayValue}
-        onChange={onChange}
-        onSelect={onSelect}
+        onChange={(event) => {
+          onChange(event)
+          noteMentions.syncCaret()
+        }}
+        onSelect={() => {
+          onSelect()
+          noteMentions.syncCaret()
+        }}
+        onBlur={(event) => {
+          formInputProps.onBlur?.(event)
+          noteMentions.clearCaret()
+        }}
       />
 
       <MentionsDropdown
-        show={showMentions}
+        show={showMentions && !noteMentions.commandOpen}
         tabs={filteredTabs}
         mentionPosition={mentionPosition}
         onSelectTab={onMentionSelect}

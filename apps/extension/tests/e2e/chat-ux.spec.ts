@@ -188,17 +188,16 @@ test.describe("Chat workspace UX", () => {
       await setSelectedModel(chatPage, String(modelId))
 
       mark("toggle rag panel")
+      // XS-15: Search & Context opens as a modal sheet over the composer;
+      // it closes from the sheet (Close, Escape or a click outside).
       const ragToggle = chatPage.getByTestId("control-rag-toggle")
       await expect(ragToggle).toBeVisible()
       await ragToggle.click()
-      const ragPanel = chatPage.locator('[data-testid="rag-search-panel"]')
-      if ((await ragPanel.count()) > 0) {
-        await expect(ragPanel).toBeVisible()
-      }
-      await ragToggle.click()
-      if ((await ragPanel.count()) > 0) {
-        await expect(ragPanel).toBeHidden()
-      }
+      const knowledgeSheet = chatPage.getByRole("dialog", { name: "Search & Context" })
+      await expect(knowledgeSheet).toBeVisible()
+      await chatPage.keyboard.press("Escape")
+      await expect(knowledgeSheet).toBeHidden()
+      await expect(ragToggle).toBeFocused()
 
       const webToggle = chatPage.getByTestId("control-web-toggle")
       if (await webToggle.isVisible()) {

@@ -120,7 +120,7 @@
     "message": "Vision"
   },
   "controlRow_visionDisabledKnowledge": {
-    "message": "Disable Knowledge Search to use Vision"
+    "message": "Turn off Search & Context to use Vision"
   },
   "controlRow_visionTooltip": {
     "message": "Enable Vision to analyze images"
@@ -2190,5 +2190,56 @@
   },
   "qaSearch_relevance_tooltip": {
     "message": "Compared with the other results. Score {{score}}"
+  },
+  "openFullPage_label": {
+    "message": "Open in full page"
+  },
+  "openFullPage_extensionDescription": {
+    "message": "Opens this chat in a new tab, with your draft and page references. Your draft also stays here."
+  },
+  "openFullPage_webuiDescription": {
+    "message": "Opens the WebUI with your draft. You can bring this chat's settings along there. This chat and its attachments stay here."
+  },
+  "openFullPage_failed": {
+    "message": "Could not open the full page. Your draft stays here."
+  },
+  "openFullPage_partial": {
+    "message": "Opened with a partial copy: some of the draft or page references were shortened or could not be read. Review it there. Your draft stays here."
+  },
+  "openFullPage_characterDraftStays": {
+    "message": "A new Character chat opens without your draft. It stays here."
+  },
+  "runtimeChip_defaults": {
+    "message": "Defaults"
+  },
+  "runtimeChip_title": {
+    "message": "Model parameters for this chat"
+  },
+  "openFullPage_routeOnlyDescription": {
+    "message": "Opens the chat page in a new tab. Drafts and page references stay here."
+  },
+  "openFullPage_webHostedDescription": {
+    "message": "Opens the full page with your draft. You can bring this chat's settings along there. This chat and its attachments stay here."
+  },
+  "openFullPage_newChatDescription": {
+    "message": "Opens the chat page in a new tab, with your draft and page references. Your draft also stays here."
+  },
+  "openFullPage_webuiLabel": {
+    "message": "Open in WebUI"
+  },
+  "openFullPage_personaDraftStays": {
+    "message": "A new Persona chat opens without your draft. It stays here."
+  },
+  "openFullPage_attachmentsStay": {
+    "message": "Attachments stay in the side panel. Add them again on the full page."
+  },
+  "openFullPage_checkingDraft": {
+    "message": "Checking which account this draft belongs to…"
+  },
+  "openFullPage_draftCheckFailed": {
+    "message": "This draft's account couldn't be checked. Retry from the draft notice."
+  },
+  "composer_imageProviderMissing": {
+    "message": "Name the image provider: /generate-image:<provider> <prompt>."
   }
 }

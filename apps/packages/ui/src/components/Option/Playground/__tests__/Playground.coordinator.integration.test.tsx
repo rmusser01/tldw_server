@@ -1274,6 +1274,21 @@ describe("Playground coordinator integration", () => {
     expect(restoreSession).not.toHaveBeenCalled()
   })
 
+  it("opens an extension side-panel copy in a new chat, not the last session (XP-09)", async () => {
+    const restoreSession = vi.fn(async () => "restored" as const)
+    sessionPersistenceState.value.restoreSession = restoreSession
+    sessionPersistenceState.value.hasPersistedSession = true
+    sessionPersistenceState.value.persistedServerChatId = "persisted-chat"
+    restoreDecisionState.value = true
+    window.history.pushState({}, "", "/chat?handoff=3f7c1f0e-5d1e-4f43-9a3f-1f2a3b4c5d6e")
+
+    render(<Playground />)
+
+    await act(async () => {})
+    expect(restoreSession).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalledWith("persisted-chat")
+  })
+
   it("starts a fresh character route chat over an active server chat", async () => {
     messageOptionState.value.serverChatId = "active-chat"
     messageOptionState.value.historyId = "active-history"

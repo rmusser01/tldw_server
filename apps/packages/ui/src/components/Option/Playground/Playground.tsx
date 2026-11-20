@@ -162,6 +162,7 @@ import {
   decodeSidepanelChatWebUiHandoff,
   SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM,
 } from "@/services/tldw/sidepanel-chat-webui-handoff";
+import { hasSidepanelChatHandoffInHref } from "@/services/sidepanel-chat-handoff";
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -792,7 +793,9 @@ const PlaygroundContent = () => {
       params.get(SETTINGS_SERVER_CHAT_ID_PARAM)?.trim() || null;
     const researchReturnRunId =
       params.get(RESEARCH_RETURN_RUN_ID_PARAM)?.trim() || null;
-    const sidepanelHandoff = readSidepanelChatWebUiHandoffFromLocation();
+    // An extension copy (`?handoff=<id>`) opens in a new chat, not the last session (XP-09).
+    const sidepanelHandoff = readSidepanelChatWebUiHandoffFromLocation() ??
+      (hasSidepanelChatHandoffInHref(window.location.href) ? "extension-copy" : null);
     return {
       historyId,
       serverChatId: returnServerChatId,

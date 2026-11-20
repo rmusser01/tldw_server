@@ -999,16 +999,16 @@
     "message": "Untitled note"
   },
   "featureHints_knowledge_title": {
-    "message": "Search your knowledge"
+    "message": "Search & Context"
   },
   "featureHints_knowledge_description": {
-    "message": "Open the knowledge search panel to find snippets and insert them into your chat."
+    "message": "Open Search & Context to find snippets and insert them into your chat."
   },
   "featureHints_moreTools_title": {
-    "message": "More tools available"
+    "message": "Tools"
   },
   "featureHints_moreTools_description": {
-    "message": "Access vision mode, image upload, quick ingest, and the full app."
+    "message": "Web search and MCP tools are under Tools; images, quick ingest and Open in full page are under More tools."
   },
   "featureHints_commandPalette_title": {
     "message": "Quick commands"
@@ -2308,5 +2308,11 @@
   },
   "chatSidebar_exportTooLarge": {
     "message": "This chat is too large to export here. Use Chatbooks to export it."
+  },
+  "saveToNotesUnavailable": {
+    "message": "Notes isn't available on this server."
+  },
+  "openNote": {
+    "message": "Open note"
   }
 }

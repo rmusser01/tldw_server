@@ -1335,7 +1335,7 @@ export function HistorySelectionReview({
         )}
         {onExpand && (
           <Button variant="ghost" size="sm" onClick={onExpand}>
-            {text("expand", "Expand in full page")}
+            {text("expand", "Open in full page")}
           </Button>
         )}
       </div>

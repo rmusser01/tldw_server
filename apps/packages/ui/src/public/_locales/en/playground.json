@@ -3462,7 +3462,7 @@
     "message": "Use no prior messages"
   },
   "historySelection_expand": {
-    "message": "Expand in full page"
+    "message": "Open in full page"
   },
   "historySelection_instructions": {
     "message": "Tick the messages the AI should see, in the order it should see them. Arrow keys move between messages; Alt + arrow keys reorder them."
@@ -4967,6 +4967,69 @@
   },
   "historySelection_backToParentStaleDetail": {
     "message": "Open the original chat from the chat list."
+  },
+  "answerNote_untitled": {
+    "message": "Chat answer, {{date}}"
+  },
+  "answerNote_fromChat": {
+    "message": "Saved from a chat on {{date}}."
+  },
+  "answerNote_fromChatModel": {
+    "message": "Saved from a chat ({{model}}) on {{date}}."
+  },
+  "answerNote_fromTemporaryChat": {
+    "message": "Saved from a temporary chat on {{date}}."
+  },
+  "answerNote_fromTemporaryChatModel": {
+    "message": "Saved from a temporary chat ({{model}}) on {{date}}."
+  },
+  "composer_slashNote": {
+    "message": "Attach a note"
+  },
+  "composer_slashNoteDesc": {
+    "message": "Search your notes and attach one to this message"
+  },
+  "noteMentions_label": {
+    "message": "Notes"
+  },
+  "noteMentions_count": {
+    "message": "{{count}} notes"
+  },
+  "noteMentions_count_one": {
+    "message": "{{count}} note"
+  },
+  "noteMentions_count_other": {
+    "message": "{{count}} notes"
+  },
+  "noteMentions_searching": {
+    "message": "Searching notes…"
+  },
+  "noteMentions_error": {
+    "message": "Couldn't search your notes."
+  },
+  "noteMentions_empty": {
+    "message": "No notes found"
+  },
+  "noteMentions_untitled": {
+    "message": "Untitled note"
+  },
+  "noteMentions_attached": {
+    "message": "Attached notes"
+  },
+  "noteMentions_open": {
+    "message": "Open this note"
+  },
+  "noteMentions_remove": {
+    "message": "Remove note {{title}}"
+  },
+  "noteMentions_shortened": {
+    "message": "[Note shortened]"
+  },
+  "noteMentions_attachedNoteLabel": {
+    "message": "Attached note: {{title}}"
+  },
+  "noteMentions_unpicked": {
+    "message": "Pick a note, or remove /note to send this as a message."
   },
   "tools_images": {
     "message": "Images"

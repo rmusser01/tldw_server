@@ -804,7 +804,9 @@
     "toolsPanel": "Composer tools",
     "calmPlaceholder": "Write a message…",
     "responseAndTools": "Response & tools",
-    "toolsPreferenceUnavailable": "Display preference unavailable. Tools still work for this visit."
+    "toolsPreferenceUnavailable": "Display preference unavailable. Tools still work for this visit.",
+    "slashNote": "Attach a note",
+    "slashNoteDesc": "Search your notes and attach one to this message"
   },
   "tour": {
     "modelTitle": "Choose a Model",
@@ -1409,7 +1411,7 @@
     "roleUser": "You",
     "roleAssistant": "Assistant",
     "empty": "Use no prior messages",
-    "expand": "Expand in full page",
+    "expand": "Open in full page",
     "instructions": "Tick the messages the AI should see, in the order it should see them. Arrow keys move between messages; Alt + arrow keys reorder them.",
     "source": "All messages in this chat",
     "imageOnly": "Image or attachment only",
@@ -1835,6 +1837,29 @@
   },
   "focusBar": {
     "openChatList": "Open chat list"
+  },
+  "answerNote": {
+    "untitled": "Chat answer, {{date}}",
+    "fromChat": "Saved from a chat on {{date}}.",
+    "fromChatModel": "Saved from a chat ({{model}}) on {{date}}.",
+    "fromTemporaryChat": "Saved from a temporary chat on {{date}}.",
+    "fromTemporaryChatModel": "Saved from a temporary chat ({{model}}) on {{date}}."
+  },
+  "noteMentions": {
+    "label": "Notes",
+    "count": "{{count}} notes",
+    "count_one": "{{count}} note",
+    "count_other": "{{count}} notes",
+    "searching": "Searching notes…",
+    "error": "Couldn't search your notes.",
+    "empty": "No notes found",
+    "untitled": "Untitled note",
+    "attached": "Attached notes",
+    "open": "Open this note",
+    "remove": "Remove note {{title}}",
+    "shortened": "[Note shortened]",
+    "attachedNoteLabel": "Attached note: {{title}}",
+    "unpicked": "Pick a note, or remove /note to send this as a message."
   },
   "tools": {
     "images": "Images"

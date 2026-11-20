@@ -1,4 +1,3 @@
-import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import logoImage from "@/assets/icon.png"
 import { useMessage } from "@/hooks/useMessage"
 import { Link } from "react-router-dom"
@@ -8,10 +7,12 @@ import { useTranslation } from "react-i18next"
 import React from "react"
 import { StatusDot } from "./StatusDot"
 import { browser } from "wxt/browser"
-import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { TtsClipsDrawer } from "./TtsClipsDrawer"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
-import { CHAT_PATH } from "@/routes/route-paths"
+import {
+  sidepanelFullPageCopy,
+  sidepanelFullPageTarget
+} from "./hooks/useSidepanelOpenFullPage"
 
 /**
  * Keyboard focus ring for header controls. A box-shadow ring is used because
@@ -20,6 +21,18 @@ import { CHAT_PATH } from "@/routes/route-paths"
 const HEADER_FOCUS_RING_CLASS =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
 const HEADER_ICON_CONTROL_CLASS = `rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2 ${HEADER_FOCUS_RING_CLASS}`
+
+/** Opens an extension full-page route in a new tab (a plain window on the web). */
+const openOptionsRoute = (route: string) => {
+  const url = browser.runtime?.getURL ? browser.runtime.getURL(`/options.html#${route}` as "/options.html") : route
+  if (browser.tabs?.create) {
+    browser.tabs.create({ url }).catch(() => {
+      window.open(url, "_blank")
+    })
+    return
+  }
+  window.open(url, "_blank")
+}
 
 type SidepanelHeaderSimpleProps = {
   chatReady?: boolean
@@ -33,7 +46,12 @@ type SidepanelHeaderSimpleProps = {
    * missing or resolves to null.
    */
   loadEditableTitle?: () => Promise<string | null>
-  onOpenChatInWebUi?: () => Promise<boolean | void> | boolean | void
+  /** The composer's one "Open in full page" action (XP-09). */
+  onOpenFullPage?: () => Promise<boolean | void> | boolean | void
+  /** The composer's description of what it carries. */
+  fullPageDescription?: string
+  /** Why the composer can't open it yet (draft not restored or not verified). */
+  notReadyReason?: string | null
   /**
    * The page's visually hidden h1; the chat page leaves it as "Chat"
    * (AX-14). `null` for a page that renders its own h1.
@@ -57,13 +75,14 @@ export const SidepanelHeaderSimple = ({
   activeTitle,
   onRenameTitle,
   loadEditableTitle,
-  onOpenChatInWebUi,
+  onOpenFullPage,
+  fullPageDescription,
+  notReadyReason,
   heading
 }: SidepanelHeaderSimpleProps = {}) => {
-  const historySelection = useHistorySelectionContext()
   const { temporaryChat } = useMessage()
   const { t } = useTranslation(["sidepanel", "common", "option"])
-  const notification = useAntdNotification()
+  const fullPageTarget = sidepanelFullPageTarget()
   const { capabilities } = useServerCapabilities()
   const [localSidebarOpen, setLocalSidebarOpen] = React.useState(false)
   const [ttsClipsOpen, setTtsClipsOpen] = React.useState(false)
@@ -87,21 +106,13 @@ export const SidepanelHeaderSimple = ({
   const sidebarToggleLabel = sidebarOpen
     ? t("common:chatSidebar.collapse", "Collapse sidebar")
     : t("common:chatSidebar.expand", "Expand sidebar")
-  const usesExtensionExpansion = Boolean(historySelection && (browser.runtime.id || !onOpenChatInWebUi))
-  const usesWebUiHandoff = Boolean(onOpenChatInWebUi && !usesExtensionExpansion)
-  const openFullChatLabel = usesExtensionExpansion
-    ? t("playground:historySelection.expand", "Expand in full page")
-    : usesWebUiHandoff
-      ? t("sidepanel:header.openFullChatWebui", "Open full chat in WebUI")
-      : t("sidepanel:header.openFullChatExtension", "Open full extension chat")
+  const fullPageCopy = sidepanelFullPageCopy(t, fullPageTarget)
+  const openFullChatLabel = fullPageCopy.label
   const openFullChatDescription = !chatReady
-    ? t("sidepanel:header.restoreBeforeExpand", "Restore or start a conversation before opening it in a full page.")
-    : usesExtensionExpansion
-      ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.")
-      : usesWebUiHandoff
-        ? t("sidepanel:header.openFullChatWebuiHandoffDescription", "Opens the configured WebUI with a draft and selected chat options. Device-local history may be unavailable there.")
-        : t("sidepanel:header.openFullChatExtensionDescription", "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy.")
-
+    ? notReadyReason ?? t("sidepanel:header.restoreBeforeExpand", "Restore or start a conversation before opening it in a full page.")
+    : onOpenFullPage
+      ? fullPageDescription ?? fullPageCopy.description
+      : t("sidepanel:openFullPage.routeOnlyDescription", "Opens the chat page in a new tab. Drafts and page references stay here.")
 
   const handleSidebarToggle = React.useCallback(() => {
     const next = !sidebarOpen
@@ -168,63 +179,19 @@ export const SidepanelHeaderSimple = ({
     setIsEditingTitle(false)
   }, [activeTitle, draftTitle, onRenameTitle, titleBaseline, titleLoading])
 
-  const webUiOpenAttemptRef = React.useRef(0)
-  const mountedRef = React.useRef(false)
-  const webUiViewRef = React.useRef({ chatReady, onOpenChatInWebUi, activeTitle })
-  webUiViewRef.current = { chatReady, onOpenChatInWebUi, activeTitle }
-  React.useLayoutEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
-
-  const openFullScreen = React.useCallback(async () => {
+  const openFullScreen = React.useCallback(() => {
     if (!chatReady) return
-    const showFailure = () => {
-      notification.error({
-        message: t(
-          "sidepanel:header.openFullScreenFailed",
-          "Unable to open full-screen view."
-        )
-      })
-    }
-    if (onOpenChatInWebUi && !usesExtensionExpansion) {
-      const attempt = ++webUiOpenAttemptRef.current
-      const expected = webUiViewRef.current
-      const current = () => webUiOpenAttemptRef.current === attempt && mountedRef.current && webUiViewRef.current.chatReady &&
-        webUiViewRef.current.onOpenChatInWebUi === expected.onOpenChatInWebUi && webUiViewRef.current.activeTitle === expected.activeTitle
-      Promise.resolve(onOpenChatInWebUi()).catch((error) => {
-        if (!current()) return
-        console.error("Failed to open WebUI chat handoff:", error)
-        showFailure()
+    if (onOpenFullPage) {
+      void Promise.resolve(onOpenFullPage()).catch((error) => {
+        console.error("[sidepanel] Open in full page failed:", error)
       })
       return
     }
-    const route = historySelection ? await historySelection.prepareExpansionPath() : CHAT_PATH
-    if (!route) { showFailure(); return }
-    const url = browser.runtime.getURL(`/options.html#${route}`)
-    const openFallback = () => {
-      const opened = window.open(url, "_blank")
-      if (!opened) {
-        showFailure()
-      }
-    }
-    if (browser.tabs?.create) {
-      browser.tabs.create({ url }).catch((error) => {
-        console.error("Failed to open full-screen tab:", error)
-        openFallback()
-      })
-      return
-    }
-    openFallback()
-  }, [chatReady, historySelection, notification, onOpenChatInWebUi, t, usesExtensionExpansion])
+    // Clipper, Companion and Persona have no composer: open the chat page alone.
+    openOptionsRoute("/chat")
+  }, [chatReady, onOpenFullPage])
 
-  const openFlashcards = React.useCallback(() => {
-    const url = browser.runtime.getURL("/options.html#/flashcards")
-    if (browser.tabs?.create) {
-      browser.tabs.create({ url }).catch(() => {
-        window.open(url, "_blank")
-      })
-      return
-    }
-    window.open(url, "_blank")
-  }, [])
+  const openFlashcards = React.useCallback(() => openOptionsRoute("/flashcards"), [])
 
   return (
     <div

@@ -48,6 +48,26 @@
     "openFullChatExtensionDescription": "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy.",
     "openFullChatWebuiHandoffDescription": "Opens the configured WebUI with a draft and selected chat options. Device-local history may be unavailable there."
   },
+  "openFullPage": {
+    "label": "Open in full page",
+    "extensionDescription": "Opens this chat in a new tab, with your draft and page references. Your draft also stays here.",
+    "webuiDescription": "Opens the WebUI with your draft. You can bring this chat's settings along there. This chat and its attachments stay here.",
+    "failed": "Could not open the full page. Your draft stays here.",
+    "partial": "Opened with a partial copy: some of the draft or page references were shortened or could not be read. Review it there. Your draft stays here.",
+    "characterDraftStays": "A new Character chat opens without your draft. It stays here.",
+    "routeOnlyDescription": "Opens the chat page in a new tab. Drafts and page references stay here.",
+    "webHostedDescription": "Opens the full page with your draft. You can bring this chat's settings along there. This chat and its attachments stay here.",
+    "newChatDescription": "Opens the chat page in a new tab, with your draft and page references. Your draft also stays here.",
+    "webuiLabel": "Open in WebUI",
+    "personaDraftStays": "A new Persona chat opens without your draft. It stays here.",
+    "attachmentsStay": "Attachments stay in the side panel. Add them again on the full page.",
+    "checkingDraft": "Checking which account this draft belongs to…",
+    "draftCheckFailed": "This draft's account couldn't be checked. Retry from the draft notice."
+  },
+  "runtimeChip": {
+    "defaults": "Defaults",
+    "title": "Model parameters for this chat"
+  },
   "flashcards": {
     "opening": "Opening Flashcards",
     "openedInTab": "Flashcards opens in the full extension workspace so review, import, and deck management have enough room.",
@@ -61,7 +81,7 @@
     "searchSection": "Search & Vision",
     "webSearch": "Web Search",
     "vision": "Vision",
-    "visionDisabledKnowledge": "Disable Knowledge Search to use Vision",
+    "visionDisabledKnowledge": "Turn off Search & Context to use Vision",
     "visionTooltip": "Enable Vision to analyze images",
     "toolChoiceLabel": "Tool choice",
     "toolChoiceAuto": "Auto",
@@ -128,7 +148,8 @@
     "commandCount_other": "{{count}} commands",
     "mentionCount": "{{count}} matches",
     "mentionCount_one": "{{count}} match",
-    "mentionCount_other": "{{count}} matches"
+    "mentionCount_other": "{{count}} matches",
+    "imageProviderMissing": "Name the image provider: /generate-image:<provider> <prompt>."
   },
   "notification": {
     "ingestSent": "Sent to tldw server",
