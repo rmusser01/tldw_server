@@ -266,3 +266,50 @@ def test_int_env_sanitizes_invalid_value_log(monkeypatch):
     assert "AUDIT_SEC_CRITICAL_HIGH_RISK_MIN" not in joined
     assert "threshold leaked" not in joined
     assert "/private/" not in joined
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("healthy", "store_status", "snapshot_raises"),
+    [(True, "healthy", False), (False, "unavailable", False), (True, "unavailable", True)],
+    ids=["healthy", "unavailable", "snapshot-raises-runtime-error"],
+)
+async def test_api_health_reports_the_provider_override_store_without_changing_its_status(
+    monkeypatch, healthy, store_status, snapshot_raises
+):
+    """TASK-15581 (P2): every LLM call refuses while the provider-override store is unavailable, so /health says so;
+    but the check is informational, so a store blip never turns a probe on this route into a restart."""
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+    from tldw_Server_API.app.core.AuthNZ import database as auth_database
+    from tldw_Server_API.app.core.Metrics import metrics_manager
+    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides as store
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    class _HealthyPool:
+        async def health_check(self):
+            return {"status": "healthy"}
+
+    async def _healthy_pool():
+        return _HealthyPool()
+
+    monkeypatch.setattr(auth_database, "get_db_pool", _healthy_pool)
+    monkeypatch.setattr(metrics_manager, "get_metrics_registry", lambda: object())
+    monkeypatch.setattr(chacha_deps, "get_chacha_health_snapshot", lambda: {"status": "healthy"})
+    set_llm_provider_overrides_cache_for_tests({}, healthy=healthy)
+    if snapshot_raises:  # P2-a: a RuntimeError from the recovery scheduler must not turn the route into a 500
+
+        def _boom() -> dict:
+            raise RuntimeError("scheduler failed")
+
+        monkeypatch.setattr(store, "get_llm_provider_overrides_snapshot", _boom)
+
+    response = await health_mod.api_health()
+    body = json.loads(response.body.decode("utf-8"))
+
+    assert (response.status_code, body["status"], body["checks"].get("llm_provider_overrides")) == (
+        200,
+        "ok",
+        {"status": store_status},
+    )

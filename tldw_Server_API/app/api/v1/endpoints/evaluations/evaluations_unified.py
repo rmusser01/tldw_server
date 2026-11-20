@@ -68,6 +68,7 @@ from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_REFUSAL_STATUS, PROVIDER_STREAM_ERROR_MESSAGES
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
 )
@@ -254,6 +255,11 @@ def _eval_provider_http_exception(exc: BaseException) -> HTTPException:
         code = "provider_authentication_failed"
         status_code = status.HTTP_502_BAD_GATEWAY
         message = "The selected provider credentials could not be authenticated."
+    elif isinstance(exc, ChatConfigurationError) and exc.error_code in ADMIN_REFUSAL_STATUS:
+        # The provider base class refused an admin-disabled provider or model, or an unreadable store (TASK-15581).
+        code = exc.error_code
+        status_code = ADMIN_REFUSAL_STATUS[code]
+        message = PROVIDER_STREAM_ERROR_MESSAGES[code]
     elif isinstance(exc, ChatConfigurationError):
         code = getattr(exc, "error_code", "provider_configuration_invalid")
         if code not in {"missing_provider_credentials", "provider_configuration_invalid"}:

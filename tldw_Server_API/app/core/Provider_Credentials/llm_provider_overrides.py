@@ -795,6 +795,18 @@ def get_llm_provider_overrides_snapshot() -> dict[str, LLMProviderOverride]:
     return _get_healthy_override_snapshot()
 
 
+def llm_provider_overrides_status() -> str:
+    """Return ``"healthy"`` when an LLM call would find a usable override snapshot, else ``"unavailable"``.
+
+    For health reporting (TASK-15581): it never raises, so a health route that shows it cannot fail over it.
+    """
+    try:
+        get_llm_provider_overrides_snapshot()
+    except Exception:  # noqa: BLE001 - any failure to read the snapshot means calls are refused
+        return "unavailable"
+    return "healthy"
+
+
 def capture_provider_override_call_snapshot(provider: str) -> ProviderOverrideCallSnapshot:
     """Capture one provider override for policy and server credential fallback."""
     provider_norm = canonical_provider_name(provider)
@@ -956,6 +968,24 @@ def apply_llm_provider_overrides_to_listing(
 
 def validate_provider_override(provider: str, model: str | None) -> dict[str, str] | None:
     return capture_provider_override_call_snapshot(provider).policy_error(model)
+
+
+def enforce_provider_override(provider: str, model: str | None) -> None:
+    """Refuse a call the admin provider override disables, whatever its key (TASK-15581).
+
+    The owner's rule (2026-11-19): a provider the override turns off (``provider_disabled``), or a model off its
+    ``allowed_models`` (``model_not_allowed``), is refused on the user's own key, a team or org key and the
+    server's. A provider the server merely has no key for is not refused. Raises ``ProviderOverridePolicyError``,
+    or ``ByokResolutionError("credential_store_unavailable")`` when the policy cannot be read. Each refusal writes
+    one warning naming the provider and the reason, never a key.
+    """
+    provider_norm = canonical_provider_name(provider)
+    try:
+        capture_provider_override_call_snapshot(provider_norm).enforce(model)
+    except ByokResolutionError as exc:
+        reason = getattr(exc, "policy_code", None) or exc.code
+        logger.warning("Provider override for {}: {}; the call is refused", provider_norm, reason)
+        raise
 
 
 def server_key_fallback(provider: str, model: str | None) -> bool:

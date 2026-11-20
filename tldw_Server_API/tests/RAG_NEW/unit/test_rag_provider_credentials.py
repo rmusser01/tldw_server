@@ -870,6 +870,12 @@ def test_checkpoint_sanitizer_excludes_runtime() -> None:
             "missing_provider_credentials",
         ),
         (
+            # The provider base class's admin-override refusal keeps its code and 403 (TASK-15581).
+            ChatConfigurationError(_SENTINEL_SECRET, provider="openai", error_code="provider_disabled"),
+            403,
+            "provider_disabled",
+        ),
+        (
             ByokResolutionError("credential_store_unavailable", "openai"),
             503,
             "credential_store_unavailable",

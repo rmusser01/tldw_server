@@ -65,6 +65,8 @@ _PROVIDER_STREAM_ERROR_STATUS = {
     "provider_disabled": 403,
     "model_not_allowed": 403,
 }
+# The admin provider-override refusals the provider base class raises (TASK-15581), with their HTTP status.
+ADMIN_REFUSAL_STATUS = {"provider_disabled": 403, "model_not_allowed": 403, "credential_store_unavailable": 503}
 _PROVIDER_STREAM_ERROR_TYPE_CODES = {
     "chatauthenticationerror": "provider_authentication_failed",
     "chatconfigurationerror": "provider_configuration_invalid",
