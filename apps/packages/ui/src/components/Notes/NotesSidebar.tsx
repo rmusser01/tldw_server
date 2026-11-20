@@ -208,6 +208,23 @@ export interface NotesSidebarProps {
 // Component
 // ---------------------------------------------------------------------------
 
+type DescribedButtonProps = React.ComponentProps<typeof Button> & {
+  /** Always describes the button; antd's Tooltip sets aria-describedby only while open. */
+  descriptionId: string
+}
+
+/** A Tooltip child that keeps its own description when the tooltip is closed (NL-12 review). */
+const DescribedButton = React.forwardRef<HTMLButtonElement, DescribedButtonProps>(
+  ({ descriptionId, 'aria-describedby': tooltipId, ...props }, ref) => (
+    <Button
+      ref={ref}
+      {...props}
+      aria-describedby={[descriptionId, tooltipId].filter(Boolean).join(' ')}
+    />
+  )
+)
+DescribedButton.displayName = 'DescribedButton'
+
 const NotesSidebar: React.FC<NotesSidebarProps> = ({
   // Layout
   isMobileViewport,
@@ -396,6 +413,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           total
         })
 
+  const inboxDescription = t('option:notesSearch.viewModeInboxDescription', {
+    defaultValue: 'Notes saved from browser capture.'
+  })
   const switchViewMode = React.useCallback(
     (mode: NotesListViewMode) => {
       setListViewMode(mode)
@@ -655,15 +675,16 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       defaultValue: 'Timeline'
                     })}
                   </Button>
-                  <Tooltip
-                    title={t('option:notesSearch.viewModeInboxDescription', {
-                      defaultValue: 'Notes saved from browser capture.'
-                    })}
-                  >
-                    <Button
+                  {/* The description is the button's own, not just a hover tooltip (NL-12 review). */}
+                  <span id="notes-view-mode-inbox-description" className="sr-only">
+                    {inboxDescription}
+                  </span>
+                  <Tooltip title={inboxDescription} trigger={['hover', 'focus']}>
+                    <DescribedButton
                       size="small"
                       type={listViewMode === 'inbox' ? 'primary' : 'default'}
                       aria-pressed={listViewMode === 'inbox'}
+                      descriptionId="notes-view-mode-inbox-description"
                       onClick={() => switchViewMode('inbox')}
                       disabled={listMode !== 'active'}
                       data-testid="notes-view-mode-inbox"
@@ -671,7 +692,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       {t('option:notesSearch.viewModeInbox', {
                         defaultValue: 'Inbox'
                       })}
-                    </Button>
+                    </DescribedButton>
                   </Tooltip>
                   <Button
                     size="small"
