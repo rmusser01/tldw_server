@@ -927,7 +927,7 @@
     "message": "Search your knowledge base and context"
   },
   "commandPalette_toggleWebSearch": {
-    "message": "Toggle Web Search"
+    "message": "Toggle web search"
   },
   "commandPalette_toggleWebDesc": {
     "message": "Search the internet"

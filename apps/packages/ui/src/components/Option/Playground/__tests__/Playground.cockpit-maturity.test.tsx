@@ -67,7 +67,6 @@ describe("Playground mature cockpit surfaces", () => {
   it("renders context as an actionable source inventory", () => {
     const removeResearch = vi.fn()
     const removeFile = vi.fn()
-    const toggleWebSearch = vi.fn()
 
     render(
       <PlaygroundContextRail
@@ -75,8 +74,6 @@ describe("Playground mature cockpit surfaces", () => {
         contextSummary={[]}
         sessionLabel="Temporary chat"
         historyLinked={false}
-        webSearch
-        onToggleWebSearch={toggleWebSearch}
         temporaryChat
         onToggleTemporaryChat={vi.fn()}
         contextCounts={{ files: 1, knowledge: 0, media: 0, research: 1 }}

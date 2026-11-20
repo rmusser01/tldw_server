@@ -239,7 +239,7 @@ test.describe('Knowledge RAG workspace UX', () => {
       await expect(contextButton).toBeVisible({ timeout: 15_000 })
       await contextButton.click()
 
-      await expect(page.getByRole('heading', { name: /Knowledge Search/i })).toBeVisible()
+      await expect(page.getByRole('heading', { name: /Search & Context/i })).toBeVisible()
 
       const settingsTab = page.getByRole('tab', { name: /Settings/i }).first()
       await settingsTab.click()

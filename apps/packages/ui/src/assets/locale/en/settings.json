@@ -1216,7 +1216,7 @@
       }
     },
     "webSearch": {
-      "heading": "Manage Web Search",
+      "heading": "Manage web search",
       "searchMode": {
         "label": "Perform Simple Internet Search"
       },
@@ -1885,8 +1885,8 @@
     }
   },
   "manageSearch": {
-    "title": "Manage Web Search",
-    "heading": "Configure Web Search"
+    "title": "Manage web search",
+    "heading": "Configure web search"
   },
   "about": {
     "title": "About",
@@ -2184,14 +2184,14 @@
       "alert": "Configuring the system prompt here is deprecated. Please use the Manage Prompts section to add or edit prompts. This section will be removed in a future release",
       "systemPrompt": "System Prompt",
       "systemPromptPlaceholder": "Enter System Prompt",
-      "webSearchPrompt": "Web Search Prompt",
+      "webSearchPrompt": "Web search prompt",
       "webSearchPromptHelp": "Do not remove `{search_results}` from the prompt.",
       "webSearchPromptError": "Please enter a web search prompt",
-      "webSearchPromptPlaceholder": "Enter Web Search Prompt",
-      "webSearchFollowUpPrompt": "Web Search Follow Up Prompt",
+      "webSearchPromptPlaceholder": "Enter web search prompt",
+      "webSearchFollowUpPrompt": "Web search follow-up prompt",
       "webSearchFollowUpPromptHelp": "Do not remove `{chat_history}` and `{question}` from the prompt.",
-      "webSearchFollowUpPromptError": "Please input your Web Search Follow Up Prompt!",
-      "webSearchFollowUpPromptPlaceholder": "Your Web Search Follow Up Prompt"
+      "webSearchFollowUpPromptError": "Please enter your web search follow-up prompt.",
+      "webSearchFollowUpPromptPlaceholder": "Your web search follow-up prompt"
     }
   },
   "chunkingPlayground": {

@@ -511,7 +511,7 @@ export function CommandPalette({
               id: "action-toggle-web",
               label: t(
                 "common:commandPalette.toggleWebSearch",
-                "Toggle Web Search"
+                "Toggle web search"
               ),
               description: t(
                 "common:commandPalette.toggleWebDesc",

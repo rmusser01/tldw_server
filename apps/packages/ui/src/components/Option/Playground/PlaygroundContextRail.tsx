@@ -77,8 +77,6 @@ export type PlaygroundContextRailProps = {
   sessionDetail?: string | null;
   sessionError?: string | null;
   historyLinked: boolean;
-  webSearch: boolean;
-  onToggleWebSearch: () => void;
   temporaryChat: boolean;
   onToggleTemporaryChat: (next: boolean) => void;
   contextCounts: {
@@ -142,8 +140,6 @@ export const PlaygroundContextRail = ({
   sessionDetail,
   sessionError,
   historyLinked,
-  webSearch,
-  onToggleWebSearch,
   temporaryChat,
   onToggleTemporaryChat,
   contextCounts,
@@ -196,15 +192,14 @@ export const PlaygroundContextRail = ({
         "Select a prompt to add system instructions.",
       )
     : effectivePromptSummary.detail;
+  // An idle session shows no status badge (CO-04: no "Idle" jargon).
   const effectiveSessionStatusLabel =
     sessionStatusLabel ||
     (sessionStatus === "failed"
       ? t("cockpit.sessionLoadFailed", "Load failed")
       : sessionStatus === "loading"
         ? t("cockpit.sessionLoading", "Loading conversation")
-        : sessionStatus === "loaded"
-          ? t("cockpit.sessionReady", READY_STATE_LABEL)
-          : t("cockpit.sessionIdle", "Idle"));
+        : t("cockpit.sessionReady", READY_STATE_LABEL));
   const sourceCountLabel =
     selectedSourceCount === 1
       ? t("cockpit.selectedSourceCountOne", "1 selected source")
@@ -276,17 +271,17 @@ export const PlaygroundContextRail = ({
       contextCounts.media > 0
         ? contextCounts.media === 1
           ? {
-              label: t("cockpit.contextMediaCountOne", "1 media scope"),
-              clearLabel: t("cockpit.clearMediaScopes", "Clear media scopes"),
+              label: t("cockpit.contextMediaCountOne", "1 media item"),
+              clearLabel: t("cockpit.clearMediaScopes", "Clear media items"),
               onClear: onClearMedia,
             }
           : {
               label: t(
                 "cockpit.contextMediaCountMany",
-                `${contextCounts.media} media scopes`,
+                `${contextCounts.media} media items`,
                 { count: contextCounts.media },
               ),
-              clearLabel: t("cockpit.clearMediaScopes", "Clear media scopes"),
+              clearLabel: t("cockpit.clearMediaScopes", "Clear media items"),
               onClear: onClearMedia,
             }
         : null,
@@ -435,27 +430,20 @@ export const PlaygroundContextRail = ({
             ))}
           </ul>
         )}
+        {/* One home per feature (CC-08): web search is toggled in the Tools
+            tray and listed here as a source while it is on. */}
         <div className="mt-3 flex flex-wrap gap-1">
           <button
             type="button"
             onClick={onOpenSearchContext}
             className={railActionClass}
-            aria-label={t("cockpit.openSearchContext", "Open Search & Context")}
+            aria-label={t(
+              "cockpit.addSourcesFromSearchContext",
+              "Add sources from Search & Context",
+            )}
           >
             <Search className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
             {t("cockpit.addSources", "Add sources")}
-          </button>
-          <button
-            type="button"
-            onClick={onToggleWebSearch}
-            className={`${railActionClass} ${webSearch ? "bg-primary/10 text-primaryStrong" : ""}`}
-            aria-label={t("cockpit.webSearch", "Web search")}
-            aria-pressed={webSearch}
-          >
-            <Globe2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-            {webSearch
-              ? t("cockpit.webSearchOn", "Web search on")
-              : t("cockpit.webSearchOff", "Web search off")}
           </button>
         </div>
         {countLabels.length > 0 && (

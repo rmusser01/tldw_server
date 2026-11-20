@@ -654,7 +654,7 @@
     "message": "Content size (default 4028)"
   },
   "generalSettings_webSearch_heading": {
-    "message": "Manage Web Search"
+    "message": "Manage web search"
   },
   "generalSettings_webSearch_searchMode_label": {
     "message": "Perform Simple Internet Search"
@@ -1281,10 +1281,10 @@
     "message": "If you have connection issues with the server, you can configure a custom origin URL. To learn more about the configuration, <anchor>click here</anchor>."
   },
   "manageSearch_title": {
-    "message": "Manage Web Search"
+    "message": "Manage web search"
   },
   "manageSearch_heading": {
-    "message": "Configure Web Search"
+    "message": "Configure web search"
   },
   "about_title": {
     "message": "About"
@@ -1881,7 +1881,7 @@
     "message": "Enter System Prompt"
   },
   "rag_prompt_webSearchPrompt": {
-    "message": "Web Search Prompt"
+    "message": "Web search prompt"
   },
   "rag_prompt_webSearchPromptHelp": {
     "message": "Do not remove `{search_results}` from the prompt."
@@ -1890,19 +1890,19 @@
     "message": "Please enter a web search prompt"
   },
   "rag_prompt_webSearchPromptPlaceholder": {
-    "message": "Enter Web Search Prompt"
+    "message": "Enter web search prompt"
   },
   "rag_prompt_webSearchFollowUpPrompt": {
-    "message": "Web Search Follow Up Prompt"
+    "message": "Web search follow-up prompt"
   },
   "rag_prompt_webSearchFollowUpPromptHelp": {
     "message": "Do not remove `{chat_history}` and `{question}` from the prompt."
   },
   "rag_prompt_webSearchFollowUpPromptError": {
-    "message": "Please input your Web Search Follow Up Prompt!"
+    "message": "Please enter your web search follow-up prompt."
   },
   "rag_prompt_webSearchFollowUpPromptPlaceholder": {
-    "message": "Your Web Search Follow Up Prompt"
+    "message": "Your web search follow-up prompt"
   },
   "chunkingPlayground_nav": {
     "message": "Chunking Playground"

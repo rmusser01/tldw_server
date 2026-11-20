@@ -351,10 +351,10 @@
     "message": "Search"
   },
   "rag_show": {
-    "message": "Show Knowledge Search"
+    "message": "Show Search & Context"
   },
   "rag_hide": {
-    "message": "Hide Knowledge Search"
+    "message": "Hide Search & Context"
   },
   "rag_addTagPlaceholder": {
     "message": "Add tag (Enter)"
@@ -597,7 +597,7 @@
     "message": "Search all settings"
   },
   "knowledge_title": {
-    "message": "Knowledge Search"
+    "message": "Search & Context"
   },
   "knowledge_tabs_search": {
     "message": "Search"
@@ -756,7 +756,7 @@
     "message": "Enable generation"
   },
   "rag_enableGenerationHelper": {
-    "message": "Generate answers from retrieved context"
+    "message": "Chat answers from your sources. QA search writes one only when you click Generate answer."
   },
   "rag_strictExtractive": {
     "message": "Strict extractive"
@@ -1248,7 +1248,7 @@
     "message": "File Search"
   },
   "knowledge_tabs_label": {
-    "message": "Knowledge panel sections"
+    "message": "Search & Context sections"
   },
   "knowledge_tabs_contextBadge": {
     "message": "{{count}} items attached"
@@ -1273,6 +1273,21 @@
   },
   "qaSearch_insertAnswer": {
     "message": "Insert answer"
+  },
+  "qaSearch_generateAnswer": {
+    "message": "Generate answer"
+  },
+  "qaSearch_generatingAnswer": {
+    "message": "Generating answer…"
+  },
+  "qaSearch_noAnswerGenerated": {
+    "message": "No answer was generated from these sources."
+  },
+  "qaSearch_generateAnswerFailed": {
+    "message": "Couldn't generate an answer. Try again, or check the model in Settings."
+  },
+  "qaSearch_answerReady": {
+    "message": "Answer ready."
   },
   "qaSearch_copyChunk": {
     "message": "Copy chunk"
@@ -2151,5 +2166,17 @@
   },
   "folderPicker_saveError": {
     "message": "Some folder changes couldn't be saved. Try again."
+  },
+  "qaSearch_relevance_best": {
+    "message": "Best match"
+  },
+  "qaSearch_relevance_good": {
+    "message": "Good match"
+  },
+  "qaSearch_relevance_weaker": {
+    "message": "Weaker match"
+  },
+  "qaSearch_relevance_tooltip": {
+    "message": "Compared with the other results. Score {{score}}"
   }
 }

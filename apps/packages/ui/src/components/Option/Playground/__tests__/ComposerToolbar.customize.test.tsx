@@ -422,15 +422,6 @@ describe("Casual task-based customization", () => {
               onToggleCompare={noop}
               selectedCharacterName={null}
               onOpenActorSettings={noop}
-              contextToolsOpen={false}
-              onToggleKnowledgePanel={noop}
-              voiceChatEnabled={false}
-              voiceChatAvailable={false}
-              isSending={false}
-              onVoiceChatToggle={noop}
-              webSearch={false}
-              hasWebSearch
-              onToggleWebSearch={noop}
               onModeAnnouncement={noop}
               t={t}
             />
@@ -440,12 +431,9 @@ describe("Casual task-based customization", () => {
               onToolsPopoverChange={setOpen}
               isProMode={false}
               onOpenImageGenerate={noop}
-              onOpenKnowledgePanel={noop}
               useOCR={false}
               onUseOCRChange={noop}
               hasWebSearch
-              webSearch={false}
-              onWebSearchChange={noop}
               simpleInternetSearch={false}
               onSimpleInternetSearchChange={noop}
               defaultInternetSearchOn={false}
@@ -505,12 +493,16 @@ describe("Casual task-based customization", () => {
       })
       trigger.focus()
       await user.keyboard("{Enter}")
+      // The tray's own Compare control shares the glossary name, so look
+      // inside the open popup.
       const child =
         kind === "MCP"
           ? await screen.findByRole("radio", { name: "Required" })
-          : await screen.findByRole("button", {
-              name: kind === "Modes" ? /Compare responses/ : "Generate image"
-            })
+          : (
+              await screen.findAllByRole("button", {
+                name: kind === "Modes" ? /Compare models/ : "Generate image"
+              })
+            ).find((element) => element.closest(".ant-popover"))!
       if (focus === "content") child.focus()
       else expect(trigger).toHaveFocus()
       await user.keyboard("{Escape}")

@@ -187,7 +187,7 @@
     "saveFailedDescription": "Chat is now saving locally only. Check your connection and try again."
   },
   "knowledge": {
-    "title": "Knowledge Search",
+    "title": "Search & Context",
     "scopeNote": "Search and insert context for this chat. Open /knowledge for the full QA workspace.",
     "tabs": {
       "search": "Search",
@@ -195,7 +195,7 @@
       "fileSearch": "File Search",
       "settings": "Settings",
       "context": "Context",
-      "label": "Knowledge panel sections",
+      "label": "Search & Context sections",
       "contextBadge": "{{count}} items attached"
     }
   },
@@ -207,6 +207,11 @@
     "copied": "Copied",
     "copy": "Copy",
     "insertAnswer": "Insert answer",
+    "generateAnswer": "Generate answer",
+    "generatingAnswer": "Generating answer…",
+    "noAnswerGenerated": "No answer was generated from these sources.",
+    "generateAnswerFailed": "Couldn't generate an answer. Try again, or check the model in Settings.",
+    "answerReady": "Answer ready.",
     "copyChunk": "Copy chunk",
     "insertChunk": "Insert chunk",
     "sourceChunks": "Source Chunks ({{count}})",
@@ -219,6 +224,12 @@
       "label": "Sort source chunks",
       "relevance": "Relevance",
       "source": "Source"
+    },
+    "relevance": {
+      "best": "Best match",
+      "good": "Good match",
+      "weaker": "Weaker match",
+      "tooltip": "Compared with the other results. Score {{score}}"
     }
   },
   "fileSearch": {
@@ -247,8 +258,8 @@
     "search": "Search",
     "searchAllSettings": "Search all settings",
     "searchSettings": "Search settings...",
-    "show": "Show Knowledge Search",
-    "hide": "Hide Knowledge Search",
+    "show": "Show Search & Context",
+    "hide": "Hide Search & Context",
     "addTagPlaceholder": "Add tag (Enter)",
     "add": "Add",
     "noResults": "No results found",
@@ -322,7 +333,7 @@
     "rerankSentinel": "Sentinel margin",
     "generation": "Answer Generation",
     "enableGeneration": "Enable generation",
-    "enableGenerationHelper": "Generate answers from retrieved context",
+    "enableGenerationHelper": "Chat answers from your sources. QA search writes one only when you click Generate answer.",
     "strictExtractive": "Strict extractive",
     "strictExtractiveHelper": "Only use verbatim quotes from sources",
     "generationModel": "Generation model",

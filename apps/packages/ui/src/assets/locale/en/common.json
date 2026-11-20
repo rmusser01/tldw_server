@@ -522,7 +522,7 @@
     "toggleKnowledgeSearchDesc": "Search your knowledge base and context",
     "toggleChatWithPage": "Toggle chat with current page",
     "toggleChatWithPageDesc": "Answer using the page open in this browser tab",
-    "toggleWebSearch": "Toggle Web Search",
+    "toggleWebSearch": "Toggle web search",
     "toggleWebDesc": "Search the internet",
     "ingestPage": "Ingest Current Page",
     "ingestDesc": "Save this page to your knowledge base",

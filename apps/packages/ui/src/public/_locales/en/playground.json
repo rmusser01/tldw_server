@@ -357,7 +357,7 @@
     "message": "Image attachments disabled"
   },
   "attachments_imageDisabledBody": {
-    "message": "Disable Knowledge Search to attach images."
+    "message": "Images can't be attached while answers come from Search & Context. Type /search to turn that off."
   },
   "attachments_tabs": {
     "message": "Web Pages"
@@ -366,13 +366,13 @@
     "message": "Uploaded Files"
   },
   "attachments_enableKnowledgeSearch": {
-    "message": "Enable Knowledge Search"
+    "message": "Include in Search & Context"
   },
   "attachments_enableKnowledgeSearchTooltip": {
     "message": "When enabled, attached files and pinned results will be searched for relevant context"
   },
   "attachments_manageContext": {
-    "message": "Manage in Knowledge Panel"
+    "message": "Manage in Search & Context"
   },
   "attachments_processingBlocked": {
     "message": "Blocked"
@@ -531,7 +531,7 @@
     "message": "Extract text from image (OCR)"
   },
   "fileRetrievalEnabled": {
-    "message": "Enable Knowledge Search for Documents"
+    "message": "Include documents in Search & Context"
   },
   "speech_title": {
     "message": "Speech Playground"
@@ -783,7 +783,7 @@
     "message": "+Tools"
   },
   "composer_manageContextHint": {
-    "message": "Manage Knowledge Search in the Context tab."
+    "message": "Manage Search & Context sources in its Context tab."
   },
   "composer_queuedBanner_title": {
     "message": "Queued from existing drafts"
@@ -2661,7 +2661,7 @@
     "message": "Hands-free conversation with audio responses"
   },
   "empty_featureSearch": {
-    "message": "Knowledge Search"
+    "message": "Search & Context"
   },
   "empty_featureSearchHint": {
     "message": "Search your ingested media and notes"
@@ -2700,7 +2700,7 @@
     "message": "Attach files"
   },
   "tour_toolsContent": {
-    "message": "Attach images or documents to include them in your message. Manage context from Knowledge Search → Context."
+    "message": "Attach images or documents to include them in your message. Manage context from Search & Context → Context."
   },
   "tour_voiceTitle": {
     "message": "Voice Chat"
@@ -2901,22 +2901,19 @@
     "message": "Clear knowledge"
   },
   "cockpit_contextMediaCountOne": {
-    "message": "1 media scope"
+    "message": "1 media item"
   },
   "cockpit_contextMediaCountMany": {
-    "message": "{{count}} media scopes"
+    "message": "{{count}} media items"
   },
   "cockpit_clearMediaScopes": {
-    "message": "Clear media scopes"
+    "message": "Clear media items"
   },
   "cockpit_webSearch": {
     "message": "Web search"
   },
   "cockpit_webSearchOn": {
     "message": "Web search on"
-  },
-  "cockpit_webSearchOff": {
-    "message": "Web search off"
   },
   "cockpit_openSearchContext": {
     "message": "Open Search & Context"
@@ -3243,7 +3240,7 @@
     "message": "Media"
   },
   "cockpit_mediaScopeLabel": {
-    "message": "Media scope {{id}}"
+    "message": "Media item {{id}}"
   },
   "cockpit_nextReply": {
     "message": "Used on next reply"
@@ -3254,17 +3251,8 @@
   "cockpit_turnRunning": {
     "message": "Turn running"
   },
-  "cockpit_turnIdle": {
-    "message": "Turn idle"
-  },
-  "cockpit_providerRoute": {
-    "message": "Provider route"
-  },
   "cockpit_stop": {
     "message": "Stop"
-  },
-  "cockpit_scopedSettings": {
-    "message": "Scoped settings"
   },
   "cockpit_settingsDefault": {
     "message": "Default settings for this provider:model."
@@ -4872,6 +4860,15 @@
   "composer_toolsLabel": {
     "message": "Tools"
   },
+  "composer_shortOptions": {
+    "message": "Composer options"
+  },
+  "composer_shortOptionsWarning": {
+    "message": "Some hidden options need attention."
+  },
+  "composer_shortOptionsActive": {
+    "message": "Some hidden options are in use."
+  },
   "composer_shortcutHint": {
     "message": "/ commands · @ mentions"
   },
@@ -4889,6 +4886,9 @@
   },
   "cockpit_addSources": {
     "message": "Add sources"
+  },
+  "cockpit_addSourcesFromSearchContext": {
+    "message": "Add sources from Search & Context"
   },
   "cockpit_conversation": {
     "message": "Conversation"
@@ -4967,5 +4967,8 @@
   },
   "historySelection_backToParentStaleDetail": {
     "message": "Open the original chat from the chat list."
+  },
+  "tools_images": {
+    "message": "Images"
   }
 }

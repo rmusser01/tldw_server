@@ -103,8 +103,9 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         ? "60px"
         : "44px"
 
+  // A little tighter in short viewports (AX-04): the row must fit the dock.
   return (
-    <div className="relative min-w-0 px-1 pb-2 pt-1">
+    <div className="relative min-w-0 px-1 pb-2 pt-1 [@media(max-height:500px)]:pb-1">
       <SlashCommandMenu
         open={showSlashMenu}
         commands={slashCommands}
