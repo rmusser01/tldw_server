@@ -1,3 +1,5 @@
+from configparser import ConfigParser
+
 import pytest
 from types import SimpleNamespace
 
@@ -47,6 +49,9 @@ def test_search_agent_defaults_apply_when_request_fields_omitted(monkeypatch):
     ):
         monkeypatch.delenv(env_key, raising=False)
 
+    # Building a request reads config.txt for the contextual defaults; an uncached reload would
+    # copy config.txt's [Search-Agent] values back into the env this test just cleared.
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: ConfigParser())
     monkeypatch.setattr(
         "tldw_Server_API.app.core.config.get_config_value",
         _config_value_factory(
