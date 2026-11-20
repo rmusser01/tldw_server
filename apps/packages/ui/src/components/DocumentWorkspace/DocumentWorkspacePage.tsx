@@ -596,6 +596,18 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
     "viewer"
   )
 
+  const pendingSelectionPrompt = useDocumentWorkspaceStore(state => state.pendingSelectionPrompt)
+  useLayoutEffect(() => {
+    if (!pendingSelectionPrompt || !owner.isCurrent()) return
+    if (pendingSelectionPrompt.documentId !== activeDocumentId) {
+      useDocumentWorkspaceStore.setState({ pendingSelectionPrompt: null })
+      return
+    }
+    if (isMobile) setActiveTab("chat")
+    else if (isTablet) setRightDrawerOpen(true)
+    else if (!rightPaneOpen) setRightPaneOpen(true)
+  }, [activeDocumentId, isMobile, isTablet, owner, pendingSelectionPrompt, rightPaneOpen, setRightPaneOpen])
+
   // Keyboard shortcuts modal state
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)

@@ -7,8 +7,19 @@ import { useDocumentTTS } from "@/hooks/document-workspace/useDocumentTTS"
 
 const mocks = vi.hoisted(() => ({
   fetchTldwVoices: vi.fn(async () => []),
+  synthesizeSpeech: vi.fn(async () => new ArrayBuffer(8)),
   getTldwTTSModel: vi.fn(async () => "KittenML/kitten-tts-nano-0.8"),
   getTldwTTSVoice: vi.fn(async () => "Bella")
+}))
+
+const requestScope = { config: { serverUrl: "http://fixture.test", authMode: "multi-user" }, userId: "alice" }
+vi.mock("@/services/tldw", () => ({ tldwClient: { synthesizeSpeech: mocks.synthesizeSpeech } }))
+vi.mock("@/hooks/document-workspace/useDocumentOperation", () => ({
+  useDocumentOperation: () => ({
+    requestScope,
+    signal: new AbortController().signal,
+    isCurrent: () => true
+  })
 }))
 
 vi.mock("@/services/tldw/audio-voices", () => ({
@@ -62,11 +73,6 @@ describe("useDocumentTTS", () => {
   it("uses configured tldw model and voice when speaking", async () => {
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:tts-audio")
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      blob: vi.fn().mockResolvedValue(new Blob(["audio"]))
-    })
-    vi.stubGlobal("fetch", fetchMock)
 
     class MockAudio {
       paused = true
@@ -108,17 +114,14 @@ describe("useDocumentTTS", () => {
       await result.current.speak("Read this text")
     })
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/audio/speech",
+    expect(mocks.synthesizeSpeech).toHaveBeenCalledWith(
+      "Read this text",
       expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          input: "Read this text",
-          voice: "Bella",
-          model: "KittenML/kitten-tts-nano-0.8",
-          speed: 1,
-          response_format: "mp3"
-        })
+        voice: "Bella",
+        model: "KittenML/kitten-tts-nano-0.8",
+        speed: 1,
+        responseFormat: "mp3",
+        requestScope
       })
     )
 
@@ -129,11 +132,6 @@ describe("useDocumentTTS", () => {
     mocks.getTldwTTSVoice.mockResolvedValue("Jasper")
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:tts-audio")
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      blob: vi.fn().mockResolvedValue(new Blob(["audio"]))
-    })
-    vi.stubGlobal("fetch", fetchMock)
 
     class MockAudio {
       paused = true
@@ -175,16 +173,14 @@ describe("useDocumentTTS", () => {
       await result.current.speak("Configured voice text")
     })
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/audio/speech",
+    expect(mocks.synthesizeSpeech).toHaveBeenCalledWith(
+      "Configured voice text",
       expect.objectContaining({
-        body: JSON.stringify({
-          input: "Configured voice text",
-          voice: "Jasper",
-          model: "KittenML/kitten-tts-nano-0.8",
-          speed: 1,
-          response_format: "mp3"
-        })
+        voice: "Jasper",
+        model: "KittenML/kitten-tts-nano-0.8",
+        speed: 1,
+        responseFormat: "mp3",
+        requestScope
       })
     )
     expect(result.current.voice).toBe("Jasper")
@@ -195,11 +191,6 @@ describe("useDocumentTTS", () => {
     const revokeSpy = vi
       .spyOn(URL, "revokeObjectURL")
       .mockImplementation(() => {})
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      blob: vi.fn().mockResolvedValue(new Blob(["audio"]))
-    })
-    vi.stubGlobal("fetch", fetchMock)
 
     let lastAudio: any = null
     class MockAudio {

@@ -94,4 +94,16 @@ describe("Document Chat conversation sidebar", () => {
     fireEvent.keyDown(input, { key: "Enter" })
     await waitFor(() => expect(input).toHaveValue("Retry this draft"))
   })
+
+  it("uses a highlighted passage queued while Chat was hidden without sending it", () => {
+    useDocumentWorkspaceStore.setState({
+      pendingSelectionPrompt: { documentId: 19, prompt: 'Explain this passage: "Selected passage"' }
+    })
+    render(<DocumentChat operation={operation} />)
+    const input = screen.getByRole("textbox")
+    expect(input).toHaveValue('Explain this passage: "Selected passage"')
+    expect(input).toHaveFocus()
+    expect(useDocumentWorkspaceStore.getState().pendingSelectionPrompt).toBeNull()
+    expect(io.submit).not.toHaveBeenCalled()
+  })
 })

@@ -112,6 +112,34 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
     cfi: string
     rect: DOMRect
   } | null>(null)
+  const clearSelection = useCallback(() => {
+    setSelection(null)
+    for (const frame of containerRef.current?.querySelectorAll("iframe") ?? []) {
+      frame.contentDocument?.getSelection()?.removeAllRanges()
+    }
+  }, [])
+  const dismissSelectionOnEscape = useCallback((event: KeyboardEvent) => {
+    if (event.key === "Escape") clearSelection()
+  }, [clearSelection])
+  const captureSelection = useCallback((rendition: Rendition, cfi: string) => {
+    if (renditionRef.current !== rendition) return
+    const range = rendition.getRange(cfi)
+    const text = range?.toString().trim()
+    if (!range || !text) return
+    const rect = range.getBoundingClientRect()
+    const frame = range.startContainer.ownerDocument?.defaultView?.frameElement
+    const frameRect = frame?.getBoundingClientRect()
+    setSelection({
+      text,
+      cfi,
+      rect: new DOMRect(
+        rect.left + (frameRect?.left ?? 0),
+        rect.top + (frameRect?.top ?? 0),
+        rect.width,
+        rect.height
+      )
+    })
+  }, [])
 
   // Store access
   const currentPage = useDocumentWorkspaceStore((s) => s.currentPage)
@@ -154,21 +182,29 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
         // Dynamically import epub.js for SSR compatibility
         const ePubModule = await import("epubjs")
         const ePub = ePubModule.default
+        if (!mounted) return
 
         // Clean up previous book
         if (bookRef.current) {
           bookRef.current.destroy()
         }
 
-        const book = ePub(url)
-        bookRef.current = book
-
-        await book.ready
+        // EPUBs arrive as extensionless blob URLs. Keep the parser local until open settles.
+        const book = ePub()
+        try {
+          await book.open(url, "epub")
+          await book.ready
+        } catch (error) {
+          book.destroy()
+          throw error
+        }
 
         if (!mounted || !containerRef.current) {
           book.destroy()
           return
         }
+
+        bookRef.current = book
 
         // Get initial settings from store
         const initialState = useDocumentWorkspaceStore.getState()
@@ -194,6 +230,7 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
 
         // Generate locations for percentage tracking (150 chars per location)
         await book.locations.generate(150)
+        if (!mounted) return
 
         // Set total "pages" (actually locations for EPUB)
         const totalLocations = book.locations.length()
@@ -277,24 +314,11 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
         })
 
         // Set up text selection handler
-        rendition.on("selected", (cfiRange: string, contents: any) => {
+        rendition.on("selected", (cfiRange: string) => {
           if (!mounted) return
 
           try {
-            const range = rendition.getRange(cfiRange)
-            if (!range) return
-
-            const text = range.toString().trim()
-            if (text.length === 0) return
-
-            // Get the bounding rect relative to viewport
-            const rect = range.getBoundingClientRect()
-
-            setSelection({
-              text,
-              cfi: cfiRange,
-              rect
-            })
+            captureSelection(rendition, cfiRange)
           } catch (e) {
             console.error("Selection error:", e)
           }
@@ -304,6 +328,7 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
         rendition.on("click", () => {
           setSelection(null)
         })
+        rendition.on("keydown", dismissSelectionOnEscape)
 
         // Register all themes with typography overrides
         const typographyOverrides = buildTypographyOverrides(initialFontFamily, initialFontSize, initialLineHeight)
@@ -349,7 +374,7 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
         bookRef.current = null
       }
     }
-  }, [url]) // Only re-init on URL change
+  }, [captureSelection, dismissSelectionOnEscape, url])
 
   // Listen for navigation events from TOC (href-based)
   useEffect(() => {
@@ -547,14 +572,7 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
 
     newRendition.on("selected", (cfiRange: string) => {
       try {
-        const range = newRendition.getRange(cfiRange)
-        if (!range) return
-
-        const text = range.toString().trim()
-        if (text.length === 0) return
-
-        const rect = range.getBoundingClientRect()
-        setSelection({ text, cfi: cfiRange, rect })
+        captureSelection(newRendition, cfiRange)
       } catch (e) {
         console.error("Selection error:", e)
       }
@@ -563,11 +581,8 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
     newRendition.on("click", () => {
       setSelection(null)
     })
-  }, [epubScrollMode, epubSpreadMode, epubFontSize, epubFontFamily, epubLineHeight])
-
-  const clearSelection = useCallback(() => {
-    setSelection(null)
-  }, [])
+    newRendition.on("keydown", dismissSelectionOnEscape)
+  }, [captureSelection, dismissSelectionOnEscape, epubScrollMode, epubSpreadMode, epubFontSize, epubFontFamily, epubLineHeight])
 
   if (!url) {
     return (
@@ -615,9 +630,13 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
       {/* Search overlay */}
       <EpubSearch bookRef={bookRef} renditionRef={renditionRef} />
 
+      {/* epub.js needs an explicit container height. */}
+      <div ref={containerRef} className="h-full w-full" style={{ minHeight: "400px" }} />
+
       {/* Text Selection Popover */}
       {selection && selection.text.length > 0 && (
         <TextSelectionPopover
+          documentId={documentId}
           text={selection.text}
           position={{
             x: selection.rect.left + selection.rect.width / 2 - 80,
@@ -628,15 +647,6 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
         />
       )}
 
-      {/* EPUB container */}
-      <div
-        ref={containerRef}
-        className="h-full w-full"
-        style={{
-          // epub.js needs explicit dimensions
-          minHeight: "400px"
-        }}
-      />
     </div>
   )
 }

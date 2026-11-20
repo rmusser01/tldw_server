@@ -966,13 +966,19 @@ export const mediaMethods = {
   async translate(
     text: string,
     targetLanguage: string = "English",
-    options?: { model?: string; provider?: string }
+    options?: {
+      model?: string
+      provider?: string
+      requestScope?: ServicePromptRequestScope
+      signal?: AbortSignal
+    }
   ): Promise<{
     translated_text: string
     target_language: string
     model_used: string
     detected_source_language?: string
   }> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     return await bgRequest<{
     translated_text: string
     target_language: string
@@ -981,7 +987,9 @@ export const mediaMethods = {
   }>({
       path: "/api/v1/translate",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      ...scopeFields,
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
       body: {
         text,
         target_language: targetLanguage,

@@ -12,6 +12,7 @@ declare module "epubjs" {
   }
 
   export interface Book {
+    open: (input: string | ArrayBuffer, format?: string) => Promise<object>
     ready: Promise<void>
     loaded: { navigation: Promise<void> }
     navigation: { toc: NavItem[] }
@@ -62,5 +63,5 @@ declare module "epubjs" {
     [key: string]: unknown
   }
 
-  export default function ePub(url: string, options?: EpubOptions): Book
+  export default function ePub(url?: string, options?: EpubOptions): Book
 }
