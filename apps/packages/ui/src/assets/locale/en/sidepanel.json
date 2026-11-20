@@ -211,6 +211,7 @@
     "generatingAnswer": "Generating answer…",
     "noAnswerGenerated": "No answer was generated from these sources.",
     "generateAnswerFailed": "Couldn't generate an answer. Try again, or check the model in Settings.",
+    "answerReady": "Answer ready.",
     "copyChunk": "Copy chunk",
     "insertChunk": "Insert chunk",
     "sourceChunks": "Source Chunks ({{count}})",

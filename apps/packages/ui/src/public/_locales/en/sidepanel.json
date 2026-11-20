@@ -1286,6 +1286,9 @@
   "qaSearch_generateAnswerFailed": {
     "message": "Couldn't generate an answer. Try again, or check the model in Settings."
   },
+  "qaSearch_answerReady": {
+    "message": "Answer ready."
+  },
   "qaSearch_copyChunk": {
     "message": "Copy chunk"
   },

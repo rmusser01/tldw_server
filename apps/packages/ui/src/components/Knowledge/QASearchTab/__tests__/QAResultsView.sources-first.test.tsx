@@ -1,7 +1,7 @@
 // CC-10 (#3101), owner decision [2]: in Search & Context the source chunks
 // come first and the generated answer is opt-in.
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { QAResultsView } from "../QAResultsView"
 import type { QASearchResponse } from "../../hooks/useQASearch"
@@ -77,7 +77,9 @@ describe("QAResultsView: sources first, answer on request", () => {
     ).toBeTruthy()
   })
 
-  it("offers Generate answer after the sources instead of generating one", () => {
+  // CC-10 review: Generate answer sits in the results header, so it is one
+  // tab stop away instead of after every chunk's actions.
+  it("offers Generate answer in the results header, before the chunks' actions", () => {
     const onGenerateAnswer = vi.fn()
     render(
       <QAResultsView
@@ -91,19 +93,24 @@ describe("QAResultsView: sources first, answer on request", () => {
       />
     )
 
-    const sources = screen.getByRole("list", {
-      name: "Retrieved source chunks"
+    const header = screen.getByTestId("qa-results-header")
+    expect(header).toHaveTextContent("Source Chunks (1)")
+    const generate = within(header).getByRole("button", {
+      name: "Generate answer"
     })
-    const generate = screen.getByRole("button", { name: "Generate answer" })
+    const firstChunkAction = within(
+      screen.getByRole("list", { name: "Retrieved source chunks" })
+    ).getAllByRole("button")[0]
     expect(
-      sources.compareDocumentPosition(generate) &
+      generate.compareDocumentPosition(firstChunkAction) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
     fireEvent.click(generate)
     expect(onGenerateAnswer).toHaveBeenCalledTimes(1)
   })
 
-  it("keeps the sources on screen while the answer is generated", () => {
+  it("keeps the sources and the focused button while the answer is generated", () => {
+    const onGenerateAnswer = vi.fn()
     render(
       <QAResultsView
         response={response()}
@@ -112,7 +119,7 @@ describe("QAResultsView: sources first, answer on request", () => {
         hasAttemptedSearch
         timedOut={false}
         pinnedResults={[]}
-        onGenerateAnswer={vi.fn()}
+        onGenerateAnswer={onGenerateAnswer}
         {...handlers()}
       />
     )
@@ -120,9 +127,49 @@ describe("QAResultsView: sources first, answer on request", () => {
     expect(
       screen.getByRole("list", { name: "Retrieved source chunks" })
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: "Generating answer…" })
-    ).toBeDisabled()
+    const generating = screen.getByRole("button", {
+      name: "Generating answer…"
+    })
+    expect(generating).toHaveAttribute("aria-disabled", "true")
+    expect(generating).not.toBeDisabled()
+    fireEvent.click(generating)
+    expect(onGenerateAnswer).not.toHaveBeenCalled()
+  })
+
+  it("moves focus to the answer and announces it when it arrives", () => {
+    const props = {
+      loading: false,
+      hasAttemptedSearch: true,
+      timedOut: false,
+      pinnedResults: [],
+      onGenerateAnswer: vi.fn(),
+      ...handlers()
+    }
+    const { rerender } = render(
+      <QAResultsView {...props} response={response()} />
+    )
+    screen.getByRole("button", { name: "Generate answer" }).focus()
+    fireEvent.click(screen.getByRole("button", { name: "Generate answer" }))
+    rerender(<QAResultsView {...props} answerLoading response={response()} />)
+    expect(screen.getByRole("button", { name: "Generating answer…" })).toHaveFocus()
+
+    rerender(
+      <QAResultsView
+        {...props}
+        response={response({ generatedAnswer: "Use a held-out set." })}
+      />
+    )
+
+    const heading = screen.getByRole("heading", { name: "Generated Answer" })
+    expect(heading).toHaveAttribute("tabindex", "-1")
+    expect(heading).toHaveFocus()
+    expect(screen.getByTestId("qa-answer-status")).toHaveTextContent(
+      "Answer ready."
+    )
+    expect(screen.getByTestId("qa-answer-status")).toHaveAttribute(
+      "aria-live",
+      "polite"
+    )
   })
 
   it("says why there is no answer when generation fails", () => {
@@ -139,11 +186,12 @@ describe("QAResultsView: sources first, answer on request", () => {
       />
     )
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
+    expect(screen.getByTestId("qa-answer-status")).toHaveTextContent(
       "The model did not respond."
     )
+    expect(screen.getByText("The model did not respond.", { selector: "p:not([data-testid])" })).toBeVisible()
     expect(
       screen.getByRole("button", { name: "Generate answer" })
-    ).toBeEnabled()
+    ).not.toHaveAttribute("aria-disabled", "true")
   })
 })

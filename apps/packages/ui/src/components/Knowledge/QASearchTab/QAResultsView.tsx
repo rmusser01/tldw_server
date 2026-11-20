@@ -51,6 +51,29 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
   onPreviewChunk
 }) => {
   const { t } = useTranslation(["sidepanel"])
+  // Focus and announce an answer the user asked for (CC-10 review).
+  const answerHeadingRef = React.useRef<HTMLHeadingElement>(null)
+  const answerRequestedRef = React.useRef(false)
+  const [answerReady, setAnswerReady] = React.useState(false)
+  const hasGeneratedAnswer = Boolean(response?.generatedAnswer)
+  React.useEffect(() => {
+    if (!hasGeneratedAnswer) {
+      setAnswerReady(false)
+      return
+    }
+    if (!answerRequestedRef.current) return
+    answerRequestedRef.current = false
+    setAnswerReady(true)
+    answerHeadingRef.current?.focus()
+  }, [hasGeneratedAnswer])
+  const answerStatus =
+    answerError ||
+    (answerReady ? t("sidepanel:qaSearch.answerReady", "Answer ready.") : "")
+  const requestAnswer = () => {
+    if (answerLoading || !onGenerateAnswer) return
+    answerRequestedRef.current = true
+    onGenerateAnswer()
+  }
 
   if (loading) {
     return (
@@ -93,7 +116,7 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
         </div>
       )}
 
-      {/* Source Chunks */}
+      {/* Source Chunks, with Generate answer in their header */}
       {hasDocs && (
         <SourceChunksList
           documents={response.documents}
@@ -103,38 +126,50 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
           onInsert={onInsertChunk}
           onPin={onPinChunk}
           onPreview={onPreviewChunk}
+          headerAction={
+            !hasAnswer && onGenerateAnswer ? (
+              <>
+                {/* aria-disabled, not disabled, so focus stays here while it runs. */}
+                <Button
+                  size="small"
+                  onClick={requestAnswer}
+                  aria-disabled={answerLoading || undefined}
+                  aria-busy={answerLoading || undefined}
+                  className={answerLoading ? "cursor-wait opacity-70" : undefined}
+                  icon={<Sparkles className="h-3 w-3" aria-hidden="true" />}
+                >
+                  {answerLoading
+                    ? t("sidepanel:qaSearch.generatingAnswer", "Generating answer…")
+                    : t("sidepanel:qaSearch.generateAnswer", "Generate answer")}
+                </Button>
+                {answerError && (
+                  <p className="basis-full text-xs text-danger">{answerError}</p>
+                )}
+              </>
+            ) : null
+          }
         />
       )}
 
       {/* Generated Answer, after the sources and only on request */}
-      {hasAnswer ? (
+      {hasAnswer && (
         <GeneratedAnswerCard
           answer={response.generatedAnswer!}
           totalTime={response.totalTime}
           cacheHit={response.cacheHit}
           onCopy={onCopyAnswer}
           onInsert={onInsertAnswer}
+          headingRef={answerHeadingRef}
         />
-      ) : hasDocs && onGenerateAnswer ? (
-        <div className="flex flex-col items-start gap-2">
-          <Button
-            size="small"
-            onClick={onGenerateAnswer}
-            disabled={answerLoading}
-            aria-busy={answerLoading}
-            icon={<Sparkles className="h-3 w-3" aria-hidden="true" />}
-          >
-            {answerLoading
-              ? t("sidepanel:qaSearch.generatingAnswer", "Generating answer…")
-              : t("sidepanel:qaSearch.generateAnswer", "Generate answer")}
-          </Button>
-          {answerError && (
-            <p role="alert" className="text-xs text-danger">
-              {answerError}
-            </p>
-          )}
-        </div>
-      ) : null}
+      )}
+      <p
+        data-testid="qa-answer-status"
+        role="status"
+        aria-live="polite"
+        className="sr-only"
+      >
+        {answerStatus}
+      </p>
     </div>
   )
 }

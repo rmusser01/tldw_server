@@ -14,6 +14,8 @@ type SourceChunksListProps = {
   onInsert: (doc: QADocument) => void
   onPin: (doc: QADocument) => void
   onPreview: (doc: QADocument) => void
+  /** Rendered beside the "Source Chunks (N)" heading, e.g. Generate answer. */
+  headerAction?: React.ReactNode
 }
 
 type ChunkSortMode = "relevance" | "source"
@@ -40,7 +42,8 @@ export const SourceChunksList: React.FC<SourceChunksListProps> = ({
   onCopy,
   onInsert,
   onPin,
-  onPreview
+  onPreview,
+  headerAction
 }) => {
   const { t } = useTranslation(["sidepanel"])
   const [sortMode, setSortMode] = React.useState<ChunkSortMode>("relevance")
@@ -94,12 +97,16 @@ export const SourceChunksList: React.FC<SourceChunksListProps> = ({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
+      <div
+        data-testid="qa-results-header"
+        className="flex flex-wrap items-center justify-between gap-2"
+      >
         <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wide">
           {t("sidepanel:qaSearch.sourceChunks", "Source Chunks ({{count}})", {
             count: documents.length
           })}
         </h4>
+        {headerAction}
         <div
           className="inline-flex items-center rounded-md border border-border bg-surface2 p-0.5"
           role="group"
