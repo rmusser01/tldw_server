@@ -528,6 +528,7 @@ class ProviderCredentialRuntime:
                         generation=generation,
                         force_refresh=force_refresh,
                         override_snapshot=None,
+                        model=model,
                     )
                 )
             )
@@ -725,6 +726,7 @@ class ProviderCredentialRuntime:
         force_refresh: bool,
         override_snapshot: _ProviderOverrideSnapshot | None,
         rejected_credential_generation: str | None = None,
+        model: str | None = None,
     ) -> _ResolvedEntry:
         resolution_failure: ByokResolutionError | None = None
         unexpected_failure = False
@@ -802,6 +804,33 @@ class ProviderCredentialRuntime:
                 provider,
                 **resolver_kwargs,
             )
+            if (
+                self._authoritative_scope is not None
+                and isinstance(resolution, ResolvedByokCredentials)
+                and resolution.uses_byok
+            ):
+                # Imported here: the override module imports the adapter registry, which imports this module.
+                from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+                    log_server_key_fallback,
+                    server_key_fallback,
+                )
+
+                # Raises, so fails closed, for a disabled provider or a policy that cannot be read (TASK-15571).
+                if server_key_fallback(provider, model):
+                    # The scope's authority was checked above. A model the override denies runs on the server key
+                    # from the same frozen snapshot the scope falls back to (TASK-15571).
+                    log_server_key_fallback(
+                        provider, "the call falls back to the server key, which its reservation checks"
+                    )
+                    resolution = await self._resolver(
+                        provider,
+                        user_id=None,
+                        team_ids=[],
+                        org_ids=[],
+                        server_config_snapshot=copy.deepcopy(self._server_config_snapshot),
+                        force_oauth_refresh=False,
+                        trusted_base_url_override=False,
+                    )
         except asyncio.CancelledError:
             raise
         except ByokResolutionError as exc:
