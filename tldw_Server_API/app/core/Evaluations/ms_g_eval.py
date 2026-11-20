@@ -112,6 +112,25 @@ def _call_adapter_text(
     resolved_model = model or resolve_provider_model(provider, cfg)
     if not resolved_model:
         raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
+    if provider_credentials is not None:
+        # Imported here: the override module imports the adapter registry, which this module's importers load.
+        from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import override_outcome
+
+        outcome = override_outcome(provider, provider_credentials, resolved_model)
+        if outcome in {"refused", "unchecked"}:
+            raise ChatConfigurationError(
+                provider=provider,
+                message=(
+                    "The LLM usage limit could not be checked."
+                    if outcome == "unchecked"
+                    else "Provider credential context is invalid."
+                ),
+            )
+        if outcome == "server_key":
+            # The same model on the server key, as a call with no handle (TASK-15571): checked and counted as such.
+            provider_credentials = api_key = None
+            credentials_resolved = False
+            cfg = ensure_app_config(None)
     system_message, cleaned_messages = split_system_message(messages_payload or [])
     request: dict[str, Any] = {
         "messages": cleaned_messages,
