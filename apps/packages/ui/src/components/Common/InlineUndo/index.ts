@@ -3,5 +3,6 @@ export {
   useInlineUndo,
   type InlineUndoController,
   type InlineUndoOffer,
-  type InlineUndoShownOffer
+  type InlineUndoShownOffer,
+  type UndoOutcome
 } from "./useInlineUndo"
