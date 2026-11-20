@@ -358,10 +358,11 @@ describe("NotesManagerPage NL-05 bulk runs", () => {
 })
 
 /** Active notes that DELETE moves to a Trash the restore and lookup routes read. */
-const serveDeletableLibrary = (options: { failRestoreOnce?: string } = {}) => {
+const serveDeletableLibrary = (options: { failRestoreOnce?: string; failDeleteOnce?: string } = {}) => {
   let active = ACTIVE_NOTES.slice()
   const trash: Array<(typeof ACTIVE_NOTES)[number] & { deleted: true }> = []
   let failRestore = options.failRestoreOnce
+  let failDelete = options.failDeleteOnce
   serve((_request, path, method) => {
     if (path.startsWith("/api/v1/notes/?")) return { items: active, pagination: { total: active.length } }
     if (path.startsWith("/api/v1/notes/trash?")) return { items: trash, total: trash.length }
@@ -380,6 +381,10 @@ const serveDeletableLibrary = (options: { failRestoreOnce?: string } = {}) => {
     }
     if (method === "DELETE") {
       const id = noteIdOf(path)
+      if (failDelete === id) {
+        failDelete = undefined
+        throw new Error("server unavailable")
+      }
       const note = active.find((row) => row.id === id)
       if (note) {
         active = active.filter((row) => row.id !== id)
@@ -412,6 +417,8 @@ describe("NotesManagerPage NL-05 bulk delete Undo", () => {
     serveDeletableLibrary()
     renderPage()
     await selectRows("n1", "n2")
+    // The button says what it does now that it doesn't ask first.
+    expect(screen.getByTestId("notes-bulk-delete")).toHaveTextContent("Move selected to Trash")
 
     fireEvent.click(screen.getByTestId("notes-bulk-delete"))
 
@@ -435,6 +442,23 @@ describe("NotesManagerPage NL-05 bulk delete Undo", () => {
     expect(callsTo("GET").filter(([request]: [Request]) => String(request.path).startsWith("/api/v1/notes/trash?"))).toHaveLength(1)
   })
 
+  it("adds the notes a Retry moves to Trash to the Undo offer already shown", async () => {
+    serveDeletableLibrary({ failDeleteOnce: "n2" })
+    renderPage()
+    await selectRows("n1", "n2")
+    fireEvent.click(screen.getByTestId("notes-bulk-delete"))
+    const offer = await screen.findByTestId("notes-undo")
+    await waitFor(() => expect(offer).toHaveTextContent("Moved 1 note to Trash."))
+
+    fireEvent.click(within(await screen.findByTestId("notes-bulk-failures")).getByTestId("notes-bulk-retry"))
+
+    await waitFor(() => expect(screen.getByTestId("notes-undo")).toHaveTextContent("Moved 2 notes to Trash."))
+    fireEvent.click(within(screen.getByTestId("notes-undo")).getByRole("button", { name: "Undo" }))
+    await waitFor(() =>
+      expect(restoreCalls().map((path) => noteIdOf(path)).sort()).toEqual(["n1", "n2"])
+    )
+  })
+
   it("lists the notes Undo could not restore, and Retry restores only those", async () => {
     serveDeletableLibrary({ failRestoreOnce: "n2" })
     renderPage()
@@ -447,6 +471,8 @@ describe("NotesManagerPage NL-05 bulk delete Undo", () => {
 
     const failures = await screen.findByTestId("notes-bulk-failures")
     expect(failures).toHaveTextContent("Restore failed for 1:")
+    // The offer announces what actually came back, not "Restored 2 notes".
+    await waitFor(() => expect(within(offer).getByRole("status")).toHaveTextContent("Restored 1 of 2 notes."))
     expect(within(failures).getByText("Beta")).toBeInTheDocument()
 
     fireEvent.click(within(failures).getByTestId("notes-bulk-retry"))

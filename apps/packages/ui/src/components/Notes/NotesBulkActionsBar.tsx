@@ -222,7 +222,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
             onClick={onDelete}
             data-testid="notes-bulk-delete"
           >
-            {t('option:notesSearch.bulkDelete', { defaultValue: 'Delete selected' })}
+            {t('option:notesSearch.bulkDelete', { defaultValue: 'Move selected to Trash' })}
           </Button>
         </div>
       )}

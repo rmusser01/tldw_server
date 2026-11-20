@@ -1381,6 +1381,8 @@
     "bulkFirstMatchingSelected": "The first {{count}} of {{total}} matching notes are selected.",
     "bulkSelectAllMatchingError": "Could not select all matching notes. Try again.",
     "bulkRestore": "Restore selected",
+    "bulkDelete": "Move selected to Trash",
+    "bulkRestorePartial": "Restored {{restored}} of {{total}} notes.",
     "bulkSelectTrashAria": "Select note {{title}} to restore",
     "noteRestored": "Note restored",
     "restoredOpenNote": "Open note",

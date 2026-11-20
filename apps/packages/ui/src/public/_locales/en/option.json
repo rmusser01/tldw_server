@@ -1325,6 +1325,12 @@
   "notesSearch_bulkRestoreSuccess_one": {
     "message": "Restored {{count}} note"
   },
+  "notesSearch_bulkDelete": {
+    "message": "Move selected to Trash"
+  },
+  "notesSearch_bulkRestorePartial": {
+    "message": "Restored {{restored}} of {{total}} notes."
+  },
   "notesSearch_bulkRestoreSuccess_other": {
     "message": "Restored {{count}} notes"
   },

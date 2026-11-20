@@ -909,6 +909,26 @@ describe("NotesManagerPage stage 16 bulk add tags (NL-03)", { timeout: 30_000 },
       expect(findServerNote("n1")?.deleted).toBe(true)
     })
 
+    // XP-17 review: Move to Trash no longer asks first, so the open note's
+    // unsaved edits are saved before it goes to Trash, never silently lost.
+    it("saves the open note's unsaved edits before moving it to Trash", async () => {
+      renderPage()
+      await open()
+      const body = screen.getByPlaceholderText("Write your note here... (Markdown supported)")
+      await user.clear(body)
+      await user.type(body, "Edited before delete")
+      await user.click(screen.getByTestId("notes-overflow-menu-button"))
+      await user.click(await screen.findByRole("menuitem", { name: "Delete" }))
+
+      await waitFor(() => expect(findServerNote("n1")?.deleted).toBe(true))
+      expect(findServerNote("n1")?.content).toBe("Edited before delete")
+      const calls = mockBgRequest.mock.calls.map(([request]) => request)
+      const firstPut = calls.findIndex(request => String(request.method).toUpperCase() === "PUT")
+      const firstDelete = calls.findIndex(request => String(request.method).toUpperCase() === "DELETE")
+      expect(firstPut).toBeGreaterThanOrEqual(0)
+      expect(firstPut).toBeLessThan(firstDelete)
+    })
+
     it("uses the original owner and versions for a legitimate single Delete and its inline Undo", async () => {
       renderPage()
       await open()
