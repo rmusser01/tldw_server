@@ -51,6 +51,7 @@ from tldw_Server_API.app.core.MCP_unified.tests.test_model_completion_transport 
 from tldw_Server_API.app.core.MCP_unified.tests.test_model_completion_transport import (
     asyncio_diagnostics as asyncio_diagnostics,
 )
+from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides
 from tldw_Server_API.tests.AuthNZ_SQLite.test_byok_runtime_sqlite import _upsert_shared_key, _upsert_user_key
 from tldw_Server_API.tests.AuthNZ_SQLite.test_provider_scope_resolution_sqlite import (
     _execute,
@@ -371,6 +372,55 @@ async def test_authenticated_completion_uses_absence_only_precedence_and_frozen_
     if stored is not None:
         assert stored["last_used_at"] is not None
         assert KEYS[selected] not in stored["encrypted_blob"]
+
+
+@pytest.mark.parametrize("selected", ["user", "team", "org", "server"])
+async def test_a_model_the_provider_override_denies_runs_on_the_server_key(composed, selected):
+    """TASK-15571: the authoritative scope is still checked; then the operator's model, which the provider override
+    denies, runs on the server key and is reserved as a server-key call. A server key is not checked again."""
+    env = composed
+    sources = ("user", "team", "org")
+    await seed_keys(env, sources[sources.index(selected) :] if selected != "server" else ())
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        {"openai": llm_provider_overrides.LLMProviderOverride(provider="openai", allowed_models=["x"])}
+    )
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    result = await env.build().complete(request(), invocation)
+    assert result.content == CONTENT.replace("\r\n", "\n")
+    assert [incoming.headers["authorization"] for incoming in env.provider.requests] == [f"Bearer {KEYS['server']}"]
+    row = await assert_safe_surfaces(env, invocation, result=result)
+    assert row["credential_source"] == "server_default"
+    denials = [line for line, _extra, _exception in env.logs if "the call falls back to the server key" in line]
+    assert len(denials) == (0 if selected == "server" else 1)
+    assert all("Provider override for openai: model_not_allowed" in line for line in denials)
+
+
+@pytest.mark.parametrize(
+    ("override_kwargs", "healthy", "code", "domain"),
+    [
+        ({"is_enabled": False}, True, "invalid_provider_credentials", ModelFailureDomain.CREDENTIAL_SCOPE),
+        ({}, False, "credential_store_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE),
+    ],
+    ids=["provider-disabled", "store-unavailable"],
+)
+async def test_a_disabled_provider_or_an_unreadable_store_refuses_an_own_key_completion(
+    composed, override_kwargs, healthy, code, domain
+):
+    """TASK-15571: only a denied model falls back. A disabled provider and an unreadable store fail closed after the
+    scope check, before any reservation or provider request."""
+    env = composed
+    await seed_keys(env, ("user",))
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        {"openai": llm_provider_overrides.LLMProviderOverride(provider="openai", **override_kwargs)}, healthy=healthy
+    )
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    with pytest.raises(ModelCompletionFailure) as caught:
+        await env.build().complete(request(), invocation)
+    assert_failure(caught.value, code, domain)
+    assert env.provider.requests == []
+    assert await assert_safe_surfaces(env, invocation) is None
 
 
 class Gate:
