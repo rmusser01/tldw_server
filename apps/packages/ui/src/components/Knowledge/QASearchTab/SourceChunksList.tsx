@@ -16,6 +16,11 @@ type SourceChunksListProps = {
   onPreview: (doc: QADocument) => void
   /** Rendered beside the "Source Chunks (N)" heading, e.g. Generate answer. */
   headerAction?: React.ReactNode
+  /**
+   * Cap the list and scroll it on its own. Off inside an already capped box
+   * (the composer's Search & Context), so it doesn't scroll inside a scroller.
+   */
+  nestedScroll?: boolean
 }
 
 type ChunkSortMode = "relevance" | "source"
@@ -43,7 +48,8 @@ export const SourceChunksList: React.FC<SourceChunksListProps> = ({
   onInsert,
   onPin,
   onPreview,
-  headerAction
+  headerAction,
+  nestedScroll = true
 }) => {
   const { t } = useTranslation(["sidepanel"])
   const [sortMode, setSortMode] = React.useState<ChunkSortMode>("relevance")
@@ -139,7 +145,7 @@ export const SourceChunksList: React.FC<SourceChunksListProps> = ({
         </div>
       </div>
       <div
-        className="flex flex-col gap-2 max-h-[350px] overflow-y-auto"
+        className={`flex flex-col gap-2 ${nestedScroll ? "max-h-[350px] overflow-y-auto" : ""}`}
         role="list"
         aria-label={t(
           "sidepanel:qaSearch.sourceChunksList",

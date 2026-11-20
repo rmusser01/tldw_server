@@ -392,6 +392,7 @@ const KnowledgePanelBase: React.FC<KnowledgePanelProps> = ({
             onPreviewChunk={handlePreviewChunk}
             isConnected={isConnected}
             autoFocus={autoFocus}
+            embedded={variant === "embedded"}
             onOpenContext={() => handleTabChange("context")}
           />
         )}

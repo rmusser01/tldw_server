@@ -337,6 +337,66 @@ for (const viewport of [
   });
 }
 
+// CC-10 review: after a search, the capped box brings its results into view,
+// so the first source and Generate answer show without scrolling.
+const RAG_DOCUMENTS = Array.from({ length: 5 }, (_, index) => ({
+  id: `doc-${index + 1}`,
+  content: `Embedding models are evaluated on held-out queries. Result ${index + 1}.`,
+  score: 0.9 - index * 0.1,
+  metadata: { title: `Evaluation note ${index + 1}`, type: 'note' },
+}));
+for (const viewport of [
+  { width: 1440, height: 1000 },
+  { width: 1024, height: 768 },
+]) {
+  test(`brings Search & Context results into view after a search at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
+    await prepareOfflinePreview(page);
+    await connectWithOneModel(page);
+    await page.route('**/api/v1/rag/search**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ documents: RAG_DOCUMENTS, query: 'embedding model evaluation' }),
+      })
+    );
+    await page.addInitScript(() => {
+      localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
+    });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.setViewportSize(viewport);
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 30_000 });
+    const tools = page.getByTestId('composer-options-toggle');
+    if ((await tools.getAttribute('aria-expanded')) !== 'true') await tools.click();
+    await page.getByTestId('knowledge-search-toggle').click();
+    if ((await tools.getAttribute('aria-expanded')) === 'true') await tools.click();
+    const section = page.getByTestId('composer-knowledge-section');
+    const query = section.getByRole('textbox', { name: 'Search your knowledge...' });
+    await expect(query).toBeEnabled({ timeout: 30_000 });
+    await query.fill('embedding model evaluation');
+    await query.press('Enter');
+    const header = section.getByTestId('qa-results-header');
+    await expect(header).toContainText('Source Chunks (5)');
+    const generate = header.getByRole('button', { name: 'Generate answer' });
+    const firstResult = section.getByRole('listitem').first();
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    const box = (await section.boundingBox())!;
+    for (const [name, locator] of [
+      ['Generate answer', generate],
+      ['the first result', firstResult],
+    ] as const) {
+      const target = (await locator.boundingBox())!;
+      expect(target.y, `${name} top ${target.y} inside ${box.y}..${box.y + box.height}`).toBeGreaterThanOrEqual(box.y - 1);
+      expect(target.y + Math.min(target.height, 40), `${name} visible in the box`).toBeLessThanOrEqual(box.y + box.height + 1);
+      testInfo.annotations.push({
+        type: 'search results',
+        description: `${viewport.width}x${viewport.height}: ${name} at +${Math.round(target.y - box.y)}px in a ${Math.round(box.height)}px box`,
+      });
+    }
+    await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeInViewport();
+  });
+}
+
 test('remembers whether Tools was expanded across reload', async ({ page }) => {
   await prepareOfflinePreview(page);
   await page.goto('/chat', { waitUntil: 'domcontentloaded' });

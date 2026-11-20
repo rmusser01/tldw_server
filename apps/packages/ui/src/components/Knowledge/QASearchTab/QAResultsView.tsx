@@ -7,6 +7,7 @@ import type { QASearchResponse, QADocument } from "../hooks/useQASearch"
 import { SearchEmptyState } from "../SearchTab/SearchEmptyState"
 import { GeneratedAnswerCard } from "./GeneratedAnswerCard"
 import { SourceChunksList } from "./SourceChunksList"
+import { scrollToTopWithin } from "./scroll-within"
 
 type QAResultsViewProps = {
   response: QASearchResponse | null
@@ -16,6 +17,11 @@ type QAResultsViewProps = {
   query?: string
   pinnedResults: RagPinnedResult[]
   onRetry?: () => void
+  /**
+   * Inside the composer's capped box: no nested list scroller, and a finished
+   * search scrolls its results to the top of the box (CC-10 review).
+   */
+  embedded?: boolean
   /** Generate an answer from the shown sources; omit to hide the action. */
   onGenerateAnswer?: () => void
   answerLoading?: boolean
@@ -40,6 +46,7 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
   query,
   pinnedResults,
   onRetry,
+  embedded = false,
   onGenerateAnswer,
   answerLoading = false,
   answerError = null,
@@ -69,6 +76,16 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
   const answerStatus =
     answerError ||
     (answerReady ? t("sidepanel:qaSearch.answerReady", "Answer ready.") : "")
+  const resultsRef = React.useRef<HTMLDivElement>(null)
+  const wasLoadingRef = React.useRef(loading)
+  React.useLayoutEffect(() => {
+    const searchFinished = wasLoadingRef.current && !loading
+    wasLoadingRef.current = loading
+    if (!embedded || !searchFinished || !resultsRef.current) return
+    // Align the results block, whose top is stable; its header starts it.
+    // (The header itself settles a few frames after the spinner is replaced.)
+    scrollToTopWithin(resultsRef.current)
+  }, [embedded, loading])
   const requestAnswer = () => {
     if (answerLoading || !onGenerateAnswer) return
     answerRequestedRef.current = true
@@ -106,7 +123,7 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={resultsRef} className="flex flex-col gap-4">
       {/* Errors */}
       {response.errors.length > 0 && (
         <div className="rounded-lg border border-warn/30 bg-warn/5 p-3">
@@ -126,6 +143,7 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
           onInsert={onInsertChunk}
           onPin={onPinChunk}
           onPreview={onPreviewChunk}
+          nestedScroll={!embedded}
           headerAction={
             !hasAnswer && onGenerateAnswer ? (
               <>

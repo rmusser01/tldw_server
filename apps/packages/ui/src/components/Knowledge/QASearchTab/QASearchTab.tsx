@@ -55,6 +55,8 @@ type QASearchTabProps = {
   // Connection state
   isConnected?: boolean
   autoFocus?: boolean
+  /** Inside the composer's capped Search & Context box (CC-10 review). */
+  embedded?: boolean
   onOpenContext?: () => void
 }
 
@@ -94,6 +96,7 @@ export const QASearchTab: React.FC<QASearchTabProps> = ({
   onPreviewChunk,
   isConnected = true,
   autoFocus = true,
+  embedded = false,
   onOpenContext
 }) => {
   const { t } = useTranslation(["sidepanel"])
@@ -139,6 +142,7 @@ export const QASearchTab: React.FC<QASearchTabProps> = ({
         query={query}
         pinnedResults={pinnedResults}
         onRetry={onSearch}
+        embedded={embedded}
         onGenerateAnswer={onGenerateAnswer}
         answerLoading={answerLoading}
         answerError={answerError}
