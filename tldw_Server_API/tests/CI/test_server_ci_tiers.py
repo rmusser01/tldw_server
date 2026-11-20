@@ -1,46 +1,20 @@
-"""Server CI keeps uncertain changes broad and publication behind exact-run results."""
+"""Server CI keeps dev focused and main and publication behind full qualification."""
 
 import os
 import shutil
 import subprocess  # nosec B404 -- Execute the fixed workflow shell against literal test outcomes.
-import sys
 from pathlib import Path
 
 import pytest
 import yaml
-from Helper_Scripts.ci.server_ci_tier import select_tier
 
 from tldw_Server_API.tests.CI.test_merge_queue_gate_workflows import _evaluate
 
 BASH_REQUIRED = pytest.mark.skipif(shutil.which("bash") is None, reason="requires Bash")
-WORD_CHUNKER = b"tldw_Server_API/app/core/Chunking/strategies/words.py"
 
 
 def _workflow(name: str) -> dict:
     return yaml.safe_load(Path(f".github/workflows/{name}.yml").read_text())
-
-
-@pytest.mark.parametrize(
-    ("diff", "tier"),
-    [
-        (b"M\0" + WORD_CHUNKER + b"\0", "light"),
-        (b"M\0" + WORD_CHUNKER + b"\0A\0Docs/Development/Notes.md\0", "light"),
-        (b"A\0Docs/Development/Notes.md\0", "unchanged"),
-        (b"M\0backlog/tasks/task-15572 - Current task.md\0", "unchanged"),
-        (b"M\0" + WORD_CHUNKER + b"\0M\0pyproject.toml\0", "full"),
-        (b"M\0tldw_Server_API/app/core/AuthNZ/settings.py\0", "full"),
-        (b"M\0unknown/file.py\0", "full"),
-        (b"M\0.github/workflows/ci.yml\0", "full"),
-        (b"D\0" + WORD_CHUNKER + b"\0", "full"),
-        (b"A\0" + WORD_CHUNKER + b"\0", "full"),
-        (b"T\0" + WORD_CHUNKER + b"\0", "full"),
-        (b"R100\0a.py\0" + WORD_CHUNKER + b"\0", "full"),
-        (b"M\0" + WORD_CHUNKER, "full"),
-        (b"", "full"),
-    ],
-)
-def test_pr_path_routing_defaults_to_full(diff, tier):
-    assert select_tier(diff) == tier  # nosec B101 -- Test assertion.
 
 
 def test_main_pr_has_an_unfiltered_distinct_release_check():
@@ -70,6 +44,36 @@ def test_publishers_call_read_only_qualification(name):
         assert "needs.qualify.outputs.qualified == 'true'" in jobs[job]["if"]  # nosec B101
 
 
+@pytest.mark.parametrize(
+    ("workflow", "job", "event", "target"),
+    [
+        ("publish-docker", "push_to_registries", "release", ""),
+        ("publish-pypi", "rolling-image", "push", ""),
+        ("publish-pypi", "publish-testpypi", "workflow_dispatch", "testpypi"),
+        ("publish-pypi", "publish-pypi", "workflow_dispatch", "pypi"),
+        ("publish-pypi", "publish-pypi", "push", ""),
+    ],
+)
+def test_publication_requires_successful_prerequisites(workflow, job, event, target):
+    job_config = _workflow(workflow)["jobs"][job]
+    prerequisites = job_config["needs"]
+    if isinstance(prerequisites, str):
+        prerequisites = [prerequisites]
+    successes = {f"needs.{dependency}.result": "success" for dependency in prerequisites}
+    context = {
+        **successes,
+        "github.event_name": event,
+        "inputs.target": target,
+        "needs.detect-version.outputs.should_publish": "true",
+        "needs.qualify.outputs.qualified": "true",
+    }
+    condition = job_config["if"].removeprefix("${{").removesuffix("}}").strip()
+    assert _evaluate(condition, context)  # nosec B101
+    assert not _evaluate(condition, context, cancelled=True)  # nosec B101
+    for status in successes:
+        assert not _evaluate(condition, {**context, status: "failure"}), status  # nosec B101
+
+
 @BASH_REQUIRED
 @pytest.mark.parametrize("result", ("failure", "cancelled", "skipped", ""))
 def test_release_verdict_rejects_every_missing_or_unsuccessful_dependency(result):
@@ -96,7 +100,7 @@ def test_release_verdict_accepts_all_expected_jobs_succeeding(tmp_path):
     assert (tmp_path / "output").read_text() == "qualified=true\n"  # nosec B101
 
 
-@pytest.mark.parametrize("tier", ("full", "light", "unchanged", "nightly", "release"))
+@pytest.mark.parametrize("tier", ("light", "unchanged", "nightly", "release"))
 def test_light_and_release_select_their_own_matrices(tier):
     jobs = _workflow("ci")["jobs"]
     context = {
@@ -107,54 +111,53 @@ def test_light_and_release_select_their_own_matrices(tier):
     }
     assert _evaluate(jobs["light-backend"]["if"], context) == (tier == "light")  # nosec B101
     assert _evaluate(jobs["full-suite-linux-312-shards"]["if"], context) == (  # nosec B101
-        tier in {"full", "nightly", "release"}
+        tier in {"nightly", "release"}
     )
-    assert _evaluate(jobs["full-suite-os-313-release-shards"]["if"], context) == (  # nosec B101
-        tier == "release"
-    )
+    for job in (
+        "full-suite-linux-313-shards",
+        "full-suite-macos-312-shards",
+        "full-suite-windows-312-shards",
+        "full-suite-os-313-release-shards",
+        "full-suite-windows-313-release-shards",
+    ):
+        assert _evaluate(jobs[job]["if"], context) == (tier == "release"), job  # nosec B101
+    package_condition = jobs["release-package"]["if"]
+    assert _evaluate(package_condition, context) == (tier == "release")  # nosec B101
+    assert not _evaluate(package_condition, context, cancelled=True)  # nosec B101
+    context["needs.changes.result"] = "failure"
+    assert not _evaluate(package_condition, context)  # nosec B101
 
 
 @BASH_REQUIRED
 @pytest.mark.parametrize(
-    ("event", "ref", "nightly", "enabled", "same_repo", "expected"),
+    ("event", "ref", "nightly", "backend_changed", "expected"),
     [
-        ("pull_request", "dev", "false", "true", "true", "light"),
-        ("pull_request", "dev", "false", "true", "false", "full"),
-        ("pull_request", "dev", "false", "", "true", "full"),
-        ("pull_request", "main", "false", "true", "true", "release"),
-        ("workflow_dispatch", "dev", "true", "", "false", "nightly"),
-        ("workflow_dispatch", "main", "true", "", "false", None),
-        ("workflow_dispatch", "main", "false", "", "false", "release"),
-        ("push", "main", "false", "true", "false", "release"),
+        ("pull_request", "dev", "false", "true", "light"),
+        ("pull_request", "dev", "false", "false", "unchanged"),
+        ("pull_request", "dev", "false", "", None),
+        ("pull_request", "main", "false", "false", "release"),
+        ("workflow_run", "dev", "false", "true", "light"),
+        ("workflow_dispatch", "dev", "true", "false", "nightly"),
+        ("workflow_dispatch", "main", "true", "false", None),
+        ("workflow_dispatch", "dev", "false", "false", "release"),
+        ("push", "main", "false", "false", "release"),
+        ("release", "v0.1.48", "false", "false", "release"),
     ],
 )
-def test_select_tier_from_event(tmp_path, event, ref, nightly, enabled, same_repo, expected):
+def test_select_tier_from_event(tmp_path, event, ref, nightly, backend_changed, expected):
     changes = _workflow("ci")["jobs"]["changes"]
     step = next(step for step in changes["steps"] if step.get("id") == "tier")
     output = tmp_path / "output"
-    diff = tmp_path / "diff"
-    diff.write_bytes(b"M\0" + WORD_CHUNKER + b"\0")
-    proc = subprocess.run(  # nosec B603, B607 -- Exercise the checked-in shell with a fixture diff.
-        [
-            "bash",
-            "-e",
-            "-c",
-            'git() { cat "$FIXTURE_DIFF"; }; python() { "$FIXTURE_PYTHON" "$@"; };\n' + step["run"],
-        ],
+    proc = subprocess.run(  # nosec B603, B607 -- Exercise the checked-in routing step.
+        ["bash", "-e", "-c", step["run"]],
         env={
             **os.environ,
-            "FIXTURE_DIFF": str(diff),
-            "FIXTURE_PYTHON": sys.executable,
             "GITHUB_OUTPUT": str(output),
-            "GITHUB_SHA": "f" * 40,
-            "GITHUB_REF": f"refs/heads/{ref}",
+            "GITHUB_REF": "refs/pull/1/merge" if event == "pull_request" else f"refs/heads/{ref}",
             "GITHUB_EVENT_NAME": event,
             "DEV_PR": str(event == "pull_request" and ref == "dev").lower(),
-            "SAME_REPO": same_repo,
-            "BASE_SHA": "a" * 40,
             "NIGHTLY": nightly,
-            "OPT_IN": enabled,
-            "BACKEND_CHANGED": "true",
+            "BACKEND_CHANGED": backend_changed,
         },
         capture_output=True,
     )
@@ -174,7 +177,7 @@ def test_select_tier_from_event(tmp_path, event, ref, nightly, enabled, same_rep
         ("nightly", {}, True),
         ("nightly", {"LINUX": "cancelled"}, False),
         ("nightly", {"RATE_LIMITS": "failure"}, False),
-        ("full", {"LICENSE": "false"}, False),
+        ("light", {"LICENSE": "false"}, False),
         ("", {}, False),
     ],
 )

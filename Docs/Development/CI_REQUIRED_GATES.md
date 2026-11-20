@@ -1,30 +1,27 @@
 # CI Required Gates
 
-This document defines the required pull-request gate contract for `dev` and the proposed server CI tiers.
+This document defines the required pull-request gates and server CI tiers.
 
 ## Server CI tiers
 
-[ADR-096](../ADR/096-tiered-development-and-release-ci.md) adds a tier to the supplemental `CI` workflow. The seven core checks and the license status below keep their existing names, routing and protections.
+[ADR-096](../ADR/096-tiered-development-and-release-ci.md) sets CI scope by target branch. The `dev` merge queue retains its seven path-scoped checks and the trusted license status. On a queue rebase, `backend-required` runs its own unit and startup smoke when backend paths change. The supplemental `CI` workflow runs on normal PR events.
 
 | Event | Validation |
 | --- | --- |
-| `dev` PR, opt-in unset | Existing preflight and path-based Linux regression selection |
-| Same-repository `dev` PR, opt-in `true`, only mapped edits plus optional Markdown docs/tasks | Existing preflight plus a bounded chunking and readiness smoke selection |
-| Other `dev` PR with opt-in `true` | Broad Linux 3.12 regression for forks, unknown changes, additions/deletions and risk-sensitive paths. Same-repository Markdown-only docs/tasks keep the existing no-backend result. |
+| `dev` PR, including forks | Existing required gates and supplemental preflight. Backend-relevant changes also run the bounded chunking and readiness smoke tests. |
 | Nightly on `dev` | Existing broad Linux 3.12 shards and the `TEST_MODE=0` rate-limit lane, at the regression run's immutable event SHA |
-| PR into `main` | Complete existing Linux/macOS/Windows matrices and checked wheel/sdist, including a clean wheel install and import. `Main PR release qualification` reports this verdict. |
+| PR into `main` | Complete existing Linux/macOS/Windows matrices and checked wheel/sdist, including a clean wheel install and import. Require `Main PR release qualification` at the current base. |
 | `main` push, tagged Docker publication or manual server publication | The same full validation at the actual event SHA before eligible PyPI or GHCR jobs can publish |
 
-The first smoke map covers edits to the existing word and paragraph chunking strategies. The other required workflows may still take substantial time. The full tier preserves the existing matrix scope and exclusions; focused Jobs and browser suites retain their own workflows. Standalone MCP Unified publication retains its own release gates.
+Full Linux regression runs on nightly and release events. Focused Jobs and browser suites retain their own workflows. Standalone MCP Unified publication retains its own release gates.
 
 For a non-publishing full qualification, dispatch `CI` with `nightly=false` on the intended ref. Check the resulting run's SHA and `Full release qualification` conclusion. The default-branch `Server Nightly Dispatcher` runs at 09:43 UTC and dispatches `CI` with `nightly=true` on `dev`. It skips an active or successful nightly for the observed SHA and retries a SHA without such a run. A push during dispatch can advance `dev`, so verify the SHA of the regression run itself. Dispatcher success alone establishes neither coverage nor regression success.
 
-Roll out in this order:
+1. Land the workflow change on `dev` through its existing required gates. Verify a normal backend PR reports `Server backend smoke` and skips the broad matrix. Verify a docs-only PR skips backend smoke.
+2. Open a CI-only promotion to `main`. Verify `Main PR release qualification` reports from the pull-request event and succeeds at the current base. Bind that exact context to GitHub Actions (integration `15368`) in a strict `main` ruleset alongside the existing license status. Then merge the promotion. After qualification, the push follows the normal rolling image and PyPI publication policy.
+3. Observe the scheduled dispatcher and its broad nightly run. Confirm the reported SHA and unchanged-SHA deduplication. A failed nightly remains retryable. Use the manual CI dispatch for an additional full qualification without publication.
 
-1. Keep `CI_TIERED_ENABLED` unset. Land the reviewed workflow change on `dev` through its regular PR checks and record a passing normal broad run for the baseline. Install the reviewed workflow changes on default `main` through a CI-only promotion. A main push can publish the rolling image after qualification, so handle that promotion under the normal release policy.
-2. Observe an actual scheduled dispatcher run and a successful broad nightly. Confirm unchanged-SHA deduplication and that a genuine failed nightly remains retryable. Qualify a full candidate at one SHA without invoking either publication workflow.
-3. Deploy the queue's active-rule support on `dev` and the CI failure wake workflow on default `main` before requiring the verdict. Verify the `Server CI verdict` context on a regular `dev` PR and `Main PR release qualification` on a regular `main` PR. Add those exact observed Actions check contexts to the corresponding strict protection rules. Preserve every existing check and bypass setting. Verify missing, skipped, cancelled and failed expected work blocks qualification, and that promotion status comes from the PR event.
-4. Recheck the live results and protections before setting `CI_TIERED_ENABLED=true`. Verify a mapped PR selects smoke and a risky or unknown change selects broad CI. Compare the observed duration to the same hosted baseline. Clear the variable to restore the original PR selection. The nightly and publication gates are independent of the variable.
+When retargeting a PR, update its branch against the new base to trigger that base's checks. Publish from refs that contain the qualification workflows so release and manual triggers use the new gates.
 
 ## Required Check Names
 

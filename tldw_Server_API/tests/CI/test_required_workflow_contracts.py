@@ -917,7 +917,7 @@ def test_full_suite_summaries_follow_the_selected_tier() -> None:
     )
   )
 ) && (
-  needs.changes.outputs.tier == 'full' || needs.changes.outputs.tier == 'nightly' ||
+  needs.changes.outputs.tier == 'nightly' ||
   needs.changes.outputs.tier == 'release'
 )"""
     summary_to_shards = {

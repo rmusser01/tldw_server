@@ -95,7 +95,12 @@ def test_publish_ghcr_main_workflow_remains_push_to_main_driven() -> None:
     assert job["needs"] == "qualify"
     condition = job["if"]
     for event, output, expected in (("push", "true", True), ("push", "", False), ("workflow_dispatch", "true", False)):
-        assert _evaluate(condition, {"github.event_name": event, "needs.qualify.outputs.qualified": output}) is expected
+        context = {
+            "github.event_name": event,
+            "needs.qualify.result": "success",
+            "needs.qualify.outputs.qualified": output,
+        }
+        assert _evaluate(condition, context) is expected
 
 
 def test_publish_ghcr_main_matrix_is_backend_only_during_frontend_freeze() -> None:

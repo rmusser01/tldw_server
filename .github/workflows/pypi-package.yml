@@ -111,6 +111,13 @@ jobs:
       - name: Build and check package
         run: make pypi-check
 
+      - name: Install PortAudio build dependencies
+        if: inputs.qualification
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-ffmpeg: 'false'
+          install-portaudio: 'true'
+
       - name: Install and import the built wheel
         id: install
         if: inputs.qualification

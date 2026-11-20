@@ -516,9 +516,6 @@ jobs:
         shell: bash
         env:
           DEV_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev' }}
-          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          OPT_IN: ${{ vars.CI_TIERED_ENABLED }}
           NIGHTLY: ${{ github.event_name == 'workflow_dispatch' && inputs.nightly }}
           BACKEND_CHANGED: ${{ steps.detect.outputs.backend_changed || steps.detect_admitted.outputs.backend_changed }}
         run: |
@@ -529,17 +526,14 @@ jobs:
               exit 1
             fi
             tier=nightly
-          elif [[ "$DEV_PR" == true && "$OPT_IN" == true ]]; then
-            tier=full
-            if [[ "$SAME_REPO" == true && "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-              tier=$(git diff --no-ext-diff --no-renames --name-status -z "$BASE_SHA" "$GITHUB_SHA" |
-                python -m Helper_Scripts.ci.server_ci_tier) || tier=full
-            fi
           elif [[ "$DEV_PR" == true || "$GITHUB_EVENT_NAME" == workflow_run ]]; then
             case "$BACKEND_CHANGED" in
-              true) tier=full ;;
+              true) tier=light ;;
               false) tier=unchanged ;;
-              *) exit 1 ;;
+              *)
+                echo 'Backend change detection did not report a result.' >&2
+                exit 1
+                ;;
             esac
           else
             tier=release
@@ -549,7 +543,7 @@ jobs:
 
   light-backend:
     name: Server backend smoke
-    needs: [lint, syntax-check, changes]
+    needs: [admission, lint, syntax-check, changes]
     if: >-
       always() && !cancelled() &&
       needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
@@ -565,6 +559,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
+          ref: ${{ needs.admission.outputs.head_sha || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/setup-ffmpeg
         with:
@@ -596,8 +591,7 @@ jobs:
       always() && !cancelled() &&
       needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
       needs.changes.result == 'success' &&
-      (needs.changes.outputs.tier == 'full' || needs.changes.outputs.tier == 'nightly' ||
-       needs.changes.outputs.tier == 'release')
+      (needs.changes.outputs.tier == 'nightly' || needs.changes.outputs.tier == 'release')
     strategy:
       fail-fast: false
       max-parallel: 20
@@ -2333,8 +2327,7 @@ jobs:
         )
       ) &&
       (
-        needs.changes.outputs.tier == 'full' || needs.changes.outputs.tier == 'nightly' ||
-        needs.changes.outputs.tier == 'release'
+        needs.changes.outputs.tier == 'nightly' || needs.changes.outputs.tier == 'release'
       )
     steps:
       - name: Check Python 3.12 shard result
@@ -8424,8 +8417,7 @@ jobs:
       always() && !cancelled() &&
       needs.full-suite-linux-312-summary.result == 'success' &&
       needs.changes.result == 'success' &&
-      (needs.changes.outputs.tier == 'full' || needs.changes.outputs.tier == 'nightly' ||
-       needs.changes.outputs.tier == 'release')
+      (needs.changes.outputs.tier == 'nightly' || needs.changes.outputs.tier == 'release')
     env:
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
@@ -8527,13 +8519,15 @@ jobs:
           require_success CHANGES HTTP_GUARD SYNTAX PREFLIGHT SHARD_COVERAGE QUICKSTART LINT FRONTEND_LINT WIZARD
           case "$TIER" in
             light) require_success LIGHT ;;
-            full|nightly|release) require_success LINUX RATE_LIMITS ;;
+            nightly|release) require_success LINUX RATE_LIMITS ;;
             unchanged) echo 'No backend regression job selected' ;;
             *) echo "Unrecognized or missing CI tier: $TIER"; exit 1 ;;
           esac
 
   release-package:
-    if: needs.changes.outputs.tier == 'release'
+    if: >-
+      always() && !cancelled() &&
+      needs.changes.result == 'success' && needs.changes.outputs.tier == 'release'
     needs: changes
     uses: ./.github/workflows/pypi-package.yml
     with:
