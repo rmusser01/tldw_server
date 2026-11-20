@@ -39,6 +39,7 @@ from tldw_Server_API.app.core.Chat.command_authorization import (
 )
 from tldw_Server_API.app.core.Chat.rate_limiter import TokenBucket
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
 from tldw_Server_API.app.core.Integrations import weather_providers
 from tldw_Server_API.app.core.Metrics import increment_counter
@@ -192,7 +193,7 @@ def is_single_user_mode() -> bool:
     code should prefer env/config-driven enforcement.
     """
     try:
-        return str(os.getenv("AUTH_MODE", "")).strip().lower() == "single_user"
+        return str(load_auth_config().mode).strip().lower() == "single_user"
     except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
         return False
 

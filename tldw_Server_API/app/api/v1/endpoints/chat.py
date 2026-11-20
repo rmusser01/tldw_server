@@ -495,6 +495,7 @@ def _mandatory_audit_unavailable_detail() -> dict[str, str]:
 import contextlib
 
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
 import tldw_Server_API.app.api.v1.API_Deps.billing_deps as _billing_deps
 import tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps as _usage_quota_deps
@@ -2812,7 +2813,7 @@ async def list_chat_commands(
                 "permissions": list(getattr(current_user, "permissions", []) or []),
                 "roles": list(getattr(current_user, "roles", []) or []),
                 "is_admin": bool(getattr(current_user, "is_admin", False)),
-                "auth_mode": os.getenv("AUTH_MODE"),
+                "auth_mode": load_auth_config().mode,
                 "is_single_user_owner": bool(
                     getattr(current_user, "is_single_user_owner", False)
                 ),
@@ -3891,7 +3892,7 @@ async def create_chat_completion(
                                     'permissions': list(getattr(current_user, 'permissions', []) or []),
                                     'roles': list(getattr(current_user, 'roles', []) or []),
                                     'is_admin': bool(getattr(current_user, 'is_admin', False)),
-                                    'auth_mode': os.getenv('AUTH_MODE'),
+                                    'auth_mode': load_auth_config().mode,
                                     'is_single_user_owner': bool(getattr(current_user, 'is_single_user_owner', False)),
                                     'conversation_id': request_data.conversation_id,
                                     'character_id': request_data.character_id,
