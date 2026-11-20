@@ -11,6 +11,8 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
+
 
 @dataclass
 class ConfigurationIssue:
@@ -79,7 +81,7 @@ class EvaluationConfigValidator:
     def _validate_authentication(self):
         """Validate authentication configuration."""
         # Check AUTH_MODE
-        auth_mode = os.getenv("AUTH_MODE", "single_user")
+        auth_mode = load_auth_config().mode
 
         if auth_mode == "single_user":
             # Check for API key configuration

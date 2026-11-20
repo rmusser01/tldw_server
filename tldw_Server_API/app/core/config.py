@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 from tldw_Server_API.app.core.config_sections.precedence import resolve
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
@@ -982,8 +983,8 @@ def load_settings():
     _load_env_files_early()
 
     # --- Application Mode ---
-    single_user_mode_str = os.getenv("APP_MODE", "single").lower()
-    single_user_mode = single_user_mode_str != "multi"
+    single_user_mode = load_auth_config(load_comprehensive_config()).mode == "single_user"
+    single_user_mode_str = "single" if single_user_mode else "multi"
 
     # --- Single-User Settings ---
     # Use a fixed ID for the single user's database path and cache key

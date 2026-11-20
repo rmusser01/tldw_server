@@ -21,6 +21,7 @@ from pydantic import Field, field_validator
 # 3rd-party imports
 from pydantic_settings import BaseSettings, NoDecode
 
+from tldw_Server_API.app.core.config_sections.auth import resolve_auth_mode
 from tldw_Server_API.app.core.config_sections.precedence import resolve
 
 _SETTINGS_IMPORT_EXCEPTIONS = (
@@ -1377,7 +1378,10 @@ def _load_overrides_from_config() -> dict:
                 with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
                     overrides[field] = caster(resolved.value)
 
-        maybe_set("AUTH_MODE", "auth_mode", lambda v: v.strip())
+        resolved_mode = resolve_auth_mode(cfg)  # the raw text goes to pydantic, which rejects a bad mode
+        if resolved_mode.source == "config":
+            with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+                overrides["AUTH_MODE"] = str(resolved_mode.value).strip()
         maybe_set("DATABASE_URL", "database_url", lambda v: v.strip())
         maybe_set("JWT_SECRET_KEY", "jwt_secret_key", lambda v: v.strip())
         maybe_set("SINGLE_USER_API_KEY", "single_user_api_key", lambda v: v.strip())

@@ -36,6 +36,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.staticfiles import StaticFiles
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 from tldw_Server_API.app.core.startup_logging import (
     normalize_startup_log_level as _normalize_startup_log_level,
     startup_api_key_log_value as _startup_api_key_log_value,
@@ -2511,7 +2512,7 @@ else:
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings as _get_cors_settings
         _cors_auth_mode = _get_cors_settings().AUTH_MODE
     except Exception:
-        _cors_auth_mode = os.getenv("AUTH_MODE", "single_user")
+        _cors_auth_mode = load_auth_config().mode
 
     _SINGLE_USER_LOCALHOST_ORIGINS = [
         "http://localhost:8080",
