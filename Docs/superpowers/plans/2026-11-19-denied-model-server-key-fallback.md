@@ -1,5 +1,7 @@
 # TASK-15571 Implementation Plan: a model the provider override denies falls back to the server key
 
+> **Superseded (2026-11-19):** the owner reversed this rule. An admin-disabled provider or model is refused on every key and path, and nothing falls back to the server key: TASK-15581, `2026-11-19-refuse-admin-disabled-provider.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** One rule for a model the admin provider-override policy denies (`model_not_allowed`), on every `analyze`

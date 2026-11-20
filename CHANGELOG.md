@@ -12,6 +12,7 @@ and this project adheres to Some kind of Versioning
 
 ### Changed
 
+- **An admin-disabled provider or model is refused on every key and path.** A provider the admin provider override turns off, or a model off its `allowed_models` (each OpenRouter fallback model included), is refused for every LLM call: on the user's own key, a team or org key and the server's, in chat and in every server-side feature. This reverses the server-key fallback of #3523 (TASK-15581). **Before upgrading:** an existing disable or allowlist now also stops server-side features (RAG generation, claims, workflows, evaluation judges, summarization) configured with that provider or another model. Standalone workers and the `tldw-evals` LLM commands load the overrides from the AuthNZ database at start, so they need the API process's `DATABASE_URL`.
 
 ### Fixed
 
