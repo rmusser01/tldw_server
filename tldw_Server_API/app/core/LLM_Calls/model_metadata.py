@@ -827,9 +827,18 @@ def get_model_metadata(provider: str, model: str) -> dict[str, Any]:
     lookup = canonical_anthropic_model_id(model) if provider == "anthropic" else model
     md = MODEL_METADATA.get(provider, {}).get(lookup)
     base = _default_model_metadata(provider, model)
-    from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import commercial_model_limits
+    from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import (
+        commercial_model_capabilities,
+        commercial_model_limits,
+    )
 
     if md is not None:
         base.update({key: value for key, value in md.items() if key != "name"})
-    base.update(commercial_model_limits(provider, lookup))
+    limits = commercial_model_limits(provider, lookup)
+    if limits:
+        base.update(limits)
+        base["capabilities"] = {**base["capabilities"], **commercial_model_capabilities(provider)}
+        if base["capabilities"].get("vision"):
+            modalities = base["modalities"]
+            base["modalities"] = {**modalities, "input": list(dict.fromkeys([*modalities["input"], "image"]))}
     return merge_routing_metadata(base, provider=provider, model=model)

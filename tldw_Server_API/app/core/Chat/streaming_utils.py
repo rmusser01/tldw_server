@@ -701,6 +701,9 @@ MAX_TOOL_ARGUMENT_LENGTH = _parse_int(
     min_value=0,
 )
 
+# Thought signatures are opaque and independent of the configurable argument limit.
+MAX_GOOGLE_THOUGHT_SIGNATURE_LENGTH = 100_000
+
 # Maximum number of items in the full_response list to prevent unbounded growth
 MAX_RESPONSE_LIST_LENGTH = _parse_int(
     os.getenv('STREAMING_MAX_RESPONSE_LIST_LENGTH') or
@@ -1389,7 +1392,7 @@ class StreamingResponseHandler:
             extra = entry.get("extra_content")
             google = extra.get("google") if isinstance(extra, dict) else None
             signature = google.get("thought_signature") if isinstance(google, dict) else None
-            if isinstance(signature, str) and 0 < len(signature) <= MAX_TOOL_ARGUMENT_LENGTH:
+            if isinstance(signature, str) and 0 < len(signature) <= MAX_GOOGLE_THOUGHT_SIGNATURE_LENGTH:
                 accumulator["extra_content"] = {"google": {"thought_signature": signature}}
             function_delta = entry.get("function") or {}
             if function_delta.get("name"):

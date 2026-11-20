@@ -935,6 +935,7 @@ export type ChatCompletionAssistantContent = string | null
 export type ChatCompletionToolCall = {
   id: string
   type: "function"
+  extra_content?: { google: { thought_signature: string } }
   function: {
     name: string
     arguments?: string | null
