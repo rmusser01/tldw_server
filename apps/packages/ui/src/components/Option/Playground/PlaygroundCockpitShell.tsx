@@ -9,11 +9,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { COCKPIT_LEFT_RESTORE_WRAPPER_CLASS } from "@/components/Layouts/chat-rail-positioning";
-import {
-  resolveCockpitRailLayout,
-  useCockpitBodyWidth,
-  type CockpitRail,
-} from "./playground-cockpit-rail-layout";
+import { useCockpitRails } from "./playground-cockpit-rail-layout";
 import {
   SHORT_VIEWPORT_OVERLAY_PANEL,
   useIsShortViewport,
@@ -33,6 +29,8 @@ export type PlaygroundCockpitShellProps = {
   onMobilePanelChange?: (panel: PlaygroundCockpitMobilePanel) => void;
   leftRail: React.ReactNode;
   rightRail: React.ReactNode;
+  /** The composer dock's height: an overlay rail stops above it. */
+  overlayBottomInset?: number;
   children: React.ReactNode;
 };
 
@@ -136,6 +134,7 @@ export const PlaygroundCockpitShell = ({
   onMobilePanelChange,
   leftRail,
   rightRail,
+  overlayBottomInset,
   children,
 }: PlaygroundCockpitShellProps) => {
   const { t } = useTranslation("playground");
@@ -145,33 +144,22 @@ export const PlaygroundCockpitShell = ({
   // Width-aware rails (CO-04): measure the body, and when only one rail
   // fits, show the one opened last. The saved preferences stay as they are.
   const bodyRef = React.useRef<HTMLDivElement | null>(null);
-  const bodyWidth = useCockpitBodyWidth(bodyRef);
-  const [preferredRail, setPreferredRail] =
-    React.useState<CockpitRail>("context");
-  const previousRailVisibilityRef = React.useRef({
-    context: leftRailVisible,
-    runtime: rightRailVisible,
-  });
-  React.useEffect(() => {
-    const previous = previousRailVisibilityRef.current;
-    if (rightRailVisible && !previous.runtime) setPreferredRail("runtime");
-    else if (leftRailVisible && !previous.context) setPreferredRail("context");
-    previousRailVisibilityRef.current = {
-      context: leftRailVisible,
-      runtime: rightRailVisible,
-    };
-  }, [leftRailVisible, rightRailVisible]);
-  const railLayout = resolveCockpitRailLayout({
-    width: bodyWidth,
+  const {
+    layout: railLayout,
+    openRail,
+    closeRail,
+    overlayKeyDown,
+  } = useCockpitRails({
+    bodyRef,
     contextVisible: leftRailVisible,
     runtimeVisible: rightRailVisible,
-    preferred: preferredRail,
+    onContextVisibleChange: onLeftRailVisibleChange,
+    onRuntimeVisibleChange: onRightRailVisibleChange,
   });
-  const openRail = (rail: CockpitRail) => {
-    setPreferredRail(rail);
-    if (rail === "context") onLeftRailVisibleChange?.(true);
-    else onRightRailVisibleChange?.(true);
-  };
+  const overlayStyle =
+    overlayBottomInset && overlayBottomInset > 0
+      ? { bottom: overlayBottomInset }
+      : undefined;
   const mobileContextButtonId = "playground-cockpit-mobile-context-tab";
   const mobileRuntimeButtonId = "playground-cockpit-mobile-runtime-tab";
   const mobileContextPanelId = "playground-cockpit-mobile-context-panel";
@@ -446,15 +434,8 @@ export const PlaygroundCockpitShell = ({
             data-testid="playground-cockpit-left-rail"
             data-placement={railLayout.context}
             aria-label={t("cockpit.contextLandmark", "Chat cockpit context")}
-            onKeyDown={
-              leftRailInline
-                ? undefined
-                : (event) => {
-                    if (event.key !== "Escape" || event.defaultPrevented) return;
-                    event.preventDefault();
-                    onLeftRailVisibleChange?.(false);
-                  }
-            }
+            onKeyDown={leftRailInline ? undefined : overlayKeyDown("context")}
+            style={leftRailInline ? undefined : overlayStyle}
             className={`hidden min-h-0 overflow-y-auto border-r border-border bg-surface px-4 py-2 lg:block ${
               leftRailInline
                 ? ""
@@ -470,7 +451,7 @@ export const PlaygroundCockpitShell = ({
                 aria-label={collapseContextSidechannelLabel}
                 aria-controls="playground-cockpit-left-rail"
                 aria-expanded="true"
-                onClick={() => onLeftRailVisibleChange?.(false)}
+                onClick={() => closeRail("context")}
                 tooltip={collapseContextSidechannelLabel}
                 tooltipPlacement="left"
                 className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md border border-border bg-surface2 text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
@@ -507,15 +488,8 @@ export const PlaygroundCockpitShell = ({
             data-testid="playground-cockpit-right-rail"
             data-placement={railLayout.runtime}
             aria-label={t("cockpit.runtimeLandmark", "Chat cockpit runtime")}
-            onKeyDown={
-              rightRailInline
-                ? undefined
-                : (event) => {
-                    if (event.key !== "Escape" || event.defaultPrevented) return;
-                    event.preventDefault();
-                    onRightRailVisibleChange?.(false);
-                  }
-            }
+            onKeyDown={rightRailInline ? undefined : overlayKeyDown("runtime")}
+            style={rightRailInline ? undefined : overlayStyle}
             className={`hidden min-h-0 overflow-y-auto border-l border-border bg-surface px-4 py-2 lg:block ${
               rightRailInline
                 ? ""
@@ -531,7 +505,7 @@ export const PlaygroundCockpitShell = ({
                 aria-label={collapseRuntimeSidechannelLabel}
                 aria-controls="playground-cockpit-right-rail"
                 aria-expanded="true"
-                onClick={() => onRightRailVisibleChange?.(false)}
+                onClick={() => closeRail("runtime")}
                 tooltip={collapseRuntimeSidechannelLabel}
                 tooltipPlacement="left"
                 className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md border border-border bg-surface2 text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"

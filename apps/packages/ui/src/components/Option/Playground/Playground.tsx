@@ -3776,6 +3776,7 @@ const PlaygroundContent = () => {
           onMobilePanelChange={setMobileCockpitPanel}
           leftRail={cockpitLeftRail}
           rightRail={cockpitRightRail}
+          overlayBottomInset={composerDockHeight}
         >
           <div
             data-testid="playground-chat-shell"

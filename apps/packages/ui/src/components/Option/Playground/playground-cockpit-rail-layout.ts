@@ -36,7 +36,8 @@ export const resolveCockpitRailLayout = ({
   width,
   contextVisible,
   runtimeVisible,
-  preferred
+  preferred,
+  overlayDismissed = false
 }: {
   /** The shell body's width in px, or null before it has been measured. */
   width: number | null
@@ -44,6 +45,11 @@ export const resolveCockpitRailLayout = ({
   runtimeVisible: boolean
   /** The rail opened most recently; it wins when only one fits. */
   preferred: CockpitRail
+  /**
+   * The user closed an overlay this session: no rail overlays the chat until
+   * they open one again, so closing one doesn't pop up the other.
+   */
+  overlayDismissed?: boolean
 }): Record<CockpitRail, CockpitRailPlacement> => {
   const layout: Record<CockpitRail, CockpitRailPlacement> = {
     context: contextVisible ? "inline" : "hidden",
@@ -59,7 +65,7 @@ export const resolveCockpitRailLayout = ({
       layout[rail] === "inline" &&
       width < COCKPIT_TRANSCRIPT_MIN_WIDTH + railMaxWidth(rail)
     ) {
-      layout[rail] = "overlay"
+      layout[rail] = overlayDismissed ? "hidden" : "overlay"
     }
   }
   return layout
@@ -78,14 +84,146 @@ export const useCockpitBodyWidth = (
   const [width, setWidth] = React.useState<number | null>(null)
   React.useLayoutEffect(() => {
     const element = ref.current
-    if (!element || typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver((entries) => {
-      const next = entries[entries.length - 1]?.contentRect.width
+    if (!element) return
+    const apply = (next: number | undefined) => {
       if (window.innerWidth < COCKPIT_RAIL_COLUMNS_MIN_VIEWPORT) setWidth(null)
       else if (typeof next === "number" && next > 0) setWidth(Math.round(next))
+    }
+    // Measure now, before the first paint, so the layout doesn't flash
+    // (AX-04 review); the observer follows later changes.
+    apply(element.getBoundingClientRect().width)
+    if (typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver((entries) => {
+      apply(entries[entries.length - 1]?.contentRect.width)
     })
     observer.observe(element)
     return () => observer.disconnect()
   }, [ref])
   return width
+}
+
+const PREFERRED_RAIL_SESSION_KEY = "tldw:playgroundCockpitPreferredRail"
+
+const readSessionRail = (): CockpitRail | null => {
+  try {
+    const value = window.sessionStorage.getItem(PREFERRED_RAIL_SESSION_KEY)
+    return value === "context" || value === "runtime" ? value : null
+  } catch {
+    return null
+  }
+}
+
+const writeSessionRail = (rail: CockpitRail) => {
+  try {
+    window.sessionStorage.setItem(PREFERRED_RAIL_SESSION_KEY, rail)
+  } catch {
+    // Storage blocked: the choice just doesn't survive a remount.
+  }
+}
+
+const railElementId = (rail: CockpitRail) =>
+  rail === "context"
+    ? "playground-cockpit-left-rail"
+    : "playground-cockpit-right-rail"
+const restoreTestId = (rail: CockpitRail) => `${railElementId(rail)}-restore`
+
+/**
+ * The cockpit's rail state (CO-04, AX-04 review): the measured width, the
+ * rail opened last (kept for the session, derived during render so a newly
+ * opened rail shows in the same frame), overlay dismissal, and focus: an
+ * overlay the user opens takes focus, and closing it returns focus to its
+ * tab. The saved open/closed preferences change only through the callbacks.
+ */
+export const useCockpitRails = ({
+  bodyRef,
+  contextVisible,
+  runtimeVisible,
+  onContextVisibleChange,
+  onRuntimeVisibleChange
+}: {
+  bodyRef: React.RefObject<HTMLElement | null>
+  contextVisible: boolean
+  runtimeVisible: boolean
+  onContextVisibleChange?: (visible: boolean) => void
+  onRuntimeVisibleChange?: (visible: boolean) => void
+}) => {
+  const width = useCockpitBodyWidth(bodyRef)
+  const [preferred, setPreferred] = React.useState<CockpitRail>(
+    () => readSessionRail() ?? "context"
+  )
+  const [seen, setSeen] = React.useState({
+    context: contextVisible,
+    runtime: runtimeVisible
+  })
+  if (seen.context !== contextVisible || seen.runtime !== runtimeVisible) {
+    // Only one rail opening is the user's choice; both turning on together
+    // is the saved preferences loading, which keeps the preferred rail.
+    const contextOpened = contextVisible && !seen.context
+    const runtimeOpened = runtimeVisible && !seen.runtime
+    const opened =
+      runtimeOpened && !contextOpened
+        ? "runtime"
+        : contextOpened && !runtimeOpened
+          ? "context"
+          : null
+    setSeen({ context: contextVisible, runtime: runtimeVisible })
+    if (opened && opened !== preferred) setPreferred(opened)
+  }
+  React.useEffect(() => {
+    writeSessionRail(preferred)
+  }, [preferred])
+  const [overlayDismissed, setOverlayDismissed] = React.useState(false)
+  const layout = resolveCockpitRailLayout({
+    width,
+    contextVisible,
+    runtimeVisible,
+    preferred,
+    overlayDismissed
+  })
+  const focusTargetRef = React.useRef<{
+    kind: "rail" | "restore"
+    rail: CockpitRail
+  } | null>(null)
+  React.useEffect(() => {
+    const target = focusTargetRef.current
+    if (!target) return
+    focusTargetRef.current = null
+    if (target.kind === "rail") {
+      if (layout[target.rail] !== "overlay") return
+      document
+        .getElementById(railElementId(target.rail))
+        ?.querySelector<HTMLElement>("button")
+        ?.focus()
+      return
+    }
+    document
+      .querySelector<HTMLElement>(`[data-testid="${restoreTestId(target.rail)}"]`)
+      ?.focus()
+  })
+  const setVisible = (rail: CockpitRail, visible: boolean) =>
+    rail === "context"
+      ? onContextVisibleChange?.(visible)
+      : onRuntimeVisibleChange?.(visible)
+  const openRail = (rail: CockpitRail) => {
+    setPreferred(rail)
+    setOverlayDismissed(false)
+    focusTargetRef.current = { kind: "rail", rail }
+    setVisible(rail, true)
+  }
+  const closeRail = (rail: CockpitRail) => {
+    if (layout[rail] === "overlay") {
+      setOverlayDismissed(true)
+      focusTargetRef.current = { kind: "restore", rail }
+    }
+    setVisible(rail, false)
+  }
+  /** Escape inside an overlay closes it, and only it. */
+  const overlayKeyDown =
+    (rail: CockpitRail) => (event: React.KeyboardEvent<HTMLElement>) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      event.preventDefault()
+      event.stopPropagation()
+      closeRail(rail)
+    }
+  return { layout, openRail, closeRail, overlayKeyDown }
 }

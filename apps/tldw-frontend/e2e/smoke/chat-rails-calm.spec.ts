@@ -184,6 +184,41 @@ test('opens one rail at a time at 1024px and keeps the transcript usable', async
   expect(overflow).toBe(false);
 });
 
+// AX-04 review: with the chat list open a 1024px window leaves room for no
+// inline rail, so a rail overlays the transcript: it stops above the
+// composer, Escape closes it back to its tab, and closing it doesn't open
+// the other rail in its place.
+test('overlays a rail above the composer and closes it with Escape', async ({ page }) => {
+  await prepareOfflinePreview(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('playgroundChatContextRailVisible', 'true');
+    localStorage.setItem('playgroundChatRuntimeRailVisible', 'true');
+    localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
+  });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 60_000 });
+  const sidebarToggle = page.getByTestId('chat-sidebar-toggle');
+  if ((await sidebarToggle.getAttribute('aria-expanded')) === 'false') await sidebarToggle.click();
+  const overlay = page.locator('aside[data-placement="overlay"]');
+  await expect(overlay).toHaveCount(1);
+  await expect(overlay).toHaveAttribute('data-testid', 'playground-cockpit-left-rail');
+  const railBox = (await overlay.boundingBox())!;
+  const dockBox = (await page.getByTestId('playground-chat-composer-dock').boundingBox())!;
+  expect(railBox.y + railBox.height, 'the overlay stops above the composer').toBeLessThanOrEqual(dockBox.y + 1);
+  await expect(page.getByTestId('chat-input')).toBeInViewport();
+
+  await overlay.getByRole('button', { name: 'Hide context', exact: true }).focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('aside[data-testid^="playground-cockpit-"]')).toHaveCount(0);
+  await expect(page.getByTestId('playground-cockpit-left-rail-restore')).toBeFocused();
+
+  await page.getByTestId('playground-cockpit-right-rail-restore').click();
+  const runtime = page.getByTestId('playground-cockpit-right-rail');
+  await expect(runtime).toHaveAttribute('data-placement', 'overlay');
+  expect(await runtime.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+});
+
 test('keeps independent rail visibility after reload', async ({ page }) => {
   await prepareOfflinePreview(page);
   await page.setViewportSize({ width: 1440, height: 1000 });

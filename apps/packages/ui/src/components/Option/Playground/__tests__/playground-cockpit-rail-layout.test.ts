@@ -80,4 +80,26 @@ describe("resolveCockpitRailLayout", () => {
     expect(COCKPIT_BOTH_RAILS_MIN_WIDTH).toBeGreaterThan(1024)
     expect(COCKPIT_ONE_RAIL_MIN_WIDTH).toBeGreaterThan(768)
   })
+
+  it("keeps every rail closed after the user dismissed an overlay", () => {
+    expect(
+      resolveCockpitRailLayout({
+        width: COCKPIT_ONE_RAIL_MIN_WIDTH - 1,
+        contextVisible: false,
+        runtimeVisible: true,
+        preferred: "context",
+        overlayDismissed: true
+      })
+    ).toEqual({ context: "hidden", runtime: "hidden" })
+    // Inline rails are unaffected.
+    expect(
+      resolveCockpitRailLayout({
+        width: COCKPIT_BOTH_RAILS_MIN_WIDTH,
+        contextVisible: true,
+        runtimeVisible: true,
+        preferred: "context",
+        overlayDismissed: true
+      })
+    ).toEqual({ context: "inline", runtime: "inline" })
+  })
 })
