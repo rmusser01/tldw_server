@@ -13,6 +13,7 @@ import {
   X
 } from "lucide-react"
 import React from "react"
+import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import {
   ModelSelect,
@@ -132,6 +133,11 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const knowledgeBtnRef = React.useRef<HTMLButtonElement>(null)
   const modelSelectRef = React.useRef<ModelSelectHandle | null>(null)
   const fullAppHandoffDescriptionId = React.useId()
+  const rowRef = React.useRef<HTMLDivElement>(null)
+  const [hintSlot, setHintSlot] = React.useState<HTMLElement | null>(null)
+  React.useLayoutEffect(() => {
+    setHintSlot(rowRef.current?.closest("form")?.querySelector<HTMLElement>("[data-sidepanel-dock-optional]") ?? null)
+  }, [])
   const webUiHandoffDescriptionId = React.useId()
   const { capabilities } = useServerCapabilities()
   const [activePlaylistDetail, setActivePlaylistDetail] =
@@ -873,9 +879,12 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     </div>
   )
 
+  // XS-15: the hint card is optional, so it goes to the dock's scrolling region.
+  const placeHint = (hint: React.ReactElement) => (hintSlot ? createPortal(hint, hintSlot) : hint)
+
   return (
-    <div data-testid="control-row" className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-        {activeHint && (
+    <div ref={rowRef} data-testid="control-row" className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        {activeHint && placeHint(
           <FeatureHint
             key={activeHint}
             featureKey={activeHint}
@@ -991,7 +1000,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
             type="button"
             data-testid="control-rag-toggle"
             onClick={onToggleRag}
-            className="flex items-center gap-2 px-3 py-2 sm:px-2 sm:py-1 rounded text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors min-h-[44px] sm:min-h-0 text-text-muted hover:bg-surface2 hover:text-text"
+            className="flex items-center gap-2 px-2 py-1 [@media(pointer:coarse)]:px-3 [@media(pointer:coarse)]:py-2 rounded text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors min-h-8 [@media(pointer:coarse)]:min-h-11 text-text-muted hover:bg-surface2 hover:text-text"
             aria-label={t("playground:composer.contextKnowledge", "Search & Context")}
             title={t("playground:composer.contextKnowledge", "Search & Context")}
           >
@@ -1006,7 +1015,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
             type="button"
             data-testid="control-web-toggle"
             onClick={() => setWebSearch(!webSearch)}
-            className={`flex items-center gap-2 px-3 py-2 sm:px-2 sm:py-1 rounded text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors min-h-[44px] sm:min-h-0 ${
+            className={`flex items-center gap-2 px-2 py-1 [@media(pointer:coarse)]:px-3 [@media(pointer:coarse)]:py-2 rounded text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors min-h-8 [@media(pointer:coarse)]:min-h-11 ${
               webSearch
                 ? "bg-primary/10 text-primary hover:bg-primary/20"
                 : "text-text-muted hover:bg-surface2 hover:text-text"
@@ -1031,7 +1040,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           <button
             type="button"
             data-testid="chat-attach-image"
-            className="flex items-center gap-2 px-3 py-2 sm:px-2 sm:py-1 rounded text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors min-h-[44px] sm:min-h-0 text-text-muted hover:bg-surface2 hover:text-text"
+            className="flex items-center gap-2 px-2 py-1 [@media(pointer:coarse)]:px-3 [@media(pointer:coarse)]:py-2 rounded text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors min-h-8 [@media(pointer:coarse)]:min-h-11 text-text-muted hover:bg-surface2 hover:text-text"
             aria-label={t("playground:actions.attachImage", "Attach image")}
             title={t("playground:actions.attachImage", "Attach image")}
           >
@@ -1060,7 +1069,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
               ref={moreBtnRef}
               type="button"
               data-testid="control-more-menu"
-              className="p-2 min-h-[44px] sm:min-h-0 rounded hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              className="p-2 min-h-8 [@media(pointer:coarse)]:min-h-11 rounded hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               aria-label={t("playground:composer.toolsLabel", "Tools")}
               aria-haspopup="menu"
               aria-expanded={moreOpen}

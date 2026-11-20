@@ -208,7 +208,7 @@ describe("PromptAssistComposerAction real shell wiring", () => {
       /const v5SendSlot = \(\s*<SidepanelComposerControlArea[\s\S]*?variant="v5"[\s\S]*?sendSlot=\{v5SendSlot\}/
     )
     expect(sidepanelFormSource).toMatch(
-      /return \(\s*<>\s*\{composerTextareaShellNode\}\s*\{composerInlineMessagesNode\}\s*(?:\{composerResponseStatusNode\}\s*)?\{composerControlAreaNode\}/
+      /return \(\s*(?:<>|<div data-sidepanel-dock-essential[^>]*>)\s*\{composerTextareaShellNode\}\s*\{composerInlineMessagesNode\}\s*(?:\{composerResponseStatusNode\}\s*)?\{composerControlAreaNode\}/
     )
   })
 

@@ -202,6 +202,46 @@ describe("Pro composer share budget (source check)", () => {
     )
   })
 
+  // Coordinator's XS-15 decision: the textarea and Send always stay in view.
+  // Optional rows scroll in one region at the top; the essential rows never
+  // scroll, and the dock grows past 40% to fit them.
+  it("splits the dock into a scrolling optional region and fixed essential rows", () => {
+    const route = source("../../../../routes/sidepanel-chat.tsx")
+    expect(route).toMatch(/data-testid="sidepanel-composer-dock"\s+className="[^"]*max-h-\[max\(40%,var\(--sp-dock-fixed-h,0px\)\)\][^"]*overflow-hidden/)
+    const form = source("../form.tsx")
+    expect(form).toMatch(/data-sidepanel-dock-optional[^>]*className="[^"]*min-h-0[^"]*overflow-y-auto/)
+    expect(form).toMatch(/data-sidepanel-dock-essential[^>]*className="[^"]*shrink-0/)
+  })
+
+  it("sizes control-row controls by pointer, not width: 32px fine, 44px coarse", () => {
+    const row = source("../ControlRow.tsx")
+    expect(row).not.toContain("min-h-[44px] sm:min-h-0")
+    expect(row).toContain("min-h-8 [@media(pointer:coarse)]:min-h-11")
+  })
+
+  it("records the essential rows' height so the dock can grow to fit them", async () => {
+    const callbacks: Array<() => void> = []
+    vi.stubGlobal("ResizeObserver", class { constructor(cb: () => void) { callbacks.push(cb) } observe() {} disconnect() {} })
+    try {
+      const { useComposerDockHeight } = await import("@/hooks/useComposerDockHeight")
+      const Dock = () => {
+        const { ref } = useComposerDockHeight()
+        return <div ref={ref} data-testid="dock"><div data-testid="content"><div data-sidepanel-dock-optional data-testid="optional" /></div></div>
+      }
+      render(<Dock />)
+      // Intrinsic heights: a capped dock clips the rows, but scrollHeight still counts them.
+      Object.defineProperty(screen.getByTestId("content"), "scrollHeight", { configurable: true, get: () => 300 })
+      // The optional region scrolls, so only its visible box (clientHeight) is in the content's height.
+      Object.defineProperty(screen.getByTestId("optional"), "scrollHeight", { configurable: true, get: () => 60 })
+      Object.defineProperty(screen.getByTestId("optional"), "clientHeight", { configurable: true, get: () => 40 })
+      act(() => callbacks.forEach((cb) => cb()))
+      // 300 - 40 visible optional + a 56px floor of the optional region, so a hint stays reachable.
+      expect(screen.getByTestId("dock").style.getPropertyValue("--sp-dock-fixed-h")).toBe("316px")
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("renders the chip and the sheet in the composer, not the inline panels", () => {
     const form = source("../form.tsx")
     expect(form).toContain("<SidepanelRuntimeChip")

@@ -1,5 +1,5 @@
 import React from "react"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ControlRow } from "../ControlRow"
@@ -335,6 +335,12 @@ describe("ControlRow first-use guidance", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Open Search & Context to find snippets")
     expect(screen.queryByText(/are under More tools\./)).not.toBeInTheDocument()
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+  })
+
+  // XS-15: the hint card is optional, so it renders in the dock's scrolling region.
+  it("puts the hint card in the dock's optional region when there is one", () => {
+    render(<form><div data-sidepanel-dock-optional data-testid="optional-region" /><ControlRow {...defaultProps()} /></form>)
+    expect(within(screen.getByTestId("optional-region")).getByRole("status")).toHaveTextContent("Open Search & Context to find snippets")
   })
 
   it("dismisses by keyboard without sending the form and returns focus to the feature", async () => {

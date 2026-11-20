@@ -480,8 +480,8 @@ export const SidepanelForm = ({
   const isNextgenV5Composer =
     nextgenComposerEnabled && nextgenComposerVariant === "v5"
   const composerCardClass = isNextgenV5Composer
-    ? "relative w-full min-w-0 max-w-[64rem] rounded-[22px] duration-100"
-    : `relative w-full min-w-0 max-w-[64rem] rounded-3xl border border-border/80 bg-surface/95 shadow-card backdrop-blur-lg duration-100 ${cardPadding}`
+    ? "relative flex min-h-0 w-full min-w-0 max-w-[64rem] flex-col rounded-[22px] duration-100"
+    : `relative flex min-h-0 w-full min-w-0 max-w-[64rem] flex-col rounded-3xl border border-border/80 bg-surface/95 shadow-card backdrop-blur-lg duration-100 ${cardPadding}`
   const { deferredInput: deferredComposerInput } = useDeferredComposerInput(
     form.values.message || ""
   )
@@ -3663,7 +3663,7 @@ export const SidepanelForm = ({
   return (
     <React.Profiler id="sidepanel-form-root" onRender={onComposerRenderProfile}>
       <div
-        className={`flex w-full min-w-0 flex-col items-center ${composerPadding}`}>
+        className={`flex min-h-0 w-full min-w-0 flex-col items-center ${composerPadding}`}>
       <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={onFindConversations} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={onRecoverDraft} disabled={!draftReady} draftOwnerVerificationState={draftOwnerVerificationState} retryDraftOwnerVerification={retryDraftOwnerVerification} /></div>
       <QuickPromptInsertionReview form={form} ready={draftReady}
         destinationKey={JSON.stringify([draftOwnerKey, historyId, serverChatId, draftAddress, sourceDraftRevision])}
@@ -3678,27 +3678,19 @@ export const SidepanelForm = ({
         blockedReason={creationRecovery.unavailable || (creationRecovery.active && !["prepared", "settled"].includes(creationRecovery.active.state)) ? t("sidepanel:greetingPicker.reviewCreation", "Review the previous save in Recover drafts before saving another opening.") : null}
           inputRevision={form.getRevision()} onStartGreeting={startCharacterGreeting} onStartWithMessage={() => textareaRef.current?.focus()} className="mb-3" />
       <div
-        className={`relative z-10 flex w-full min-w-0 flex-col items-center justify-center ${composerGap} text-body`}>
-        <div className="relative flex w-full min-w-0 flex-row justify-center gap-2">
+        className={`relative z-10 flex min-h-0 w-full min-w-0 flex-col items-center justify-center ${composerGap} text-body`}>
+        <div className="relative flex min-h-0 w-full min-w-0 flex-row justify-center gap-2">
           <div
             className={composerCardClass}>
-            <div>
-              {/* XS-15: model parameters as one Runtime chip (Pro mode only) */}
-              {wrapComposerProfile(
-                "sidepanel-model-params-panel",
-                <SidepanelRuntimeChip
-                  onOpenFullSettings={handleOpenModelSettings}
-                  selectedModel={selectedModel}
-                />
-              )}
-              <div className="flex">
+            <div className="flex min-h-0 flex-col">
+              <div className="flex min-h-0">
                 <form
                   data-prompt-assist-collision-surface
                   onSubmit={(event) => {
                     event.preventDefault()
                     void submitForm()
                   }}
-                  className="min-w-0 flex-1 flex flex-col items-center"
+                  className="min-h-0 min-w-0 flex-1 flex flex-col items-center"
                 >
                   <input
                     id="file-upload"
@@ -3726,11 +3718,20 @@ export const SidepanelForm = ({
                     onChange={handleContextFileChange}
                   />
                   <div
-                    className={`flex w-full min-w-0 flex-col px-1 ${
+                    className={`flex min-h-0 w-full min-w-0 flex-col px-1 ${
                       !isConnectionReady
                         ? "rounded-md border border-dashed border-warn bg-warn/10"
                         : ""
                     }`}>
+                    <div data-sidepanel-dock-optional className="min-h-0 w-full overflow-y-auto overscroll-contain">{/* XS-15: optional rows scroll here; the textarea and Send below never do. */}
+                    {/* XS-15: model parameters as one Runtime chip (Pro mode only) */}
+                    {wrapComposerProfile(
+                      "sidepanel-model-params-panel",
+                      <SidepanelRuntimeChip
+                        onOpenFullSettings={handleOpenModelSettings}
+                        selectedModel={selectedModel}
+                      />
+                    )}
                     {/* Connection status indicator when disconnected */}
                     {wrapComposerProfile(
                       "sidepanel-connection-status",
@@ -3817,6 +3818,7 @@ export const SidepanelForm = ({
                           />
                         )
                       : null}
+                    </div>
                     {(() => {
                       const composerTextareaShellNode = (
                         <div className="relative min-w-0">
@@ -4075,7 +4077,7 @@ export const SidepanelForm = ({
                                         type="button"
                                         onClick={openUploadDialog}
                                         data-testid="chat-upload-image-inline"
-                                        className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                                        className="inline-flex min-h-8 min-w-8 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                                         aria-label={t(
                                           "playground:actions.upload",
                                           "Attach image"
@@ -4194,7 +4196,7 @@ export const SidepanelForm = ({
                                         onClick={() =>
                                           setCharacterControlsOpen(true)
                                         }
-                                        className="inline-flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                                        className="inline-flex h-8 w-8 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                                         aria-label={t(
                                           "playground:characterRail.title",
                                           "Character controls"
@@ -4242,7 +4244,7 @@ export const SidepanelForm = ({
                                           }
                                         : undefined
                                     }
-                                    className="inline-flex min-h-[44px] items-center gap-2 rounded-l-md border border-border bg-surface px-3 text-sm text-text transition-colors hover:bg-surface2"
+                                    className="inline-flex min-h-8 [@media(pointer:coarse)]:min-h-11 items-center gap-2 rounded-l-md border border-border bg-surface px-3 text-sm text-text transition-colors hover:bg-surface2"
                                   >
                                     {!shouldQueuePrimaryAction && sendWhenEnter ? (
                                       <svg
@@ -4346,7 +4348,7 @@ export const SidepanelForm = ({
                                           "Open message delivery options"
                                         ) as string
                                       }
-                                      className="inline-flex min-h-[44px] items-center rounded-r-md border border-l-0 border-border bg-surface px-2 text-text transition-colors hover:bg-surface2"
+                                      className="inline-flex min-h-8 [@media(pointer:coarse)]:min-h-11 items-center rounded-r-md border border-l-0 border-border bg-surface px-2 text-text transition-colors hover:bg-surface2"
                                     >
                                       <svg
                                         xmlns="http://www.w3.org/2000/svg"
@@ -4981,19 +4983,19 @@ export const SidepanelForm = ({
                           )
 
                         return (
-                          <div data-testid="nextgen-composer-wrapper">
+                          <div data-testid="nextgen-composer-wrapper" data-sidepanel-dock-essential className="w-full shrink-0">
                             {variantNode}
                           </div>
                         )
                       }
 
                       return (
-                        <>
+                        <div data-sidepanel-dock-essential className="w-full shrink-0">
                           {composerTextareaShellNode}
                           {composerInlineMessagesNode}
                           {composerResponseStatusNode}
                           {composerControlAreaNode}
-                        </>
+                        </div>
                       )
                     })()}
                   </div>
