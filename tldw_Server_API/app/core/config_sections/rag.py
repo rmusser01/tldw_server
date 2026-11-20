@@ -49,19 +49,19 @@ def default_llm_model_env(env: Mapping[str, str] | None = None) -> str | None:
 def _resolve_default_llm(
     from_env: str | None, key: str, option: str, config_parser: ConfigParserLike | None
 ) -> Resolved:
-    if from_env:
+    if from_env and from_env.strip():
         return Resolved(from_env, "env", key)
     return resolve((), (("RAG", option),), config_parser=config_parser, blank_config=True)
 
 
 def resolve_default_llm_provider(config_parser: ConfigParserLike | None, env: Mapping[str, str] | None = None) -> Resolved:
-    """A non-empty env ``RAG_DEFAULT_LLM_PROVIDER``, then ``[RAG] default_llm_provider`` as stored (blank stays blank).
+    """A non-blank env ``RAG_DEFAULT_LLM_PROVIDER``, then ``[RAG] default_llm_provider`` as stored (blank stays blank).
 
-    A blank env value falls through to config. Nothing is validated or defaulted here.
+    A blank or whitespace-only env value falls through to config (a non-blank one is returned unstripped). Nothing is validated or defaulted here.
     """
     return _resolve_default_llm(default_llm_provider_env(env), "RAG_DEFAULT_LLM_PROVIDER", "default_llm_provider", config_parser)
 
 
 def resolve_default_llm_model(config_parser: ConfigParserLike | None, env: Mapping[str, str] | None = None) -> Resolved:
-    """A non-empty env ``RAG_DEFAULT_LLM_MODEL``, then ``[RAG] default_llm_model`` as stored (blank stays blank)."""
+    """A non-blank env ``RAG_DEFAULT_LLM_MODEL``, then ``[RAG] default_llm_model`` as stored (blank stays blank)."""
     return _resolve_default_llm(default_llm_model_env(env), "RAG_DEFAULT_LLM_MODEL", "default_llm_model", config_parser)

@@ -1217,6 +1217,7 @@ def test_resolve_single_user_api_key_never_puts_the_secret_in_origin():
 RAG_LLM_CASES = {
     "env_set": ("envp", "envm", "cfgp", "cfgm"),
     "env_blank": ("", "", "cfgp", "cfgm"),
+    "env_spaces": ("  ", "  ", "cfgp", "cfgm"),
     "env_provider_only": ("envp", UNSET, "cfgp", "cfgm"),
     "config_only": (UNSET, UNSET, "cfgp", "cfgm"),
     "config_blank": (UNSET, UNSET, "", ""),
@@ -1272,6 +1273,7 @@ def _rag_llm_outcomes():
 RAG_LLM_EXPECTED = {
     "env_set": dict.fromkeys(("lazy", "logged", "typed", "generation"), ("envp", "envm")),
     "env_blank": dict.fromkeys(("lazy", "logged", "typed", "generation"), ("cfgp", "cfgm")),
+    "env_spaces": dict.fromkeys(("lazy", "logged", "typed", "generation"), ("cfgp", "cfgm")),
     "env_provider_only": {
         "lazy": ("envp", "cfgm"), "logged": ("envp", None), "typed": ("envp", "cfgm"), "generation": ("envp", None),
     },
@@ -1296,6 +1298,7 @@ def test_rag_default_llm_resolution(apply_rag_llm_case, case):
 RAG_LLM_RESOLVED = {
     "env_set": (Resolved("envp", "env", "RAG_DEFAULT_LLM_PROVIDER"), Resolved("envm", "env", "RAG_DEFAULT_LLM_MODEL")),
     "env_blank": (Resolved("cfgp", "config", "RAG.default_llm_provider"), Resolved("cfgm", "config", "RAG.default_llm_model")),
+    "env_spaces": (Resolved("cfgp", "config", "RAG.default_llm_provider"), Resolved("cfgm", "config", "RAG.default_llm_model")),
     "env_provider_only": (
         Resolved("envp", "env", "RAG_DEFAULT_LLM_PROVIDER"), Resolved("cfgm", "config", "RAG.default_llm_model"),
     ),
