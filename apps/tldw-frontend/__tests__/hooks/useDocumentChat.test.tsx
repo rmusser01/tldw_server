@@ -2,7 +2,17 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { DEFAULT_RAG_SETTINGS } from "@/services/rag/unified-rag"
 import { useStoreMessageOption } from "@/store/option"
+import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
 import { useDocumentChat } from "@/hooks/document-workspace/useDocumentChat"
+
+const operation: QuickIngestOperation = {
+  authorityKey: "verified-account",
+  authorityRevision: 1,
+  requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" },
+  signal: new AbortController().signal,
+  isCurrent: () => true,
+  assertCurrent: () => {}
+}
 
 let connectionState = {
   state: { isConnected: true, mode: "normal" }
@@ -48,7 +58,7 @@ describe("useDocumentChat", () => {
 
   it("swaps chat sessions per document and restores when revisiting", () => {
     const { rerender } = renderHook(
-      ({ mediaId }) => useDocumentChat(mediaId),
+      ({ mediaId }) => useDocumentChat(mediaId, operation),
       { initialProps: { mediaId: 1 } }
     )
 
@@ -105,7 +115,7 @@ describe("useDocumentChat", () => {
     const baselineSources = ["media_db", "notes"]
     resetChatStore({ ragSources: baselineSources })
 
-    const { result } = renderHook(() => useDocumentChat(1))
+    const { result } = renderHook(() => useDocumentChat(1, operation))
 
     expect(result.current.ragEnabled).toBe(false)
 
@@ -146,7 +156,7 @@ describe("useDocumentChat", () => {
       ragSources: baselineRagSources
     })
 
-    const { unmount } = renderHook(() => useDocumentChat(1))
+    const { unmount } = renderHook(() => useDocumentChat(1, operation))
 
     act(() => {
       useStoreMessageOption.setState({

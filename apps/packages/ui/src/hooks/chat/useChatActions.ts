@@ -437,6 +437,7 @@ const characterIdsMatch = (
 }
 
 type UseChatActionsOptions = {
+  historyDocumentId?: string
   capturePrivateScene?: (commandIsCurrent: () => boolean) => ReturnType<typeof captureActorSceneSend>
   t: TFunction
   notification: NotificationInstance
@@ -622,7 +623,8 @@ export const useChatActions = ({
   clearMessageSteering,
   visualIdentityManualExpressionOverride,
   setVisualIdentityManualExpressionOverride,
-  capturePrivateScene
+  capturePrivateScene,
+  historyDocumentId
 }: UseChatActionsOptions) => {
   const historySelection = useHistorySelectionContext()
   const captureSceneForCommand = (isCurrent: () => boolean) => historySelection
@@ -887,7 +889,7 @@ export const useChatActions = ({
       options?: { preserveServerChatId?: boolean }
     ) => void
   )
-  const saveMessageOnError = createSaveMessageOnError(
+  const baseSaveMessageOnError = createSaveMessageOnError(
     temporaryChat,
     history,
     setHistory,
@@ -896,6 +898,9 @@ export const useChatActions = ({
       options?: { preserveServerChatId?: boolean }
     ) => void
   )
+
+  const saveMessageOnError: typeof baseSaveMessageOnError = (data) =>
+    baseSaveMessageOnError(historyDocumentId ? { ...data, historyDocumentId } : data)
 
   const resolveImageEventSyncModeForPayload = React.useCallback(
     (payload?: SaveMessagePayload): ImageGenerationEventSyncMode => {
@@ -962,6 +967,7 @@ export const useChatActions = ({
     let payloadForLocalPersistence = payload
       ? {
           ...payload,
+          ...(historyDocumentId ? { historyDocumentId } : {}),
           setHistoryId: (
             ...args: Parameters<NonNullable<SaveMessagePayload["setHistoryId"]>>
           ) => {
@@ -4268,7 +4274,8 @@ export const useChatActions = ({
           ...chatModeParamsWithRegen,
           ...alternateHistoryParams,
           actorSceneSend: workspaceServerChat.sceneSend,
-          servicePromptSnapshot: turnServicePromptSnapshot
+          servicePromptSnapshot: turnServicePromptSnapshot,
+          ...(historyDocumentId && !chatModeParams.serverChatId ? { saveToDb: false } : {})
         }
         const scopedRagModeParams = workspaceServerChat.chatId
           ? {

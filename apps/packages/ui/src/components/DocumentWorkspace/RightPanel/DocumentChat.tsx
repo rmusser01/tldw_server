@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, Suspense, useEffect } from "react"
+import React, { useState, useRef, useCallback, Suspense, useEffect, useLayoutEffect } from "react"
 import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
 import { Empty, Spin, Switch, Tooltip, Popconfirm } from "antd"
@@ -11,6 +11,7 @@ import {
   Sparkles
 } from "lucide-react"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
+import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
 import { useDocumentChat } from "@/hooks/document-workspace/useDocumentChat"
 import { useDocumentMetadata } from "@/hooks/document-workspace/useDocumentMetadata"
 import { useMessageOption } from "@/hooks/useMessageOption"
@@ -31,11 +32,12 @@ const PlaygroundMessage = React.lazy(() =>
  * - Shows suggested questions when chat is empty
  * - Displays message sources for RAG responses
  */
-export const DocumentChat: React.FC = () => {
+export const DocumentChat: React.FC<{ operation: QuickIngestOperation }> = ({ operation }) => {
   const { t } = useTranslation(["option", "common", "playground"])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [inputValue, setInputValue] = useState("")
+  const activeTurn = useRef<AbortController | null>(null)
 
   // Get active document from workspace store
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
@@ -49,10 +51,13 @@ export const DocumentChat: React.FC = () => {
     streaming,
     isProcessing,
     isServerAvailable,
+    isChatReady,
+    historyDocumentId,
+    capturePrivateScene,
     clearDocumentChat,
     ragEnabled,
     setRagEnabled
-  } = useDocumentChat(activeDocumentId)
+  } = useDocumentChat(activeDocumentId, operation)
 
   // Get full message option for onSubmit and other actions
   const {
@@ -66,7 +71,7 @@ export const DocumentChat: React.FC = () => {
     serverChatId,
     actionInfo,
     selectedModel
-  } = useMessageOption({ hydrateServerChat: true })
+  } = useMessageOption({ hydrateServerChat: true, capturePrivateScene, historyDocumentId })
 
   const { data: documentMetadata } = useDocumentMetadata(activeDocumentId)
 
@@ -129,10 +134,26 @@ export const DocumentChat: React.FC = () => {
     }
   }, [])
 
+  useLayoutEffect(() => () => {
+    activeTurn.current?.abort()
+    activeTurn.current = null
+  }, [activeDocumentId, operation])
+
+  const submitQuestion = useCallback(async (question: string) => {
+    if (activeTurn.current) return
+    const controller = new AbortController()
+    activeTurn.current = controller
+    try {
+      await onSubmit({ message: question, image: "", controller })
+    } finally {
+      if (activeTurn.current === controller) activeTurn.current = null
+    }
+  }, [onSubmit])
+
   // Handle sending a message
   const handleSend = useCallback(async () => {
     const trimmedMessage = inputValue.trim()
-    if (!trimmedMessage || isProcessing || streaming || !hasSelectedModel) {
+    if (!trimmedMessage || isProcessing || streaming || !hasSelectedModel || !isChatReady) {
       return
     }
 
@@ -143,15 +164,13 @@ export const DocumentChat: React.FC = () => {
 
     setInputValue("")
 
-    await onSubmit({
-      message: trimmedMessage,
-      image: ""
-    })
+    await submitQuestion(trimmedMessage)
   }, [
     hasSelectedModel,
     inputValue,
+    isChatReady,
     isProcessing,
-    onSubmit,
+    submitQuestion,
     streaming,
     suggestionsCollapsed
   ])
@@ -159,14 +178,11 @@ export const DocumentChat: React.FC = () => {
   // Handle suggested question click - auto-send
   const handleQuestionClick = useCallback(
     async (question: string) => {
-      if (!hasSelectedModel || isProcessing || streaming) return
+      if (!hasSelectedModel || !isChatReady || isProcessing || streaming) return
       setSuggestionsCollapsed(true)
-      await onSubmit({
-        message: question,
-        image: ""
-      })
+      await submitQuestion(question)
     },
-    [hasSelectedModel, isProcessing, streaming, onSubmit]
+    [hasSelectedModel, isChatReady, isProcessing, streaming, submitQuestion]
   )
 
   // Handle keyboard events in textarea
@@ -179,6 +195,7 @@ export const DocumentChat: React.FC = () => {
 
   // Handle clearing the chat
   const handleClearChat = useCallback(() => {
+    activeTurn.current?.abort()
     clearDocumentChat()
     setSuggestionsCollapsed(false)
     setInputValue("")
@@ -276,7 +293,7 @@ export const DocumentChat: React.FC = () => {
             documentType={activeDocumentType}
             variant={questionVariant}
             onQuestionClick={handleQuestionClick}
-            disabled={isProcessing || streaming}
+            disabled={!isChatReady || isProcessing || streaming}
           />
         )}
 
@@ -444,7 +461,7 @@ export const DocumentChat: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleSend}
-                  disabled={!hasSelectedModel || !inputValue.trim() || isProcessing}
+                  disabled={!hasSelectedModel || !isChatReady || !inputValue.trim() || isProcessing}
                   className="
                     rounded p-1 text-primary transition-colors
                     hover:bg-primary/10

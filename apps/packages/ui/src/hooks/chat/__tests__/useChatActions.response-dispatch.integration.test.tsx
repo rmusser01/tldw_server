@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import {
   createElement,
   useCallback,
@@ -8,6 +8,7 @@ import {
 } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { App } from "antd"
+import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 // Physical storage and fetch are the only replaced boundaries. The full
@@ -22,6 +23,7 @@ const physical = vi.hoisted(() => {
   const areas = new Map<string, Map<string, unknown>>()
   const watchers = new Map<string, Set<Watch>>()
   const control = {
+    allowDurableHistory: false,
     beforeRead: undefined as ((read: Read) => Promise<unknown>) | undefined,
     beforeFetch: undefined as
       | ((url: string, init: RequestInit) => Promise<Response | undefined>)
@@ -85,6 +87,8 @@ const physical = vi.hoisted(() => {
   type Row = Record<string, unknown>
   type Collection = {
     toArray: () => Promise<Row[]>
+    reverse: () => Collection
+    sortBy: (key: string) => Promise<Row[]>
     and: (predicate: (row: Row) => boolean) => Collection
   }
   const tables: Record<string, ReturnType<typeof table>> = {}
@@ -92,12 +96,19 @@ const physical = vi.hoisted(() => {
     const rows = new Map<string, Row>()
     const collection = (matches: (row: Row) => boolean): Collection => ({
       toArray: async () => structuredClone([...rows.values()].filter(matches)),
+      reverse: () => collection(matches),
+      sortBy: async (key: string) => structuredClone(
+        [...rows.values()].filter(matches).sort((a, b) => Number(b[key]) - Number(a[key]))
+      ),
       and: (predicate: (row: Row) => boolean) =>
         collection((row) => matches(row) && predicate(row))
     })
     return {
       rows,
       get: async (id: unknown) => structuredClone(rows.get(JSON.stringify(id))),
+      add: async (row: Row) => {
+        rows.set(JSON.stringify(row.id), structuredClone(row))
+      },
       put: async (row: Row) => {
         rows.set(JSON.stringify(row.id), structuredClone(row))
       },
@@ -142,7 +153,9 @@ vi.mock("@/utils/safe-storage", async (original) => ({
 vi.mock("@/db/dexie/schema", () => ({
   db: {
     ...physical.tables,
-    transaction: () => {
+    searchTokens: { bulkPut: async () => undefined },
+    transaction: async (_mode: unknown, _tables: unknown, operation: () => Promise<unknown>) => {
+      if (physical.control.allowDurableHistory) return operation()
       throw new Error(
         "This Temporary consumer must not persist a durable history"
       )
@@ -166,6 +179,9 @@ import {
 } from "@/services/actor-settings"
 import { createDefaultActorSettings } from "@/types/actor"
 import { useActorStore } from "@/store/actor"
+import { DocumentChat } from "@/components/DocumentWorkspace/RightPanel/DocumentChat"
+import { useConnectionStore } from "@/store/connection"
+import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 import { useStoreMessageOption } from "@/store/option"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useMcpToolsStore } from "@/store/mcp-tools"
@@ -230,6 +246,7 @@ beforeEach(async () => {
   // registry-cached settings (imageBackendConfigs) would survive from the
   // previous test and skip the physical reads these cases gate on.
   __clearSettingCachesForTests()
+  physical.control.allowDurableHistory = false
   physical.control.beforeRead = undefined
   physical.control.beforeFetch = undefined
   physical.areas.clear()
@@ -446,6 +463,72 @@ afterEach(() => {
   useStoreMessageOption.setState(initialCore)
   useActorStore.getState().reset()
   vi.unstubAllGlobals()
+})
+
+it("sends a typed Document Workspace question without a Chat history provider", async () => {
+  const connection = useConnectionStore.getState().state
+  const workspace = useDocumentWorkspaceStore.getState()
+  useConnectionStore.setState({ state: { ...connection, isConnected: true, mode: "normal" } })
+  useDocumentWorkspaceStore.setState({ activeDocumentId: 81, activeDocumentType: "pdf" })
+  useStoreMessageOption.setState({ temporaryChat: false })
+  physical.control.allowDurableHistory = true
+  physical.control.beforeFetch = async (url) => {
+    const path = new URL(url).pathname
+    if (path === "/api/v1/media/81")
+      return Response.json({ id: 81, title: "Synthetic document", type: "pdf" })
+    if (path === "/api/v1/chats/")
+      return Response.json({ id: "document-chat", title: "Synthetic document", version: 1 })
+    if (path === "/api/v1/chats/document-chat/messages")
+      return Response.json({ id: "acknowledged-message", version: 2 })
+    if (path === "/api/v1/chats/document-chat")
+      return Response.json({ id: "document-chat", title: "Synthetic document", version: 2 })
+    return undefined
+  }
+  const operation = {
+    authorityKey: "verified-test-account",
+    authorityRevision: 1,
+    requestScope: await resolveServicePromptScope(),
+    signal: new AbortController().signal,
+    isCurrent: () => true,
+    assertCurrent: () => {}
+  }
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const scrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView")
+  Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: vi.fn() })
+  const panel = createElement(
+    QueryClientProvider,
+    { client: queryClient },
+    createElement(
+      MemoryRouter,
+      { future: { v7_startTransition: true, v7_relativeSplatPath: true } },
+      createElement(App, null, createElement(DocumentChat, { operation }))
+    )
+  )
+  let view = render(panel)
+  try {
+    const suggestion = screen.getByRole("button", { name: "Summarize this document" })
+    await waitFor(() => expect(suggestion).toBeEnabled())
+    const input = screen.getByRole("textbox", { name: "Ask about this document..." })
+    fireEvent.change(input, { target: { value: "What does this document say?" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(wires).toHaveLength(1))
+    expect(wires[0].body.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "user", content: "What does this document say?" })
+    ]))
+    await waitFor(() => expect(physical.tables.messages.rows.size).toBe(2))
+    expect([...physical.tables.chatHistories.rows.values()]).toEqual([
+      expect.objectContaining({ doc_id: "document:81", server_chat_id: "document-chat" })
+    ])
+    view.unmount()
+    view = render(panel)
+    await waitFor(() => expect(useStoreMessageOption.getState().messages.at(-1)?.message).toBe("Seed answer"))
+  } finally {
+    view.unmount()
+    if (scrollIntoView) Object.defineProperty(Element.prototype, "scrollIntoView", scrollIntoView)
+    else Reflect.deleteProperty(Element.prototype, "scrollIntoView")
+    useConnectionStore.setState({ state: connection })
+    useDocumentWorkspaceStore.setState(workspace)
+  }
 })
 
 const steeringTuple = () => {
