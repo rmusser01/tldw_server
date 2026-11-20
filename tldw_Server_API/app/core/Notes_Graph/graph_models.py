@@ -68,6 +68,21 @@ class GraphNode(BaseModel):
     degree: int | None = Field(None, ge=0, description="Degree in the returned subgraph")
     tag_count: int | None = Field(None, ge=0, description="Number of tags on a note (if computed)")
     primary_source_id: str | None = Field(None, description="Primary source id for notes (when available)")
+    has_note_links: bool | None = Field(
+        None,
+        description=(
+            "Notes only, with include_link_status=true: whether the note has a manual link or a [[link]], "
+            "either way, with another live note anywhere in the library (semantic similarity does not "
+            "count). Omitted otherwise."
+        ),
+    )
+
+    @model_serializer(mode="wrap")
+    def _serialize_without_absent_link_status(self, handler):
+        data = handler(self)
+        if self.has_note_links is None:
+            data.pop("has_note_links", None)
+        return data
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -447,6 +462,10 @@ class NoteGraphRequest(BaseModel):
     format: GraphFormat = GraphFormat.default
     cursor: str | None = None
     allow_heavy: bool = False
+    include_link_status: bool = Field(
+        False,
+        description="If true, each note node carries has_note_links (see GraphNode).",
+    )
 
     @field_validator("dataset_id", mode="before")
     @classmethod

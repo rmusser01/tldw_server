@@ -122,6 +122,16 @@ describe("useNotesGraphWorkspace library graphs (NL-11)", () => {
     expect(NOTES_GRAPH_LIBRARY_REQUEST.maxNodes).toBeGreaterThanOrEqual(500)
   })
 
+  it("asks the server which notes have links (NL-11 review)", async () => {
+    mocks.fetchNotesGraph.mockResolvedValue(graph())
+    renderWorkspace()
+    await flush()
+
+    expect(mocks.fetchNotesGraph).toHaveBeenLastCalledWith(
+      expect.objectContaining({ includeLinkStatus: true })
+    )
+  })
+
   it("filters a library over the cap by tag", async () => {
     mocks.fetchNotesGraph.mockResolvedValue(
       graph({ active_note_count: 2_000, all_notes_eligible: false })

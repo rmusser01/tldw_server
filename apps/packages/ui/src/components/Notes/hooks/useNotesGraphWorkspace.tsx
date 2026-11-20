@@ -297,6 +297,8 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
           datasetId: options.datasetId,
           radius,
           tag: tagFilter ?? undefined,
+          // "Linked notes only" reads the server's link status (NL-11 review).
+          includeLinkStatus: true,
           edgeTypes: includeSemantic ? requestedEdgeTypes : ORDINARY_EDGE_TYPES,
           maxNodes,
           maxEdges,

@@ -1665,6 +1665,7 @@ describe("useNotesGraphWorkspace", () => {
       maxNodes: 1000,
       maxEdges: 4000,
       tag: undefined,
+      includeLinkStatus: true,
       cursor: undefined,
       semanticThreshold: undefined,
       semanticTopK: undefined

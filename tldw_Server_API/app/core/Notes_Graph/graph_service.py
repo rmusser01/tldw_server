@@ -543,6 +543,8 @@ class NoteGraphService:
             "max_degree": eff_max_degree,
             "allow_heavy": req.allow_heavy and self._allow_heavy_limits,
         }
+        if req.include_link_status:  # only when asked, so older request hashes and cursors hold
+            normalized_query["include_link_status"] = True
         dataset_hash = hashlib.sha256(self._dataset_id.encode()).hexdigest()
         request_hash = hashlib.sha256(
             json.dumps(normalized_query, sort_keys=True, separators=(",", ":")).encode()
@@ -660,6 +662,9 @@ class NoteGraphService:
                 tag_count=None,
                 primary_source_id=None,
             )
+
+        if req.include_link_status:
+            self._mark_note_link_status(note_node_map)
 
         # 10. Compute degree & tag counts
         for edge in edges:
@@ -831,6 +836,15 @@ class NoteGraphService:
                 request_hash=request_hash,
             )
         return notes, has_more, next_cursor
+
+    def _mark_note_link_status(self, note_node_map: dict[str, GraphNode]) -> None:
+        """Set ``has_note_links`` from the whole library, before degree pruning (NL-11 review)."""
+        projection_store = self._projection_store()
+        if projection_store is None or not note_node_map:
+            return
+        linked = projection_store.note_ids_with_note_links(list(note_node_map))
+        for note_id, node in note_node_map.items():
+            node.has_note_links = note_id in linked
 
     # ------------------------------------------------------------------
     # Limit resolution

@@ -34,11 +34,11 @@ export const NOTES_GRAPH_TREE_LAYOUT_LIMIT = { nodes: 200, edges: 600 } as const
 /** Above this many links, link labels show only on a hovered or selected link. */
 export const NOTES_GRAPH_EDGE_LABEL_LIMIT = 150
 
+/** Real links: semantic similarity is not one (NL-11 review). */
 const NOTE_TO_NOTE_EDGE_TYPES: ReadonlySet<NotesGraphEdgeType> = new Set([
   "manual",
   "wikilink",
-  "backlink",
-  "semantic"
+  "backlink"
 ])
 
 const isNoteNode = (id: string): boolean => id.startsWith("note:")
@@ -62,9 +62,11 @@ export const countVisibleNotesGraphEdges = (
 ): number => graph.edges.filter((edge) => visibleEdgeTypes.has(edge.type)).length
 
 /**
- * "Linked notes only": keeps the notes that a shown link joins to another
- * note, the tags and sources of those notes, and `keepNodeIds` (the focus
- * and selected notes), so the graph never loses what the reader is on.
+ * "Linked notes only": keeps the linked notes, the tags and sources of those
+ * notes, and `keepNodeIds` (the focus and selected notes), so the graph
+ * never loses what the reader is on. A note is linked when the server says
+ * so (`has_note_links`, counted before the degree cap prunes edges); from an
+ * older server, when a shown real link joins it to another note.
  */
 export const keepLinkedNotes = (
   graph: NotesGraphResponse,
@@ -75,6 +77,12 @@ export const keepLinkedNotes = (
   const keptNotes = new Set<string>(
     keepNodeIds.filter((id): id is string => Boolean(id))
   )
+  const serverStatus = new Map<string, boolean>()
+  for (const node of graph.nodes) {
+    if (typeof node.has_note_links !== "boolean") continue
+    serverStatus.set(node.id, node.has_note_links)
+    if (node.has_note_links) keptNotes.add(node.id)
+  }
   for (const edge of shownEdges) {
     if (
       NOTE_TO_NOTE_EDGE_TYPES.has(edge.type) &&
@@ -82,8 +90,8 @@ export const keepLinkedNotes = (
       isNoteNode(edge.source) &&
       isNoteNode(edge.target)
     ) {
-      keptNotes.add(edge.source)
-      keptNotes.add(edge.target)
+      if (!serverStatus.has(edge.source)) keptNotes.add(edge.source)
+      if (!serverStatus.has(edge.target)) keptNotes.add(edge.target)
     }
   }
   const kept = new Set(keptNotes)

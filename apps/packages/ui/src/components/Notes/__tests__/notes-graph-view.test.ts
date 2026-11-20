@@ -104,6 +104,31 @@ describe("keepLinkedNotes (NL-11 'Linked notes only')", () => {
   })
 })
 
+describe("keepLinkedNotes with the server's link status (NL-11 review)", () => {
+  it("keeps a note the server says is linked, even when the degree cap dropped its edges", () => {
+    const hub = graph(["note:hub", "note:spoke", "note:alone"], [])
+    hub.nodes[0].has_note_links = true
+    hub.nodes[1].has_note_links = true
+    hub.nodes[2].has_note_links = false
+
+    expect(keepLinkedNotes(hub, ALL_EDGES).nodes.map((entry) => entry.id)).toEqual([
+      "note:hub",
+      "note:spoke"
+    ])
+  })
+
+  it("does not count semantic similarity as a link when the server sends no status", () => {
+    const similar = graph(
+      ["note:a", "note:b"],
+      [edge("note:a", "note:b", "semantic")]
+    )
+
+    expect(
+      keepLinkedNotes(similar, new Set<NotesGraphEdgeType>([...ALL_EDGES, "semantic"])).nodes
+    ).toEqual([])
+  })
+})
+
 describe("resolveNotesGraphCanvasLayout", () => {
   it("keeps Tree for a graph it lays out quickly", () => {
     expect(resolveNotesGraphCanvasLayout("dagre", 120, 300)).toBe("dagre")
