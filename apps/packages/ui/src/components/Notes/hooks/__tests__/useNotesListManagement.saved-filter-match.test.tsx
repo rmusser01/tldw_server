@@ -14,8 +14,14 @@ const mocks = vi.hoisted(() => ({
   setSetting: vi.fn(),
   confirmDanger: vi.fn(),
   setKeywordTokens: vi.fn(),
+  promptModal: vi.fn(),
   message: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }
 }))
+
+vi.mock("../../notes-manager-utils", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../notes-manager-utils")>()
+  return { ...actual, promptModal: mocks.promptModal }
+})
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: mocks.bgRequest
@@ -41,7 +47,8 @@ const renderList = (keywordTokens: string[], notebookKeywordTokens: string[]) =>
         message: mocks.message as any,
         confirmDanger: mocks.confirmDanger,
         queryClient: new QueryClient(),
-        t: (key: string) => key,
+        t: (key: string, options?: { defaultValue?: string; tags?: string }) =>
+          options?.defaultValue ? options.defaultValue.replace("{{tags}}", options.tags ?? "") : key,
         keywordTokens,
         setKeywordTokens: mocks.setKeywordTokens,
         notebookKeywordTokens
@@ -110,5 +117,34 @@ describe("useNotesListManagement saved filters (decision 19)", () => {
     const { result } = renderList(["eval"], ["rag", "baking"])
 
     expect(result.current.tagMatchApplies).toBe(false)
+  })
+
+  it("warns in the Save dialog that a filter saved under Any matches all of its tags", async () => {
+    mocks.promptModal.mockResolvedValue(null)
+    const { result } = renderList(["rag", "baking"], [])
+    act(() => result.current.setTagMatch("any"))
+
+    await act(async () => {
+      await result.current.createNotebookFromCurrentKeywords()
+    })
+
+    expect(mocks.promptModal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        label: "This filter will show notes that have all of these tags: rag, baking."
+      })
+    )
+  })
+
+  it("keeps the usual Save dialog text under All", async () => {
+    mocks.promptModal.mockResolvedValue(null)
+    const { result } = renderList(["rag", "baking"], [])
+
+    await act(async () => {
+      await result.current.createNotebookFromCurrentKeywords()
+    })
+
+    expect(mocks.promptModal).toHaveBeenCalledWith(
+      expect.objectContaining({ label: "Save the current tag filters as a reusable preset." })
+    )
   })
 })

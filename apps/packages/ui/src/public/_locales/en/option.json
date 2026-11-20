@@ -7157,6 +7157,9 @@
   "notesSearch_tagMatchAny": {
     "message": "Any of these tags"
   },
+  "notesSearch_notebookSaveAllTagsNotice": {
+    "message": "This filter will show notes that have all of these tags: {{tags}}."
+  },
   "notesSearch_notebookHelperSelectedAllTags": {
     "message": "Shows notes that have all of its tags: {{tags}}."
   },

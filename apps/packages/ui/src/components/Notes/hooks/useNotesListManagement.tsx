@@ -1042,9 +1042,17 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     if (typeof window === 'undefined') return
 
     const defaultName = buildNotebookDefaultName(normalizedKeywords)
+    // A saved filter always matches all of its tags (decision 19); say so
+    // when the reader is looking at "any" (NL-12 review).
+    const savingUnderAny = tagMatch === 'any' && tagMatchApplies
     const rawName = await promptModal({
       title: 'Save filter',
-      label: 'Save the current tag filters as a reusable preset.',
+      label: savingUnderAny
+        ? t('option:notesSearch.notebookSaveAllTagsNotice', {
+            defaultValue: 'This filter will show notes that have all of these tags: {{tags}}.',
+            tags: normalizedKeywords.join(', ')
+          })
+        : 'Save the current tag filters as a reusable preset.',
       defaultValue: defaultName,
       placeholder: 'Filter name',
       okText: 'Save',
@@ -1123,7 +1131,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         }
       }
     }
-  }, [authorityOwner, isCurrentAuthority, isOnline, keywordTokens, message, notebookOptions, setKeywordTokens, setNotebookOptions, setSelectedNotebookId, upsertNotebookOnServer])
+  }, [authorityOwner, isCurrentAuthority, isOnline, keywordTokens, message, notebookOptions, setKeywordTokens, setNotebookOptions, setSelectedNotebookId, t, tagMatch, tagMatchApplies, upsertNotebookOnServer])
 
   const removeSelectedNotebook = React.useCallback(async () => {
     const requestOwner = authorityOwner
