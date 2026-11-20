@@ -423,6 +423,18 @@ def get_config_value(
     return parser.get(section, key, fallback=default)
 
 
+def chat_queued_execution_enabled(chat_config: dict[str, str] | None = None) -> bool:
+    """Return whether chat expects a request queue, honoring the environment override."""
+    raw = os.getenv("CHAT_QUEUED_EXECUTION")
+    if raw is None:
+        raw = (
+            chat_config.get("queued_execution")
+            if chat_config is not None
+            else get_config_value("Chat-Module", "queued_execution")
+        )
+    return is_truthy(raw)
+
+
 ACTUAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 _INGESTION_SOURCE_ALLOWED_ROOT_SECTION = "Files"
