@@ -10,7 +10,11 @@ from fastapi import HTTPException
 from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import validate_chat_settings_storage
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import sanitize_sender_name
-from tldw_Server_API.app.core.Chat.generation_metadata import sanitize_generation_metadata
+from tldw_Server_API.app.core.Chat.generation_metadata import (
+    MOONSHOT_REASONING_KEY,
+    bounded_moonshot_reasoning,
+    sanitize_generation_metadata,
+)
 from tldw_Server_API.app.core.Chat.knowledge_save import strip_reasoning_blocks
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, NotFoundError
 from typing import TYPE_CHECKING
@@ -118,6 +122,7 @@ def build_assistant_message_payload(
     tool_calls: Any | None,
     function_call: Any | None,
     generation_metadata: Mapping[str, Any] | None = None,
+    moonshot_reasoning: str | None = None,
 ) -> dict[str, Any]:
     """Build the persisted assistant message payload for a chat completion.
 
@@ -137,6 +142,8 @@ def build_assistant_message_payload(
         message_payload["function_call"] = function_call
     if generation_metadata:
         message_payload["generation_metadata"] = dict(generation_metadata)
+    if moonshot_reasoning is not None:
+        message_payload[MOONSHOT_REASONING_KEY] = moonshot_reasoning
     return message_payload
 
 
@@ -147,7 +154,12 @@ def assistant_generation_extra(message: Mapping[str, Any]) -> dict[str, Any]:
     """
     if message.get("role") != "assistant":
         return {}
-    return sanitize_generation_metadata(message.get("generation_metadata"))
+    extra = sanitize_generation_metadata(message.get("generation_metadata"))
+    if extra.get("provider") == "moonshot":
+        reasoning = bounded_moonshot_reasoning(message.get(MOONSHOT_REASONING_KEY))
+        if reasoning is not None:
+            extra[MOONSHOT_REASONING_KEY] = reasoning
+    return extra
 
 
 async def save_assistant_message(

@@ -938,7 +938,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         throw new Error("unsupported_history_native_result_metadata")
       preparedRequest = await admitHistoryInput(nativeCompletion
         ? modelClient.prepareNativeHistoryRequest([...promptData.nativeCurrentInput!, humanMessage] as BaseMessage[])
-        : modelClient.prepareClientManagedRequest(finalMessages as BaseMessage[]))
+        : modelClient.prepareClientManagedRequest(finalMessages as BaseMessage[], historyTurn.owner.kind === "local"))
     }
 
     let nativeReplyInterrupted = false

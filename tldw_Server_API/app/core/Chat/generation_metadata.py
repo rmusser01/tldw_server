@@ -70,6 +70,18 @@ _MAX_TOKEN_COUNT = 2**53
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}")
 
 
+# Server-owned continuation text, separate from the public generation metadata allow-list.
+MOONSHOT_REASONING_KEY = "moonshot_reasoning_content"
+MOONSHOT_REASONING_EVENT = "moonshot_history_reasoning"
+MAX_MOONSHOT_REASONING_LENGTH = 100_000
+
+
+def bounded_moonshot_reasoning(value: Any) -> str | None:
+    if isinstance(value, str) and 0 < len(value) <= MAX_MOONSHOT_REASONING_LENGTH:
+        return value
+    return None
+
+
 class GenerationMetadataError(ValueError):
     """Raised when generation metadata has unknown keys or invalid values."""
 

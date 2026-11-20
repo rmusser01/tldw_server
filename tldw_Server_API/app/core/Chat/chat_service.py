@@ -73,6 +73,9 @@ from tldw_Server_API.app.core.Chat.chat_logging import (
 )
 from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
 from tldw_Server_API.app.core.Chat.generation_metadata import (
+    MOONSHOT_REASONING_EVENT,
+    MOONSHOT_REASONING_KEY,
+    bounded_moonshot_reasoning,
     GENERATION_STATUS_COMPLETE,
     GENERATION_STATUS_LENGTH,
     build_generation_metadata,
@@ -1673,6 +1676,10 @@ def build_call_params_from_request(
             and (not isinstance(declared_fields, Mapping) or key in declared_fields)
         )
     }
+    request_metadata = getattr(request_data, "metadata", None)
+    if isinstance(request_metadata, dict) and request_metadata.get("tldw_moonshot_reasoning_history_v1") is True:
+        call_params["_chat_moonshot_reasoning_history"] = True
+
     call_model = resolved_model if resolved_model is not None else call_params.get("model")
     if isinstance(call_model, str) and call_model.strip():
         call_params["model"] = call_model.strip()
@@ -2388,6 +2395,7 @@ def _build_assistant_message_payload(
     tool_calls: Any | None,
     function_call: Any | None,
     generation_metadata: dict[str, Any] | None = None,
+    moonshot_reasoning: str | None = None,
 ) -> dict[str, Any]:
     """Compatibility wrapper for tests/imports that use the old local helper."""
 
@@ -2398,6 +2406,7 @@ def _build_assistant_message_payload(
         tool_calls=tool_calls,
         function_call=function_call,
         generation_metadata=generation_metadata,
+        moonshot_reasoning=moonshot_reasoning,
     )
 
 
@@ -3059,6 +3068,10 @@ def _format_selected_history_messages(
             ]
         if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
             entry["content"] = None
+        if role == "assistant" and extra.get("provider") == "moonshot":
+            reasoning = bounded_moonshot_reasoning(extra.get(MOONSHOT_REASONING_KEY))
+            if reasoning is not None:
+                entry[MOONSHOT_REASONING_KEY] = reasoning
         if item.get("tool_calls") is not None:
             entry["tool_calls"] = item["tool_calls"]
         for key in ("function_call", "tool_call_id"):
@@ -3463,6 +3476,7 @@ async def build_context_and_messages(
             tool_call_id_meta = None
             stored_role = None
             stored_name = None
+            stored_moonshot_reasoning = None
             if metadata:
                 tool_calls_meta = metadata.get("tool_calls")
                 extra_meta = metadata.get("extra") or {}
@@ -3472,6 +3486,8 @@ async def build_context_and_messages(
                     tool_call_id_meta = extra_meta.get("tool_call_id")
                     stored_role = extra_meta.get("sender_role")
                     stored_name = extra_meta.get("sender_name")
+                    if extra_meta.get("provider") == "moonshot":
+                        stored_moonshot_reasoning = bounded_moonshot_reasoning(extra_meta.get(MOONSHOT_REASONING_KEY))
 
             role_initial = map_sender_to_role(sender_val, character_card.get("name") if character_card else None)
             role = stored_role if stored_role in {"user", "assistant", "system", "tool"} else role_initial
@@ -3531,6 +3547,8 @@ async def build_context_and_messages(
                 else:
                     hist_entry["content"] = msg_parts or None
                 if role == "assistant":
+                    if stored_moonshot_reasoning is not None:
+                        hist_entry[MOONSHOT_REASONING_KEY] = stored_moonshot_reasoning
                     name_source = stored_name or (character_card.get("name") if character_card else None)
                     if name_source:
                         name = sanitize_sender_name(name_source)
@@ -5215,6 +5233,8 @@ async def execute_streaming_call(
             rg_commit_cb=cst.rg_commit_cb,
         )
 
+    client_moonshot_history = not cst.should_persist and cst.cleaned_args.get("_chat_moonshot_reasoning_history") is True
+
     async def save_callback(
         full_reply: str,
         tool_calls: list[dict[str, Any]] | None,
@@ -5222,6 +5242,7 @@ async def execute_streaming_call(
         *,
         generation: dict[str, Any] | None = None,
         stream_usage: _StreamUsage | None = None,
+        provider_reasoning: str | None = None,
     ):
         # The usage row and the token commit, once per stream, detached: a client drop or a failure during the
         # save below must not lose it (an early end records in _finalize_stream)
@@ -5290,6 +5311,20 @@ async def execute_streaming_call(
             outcome="blocked" if post_stream_blocked else "success",
         )
 
+        moonshot_reasoning = None
+        if not post_stream_blocked and cst.selected_provider == "moonshot" and provider_reasoning:
+            approved, blocked = await _apply_stream_output_policies(provider_reasoning, enforce_resolved_action=True)
+            if not blocked and approved == provider_reasoning:
+                moonshot_reasoning = provider_reasoning
+                if client_moonshot_history:
+                    structured_events.append({
+                        "event": MOONSHOT_REASONING_EVENT,
+                        "data": {
+                            "event": MOONSHOT_REASONING_EVENT,
+                            "data": {"reasoning_content": moonshot_reasoning},
+                        },
+                    })
+
         if cst.should_persist and cst.final_conversation_id and not post_stream_blocked and (
             full_reply_to_save or tool_calls or function_call
         ):
@@ -5300,6 +5335,7 @@ async def execute_streaming_call(
                 tool_calls=tool_calls,
                 function_call=function_call,
                 generation_metadata=_stream_generation_metadata(generation),
+                moonshot_reasoning=moonshot_reasoning,
             )
             saved_message_id = await save_assistant_message(
                 chat_db=cst.chat_db,
@@ -5711,6 +5747,9 @@ async def execute_streaming_call(
                     continuation_metadata=cst.normalized_continuation_metadata,
                     history_persistence_ack=bool(cst.native_persistence) or None,
                     forward_usage_chunk=cst.forward_usage_chunk,
+                    capture_provider_reasoning=(
+                        bool(cst.should_persist and cst.final_conversation_id) or client_moonshot_history
+                    ) or None,
                     retain_reasoning=(
                         cst.native_persistence == "retain_reasoning" and cst.keep_partial_replies and cst.structured_request_context is None
                     ) or None,

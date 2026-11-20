@@ -965,6 +965,7 @@ export type ChatMessage =
       content: ChatCompletionAssistantContent
       name?: string | null
       tool_calls?: ChatCompletionToolCall[] | null
+      moonshot_reasoning_content?: string
       function_call?: FunctionCall | null
     }
   | {
