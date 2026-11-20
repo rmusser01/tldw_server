@@ -102,6 +102,7 @@ export const saveMessageOnError = async ({
   botMessage,
   historyId,
   historyDocumentId,
+  historyServerChatId,
   selectedModel,
   setHistoryId,
   isRegenerating,
@@ -142,6 +143,7 @@ export const saveMessageOnError = async ({
   botMessage: string
   historyId: string | null
   historyDocumentId?: string
+  historyServerChatId?: string
   selectedModel: string
   setHistoryId: (
     historyId: string,
@@ -247,7 +249,7 @@ export const saveMessageOnError = async ({
       async () => {
         await indexDocumentHistory(historyId, historyDocumentId, requestScope)
         const targetHistoryId = historyId ?? (
-          await saveHistory(title!, false, message_source, historyDocumentId, undefined, requestScope)
+          await saveHistory(title!, false, message_source, historyDocumentId, historyServerChatId, requestScope)
         ).id
         const shouldSaveUser = !isRegenerating && (
           !historyId || !isAbort || !isContinue
@@ -521,6 +523,7 @@ export const saveMessageOnSuccess = async ({
   historyTurn,
   historyId,
   historyDocumentId,
+  historyServerChatId,
   setHistoryId,
   isRegenerate,
   selectedModel,
@@ -561,6 +564,7 @@ export const saveMessageOnSuccess = async ({
   historyTurn?: HistorySendTurn
   historyId: string | null
   historyDocumentId?: string
+  historyServerChatId?: string
   setHistoryId: (
     historyId: string,
     options?: { preserveServerChatId?: boolean }
@@ -694,7 +698,7 @@ export const saveMessageOnSuccess = async ({
     async () => {
       await indexDocumentHistory(historyId, historyDocumentId, requestScope)
       const targetHistoryId = historyId ?? (
-        await saveHistory(title!, false, message_source, historyDocumentId, undefined, requestScope)
+        await saveHistory(title!, false, message_source, historyDocumentId, historyServerChatId, requestScope)
       ).id
 
       if (isRegenerate && retryFailedTurn && userMessageId && userServerMessageId) {

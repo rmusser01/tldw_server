@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { HistoryInfo } from "../types"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
-import { getRecentChatFromWebUI, getRecentChatFromCopilot, getHistoryByDocId, saveHistory } from "../helpers"
+import { getRecentChatFromWebUI, getRecentChatFromCopilot, getHistoryByDocId, getAllHistoriesByDocId, saveHistory } from "../helpers"
 
 const io = vi.hoisted(() => ({ histories: [] as HistoryInfo[] }))
 vi.mock("../schema", () => ({ db: { chatHistories: {
@@ -54,6 +54,18 @@ describe("recent Chat cache ownership", () => {
       { ...history("bob", bobOwner), doc_id: "document:1", createdAt: 2 }
     ]
     expect((await getHistoryByDocId("document:1", snapshot.requestScope))?.id).toBe("bob")
+  })
+
+  it("lists every owned conversation for the document in most recently used order", async () => {
+    io.histories = [
+      { ...history("bob-old", bobOwner), doc_id: "document:1", createdAt: 1 },
+      { ...history("alice", aliceOwner), doc_id: "document:1", createdAt: 4 },
+      { ...history("legacy"), doc_id: "document:1", createdAt: 5 },
+      { ...history("bob-new", bobOwner), doc_id: "document:1", createdAt: 2 },
+      { ...history("other-doc", bobOwner), doc_id: "document:2", createdAt: 3 }
+    ]
+    expect((await getAllHistoriesByDocId("document:1", snapshot.requestScope)).map(row => row.id))
+      .toEqual(["bob-new", "bob-old"])
   })
 
   it.each([aliceOwner, undefined])("does not adopt another owner's or unowned legacy cache (%s)", async owner => {

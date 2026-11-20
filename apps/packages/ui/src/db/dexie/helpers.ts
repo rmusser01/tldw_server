@@ -86,16 +86,15 @@ export const getHistoryByServerChatId = async (serverChatId: string) => {
 }
 
 export const getHistoryByDocId = async (docId: string, requestScope: ServicePromptSnapshot["requestScope"]) => {
+  return (await getAllHistoriesByDocId(docId, requestScope))[0] ?? null
+}
+
+export const getAllHistoriesByDocId = async (docId: string, requestScope: ServicePromptSnapshot["requestScope"]) => {
   const db = new PageAssistDatabase()
   const ownerKey = serverChatMirrorOwnerKey({ requestScope })
   const histories = await db.getAllHistoriesByDocId(docId)
   return histories.filter(history => history.server_scope_key === ownerKey)
-    .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null
-}
-
-export const getAllHistoriesByDocId = async (docId: string) => {
-  const db = new PageAssistDatabase()
-  return await db.getAllHistoriesByDocId(docId)
+    .sort((a, b) => b.createdAt - a.createdAt)
 }
 export const updateChatHistoryCreatedAt = async (history_id: string) => {
   const createdAt = Date.now()

@@ -51,6 +51,7 @@ type UseMessageOptionOptions = {
   /** Only the chat surface owns hydration; toolbars and settings are passive. */
   hydrateServerChat?: boolean;
   historyDocumentId?: string;
+  onDocumentHistorySaved?: (historyId: string) => Promise<void>;
   forceCompareEnabled?: boolean;
   scope?: ChatScope;
   inheritedAssistant?: AssistantSelection | null;
@@ -730,6 +731,7 @@ export const useMessageOption = (
     scope: opts.scope,
     capturePrivateScene: opts.capturePrivateScene,
     historyDocumentId: opts.historyDocumentId,
+    onDocumentHistorySaved: opts.onDocumentHistorySaved,
     visualIdentityManualExpressionOverride:
       opts.visualIdentityManualExpressionOverride,
     setVisualIdentityManualExpressionOverride:

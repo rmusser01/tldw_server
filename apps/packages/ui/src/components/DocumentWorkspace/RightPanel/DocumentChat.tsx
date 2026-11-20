@@ -1,10 +1,10 @@
-import React, { useState, useRef, useCallback, Suspense, useEffect, useLayoutEffect } from "react"
+import React, { useState, useRef, useCallback, Suspense, useEffect, useLayoutEffect, useId } from "react"
 import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
-import { Empty, Spin, Switch, Tooltip, Popconfirm } from "antd"
+import { Empty, Spin, Switch, Tooltip } from "antd"
 import {
   SendHorizontal,
-  Trash2,
+  Plus,
   AlertCircle,
   BookOpen,
   StopCircle,
@@ -12,9 +12,10 @@ import {
 } from "lucide-react"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
-import { useDocumentChat } from "@/hooks/document-workspace/useDocumentChat"
+import { useDocumentChat, type DocumentChatCache } from "@/hooks/document-workspace/useDocumentChat"
 import { useDocumentMetadata } from "@/hooks/document-workspace/useDocumentMetadata"
 import { useMessageOption } from "@/hooks/useMessageOption"
+import { markChatTurnStoppedByUser } from "@/hooks/chat/abort-turn-cleanup"
 import { SuggestedQuestions } from "./SuggestedQuestions"
 
 const PlaygroundMessage = React.lazy(() =>
@@ -32,12 +33,16 @@ const PlaygroundMessage = React.lazy(() =>
  * - Shows suggested questions when chat is empty
  * - Displays message sources for RAG responses
  */
-export const DocumentChat: React.FC<{ operation: QuickIngestOperation }> = ({ operation }) => {
+export const DocumentChat: React.FC<{
+  operation: QuickIngestOperation
+  conversations?: DocumentChatCache
+}> = ({ operation, conversations: workspaceConversations }) => {
   const { t } = useTranslation(["option", "common", "playground"])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const [inputValue, setInputValue] = useState("")
   const activeTurn = useRef<AbortController | null>(null)
+  const activeTabRef = useRef<HTMLButtonElement | null>(null)
+  const panelId = useId()
 
   // Get active document from workspace store
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
@@ -54,24 +59,41 @@ export const DocumentChat: React.FC<{ operation: QuickIngestOperation }> = ({ op
     isChatReady,
     historyDocumentId,
     capturePrivateScene,
-    clearDocumentChat,
+    conversations,
+    activeConversationKey,
+    conversationStatus,
+    inputValue,
+    setInputValue,
+    newConversation,
+    selectConversation,
+    retryConversation,
+    onHistorySaved,
+    trackTurn,
     ragEnabled,
     setRagEnabled
-  } = useDocumentChat(activeDocumentId, operation)
+  } = useDocumentChat(activeDocumentId, operation, workspaceConversations)
 
   // Get full message option for onSubmit and other actions
   const {
     onSubmit,
-    stopStreamingRequest,
     regenerateLastMessage,
     editMessage,
     deleteMessage,
     ttsEnabled,
     temporaryChat,
     serverChatId,
+    serverChatMetaLoaded,
+    serverChatLoadState,
     actionInfo,
     selectedModel
-  } = useMessageOption({ hydrateServerChat: true, capturePrivateScene, historyDocumentId })
+  } = useMessageOption({
+    hydrateServerChat: isChatReady,
+    capturePrivateScene,
+    historyDocumentId,
+    onDocumentHistorySaved: onHistorySaved
+  })
+  const waitingForChatDetails = isChatReady && Boolean(serverChatId) && !serverChatMetaLoaded
+  const canSend = isChatReady && !waitingForChatDetails
 
   const { data: documentMetadata } = useDocumentMetadata(activeDocumentId)
 
@@ -108,8 +130,11 @@ export const DocumentChat: React.FC<{ operation: QuickIngestOperation }> = ({ op
 
   React.useEffect(() => {
     setSuggestionsCollapsed(false)
-    setInputValue("")
-  }, [activeDocumentId])
+  }, [activeConversationKey])
+
+  useLayoutEffect(() => {
+    activeTabRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" })
+  }, [activeConversationKey])
 
   // Listen for "Ask AI" events from the text selection popover
   useEffect(() => {
@@ -132,28 +157,36 @@ export const DocumentChat: React.FC<{ operation: QuickIngestOperation }> = ({ op
         handleAskAI as EventListener
       )
     }
-  }, [])
+  }, [setInputValue])
 
-  useLayoutEffect(() => () => {
-    activeTurn.current?.abort()
+  const stopConversationTurn = useCallback(() => {
+    const controller = activeTurn.current
+    if (!controller) return
     activeTurn.current = null
-  }, [activeDocumentId, operation])
+    markChatTurnStoppedByUser(controller.signal)
+    controller.abort()
+  }, [])
+  useLayoutEffect(() => stopConversationTurn, [activeDocumentId, operation, stopConversationTurn])
 
-  const submitQuestion = useCallback(async (question: string) => {
-    if (activeTurn.current) return
+  const runTurn = useCallback(async <T,>(send: (controller: AbortController) => Promise<T>) => {
+    if (activeTurn.current || !canSend) return
     const controller = new AbortController()
     activeTurn.current = controller
     try {
-      await onSubmit({ message: question, image: "", controller })
+      return await trackTurn(() => send(controller))
     } finally {
       if (activeTurn.current === controller) activeTurn.current = null
     }
-  }, [onSubmit])
+  }, [canSend, trackTurn])
+
+  const submitQuestion = useCallback((question: string, isContinue = false) =>
+    runTurn(controller => onSubmit({ message: question, image: "", controller, isContinue })),
+  [onSubmit, runTurn])
 
   // Handle sending a message
   const handleSend = useCallback(async () => {
     const trimmedMessage = inputValue.trim()
-    if (!trimmedMessage || isProcessing || streaming || !hasSelectedModel || !isChatReady) {
+    if (!trimmedMessage || isProcessing || streaming || !hasSelectedModel || !canSend) {
       return
     }
 
@@ -164,12 +197,16 @@ export const DocumentChat: React.FC<{ operation: QuickIngestOperation }> = ({ op
 
     setInputValue("")
 
-    await submitQuestion(trimmedMessage)
+    const result = await submitQuestion(trimmedMessage)
+    if (result?.status === "failed" && result.restoreDraft && result.restoreDraftIsCurrent?.() !== false) {
+      setInputValue(current => current || inputValue)
+    }
   }, [
+    canSend,
     hasSelectedModel,
     inputValue,
-    isChatReady,
     isProcessing,
+    setInputValue,
     submitQuestion,
     streaming,
     suggestionsCollapsed
@@ -178,11 +215,11 @@ export const DocumentChat: React.FC<{ operation: QuickIngestOperation }> = ({ op
   // Handle suggested question click - auto-send
   const handleQuestionClick = useCallback(
     async (question: string) => {
-      if (!hasSelectedModel || !isChatReady || isProcessing || streaming) return
+      if (!hasSelectedModel || !canSend || isProcessing || streaming) return
       setSuggestionsCollapsed(true)
       await submitQuestion(question)
     },
-    [hasSelectedModel, isChatReady, isProcessing, streaming, submitQuestion]
+    [canSend, hasSelectedModel, isProcessing, streaming, submitQuestion]
   )
 
   // Handle keyboard events in textarea
@@ -193,13 +230,31 @@ export const DocumentChat: React.FC<{ operation: QuickIngestOperation }> = ({ op
     }
   }
 
-  // Handle clearing the chat
-  const handleClearChat = useCallback(() => {
-    activeTurn.current?.abort()
-    clearDocumentChat()
-    setSuggestionsCollapsed(false)
-    setInputValue("")
-  }, [clearDocumentChat])
+  const handleTabKeys = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+    const current = tabs.findIndex(tab => tab === event.target)
+    if (current < 0) return
+    let next: number
+    switch (event.key) {
+      case "ArrowRight":
+        next = (current + 1) % tabs.length
+        break
+      case "ArrowLeft":
+        next = (current + tabs.length - 1) % tabs.length
+        break
+      case "Home":
+        next = 0
+        break
+      case "End":
+        next = tabs.length - 1
+        break
+      default:
+        return
+    }
+    event.preventDefault()
+    tabs[next]?.focus()
+    tabs[next]?.click()
+  }
 
   // No document selected state
   if (activeDocumentId === null) {
@@ -237,258 +292,314 @@ export const DocumentChat: React.FC<{ operation: QuickIngestOperation }> = ({ op
     )
   }
 
-  const hasMessages = messages.length > 0
-  const showSuggestions = !suggestionsCollapsed
+  const hasMessages = isChatReady && messages.length > 0
+  const showSuggestions = isChatReady && !suggestionsCollapsed
+  const newChatLabel = t("option:documentWorkspace.newConversation", "New chat")
+  const useDocumentLabel = t("option:documentWorkspace.enableRag", "Use document content")
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Chat header with clear button */}
-      {hasMessages && (
-        <div className="flex items-center justify-between border-b border-border px-3 py-2">
-          <span className="text-xs text-text-muted">
-            {t("option:documentWorkspace.chatWithDocument", "Chat with document")}
-          </span>
-          <Popconfirm
-            title={t("option:documentWorkspace.clearChatConfirm", "Clear chat history?")}
-            onConfirm={handleClearChat}
-            okText={t("common:clear", "Clear")}
-            cancelText={t("common:cancel", "Cancel")}
-            okButtonProps={{ danger: true }}
-            placement="bottomRight"
-          >
-            <Tooltip
-              title={t("common:clearChat", "Clear chat")}
-              placement="left"
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center gap-1 border-b border-border px-2">
+        <div
+          role="tablist"
+          aria-label={t("option:documentWorkspace.conversations", "Conversations")}
+          className="flex min-w-0 flex-1 gap-1 overflow-x-auto py-1 scrollbar-thin"
+          onKeyDown={handleTabKeys}
+        >
+          {conversations.map(({ key, title }, index) => {
+            const selected = key === activeConversationKey
+            const label = title || t("option:documentWorkspace.conversationDraft", "Draft {{number}}", { number: index + 1 })
+            return (
+              <button
+                key={key}
+                ref={selected ? activeTabRef : undefined}
+                id={`${panelId}-${key}`}
+                role="tab"
+                type="button"
+                title={label}
+                aria-selected={selected}
+                aria-controls={selected ? panelId : undefined}
+                tabIndex={selected ? 0 : -1}
+                className="max-w-36 shrink-0 truncate rounded px-2 py-1.5 text-sm text-text-muted hover:bg-hover hover:text-text aria-selected:bg-primary/10 aria-selected:font-medium aria-selected:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
+                onClick={() => {
+                  if (selected) return
+                  stopConversationTurn()
+                  selectConversation(key)
+                }}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+        <button
+          type="button"
+          disabled={conversations.length === 0}
+          className="flex min-h-8 shrink-0 items-center gap-1 rounded px-2 text-sm text-text hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+          onClick={() => {
+            stopConversationTurn()
+            newConversation()
+          }}
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          {newChatLabel}
+        </button>
+      </div>
+      <div
+        id={panelId}
+        role={activeConversationKey ? "tabpanel" : undefined}
+        aria-labelledby={activeConversationKey ? `${panelId}-${activeConversationKey}` : undefined}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+
+        {hasMessages && suggestionsCollapsed && (
+          <div className="flex justify-center border-b border-border py-1">
+            <button
+              type="button"
+              onClick={() => setSuggestionsCollapsed(false)}
+              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-text-muted transition-colors hover:bg-hover hover:text-text"
             >
+              <Sparkles className="h-3 w-3" />
+              {t("option:documentWorkspace.showSuggestions", "Show suggestions")}
+            </button>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto">
+          {conversationStatus === "loading" && (
+            <div role="status" className="flex items-center gap-2 p-3 text-sm text-text-muted">
+              <Spin size="small" />
+              {t("option:documentWorkspace.loadingConversation", "Loading conversation…")}
+            </div>
+          )}
+          {conversationStatus === "error" && (
+            <div className="flex items-center justify-between gap-2 p-3 text-sm">
+              <p role="alert" className="text-error">
+                {t("option:documentWorkspace.conversationLoadError", "Could not load this conversation.")}
+              </p>
               <button
                 type="button"
-                disabled={isProcessing || streaming}
-                className="rounded p-1 text-text-muted transition-colors hover:bg-hover hover:text-text disabled:opacity-50"
+                onClick={retryConversation}
+                className="shrink-0 rounded border border-border px-2 py-1 text-text hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
               >
-                <Trash2 className="h-4 w-4" />
+                {t("common:retry", "Retry")}
               </button>
-            </Tooltip>
-          </Popconfirm>
-        </div>
-      )}
+            </div>
+          )}
+          {showSuggestions && (
+            <SuggestedQuestions
+              documentType={activeDocumentType}
+              variant={questionVariant}
+              onQuestionClick={handleQuestionClick}
+              disabled={!canSend || isProcessing || streaming}
+            />
+          )}
 
-      {/* Chat header with clear button */}
-      {hasMessages && suggestionsCollapsed && (
-        <div className="flex justify-center border-b border-border py-1">
-          <button
-            type="button"
-            onClick={() => setSuggestionsCollapsed(false)}
-            className="flex items-center gap-1 rounded px-2 py-1 text-xs text-text-muted transition-colors hover:bg-hover hover:text-text"
-          >
-            <Sparkles className="h-3 w-3" />
-            {t("option:documentWorkspace.showSuggestions", "Show suggestions")}
-          </button>
-        </div>
-      )}
-
-      {/* Chat header with clear button */}
-      <div className="flex-1 overflow-y-auto">
-        {showSuggestions && (
-          <SuggestedQuestions
-            documentType={activeDocumentType}
-            variant={questionVariant}
-            onQuestionClick={handleQuestionClick}
-            disabled={!isChatReady || isProcessing || streaming}
-          />
-        )}
-
-        {hasMessages && (
-          <div className="space-y-4 p-3">
-            <Suspense
-              fallback={
-                <div className="flex items-center justify-center p-4">
-                  <Spin size="small" />
-                </div>
-              }
-            >
-              {messages.map((message, index) => (
-                <div key={message.id || `msg-${index}`}>
-                  <PlaygroundMessage
-                    isBot={message.isBot}
-                    message={message.message}
-                    name={message.name}
-                    role={message.role}
-                    images={message.images || []}
-                    currentMessageIndex={index}
-                    totalMessages={messages.length}
-                    onRegenerate={regenerateLastMessage}
-                    isProcessing={isProcessing}
-                    sources={message.sources}
-                    onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
-                      return editMessage(
-                        index,
-                        value,
-                        !message.isBot,
-                        isSend,
-                        editIsCurrent,
-                        editOriginIsCurrent
-                      )
-                    }}
-                    onDeleteMessage={() => {
-                      return deleteMessage(index)
-                    }}
-                    isTTSEnabled={ttsEnabled}
-                    generationInfo={message?.generationInfo}
-                    isStreaming={streaming}
-                    modelImage={message?.modelImage}
-                    modelName={message?.modelName}
-                    createdAt={message?.createdAt}
-                    temporaryChat={temporaryChat}
-                    onStopStreaming={stopStreamingRequest}
-                    onContinue={() => {
-                      onSubmit({
-                        image: "",
-                        message: "",
-                        isContinue: true
-                      })
-                    }}
-                    documents={message?.documents}
-                    actionInfo={actionInfo}
-                    serverChatId={serverChatId}
-                    serverMessageId={message.serverMessageId}
-                    messageId={message.id}
-                    discoSkillComment={message.discoSkillComment}
-                    conversationInstanceId={`doc-${activeDocumentId}`}
-                    hideCopy={false}
-                    hideEditAndRegenerate={false}
-                    toolCalls={message?.toolCalls}
-                    toolResults={message?.toolResults}
-                  />
-                  {message.isBot && message.sources && message.sources.length > 0 && (
-                      <div className="ml-10 mt-1 flex items-center gap-1 text-xs text-text-muted">
-                        <Tooltip
-                          title={t(
-                            "option:documentWorkspace.usesDocumentContext",
-                            "Uses document context"
-                          )}>
-                          <span className="flex items-center gap-1">
-                            <BookOpen className="h-3 w-3" />
-                            <span>
-                              {message.sources.length} source
-                              {message.sources.length !== 1 ? "s" : ""}
+          {hasMessages && (
+            <div className="space-y-4 p-3">
+              <Suspense
+                fallback={
+                  <div className="flex items-center justify-center p-4">
+                    <Spin size="small" />
+                  </div>
+                }
+              >
+                {messages.map((message, index) => (
+                  <div key={message.id || `msg-${index}`}>
+                    <PlaygroundMessage
+                      isBot={message.isBot}
+                      message={message.message}
+                      name={message.name}
+                      role={message.role}
+                      images={message.images || []}
+                      currentMessageIndex={index}
+                      totalMessages={messages.length}
+                      onRegenerate={() => runTurn(controller => regenerateLastMessage({ controller }))}
+                      isProcessing={isProcessing}
+                      sources={message.sources}
+                      onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
+                        return trackTurn(() => editMessage(
+                          index,
+                          value,
+                          !message.isBot,
+                          isSend,
+                          editIsCurrent,
+                          editOriginIsCurrent
+                        ))
+                      }}
+                      onDeleteMessage={() => {
+                        return deleteMessage(index)
+                      }}
+                      isTTSEnabled={ttsEnabled}
+                      generationInfo={message?.generationInfo}
+                      isStreaming={streaming}
+                      modelImage={message?.modelImage}
+                      modelName={message?.modelName}
+                      createdAt={message?.createdAt}
+                      temporaryChat={temporaryChat}
+                      onStopStreaming={stopConversationTurn}
+                      onContinue={() => submitQuestion("", true)}
+                      documents={message?.documents}
+                      actionInfo={actionInfo}
+                      serverChatId={serverChatId}
+                      serverMessageId={message.serverMessageId}
+                      messageId={message.id}
+                      discoSkillComment={message.discoSkillComment}
+                      conversationInstanceId={`doc-${activeDocumentId}-${activeConversationKey}`}
+                      hideCopy={false}
+                      hideEditAndRegenerate={false}
+                      toolCalls={message?.toolCalls}
+                      toolResults={message?.toolResults}
+                    />
+                    {message.isBot && message.sources && message.sources.length > 0 && (
+                        <div className="ml-10 mt-1 flex items-center gap-1 text-xs text-text-muted">
+                          <Tooltip
+                            title={t(
+                              "option:documentWorkspace.usesDocumentContext",
+                              "Uses document context"
+                            )}>
+                            <span className="flex items-center gap-1">
+                              <BookOpen className="h-3 w-3" />
+                              <span>
+                                {message.sources.length} source
+                                {message.sources.length !== 1 ? "s" : ""}
+                              </span>
                             </span>
-                          </span>
-                        </Tooltip>
-                      </div>
-                    )}
-                </div>
-              ))}
-            </Suspense>
-            <div ref={messagesEndRef} />
-          </div>
-        )}
+                          </Tooltip>
+                        </div>
+                      )}
+                  </div>
+                ))}
+              </Suspense>
+              <div ref={messagesEndRef} />
+            </div>
+          )}
 
-        {!hasMessages && suggestionsCollapsed && (
-          <div className="flex h-full items-center justify-center p-4">
-            <Empty
-              description={t(
-                "option:documentWorkspace.startChatting",
-                "Ask a question about this document"
-              )}
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Chat header with clear button */}
-      <div className="border-t border-border p-3">
-        <div className="mb-2 flex items-center justify-between text-xs text-text-muted">
-          <div className="flex items-center gap-2">
-            <Switch
-              size="small"
-              checked={ragEnabled}
-              onChange={(checked) => setRagEnabled(checked)}
-            />
-            <span>
-              {t(
-                "option:documentWorkspace.enableRag",
-                "Use document content"
-              )}
-            </span>
-          </div>
-          {!hasSelectedModel && (
-            <span className="text-warning">
-              {t(
-                "option:documentWorkspace.selectModelHint",
-                "Set up AI chat in Settings"
-              )}
-            </span>
+          {isChatReady && !hasMessages && suggestionsCollapsed && (
+            <div className="flex h-full items-center justify-center p-4">
+              <Empty
+                description={t(
+                  "option:documentWorkspace.startChatting",
+                  "Ask a question about this document"
+                )}
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+              />
+            </div>
           )}
         </div>
-        <div className="relative">
-          <textarea
-            ref={textareaRef}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={t(
-              "option:documentWorkspace.chatPlaceholder",
-              "Ask about this document..."
-            )}
-            aria-label={t("option:documentWorkspace.chatPlaceholder", "Ask about this document...")}
-            disabled={!hasSelectedModel || !isServerAvailable || (isProcessing && !streaming)}
-            rows={1}
-            className="
-              w-full resize-none rounded-lg border border-border bg-surface
-              px-3 py-2 pr-10 text-sm text-text
-              placeholder:text-text-muted
-              focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary
-              disabled:cursor-not-allowed disabled:opacity-50
-            "
-            style={{ minHeight: "40px", maxHeight: "120px" }}
-          />
 
-          {/* Send/Stop button */}
-          <div className="absolute bottom-2 right-2">
-            {streaming ? (
-              <Tooltip title={t("common:stop", "Stop")}>
+        <div className="border-t border-border p-3">
+          {waitingForChatDetails && (
+            serverChatLoadState === "failed" ? (
+              <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+                <p role="alert" className="text-error">
+                  {t("option:documentWorkspace.chatDetailsError", "Could not load chat details.")}
+                </p>
                 <button
                   type="button"
-                  onClick={stopStreamingRequest}
-                  className="rounded p-1 text-error transition-colors hover:bg-error/10"
+                  onClick={retryConversation}
+                  className="rounded border border-border px-2 py-1 hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
                 >
-                  <StopCircle className="h-5 w-5" />
+                  {t("common:retry", "Retry")}
                 </button>
-              </Tooltip>
+              </div>
             ) : (
-              <Tooltip title={t("common:send", "Send")}>
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={!hasSelectedModel || !isChatReady || !inputValue.trim() || isProcessing}
-                  className="
-                    rounded p-1 text-primary transition-colors
-                    hover:bg-primary/10
-                    disabled:cursor-not-allowed disabled:opacity-50
-                  "
-                >
-                  <SendHorizontal className="h-5 w-5" />
-                </button>
-              </Tooltip>
+              <p role="status" className="mb-2 text-xs text-text-muted">
+                {t("option:documentWorkspace.loadingChatDetails", "Loading chat details…")}
+              </p>
+            )
+          )}
+          <div className="mb-2 flex items-center justify-between text-xs text-text-muted">
+            <div className="flex items-center gap-2">
+              <Switch
+                size="small"
+                checked={ragEnabled}
+                disabled={!isChatReady}
+                aria-label={useDocumentLabel}
+                onChange={(checked) => setRagEnabled(checked)}
+              />
+              <span>{useDocumentLabel}</span>
+            </div>
+            {!hasSelectedModel && (
+              <span className="text-warning">
+                {t(
+                  "option:documentWorkspace.selectModelHint",
+                  "Set up AI chat in Settings"
+                )}
+              </span>
             )}
           </div>
-        </div>
+          <div className="relative">
+            <textarea
+              ref={textareaRef}
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={t(
+                "option:documentWorkspace.chatPlaceholder",
+                "Ask about this document..."
+              )}
+              aria-label={t("option:documentWorkspace.chatPlaceholder", "Ask about this document...")}
+              disabled={!hasSelectedModel || !isChatReady || (isProcessing && !streaming)}
+              rows={1}
+              className="
+                w-full resize-none rounded-lg border border-border bg-surface
+                px-3 py-2 pr-10 text-sm text-text
+                placeholder:text-text-muted
+                focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary
+                disabled:cursor-not-allowed disabled:opacity-50
+              "
+              style={{ minHeight: "40px", maxHeight: "120px" }}
+            />
 
-        {/* Document scope indicator */}
-        <div className="mt-2 flex items-center gap-1 text-xs text-text-subtle">
-          <BookOpen className="h-3 w-3" />
-          <span>
-            {ragEnabled
-              ? t(
-                  "option:documentWorkspace.scopedToDocument",
-                  "Answers scoped to this document"
-                )
-              : t(
-                  "option:documentWorkspace.ragDisabled",
-                  "Document content is not being used. Enable to get answers based on this document."
-                )}
-          </span>
+            {/* Send/Stop button */}
+            <div className="absolute bottom-2 right-2">
+              {streaming ? (
+                <Tooltip title={t("common:stop", "Stop")}>
+                  <button
+                    type="button"
+                    aria-label={t("common:stop", "Stop")}
+                    onClick={stopConversationTurn}
+                    className="rounded p-1 text-error transition-colors hover:bg-error/10"
+                  >
+                    <StopCircle className="h-5 w-5" />
+                  </button>
+                </Tooltip>
+              ) : (
+                <Tooltip title={t("common:send", "Send")}>
+                  <button
+                    type="button"
+                    onClick={handleSend}
+                    aria-label={t("common:send", "Send")}
+                    disabled={!hasSelectedModel || !canSend || !inputValue.trim() || isProcessing}
+                    className="
+                      rounded p-1 text-primary transition-colors
+                      hover:bg-primary/10
+                      disabled:cursor-not-allowed disabled:opacity-50
+                    "
+                  >
+                    <SendHorizontal className="h-5 w-5" />
+                  </button>
+                </Tooltip>
+              )}
+            </div>
+          </div>
+
+          {/* Document scope indicator */}
+          <div className="mt-2 flex items-center gap-1 text-xs text-text-subtle">
+            <BookOpen className="h-3 w-3" />
+            <span>
+              {ragEnabled
+                ? t(
+                    "option:documentWorkspace.scopedToDocument",
+                    "Answers scoped to this document"
+                  )
+                : t(
+                    "option:documentWorkspace.ragDisabled",
+                    "Document content is not being used. Enable to get answers based on this document."
+                  )}
+            </span>
+          </div>
         </div>
       </div>
     </div>
