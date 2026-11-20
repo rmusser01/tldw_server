@@ -2047,13 +2047,14 @@ _NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT = 100
 _NOTES_KEYWORD_TOKEN_MAX_LENGTH = 100
 
 
-def _normalize_keyword_tokens(tokens: Optional[list[str]]) -> list[str]:
+def _normalize_keyword_tokens(tokens: Optional[list[str]], name: str = "tokens") -> list[str]:
+    """Trim and dedupe keyword tokens; ``name`` is the query list a 400 names."""
     if not tokens:
         return []
     if len(tokens) > _NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Too many keyword tokens; maximum raw tokens is {_NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT}.",
+            detail=f"Too many keyword tokens in {name}; maximum raw tokens is {_NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT}.",
         )
     seen: set[str] = set()
     out: list[str] = []
@@ -2074,7 +2075,7 @@ def _normalize_keyword_tokens(tokens: Optional[list[str]]) -> list[str]:
         if len(out) >= _NOTES_KEYWORD_TOKEN_MAX_COUNT:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Too many keyword tokens; maximum is {_NOTES_KEYWORD_TOKEN_MAX_COUNT}.",
+                detail=f"Too many keyword tokens in {name}; maximum is {_NOTES_KEYWORD_TOKEN_MAX_COUNT}.",
             )
         seen.add(key)
         out.append(text)
@@ -3050,7 +3051,7 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
             description=(
                 "If true, match the query against note titles only: a case-insensitive substring match with "
                 "titles that start with the query first, then the most recently modified. Used for [[wikilink]] "
-                "autocomplete across the whole library. Ignored when tokens are given."
+                "autocomplete across the whole library. Ignored when tokens or required_tokens are given."
             ),
         ),
         sort_by: Annotated[
@@ -3092,14 +3093,15 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                                 detail="Rate limit exceeded for notes.search",
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
         token_list = _normalize_keyword_tokens(tokens)
-        required_list = _normalize_keyword_tokens(required_tokens)
+        required_list = _normalize_keyword_tokens(required_tokens, "required_tokens")
         query_term = query.strip() if query else ""
         if not query_term and not token_list and not required_list:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="query or tokens is required")
         search_sort_by, search_sort_order = _normalize_note_search_sort(sort_by, sort_order)
         logger.debug(
-            f"User (DB client_id: {db.client_id}) searching notes: query='{query_term}', limit={limit}, offset={offset}, tokens={token_list}")
+            f"User (DB client_id: {db.client_id}) searching notes: query='{query_term}', limit={limit}, offset={offset}, "
+            f"tokens={token_list}, required_tokens={required_list}")
         total = None
         if token_list or required_list:
             notes_data = db.search_notes_with_keywords(

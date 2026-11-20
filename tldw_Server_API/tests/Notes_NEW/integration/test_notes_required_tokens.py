@@ -98,3 +98,49 @@ def test_required_tokens_combine_with_a_text_query(notes_client: TestClient) -> 
 
     assert titles == ["captured baking", "captured rag", "captured rag and baking"]
     assert total == 3
+
+
+def _search_parameter(client: TestClient, name: str) -> dict:
+    operation = client.app.openapi()["paths"]["/api/v1/notes/search/"]["get"]
+    return next(parameter for parameter in operation["parameters"] if parameter["name"] == name)
+
+
+def test_too_many_required_tokens_names_the_list(notes_client: TestClient) -> None:
+    response = notes_client.get(
+        "/api/v1/notes/search/",
+        params=[("required_tokens", f"topic-{index}") for index in range(21)],
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"].startswith("Too many keyword tokens in required_tokens")
+
+
+def test_too_many_tokens_names_the_list(notes_client: TestClient) -> None:
+    response = notes_client.get(
+        "/api/v1/notes/search/",
+        params=[("tokens", f"topic-{index}") for index in range(21)],
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"].startswith("Too many keyword tokens in tokens")
+
+
+def test_title_only_says_it_ignores_required_tokens_too(notes_client: TestClient) -> None:
+    description = _search_parameter(notes_client, "title_only")["description"]
+
+    assert "required_tokens" in description
+
+
+def test_the_search_debug_log_includes_required_tokens(notes_client: TestClient) -> None:
+    from loguru import logger
+
+    lines: list[str] = []
+    sink = logger.add(lines.append, level="DEBUG", format="{message}")
+    try:
+        _titles(notes_client, tokens=["rag", "baking"], tokens_match="any", required_tokens=["captured"])
+    finally:
+        logger.remove(sink)
+
+    search_lines = [line for line in lines if "searching notes" in line]
+    assert search_lines
+    assert "required_tokens=['captured']" in search_lines[-1]
