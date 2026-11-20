@@ -18,8 +18,9 @@ const EXT_PATH = path.resolve(
 )
 const MODEL_ID = "mock-model"
 const MODEL_KEY = `tldw:${MODEL_ID}`
+// A fresh panel has no chat open yet, so the action names the chat page.
 const CHAT_HANDOFF_DESCRIPTION =
-  "Opens this chat in a new tab, with your draft and page references. Your draft also stays here."
+  "Opens the chat page in a new tab, with your draft and page references. Your draft also stays here."
 
 const buildSeedConfig = (
   baseUrl: string,
