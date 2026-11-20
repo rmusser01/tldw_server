@@ -243,7 +243,14 @@ def _moonshot_request(
             total=_safe_cast(moonshot_config.get("api_retries"), int, 1)
         )
         try:
-            response = session.post(api_url, headers=headers, json=payload, timeout=effective_timeout)
+            redirect_options = (
+                {"allow_redirects": False}
+                if any("reasoning_content" in message for message in api_messages)
+                else {}
+            )
+            response = session.post(
+                api_url, headers=headers, json=payload, timeout=effective_timeout, **redirect_options
+            )
             logging.debug(f"Moonshot: Full API response status: {response.status_code}")
             response.raise_for_status()
             try:

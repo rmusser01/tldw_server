@@ -30,6 +30,8 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     SanitizedProviderStreamError,
 )
 from tldw_Server_API.app.core.Chat.generation_metadata import (
+    MAX_MOONSHOT_REASONING_LENGTH,
+    MOONSHOT_REASONING_EVENT,
     GENERATION_STATUS_COMPLETE,
     GENERATION_STATUS_INTERRUPTED,
     GENERATION_STATUS_LENGTH,
@@ -1056,6 +1058,8 @@ class StreamingResponseHandler:
         self.last_activity = time.time()
         self.is_cancelled = False
         self.full_response: list[str] = []
+        self.provider_reasoning: list[str] | None = None
+        self.provider_reasoning_length = 0
         self.reasoning_open = False
         self.retain_reasoning = False
         self.response_size = 0
@@ -1231,6 +1235,8 @@ class StreamingResponseHandler:
             kwargs["generation"] = self.generation_snapshot()
         if _accepts_keyword(save_callback, "stream_usage"):
             kwargs["stream_usage"] = self.stream_usage
+        if self.provider_reasoning and _accepts_keyword(save_callback, "provider_reasoning"):
+            kwargs["provider_reasoning"] = "".join(self.provider_reasoning)
         return kwargs
 
     def _partial_settlement_eligible(self) -> bool:
@@ -1642,6 +1648,9 @@ class StreamingResponseHandler:
                         outputs.append(f"data: {payload_str}\n\n")
                         self.update_activity()
                         return outputs, False
+                    if isinstance(data, dict) and data.get("event") == MOONSHOT_REASONING_EVENT:
+                        # Only local settlement can issue a reasoning history event.
+                        return outputs, False
                     error_code = structural_error_code(data)
                     if error_code is not None:
                         outputs.append(canonical_provider_error(error_code))
@@ -1709,6 +1718,17 @@ class StreamingResponseHandler:
                                 reasoning = delta.get("reasoning_content")
                                 if reasoning is None:
                                     reasoning = extra_reasoning
+                                if (
+                                    self.provider_reasoning is not None
+                                    and choice.get("index", 0) == 0
+                                    and isinstance(reasoning, str)
+                                    and reasoning
+                                ):
+                                    self.provider_reasoning_length += len(reasoning)
+                                    if self.provider_reasoning_length <= MAX_MOONSHOT_REASONING_LENGTH:
+                                        self.provider_reasoning.append(reasoning)
+                                    else:
+                                        self.provider_reasoning = None
                                 if (
                                     self.retain_reasoning
                                     and choice.get("index", 0) == 0
@@ -2281,6 +2301,7 @@ async def create_streaming_response_with_timeout(
     partial_save_callback: Optional[Callable[..., Any]] = None,
     forward_usage_chunk: bool = True,
     retain_reasoning: bool = False,
+    capture_provider_reasoning: bool = False,
 ) -> AsyncIterator[str]:
     """
     Create a streaming response with timeout and error handling.
@@ -2320,6 +2341,8 @@ async def create_streaming_response_with_timeout(
     handler.user_message_id = user_message_id
     handler.forward_usage_chunk = forward_usage_chunk
     handler.retain_reasoning = retain_reasoning
+    if capture_provider_reasoning:
+        handler.provider_reasoning = []
     if isinstance(continuation_metadata, dict) and continuation_metadata:
         handler.continuation_metadata = dict(continuation_metadata)
 

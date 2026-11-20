@@ -891,6 +891,36 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
     if base_url_override:
         request["base_url"] = base_url_override
 
+    from tldw_Server_API.app.core.Chat.generation_metadata import MOONSHOT_REASONING_KEY, bounded_moonshot_reasoning
+
+    if any(isinstance(message, dict) and MOONSHOT_REASONING_KEY in message for message in messages_payload):
+        replay_reasoning = False
+        if provider == "moonshot":
+            from urllib.parse import urlsplit
+
+            from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import resolve_provider_models_base_url
+
+            base = resolve_provider_models_base_url(
+                provider, app_config, credentials_resolved=credentials_resolved, base_url=base_url_override
+            )
+            if base:
+                endpoint = urlsplit(base)
+                replay_reasoning = (
+                    endpoint.scheme == "https"
+                    and endpoint.hostname in {"api.moonshot.ai", "api.moonshot.cn"}
+                    and endpoint.port in (None, 443)
+                )
+        messages_payload = list(messages_payload)
+        for index, message in enumerate(messages_payload):
+            if not isinstance(message, dict) or MOONSHOT_REASONING_KEY not in message:
+                continue
+            message = dict(message)
+            reasoning = bounded_moonshot_reasoning(message.pop(MOONSHOT_REASONING_KEY))
+            if replay_reasoning and message.get("role") == "assistant" and reasoning is not None:
+                message.setdefault("reasoning_content", reasoning)
+            messages_payload[index] = message
+        request["messages"] = messages_payload
+
     stream_value = chat_args.get("stream")
     if stream_value is None:
         stream_value = chat_args.get("streaming")

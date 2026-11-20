@@ -1648,6 +1648,7 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
             ? metadata.local_history
             : undefined
         ) as Record<string, unknown> | undefined
+        const moonshotReasoning = (local?.generationInfo as { moonshotReasoning?: unknown } | undefined)?.moonshotReasoning
 
         return {
           id: node.id,
@@ -1656,6 +1657,7 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
           images: [...content.images],
           tool_calls: content.tool_calls ? [...content.tool_calls] : undefined,
           tool_call_id: metadata.tool_call_id as string | undefined,
+          ...(typeof moonshotReasoning === "string" ? { moonshotReasoning } : {}),
           function_call: metadata.function_call as
             | Record<string, unknown>
             | undefined,

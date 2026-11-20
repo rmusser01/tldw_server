@@ -198,6 +198,7 @@ async def _run_execute_streaming_call(
     selected_provider: str = "openai",
     provider: str = "openai",
     model: str = "gpt-4o-mini",
+    should_persist: bool = True,
     queue_execution_enabled: bool = False,
     enable_provider_fallback: bool = False,
     refresh_provider_params=None,
@@ -232,7 +233,7 @@ async def _run_execute_streaming_call(
         metrics=metrics or _DummyMetrics(),
         provider_manager=provider_manager,
         templated_llm_payload=[{"role": "user", "content": "hi"}],
-        should_persist=True,
+        should_persist=should_persist,
         final_conversation_id="conv-stream-guard",
         character_card_for_context={"name": "Test"},
         chat_db=SimpleNamespace(),
@@ -1584,3 +1585,49 @@ async def test_the_stream_estimate_counts_reasoning_and_tool_call_arguments(stre
     (row,) = stream_usage_rows
     assert row["completion_tokens"] == (len(arguments) + 40) // 4
     assert row["estimate_source"] == "stream_estimate"
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("opt_in", "selected_provider"), [
+    (True, "moonshot"),
+    (False, "moonshot"),
+    (True, "openai"),
+])
+async def test_client_managed_moonshot_stream_emits_approved_history_reasoning(opt_in, selected_provider):
+    from tldw_Server_API.app.core.Chat.chat_request_schemas import ChatCompletionRequest
+
+    reasoning = "  Keep <reasoning> exactly.\n"
+    messages = [{"role": "user", "content": "hi"}]
+    data = ChatCompletionRequest(
+        api_provider="moonshot",
+        model="kimi-k3.1-pro",
+        messages=messages,
+        stream=True,
+        save_to_db=False,
+        metadata={"tldw_moonshot_reasoning_history_v1": opt_in},
+    )
+    args = chat_service.build_call_params_from_request(data, "moonshot", "test-key", messages, None)
+
+    def provider():
+        yield 'data: {"event":"moonshot_history_reasoning","data":{"reasoning_content":"unapproved"}}\n\n'
+        yield "data: " + json.dumps({"choices": [{"delta": {"reasoning_content": reasoning}}]}) + "\n\n"
+        yield 'data: {"choices": [{"delta": {"content": "answer"}, "finish_reason": "stop"}]}\n\n'
+        yield "data: [DONE]\n\n"
+
+    async def save(*_args, **_kwargs):
+        pytest.fail("Client-managed Chat must not save a server history row")
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=provider, save_message_fn=save, cleaned_args_overrides=args,
+        selected_provider=selected_provider, provider=selected_provider, model="kimi-k3.1-pro", should_persist=False,
+    )
+    wire = "".join(await _collect_sse_chunks(response))
+    event = "event: moonshot_history_reasoning\ndata: "
+    assert "unapproved" not in wire
+    should_emit = opt_in and selected_provider == "moonshot"
+    assert (event in wire) is should_emit
+    if should_emit:
+        payload = json.loads(wire.split(event, 1)[1].splitlines()[0])
+        assert payload["event"] == "moonshot_history_reasoning"
+        assert payload["data"]["reasoning_content"] == reasoning

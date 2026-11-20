@@ -2418,3 +2418,29 @@ async def test_native_cancelled_stream_never_fabricates_saved_identity(monkeypat
     wire = "".join([frame async for frame in handler.safe_stream_generator(provider(), save)])
     save.assert_not_awaited()
     assert "tldw_message_id" not in wire
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capture", [True, False])
+async def test_stream_passes_exact_reasoning_to_completed_save_only(capture):
+    from tldw_Server_API.app.core.Chat.streaming_utils import create_streaming_response_with_timeout
+
+    async def provider():
+        for delta in ({"reasoning_content": "  Plan <tool>"},
+                      {"reasoning_content": " & preserve\n"}, {"content": "Answer"}):
+            yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': delta}]})}\n\n"
+        yield 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+        yield "data: [DONE]\n\n"
+
+    saved = []
+
+    async def save(content, _tools=None, _function=None, *, provider_reasoning=None):
+        saved.append((content, provider_reasoning))
+
+    async for _ in create_streaming_response_with_timeout(
+        provider(), "conv", "kimi-k3.1-pro", save_callback=save, capture_provider_reasoning=capture
+    ):
+        pass
+
+    assert saved == [("Answer", "  Plan <tool> & preserve\n" if capture else None)]

@@ -185,6 +185,7 @@ export class ChatTldw {
       ? []
       : this.convertToTldwMessages(messages)
     const toolCalls: ToolCall[] = []
+    let moonshotReasoning: string | undefined
     // Captures the background transport's `stream_transport_interrupted`
     // sentinel. TldwChat surfaces it via onChunk (not as a text token), so we
     // hold onto the raw chunk here and re-emit it after the token loop so the
@@ -227,6 +228,13 @@ export class ChatTldw {
 
     const consumeChunk = (chunk: any) => {
       if (signal?.aborted) return
+      if (
+        options?.preparedRequest?.metadata?.tldw_moonshot_reasoning_history_v1 === true &&
+        chunk?.event === "moonshot_history_reasoning" &&
+        typeof chunk.data?.reasoning_content === "string"
+      ) {
+        moonshotReasoning = chunk.data.reasoning_content
+      }
       const streamedConversationId =
         typeof chunk?.tldw_conversation_id === "string" &&
         chunk.tldw_conversation_id.trim().length > 0
@@ -358,8 +366,13 @@ export class ChatTldw {
         endServerWrite?.(serverWriteOutcome)
         // Synthesize a minimal LangChain-style result for handleLLMEnd
         if (callbacks && callbacks.length > 0) {
-          const generationInfo =
-            toolCalls.length > 0 ? { tool_calls: toolCalls } : undefined
+          const approvedReasoning = serverWriteOutcome === "saved" && moonshotReasoning
+          const generationInfo = toolCalls.length > 0 || approvedReasoning
+            ? {
+                ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+                ...(approvedReasoning ? { moonshotReasoning: approvedReasoning } : {})
+              }
+            : undefined
           const result = {
             generations: [[{ text: fullText, generationInfo }]]
           }
@@ -378,10 +391,14 @@ export class ChatTldw {
   }
 
   /** Freeze after the existing builder resolves tools/settings, before owner admission. */
-  prepareClientManagedRequest(messages: BaseMessage[]): ChatCompletionRequest {
+  prepareClientManagedRequest(messages: BaseMessage[], localHistory = false): ChatCompletionRequest {
     if (!this.clientManagedHistory)
       throw new Error("client_managed_history_required")
-    return this.prepareHistoryRequest(messages)
+    const request = this.prepareHistoryRequest(messages, localHistory)
+    if (localHistory) {
+      request.metadata = { ...request.metadata, tldw_moonshot_reasoning_history_v1: true }
+    }
+    return request
   }
 
   prepareNativeHistoryRequest(messages: BaseMessage[]): ChatCompletionRequest {
@@ -390,7 +407,7 @@ export class ChatTldw {
     return this.prepareHistoryRequest(messages)
   }
 
-  private prepareHistoryRequest(messages: BaseMessage[]): ChatCompletionRequest {
+  private prepareHistoryRequest(messages: BaseMessage[], preserveMoonshotReasoning = false): ChatCompletionRequest {
     // Custom provider objects can contain credentials. No implicit redaction/projection.
     if (this.extraBody && Object.keys(this.extraBody).length) {
       throw new Error("unsupported_history_custom_provider_body")
@@ -413,7 +430,7 @@ export class ChatTldw {
     ) {
       throw new Error("unsupported_history_model_images")
     }
-    return prepareChatCompletionRequest(this.convertToTldwMessages(messages), {
+    return prepareChatCompletionRequest(this.convertToTldwMessages(messages, preserveMoonshotReasoning), {
       model: this.model,
       routing: this.routing,
       temperature: this.temperature,
@@ -594,7 +611,7 @@ export class ChatTldw {
     return parts
   }
 
-  private convertToTldwMessages(messages: BaseMessage[]): ChatMessage[] {
+  private convertToTldwMessages(messages: BaseMessage[], preserveMoonshotReasoning = false): ChatMessage[] {
     return messages.map((msg) => {
       if (
         msg instanceof SystemMessage ||
@@ -619,9 +636,13 @@ export class ChatTldw {
         throw new Error("unsupported_history_function_message")
       }
       if (msg instanceof AIMessage) {
+        const moonshotReasoning = msg.additional_kwargs?.moonshotReasoning
         return {
           role: "assistant",
           content: this.coerceTextContent(msg.content),
+          ...(preserveMoonshotReasoning && typeof moonshotReasoning === "string" && moonshotReasoning
+            ? { moonshot_reasoning_content: moonshotReasoning }
+            : {}),
           ...(Array.isArray(msg.additional_kwargs?.tool_calls)
             ? { tool_calls: msg.additional_kwargs.tool_calls as ToolCall[] }
             : {})
