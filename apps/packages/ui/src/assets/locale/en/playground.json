@@ -798,6 +798,8 @@
     "shortcutHint": "/ commands · @ mentions",
     "toolsLabel": "Tools",
     "shortOptions": "Composer options",
+    "shortOptionsWarning": "Some hidden options need attention.",
+    "shortOptionsActive": "Some hidden options are in use.",
     "instructionsAndPeople": "Prompts & people",
     "toolsPanel": "Composer tools",
     "calmPlaceholder": "Write a message…",

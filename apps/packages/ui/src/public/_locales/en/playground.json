@@ -4863,6 +4863,12 @@
   "composer_shortOptions": {
     "message": "Composer options"
   },
+  "composer_shortOptionsWarning": {
+    "message": "Some hidden options need attention."
+  },
+  "composer_shortOptionsActive": {
+    "message": "Some hidden options are in use."
+  },
   "composer_shortcutHint": {
     "message": "/ commands · @ mentions"
   },

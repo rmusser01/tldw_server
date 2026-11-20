@@ -1,9 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens";
+import { OPEN_PROMPT_SELECT_EVENT } from "../playground-cockpit-actions";
 import { ComposerToolbar } from "../ComposerToolbar";
 
 const assistantSelectMock = vi.hoisted(() => vi.fn());
@@ -400,6 +401,55 @@ describe("calm composer", () => {
     for (const control of collapsed) {
       expect(control.closest(`[class*="${shortHidden}"]`)).toBeNull();
     }
+  });
+
+  // AX-04 review: a prompt or assistant picker opened from elsewhere reveals
+  // the collapsed row first, so it doesn't anchor to a hidden panel.
+  it("reveals the collapsed short-viewport row when a picker is opened by event", () => {
+    render(<ToolbarHarness />);
+    const toggle = screen.getByTestId("composer-short-options-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    act(() => {
+      window.dispatchEvent(new Event(OPEN_PROMPT_SELECT_EVENT));
+    });
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("composer-options-panel").className).not.toContain(
+      "[@media(max-height:500px)]:hidden",
+    );
+  });
+
+  it("controls the whole toolbar it collapses", () => {
+    render(<ToolbarHarness />);
+    const toggle = screen.getByTestId("composer-short-options-toggle");
+    const controlled = document.getElementById(
+      toggle.getAttribute("aria-controls") ?? "",
+    );
+    expect(controlled).toBe(screen.getByTestId("composer-toolbar"));
+  });
+
+  it("flags hidden warnings and active context on Composer options", () => {
+    const { rerender } = render(<ToolbarHarness />);
+    const toggle = screen.getByTestId("composer-short-options-toggle");
+    expect(toggle).not.toHaveAttribute("data-attention");
+    expect(toggle).not.toHaveAttribute("aria-describedby");
+
+    rerender(
+      <ToolbarHarness
+        contextItems={[
+          { id: "model", label: "Model", value: "None", tone: "warning" },
+        ]}
+      />,
+    );
+    expect(toggle).toHaveAttribute("data-attention", "warning");
+    expect(toggle).toHaveAccessibleDescription(
+      "Some hidden options need attention.",
+    );
+
+    rerender(<ToolbarHarness selectedDocumentsCount={2} />);
+    expect(toggle).toHaveAttribute("data-attention", "active");
+    expect(toggle).toHaveAccessibleDescription("Some hidden options are in use.");
   });
 
   it("toggles the formatting guide inside Tools", () => {

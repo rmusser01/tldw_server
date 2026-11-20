@@ -230,6 +230,14 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   const [assistantPickerOpen, setAssistantPickerOpen] = React.useState(false);
   const [promptPickerOpen, setPromptPickerOpen] = React.useState(false);
   const pendingCustomizationRevealRef = React.useRef(false);
+  // AX-04, decision [14]: in short viewports (max-height 500px, e.g. 400%
+  // zoom) this row collapses first, behind one "Composer options" button;
+  // the input and Send stay. The textarea shares Send's row there
+  // (PlaygroundForm), so the transcript keeps a usable height. Anything that
+  // reveals Tools reveals the row too, so pickers never anchor to a hidden
+  // panel.
+  const [shortRowOpen, setShortRowOpen] = React.useState(false);
+  const shortHidden = shortRowOpen ? "" : SHORT_VIEWPORT_COLLAPSE;
   const handleAssistantPickerOpen = React.useCallback((open: boolean) => {
     setAssistantPickerOpen(open);
     if (open) pendingCustomizationRevealRef.current = true;
@@ -243,6 +251,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       pendingCustomizationRevealRef.current = false;
     if (!pendingCustomizationRevealRef.current || optionsLoading) return;
     pendingCustomizationRevealRef.current = false;
+    setShortRowOpen(true);
     if (!optionsExpanded) onToggleOptions();
   }, [
     assistantPickerOpen,
@@ -253,6 +262,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   ]);
   React.useEffect(() => {
     const revealTools = () => {
+      setShortRowOpen(true);
       if (optionsLoading) pendingCustomizationRevealRef.current = true;
       else if (!optionsExpanded) onToggleOptions();
     };
@@ -267,12 +277,6 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     useStorage(PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY, false);
   const [systemPromptsOpen, setSystemPromptsOpen] = React.useState(false);
   const [generationStyleOpen, setGenerationStyleOpen] = React.useState(false);
-  // AX-04, decision [14]: in short viewports (max-height 500px, e.g. 400%
-  // zoom) this row collapses first, behind one "Composer options" button;
-  // the input and Send stay. The textarea shares Send's row there
-  // (PlaygroundForm), so the transcript keeps a usable height.
-  const [shortRowOpen, setShortRowOpen] = React.useState(false);
-  const shortHidden = shortRowOpen ? "" : SHORT_VIEWPORT_COLLAPSE;
   // Retained hidden controls and detached portals are both invalid return targets.
   // Repair only focus still owned by that disappearing control, never another task.
   React.useLayoutEffect(() => {
@@ -368,6 +372,18 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           "rolePlayScene",
         ].includes(item.id)),
   );
+  // What "Composer options" hides in short viewports, so its button can say
+  // when that includes a warning or something in use (AX-04 review).
+  const hiddenAttention = contextItems.some((item) => item.tone === "warning")
+    ? "warning"
+    : activeContextItems.length > 0 ||
+        selectedDocumentsCount > 0 ||
+        uploadedFilesCount > 0 ||
+        toolChoice !== "none" ||
+        appendFormattingGuidePrompt ||
+        openUIRequestMode
+      ? "active"
+      : null;
   const neutralContextItems = contextItems.filter(
     (item) => item.tone === "neutral" && !activeContextItems.includes(item),
   );
@@ -467,6 +483,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   return (
     <div
       ref={toolbarRef}
+      id="composer-toolbar"
       data-testid="composer-toolbar"
       onFocusCapture={(event) => {
         lastFocusedControlRef.current = event.target as HTMLElement;
@@ -956,16 +973,41 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             type="button"
             onClick={() => setShortRowOpen((open) => !open)}
             aria-expanded={shortRowOpen}
-            aria-controls="composer-bottom-bar"
+            aria-controls="composer-toolbar"
+            aria-describedby={
+              hiddenAttention && !shortRowOpen
+                ? "composer-short-options-attention"
+                : undefined
+            }
+            data-attention={(!shortRowOpen && hiddenAttention) || undefined}
             aria-label={
               t("playground:composer.shortOptions", "Composer options") as string
             }
             title={t("playground:composer.shortOptions", "Composer options") as string}
             data-testid="composer-short-options-toggle"
-            className={`hidden ${COMPOSER_TOOLBAR_TOKENS.iconButton} [@media(max-height:500px)]:inline-flex border border-border text-text-muted transition-colors hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${shortRowOpen ? "bg-surface2 text-text" : ""}`}
+            className={`relative hidden ${COMPOSER_TOOLBAR_TOKENS.iconButton} [@media(max-height:500px)]:inline-flex border border-border text-text-muted transition-colors hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${shortRowOpen ? "bg-surface2 text-text" : ""}`}
           >
             <Ellipsis className="h-4 w-4" aria-hidden="true" />
+            {hiddenAttention && !shortRowOpen && (
+              <span
+                aria-hidden="true"
+                className={`absolute right-1 top-1 h-2 w-2 rounded-full ${hiddenAttention === "warning" ? "bg-warn" : "bg-primary"}`}
+              />
+            )}
           </button>
+          {hiddenAttention && !shortRowOpen && (
+            <span id="composer-short-options-attention" className="sr-only">
+              {hiddenAttention === "warning"
+                ? t(
+                    "playground:composer.shortOptionsWarning",
+                    "Some hidden options need attention.",
+                  )
+                : t(
+                    "playground:composer.shortOptionsActive",
+                    "Some hidden options are in use.",
+                  )}
+            </span>
+          )}
           <div
             data-testid="composer-inline-send-control"
             className="flex shrink-0 items-center gap-2"
