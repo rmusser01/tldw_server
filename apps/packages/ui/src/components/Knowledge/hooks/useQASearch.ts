@@ -98,6 +98,34 @@ type UseQASearchOptions = {
   onPin: (item: RagResult) => void
 }
 
+/**
+ * Settings that shape the written answer rather than the retrieval. "Generate
+ * answer" reads these when it is clicked, so a model picked after the search
+ * is used; the query and retrieval settings stay as searched (CC-10 review).
+ */
+const ANSWER_SETTING_KEYS = [
+  "strict_extractive",
+  "generation_model",
+  "generation_provider",
+  "generation_prompt",
+  "max_generation_tokens",
+  "enable_abstention",
+  "abstention_behavior",
+  "enable_multi_turn_synthesis",
+  "synthesis_time_budget_sec",
+  "synthesis_draft_tokens",
+  "synthesis_refine_tokens",
+  "enable_citations",
+  "citation_style",
+  "include_page_numbers",
+  "enable_chunk_citations"
+] as const satisfies ReadonlyArray<keyof RagSettings>
+
+const pickAnswerSettings = (settings: RagSettings): Partial<RagSettings> =>
+  Object.fromEntries(
+    ANSWER_SETTING_KEYS.map((key) => [key, settings[key]])
+  ) as Partial<RagSettings>
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null
 
@@ -267,8 +295,8 @@ export function useQASearch({
   const [queryError, setQueryError] = React.useState<string | null>(null)
   const [answerLoading, setAnswerLoading] = React.useState(false)
   const [answerError, setAnswerError] = React.useState<string | null>(null)
-  // The query and settings behind the shown sources, so Generate answer
-  // answers the same search even after the user edits the box.
+  // The query and retrieval settings behind the shown sources, so Generate
+  // answer answers the same search even after the user edits the box.
   const lastSearchRef = React.useRef<{
     query: string
     settings: RagSettings
@@ -340,6 +368,7 @@ export function useQASearch({
       await tldwClient.initialize()
       const { query, options, timeoutMs } = buildRagSearchRequest({
         ...lastSearch.settings,
+        ...pickAnswerSettings(draftSettings),
         query: lastSearch.query,
         enable_generation: true
       })
@@ -370,7 +399,7 @@ export function useQASearch({
     } finally {
       if (runId === searchRunRef.current) setAnswerLoading(false)
     }
-  }, [t])
+  }, [draftSettings, t])
 
   const copyAnswer = React.useCallback(async () => {
     if (!response?.generatedAnswer) return

@@ -409,4 +409,158 @@ describe("useQASearch", () => {
       "Couldn't generate an answer. Try again, or check the model in Settings."
     )
   })
+
+  // CC-10 review: Generate answer answers the searched query, but with the
+  // answer settings chosen when the user clicks it.
+  type HookProps = { resolvedQuery: string; draftSettings: typeof baseSettings }
+  const renderWithProps = (initialProps: HookProps) =>
+    renderHook(
+      (props: HookProps) =>
+        useQASearch({
+          resolvedQuery: props.resolvedQuery,
+          draftSettings: props.draftSettings,
+          applySettings: vi.fn(),
+          onInsert: vi.fn(),
+          pinnedResults: [],
+          onPin: vi.fn()
+        }),
+      { initialProps }
+    )
+
+  it("answers the searched query even after the query box changes", async () => {
+    vi.mocked(tldwClient.ragSearch).mockResolvedValue({
+      documents: [{ content: "Source chunk" }]
+    })
+    const { result, rerender } = renderWithProps({
+      resolvedQuery: "searched query",
+      draftSettings: baseSettings
+    })
+    await act(async () => {
+      await result.current.runQASearch()
+    })
+
+    rerender({ resolvedQuery: "edited afterwards", draftSettings: baseSettings })
+    await act(async () => {
+      await result.current.generateAnswer()
+    })
+
+    expect(buildRagSearchRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        query: "searched query",
+        enable_generation: true
+      })
+    )
+  })
+
+  it("uses the answer model chosen after the search", async () => {
+    vi.mocked(tldwClient.ragSearch).mockResolvedValue({
+      documents: [{ content: "Source chunk" }]
+    })
+    const searched = {
+      ...baseSettings,
+      top_k: 7,
+      generation_provider: "openai",
+      generation_model: "old-model",
+      max_generation_tokens: 300
+    }
+    const { result, rerender } = renderWithProps({
+      resolvedQuery: "searched query",
+      draftSettings: searched
+    })
+    await act(async () => {
+      await result.current.runQASearch()
+    })
+
+    rerender({
+      resolvedQuery: "searched query",
+      draftSettings: {
+        ...searched,
+        top_k: 20,
+        generation_provider: "anthropic",
+        generation_model: "new-model",
+        max_generation_tokens: 900
+      }
+    })
+    await act(async () => {
+      await result.current.generateAnswer()
+    })
+
+    expect(buildRagSearchRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        query: "searched query",
+        // Retrieval stays as searched, so the answer cites those sources.
+        top_k: 7,
+        generation_provider: "anthropic",
+        generation_model: "new-model",
+        max_generation_tokens: 900,
+        enable_generation: true
+      })
+    )
+  })
+
+  it("drops an answer that arrives after a new search started", async () => {
+    vi.mocked(tldwClient.ragSearch).mockResolvedValueOnce({
+      documents: [{ content: "First sources" }]
+    })
+    const { result } = createHook("first query")
+    await act(async () => {
+      await result.current.runQASearch()
+    })
+
+    let resolveAnswer: (value: unknown) => void = () => {}
+    vi.mocked(tldwClient.ragSearch).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveAnswer = resolve
+      }) as ReturnType<typeof tldwClient.ragSearch>
+    )
+    let pendingAnswer: Promise<void> = Promise.resolve()
+    act(() => {
+      pendingAnswer = result.current.generateAnswer()
+    })
+    vi.mocked(tldwClient.ragSearch).mockResolvedValueOnce({
+      documents: [{ content: "Second sources" }]
+    })
+    await act(async () => {
+      await result.current.runQASearch()
+    })
+    await act(async () => {
+      resolveAnswer({
+        generated_answer: "Stale answer",
+        documents: [{ content: "First sources" }]
+      })
+      await pendingAnswer
+    })
+
+    expect(result.current.response?.documents[0].content).toBe("Second sources")
+    expect(result.current.response?.generatedAnswer).toBeNull()
+    expect(result.current.answerLoading).toBe(false)
+    expect(result.current.answerError).toBeNull()
+  })
+
+  it("discards a search response that arrives after a newer search", async () => {
+    let resolveFirst: (value: unknown) => void = () => {}
+    vi.mocked(tldwClient.ragSearch).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFirst = resolve
+      }) as ReturnType<typeof tldwClient.ragSearch>
+    )
+    const { result } = createHook("query")
+    let firstSearch: Promise<void> = Promise.resolve()
+    act(() => {
+      firstSearch = result.current.runQASearch()
+    })
+    vi.mocked(tldwClient.ragSearch).mockResolvedValueOnce({
+      documents: [{ content: "Newer sources" }]
+    })
+    await act(async () => {
+      await result.current.runQASearch()
+    })
+    await act(async () => {
+      resolveFirst({ documents: [{ content: "Stale sources" }] })
+      await firstSearch
+    })
+
+    expect(result.current.response?.documents[0].content).toBe("Newer sources")
+    expect(result.current.loading).toBe(false)
+  })
 })
