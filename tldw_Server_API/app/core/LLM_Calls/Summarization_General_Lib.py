@@ -166,7 +166,8 @@ def _summary_error_code(exc: BaseException, adapter: Any = None) -> str:
     if isinstance(exc, ChatAuthenticationError):
         return "authentication"
     if isinstance(exc, ChatConfigurationError):
-        return "configuration"
+        # An unreadable provider-override store passes once it loads (TASK-15581); the rest needs a config change.
+        return "provider_failure" if exc.error_code == "credential_store_unavailable" else "configuration"
     if isinstance(exc, ChatRateLimitError):
         return "provider_quota_exhausted" if exc.quota_exhausted is True else "rate_limit"
     if isinstance(exc, ChatBadRequestError):
@@ -312,29 +313,26 @@ def _summarize_via_adapter(
         model = model or resolve_provider_model(provider, effective_app_config)
     else:
         model = resolve_provider_model(provider, effective_app_config)
-    outcome = None
-    if model and provider_credentials is not None:
-        # Imported here: a module-level import would add AuthNZ modules to the LLM_Calls load ratchet.
-        from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import override_outcome
+    # Imported here: a module-level import would add AuthNZ modules to the LLM_Calls load ratchet.
+    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import enforce_provider_override
 
-        outcome = override_outcome(provider, provider_credentials, model)
-    if outcome in {"refused", "unchecked"}:
+    try:
+        # Refused on every key (TASK-15581). The provider base class refuses it too; here it keeps this path's
+        # failure codes, and comes before a stream is handed back.
+        enforce_provider_override(provider, model)
+    except ByokResolutionError as exc:
+        store_down = exc.code == "credential_store_unavailable"  # retryable: a job tries again once it loads
         return _summary_failure(
-            code="configuration",
+            code="provider_failure" if store_down else "configuration",
             provider=provider,
             raise_on_error=raise_on_error,
             legacy_message=(
-                "Error: The LLM usage limit could not be checked."
-                if outcome == "unchecked"
-                else "Error: Provider credential context is invalid."
+                "Error: Provider credential storage is temporarily unavailable."
+                if store_down
+                else "Error: The provider or model is disabled by the administrator."
             ),
         )
-    if outcome == "server_key":
-        # The same model on the server key, as a call with no handle (TASK-15571). The request then carries no
-        # handle, so the call-site check counts it as a server-key call.
-        provider_credentials = api_key = None
-        explicit_credentials = False
-        effective_app_config = ensure_app_config(load_and_log_configs())
     if not model:
         return _summary_failure(
             code="missing_model",

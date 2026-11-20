@@ -430,14 +430,13 @@ async def test_summary_translation_forwards_genuine_cloud_handle(
     assert captured["app_config"] == handle.app_config
 
 
-_POLICY_DENIED = "Error: Provider credential context is invalid."
+_POLICY_DENIED = "Error: The provider or model is disabled by the administrator."
+_STORE_DOWN = "Error: Provider credential storage is temporarily unavailable."
 _OVERRIDE_MODULE = "tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides"
-# The one warning a denied model writes (TASK-15571).
-_FALLBACK_LINE = "Provider override for openai: model_not_allowed; the call falls back to the server key"
 
 
 def _refused_line(reason: str) -> str:
-    """The one warning a refused call writes (TASK-15571)."""
+    """The one warning a refused call writes (TASK-15571, TASK-15581)."""
     return f"Provider override for openai: {reason}; the call is refused"
 
 
@@ -537,78 +536,84 @@ async def test_own_key_summary_falls_back_to_the_default_model_environment_varia
     assert warnings == []
 
 
-@pytest.mark.asyncio
-@_MODEL_SOURCES
-async def test_a_denied_model_on_the_users_own_key_runs_on_the_server_key(
-    monkeypatch: pytest.MonkeyPatch, config_model: str | None, model_override: str | None, expected: str
-) -> None:
-    """TASK-15571: whatever its source, a model the override denies runs on the server key, without the handle."""
-    result, calls, warnings = await _summary(
-        monkeypatch, overrides=_allowlist("x"), config_model=config_model, model_override=model_override
-    )
-
-    assert result == "summary"
-    assert calls == [(expected, "server-key", False)]
-    assert warnings == [_FALLBACK_LINE]
-
-
-@pytest.mark.asyncio
-@_MODEL_SOURCES
-@pytest.mark.parametrize(
-    ("override_kwargs", "healthy", "reason"),
-    [({"is_enabled": False}, True, "provider_disabled"), ({}, False, "credential_store_unavailable")],
-    ids=["provider-disabled", "override-cache-unhealthy"],
+# Each admin disable, and a policy that cannot be read (TASK-15581).
+_REFUSALS = pytest.mark.parametrize(
+    ("override_kwargs", "healthy", "reason", "refused"),
+    [
+        ({"allowed_models": ["x"]}, True, "model_not_allowed", _POLICY_DENIED),
+        ({"is_enabled": False}, True, "provider_disabled", _POLICY_DENIED),
+        ({}, False, "credential_store_unavailable", _STORE_DOWN),
+    ],
+    ids=["model-not-allowed", "provider-disabled", "override-cache-unhealthy"],
 )
-async def test_a_disabled_provider_or_an_unreadable_policy_refuses_the_call(
+
+
+async def _refused_summary(
+    monkeypatch: pytest.MonkeyPatch, override_kwargs: dict[str, Any], healthy: bool, **summary_kwargs: Any
+) -> tuple[str | None, list[tuple[str, str | None, bool]], list[str]]:
+    """``_summary`` under one admin override for openai."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import LLMProviderOverride
+
+    overrides = {"openai": LLMProviderOverride(provider="openai", **override_kwargs)}
+    return await _summary(monkeypatch, overrides=overrides, healthy=healthy, **summary_kwargs)
+
+
+@pytest.mark.asyncio
+@_MODEL_SOURCES
+@_REFUSALS
+async def test_an_admin_disabled_provider_or_model_is_refused_on_the_users_own_key(
     monkeypatch: pytest.MonkeyPatch,
     override_kwargs: dict[str, Any],
     healthy: bool,
     reason: str,
+    refused: str,
     config_model: str | None,
     model_override: str | None,
     expected: str,
 ) -> None:
-    """TASK-15571 rulings: only a denied model falls back. A disabled provider, or a policy that cannot be read,
-    refuses the call with 'configuration' (as TASK-15496 did) and says why."""
-    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import LLMProviderOverride
-
-    overrides = {"openai": LLMProviderOverride(provider="openai", **override_kwargs)}
-
-    result, calls, warnings = await _summary(
-        monkeypatch, overrides=overrides, healthy=healthy, config_model=config_model, model_override=model_override
+    """TASK-15581, the owner's rule: whatever the model's source, a provider or model the admin disabled is refused
+    with 'configuration' (as TASK-15496 did), and the reason is logged. A policy that cannot be read refuses too, as
+    the retryable 'provider_failure', so a job tries again once it loads."""
+    result, calls, warnings = await _refused_summary(
+        monkeypatch, override_kwargs, healthy, config_model=config_model, model_override=model_override
     )
 
-    assert result == _POLICY_DENIED
-    assert calls == []
-    assert warnings == [_refused_line(reason)]
+    assert (result, calls, warnings) == (refused, [], [_refused_line(reason)])
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("source", ["team", "org"])
-async def test_a_denied_model_on_a_shared_key_runs_on_the_server_key(
-    monkeypatch: pytest.MonkeyPatch, source: str
-) -> None:
-    """TASK-15571: the rule holds whatever the key, a team's or an org's too."""
-    result, calls, warnings = await _summary(
-        monkeypatch, source=source, overrides=_allowlist("x"), config_model="cfg-m"
-    )
-
-    assert result == "summary"
-    assert calls == [("cfg-m", "server-key", False)]
-    assert warnings == [_FALLBACK_LINE]
-
-
-@pytest.mark.asyncio
-async def test_a_denied_model_never_takes_the_callers_key_to_the_server_key_path(
+@_REFUSALS
+@pytest.mark.parametrize(
+    "source", ["team", "org", "server_default", None], ids=["team", "org", "server-default-handle", "no-handle"]
+)
+async def test_an_admin_disabled_provider_or_model_is_refused_on_every_other_key(
     monkeypatch: pytest.MonkeyPatch,
+    override_kwargs: dict[str, Any],
+    healthy: bool,
+    reason: str,
+    refused: str,
+    source: str | None,
 ) -> None:
-    """TASK-15571: with no server key for the provider, the fallback request has no key, never the handle's."""
-    _result, calls, warnings = await _summary(
-        monkeypatch, overrides=_allowlist("x"), config_model="cfg-m", server_key=None
+    """TASK-15581: the same on a team's or an org's key and on the server's, with a handle or none."""
+    result, calls, warnings = await _refused_summary(
+        monkeypatch, override_kwargs, healthy, source=source, config_model="cfg-m"
     )
 
-    assert calls == [("cfg-m", None, False)]
-    assert warnings == [_FALLBACK_LINE]
+    assert (result, calls, warnings) == (refused, [], [_refused_line(reason)])
+
+
+@pytest.mark.parametrize(
+    ("error_code", "summary_code"),
+    [("provider_disabled", "configuration"), ("credential_store_unavailable", "provider_failure")],
+)
+def test_a_refusal_at_the_provider_base_class_is_retryable_only_for_an_unreadable_store(error_code, summary_code):
+    """TASK-15581 (I2): the audio worker keeps a transcript without its analysis for good on 'configuration', so
+    a store blip must come back as the retryable 'provider_failure'."""
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
+
+    error = ChatConfigurationError("refused", provider="openai", error_code=error_code)
+
+    assert sgl._summary_error_code(error) == summary_code
 
 
 @pytest.mark.asyncio
@@ -626,31 +631,6 @@ async def test_an_allowed_model_stays_on_the_users_own_key(
 
     assert result == "summary"
     assert calls == [(expected, "handle-key", True)]
-    assert warnings == []
-
-
-@pytest.mark.asyncio
-@_MODEL_SOURCES
-async def test_a_denied_model_on_the_server_key_path_runs_unchecked(
-    monkeypatch: pytest.MonkeyPatch, config_model: str | None, model_override: str | None, expected: str
-) -> None:
-    """TASK-15571: with no handle the call is already on the server key; no override check applies (unchanged)."""
-    result, calls, warnings = await _summary(
-        monkeypatch, source=None, overrides=_allowlist("x"), config_model=config_model, model_override=model_override
-    )
-
-    assert result == "summary"
-    assert calls == [(expected, "server-key", False)]
-    assert warnings == []
-
-
-@pytest.mark.asyncio
-async def test_a_denied_model_on_a_server_default_handle_runs_unchecked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """TASK-15571: a handle the runtime resolved to the server's key keeps it; the model is not checked."""
-    result, calls, warnings = await _summary(monkeypatch, source="server_default", overrides=_allowlist("x"))
-
-    assert result == "summary"
-    assert calls == [("gpt-env-default", "handle-key", True)]
     assert warnings == []
 
 

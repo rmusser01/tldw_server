@@ -831,11 +831,9 @@ def _analyze_with_empty_moonshot_handle():
 
 
 @pytest.mark.unit
-def test_explicit_missing_summary_model_uses_default_model_environment_and_a_denied_one_runs_on_the_server_key(
-    monkeypatch,
-):
-    # TASK-15496 gave a handle call the DEFAULT_MODEL_<PROVIDER> fallback. TASK-15571: a fallback model the
-    # provider override denies runs on the server key (under TASK-15496 it failed 'configuration').
+def test_explicit_missing_summary_model_uses_default_model_environment_and_a_denied_one_is_refused(monkeypatch):
+    # TASK-15496 gave a handle call the DEFAULT_MODEL_<PROVIDER> fallback. A fallback model the provider override
+    # does not allow is refused with 'configuration' (TASK-15581 restores TASK-15496's refusal).
     from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
         LLMProviderOverride,
         set_llm_provider_overrides_cache_for_tests,
@@ -844,20 +842,17 @@ def test_explicit_missing_summary_model_uses_default_model_environment_and_a_den
     adapter = _Adapter(response={"choices": [{"message": {"content": "Cedar summary"}}]})
     monkeypatch.setenv("DEFAULT_MODEL_MOONSHOT", "server-env-model")
     monkeypatch.setattr(sgl, "get_registry", lambda: _Registry(adapter))
-    monkeypatch.setattr(sgl, "load_and_log_configs", dict)
-    monkeypatch.setattr(sgl, "resolve_provider_api_key_from_config", lambda *_args, **_kwargs: "server-key")
     set_llm_provider_overrides_cache_for_tests(
         {"moonshot": LLMProviderOverride(provider="moonshot", allowed_models=["server-env-model"])}
     )
 
     assert _analyze_with_empty_moonshot_handle() == "Cedar summary"
     monkeypatch.setenv("DEFAULT_MODEL_MOONSHOT", "blocked-model")
-    assert _analyze_with_empty_moonshot_handle() == "Cedar summary"
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        _analyze_with_empty_moonshot_handle()
 
-    assert [(request["model"], request["api_key"]) for request, _timeout in adapter.requests] == [
-        ("server-env-model", "explicit-key"),
-        ("blocked-model", "server-key"),
-    ]
+    assert exc_info.value.code == "configuration"
+    assert [request["model"] for request, _timeout in adapter.requests] == ["server-env-model"]
 
 
 @pytest.mark.unit

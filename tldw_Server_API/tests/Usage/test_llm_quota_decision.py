@@ -377,9 +377,21 @@ async def test_a_failed_resolution_keeps_the_servers_key(monkeypatch) -> None:
     assert await usage_quota_deps.users_own_key_credentials(1, "openai") is None
 
 
-async def test_a_configured_model_the_override_denies_keeps_the_servers_key_and_its_limit(monkeypatch) -> None:
-    """TASK-15571: denied at resolution, so no handle: the server's key, and an over-limit user is refused at the
-    boundary. One warning names the provider and the reason, and no key."""
+@pytest.mark.parametrize(
+    ("override_kwargs", "healthy", "reason"),
+    [
+        ({"allowed_models": ["x"]}, True, "model_not_allowed"),
+        ({"is_enabled": False}, True, "provider_disabled"),
+        ({}, False, "credential_store_unavailable"),
+    ],
+    ids=["model-not-allowed", "provider-disabled", "store-unavailable"],
+)
+async def test_an_admin_disabled_own_key_keeps_no_handle_and_its_limit(
+    monkeypatch, override_kwargs, healthy, reason
+) -> None:
+    """TASK-15577 / TASK-15581: refused at resolution, so no handle. The request keeps the server's key, where the call
+    is refused too (test_provider_adapter_runtime_boundary), and an over-limit user is refused at the boundary. One
+    warning names the provider and the reason, and no key."""
     from loguru import logger
 
     from tldw_Server_API.app.core.Provider_Credentials import provider_credential_runtime as runtime_module
@@ -391,14 +403,16 @@ async def test_a_configured_model_the_override_denies_keeps_the_servers_key_and_
 
     users_own_key(monkeypatch, "openai")
     monkeypatch.setattr(runtime_module, "load_server_config_snapshot", lambda: {"openai_api": {"model": "gpt-denied"}})
-    set_llm_provider_overrides_cache_for_tests({"openai": LLMProviderOverride(provider="openai", allowed_models=["x"])})
+    set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", **override_kwargs)}, healthy=healthy
+    )
     warnings: list[str] = []
     sink = logger.add(lambda message: warnings.append(message.record["message"]), level="WARNING")
     try:
         assert await usage_quota_deps.users_own_key_credentials(1, "openai") is None
     finally:
         logger.remove(sink)
-    assert warnings == ["Own-key credential resolution for openai failed: model_not_allowed; the server key is used"]
+    assert warnings == [f"Own-key credential resolution for openai failed: {reason}"]
     refuse_llm_work(monkeypatch)
     with pytest.raises(LLMQuotaExceededError):
         await usage_quota_deps.enforce_llm_quota_on_own_key(1, "openai")

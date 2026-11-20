@@ -119,11 +119,12 @@ async def users_own_key_credentials(user_id: Any, provider: str | None, *, model
             await runtime.close()
     except Exception as error:  # noqa: BLE001 - the server's key, as for a user without one
         # A bounded code, never the message: a policy denial's code (TASK-15571), a resolution code, or the type.
+        # The request keeps the server's key, where an admin-disabled provider or model is refused too (TASK-15581).
         reason = getattr(error, "policy_code", None) or (
             error.code if isinstance(error, ByokResolutionError) else type(error).__name__
         )
         logger.bind(exception_type=type(error).__name__).warning(
-            "Own-key credential resolution for {} failed: {}; the server key is used", provider, reason
+            "Own-key credential resolution for {} failed: {}", provider, reason
         )
         return None
     return handle if handle.credential_source == USER_KEY_SOURCE else None

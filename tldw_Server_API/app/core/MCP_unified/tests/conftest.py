@@ -41,17 +41,29 @@ def _seed_single_user_admin_rbac():
 
 
 @pytest.fixture(autouse=True)
-def _healthy_empty_llm_provider_override_store(monkeypatch):
+def _healthy_empty_llm_provider_override_store(request):
     """Every test starts with the healthy, empty provider-override store app startup gives production.
 
     The tldw_Server_API/tests conftest does the same for its tests; this directory is outside it. The MCP
-    authoritative path reads the store since TASK-15571, and fails closed when it cannot.
+    authoritative path reads the store on every resolution (TASK-15581), and fails closed when it cannot. The
+    store's own setter also resets its recovery state, and the store is restored after (TASK-15577 M2). Mark a test
+    ``ambient_llm_provider_override_store`` to see the import-time (unloaded, unhealthy) store instead.
     """
-    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides
+    if request.node.get_closest_marker("ambient_llm_provider_override_store") is not None:
+        yield
+        return
+    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides as store
 
-    monkeypatch.setattr(llm_provider_overrides, "_OVERRIDE_CACHE", {})
-    monkeypatch.setattr(llm_provider_overrides, "_OVERRIDE_CACHE_HEALTHY", True)
-    monkeypatch.setattr(llm_provider_overrides, "_OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS", True)
+    with store._OVERRIDE_LOCK:
+        overrides = dict(store._OVERRIDE_CACHE)
+        healthy = store._OVERRIDE_CACHE_HEALTHY
+        ttl_disabled = store._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
+    set_overrides = store.set_llm_provider_overrides_cache_for_tests  # bound now: a test may patch the setter
+    set_overrides({})
+    try:
+        yield
+    finally:
+        set_overrides(overrides, healthy=healthy, ttl_enabled=not ttl_disabled)
 
 
 @pytest.fixture

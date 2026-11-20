@@ -1892,8 +1892,8 @@ async def test_authoritative_runtime_revalidates_cached_credentials(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_authoritative_runtime_checks_the_scope_before_a_denied_model_falls_back(monkeypatch):
-    """TASK-15571: a revoked scope fails as before; the override's server-key fallback never widens it."""
+async def test_authoritative_runtime_checks_the_scope_before_the_admin_override(monkeypatch):
+    """TASK-15571, TASK-15581: a revoked scope fails as before; the admin override is checked only after it."""
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
     from tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result import (
         ProviderScopeResult,
