@@ -415,3 +415,40 @@ async def test_generate_document_insights_passes_an_llm_quota_refusal_through(mo
 
     app.dependency_overrides.clear()
     assert_llm_quota_402(response)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["provider_disabled", "model_not_allowed", "credential_store_unavailable"])
+async def test_generate_document_insights_keeps_an_admin_refusals_code_and_status(mock_user, mock_db, code):
+    """TASK-15581: the provider base class's admin-override refusal is a 403 (503 for an unreadable store) with its own
+    code, not the generic 503 'configuration error' that hides the admin's decision."""
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+    from tldw_Server_API.app.core.LLM_Calls.provider_results import (
+        ADMIN_REFUSAL_STATUS,
+        PROVIDER_STREAM_ERROR_MESSAGES,
+    )
+
+    class _RefusingAdapter:
+        def chat(self, _request, **_kwargs):
+            """Refuse, as the provider base class does."""
+            raise ChatConfigurationError("refused", provider="openai", error_code=code)
+
+    app.dependency_overrides[get_request_user] = lambda: mock_user
+    app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
+    with (
+        # The registry instance, not the endpoint module: the endpoint-patch ratchet freezes patches of the latter.
+        patch.object(get_registry(), "get_adapter", return_value=_RefusingAdapter()),
+        patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
+        patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
+        patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=None),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/api/v1/media/1/insights", json={"model": "test-model"})
+
+    app.dependency_overrides.clear()
+    assert (response.status_code, response.json()["detail"]) == (
+        ADMIN_REFUSAL_STATUS[code],
+        {"error_code": code, "message": PROVIDER_STREAM_ERROR_MESSAGES[code]},
+    )
