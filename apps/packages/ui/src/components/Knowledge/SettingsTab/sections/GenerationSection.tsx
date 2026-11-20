@@ -225,8 +225,9 @@ export const GenerationSection: React.FC<GenerationSectionProps> = ({
   )
 
   const sectionVisible = getGenerationSectionVisible(searchFilter, t)
+  // The answer fields stay visible with chat generation off: QA search's
+  // Generate answer uses them too (CC-10 review).
   const showAbstentionSection =
-    settings.enable_generation &&
     matchesAny(
       abstentionLabel,
       enableAbstentionLabel,
@@ -234,7 +235,6 @@ export const GenerationSection: React.FC<GenerationSectionProps> = ({
       ...abstentionFilterTerms
     )
   const showSynthesisSection =
-    settings.enable_generation &&
     matchesAny(
       synthesisLabel,
       enableSynthesisLabel,
@@ -261,7 +261,7 @@ export const GenerationSection: React.FC<GenerationSectionProps> = ({
       )}
 
       {/* Strict Extractive */}
-      {settings.enable_generation && matchesFilter(strictExtractiveLabel) && (
+      {matchesFilter(strictExtractiveLabel) && (
         <SettingField
           type="switch"
           label={strictExtractiveLabel}
@@ -272,7 +272,7 @@ export const GenerationSection: React.FC<GenerationSectionProps> = ({
       )}
 
       {/* Generation Model */}
-      {settings.enable_generation && matchesFilter(generationModelLabel) && (
+      {matchesFilter(generationModelLabel) && (
         <SettingField
           type="text"
           label={generationModelLabel}
@@ -283,7 +283,7 @@ export const GenerationSection: React.FC<GenerationSectionProps> = ({
       )}
 
       {/* Generation Prompt */}
-      {settings.enable_generation && matchesFilter(generationPromptLabel) && (
+      {matchesFilter(generationPromptLabel) && (
         <div className="col-span-2">
           <SettingField
             type="textarea"
@@ -297,7 +297,7 @@ export const GenerationSection: React.FC<GenerationSectionProps> = ({
       )}
 
       {/* Max Generation Tokens */}
-      {settings.enable_generation && matchesFilter(maxGenerationTokensLabel) && (
+      {matchesFilter(maxGenerationTokensLabel) && (
         <SettingField
           type="number"
           label={maxGenerationTokensLabel}

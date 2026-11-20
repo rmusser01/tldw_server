@@ -31,4 +31,27 @@ describe("GenerationSection", () => {
       )
     ).toBeInTheDocument()
   })
+
+  // CC-10 review (approved): Generate answer uses these fields, so turning
+  // chat generation off doesn't hide them.
+  it("keeps the answer fields that Generate answer uses when generation is off", () => {
+    render(
+      <GenerationSection
+        settings={{ ...DEFAULT_RAG_SETTINGS, enable_generation: false }}
+        onUpdate={vi.fn()}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Answer Generation/ }))
+
+    for (const label of [
+      "Strict extractive",
+      "Generation model",
+      "Generation prompt",
+      "Max tokens",
+      "Enable abstention",
+      "Enable synthesis"
+    ]) {
+      expect(screen.getByText(label), label).toBeInTheDocument()
+    }
+  })
 })
