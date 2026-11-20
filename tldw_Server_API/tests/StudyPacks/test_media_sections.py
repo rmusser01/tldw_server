@@ -26,3 +26,17 @@ def test_media_without_headings_uses_paragraph_boundaries():
 
     assert [item.title for item in sections] == ["Section 1", "Section 2"]  # nosec B101
     assert sections[0].end == len(first) + 2  # nosec B101
+
+
+def test_chapter_plan_names_a_heading_only_title_chain_after_the_chapter():
+    book = (
+        "# Book title\n\n## Chapter 1: First lesson\n\n" + "First lesson. " * 10
+        + "\n\n## Chapter 2: Last lesson\n\n" + "Last lesson. " * 10
+    )
+    _, sections = plan_media_sections(book, 80)
+
+    assert [section.title for section in sections] == [  # nosec B101
+        "Chapter 1: First lesson", "Chapter 2: Last lesson",
+    ]
+    assert sections[0].start == 0  # nosec B101
+    assert book[sections[1].start:].startswith("## Chapter 2:")  # nosec B101

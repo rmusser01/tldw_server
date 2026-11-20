@@ -54,27 +54,28 @@ def plan_media_sections(text: str, limit: int) -> tuple[str, list[MediaSection]]
         return digest.hexdigest(), []
 
     starts = [0]
+    titles: dict[int, str] = {}
     previous_end = None
     for heading in _SECTION_HEADING.finditer(text):
-        # EPUB Markdown can repeat a heading before any body text.
+        # Keep adjacent headings with the body, and use the last heading as its title.
         has_body = previous_end is None or bool(text[previous_end:heading.start()].strip())
         if has_body and heading.start() != starts[-1]:
             starts.append(heading.start())
             if len(starts) > _MAX_SECTIONS:
                 raise StudyPackSectionError("study_pack_sections_too_many")
+        titles[starts[-1]] = heading.group().strip().lstrip("#").strip()
         previous_end = heading.end()
 
     spans = (
         zip(starts, [*starts[1:], len(text)], strict=True)
-        if len(starts) > 1 or _SECTION_HEADING.match(text)
+        if titles
         else bounded_spans(text, 0, len(text), limit)
     )
-    sections = []
+    sections: list[MediaSection] = []
     for start, end in spans:
         if not text[start:end].strip():
             continue
-        heading = _SECTION_HEADING.match(text, start, end)
-        title = heading.group().strip().lstrip("#").strip() if heading else f"Section {len(sections) + 1}"
+        title = titles.get(start, f"Section {len(sections) + 1}")
         sections.append(MediaSection(start, end, title[:120]))
         digest.update(f"\0{start}:{end}".encode())
         if len(sections) > _MAX_SECTIONS:
@@ -85,9 +86,11 @@ def plan_media_sections(text: str, limit: int) -> tuple[str, list[MediaSection]]
 def section_passages(text: str, section: MediaSection, limit: int) -> Iterator[tuple[int, int, str]]:
     """Yield the exact source spans and text used in model prompts."""
     for start, end in bounded_spans(text, section.start, section.end, limit):
-        passage = text[start:end].strip()
-        if passage:
-            yield start, end, passage
+        passage = text[start:end]
+        trimmed = passage.strip()
+        if trimmed:
+            first_char = start + len(passage) - len(passage.lstrip())
+            yield first_char, first_char + len(trimmed), trimmed
 
 
 def selected_section_indices(

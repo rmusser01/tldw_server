@@ -747,6 +747,9 @@ async def test_whole_media_pack_generates_cited_cards_through_the_end(
             assert len(capped_passages) == 1 and not repair_prompts  # nosec B101
             assert max(map(len, passages)) <= 6_100  # nosec B101
             first_chapter_cards = 3
+            for uuid, passage in zip(result.card_uuids, passages, strict=True):
+                locator = json.loads(db.list_flashcard_citations(uuid)[0]["locator"])
+                assert item.evidence_text[locator["start_char"]:locator["end_char"]] == passage  # nosec B101
         assert len(passages) == first_chapter_cards + 1  # nosec B101
         first_set_id = f"{media_id}:0:{revision}"
         all_cards = browse_deck_cards(db, result.deck_id, chapter_id=None, limit=20, offset=0)
@@ -761,6 +764,7 @@ async def test_whole_media_pack_generates_cited_cards_through_the_end(
         assert all(card["deck_id"] == result.deck_id for card in all_cards["items"])  # nosec B101
 
     pack = db.get_study_pack(result.pack_id)
+    assert pack is not None  # nosec B101
     snapshot = pack["source_bundle_json"]
     if isinstance(snapshot, str):
         snapshot = json.loads(snapshot)

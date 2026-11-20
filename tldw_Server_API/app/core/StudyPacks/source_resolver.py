@@ -262,7 +262,7 @@ class StudySourceResolver:
         chunk_index = locator.get("chunk_index")
         timestamp_value = locator.get("timestamp_seconds")
         whole_media = chunk_index is None and timestamp_value is None and selection.excerpt_text is None
-        section_locator = {key: locator[key] for key in ("section_indices", "section_revision") if key in locator}
+        section_locator: dict[str, Any] = {key: locator[key] for key in ("section_indices", "section_revision") if key in locator}
         if section_locator and not whole_media:
             raise StudyPackSectionError("study_pack_sections_conflict")
         if chunk_index is not None:
@@ -289,7 +289,7 @@ class StudySourceResolver:
             ]
             if evidence_parts:
                 chunk_id = _clean_text(chunks[0].get("uuid")) or str(chunk_index)
-                chunk_locator = _bounded_evidence_text(
+                evidence_text, chunk_locator = _bounded_evidence_text(
                     _pick_evidence_text(selection, "\n\n".join(evidence_parts)),
                     {
                         "media_id": media_id,
@@ -297,13 +297,12 @@ class StudySourceResolver:
                         "chunk_index": chunk_index,
                     },
                 )
-                evidence_text, normalized_locator = chunk_locator
                 return StudySourceBundleItem(
                     source_type="media",
                     source_id=str(media_id),
                     label=label,
                     evidence_text=evidence_text,
-                    locator=normalized_locator,
+                    locator=chunk_locator,
                 )
 
         transcript = _clean_text(get_latest_transcription(self.media_db, media_id))

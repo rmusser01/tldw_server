@@ -6,6 +6,8 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.DB_Management.chacha.flashcard_chapter_queries import list_flashcard_chapter_rows
+
 from .types import CHAPTER_ID_PATTERN, CHAPTER_LOCATOR_KEY
 
 if TYPE_CHECKING:
@@ -52,7 +54,7 @@ def browse_deck_cards(
     """Count active deck cards and load only the requested page of card bodies."""
     memberships: dict[str, str | None] = {}
     chapters: dict[tuple[int, int, str], dict[str, Any]] = {}
-    for row in db.list_flashcard_chapter_rows(deck_id):
+    for row in list_flashcard_chapter_rows(db, deck_id):
         uuid = row["uuid"]
         if memberships.setdefault(uuid, None) is not None:
             continue
