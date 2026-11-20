@@ -38,7 +38,7 @@ import {
 import { normalizeNoteSearchSnippet } from '../NoteSearchSnippet'
 import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
 import { isSameNotesListRowsKind } from '../notes-list-cache'
-import { buildNotesTagSearchParams, pickedTagMatchTokens } from '../notes-tag-match'
+import { buildNotesTagSearchParams, tagMatchToggleApplies } from '../notes-tag-match'
 import {
   SELECT_ALL_MATCHING_CAP,
   useNotesMatchingSelection,
@@ -306,9 +306,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         .filter(Boolean),
     [effectiveNotebookKeywordTokens, listViewMode]
   )
-  /** The toggle applies to the tags the reader picked, so it shows only for two or more. */
-  const tagMatchApplies =
-    pickedTagMatchTokens(effectiveKeywordTokens, requiredKeywordTokens).length > 1
+  /** The toggle applies to the tags the reader picked, so it shows for two or more. */
+  const tagMatchApplies = tagMatchToggleApplies(keywordTokens)
 
   const clearSearchQueryTimeout = React.useCallback(() => {
     if (searchQueryTimeoutRef.current != null) {
@@ -344,9 +343,18 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     params.set('include_keywords', 'true')
     params.set('sort_by', NOTE_SORT_API_PARAMS[fetchSort].sortBy)
     params.set('sort_order', NOTE_SORT_API_PARAMS[fetchSort].sortOrder)
+    // Picked tags come from the reader's own picks, so a tag that is also
+    // required (Inbox, a saved filter) still counts as picked (NL-12 review).
+    const searchTokens = toks.map((tok) => tok.trim().toLowerCase())
+    const pickedInList = keywordTokens
+      .map((tok) => String(tok || '').trim().toLowerCase())
+      .filter((tok) => searchTokens.includes(tok))
     buildNotesTagSearchParams(params, {
-      picked: toks.filter((tok) => !requiredKeywordTokens.includes(tok.trim().toLowerCase())),
-      required: toks.filter((tok) => requiredKeywordTokens.includes(tok.trim().toLowerCase())),
+      picked: [
+        ...pickedInList,
+        ...searchTokens.filter((tok) => !requiredKeywordTokens.includes(tok) && !pickedInList.includes(tok))
+      ],
+      required: searchTokens.filter((tok) => requiredKeywordTokens.includes(tok)),
       match: tagMatch
     })
     // `items` is all the list reads; skip the duplicate arrays (NS-04).
@@ -388,7 +396,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     }
 
     return { items: sortNoteRows(items, fetchSort), total: totalVal }
-  }, [authorityOwner, isCurrentAuthority, requiredKeywordTokens, searchSortOption, sortOption, tagMatch])
+  }, [authorityOwner, isCurrentAuthority, keywordTokens, requiredKeywordTokens, searchSortOption, sortOption, tagMatch])
 
   /**
    * One page of the current list: Trash, a search or tag filter, or the whole

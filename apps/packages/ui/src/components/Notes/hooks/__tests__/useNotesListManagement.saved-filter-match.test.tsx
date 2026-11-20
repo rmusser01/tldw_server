@@ -92,6 +92,20 @@ describe("useNotesListManagement saved filters (decision 19)", () => {
     expect(result.current.tagMatchApplies).toBe(true)
   })
 
+  it("keeps the toggle for two picked tags when one is in the saved filter, and any is met by it", async () => {
+    const { result } = renderList(["a", "c"], ["a", "b"])
+    expect(result.current.tagMatchApplies).toBe(true)
+    act(() => result.current.setTagMatch("any"))
+
+    await act(async () => {
+      await result.current.fetchFilteredNotesRaw("", ["a", "c", "b"], 1, 20)
+    })
+
+    expect(lastSearch().getAll("tokens")).toEqual(["a", "b"])
+    expect(lastSearch().get("tokens_match")).toBe("all")
+    expect(lastSearch().has("required_tokens")).toBe(false)
+  })
+
   it("does not offer the toggle for one picked tag on top of a saved filter", () => {
     const { result } = renderList(["eval"], ["rag", "baking"])
 
