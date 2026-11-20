@@ -79,7 +79,7 @@
     "ephemeralBadge": "Ephemeral",
     "ephemeralModeActive": "Ephemeral mode: chat won't be saved",
     "searchSection": "Search & Vision",
-    "webSearch": "Web Search",
+    "webSearch": "Web search",
     "vision": "Vision",
     "visionDisabledKnowledge": "Turn off Search & Context to use Vision",
     "visionTooltip": "Enable Vision to analyze images",
@@ -118,7 +118,7 @@
     "copyDraftPageReferencesUnavailable": "Page references could not be read. Try again. Your source draft remains here."
   },
   "toolbar": {
-    "knowledgeSearch": "Knowledge Search"
+    "knowledgeSearch": "Search & Context"
   },
   "composer": {
     "connectHint": "Connect to your tldw server in Settings to send messages.",

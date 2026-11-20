@@ -246,11 +246,7 @@ describe("CC-08: one name and one home per composer feature", () => {
   it("uses no old name for Search & Context or web search in any English string", () => {
     const allowed = new Set([
       // The /knowledge workspace page, a different feature.
-      "knowledge.json:search.title",
-      // Side-panel composer strings: lane 7D aligns them (XP-12).
-      "sidepanel.json:controlRow.webSearch",
-      "sidepanel.json:controlRow.visionDisabledKnowledge",
-      "sidepanel.json:toolbar.knowledgeSearch"
+      "knowledge.json:search.title"
     ])
     const localeDir = path.resolve(srcRoot, "assets/locale/en")
     const offenders: string[] = []

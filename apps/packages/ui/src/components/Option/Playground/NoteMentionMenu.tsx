@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import { SuggestionCountStatus } from "@/components/Common/SuggestionCountStatus"
 import { comboboxOptionId } from "@/hooks/useComposerCombobox"
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens"
 import { cn } from "@/libs/utils"
 import { buildNotePath } from "@/routes/hooks/useNotesRouteAddress"
 import { sliceCodeUnitsSafely } from "@/utils/safe-slice"
@@ -132,7 +133,7 @@ export const AttachedNoteChips: React.FC<{ onRemoved?: () => void }> = ({ onRemo
           <span
             key={result.id}
             data-testid="attached-note-chip"
-            className="inline-flex min-h-8 max-w-full items-center gap-1 rounded-full border border-border bg-surface2 pl-2 text-xs text-text [@media(pointer:coarse)]:min-h-11"
+            className="inline-flex min-h-11 max-w-full items-center gap-1 rounded-full border border-border bg-surface2 pl-2 text-xs text-text sm:min-h-8 [@media(pointer:coarse)]:min-h-11"
           >
             <StickyNote className="size-3 shrink-0 text-text-muted" aria-hidden="true" />
             <Link
@@ -150,8 +151,11 @@ export const AttachedNoteChips: React.FC<{ onRemoved?: () => void }> = ({ onRemo
                 // The chip and its button are gone; typing carries on.
                 onRemoved?.()
               }}
-              // 32px on desktop, 44px on touch; lane 7A's size tokens replace these at integration.
-              className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:bg-surface hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
+              // 32px on desktop, 44px on touch (decision 3).
+              className={cn(
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-text-muted hover:bg-surface hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+                COMPOSER_TOOLBAR_TOKENS.iconControl
+              )}
             >
               <X className="size-3" aria-hidden="true" />
             </button>

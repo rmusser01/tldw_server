@@ -9,6 +9,7 @@ import React from "react"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens"
 import { useStoreMessageOption } from "@/store/option"
 
 const io = vi.hoisted(() => ({
@@ -149,9 +150,9 @@ describe("ComposerTextarea note mentions", () => {
     const link = screen.getByRole("link", { name: "Rebase notes" })
     expect(link).toHaveAttribute("href", "/notes?note=7")
     const remove = screen.getByRole("button", { name: "Remove note Rebase notes" })
-    // 32px on desktop, 44px on touch (lane 7A's size tokens replace these at integration).
-    expect(remove.className).toMatch(/\bmin-h-8\b/)
-    expect(remove.className).toMatch(/\[@media\(pointer:coarse\)\]:min-h-11/)
+    // 32px on desktop, 44px on touch (decision 3).
+    for (const token of COMPOSER_TOOLBAR_TOKENS.iconControl.split(" "))
+      expect(remove.className.split(" ")).toContain(token)
     fireEvent.click(remove)
     expect(useStoreMessageOption.getState().ragPinnedResults).toEqual([])
     expect(screen.getByTestId("chat-input")).toHaveFocus()
