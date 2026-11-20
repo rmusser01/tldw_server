@@ -2897,7 +2897,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         keywordOptions={kw.keywordOptions}
         availableKeywords={kw.availableKeywords}
         tagMatch={list.tagMatch}
-        tagMatchApplies={list.effectiveKeywordTokens.length > 1}
+        tagMatchApplies={list.tagMatchApplies}
         onTagMatchChange={(match) => {
           list.setTagMatch(match)
           list.setPage(1)
@@ -3023,12 +3023,13 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           hasActiveNotes={hasActiveNotes}
           isMobileViewport={isMobileViewport}
           onOpenSidebar={() => setMobileSidebarOpen(true)}
-          onSelectNote={(noteId) => {
-            void ed.handleSelectNote(noteId)
-          }}
+          onSelectNote={(noteId) => ed.handleSelectNote(noteId)}
           onCreateNote={() => {
             void handleNewNote()
           }}
+          notePreview={ed.selectedId == null ? null : { noteId: String(ed.selectedId), title: ed.title, content: ed.content, loading: ed.loadingDetail }}
+          onOpenInEditor={() => { list.setListViewMode('list'); listKeyboard.focusEditorSoon() }}
+          tagOptions={kw.availableKeywords}
         />
       ) : list.listMode === 'trash' && showEditorEmptyState ? (
         <NotesTrashGuidance isMobileViewport={isMobileViewport} onShowTrashList={() => setMobileSidebarOpen(true)} onBackToNotes={() => { void ed.switchListMode('active') }} />

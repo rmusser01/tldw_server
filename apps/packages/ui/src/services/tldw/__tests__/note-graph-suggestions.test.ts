@@ -657,6 +657,63 @@ describe("Notes graph suggestion client", () => {
     })
   })
 
+  it("sends a tag filter for a graph with no focus note (NL-11)", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      nodes: [],
+      edges: [],
+      truncated: false,
+      truncated_by: [],
+      has_more: false,
+      cursor: null,
+      limits: { max_nodes: 625, max_edges: 1200, max_degree: 40 },
+      radius_cap_applied: false,
+      active_note_count: 2000,
+      all_notes_note_cap: 500,
+      all_notes_eligible: false
+    })
+
+    await fetchNotesGraph({ tag: " reading list ", maxNodes: 1000 })
+
+    expect(mocks.bgRequest.mock.calls[0][0].path).toBe(
+      "/api/v1/notes/graph?radius=1&tag=reading+list&max_nodes=1000&max_edges=480"
+    )
+  })
+
+  it("asks for and reads each note's link status (NL-11 review)", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      nodes: [
+        {
+          id: "note:a",
+          type: "note",
+          label: "A",
+          created_at: null,
+          deleted: false,
+          degree: 0,
+          tag_count: null,
+          primary_source_id: null,
+          has_note_links: true
+        }
+      ],
+      edges: [],
+      truncated: false,
+      truncated_by: [],
+      has_more: false,
+      cursor: null,
+      limits: { max_nodes: 625, max_edges: 2500, max_degree: 40 },
+      radius_cap_applied: false,
+      active_note_count: 1,
+      all_notes_note_cap: 500,
+      all_notes_eligible: true
+    })
+
+    const result = await fetchNotesGraph({ includeLinkStatus: true })
+
+    expect(mocks.bgRequest.mock.calls[0][0].path).toBe(
+      "/api/v1/notes/graph?radius=1&max_nodes=120&max_edges=480&include_link_status=true"
+    )
+    expect(result.nodes[0].has_note_links).toBe(true)
+  })
+
   it("rejects semantic top-k above the backend contract", async () => {
     await expect(
       fetchNotesGraph({ edgeTypes: ["semantic"], semanticTopK: 51 })

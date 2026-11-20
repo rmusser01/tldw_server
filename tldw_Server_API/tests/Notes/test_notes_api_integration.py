@@ -894,11 +894,13 @@ def test_search_notes_with_keyword_tokens(client: TestClient):
         match="all",
         sort_by=None,
         sort_order="desc",
+        required_tokens=[],
     )
     mock_chacha_db_instance.count_notes_matching_keywords.assert_called_once_with(
         search_term=query_term,
         keyword_tokens=["mindmap", "project"],
         match="all",
+        required_tokens=[],
     )
 
 

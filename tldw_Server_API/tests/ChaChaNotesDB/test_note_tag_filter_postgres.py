@@ -79,3 +79,49 @@ def test_postgres_tag_filter_matches_by_keyword_identity(pg_database_config: Dat
     finally:
         db.close_all_connections()
         other.close_all_connections()
+
+
+def test_postgres_required_tokens_always_match(pg_database_config: DatabaseConfig) -> None:
+    """Tags a view implies all match, whatever the any/all toggle says (NL-12, #3101)."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(db_path=":memory:", client_id="930005", backend=backend)
+    other = CharactersRAGDB(db_path=":memory:", client_id="930006", backend=backend)
+    try:
+        for title, tags in {
+            "captured rag": ["captured", "rag"],
+            "captured baking": ["Captured", "baking"],
+            "captured only": ["captured"],
+            "rag only": ["rag"],
+        }.items():
+            note_id = db.add_note(title=title, content=f"Body of {title}")
+            for tag in tags:
+                _tag(db, note_id, tag)
+        foreign = other.add_note(title="foreign captured rag", content="Body")
+        _tag(other, foreign, "captured")
+        _tag(other, foreign, "rag")
+
+        def search(tokens: list[str], match: str, required: list[str], query: str | None = None):
+            rows = db.search_notes_with_keywords(
+                query, tokens, limit=50, offset=0, match=match, required_tokens=required
+            )
+            count = db.count_notes_matching_keywords(
+                query, tokens, match=match, required_tokens=required
+            )
+            return sorted(row["title"] for row in rows), count
+
+        assert search(["rag", "baking"], "any", ["captured"]) == (
+            ["captured baking", "captured rag"],
+            2,
+        )
+        assert search([], "any", ["CAPTURED"]) == (
+            ["captured baking", "captured only", "captured rag"],
+            3,
+        )
+        assert search(["rag"], "any", ["never-used"]) == ([], 0)
+        assert search(["rag", "baking"], "any", ["captured"], query="Body") == (
+            ["captured baking", "captured rag"],
+            2,
+        )
+    finally:
+        db.close_all_connections()
+        other.close_all_connections()
