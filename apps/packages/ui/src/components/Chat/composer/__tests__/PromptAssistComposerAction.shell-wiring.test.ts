@@ -221,7 +221,7 @@ describe("PromptAssistComposerAction real shell wiring", () => {
       /path:\s*"\/chat"[\s\S]*element:\s*<SidepanelChat\s*\/>/
     )
     expect(sidepanelChatSource).toMatch(
-      /import\s*\{\s*SidepanelForm,\s*type\s*SidepanelWebUiOpenSource\s*\}\s*from\s*["']~\/components\/Sidepanel\/Chat\/form["']/,
+      /import\s*\{\s*SidepanelForm,(?:\s*type\s*SidepanelFullPageInfo,)?\s*type\s*SidepanelWebUiOpenSource\s*\}\s*from\s*["']~\/components\/Sidepanel\/Chat\/form["']/,
     );
     expect(
       occurrences(sidepanelFormSource, "<PromptAssistComposerAction")
