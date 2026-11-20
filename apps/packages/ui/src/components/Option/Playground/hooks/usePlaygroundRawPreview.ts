@@ -12,7 +12,7 @@ import type {
   ChatResearchContext
 } from "@/services/tldw/TldwApiClient"
 import { parseJsonObject } from "./utils"
-import { formatPinnedResults } from "@/utils/rag-format"
+import { appendPinnedContext } from "@/utils/note-pins"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
 import {
   deriveRolePlayCompatibility,
@@ -388,9 +388,8 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     const compatibility = buildRolePlayCompatibility(intent)
     let draftMessage = intent.message.trim()
     // Append pinned source expansion to match submitForm behavior
-    if (!intent.isImageCommand && !fileRetrievalEnabled && ragPinnedResults && ragPinnedResults.length > 0) {
-      const pinnedText = formatPinnedResults(ragPinnedResults, "markdown")
-      draftMessage = draftMessage ? `${draftMessage}\n\n${pinnedText}` : pinnedText
+    if (!intent.isImageCommand) {
+      draftMessage = appendPinnedContext(draftMessage, ragPinnedResults, { fileRetrievalEnabled })
     }
     const modelDraftMessage =
       !intent.isImageCommand && importedSidepanelContext

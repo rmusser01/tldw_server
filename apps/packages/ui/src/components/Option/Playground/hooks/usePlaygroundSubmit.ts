@@ -7,7 +7,7 @@ import { nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-p
 import { useStoreMessageOption } from "@/store/option"
 import { defaultEmbeddingModelForRag } from "~/services/tldw-server"
 import { getIsSimpleInternetSearch } from "@/services/search"
-import { formatPinnedResults } from "@/utils/rag-format"
+import { appendPinnedContext, clearSentNotePins, sendablePins } from "@/utils/note-pins"
 import { normalizeChatModelId } from "@/utils/chat-model-availability"
 import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
@@ -302,11 +302,11 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
   const buildPinnedMessage = React.useCallback(
     (message: string, options?: { ignorePinnedResults?: boolean }) => {
-      if (options?.ignorePinnedResults) return message
-      if (fileRetrievalEnabled) return message
-      if (!ragPinnedResults || ragPinnedResults.length === 0) return message
-      const pinnedText = formatPinnedResults(ragPinnedResults, "markdown")
-      return message ? `${message}\n\n${pinnedText}` : pinnedText
+      // Attached notes always go; other pins as before (note-mentions.ts).
+      return appendPinnedContext(message, ragPinnedResults, {
+        fileRetrievalEnabled,
+        ignoreOtherPins: options?.ignorePinnedResults
+      })
     },
     [fileRetrievalEnabled, ragPinnedResults]
   )
@@ -446,6 +446,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         return
       }
       const nextMessage = intent.message
+      // An attached note belongs to this message; its chip clears once it is sent or queued.
+      const sentPins = intent.isImageCommand ? [] : sendablePins(ragPinnedResults, { fileRetrievalEnabled, ignoreOtherPins: options?.ignorePinnedResults })
       const combinedMessage = intent.isImageCommand
         ? nextMessage
         : buildPinnedMessage(nextMessage, options)
@@ -572,6 +574,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         if (queuedItem && openUIRequestMode) {
           clearOpenUIRequestMode()
         }
+        if (queuedItem) clearSentNotePins(sentPins, useStoreMessageOption)
         return
       }
 
@@ -849,6 +852,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       if (openUIRequestMode && completionIsCurrent() && isChatSubmitSuccess(normalizeChatSubmitResult(result))) {
         clearOpenUIRequestMode()
       }
+      // A failed send keeps the chip, so the note goes with the retry.
+      if (isChatSubmitSuccess(normalizeChatSubmitResult(result))) clearSentNotePins(sentPins, useStoreMessageOption)
       } finally {
         if (activeSubmissionRef.current === submission) {
           activeSubmissionRef.current = null

@@ -138,6 +138,51 @@ describe("Playground slash commands", { timeout: 60_000 }, () => {
     expect(sent).toContain("Use git rebase -i to squash.")
   })
 
+  // Review fix: an attached note belongs to one message. After it is sent the
+  // chip clears, and the next message goes without it.
+  it("sends an attached note with one message only", async () => {
+    const server = createFakeTldwServer({
+      notes: [{ id: 7, title: "Rebase notes", content: "Use git rebase -i to squash." }]
+    })
+    const view = await renderPlayground({ server })
+    await view.user.click(view.composer)
+    await view.user.type(view.composer, "@Reb")
+    await screen.findByRole("option", { name: /Rebase notes/ }, HARNESS_WAIT)
+    await view.user.keyboard("{Enter}")
+    await screen.findByRole("link", { name: "Rebase notes" }, HARNESS_WAIT)
+    await view.user.type(view.composer, "First question")
+    await view.user.keyboard("{Enter}")
+    await waitForChatIdle()
+    expect(screen.queryByRole("link", { name: "Rebase notes" })).toBeNull()
+    await view.user.type(view.composer, "Second question")
+    await view.user.keyboard("{Enter}")
+    await waitForChatIdle()
+    const completions = server.completionRequests()
+    expect(completions).toHaveLength(2)
+    expect(String(completionMessages(completions[0]).at(-1)?.content)).toContain("Use git rebase -i to squash.")
+    expect(String(completionMessages(completions[1]).at(-1)?.content)).toContain("Second question")
+    expect(String(completionMessages(completions[1]).at(-1)?.content)).not.toContain("Use git rebase -i to squash.")
+  })
+
+  // Review fix: a note is an explicit attachment, so file retrieval does not drop it.
+  it("sends an attached note with file retrieval on", async () => {
+    const server = createFakeTldwServer({
+      notes: [{ id: 7, title: "Rebase notes", content: "Use git rebase -i to squash." }]
+    })
+    const view = await renderPlayground({ server })
+    useStoreMessageOption.getState().setFileRetrievalEnabled(true)
+    await view.user.click(view.composer)
+    await view.user.type(view.composer, "@Reb")
+    await screen.findByRole("option", { name: /Rebase notes/ }, HARNESS_WAIT)
+    await view.user.keyboard("{Enter}")
+    await view.user.type(view.composer, "Summarize this")
+    await view.user.keyboard("{Enter}")
+    await waitForChatIdle()
+    const completions = server.completionRequests()
+    expect(completions).toHaveLength(1)
+    expect(String(completionMessages(completions[0]).at(-1)?.content)).toContain("Use git rebase -i to squash.")
+  })
+
   // AX-01: '/model' opens the composer's model picker (search focused), not
   // the chat settings, and only once the command is chosen.
   it("opens the model picker only when '/model' is chosen, not while it is typed", async () => {

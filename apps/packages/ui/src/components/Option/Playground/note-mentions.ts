@@ -7,14 +7,23 @@
  * - A draft that is "/note" plus a search, on every surface. The slash menu's
  *   /note leaves "/note " in the composer for this.
  *
- * A picked note becomes one pinned result (`type: "note"`), so it is sent
- * with the message exactly as pinned search results are
- * (usePlaygroundSubmit's buildPinnedMessage).
+ * A picked note becomes one pinned result (`type: "note"`) that belongs to
+ * the next message only: it is sent with that message (even with file
+ * retrieval on, as an explicit attachment), and its chip clears once the
+ * message is sent or queued. Other pins keep their own behaviour.
  */
 import type { RagPinnedResult } from "@/utils/rag-format"
+import { NOTE_PINNED_ID_PREFIX, NOTE_PINNED_TYPE } from "@/utils/note-pins"
 
-export const NOTE_PINNED_ID_PREFIX = "note:"
-export const NOTE_PINNED_TYPE = "note"
+export {
+  appendPinnedContext,
+  clearSentNotePins,
+  isNotePin,
+  noteIdFromPinnedResult,
+  sendablePins,
+  withoutNotePins
+} from "@/utils/note-pins"
+
 /** A note longer than this is shortened before it is attached. */
 export const NOTE_CONTENT_MAX_CHARS = 12_000
 
@@ -81,12 +90,6 @@ export const noteToPinnedResult = (note: NoteRow): RagPinnedResult => {
   }
 }
 
-/** The note id of a pinned result attached from a note, or null. */
-export const noteIdFromPinnedResult = (result: RagPinnedResult): string | null =>
-  result.type === NOTE_PINNED_TYPE && result.id.startsWith(NOTE_PINNED_ID_PREFIX)
-    ? result.id.slice(NOTE_PINNED_ID_PREFIX.length) || null
-    : null
-
 /** Rows from a notes list or search response. */
 export const readNoteRows = (response: unknown): NoteRow[] => {
   const rows = Array.isArray(response)
@@ -102,3 +105,4 @@ export const readNoteRows = (response: unknown): NoteRow[] => {
       content: typeof row.content === "string" ? row.content : null
     }))
 }
+
