@@ -2,7 +2,7 @@
 id: TASK-15576
 title: Decide whether the resolve-time provider-override runtimes follow TASK-15571's
   server-key fallback
-status: In Progress
+status: Done
 labels:
 - llm
 - byok
@@ -17,8 +17,8 @@ Found by TASK-15571's plan review (I5). TASK-15571 applies the owner's rule (a m
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The owner decides whether the server-key fallback extends to these runtimes and to chat's 403
-- [ ] #2 If it does: each runtime family falls back with the same fail-closed quota check, with tests; if not: the docs say which endpoints refuse
+- [x] #1 The owner decides whether the server-key fallback extends to these runtimes and to chat's 403
+- [x] #2 If it does: each runtime family falls back with the same fail-closed quota check, with tests; if not: the docs say which endpoints refuse
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -32,14 +32,15 @@ Owner's answer, 2026-11-19: keep refusing; explicit disable is refused everywher
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Owner, 2026-11-19: keep refusing; explicit disable is refused everywhere. No runtime adopts the fallback; TASK-15581 removed it and refuses at the provider base class too, closing the Prompt Studio DEFAULT_MODEL_* gap. The docs say every endpoint refuses.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

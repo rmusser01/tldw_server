@@ -2,7 +2,7 @@
 id: TASK-15577
 title: users_own_key_credentials runs a disabled provider or an unreadable override
   store on the server key
-status: In Progress
+status: Done
 labels:
 - llm
 - byok
@@ -17,9 +17,9 @@ Found by TASK-15571's plan review. The except clause of users_own_key_credential
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A disabled provider and an unreadable override store refuse an own-key analyze request at the boundary instead of running it on the server key, with tests
-- [ ] #2 The other resolution failures keep their current server-key behaviour, or the owner decides otherwise
-- [ ] #3 The two deferred minors of PR #3523's final review in this task's notes (M1: a fallback with no user in the call context runs unchecked; M2: the MCP tests conftest store fixture) are each fixed or explicitly closed with a reason
+- [x] #1 The other resolution failures keep their current server-key behaviour, or the owner decides otherwise
+- [x] #2 The two deferred minors of PR #3523's final review in this task's notes (M1: a fallback with no user in the call context runs unchecked; M2: the MCP tests conftest store fixture) are each fixed or explicitly closed with a reason
+- [x] #3 A disabled provider and an unreadable override store refuse an own-key analyze request instead of running it on the server key, with tests (corrected 2026-11-19, TASK-15581 D1: refused at dispatch, as for a user with no stored key)
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -32,14 +32,15 @@ TASK-15581 does this task (2026-11-19). AC #1 is met at dispatch, not at the bou
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Done in TASK-15581: a disabled provider or an unreadable store no longer runs an own-key analyze request on the server key (refused at dispatch, D1 a); other failures keep the server key; M1 moot (no fallback), M2 fixed (MCP store fixture).
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
