@@ -129,7 +129,7 @@ def _moonshot_request(
                                 )
                     elif isinstance(part, str):
                         moonshot_content.append({"type": "text", "text": part})
-                api_messages.append({"role": role, "content": moonshot_content})
+                content = moonshot_content
             else:
                 text_parts = []
                 has_images = False
@@ -147,10 +147,15 @@ def _moonshot_request(
                         "doesn't support vision. Images will be ignored."
                     )
 
-                combined_text = "\n".join(text_parts)
-                api_messages.append({"role": role, "content": combined_text})
-        else:
-            api_messages.append({"role": role, "content": content})
+                content = "\n".join(text_parts)
+        message = {"role": role, "content": content}
+        if role == "assistant":
+            for field in ("reasoning_content", "tool_calls"):
+                if msg.get(field) is not None:
+                    message[field] = msg[field]
+        elif role == "tool" and msg.get("tool_call_id") is not None:
+            message["tool_call_id"] = msg["tool_call_id"]
+        api_messages.append(message)
 
     from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import is_bundled_model_endpoint
 

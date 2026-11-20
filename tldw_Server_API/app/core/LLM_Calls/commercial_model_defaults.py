@@ -18,11 +18,30 @@ _MODELS = {
     "huggingface": ("router.huggingface.co", "Qwen/Qwen3.6-35B-A3B", 262_144, None, 32_768),
     "mistral": ("api.mistral.ai", "mistral-small-2603", 262_144, None, 4096),
     "moonshot": ("api.moonshot.cn api.moonshot.ai", "kimi-k3.1-pro", 1_048_576, None, 131_072),
-    "openai": ("api.openai.com", "gpt-6-luna", 1_050_000, 128_000, 128_000),
+    "openai": ("api.openai.com eu.api.openai.com", "gpt-6-luna", 1_050_000, 128_000, 128_000),
     "openrouter": ("openrouter.ai", "google/gemini-3.1-flash-lite", 1_048_576, 65_536, 65_536),
     "qwen": ("dashscope-intl.aliyuncs.com", "qwen3.7-plus", 1_000_000, 131_072, 131_072),
     "zai": ("api.z.ai", "glm-5.3-flash", 1_000_000, 131_072, 131_072),
 }
+
+
+NATIVE_COMPLETION_TOKEN_PROVIDERS = frozenset({"openai", "groq", "moonshot", "qwen"})
+
+
+# Verify these capabilities against both the model and the generation adapter.
+_MODEL_FEATURES = {
+    "anthropic": ("vision", "tool_use", "function_calling", "thinking"),
+    "deepseek": ("tool_use", "function_calling", "json_mode", "thinking"),
+    "google": ("vision", "tool_use", "function_calling", "json_mode", "thinking"),
+    "groq": ("tool_use", "function_calling", "json_mode", "thinking"),
+    "moonshot": ("tool_use", "function_calling", "json_mode", "thinking"),
+    "openai": ("vision", "tool_use", "function_calling", "json_mode", "thinking"),
+}
+
+
+def commercial_model_capabilities(provider: str) -> dict[str, bool]:
+    """Return verified generation capabilities for an already matched bundled model."""
+    return dict.fromkeys(("streaming", *_MODEL_FEATURES.get(provider, ())), True)
 
 
 def commercial_model_limits(provider: str, model: str) -> dict[str, int | None]:
@@ -50,10 +69,10 @@ def apply_commercial_output_default(provider: str, request: dict[str, Any]) -> N
     if not entry:
         return
 
-    from tldw_Server_API.app.core.LLM_Calls.adapter_utils import resolve_provider_section
+    from tldw_Server_API.app.core.LLM_Calls.adapter_utils import resolve_provider_model, resolve_provider_section
     from tldw_Server_API.app.core.LLM_Calls.capability_registry import normalize_payload
 
-    completion_field = provider in {"openai", "groq", "moonshot", "qwen"}
+    completion_field = provider in NATIVE_COMPLETION_TOKEN_PROVIDERS
     normalized = normalize_payload(provider, request)
     if normalized.get("max_completion_tokens") is not None:
         if not completion_field and normalized.get("max_tokens") is None:
@@ -92,10 +111,8 @@ def apply_commercial_output_default(provider: str, request: dict[str, Any]) -> N
             request["max_tokens"] = int(configured)
         return
 
-    _hosts, model, context, _ceiling, budget = entry
-    selected_model = request.get("model") or scoped.get("model")
-    if selected_model != model:
-        return
+    _hosts, _model, context, _ceiling, budget = entry
+    selected_model = request.get("model") or resolve_provider_model(provider, config)
     if provider == "bedrock":
         from tldw_Server_API.app.core.LLM_Calls.providers.bedrock_adapter import BedrockAdapter
 
@@ -108,6 +125,9 @@ def apply_commercial_output_default(provider: str, request: dict[str, Any]) -> N
             credentials_resolved=request.get("credentials_resolved") is True,
         )
     if not is_bundled_model_endpoint(provider, selected_model, endpoint):
+        # Older shipped configs supplied this cap even for another model or endpoint.
+        if "max_tokens" in scoped and provider not in {"moonshot", "zai"}:
+            request["max_tokens"] = 4096
         return
 
     if provider == "anthropic" and not request.get("stream"):

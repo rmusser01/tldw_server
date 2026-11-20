@@ -3718,6 +3718,8 @@ async def create_chat_completion(
             request_data.temperature = validate_temperature(request_data.temperature)
         if request_data.max_tokens is not None:
             request_data.max_tokens = validate_max_tokens(request_data.max_tokens)
+        if request_data.max_completion_tokens is not None:
+            request_data.max_completion_tokens = validate_max_tokens(request_data.max_completion_tokens)
     except ValueError as e:
         logger.warning(f"Input validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request.") from e
@@ -4262,7 +4264,7 @@ async def create_chat_completion(
 
                     completion_budget = 0
                     try:
-                        completion_budget = int(getattr(request_data, "max_tokens", 0) or 0)
+                        completion_budget = int(request_data.max_completion_tokens or request_data.max_tokens or 0)
                     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                         completion_budget = 0
 
