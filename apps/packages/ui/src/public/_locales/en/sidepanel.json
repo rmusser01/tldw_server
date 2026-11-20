@@ -354,7 +354,7 @@
     "message": "Show Search & Context"
   },
   "rag_hide": {
-    "message": "Hide Knowledge Search"
+    "message": "Hide Search & Context"
   },
   "rag_addTagPlaceholder": {
     "message": "Add tag (Enter)"
@@ -1248,7 +1248,7 @@
     "message": "File Search"
   },
   "knowledge_tabs_label": {
-    "message": "Knowledge panel sections"
+    "message": "Search & Context sections"
   },
   "knowledge_tabs_contextBadge": {
     "message": "{{count}} items attached"

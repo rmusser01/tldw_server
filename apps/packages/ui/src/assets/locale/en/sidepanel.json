@@ -195,7 +195,7 @@
       "fileSearch": "File Search",
       "settings": "Settings",
       "context": "Context",
-      "label": "Knowledge panel sections",
+      "label": "Search & Context sections",
       "contextBadge": "{{count}} items attached"
     }
   },
@@ -259,7 +259,7 @@
     "searchAllSettings": "Search all settings",
     "searchSettings": "Search settings...",
     "show": "Show Search & Context",
-    "hide": "Hide Knowledge Search",
+    "hide": "Hide Search & Context",
     "addTagPlaceholder": "Add tag (Enter)",
     "add": "Add",
     "noResults": "No results found",

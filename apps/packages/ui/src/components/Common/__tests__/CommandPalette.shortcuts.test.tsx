@@ -227,7 +227,7 @@ describe("CommandPalette shortcut hints", () => {
       )
     ).toBeInTheDocument()
 
-    const toggleWeb = screen.getByRole("option", { name: /Toggle Web Search/i })
+    const toggleWeb = screen.getByRole("option", { name: /Toggle web search/i })
     expect(
       within(toggleWeb).getByText(
         expectedShortcutLabel(mockShortcutConfig.toggleWebSearch)

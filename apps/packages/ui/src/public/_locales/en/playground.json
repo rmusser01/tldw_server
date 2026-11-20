@@ -357,7 +357,7 @@
     "message": "Image attachments disabled"
   },
   "attachments_imageDisabledBody": {
-    "message": "Turn off Search & Context answers to attach images."
+    "message": "Images can't be attached while answers come from Search & Context. Type /search to turn that off."
   },
   "attachments_tabs": {
     "message": "Web Pages"
@@ -366,7 +366,7 @@
     "message": "Uploaded Files"
   },
   "attachments_enableKnowledgeSearch": {
-    "message": "Enable Knowledge Search"
+    "message": "Include in Search & Context"
   },
   "attachments_enableKnowledgeSearchTooltip": {
     "message": "When enabled, attached files and pinned results will be searched for relevant context"
@@ -531,7 +531,7 @@
     "message": "Extract text from image (OCR)"
   },
   "fileRetrievalEnabled": {
-    "message": "Enable Knowledge Search for Documents"
+    "message": "Include documents in Search & Context"
   },
   "speech_title": {
     "message": "Speech Playground"
@@ -2661,7 +2661,7 @@
     "message": "Hands-free conversation with audio responses"
   },
   "empty_featureSearch": {
-    "message": "Knowledge Search"
+    "message": "Search & Context"
   },
   "empty_featureSearchHint": {
     "message": "Search your ingested media and notes"
@@ -2700,7 +2700,7 @@
     "message": "Attach files"
   },
   "tour_toolsContent": {
-    "message": "Attach images or documents to include them in your message. Manage context from Knowledge Search → Context."
+    "message": "Attach images or documents to include them in your message. Manage context from Search & Context → Context."
   },
   "tour_voiceTitle": {
     "message": "Voice Chat"

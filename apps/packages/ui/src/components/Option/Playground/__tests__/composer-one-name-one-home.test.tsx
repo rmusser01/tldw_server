@@ -3,7 +3,7 @@
 // redesign's names stay ("Search & Context", "Runtime"); web search has one
 // toggle (the Tools tray) and one spelling; Modes holds conversation modes.
 import React from "react"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { fireEvent, render, screen } from "@testing-library/react"
@@ -140,9 +140,11 @@ describe("CC-08: one name and one home per composer feature", () => {
     expect(
       screen.getByRole("button", { name: /Character \/ Scene/ })
     ).toBeInTheDocument()
+    // The glossary's name for Compare (CC-08 review).
     expect(
-      screen.getByRole("button", { name: /Compare responses/ })
+      screen.getByRole("button", { name: /Compare models/ })
     ).toBeInTheDocument()
+    expect(screen.queryByText("Compare responses")).not.toBeInTheDocument()
     expect(screen.queryByText("Knowledge panel")).not.toBeInTheDocument()
     expect(screen.queryByText("Voice mode")).not.toBeInTheDocument()
     expect(screen.queryByText(/web search/i)).not.toBeInTheDocument()
@@ -237,6 +239,56 @@ describe("CC-08: one name and one home per composer feature", () => {
       expect(source, file).not.toMatch(/Manage in Knowledge Panel/)
       expect(source, file).not.toMatch(/"Web Search"/)
     }
+  })
+
+  // CC-08 review: the guard covers every English string, not just a list,
+  // so a leftover like the Context tab's "Enable Knowledge Search" fails it.
+  it("uses no old name for Search & Context or web search in any English string", () => {
+    const allowed = new Set([
+      // The /knowledge workspace page, a different feature.
+      "knowledge.json:search.title",
+      // Side-panel composer strings: lane 7D aligns them (XP-12).
+      "sidepanel.json:controlRow.webSearch",
+      "sidepanel.json:controlRow.visionDisabledKnowledge",
+      "sidepanel.json:toolbar.knowledgeSearch"
+    ])
+    const localeDir = path.resolve(srcRoot, "assets/locale/en")
+    const offenders: string[] = []
+    const walk = (file: string, value: unknown, key: string) => {
+      if (typeof value === "string") {
+        if (
+          /Knowledge Search|Knowledge Panel|Knowledge panel|Web Search/.test(value) &&
+          !allowed.has(`${file}:${key}`)
+        )
+          offenders.push(`${file}:${key} = ${value}`)
+        return
+      }
+      if (value && typeof value === "object")
+        for (const [child, nested] of Object.entries(value))
+          walk(file, nested, key ? `${key}.${child}` : child)
+    }
+    for (const file of readdirSync(localeDir).filter((name) => name.endsWith(".json")))
+      walk(file, JSON.parse(readFileSync(path.join(localeDir, file), "utf8")), "")
+    expect(offenders).toEqual([])
+  })
+
+  it("keeps the old names out of the fallbacks of the renamed features", () => {
+    for (const file of [
+      "components/Knowledge/ContextTab/ContextTab.tsx",
+      "components/Knowledge/KnowledgeTabs.tsx",
+      "tutorials/definitions/playground.ts",
+      "components/Common/CommandPalette.tsx",
+      "hooks/playground/useSlashCommands.ts",
+      "hooks/useSlashCommands.tsx"
+    ]) {
+      const source = readFileSync(path.resolve(srcRoot, file), "utf8")
+      expect(source, file).not.toMatch(/"(Enable )?Knowledge Search"|Knowledge panel sections|"Web Search"|"Toggle Web Search"/)
+    }
+  })
+
+  it("names the real way out when images are blocked by Search & Context answers", () => {
+    const playground = readLocale("playground.json")
+    expect(playground.attachments.imageDisabledBody).toContain("/search")
   })
 
   it("keeps Character / Scene in Modes and announces it", () => {

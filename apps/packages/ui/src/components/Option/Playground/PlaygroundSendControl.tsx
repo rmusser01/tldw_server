@@ -49,7 +49,7 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
       chatMode === "rag"
         ? t(
             "playground:attachments.imageDisabledBody",
-            "Turn off Search & Context answers to attach images."
+            "Images can't be attached while answers come from Search & Context. Type /search to turn that off."
           )
         : null
 

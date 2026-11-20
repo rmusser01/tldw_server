@@ -83,7 +83,7 @@ export const PlaygroundModeLauncher: React.FC<PlaygroundModeLauncherProps> =
             }}
             className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2">
             <span>
-              {t("playground:composer.modeCompare", "Compare responses")}
+              {t("playground:composer.modeCompare", "Compare models")}
             </span>
             <span className="text-xs text-text-muted">
               {compareModeActive ? t("common:on", "On") : t("common:off", "Off")}
