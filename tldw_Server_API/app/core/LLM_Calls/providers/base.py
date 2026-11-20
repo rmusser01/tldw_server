@@ -90,6 +90,9 @@ class ChatProvider(ABC):
 
         bound, credentials = bind_provider_call_credentials(self.name, request, consume=True)
         self._validate_model_inventory(bound, getattr(credentials, "auth_source", None) == "oauth")
+        from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import apply_commercial_output_default
+
+        apply_commercial_output_default(self.name, bound)
         return bound, credentials
 
     def _validate_model_inventory(self, request: dict[str, Any], refreshable_oauth: bool = False) -> None:
