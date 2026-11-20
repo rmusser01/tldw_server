@@ -66,6 +66,7 @@ class OutputModerationRuntime:
     review_item_callback: ReviewItemCallback | None = None
     completion_metric_callback: CompletionMetricCallback | None = None
     audit_event_type: Any | None = AuditEventType.SECURITY_VIOLATION
+    require_policy_check: bool = False
 
 
 @dataclass(slots=True)
@@ -213,6 +214,8 @@ async def _apply_output_self_monitoring(
     except HTTPException:
         raise
     except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS as exc:
+        if runtime.require_policy_check:
+            raise
         logger.debug(f"Self-monitoring output check skipped: {exc}")
 
 
@@ -252,6 +255,7 @@ async def _apply_output_moderation(
                 moderation=moderation,
                 eff_policy=eff_policy,
                 target_text=target_text,
+                require_policy_check=runtime.require_policy_check,
             )
             _schedule_output_topic_monitoring(
                 runtime=runtime,
@@ -304,6 +308,8 @@ async def _apply_output_moderation(
     except MandatoryAuditWriteError:
         raise
     except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS as exc:
+        if runtime.require_policy_check:
+            raise
         logger.warning(f"Moderation output processing error: {exc}")
         return None
 
@@ -313,6 +319,7 @@ def _evaluate_output_moderation(
     moderation: Any,
     eff_policy: Any,
     target_text: str,
+    require_policy_check: bool,
 ) -> _ModerationDecision:
     action = None
     sample = None
@@ -331,6 +338,8 @@ def _evaluate_output_moderation(
             else:
                 action, redacted_value, matched_pattern = eval_res  # type: ignore[misc]
         except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS:
+            if require_policy_check:
+                raise
             action = None
         if match_span and hasattr(moderation, "build_sanitized_snippet"):
             try:
@@ -346,6 +355,8 @@ def _evaluate_output_moderation(
             else:
                 action, redacted_value, matched_pattern = eval_res  # type: ignore[misc]
         except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS:
+            if require_policy_check:
+                raise
             action = None
 
     if action and action != "pass" and sample is None:

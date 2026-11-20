@@ -303,6 +303,7 @@ async def _run_non_stream_content_test(
     response_format: dict | None = None,
     metrics: object | None = None,
     save_calls: list[dict[str, object]] | None = None,
+    app_config: dict | None = None,
 ) -> tuple[dict, list[dict[str, object]], dict[str, object]]:
     logged_usage: dict[str, object] = {}
 
@@ -332,6 +333,8 @@ async def _run_non_stream_content_test(
         "model": model,
         "streaming": False,
     }
+    if app_config is not None:
+        cleaned_args["app_config"] = app_config
     if response_format is not None:
         cleaned_args["response_format"] = response_format
 
@@ -1072,3 +1075,46 @@ async def test_redacted_moonshot_reasoning_is_not_saved(monkeypatch):
     )
     assert saved[0]["content"] == "Answer"
     assert "moonshot_reasoning_content" not in assistant_generation_extra(saved[0])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario", ["policy_error", "custom_endpoint"])
+async def test_unapproved_moonshot_reasoning_is_not_saved(monkeypatch, scenario):
+    from tldw_Server_API.app.core.Chat.persistence_service import assistant_generation_extra
+
+    class ReasoningPolicy(_RedactingModeration):
+        def evaluate_action_with_match(self, text, *_args):
+            if text == "Private reasoning" and scenario == "policy_error":
+                raise RuntimeError("moderation unavailable")
+            return ("pass", None, None, None, None)
+
+    config = {"moonshot_api": {}}
+    if scenario == "custom_endpoint":
+        config["moonshot_api"]["api_base_url"] = "https://example.com/v1"
+    _, saved, _ = await _run_non_stream_content_test(
+        monkeypatch,
+        llm_response={"choices": [{
+            "message": {"role": "assistant", "content": "Answer", "reasoning_content": "Private reasoning"},
+            "finish_reason": "stop",
+        }]},
+        moderation=ReasoningPolicy(),
+        should_persist=True,
+        provider="moonshot",
+        model="kimi-k3.1-pro",
+        app_config=config,
+    )
+    assert saved[0]["content"] == "Answer"
+    assert "moonshot_reasoning_content" not in assistant_generation_extra(saved[0])
+
+
+@pytest.mark.parametrize("literal_close", ["</reason>", "</think>"])
+def test_selected_history_omits_ambiguous_legacy_thinking(literal_close):
+    snapshot = SimpleNamespace(nodes=[{"id": "reply", "role": "assistant"}])
+    rows = [{
+        "id": "reply",
+        "message": f"<think>Trace {literal_close} private text</think>Answer",
+        "images": [],
+        "_message_version": 1,
+        "extra_metadata": {},
+    }]
+    assert chat_service._format_selected_history_messages(snapshot, rows, {})[0]["content"] == "Answer"

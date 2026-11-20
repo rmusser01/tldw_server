@@ -391,11 +391,13 @@ export class ChatTldw {
   }
 
   /** Freeze after the existing builder resolves tools/settings, before owner admission. */
-  prepareClientManagedRequest(messages: BaseMessage[], localHistory = false): ChatCompletionRequest {
+  prepareClientManagedRequest(messages: BaseMessage[], historyOwner?: "local" | "native"): ChatCompletionRequest {
     if (!this.clientManagedHistory)
       throw new Error("client_managed_history_required")
-    const request = this.prepareHistoryRequest(messages, localHistory)
-    if (localHistory) {
+    const provider = this.apiProvider?.trim().toLowerCase()
+    const mayUseMoonshot = !provider || provider === "moonshot" || provider === "auto"
+    const request = this.prepareHistoryRequest(messages, historyOwner !== undefined && mayUseMoonshot)
+    if (historyOwner === "local") {
       request.metadata = { ...request.metadata, tldw_moonshot_reasoning_history_v1: true }
     }
     return request

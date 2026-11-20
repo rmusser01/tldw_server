@@ -204,6 +204,9 @@ async def _run_execute_streaming_call(
     refresh_provider_params=None,
     rg_commit_cb=None,
     rg_refund_cb=None,
+    moderation_getter=_NoModeration,
+    native_persistence=None,
+    self_monitoring_service=None,
 ) -> StreamingResponse:
     cleaned_args = {
         "api_endpoint": selected_provider,
@@ -245,7 +248,9 @@ async def _run_execute_streaming_call(
         enable_provider_fallback=enable_provider_fallback,
         llm_call_func=llm_call_func,
         refresh_provider_params=refresh_provider_params or (lambda *_args, **_kwargs: ({}, None)),
-        moderation_getter=lambda: _NoModeration(),
+        moderation_getter=moderation_getter,
+        native_persistence=native_persistence,
+        self_monitoring_service=self_monitoring_service,
         rg_commit_cb=rg_commit_cb,
         rg_refund_cb=rg_refund_cb,
     )
@@ -1589,12 +1594,14 @@ async def test_the_stream_estimate_counts_reasoning_and_tool_call_arguments(stre
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("opt_in", "selected_provider"), [
-    (True, "moonshot"),
-    (False, "moonshot"),
-    (True, "openai"),
+@pytest.mark.parametrize(("opt_in", "selected_provider", "scenario"), [
+    (True, "moonshot", "approved"),
+    (False, "moonshot", "approved"),
+    (True, "openai", "approved"),
+    (True, "moonshot", "policy_error"),
+    (True, "moonshot", "custom_endpoint"),
 ])
-async def test_client_managed_moonshot_stream_emits_approved_history_reasoning(opt_in, selected_provider):
+async def test_client_managed_moonshot_stream_emits_approved_history_reasoning(opt_in, selected_provider, scenario):
     from tldw_Server_API.app.core.Chat.chat_request_schemas import ChatCompletionRequest
 
     reasoning = "  Keep <reasoning> exactly.\n"
@@ -1607,7 +1614,20 @@ async def test_client_managed_moonshot_stream_emits_approved_history_reasoning(o
         save_to_db=False,
         metadata={"tldw_moonshot_reasoning_history_v1": opt_in},
     )
-    args = chat_service.build_call_params_from_request(data, "moonshot", "test-key", messages, None)
+    config = {"moonshot_api": {}}
+    if scenario == "custom_endpoint":
+        config["moonshot_api"]["api_base_url"] = "https://example.com/v1"
+    args = chat_service.build_call_params_from_request(data, "moonshot", "test-key", messages, None, app_config=config)
+
+    class ReasoningPolicy(_NoModeration):
+        class _Policy(_NoModeration._Policy):
+            enabled = True
+            output_enabled = True
+
+        def evaluate_action(self, text, *_args):
+            if text == reasoning and scenario == "policy_error":
+                raise RuntimeError("moderation unavailable")
+            return ("pass", None, None)
 
     def provider():
         yield 'data: {"event":"moonshot_history_reasoning","data":{"reasoning_content":"unapproved"}}\n\n'
@@ -1621,13 +1641,52 @@ async def test_client_managed_moonshot_stream_emits_approved_history_reasoning(o
     response = await _run_execute_streaming_call(
         llm_call_func=provider, save_message_fn=save, cleaned_args_overrides=args,
         selected_provider=selected_provider, provider=selected_provider, model="kimi-k3.1-pro", should_persist=False,
+        moderation_getter=ReasoningPolicy,
     )
     wire = "".join(await _collect_sse_chunks(response))
     event = "event: moonshot_history_reasoning\ndata: "
     assert "unapproved" not in wire
-    should_emit = opt_in and selected_provider == "moonshot"
+    should_emit = opt_in and selected_provider == "moonshot" and scenario == "approved"
     assert (event in wire) is should_emit
     if should_emit:
         payload = json.loads(wire.split(event, 1)[1].splitlines()[0])
         assert payload["event"] == "moonshot_history_reasoning"
         assert payload["data"]["reasoning_content"] == reasoning
+
+
+@pytest.mark.asyncio
+async def test_native_moonshot_display_thinking_denial_also_blocks_typed_history():
+    from tldw_Server_API.app.core.Chat.persistence_service import assistant_generation_extra
+
+    class OncePerConversationMonitoring:
+        denied = False
+
+        def check_text(self, *, text, **_kwargs):
+            if "Private reasoning" in text and not self.denied:
+                self.denied = True
+                return SimpleNamespace(action="block")
+            return SimpleNamespace(action="pass")
+
+    def provider():
+        yield 'data: {"choices": [{"delta": {"reasoning_content": "Private reasoning"}}]}\n\n'
+        yield 'data: {"choices": [{"delta": {"content": "Answer"}, "finish_reason": "stop"}]}\n\n'
+        yield "data: [DONE]\n\n"
+
+    saved = []
+
+    async def save(_db, _conversation_id, payload, **_kwargs):
+        saved.append(payload)
+        return "saved-reply"
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=provider,
+        save_message_fn=save,
+        selected_provider="moonshot",
+        provider="moonshot",
+        model="kimi-k3.1-pro",
+        native_persistence="retain_reasoning",
+        self_monitoring_service=OncePerConversationMonitoring(),
+    )
+    await _collect_sse_chunks(response)
+    assert saved[0]["content"] == "Answer"
+    assert "moonshot_reasoning_content" not in assistant_generation_extra(saved[0])
