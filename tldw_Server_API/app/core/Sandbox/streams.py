@@ -11,6 +11,7 @@ import uuid
 
 from loguru import logger
 
+from tldw_Server_API.app.core.config_sections.redis import redis_url_env
 from tldw_Server_API.app.core.Infrastructure.redis_factory import create_sync_redis_client
 from tldw_Server_API.app.core.testing import is_truthy
 
@@ -615,7 +616,7 @@ class RunStreamHub:
             if not is_truthy(toggle_env):
                 return
             # Resolve URL
-            url = os.getenv("SANDBOX_REDIS_URL") or os.getenv("REDIS_URL")
+            url = os.getenv("SANDBOX_REDIS_URL") or redis_url_env()
             if not url:
                 # Try host/port/db
                 try:

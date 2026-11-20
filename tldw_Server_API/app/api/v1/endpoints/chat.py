@@ -495,7 +495,7 @@ def _mandatory_audit_unavailable_detail() -> dict[str, str]:
 import contextlib
 
 from tldw_Server_API.app.core.config import load_comprehensive_config
-from tldw_Server_API.app.core.config_sections.auth import load_auth_config
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config, resolve_jwt_secret_key
 import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
 import tldw_Server_API.app.api.v1.API_Deps.billing_deps as _billing_deps
 import tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps as _usage_quota_deps
@@ -6905,7 +6905,7 @@ def _get_knowledge_qa_share_signing_key() -> bytes:
         # every share token with a key anybody could read. Fail closed instead. Note
         # lru_cache does not memoize exceptions, so a transient derivation failure is
         # retried on the next call rather than pinned for the process lifetime.
-        fallback = (os.getenv("JWT_SECRET_KEY") or "").strip()
+        fallback = str(resolve_jwt_secret_key(load_comprehensive_config()).value or "").strip()
         if not fallback:
             raise RuntimeError(
                 "Cannot sign knowledge-QA share links: key derivation failed and "

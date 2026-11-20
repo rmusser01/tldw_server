@@ -25,6 +25,7 @@
 - `types.py` - shared parser type definitions.
 - `precedence.py` - `resolve`: first set env key, then first set config option, then the default.
 - `audio.py`, `auth.py`, `chat.py`, `chunking.py`, `database.py`, `embeddings.py`, `jobs.py`, `logging.py`, `moderation.py`, `providers.py`, `rag.py`, `server.py`, and `stt.py` - section dataclasses and loaders.
+- `redis.py` - `REDIS_URL` resolution (`resolve_redis_url`, `redis_url_env`); no dataclass.
 
 ## How It Connects
 

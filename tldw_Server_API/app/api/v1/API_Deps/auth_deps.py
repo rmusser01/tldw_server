@@ -2291,9 +2291,6 @@ def require_token_scope(
                     primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
                     if primary_key:
                         allowed_keys.add(primary_key)
-                    env_primary_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
-                    if env_primary_key:
-                        allowed_keys.add(env_primary_key)
                     if api_key in allowed_keys:
                         client_ip = resolve_client_ip(request, settings)
                         if not is_single_user_ip_allowed(client_ip, settings):
