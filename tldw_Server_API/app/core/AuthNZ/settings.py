@@ -1384,23 +1384,23 @@ def _load_overrides_from_config() -> dict:
             # Map config key to Settings field if env var not set
             resolved = resolve((field,), (("AuthNZ", key),), config_parser=cfg, blank_env=True, blank_config=True)
             if resolved.source == "config":
-                with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+                with contextlib.suppress(*_SETTINGS_CAST_EXCEPTIONS):
                     overrides[field] = caster(resolved.value)
 
         resolved_mode = resolve_auth_mode(cfg)  # the raw text goes to pydantic, which rejects a bad mode
         if resolved_mode.source == "config":
-            with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+            with contextlib.suppress(*_SETTINGS_CAST_EXCEPTIONS):
                 overrides["AUTH_MODE"] = str(resolved_mode.value).strip()
         resolved_url = resolve_database_url(cfg)
         if resolved_url.source == "config":
             overrides["DATABASE_URL"] = str(resolved_url.value).strip()
         resolved_jwt = resolve_jwt_secret_key(cfg)
         if resolved_jwt.source == "config":
-            with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+            with contextlib.suppress(*_SETTINGS_CAST_EXCEPTIONS):
                 overrides["JWT_SECRET_KEY"] = str(resolved_jwt.value).strip()
         resolved_key = resolve_single_user_api_key(cfg)
         if resolved_key.source == "config":
-            with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+            with contextlib.suppress(*_SETTINGS_CAST_EXCEPTIONS):
                 overrides["SINGLE_USER_API_KEY"] = str(resolved_key.value).strip()
         for field, key in _AUTHNZ_TRANSACTION_POLICY_CONFIG_KEYS:
             maybe_set(field, key, lambda v: v.strip())
@@ -1461,7 +1461,7 @@ def _load_overrides_from_config() -> dict:
         )
         resolved_ttl = resolve_access_token_expire_minutes(cfg)
         if resolved_ttl.source == "config":
-            with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+            with contextlib.suppress(*_SETTINGS_CAST_EXCEPTIONS):
                 overrides["ACCESS_TOKEN_EXPIRE_MINUTES"] = int(resolved_ttl.value)
         maybe_set("REFRESH_TOKEN_EXPIRE_DAYS", "refresh_token_expire_days", lambda v: int(v))
         maybe_set("MAGIC_LINK_EXPIRE_MINUTES", "magic_link_expire_minutes", lambda v: int(v))
@@ -1483,7 +1483,7 @@ def _load_overrides_from_config() -> dict:
         )
         resolved_redis = resolve_redis_url(cfg)
         if resolved_redis.source == "config":
-            with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+            with contextlib.suppress(*_SETTINGS_CAST_EXCEPTIONS):
                 overrides["REDIS_URL"] = str(resolved_redis.value).strip()
         maybe_set("SECURITY_ALERTS_ENABLED", "security_alerts_enabled", _bool_from_str)
         maybe_set("SECURITY_ALERT_MIN_SEVERITY", "security_alert_min_severity", lambda v: v.strip())
