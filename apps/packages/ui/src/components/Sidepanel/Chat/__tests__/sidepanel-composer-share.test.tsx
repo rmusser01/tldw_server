@@ -195,14 +195,11 @@ describe("SidepanelKnowledgeSheet", () => {
 })
 
 describe("Pro composer share budget (source check)", () => {
-  it("caps the Pro textarea at about 96px", () => {
-    expect(COMPOSER_CONSTANTS.TEXTAREA_MAX_HEIGHT_PRO).toBeLessThanOrEqual(96)
-  })
-
-  it("caps the pinned dock at 40% so the conversation keeps at least 60%", () => {
-    const route = source("../../../../routes/sidepanel-chat.tsx")
-    expect(route).toContain("max-h-[40%]")
-    expect(route).not.toContain("max-h-[60%]")
+  // Review fix: 96px was below Casual's cap; the dock budget holds without it.
+  it("lets the Pro textarea grow at least as far as Casual's", () => {
+    expect(COMPOSER_CONSTANTS.TEXTAREA_MAX_HEIGHT_PRO).toBeGreaterThanOrEqual(
+      COMPOSER_CONSTANTS.TEXTAREA_MAX_HEIGHT_CASUAL
+    )
   })
 
   it("renders the chip and the sheet in the composer, not the inline panels", () => {

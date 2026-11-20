@@ -5,8 +5,8 @@
 
 export const COMPOSER_CONSTANTS = {
   // Textarea sizing
-  // XS-15: about 96px, so the Pro composer leaves the conversation its share.
-  TEXTAREA_MAX_HEIGHT_PRO: 96,
+  // XS-15 review: as tall as Casual's; the dock's 40% cap keeps the conversation's share.
+  TEXTAREA_MAX_HEIGHT_PRO: 120,
   TEXTAREA_MAX_HEIGHT_CASUAL: 120,
   TEXTAREA_MIN_HEIGHT_PRO: 60,
   TEXTAREA_MIN_HEIGHT_CASUAL: 44,
