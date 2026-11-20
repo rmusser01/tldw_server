@@ -876,9 +876,16 @@ async def run_media_ingest_heavy_jobs_worker(stop_event: asyncio.Event | None = 
             )
 
 
+async def main(heavy: bool = False) -> None:
+    """Load the provider-override store, then take jobs: every LLM call refuses until it is loaded (TASK-15581)."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import standalone_llm_provider_overrides
+
+    async with standalone_llm_provider_overrides():
+        await (run_media_ingest_heavy_jobs_worker() if heavy else run_media_ingest_jobs_worker())
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a media ingest Jobs worker")
     parser.add_argument("--heavy", action="store_true", help="Run the heavy ingest worker pool")
-    run_worker = run_media_ingest_heavy_jobs_worker if parser.parse_args().heavy else run_media_ingest_jobs_worker
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run_worker())
+        asyncio.run(main(heavy=parser.parse_args().heavy))

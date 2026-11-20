@@ -38,6 +38,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.cli.utils.llm_store import LLMStoreGroup
 
 DEPRECATION_MSG = (
     "DEPRECATION: This CLI is deprecated. Use 'tldw-evals' or 'python -m tldw_Server_API.cli.evals_cli' instead.\n"
@@ -89,7 +90,12 @@ def _call_adapter_text(
     return extract_response_content(response) or str(response)
 
 
-@click.group(context_settings={'help_option_names': ['-h', '--help']})
+@click.group(
+    cls=LLMStoreGroup,
+    # These make LLM calls, which need the provider-override store (TASK-15581).
+    llm_commands={"run", "test-api"},
+    context_settings={'help_option_names': ['-h', '--help']},
+)
 @click.option('--config', type=click.Path(exists=True), help='Config file path')
 @click.option('--log-level', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR']),
               default='INFO', help='Logging level')

@@ -132,7 +132,7 @@
   "core/PrivilegeMaps/cache.py": {"globals": 2, "reason": null},
   "core/Prompt_Management/Prompts_Interop.py": {"globals": 2, "reason": null},
   "core/Prototype_Workspaces/jobs.py": {"globals": 2, "reason": null},
-  "core/Provider_Credentials/llm_provider_overrides.py": {"globals": 34, "reason": "moved from core/AuthNZ/llm_provider_overrides.py (TASK-13950.17)"},
+  "core/Provider_Credentials/llm_provider_overrides.py": {"globals": 35, "reason": "TASK-15581 M2: a pool reset marks the override store stale instead of emptying it (fail-open fix)"},
   "core/RAG/rag_custom_metrics.py": {"globals": 1, "reason": null},
   "core/RAG/rag_service/advanced_cache.py": {"globals": 1, "reason": null},
   "core/RAG/rag_service/agentic_execution.py": {"globals": 1, "reason": null},
