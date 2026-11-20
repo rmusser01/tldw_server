@@ -1,8 +1,11 @@
 """Core-owned RAG models, re-exported by the API schemas package (TASK-13950.15)."""
 
-from typing import Any, Literal, Optional
+from dataclasses import asdict
+from functools import lru_cache
+from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel
+from loguru import logger
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 try:
     # Pydantic v2
@@ -12,32 +15,64 @@ except Exception:
     from pydantic import validator as field_validator  # type: ignore
 from pydantic import ConfigDict
 
+from tldw_Server_API.app.core import config as _config
+from tldw_Server_API.app.core.config_sections.rag import contextual_defaults, default_fts_level
+from tldw_Server_API.app.core.config_sections.types import CONFIG_LOAD_ERRORS
 from tldw_Server_API.app.core.Text2SQL.source_registry import (
     normalize_source,
     normalize_sources_public,
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import Field
 
-# Load contextual retrieval defaults from settings (config.txt/env)
+# OpenAPI defaults stay static; configured contextual values apply at call time
+# (see ``_apply_contextual_defaults``).
+_DEF_SIB_WIN = 1
+_DEF_INC_PARENT = False
+_DEF_PARENT_MAX_TOK = 1200
+_DEF_INC_SIB = False
+_DEF_ENH_CHUNK = False
 try:
-    from tldw_Server_API.app.core.config import settings as _settings
-    _ctx_defaults = _settings.get("RAG_CONTEXTUAL_DEFAULTS", {}) if isinstance(_settings, dict) else {}
-    _DEF_SIB_WIN = int(_ctx_defaults.get("sibling_window", 1))
-    _DEF_INC_PARENT = bool(_ctx_defaults.get("include_parent_document", False))
-    _DEF_PARENT_MAX_TOK = int(_ctx_defaults.get("parent_max_tokens", 1200))
-    _DEF_INC_SIB = bool(_ctx_defaults.get("include_sibling_chunks", False))
-    _DEF_ENH_CHUNK = bool(_ctx_defaults.get("enable_enhanced_chunking", False))
     # Default FTS level for RAG: 'media' or 'chunk'
-    _DEF_FTS_LVL = str(_settings.get("RAG_DEFAULT_FTS_LEVEL", "media")).lower()
+    _DEF_FTS_LVL = default_fts_level(_config.load_comprehensive_config())
     if _DEF_FTS_LVL not in ("media", "chunk"):
         _DEF_FTS_LVL = "media"
-except Exception:
-    _DEF_SIB_WIN = 1
-    _DEF_INC_PARENT = False
-    _DEF_PARENT_MAX_TOK = 1200
-    _DEF_INC_SIB = False
-    _DEF_ENH_CHUNK = False
+except Exception:  # noqa: BLE001 - import-time default; any failure falls back to "media", as before (TASK-13950.21)
     _DEF_FTS_LVL = "media"
+
+_CONTEXTUAL_WARNED: set[str] = set()
+
+
+def _warn_once(message: str) -> None:
+    if message not in _CONTEXTUAL_WARNED:
+        _CONTEXTUAL_WARNED.add(message)
+        logger.warning(message)
+
+
+@lru_cache(maxsize=None)
+def _field_adapter(model: type[BaseModel], name: str) -> TypeAdapter:
+    field = model.model_fields[name]
+    return TypeAdapter(Annotated[(field.annotation, *field.metadata)] if field.metadata else field.annotation)
+
+
+def _apply_contextual_defaults(model: BaseModel, fields: tuple[str, ...]) -> None:
+    """Write configured contextual defaults into fields the request left unset.
+
+    Writes to ``__dict__`` so ``model_fields_set`` still reports the field as unset.
+    """
+    unset = [name for name in fields if name not in model.model_fields_set]
+    if not unset:
+        return
+    try:
+        parser = _config.load_comprehensive_config()
+        configured = asdict(contextual_defaults(parser))
+    except CONFIG_LOAD_ERRORS as exc:
+        _warn_once(f"RAG contextual defaults unavailable; using built-in defaults: {exc}")
+        return
+    for name in unset:
+        try:
+            model.__dict__[name] = _field_adapter(type(model), name).validate_python(configured[name])
+        except ValidationError:
+            _warn_once(f"RAG contextual default {name}={configured[name]} is out of range; using the built-in default")
 
 
 class UnifiedRAGRequest(BaseModel):
@@ -1649,6 +1684,13 @@ class UnifiedRAGRequest(BaseModel):
                 )
             return self
 
+        @model_validator(mode="after")
+        def _apply_configured_contextual_defaults(self):  # type: ignore
+            _apply_contextual_defaults(
+                self, ("include_sibling_chunks", "sibling_window", "include_parent_document", "parent_max_tokens")
+            )
+            return self
+
 
 KnowledgeSourceIndexStatus = Literal[
     "ready",
@@ -2143,6 +2185,11 @@ class UnifiedBatchRequest(BaseModel):
                 if (v is None or (isinstance(v, str) and not v.strip())) and isinstance(corpus, str):
                     values["index_namespace"] = corpus.strip() or v
             return values
+
+        @model_validator(mode="after")
+        def _apply_configured_contextual_defaults_batch(self):  # type: ignore
+            _apply_contextual_defaults(self, ("sibling_window", "include_parent_document", "parent_max_tokens"))
+            return self
 
     model_config = ConfigDict(json_schema_extra={
         "examples": [

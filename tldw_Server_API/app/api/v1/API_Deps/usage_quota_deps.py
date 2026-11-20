@@ -97,6 +97,7 @@ async def users_own_key_credentials(user_id: Any, provider: str | None, *, model
     """
     if not provider or not await users_own_key_serves(user_id, provider):
         return None
+    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
     from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
         capture_provider_override_call_snapshot,
     )
@@ -117,7 +118,13 @@ async def users_own_key_credentials(user_id: Any, provider: str | None, *, model
         finally:
             await runtime.close()
     except Exception as error:  # noqa: BLE001 - the server's key, as for a user without one
-        logger.bind(exception_type=type(error).__name__).warning("Own-key credential resolution failed")
+        # A bounded code, never the message: a policy denial's code (TASK-15571), a resolution code, or the type.
+        reason = getattr(error, "policy_code", None) or (
+            error.code if isinstance(error, ByokResolutionError) else type(error).__name__
+        )
+        logger.bind(exception_type=type(error).__name__).warning(
+            "Own-key credential resolution for {} failed: {}; the server key is used", provider, reason
+        )
         return None
     return handle if handle.credential_source == USER_KEY_SOURCE else None
 

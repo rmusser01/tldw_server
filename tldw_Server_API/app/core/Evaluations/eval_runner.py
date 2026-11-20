@@ -108,6 +108,23 @@ except _EVAL_EMBEDDINGS_IMPORT_EXCEPTIONS:
         raise RuntimeError("Embeddings backend unavailable; install required dependencies")
 
 
+def _denied_model_takes_the_server_key(provider: str, handle: Any, model: str) -> bool:
+    """Whether a model the provider override denies runs on the server key instead of ``handle`` (TASK-15571).
+
+    Refuses with ``ChatConfigurationError`` for a disabled provider, an unreadable override store, or a fallback no
+    quota check answered; an over-limit user gets the 402.
+    """
+    # Imported here: the override module imports the adapter registry, which this module's importers load.
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import override_outcome
+
+    outcome = override_outcome(provider, handle, model)
+    if outcome == "unchecked":
+        raise ChatConfigurationError(provider=provider, message="The LLM usage limit could not be checked.")
+    if outcome == "refused":
+        raise ChatConfigurationError(provider=provider, message="Provider credential context is invalid.")
+    return outcome == "server_key"
+
+
 def _call_adapter_text(
     *,
     api_endpoint: str,
@@ -136,6 +153,14 @@ def _call_adapter_text(
     resolved_model = model or resolve_provider_model(provider, cfg)
     if not resolved_model:
         raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
+    if provider_credentials is not None and _denied_model_takes_the_server_key(
+        provider, provider_credentials, resolved_model
+    ):
+        # The same model on the server key, as a call with no handle (TASK-15571): checked and counted as such.
+        api_key = None
+        extra_kwargs.pop(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY, None)
+        extra_kwargs.pop("credentials_resolved", None)
+        cfg = ensure_app_config(None)
     system_msg = system_message
     cleaned_messages = messages_payload or []
     if not system_msg:

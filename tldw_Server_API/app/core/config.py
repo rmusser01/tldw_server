@@ -10,6 +10,7 @@ import json
 import os
 import platform
 from collections.abc import Mapping, MutableMapping
+from dataclasses import asdict
 from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,15 +26,19 @@ from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file
 from tldw_Server_API.app.core.config_sections.auth import (
-    load_auth_config,
     api_key_env,
+    load_auth_config,
     resolve_jwt_secret_key,
     resolve_single_user_api_key,
     resolve_single_user_fixed_id,
 )
 from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.config_sections.precedence import resolve
-from tldw_Server_API.app.core.config_sections.rag import resolve_default_llm_model, resolve_default_llm_provider
+from tldw_Server_API.app.core.config_sections.rag import (
+    contextual_defaults,
+    resolve_default_llm_model,
+    resolve_default_llm_provider,
+)
 from tldw_Server_API.app.core.config_sections.redis import resolve_redis_url
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
@@ -1980,48 +1985,7 @@ def load_settings():
         ))(),
 
         # Contextual retrieval defaults (parent/siblings) - from env or config.txt [RAG] section
-        "RAG_CONTEXTUAL_DEFAULTS": (lambda: (
-            # Build contextual defaults from env first, then config.txt [RAG] section
-            (lambda _envs, _cfg: {
-                "include_parent_document": (
-                    (_envs.get("RAG_INCLUDE_PARENT_DOCUMENT").lower() == "true") if _envs.get("RAG_INCLUDE_PARENT_DOCUMENT") is not None else (
-                        str(_cfg.get('include_parent_document', 'false')).lower() == 'true'
-                    )
-                ),
-                "parent_max_tokens": (
-                    _int_env_or_cfg(
-                        _envs.get("RAG_PARENT_MAX_TOKENS"),
-                        _cfg.get("parent_max_tokens", "1200"),
-                        1200,
-                    )
-                ),
-                "include_sibling_chunks": (
-                    (_envs.get("RAG_INCLUDE_SIBLING_CHUNKS").lower() == "true") if _envs.get("RAG_INCLUDE_SIBLING_CHUNKS") is not None else (
-                        str(_cfg.get('include_sibling_chunks', 'false')).lower() == 'true'
-                    )
-                ),
-                "sibling_window": (
-                    _int_env_or_cfg(
-                        _envs.get("RAG_SIBLING_WINDOW"),
-                        _cfg.get("sibling_window", "1"),
-                        1,
-                    )
-                ),
-            })(
-                {
-                    "RAG_INCLUDE_PARENT_DOCUMENT": os.getenv("RAG_INCLUDE_PARENT_DOCUMENT"),
-                    "RAG_PARENT_MAX_TOKENS": os.getenv("RAG_PARENT_MAX_TOKENS"),
-                    "RAG_INCLUDE_SIBLING_CHUNKS": os.getenv("RAG_INCLUDE_SIBLING_CHUNKS"),
-                    "RAG_SIBLING_WINDOW": os.getenv("RAG_SIBLING_WINDOW"),
-                },
-                (lambda _cp: (
-                    (lambda d: d)(
-                        {k: (_cp.get('RAG', k, fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None)
-                         for k in ['include_parent_document', 'parent_max_tokens', 'include_sibling_chunks', 'sibling_window']}
-                    )
-                ))(load_comprehensive_config())
-            )
-        ))(),
+        "RAG_CONTEXTUAL_DEFAULTS": asdict(contextual_defaults(load_comprehensive_config())),
         "IMPLICIT_FEEDBACK_ENABLED": implicit_feedback_enabled(default=True),
 
         # RAG FlashRank reranker cache/model configuration

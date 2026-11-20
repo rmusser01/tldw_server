@@ -36,6 +36,56 @@ def load_rag_config(
     )
 
 
+def default_fts_level(
+    config_parser: ConfigParserLike | None,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Default RAG FTS level, lower-cased and not validated: env (blank included), else ``[RAG] default_fts_level``."""
+    env_value = resolve(("RAG_DEFAULT_FTS_LEVEL",), env=env, blank_env=True).value
+    if env_value is not None:
+        return str(env_value).lower()
+    configured = resolve((), (("RAG", "default_fts_level"),), config_parser=config_parser, blank_config=True).value
+    return str(configured if configured is not None else "media").lower()
+
+
+@dataclass(frozen=True)
+class ContextualDefaults:
+    include_parent_document: bool = False
+    parent_max_tokens: int = 1200
+    include_sibling_chunks: bool = False
+    sibling_window: int = 1
+
+
+def contextual_defaults(
+    config_parser: ConfigParserLike | None,
+    env: Mapping[str, str] | None = None,
+) -> ContextualDefaults:
+    """Contextual-retrieval request defaults: env first, then ``[RAG]``, then the literals.
+
+    A non-integer value raises ``ValueError``.
+    """
+    from tldw_Server_API.app.core.config import _int_env_or_cfg
+
+    def _env(key: str) -> str | None:
+        return resolve((key,), env=env, blank_env=True).value
+
+    def _cfg(option: str) -> str | None:
+        return resolve((), (("RAG", option),), config_parser=config_parser, blank_config=True).value
+
+    def _flag(key: str, option: str) -> bool:
+        env_value = _env(key)
+        if env_value is not None:
+            return env_value.lower() == "true"
+        return str(_cfg(option) or "false").lower() == "true"
+
+    return ContextualDefaults(
+        include_parent_document=_flag("RAG_INCLUDE_PARENT_DOCUMENT", "include_parent_document"),
+        parent_max_tokens=_int_env_or_cfg(_env("RAG_PARENT_MAX_TOKENS"), _cfg("parent_max_tokens"), 1200),
+        include_sibling_chunks=_flag("RAG_INCLUDE_SIBLING_CHUNKS", "include_sibling_chunks"),
+        sibling_window=_int_env_or_cfg(_env("RAG_SIBLING_WINDOW"), _cfg("sibling_window"), 1),
+    )
+
+
 def default_llm_provider_env(env: Mapping[str, str] | None = None) -> str | None:
     """The environment layer alone: the live ``RAG_DEFAULT_LLM_PROVIDER`` text, blank kept, ``None`` when unset."""
     return resolve(("RAG_DEFAULT_LLM_PROVIDER",), env=env, blank_env=True).value

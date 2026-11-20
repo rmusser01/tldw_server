@@ -2,15 +2,15 @@
 # Description: Advanced validators for chat request schemas
 #
 # Imports
-import configparser
 import json
-import os
 import re
 import uuid
 from typing import Any, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.config_sections.chat import max_request_size_chars
+from tldw_Server_API.app.core.config_sections.types import CONFIG_LOAD_ERRORS
 from tldw_Server_API.app.core.custom_openai_providers import iter_custom_openai_provider_names
 from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
 
@@ -26,45 +26,6 @@ CHARACTER_ID_PATTERN = re.compile(r'^(\d+|[a-zA-Z0-9_\- ]{1,100})$')
 
 # Maximum tool definition size (reduced from 10KB to 5KB for security)
 MAX_TOOL_DEFINITION_SIZE = 5000  # characters
-
-# Maximum total request size
-def _get_max_request_size() -> int:
-    """Resolve the max request size with env/config overrides.
-
-    Precedence:
-    - Env var CHAT_REQUEST_MAX_SIZE (integer, characters)
-    - Config [Chat-Module] max_request_size_chars
-    - Default 1_000_000
-    """
-    # Env override
-    try:
-        env_val = os.getenv("CHAT_REQUEST_MAX_SIZE")
-        if env_val is not None:
-            return max(1, int(env_val))
-    except (ValueError, TypeError) as env_err:
-        logger.debug(f"Failed to parse CHAT_REQUEST_MAX_SIZE env var: {env_err}")
-    # Config override
-    try:
-        from tldw_Server_API.app.core.config import load_comprehensive_config
-        cfg = load_comprehensive_config()
-        if cfg and cfg.has_section('Chat-Module'):
-            raw = cfg.get('Chat-Module', 'max_request_size_chars', fallback=None)
-            if raw is not None:
-                return max(1, int(raw))
-    except (
-        AttributeError,
-        FileNotFoundError,
-        ImportError,
-        OSError,
-        RuntimeError,
-        TypeError,
-        ValueError,
-        configparser.Error,
-    ) as cfg_err:
-        logger.debug(f"Failed to load max_request_size from config: {cfg_err}")
-    return 1_000_000
-
-MAX_REQUEST_SIZE = _get_max_request_size()
 
 #######################################################################################################################
 #
@@ -332,6 +293,14 @@ def validate_request_size(request_data: Any) -> bool:
         ValueError: If request is too large
     """
     try:
+        from tldw_Server_API.app.core.config import load_comprehensive_config
+
+        parser = load_comprehensive_config()
+    except CONFIG_LOAD_ERRORS as cfg_err:
+        logger.debug(f"Failed to load max_request_size from config: {cfg_err}")
+        parser = None
+    limit = max_request_size_chars(parser)
+    try:
         # If it's already a JSON string, avoid re-serializing: redact via regex only.
         if isinstance(request_data, str):
             # Use pre-compiled pattern to replace base64 payload with <redacted>
@@ -342,9 +311,9 @@ def validate_request_size(request_data: Any) -> bool:
             sanitized_obj = _sanitize_value_for_size(raw)
             request_json = json.dumps(sanitized_obj)
 
-        if len(request_json) > MAX_REQUEST_SIZE:
+        if len(request_json) > limit:
             raise ValueError(
-                f"Request too large (max {MAX_REQUEST_SIZE} chars, got {len(request_json)})"
+                f"Request too large (max {limit} chars, got {len(request_json)})"
             )
 
         return True

@@ -63,7 +63,7 @@ def test_prompt_cost_estimate_is_linear(body):
 @pytest.mark.unit
 @_CRAFTED_SHAPES
 def test_request_size_validator_is_linear(monkeypatch, body):
-    monkeypatch.setattr(chat_validators, "MAX_REQUEST_SIZE", 10_000_000)
+    monkeypatch.setenv("CHAT_REQUEST_MAX_SIZE", "10000000")
     _assert_fast(chat_validators.validate_request_size, body)
 
 
@@ -89,7 +89,7 @@ def test_endpoint_queue_estimate_ignores_a_payload_outside_a_url_key():
 
 @pytest.mark.unit
 def test_request_size_validator_redacts_an_uppercase_data_uri(monkeypatch):
-    monkeypatch.setattr(chat_validators, "MAX_REQUEST_SIZE", 1000)
+    monkeypatch.setenv("CHAT_REQUEST_MAX_SIZE", "1000")
     body = '{"url": "DATA:IMAGE/PNG;BASE64,' + "A" * 5000 + '"}'
     assert chat_validators.validate_request_size(body) is True
 

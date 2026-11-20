@@ -47,12 +47,13 @@ def _warn_once(key: str, message: str) -> None:
     logger.warning(message)
 
 
-def user_to_check(credential_source: str | None = None) -> int | None:
+def user_to_check(credential_source: str | None = None, *, strict: bool = False) -> int | None:
     """The user this call is checked for, or None when it is not checked.
 
     Not checked: a call on the user's own key (``credential_source`` ``user``),
     no user, an exempt or admitted (``prechecked``) context, a call nested in an
     accounted call, quotas off, or a user whose cached limits set no LLM key.
+    A failure here admits the call; ``strict`` raises it instead (TASK-15571).
     """
     try:
         if credential_source == USER_KEY_SOURCE or in_accounted_call():
@@ -68,6 +69,8 @@ def user_to_check(credential_source: str | None = None) -> int | None:
             return None
         return user_id
     except Exception as error:  # noqa: BLE001 - a check must never break an LLM call
+        if strict:
+            raise
         logger.bind(exception_type=type(error).__name__).warning("LLM quota check could not start; call admitted")
         return None
 
@@ -86,14 +89,16 @@ def _running_loop() -> asyncio.AbstractEventLoop | None:
         return None
 
 
-def check_user_sync(user_id: int) -> bool:
+def check_user_sync(user_id: int, *, strict: bool = False) -> bool:
     """Check ``user_id`` from synchronous code; raise ``LLMQuotaExceededError`` when refused.
 
     Returns False when the check cannot run here, and the call goes ahead
     unchecked: on the accounting loop's own thread, where waiting would
     deadlock, or with no accounting loop. A check that times out or fails
-    admits the call and returns True.
+    admits the call and returns True; ``strict`` returns False for it too, for
+    a caller that must not admit a call no check answered (TASK-15571).
     """
+    outcome = "not admitted" if strict else "admitted"
     loop = get_accounting_loop()
     if loop is None:
         _warn_once(
@@ -110,28 +115,31 @@ def check_user_sync(user_id: int) -> bool:
         future = asyncio.run_coroutine_threadsafe(coro, loop)
     except Exception as error:  # noqa: BLE001 - the loop closed between the two lines above
         coro.close()
-        logger.bind(exception_type=type(error).__name__).warning("LLM quota check failed; call admitted")
-        return True
+        logger.bind(exception_type=type(error).__name__).warning("LLM quota check failed; call {}", outcome)
+        return not strict
     try:
         refusal = future.result(timeout=CHECK_TIMEOUT_SECONDS)
     except TimeoutError:
         future.cancel()
-        logger.warning("LLM quota check timed out after {}s; call admitted", CHECK_TIMEOUT_SECONDS)
-        return True
+        logger.warning("LLM quota check timed out after {}s; call {}", CHECK_TIMEOUT_SECONDS, outcome)
+        return not strict
     except Exception as error:  # noqa: BLE001 - a check must never break an LLM call
-        logger.bind(exception_type=type(error).__name__).warning("LLM quota check failed; call admitted")
-        return True
+        logger.bind(exception_type=type(error).__name__).warning("LLM quota check failed; call {}", outcome)
+        return not strict
     _raise_if_refused(refusal)
     return True
 
 
-async def check_user_async(user_id: int) -> None:
+async def check_user_async(user_id: int, *, strict: bool = False) -> bool:
     """Check ``user_id`` from a coroutine; raise ``LLMQuotaExceededError`` when refused.
 
     On the accounting loop, or with none captured, the decision is awaited
     here. From another loop it is handed to the accounting loop. A check that
-    times out or fails admits the call.
+    times out or fails admits the call and returns True; ``strict`` returns
+    False for it, for a caller that must not admit a call no check answered
+    (TASK-15571).
     """
+    outcome = "not admitted" if strict else "admitted"
     try:
         running = asyncio.get_running_loop()
         target = get_accounting_loop() or running
@@ -147,18 +155,19 @@ async def check_user_async(user_id: int) -> None:
             try:
                 refusal = await asyncio.wait_for(asyncio.wrap_future(future), CHECK_TIMEOUT_SECONDS)
             except TimeoutError:
-                logger.warning("LLM quota check timed out after {}s; call admitted", CHECK_TIMEOUT_SECONDS)
-                return
+                logger.warning("LLM quota check timed out after {}s; call {}", CHECK_TIMEOUT_SECONDS, outcome)
+                return not strict
             except asyncio.CancelledError:
                 task = asyncio.current_task()
                 if task is not None and task.cancelling():
                     raise  # the caller itself was cancelled
-                logger.warning("LLM quota check was cancelled by the accounting loop; call admitted")
-                return
+                logger.warning("LLM quota check was cancelled by the accounting loop; call {}", outcome)
+                return not strict
     except Exception as error:  # noqa: BLE001 - a check must never break an LLM call
-        logger.bind(exception_type=type(error).__name__).warning("LLM quota check failed; call admitted")
-        return
+        logger.bind(exception_type=type(error).__name__).warning("LLM quota check failed; call {}", outcome)
+        return not strict
     _raise_if_refused(refusal)
+    return True
 
 
 def check_llm_call_sync(credential_source: str | None = None) -> bool:
