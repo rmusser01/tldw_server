@@ -1770,6 +1770,7 @@
     "tagMatchLabel": "Show notes with",
     "tagMatchAll": "All these tags",
     "tagMatchAny": "Any of these tags",
+    "notebookHelperSelectedNoTags": "This saved filter has no tags, so it does not narrow the list.",
     "notebookSaveAllTagsNotice": "This filter will show notes that have all of these tags: {{tags}}.",
     "notebookHelperSelectedAllTags": "Shows notes that have all of its tags: {{tags}}.",
     "notebookHelperDefaultAllTags": "Save the picked tags as a saved filter. A saved filter shows notes that have all of its tags.",

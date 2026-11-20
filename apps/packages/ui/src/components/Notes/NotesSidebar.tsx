@@ -817,11 +817,15 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       data-testid="notes-notebook-helper-text"
                     >
                       {selectedNotebook
-                        ? t('option:notesSearch.notebookHelperSelectedAllTags', {
-                            // A saved filter always matches all of its tags (decision 19).
-                            defaultValue: 'Shows notes that have all of its tags: {{tags}}.',
-                            tags: selectedNotebook.keywords.join(', ')
-                          })
+                        ? selectedNotebook.keywords.length === 0
+                          ? t('option:notesSearch.notebookHelperSelectedNoTags', {
+                              defaultValue: 'This saved filter has no tags, so it does not narrow the list.'
+                            })
+                          : t('option:notesSearch.notebookHelperSelectedAllTags', {
+                              // A saved filter always matches all of its tags (decision 19).
+                              defaultValue: 'Shows notes that have all of its tags: {{tags}}.',
+                              tags: selectedNotebook.keywords.join(', ')
+                            })
                         : t('option:notesSearch.notebookHelperDefaultAllTags', {
                             defaultValue:
                               'Save the picked tags as a saved filter. A saved filter shows notes that have all of its tags.'

@@ -12,6 +12,12 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: translateWithDefaults })
 }))
 
+// The section remembers being open, so open it only when it is closed.
+const openOrganize = () => {
+  const toggle = screen.getByTestId('notes-section-organize-toggle')
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle)
+}
+
 describe('NotesSidebar saved filter description', () => {
   afterEach(cleanup)
 
@@ -26,10 +32,28 @@ describe('NotesSidebar saved filter description', () => {
         })}
       />
     )
-    fireEvent.click(screen.getByTestId('notes-section-organize-toggle'))
+    openOrganize()
 
     expect(screen.getByTestId('notes-notebook-helper-text')).toHaveTextContent(
       'Shows notes that have all of its tags: rag, baking.'
+    )
+  })
+
+  it('says what a saved filter with no tags shows', () => {
+    const empty = { id: 8, name: 'Empty', keywords: [] as string[] }
+    render(
+      <NotesSidebar
+        {...buildNotesSidebarProps({
+          notebookOptions: [empty],
+          selectedNotebookId: 8,
+          selectedNotebook: empty
+        })}
+      />
+    )
+    openOrganize()
+
+    expect(screen.getByTestId('notes-notebook-helper-text')).toHaveTextContent(
+      'This saved filter has no tags, so it does not narrow the list.'
     )
   })
 })
