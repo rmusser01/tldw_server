@@ -74,8 +74,8 @@ for (const viewport of [
         expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
         expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
       }
-      // On the web '@' attaches notes (decision [4]), so the hint names it.
-      const hints = page.getByText('/ commands · @ mentions', { exact: true });
+      // On the web '@' attaches notes (decision [4]); the hint names it when the server has Notes.
+      const hints = page.getByText(/^\/ commands( · @ mentions)?$/);
       const saved = page.getByTestId('composer-persistence');
       await expect(hints).toBeVisible();
       await expect(saved).toBeVisible();

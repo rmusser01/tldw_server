@@ -105,14 +105,15 @@ describe("Playground slash commands", { timeout: 60_000 }, () => {
     expect(useStoreMessageOption.getState().webSearch).toBe(false)
   })
 
-  // Decision [4]: on the web '@' attaches notes, so the hint names it (CC-11
-  // kept it out while '@' meant browser tabs, which only the extension reads).
-  it("names @ mentions in the web app's composer, where they attach notes", async () => {
+  // CC-11 and decision [4]: on the web '@' attaches notes, so without Notes
+  // on the server the hint must not promise it.
+  it("does not promise @ mentions when the server has no Notes", async () => {
     const server = createFakeTldwServer()
     const view = await renderPlayground({ server })
 
     expect(view.composer.getAttribute("placeholder")).not.toContain("@")
-    expect(screen.getByText("/ commands · @ mentions")).toBeInTheDocument()
+    expect(screen.getByText("/ commands")).toBeInTheDocument()
+    expect(screen.queryByText(/@ mentions/)).toBeNull()
   })
 
   // AX-01: '/model' opens the composer's model picker (search focused), not

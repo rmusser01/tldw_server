@@ -148,8 +148,13 @@ describe("ComposerTextarea note mentions", () => {
     renderComposer()
     const link = screen.getByRole("link", { name: "Rebase notes" })
     expect(link).toHaveAttribute("href", "/notes?note=7")
-    fireEvent.click(screen.getByRole("button", { name: "Remove note Rebase notes" }))
+    const remove = screen.getByRole("button", { name: "Remove note Rebase notes" })
+    // 32px on desktop, 44px on touch (lane 7A's size tokens replace these at integration).
+    expect(remove.className).toMatch(/\bmin-h-8\b/)
+    expect(remove.className).toMatch(/\[@media\(pointer:coarse\)\]:min-h-11/)
+    fireEvent.click(remove)
     expect(useStoreMessageOption.getState().ragPinnedResults).toEqual([])
+    expect(screen.getByTestId("chat-input")).toHaveFocus()
   })
 
   it("moves through the notes with the arrow keys and closes on Escape", async () => {

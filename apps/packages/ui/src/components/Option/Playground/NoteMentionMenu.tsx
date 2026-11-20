@@ -111,7 +111,7 @@ export const NoteMentionMenu: React.FC<NoteMentionMenuProps> = ({
 }
 
 /** The notes attached to the next message, each removable. */
-export const AttachedNoteChips: React.FC = () => {
+export const AttachedNoteChips: React.FC<{ onRemoved?: () => void }> = ({ onRemoved }) => {
   const { t } = useTranslation(["playground"])
   const pinned = useStoreMessageOption((state) => state.ragPinnedResults)
   const setPinned = useStoreMessageOption((state) => state.setRagPinnedResults)
@@ -132,7 +132,7 @@ export const AttachedNoteChips: React.FC = () => {
           <span
             key={result.id}
             data-testid="attached-note-chip"
-            className="inline-flex min-h-7 max-w-full items-center gap-1 rounded-full border border-border bg-surface2 pl-2 text-xs text-text"
+            className="inline-flex min-h-8 max-w-full items-center gap-1 rounded-full border border-border bg-surface2 pl-2 text-xs text-text [@media(pointer:coarse)]:min-h-11"
           >
             <StickyNote className="size-3 shrink-0 text-text-muted" aria-hidden="true" />
             <Link
@@ -145,8 +145,13 @@ export const AttachedNoteChips: React.FC = () => {
             <button
               type="button"
               aria-label={t("playground:noteMentions.remove", "Remove note {{title}}", { title })}
-              onClick={() => setPinned((pinned ?? []).filter((item) => item.id !== result.id))}
-              className="flex size-7 shrink-0 items-center justify-center rounded-full text-text-muted hover:bg-surface hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              onClick={() => {
+                setPinned((pinned ?? []).filter((item) => item.id !== result.id))
+                // The chip and its button are gone; typing carries on.
+                onRemoved?.()
+              }}
+              // 32px on desktop, 44px on touch; lane 7A's size tokens replace these at integration.
+              className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-full text-text-muted hover:bg-surface hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
             >
               <X className="size-3" aria-hidden="true" />
             </button>

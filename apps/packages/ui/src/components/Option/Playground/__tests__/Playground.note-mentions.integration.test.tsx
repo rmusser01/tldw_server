@@ -105,4 +105,10 @@ describe("Playground note mentions", { timeout: 60_000 }, () => {
     expect(server.completionRequests()).toHaveLength(0)
     expect(view.composer).toHaveValue("/note rebase")
   })
+
+  it("names @ mentions in the hint when the server has Notes", async () => {
+    const server = createFakeTldwServer({ notes: [{ id: 7, title: "Rebase notes", content: "x" }] })
+    await renderPlayground({ server })
+    expect(await screen.findByText("/ commands · @ mentions", {}, HARNESS_WAIT)).toBeInTheDocument()
+  })
 })

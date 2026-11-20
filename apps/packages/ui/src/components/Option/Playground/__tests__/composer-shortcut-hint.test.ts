@@ -13,10 +13,12 @@ describe("composer shortcut hint (CC-11)", () => {
     expect(composerMentionsAvailable(undefined, true)).toBe(false)
   })
 
-  // Decision [4]: on the web '@' searches notes, whatever the tab setting says.
-  it("mentions '@' on the web, where it attaches notes", () => {
-    expect(composerMentionsAvailable(true, false)).toBe(true)
-    expect(composerMentionsAvailable(false, false)).toBe(true)
+  // Decision [4]: on the web '@' searches notes, so it is named only when Notes is there.
+  it("mentions '@' on the web only when the server has Notes", () => {
+    expect(composerMentionsAvailable(true, false, true)).toBe(true)
+    expect(composerMentionsAvailable(false, false, true)).toBe(true)
+    expect(composerMentionsAvailable(true, false, false)).toBe(false)
+    expect(composerMentionsAvailable(false, false)).toBe(false)
   })
 
   it("advertises only slash commands when mentions are unavailable", () => {

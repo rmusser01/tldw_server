@@ -134,7 +134,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         className="relative mx-3 mb-2"
         listboxId={slashCombobox.listboxId}
       />
-      <AttachedNoteChips />
+      <AttachedNoteChips onRemoved={() => textareaRef.current?.focus()} />
       {onSetMessage && <NoteMentionMenu
         open={noteMentions.open}
         notes={noteMentions.results}
