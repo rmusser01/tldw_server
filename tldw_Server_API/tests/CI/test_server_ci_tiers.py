@@ -168,6 +168,23 @@ def test_select_tier_from_event(tmp_path, event, ref, nightly, backend_changed, 
         assert output.read_text() == f"tier={expected}\n"  # nosec B101
 
 
+@pytest.mark.parametrize(
+    "job_name", ("full-suite-macos-312-shards", "full-suite-os-313-release-shards")
+)
+def test_macos_tooling_shards_install_docker_compose(job_name):
+    steps = _workflow("ci")["jobs"][job_name]["steps"]
+    install = next(
+        (step for step in steps if step.get("name") == "Install Docker Compose CLI for monitoring render contract"),
+        None,
+    )
+    assert install is not None, job_name  # nosec B101
+    context = {"matrix.shard.name": "core-utils-tooling", "runner.os": "macOS"}
+    assert _evaluate(install["if"], context)  # nosec B101
+    assert not _evaluate(install["if"], {**context, "runner.os": "Windows"})  # nosec B101
+    assert not _evaluate(install["if"], {**context, "matrix.shard.name": "core-settings"})  # nosec B101
+    assert "docker compose version" in install["run"]  # nosec B101
+
+
 @BASH_REQUIRED
 @pytest.mark.parametrize(
     ("tier", "result", "passed"),

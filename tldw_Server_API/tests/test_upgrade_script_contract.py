@@ -11,13 +11,28 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[2] / "Helper_Scripts" / "upgrade.sh"
 
 
+def _write_python_stub(tools: Path, name: str, source: str) -> Path:
+    """Use a shell launcher so Git Bash can invoke the fixture's native Python."""
+    (tools / f"{name}.py").write_text(source, encoding="utf-8")
+    launcher = tools / name
+    launcher.write_text(
+        '#!/usr/bin/env bash\nexec "$UPGRADE_TEST_PYTHON" "$0.py" "$@"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    launcher.chmod(0o700)
+    return launcher
+
+
 @pytest.fixture
 def upgrade_script(tmp_path):
+    bash = shutil.which("bash")
+    assert bash is not None, "Bash is required to run the upgrade contract"  # nosec B101
     repository = tmp_path / "installation"
     helpers = repository / "Helper_Scripts"
     helpers.mkdir(parents=True)
     script = helpers / "upgrade.sh"
-    shutil.copyfile(SCRIPT, script)
+    script.write_text(SCRIPT.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
     databases = repository / "Databases"
     databases.mkdir()
     (databases / "retained.txt").write_text("prior release record")
@@ -26,10 +41,10 @@ def upgrade_script(tmp_path):
     tools.mkdir()
     temporary = tmp_path / "temporary"
     temporary.mkdir()
-    stub = tools / "python"
-    stub.write_text(
-        f"#!{sys.executable}\n"
-        + r"""import json
+    stub = _write_python_stub(
+        tools,
+        "python",
+        r"""import json
 import os
 import sys
 from pathlib import Path
@@ -48,13 +63,12 @@ if arguments == ["-m", "Helper_Scripts.upgrade_helpers"]:
 if arguments == ["-m", "pip", "install", "-e", "."]:
     raise SystemExit(0)
 raise SystemExit(99)
-"""
+""",
     )
-    stub.chmod(0o700)
-    git = tools / "git"
-    git.write_text(
-        f"#!{sys.executable}\n"
-        + r"""import os
+    _write_python_stub(
+        tools,
+        "git",
+        r"""import os
 import sys
 from pathlib import Path
 arguments = sys.argv[1:]
@@ -66,22 +80,22 @@ elif arguments == ["rev-parse", "HEAD"]:
     print("a" * 40)
 elif arguments != ["pull", "origin", "main"]:
     raise SystemExit(99)
-"""
+""",
     )
-    git.chmod(0o700)
 
     def run(*arguments, precheck=0, postcheck=0):
         environment = os.environ.copy()
         environment.update(
-            PYTHON=str(stub),
+            PYTHON=stub.as_posix(),
+            UPGRADE_TEST_PYTHON=Path(sys.executable).as_posix(),
             PATH=str(tools) + os.pathsep + environment.get("PATH", ""),
-            TMPDIR=str(temporary),
+            TMPDIR=temporary.as_posix(),
             UPGRADE_TEST_COMMANDS=str(commands),
             UPGRADE_PRECHECK_EXIT=str(precheck),
             UPGRADE_POSTCHECK_EXIT=str(postcheck),
         )
         result = subprocess.run(  # nosec B603 - real script with isolated Git/pip fixtures
-            ["/bin/bash", str(script), *arguments],
+            [bash, script.as_posix(), *arguments],
             cwd=repository,
             env=environment,
             capture_output=True,

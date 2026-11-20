@@ -7,6 +7,7 @@ labels:
 - release
 references:
 - https://github.com/rmusser01/tldw_server/pull/3508
+- https://github.com/rmusser01/tldw_server/pull/3540
 - Docs/ADR/096-tiered-development-and-release-ci.md
 ---
 
@@ -33,6 +34,7 @@ Local implementation on codex/server-tiered-ci. All 350 focused workflow and Bac
 Maintainer correction: the target branch sets the policy for all PRs. ADR required: yes. ADR path: Docs/ADR/096-tiered-development-and-release-ci.md. Revise the existing proposed ADR to keep dev fast by default and require full CI on main, preserving ADR-063 and the existing dev gates.
 The dev queue keeps its seven protected workflows and the trusted license check, including the backend-required unit and startup smoke on rebased heads. Supplemental CI uses smoke or a backend no-op on normal dev PRs. Nightly and release select the full Linux matrix; main PRs also select the macOS/Windows matrices and package check. The Linux qualification job provisions PortAudio before installing the wheel and runtime dependencies.
 Branch-policy correction verified locally: 691 dev and 683 main workflow contracts passed, with one runner-only test skipped in each. All 25 backend smoke tests passed. Actionlint, Ruff and shard coverage passed on both candidates, and Bandit found no new findings in the touched Python tests. Hosted merge and branch protection verification are pending.
+Hosted main qualification found two test prerequisites. The macOS Python 3.13 tooling shard now reuses the Python 3.12 Compose setup. The Windows upgrade contract now locates Bash and launches its isolated Python fixtures through the shell. The original hosted failures were job 136523705785 and job 136523706411. Local targeted suites passed 221 and 131 tests. Ruff, Actionlint, and Bandit passed. Hosted requalification is pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
