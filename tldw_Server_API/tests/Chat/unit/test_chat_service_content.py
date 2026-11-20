@@ -298,9 +298,12 @@ async def _run_non_stream_content_test(
     llm_response: dict | str,
     moderation,
     should_persist: bool = False,
+    provider: str = "openai",
+    model: str = "gpt-4o-mini",
     response_format: dict | None = None,
     metrics: object | None = None,
     save_calls: list[dict[str, object]] | None = None,
+    app_config: dict | None = None,
 ) -> tuple[dict, list[dict[str, object]], dict[str, object]]:
     logged_usage: dict[str, object] = {}
 
@@ -324,21 +327,23 @@ async def _run_non_stream_content_test(
         state=SimpleNamespace(user_id=None, api_key_id=None),
     )
     cleaned_args = {
-        "api_endpoint": "openai",
+        "api_endpoint": provider,
         "api_key": "test-key",
         "messages_payload": [{"role": "user", "content": "hi"}],
-        "model": "gpt-4o-mini",
+        "model": model,
         "streaming": False,
     }
+    if app_config is not None:
+        cleaned_args["app_config"] = app_config
     if response_format is not None:
         cleaned_args["response_format"] = response_format
 
     response = await execute_non_stream_call(
         current_loop=asyncio.get_running_loop(),
         cleaned_args=cleaned_args,
-        selected_provider="openai",
-        provider="openai",
-        model="gpt-4o-mini",
+        selected_provider=provider,
+        provider=provider,
+        model=model,
         request_json="{}",
         request=request,
         metrics=metrics or _DummyMetrics(),
@@ -996,3 +1001,120 @@ async def test_execute_non_stream_call_missing_usage_estimates_all_returned_choi
     assert logged_usage["completion_tokens"] == 3
     assert logged_usage["total_tokens"] == logged_usage["prompt_tokens"] + 3
     assert logged_usage["estimate_source"] == "missing_usage"
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_turn", [False, True])
+async def test_saved_moonshot_reply_replays_verbatim_to_moonshot_only(monkeypatch, tool_turn):
+    from tldw_Server_API.app.core.Chat.persistence_service import assistant_generation_extra
+    from tldw_Server_API.app.core.LLM_Calls.gateway import _build_adapter_request_from_chat_args
+
+    reason = "  Plan <tool> & preserve this\n"
+    assistant = {"role": "assistant", "content": "Answer", "reasoning_content": reason}
+    if tool_turn:
+        assistant["tool_calls"] = [
+            {"id": "lookup_0", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
+        ]
+    _, saved, _ = await _run_non_stream_content_test(
+        monkeypatch,
+        llm_response={"choices": [
+            {"message": assistant, "finish_reason": "tool_calls" if tool_turn else "stop"}
+        ]},
+        moderation=_NoModeration(),
+        should_persist=True,
+        provider="moonshot",
+        model="kimi-k3.1-pro",
+    )
+    extra = assistant_generation_extra(saved[0])
+    assert extra["moonshot_reasoning_content"] == reason
+    projection = [{
+        "id": "reply",
+        "message": saved[0]["content"],
+        "images": [],
+        "_message_version": 1,
+        "extra_metadata": extra,
+        "tool_calls": saved[0].get("tool_calls"),
+    }]
+    snapshot = SimpleNamespace(nodes=[{"id": "reply", "role": "assistant"}])
+    history = chat_service._format_selected_history_messages(snapshot, projection, {})
+    for provider, model, scoped, expected in (
+        ("openai", "gpt-4o-mini", {}, None),
+        ("moonshot", "kimi-k3.1-pro", {}, reason),
+        ("moonshot", "kimi-k3.1-pro", {"moonshot_api": {"api_base_url": "https://example.com/v1"}}, None),
+    ):
+        _, request, _ = _build_adapter_request_from_chat_args({
+            "api_endpoint": provider, "model": model, "messages_payload": history, "app_config": scoped,
+        })
+        message = request["messages"][0]
+        assert message["content"] == "Answer"
+        assert "moonshot_reasoning_content" not in message
+        assert message.get("reasoning_content") == expected
+
+
+
+@pytest.mark.asyncio
+async def test_redacted_moonshot_reasoning_is_not_saved(monkeypatch):
+    from tldw_Server_API.app.core.Chat.persistence_service import assistant_generation_extra
+
+    class ModerateReasoning(_RedactingModeration):
+        def evaluate_action_with_match(self, text, *_args, **_kwargs):
+            action = "redact" if "secret" in text else "pass"
+            return (action, None, None, None, None)
+
+    _, saved, _ = await _run_non_stream_content_test(
+        monkeypatch,
+        llm_response={"choices": [{
+            "message": {"role": "assistant", "content": "Answer", "reasoning_content": "Private secret"},
+            "finish_reason": "stop",
+        }]},
+        moderation=ModerateReasoning(),
+        should_persist=True,
+        provider="moonshot",
+        model="kimi-k3.1-pro",
+    )
+    assert saved[0]["content"] == "Answer"
+    assert "moonshot_reasoning_content" not in assistant_generation_extra(saved[0])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario", ["policy_error", "custom_endpoint"])
+async def test_unapproved_moonshot_reasoning_is_not_saved(monkeypatch, scenario):
+    from tldw_Server_API.app.core.Chat.persistence_service import assistant_generation_extra
+
+    class ReasoningPolicy(_RedactingModeration):
+        def evaluate_action_with_match(self, text, *_args):
+            if text == "Private reasoning" and scenario == "policy_error":
+                raise RuntimeError("moderation unavailable")
+            return ("pass", None, None, None, None)
+
+    config = {"moonshot_api": {}}
+    if scenario == "custom_endpoint":
+        config["moonshot_api"]["api_base_url"] = "https://example.com/v1"
+    _, saved, _ = await _run_non_stream_content_test(
+        monkeypatch,
+        llm_response={"choices": [{
+            "message": {"role": "assistant", "content": "Answer", "reasoning_content": "Private reasoning"},
+            "finish_reason": "stop",
+        }]},
+        moderation=ReasoningPolicy(),
+        should_persist=True,
+        provider="moonshot",
+        model="kimi-k3.1-pro",
+        app_config=config,
+    )
+    assert saved[0]["content"] == "Answer"
+    assert "moonshot_reasoning_content" not in assistant_generation_extra(saved[0])
+
+
+@pytest.mark.parametrize("literal_close", ["</reason>", "</think>"])
+def test_selected_history_omits_ambiguous_legacy_thinking(literal_close):
+    snapshot = SimpleNamespace(nodes=[{"id": "reply", "role": "assistant"}])
+    rows = [{
+        "id": "reply",
+        "message": f"<think>Trace {literal_close} private text</think>Answer",
+        "images": [],
+        "_message_version": 1,
+        "extra_metadata": {},
+    }]
+    assert chat_service._format_selected_history_messages(snapshot, rows, {})[0]["content"] == "Answer"
