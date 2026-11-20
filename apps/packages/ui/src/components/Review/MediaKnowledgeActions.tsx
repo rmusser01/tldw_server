@@ -25,7 +25,7 @@ export function MediaKnowledgeActions({
   isCurrent?: () => boolean
 }) {
   const { t } = useTranslation("review")
-  const ownerScope = useHomeMilestoneScope()
+  const ownerScope = useHomeMilestoneScope({ verifyCookieSession: true })
   const message = useAntdMessage()
   const [pending, setPending] = useState(false)
   const mounted = useRef(true)

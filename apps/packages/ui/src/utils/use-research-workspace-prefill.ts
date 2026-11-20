@@ -79,7 +79,12 @@ export function useResearchWorkspacePrefill(
     setStatus(emptyStatus)
     const run = async () => {
       try {
-        const owner = await getResearchWorkspaceOwner()
+        const owner = await getResearchWorkspaceOwner().catch((error) => {
+          if (retained.current && !retained.current.completed) throw error
+          // An idle check has no known handoff to report before resolving the owner.
+          return null
+        })
+        if (!owner) return
         assertCurrent()
         const cached = retained.current
         const payload =

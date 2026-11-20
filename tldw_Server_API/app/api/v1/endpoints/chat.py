@@ -650,12 +650,8 @@ def _cfg_bool_cmds(env_name: str, cfg_key: str, fallback: bool) -> bool:
 
 
 # Feature flag: queued execution of chat calls via workers (default disabled)
-_env_queued = os.getenv("CHAT_QUEUED_EXECUTION")
 try:
-    QUEUED_EXECUTION: bool = (
-        (_shared_is_truthy(_env_queued)) if _env_queued is not None
-        else _shared_is_truthy(_chat_config.get("queued_execution", "False"))
-    )
+    QUEUED_EXECUTION: bool = __config.chat_queued_execution_enabled(_chat_config)
 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
     QUEUED_EXECUTION = False
 
