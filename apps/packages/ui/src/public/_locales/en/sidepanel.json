@@ -497,6 +497,12 @@
   "controlRow_mcpToolsEmpty": {
     "message": "No MCP tools available"
   },
+  "contextMenu_movedChatToTrash": {
+    "message": "Moved \"{{title}}\" to Trash."
+  },
+  "contextMenu_moveToTrash": {
+    "message": "Move to Trash"
+  },
   "contextMenu_status": {
     "message": "Status"
   },
@@ -589,6 +595,9 @@
   },
   "multiSelect_deleteSuccess": {
     "message": "Chats moved to trash."
+  },
+  "multiSelect_restoreSuccess": {
+    "message": "Chats restored."
   },
   "multiSelect_localOnlyClosed": {
     "message": "{{count}} local chat(s) were closed."

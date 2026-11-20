@@ -231,7 +231,8 @@ export const ConversationContextMenu: React.FC<
       ? {
           key: "delete",
           icon: <Trash2 className="size-3" />,
-          label: t("common:delete", "Delete"),
+          // Instant, with Undo, so it says where the chat goes (XP-17).
+          label: t("sidepanel:contextMenu.moveToTrash", "Move to Trash"),
           danger: true,
           onClick: () => {
             void handleDelete()

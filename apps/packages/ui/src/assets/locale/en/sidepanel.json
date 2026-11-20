@@ -540,6 +540,7 @@
     "deleteFailed": "Unable to move chats to trash.",
     "deletePartial": "Some chats could not be moved to trash.",
     "deleteSuccess": "Chats moved to trash.",
+    "restoreSuccess": "Chats restored.",
     "localOnlyClosed": "{{count}} local chat(s) were closed.",
     "organizationLoadError": "Unable to load folders and tags for this account.",
     "organizationRefreshRequired": "Refresh folders and tags for this account.",
@@ -547,6 +548,8 @@
     "folderApplyPartialError": "Some chats could not be added to folders. Your selection is kept so you can try again."
   },
   "contextMenu": {
+    "movedChatToTrash": "Moved \"{{title}}\" to Trash.",
+    "moveToTrash": "Move to Trash",
     "status": "Status",
     "export": "Export",
     "openMenu": "Chat actions: {{title}}",
