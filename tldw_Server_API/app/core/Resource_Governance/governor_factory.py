@@ -10,10 +10,11 @@ state through Redis.
 """
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from loguru import logger
+
+from tldw_Server_API.app.core.config_sections.redis import redis_url_env
 
 from .governor import MemoryResourceGovernor, ResourceGovernor
 
@@ -40,7 +41,7 @@ def create_governor(
         A :class:`ResourceGovernor` instance -- Redis-backed when Redis is
         available, in-memory otherwise.
     """
-    url = redis_url or os.getenv("REDIS_URL")
+    url = redis_url or redis_url_env()
 
     if url:
         try:

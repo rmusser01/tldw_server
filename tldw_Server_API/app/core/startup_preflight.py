@@ -19,6 +19,8 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.config_sections.database import database_url_env
+
 
 # ---------------------------------------------------------------------------
 # Result container
@@ -131,7 +133,7 @@ def check_database_connectivity() -> dict[str, Any]:
     This only verifies network reachability, not authentication or schema.
     """
     name = "database_connectivity"
-    db_url = os.environ.get("DATABASE_URL", "")
+    db_url = database_url_env() or ""
     if not db_url.startswith(("postgresql", "postgres")):
         return {"name": name, "status": "ok", "message": "SQLite (no remote check needed)"}
     try:
