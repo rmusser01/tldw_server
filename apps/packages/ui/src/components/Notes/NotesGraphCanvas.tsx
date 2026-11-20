@@ -192,6 +192,22 @@ const NotesGraphCanvas = React.forwardRef<
         })
       }
 
+      // Never hand Cytoscape an edge with a missing end: it throws, and the
+      // route error boundary replaces the page (NL-11 review).
+      const drawnNodeIds = new Set(
+        elements
+          .filter((element) => element.data.source === undefined)
+          .map((element) => String(element.data.id))
+      )
+      for (let index = elements.length - 1; index >= 0; index -= 1) {
+        const { source, target } = elements[index].data
+        if (
+          source !== undefined &&
+          (!drawnNodeIds.has(String(source)) || !drawnNodeIds.has(String(target)))
+        ) {
+          elements.splice(index, 1)
+        }
+      }
       // A large graph (All notes holds up to 500 notes, NL-11) labels a link
       // only on hover or selection, and skips links while panning or zooming.
       const largeGraph =

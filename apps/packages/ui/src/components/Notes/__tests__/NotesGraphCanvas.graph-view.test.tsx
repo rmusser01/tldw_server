@@ -401,6 +401,52 @@ describe("NotesGraphCanvas graph view", () => {
     expect(config.hideEdgesOnViewport).toBe(true)
   })
 
+  it("never hands Cytoscape an edge whose ends it does not draw (NL-11 review)", async () => {
+    const orphanOverlay = {
+      edge: {
+        ...overlays[0].edge,
+        id: "suggestion-edge:orphan",
+        suggestionId: "orphan",
+        source: "note:hidden",
+        target: "note:b"
+      },
+      node: null
+    }
+    render(
+      <NotesGraphCanvas
+        graph={{
+          ...graph,
+          edges: [
+            ...graph.edges,
+            { ...graph.edges[0], id: "edge:dangling", target: "note:gone" }
+          ]
+        }}
+        layout="dagre"
+        focusNoteId="a"
+        selectedNodeId={null}
+        visibleEdgeTypes={new Set(["manual", "wikilink"])}
+        provisionalOverlays={[...overlays, orphanOverlay]}
+        showProvisional
+        onSelectNode={vi.fn()}
+      />
+    )
+
+    await waitFor(() => expect(mockCytoscapeFactory).toHaveBeenCalled())
+    const config = mockCytoscapeFactory.mock.calls[0]?.[0] as CytoscapeTestConfig
+    const nodeIds = new Set(
+      config.elements
+        .filter((element) => element.data.source === undefined)
+        .map((element) => String(element.data.id))
+    )
+    const edges = config.elements.filter((element) => element.data.source !== undefined)
+    expect(edges.length).toBeGreaterThan(0)
+    for (const edge of edges) {
+      expect(nodeIds.has(String(edge.data.source))).toBe(true)
+      expect(nodeIds.has(String(edge.data.target))).toBe(true)
+    }
+    expect(edges.map((edge) => edge.data.id)).toContain("suggestion-edge:s1")
+  })
+
   it("keeps every link labelled in a small graph", async () => {
     render(
       <NotesGraphCanvas

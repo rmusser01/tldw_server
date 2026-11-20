@@ -21,6 +21,7 @@ import {
   NOTES_GRAPH_TREE_LAYOUT_LIMIT,
   countVisibleNotesGraphEdges,
   keepLinkedNotes,
+  overlaysWithDrawnEnds,
   resolveNotesGraphCanvasLayout
 } from "./notes-graph-view"
 import {
@@ -167,20 +168,6 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     () => new Set(workspace.graph?.nodes.map((node) => node.id) ?? []),
     [workspace.graph]
   )
-  const displayGraph = React.useMemo(() => {
-    if (!workspace.graph || !linkedOnly) return workspace.graph
-    const keepNodeId =
-      workspace.scope === "focused" && workspace.focusNoteId
-        ? `note:${workspace.focusNoteId}`
-        : null
-    return keepLinkedNotes(workspace.graph, workspace.visibleEdgeTypes, keepNodeId)
-  }, [
-    linkedOnly,
-    workspace.focusNoteId,
-    workspace.graph,
-    workspace.scope,
-    workspace.visibleEdgeTypes
-  ])
   // A note picked in the notes list while in Graph re-centres the graph on it
   // (NL-11): All notes pans to it, a focused graph refocuses on it.
   const workspaceScope = workspace.scope
@@ -218,6 +205,24 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     selectedNodeCandidate && loadedNodeIds.has(selectedNodeCandidate)
       ? selectedNodeCandidate
       : null
+  const displayGraph = React.useMemo(() => {
+    if (!workspace.graph || !linkedOnly) return workspace.graph
+    const focusNodeId =
+      workspace.scope === "focused" && workspace.focusNoteId
+        ? `note:${workspace.focusNoteId}`
+        : null
+    return keepLinkedNotes(workspace.graph, workspace.visibleEdgeTypes, [
+      focusNodeId,
+      currentSelectedNodeId
+    ])
+  }, [
+    currentSelectedNodeId,
+    linkedOnly,
+    workspace.focusNoteId,
+    workspace.graph,
+    workspace.scope,
+    workspace.visibleEdgeTypes
+  ])
   const selectedSuggestionNoteId = React.useMemo(() => {
     const selectedNode = workspace.graph?.nodes.find(
       (node) => node.id === currentSelectedNodeId
@@ -237,9 +242,17 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     loadedNodeIds,
     fallbackTargetLabel: t("option:notesSearch.graphSuggestedNote")
   })
+  // Only overlays whose ends the canvas draws: "Linked notes only" can hide
+  // a suggestion's note (NL-11 review).
   const provisionalOverlays = React.useMemo(
-    () => Object.values(suggestions.provisionalBySuggestionId),
-    [suggestions.provisionalBySuggestionId]
+    () =>
+      displayGraph
+        ? overlaysWithDrawnEnds(
+            Object.values(suggestions.provisionalBySuggestionId),
+            displayGraph
+          )
+        : [],
+    [displayGraph, suggestions.provisionalBySuggestionId]
   )
   const isDecisionPending = Boolean(
     suggestions.mutations?.acceptance?.isPending ||

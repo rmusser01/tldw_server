@@ -97,7 +97,7 @@ describe("keepLinkedNotes (NL-11 'Linked notes only')", () => {
   })
 
   it("keeps the focus note even when it has no links", () => {
-    const filtered = keepLinkedNotes(library, ALL_EDGES, "note:lonely")
+    const filtered = keepLinkedNotes(library, ALL_EDGES, ["note:lonely"])
 
     expect(filtered.nodes.map((entry) => entry.id)).toContain("note:lonely")
     expect(filtered.nodes.map((entry) => entry.id)).toContain("tag:orphan-tag")

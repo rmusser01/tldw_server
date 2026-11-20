@@ -63,16 +63,18 @@ export const countVisibleNotesGraphEdges = (
 
 /**
  * "Linked notes only": keeps the notes that a shown link joins to another
- * note, the tags and sources of those notes, and `keepNodeId` (the focus
- * note), so an ego graph never loses its centre.
+ * note, the tags and sources of those notes, and `keepNodeIds` (the focus
+ * and selected notes), so the graph never loses what the reader is on.
  */
 export const keepLinkedNotes = (
   graph: NotesGraphResponse,
   visibleEdgeTypes: ReadonlySet<NotesGraphEdgeType>,
-  keepNodeId: string | null = null
+  keepNodeIds: ReadonlyArray<string | null> = []
 ): NotesGraphResponse => {
   const shownEdges = graph.edges.filter((edge) => visibleEdgeTypes.has(edge.type))
-  const keptNotes = new Set<string>(keepNodeId ? [keepNodeId] : [])
+  const keptNotes = new Set<string>(
+    keepNodeIds.filter((id): id is string => Boolean(id))
+  )
   for (const edge of shownEdges) {
     if (
       NOTE_TO_NOTE_EDGE_TYPES.has(edge.type) &&
@@ -96,4 +98,26 @@ export const keepLinkedNotes = (
       (edge) => kept.has(edge.source) && kept.has(edge.target)
     )
   }
+}
+
+type NotesGraphOverlayEnds = {
+  edge: { source: string; target: string }
+  node: { id: string } | null
+}
+
+/**
+ * The suggestion overlays the canvas can draw: both ends must be a drawn
+ * node, or the target the overlay's own ephemeral node. Cytoscape throws on
+ * an edge with a missing end, which takes the whole page down.
+ */
+export const overlaysWithDrawnEnds = <T extends NotesGraphOverlayEnds>(
+  overlays: T[],
+  graph: Pick<NotesGraphResponse, "nodes">
+): T[] => {
+  const drawn = new Set(graph.nodes.map((node) => node.id))
+  return overlays.filter(
+    (overlay) =>
+      drawn.has(overlay.edge.source) &&
+      (drawn.has(overlay.edge.target) || overlay.node?.id === overlay.edge.target)
+  )
 }
