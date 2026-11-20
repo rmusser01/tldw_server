@@ -1860,5 +1860,8 @@
     "shortened": "[Note shortened]",
     "attachedNoteLabel": "Attached note: {{title}}",
     "unpicked": "Pick a note, or remove /note to send this as a message."
+  },
+  "tools": {
+    "images": "Images"
   }
 }

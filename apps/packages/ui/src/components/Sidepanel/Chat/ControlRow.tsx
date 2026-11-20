@@ -466,50 +466,6 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         </div>
       )}
 
-      {/* Vision */}
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm flex items-center gap-2">
-          <Eye className="size-3.5" />
-          {t("sidepanel:controlRow.vision", "Vision")}
-        </span>
-        {/* L12: Always show tooltip for disabled controls for better accessibility */}
-        <Tooltip
-          title={
-            chatMode === "rag"
-              ? t("sidepanel:controlRow.visionDisabledKnowledge", "Disable Knowledge Search to use Vision")
-              : t("sidepanel:controlRow.visionTooltip", "Enable Vision to analyze images")
-          }
-          open={chatMode === "rag" ? undefined : false}
-        >
-          <Switch
-            size="small"
-            checked={chatMode === "vision"}
-            disabled={chatMode === "rag"}
-            onChange={(checked) => setChatMode(checked ? "vision" : "normal")}
-          />
-        </Tooltip>
-      </div>
-
-      {/* Upload Image */}
-      <Upload
-        accept="image/*"
-        showUploadList={false}
-        beforeUpload={(file) => {
-          onImageUpload(file)
-          setMoreOpen(false)
-          return false
-        }}
-      >
-        <button
-          data-testid="chat-upload-image"
-          className="w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 hover:bg-surface2"
-          title={t("playground:actions.attachImage", "Attach image")}
-        >
-          <ImageIcon className="size-4 text-text-subtle" />
-          {t("playground:actions.attachImage", "Attach image")}
-        </button>
-      </Upload>
-
       <div className="panel-divider my-1" />
 
       <div className="text-caption text-text-muted font-medium">
@@ -720,6 +676,56 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
 
       <div className="panel-divider my-1" />
 
+      {/* XS-15/XP-12 review: lane 7A's full page ends Tools with "More tools". */}
+      <div className="text-caption text-text-muted font-medium">
+        {t("playground:composer.moreTools", "More tools")}
+      </div>
+      <div className="text-xs text-text-muted">
+        {t("playground:tools.images", "Images")}
+      </div>
+      {/* Vision */}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm flex items-center gap-2">
+          <Eye className="size-3.5" />
+          {t("sidepanel:controlRow.vision", "Vision")}
+        </span>
+        {/* L12: Always show tooltip for disabled controls for better accessibility */}
+        <Tooltip
+          title={
+            chatMode === "rag"
+              ? t("sidepanel:controlRow.visionDisabledKnowledge", "Turn off Search & Context to use Vision")
+              : t("sidepanel:controlRow.visionTooltip", "Enable Vision to analyze images")
+          }
+          open={chatMode === "rag" ? undefined : false}
+        >
+          <Switch
+            size="small"
+            checked={chatMode === "vision"}
+            disabled={chatMode === "rag"}
+            onChange={(checked) => setChatMode(checked ? "vision" : "normal")}
+          />
+        </Tooltip>
+      </div>
+
+      {/* Upload Image */}
+      <Upload
+        accept="image/*"
+        showUploadList={false}
+        beforeUpload={(file) => {
+          onImageUpload(file)
+          setMoreOpen(false)
+          return false
+        }}
+      >
+        <button
+          data-testid="chat-upload-image"
+          className="w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 hover:bg-surface2"
+          title={t("playground:actions.attachImage", "Attach image")}
+        >
+          <ImageIcon className="size-4 text-text-subtle" />
+          {t("playground:actions.attachImage", "Attach image")}
+        </button>
+      </Upload>
       <button
         type="button"
         onClick={() => setAdvancedToolsExpanded((open) => !open)}
@@ -799,11 +805,6 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         </div>
       )}
 
-      <div className="panel-divider my-1" />
-
-      <div className="text-caption text-text-muted font-medium">
-        {t("sidepanel:controlRow.quickActions", "Quick actions")}
-      </div>
       <button
         type="button"
         onClick={() => {
@@ -891,7 +892,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
                   )
                 : t(
                     "common:featureHints.moreTools.description",
-                    "Vision, image upload, quick ingest and Open in full page are under Tools."
+                    "Web search and MCP tools are under Tools; images, quick ingest and Open in full page are under More tools."
                   )
             }
             className="basis-full"

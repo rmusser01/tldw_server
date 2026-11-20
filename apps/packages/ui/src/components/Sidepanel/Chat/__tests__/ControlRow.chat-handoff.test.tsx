@@ -350,14 +350,17 @@ describe("ControlRow vocabulary matches the full page (XP-12)", () => {
     expect(screen.queryByRole("button", { name: /knowledge search|more tools|^web$/i })).toBeNull()
   })
 
-  it("groups Tools like the full page: Context setup, then Response & tools", () => {
+  // Review fix: lane 7A's full page ends Tools with a "More tools" group.
+  it("groups Tools like the full page: Context setup, Response & tools, then More tools", () => {
     render(<ControlRow {...defaultProps()} fullPage={fullPage()} />)
     const menu = screen.getByTestId("mock-popover-content").textContent ?? ""
-    const order = ["Context setup", "Web search", "Vision", "Attach image", "Response & tools", "Tool choice", "MCP tools", "Advanced"]
+    const order = ["Context setup", "Web search", "Response & tools", "Tool choice", "MCP tools", "More tools", "Images", "Vision", "Attach image", "Advanced", "Open in full page"]
       .map((label) => menu.indexOf(label))
     expect(order.every((index) => index >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
     expect(menu).not.toContain("Search & Vision")
     expect(menu).not.toContain("Upload Image")
+    expect(menu).not.toContain("Quick actions")
+    expect(menu).not.toContain("Knowledge Search")
   })
 })

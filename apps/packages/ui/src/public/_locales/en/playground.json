@@ -5030,5 +5030,8 @@
   },
   "noteMentions_unpicked": {
     "message": "Pick a note, or remove /note to send this as a message."
+  },
+  "tools_images": {
+    "message": "Images"
   }
 }

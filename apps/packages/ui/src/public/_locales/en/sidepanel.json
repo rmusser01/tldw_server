@@ -117,7 +117,7 @@
     "message": "Vision"
   },
   "controlRow_visionDisabledKnowledge": {
-    "message": "Disable Knowledge Search to use Vision"
+    "message": "Turn off Search & Context to use Vision"
   },
   "controlRow_visionTooltip": {
     "message": "Enable Vision to analyze images"
@@ -2199,5 +2199,8 @@
   },
   "openFullPage_draftCheckFailed": {
     "message": "This draft's account couldn't be checked. Retry from the draft notice."
+  },
+  "composer_imageProviderMissing": {
+    "message": "Name the image provider: /generate-image:<provider> <prompt>."
   }
 }

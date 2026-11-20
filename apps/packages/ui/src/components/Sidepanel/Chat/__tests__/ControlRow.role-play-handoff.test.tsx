@@ -333,7 +333,7 @@ describe("ControlRow first-use guidance", () => {
       screen.getAllByRole("button", { name: "Dismiss" })
     ).toHaveLength(1)
     expect(screen.getByRole("status")).toHaveTextContent("Open Search & Context to find snippets")
-    expect(screen.queryByText(/are under Tools\./)).not.toBeInTheDocument()
+    expect(screen.queryByText(/are under More tools\./)).not.toBeInTheDocument()
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
   })
 
@@ -350,7 +350,7 @@ describe("ControlRow first-use guidance", () => {
       screen.getByRole("button", { name: "Search & Context" })
     ).toHaveFocus())
     expect(screen.queryByText(/Open Search & Context to find snippets/)).not.toBeInTheDocument()
-    expect(screen.getByText(/are under Tools\./)).toBeVisible()
+    expect(screen.getByText(/are under More tools\./)).toBeVisible()
     screen.getByRole("button", { name: "Dismiss" }).focus()
     await user.keyboard(" ")
     await waitFor(() => expect(
@@ -368,7 +368,7 @@ describe("ControlRow first-use guidance", () => {
     first.unmount()
     const second = render(<ControlRow {...defaultProps()} />)
     expect(screen.queryByText(/Open Search & Context to find snippets/)).not.toBeInTheDocument()
-    expect(screen.getByText(/are under Tools\./)).toBeVisible()
+    expect(screen.getByText(/are under More tools\./)).toBeVisible()
     await user.click(screen.getByRole("button", { name: "Dismiss" }))
     second.unmount()
     render(<ControlRow {...defaultProps()} />)
@@ -385,7 +385,7 @@ describe("ControlRow first-use guidance", () => {
     expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument()
     view.rerender(<ControlRow {...props} isConnected />)
     expect(screen.getByText(/Open Search & Context to find snippets/)).toBeVisible()
-    expect(screen.queryByText(/are under Tools\./)).not.toBeInTheDocument()
+    expect(screen.queryByText(/are under More tools\./)).not.toBeInTheDocument()
   })
 
   it("preserves More tools Escape and trigger focus while a hint is visible", async () => {

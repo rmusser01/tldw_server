@@ -558,7 +558,7 @@
     },
     "moreTools": {
       "title": "Tools",
-      "description": "Vision, image upload, quick ingest and Open in full page are under Tools."
+      "description": "Web search and MCP tools are under Tools; images, quick ingest and Open in full page are under More tools."
     },
     "commandPalette": {
       "title": "Quick commands",

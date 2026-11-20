@@ -80,7 +80,7 @@
     "searchSection": "Search & Vision",
     "webSearch": "Web Search",
     "vision": "Vision",
-    "visionDisabledKnowledge": "Disable Knowledge Search to use Vision",
+    "visionDisabledKnowledge": "Turn off Search & Context to use Vision",
     "visionTooltip": "Enable Vision to analyze images",
     "toolChoiceLabel": "Tool choice",
     "toolChoiceAuto": "Auto",
@@ -147,7 +147,8 @@
     "commandCount_other": "{{count}} commands",
     "mentionCount": "{{count}} matches",
     "mentionCount_one": "{{count}} match",
-    "mentionCount_other": "{{count}} matches"
+    "mentionCount_other": "{{count}} matches",
+    "imageProviderMissing": "Name the image provider: /generate-image:<provider> <prompt>."
   },
   "notification": {
     "ingestSent": "Sent to tldw server",

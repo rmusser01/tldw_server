@@ -1008,7 +1008,7 @@
     "message": "Tools"
   },
   "featureHints_moreTools_description": {
-    "message": "Vision, image upload, quick ingest and Open in full page are under Tools."
+    "message": "Web search and MCP tools are under Tools; images, quick ingest and Open in full page are under More tools."
   },
   "featureHints_commandPalette_title": {
     "message": "Quick commands"

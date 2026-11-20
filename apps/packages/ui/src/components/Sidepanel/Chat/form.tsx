@@ -1,5 +1,6 @@
 import { useModelPickerOpenRequests } from "./useModelPickerOpenRequests"
 import { useSidepanelOpenFullPage } from "./hooks/useSidepanelOpenFullPage"
+import { composerShortcutHint } from "@/components/Option/Playground/composer-shortcut-hint"
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
 import { resolveModelSelectorSelection, type ModelSelectorDescriptor } from "@/hooks/playground/modelSelectorUtils"
@@ -799,7 +800,7 @@ export const SidepanelForm = ({
   }, [markOptionalPanelEngaged, setOptionalPanelVisible, voiceChatEnabled])
 
   const [debouncedPlaceholder, setDebouncedPlaceholder] = React.useState<string>(
-    t("playground:composer.calmPlaceholder", "Write a message…")
+    `${t("playground:composer.calmPlaceholder", "Write a message…")} (${composerShortcutHint(t, false)})`
   )
   const placeholderTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const {
@@ -2179,8 +2180,8 @@ export const SidepanelForm = ({
         message: t("error", { defaultValue: "Error" }),
         description: intent.imageCommandMissingProvider
           ? t(
-              "imageCommand.missingProvider",
-              "Pick an Image provider in More tools or use /generate-image:<provider> <prompt>."
+              "sidepanel:composer.imageProviderMissing",
+              "Name the image provider: /generate-image:<provider> <prompt>."
             )
           : t(
               "imageCommand.invalidUsage",
@@ -3365,8 +3366,8 @@ export const SidepanelForm = ({
           message: t("error", { defaultValue: "Error" }),
           description: intent.imageCommandMissingProvider
             ? t(
-                "imageCommand.missingProvider",
-                "Pick an Image provider in More tools or use /generate-image:<provider> <prompt>."
+                "sidepanel:composer.imageProviderMissing",
+                "Name the image provider: /generate-image:<provider> <prompt>."
               )
             : t(
                 "imageCommand.invalidUsage",
@@ -3630,7 +3631,7 @@ export const SidepanelForm = ({
   // Debounce placeholder changes to prevent flashing on flaky connections
   React.useEffect(() => {
     const targetPlaceholder = isConnectionReady
-      ? t("playground:composer.calmPlaceholder", "Write a message…")
+      ? `${t("playground:composer.calmPlaceholder", "Write a message…")} (${composerShortcutHint(t, false)})`
       : uxState === "testing"
         ? t(
             "sidepanel:composer.connectingPlaceholder",
@@ -3864,7 +3865,7 @@ export const SidepanelForm = ({
                                 setTyping(false)
                               }
                             }}
-                            placeholder={debouncedPlaceholder || t("playground:composer.calmPlaceholder", "Write a message…")}
+                            placeholder={debouncedPlaceholder || `${t("playground:composer.calmPlaceholder", "Write a message…")} (${composerShortcutHint(t, false)})`}
                             {...messageInputProps}
                             onChange={(event) => {
                               messageInputProps.onChange(event)
