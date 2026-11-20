@@ -14,6 +14,10 @@ import {
   useCockpitBodyWidth,
   type CockpitRail,
 } from "./playground-cockpit-rail-layout";
+import {
+  SHORT_VIEWPORT_OVERLAY_PANEL,
+  useIsShortViewport,
+} from "./composer-short-viewport";
 
 export type PlaygroundCockpitMode = "cockpit" | "focus";
 export type PlaygroundCockpitMobilePanel = "context" | "runtime" | null;
@@ -179,8 +183,14 @@ export const PlaygroundCockpitShell = ({
   const rightRailInline = showRightRail && railLayout.runtime === "inline";
   const resolvedMobilePanel =
     mobilePanel !== undefined ? mobilePanel : uncontrolledMobilePanel;
+  // Short viewports (AX-04 review): a saved open panel would push the composer
+  // out of the window, so it is not restored on load; a panel the user opens
+  // this session overlays the chat. The saved preference is left as it was.
+  const shortViewport = useIsShortViewport();
+  const [mobilePanelChosen, setMobilePanelChosen] = React.useState(false);
   const setMobilePanel = React.useCallback(
     (panel: PlaygroundCockpitMobilePanel) => {
+      setMobilePanelChosen(true);
       if (onMobilePanelChange) {
         onMobilePanelChange(panel);
         return;
@@ -189,11 +199,14 @@ export const PlaygroundCockpitShell = ({
     },
     [onMobilePanelChange],
   );
-  const visibleMobilePanel = resolveVisibleMobilePanel(
-    resolvedMobilePanel,
-    leftRailVisible,
-    rightRailVisible,
-  );
+  const visibleMobilePanel =
+    shortViewport && !mobilePanelChosen
+      ? null
+      : resolveVisibleMobilePanel(
+          resolvedMobilePanel,
+          leftRailVisible,
+          rightRailVisible,
+        );
   const mobilePanelSummary =
     visibleMobilePanel === "context"
       ? t(
@@ -300,7 +313,7 @@ export const PlaygroundCockpitShell = ({
           key="mobile-rails"
           data-testid="playground-cockpit-mobile-rails"
           data-mobile-panel={visibleMobilePanel ?? "none"}
-          className="grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"
+          className="relative grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"
         >
           <div className="flex items-center gap-1">
             <div
@@ -396,7 +409,7 @@ export const PlaygroundCockpitShell = ({
             aria-describedby={mobilePanelSummaryId}
             hidden={!leftRailVisible || visibleMobilePanel !== "context"}
             aria-hidden={!leftRailVisible || visibleMobilePanel !== "context"}
-            className={`max-h-[30vh] overflow-y-auto border-t border-border bg-surface px-3 ${
+            className={`max-h-[30vh] overflow-y-auto border-t border-border bg-surface px-3 ${SHORT_VIEWPORT_OVERLAY_PANEL} ${
               !leftRailVisible || visibleMobilePanel !== "context"
                 ? "hidden"
                 : ""
@@ -410,7 +423,7 @@ export const PlaygroundCockpitShell = ({
             aria-describedby={mobilePanelSummaryId}
             hidden={!rightRailVisible || visibleMobilePanel !== "runtime"}
             aria-hidden={!rightRailVisible || visibleMobilePanel !== "runtime"}
-            className={`max-h-[30vh] overflow-y-auto border-t border-border bg-surface px-3 ${
+            className={`max-h-[30vh] overflow-y-auto border-t border-border bg-surface px-3 ${SHORT_VIEWPORT_OVERLAY_PANEL} ${
               !rightRailVisible || visibleMobilePanel !== "runtime"
                 ? "hidden"
                 : ""

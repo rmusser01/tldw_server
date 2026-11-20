@@ -7516,7 +7516,7 @@ export const PlaygroundForm = ({
 
                         return (
                           <>
-                            <div className={`flex w-full min-w-0 flex-col ${SHORT_VIEWPORT_COMPOSER_ROW}`}>
+                            <div data-composer-row className={`flex w-full min-w-0 flex-col ${SHORT_VIEWPORT_COMPOSER_ROW}`}>
                               {composerTextareaNode}
                               {composerToolbarSlot}
                             </div>

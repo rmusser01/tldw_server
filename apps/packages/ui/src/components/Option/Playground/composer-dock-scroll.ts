@@ -24,16 +24,44 @@ export const revealInScroller = (
   }
 }
 
-/** Re-reveal the focused control in `scrollerRef` when `dockHeight` changes. */
+/**
+ * Re-reveal the focused control in `scrollerRef` when `dockHeight` changes.
+ * When it sits in the composer row (`data-composer-row`: the textarea and
+ * Send) and the row fits, the whole row is revealed. A scroll the user made
+ * inside the dock since the last resize is left alone (AX-04 review).
+ */
 export const useKeepFocusedComposerControlInView = (
   scrollerRef: React.RefObject<HTMLElement | null>,
   dockHeight: number | null | undefined
 ) => {
+  const userScrolledRef = React.useRef(false)
+  // The position our own reveal set, so its scroll event isn't the user's.
+  const revealedScrollTopRef = React.useRef<number | null>(null)
+  React.useEffect(() => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    const onScroll = () => {
+      if (scroller.scrollTop !== revealedScrollTopRef.current)
+        userScrolledRef.current = true
+    }
+    scroller.addEventListener("scroll", onScroll, { passive: true })
+    return () => scroller.removeEventListener("scroll", onScroll)
+  }, [scrollerRef])
   React.useLayoutEffect(() => {
     const scroller = scrollerRef.current
+    const userScrolled = userScrolledRef.current
+    userScrolledRef.current = false
+    if (!scroller || userScrolled) return
     const focused = typeof document === "undefined" ? null : document.activeElement
-    if (!scroller || !(focused instanceof HTMLElement)) return
-    if (!scroller.contains(focused)) return
-    revealInScroller(scroller, focused)
+    if (!(focused instanceof HTMLElement) || !scroller.contains(focused)) return
+    const row = focused.closest<HTMLElement>("[data-composer-row]")
+    const target =
+      row &&
+      scroller.contains(row) &&
+      row.getBoundingClientRect().height <= scroller.clientHeight
+        ? row
+        : focused
+    revealInScroller(scroller, target)
+    revealedScrollTopRef.current = scroller.scrollTop
   }, [scrollerRef, dockHeight])
 }

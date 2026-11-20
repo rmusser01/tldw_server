@@ -334,9 +334,13 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
 
     return (
       <div className="flex items-center gap-2">
+        {/* No fixed 36px height when Send is 44px (mobile): it overflowed the
+            group, so the composer row didn't contain it (AX-04 review). */}
         <Space.Compact
           className={`!justify-end !w-auto ${
-            isProMode ? "" : "!h-9 !rounded-full !px-3 !text-xs"
+            isProMode
+              ? ""
+              : `${isMobileViewport ? "" : "!h-9 "}!rounded-full !px-3 !text-xs`
           }`}
         >
           <Button

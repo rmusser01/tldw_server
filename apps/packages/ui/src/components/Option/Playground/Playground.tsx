@@ -4111,7 +4111,7 @@ const PlaygroundContent = () => {
                 data-testid={
                   stickyChatInput ? "playground-chat-transcript" : undefined
                 }
-                className={`custom-scrollbar flex-1 min-h-[20%] w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4 [@media(max-height:500px)]:min-h-[40dvh] ${
+                className={`custom-scrollbar flex-1 min-h-[20%] w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4 [@media(max-height:500px)]:min-h-[min(42dvh,45%)] ${
                   exitFocusPillVisible ? "pt-14 scroll-pt-14" : ""
                 }`}
               >
@@ -4150,7 +4150,7 @@ const PlaygroundContent = () => {
                   ? "playground-chat-composer-dock"
                   : "playground-chat-composer-region"
               }
-              className={`relative flex max-h-[60%] min-h-0 w-full shrink flex-col ${
+              className={`relative flex max-h-[60%] min-h-0 w-full shrink flex-col [@media(max-height:500px)]:min-h-[4.5rem] ${
                 stickyChatInput
                   ? "sticky bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur"
                   : ""

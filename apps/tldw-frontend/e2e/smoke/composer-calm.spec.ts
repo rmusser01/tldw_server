@@ -279,12 +279,23 @@ for (const viewport of [
 // textarea and Send stay, and the message log keeps a usable height. The log
 // is measured by its scroll viewport (the transcript), since an empty chat's
 // role=log has no height of its own.
-for (const viewport of [
-  { width: 320, height: 256 },
-  { width: 640, height: 400 },
+// Landscape phones of 768px or wider open in cockpit by default (AX-04
+// review), and a saved cockpit layout with a rail panel open must keep the
+// composer too.
+for (const { viewport, seed } of [
+  { viewport: { width: 320, height: 256 }, seed: '' },
+  { viewport: { width: 640, height: 400 }, seed: '' },
+  { viewport: { width: 844, height: 390 }, seed: '' },
+  { viewport: { width: 640, height: 400 }, seed: 'cockpit+rail' },
 ]) {
-  test(`reflows the composer at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
+  test(`reflows the composer at ${viewport.width}x${viewport.height}${seed ? ` (${seed})` : ''}`, async ({ page }, testInfo) => {
     await prepareOfflinePreview(page);
+    if (seed)
+      await page.addInitScript(() => {
+        localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
+        localStorage.setItem('playgroundChatContextRailVisible', 'true');
+        localStorage.setItem('playgroundChatMobileCockpitPanel', JSON.stringify('context'));
+      });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize(viewport);
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
@@ -319,11 +330,11 @@ for (const viewport of [
     expect(log.height, `log ${log.height}px, composer ${composer.height}px`).toBeGreaterThanOrEqual(100);
     testInfo.annotations.push({
       type: 'composer share',
-      description: `${viewport.width}x${viewport.height}: composer ${Math.round(composer.height)}px (${Math.round((composer.height / viewport.height) * 100)}%), log ${Math.round(log.height)}px`,
+      description: `${viewport.width}x${viewport.height}${seed ? ` ${seed}` : ''}: composer ${Math.round(composer.height)}px (${Math.round((composer.height / viewport.height) * 100)}%), log ${Math.round(log.height)}px`,
     });
     await page.screenshot({
       animations: 'disabled',
-      path: testInfo.outputPath(`reflow-${viewport.width}x${viewport.height}.png`),
+      path: testInfo.outputPath(`reflow-${viewport.width}x${viewport.height}${seed ? '-rail' : ''}.png`),
     });
 
     const options = page.getByTestId('composer-short-options-toggle');
