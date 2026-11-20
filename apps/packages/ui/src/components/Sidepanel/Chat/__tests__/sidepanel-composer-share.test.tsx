@@ -158,6 +158,35 @@ describe("SidepanelKnowledgeSheet", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  // Review fixes: a modal sheet that can be left at once and gives focus back.
+  it("is a modal dialog that takes focus as it opens, so Escape works at once", async () => {
+    const onOpenChange = vi.fn()
+    render(<SidepanelKnowledgeSheet open onOpenChange={onOpenChange} />)
+    const sheet = screen.getByRole("dialog", { name: "Search & Context" })
+    expect(sheet).toHaveAttribute("aria-modal", "true")
+    await waitFor(() => expect(sheet.contains(document.activeElement)).toBe(true))
+    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("returns focus to the control that opened it", async () => {
+    const onOpenChange = vi.fn()
+    const view = render(<><button type="button">Search & Context toggle</button><SidepanelKnowledgeSheet open={false} onOpenChange={onOpenChange} /></>)
+    const toggle = screen.getByRole("button", { name: "Search & Context toggle" })
+    toggle.focus()
+    view.rerender(<><button type="button">Search & Context toggle</button><SidepanelKnowledgeSheet open onOpenChange={onOpenChange} /></>)
+    await waitFor(() => expect(toggle).not.toHaveFocus())
+    view.rerender(<><button type="button">Search & Context toggle</button><SidepanelKnowledgeSheet open={false} onOpenChange={onOpenChange} /></>)
+    await waitFor(() => expect(toggle).toHaveFocus())
+  })
+
+  it("closes on a click outside the sheet", () => {
+    const onOpenChange = vi.fn()
+    render(<SidepanelKnowledgeSheet open onOpenChange={onOpenChange} />)
+    fireEvent.mouseDown(screen.getByTestId("sidepanel-knowledge-sheet-backdrop"))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
   it("keeps the panel mounted while closed, so its open event still arrives", () => {
     render(<SidepanelKnowledgeSheet open={false} onOpenChange={vi.fn()} />)
     expect(screen.queryByRole("dialog")).toBeNull()
