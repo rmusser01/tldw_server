@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.config_sections.auth import (
     api_key_env,
 )
 from tldw_Server_API.app.core.config_sections.database import database_url_env
+from tldw_Server_API.app.core.config_sections import rag as rag_section
 from tldw_Server_API.app.core.config_sections.precedence import Resolved
 from tldw_Server_API.app.core.DB_Management import db_path_utils
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
@@ -1255,12 +1256,7 @@ def _rag_llm_outcomes():
     parser = config.load_comprehensive_config()
     lazy = config.load_settings()
     logged = config.load_and_log_configs()
-    legacy = configparser.ConfigParser(interpolation=None)  # RAGConfig reads the option names it always read
-    legacy.add_section("RAG")
-    for new, old in (("default_llm_provider", "rag_default_llm_provider"), ("default_llm_model", "rag_default_llm_model")):
-        if parser.has_option("RAG", new):
-            legacy.set("RAG", old, parser.get("RAG", new))
-    typed = load_rag_config(legacy)
+    typed = load_rag_config(parser)
     flat = {k: parser.get("RAG", o, fallback=None) for k, o in (
         ("RAG_DEFAULT_LLM_PROVIDER", "default_llm_provider"), ("RAG_DEFAULT_LLM_MODEL", "default_llm_model"))}
     return {
@@ -1271,17 +1267,15 @@ def _rag_llm_outcomes():
     }
 
 
-# reader -> (provider, model). Today a blank env value wins in LazySettings and generation, and falls
-# through to config in load_and_log_configs and RAGConfig. RAGConfig reads the options it always has.
-RAG_LLM_TODAY = {
-    "env_set": {r: ("envp", "envm") for r in ("lazy", "logged", "typed", "generation")},
-    "env_blank": {
-        "lazy": ("", ""), "logged": ("cfgp", "cfgm"), "typed": ("cfgp", "cfgm"), "generation": ("openai", "gpt-4o-mini"),
-    },
+# reader -> (provider, model). D1(h): a blank env value falls through to config in every reader (before,
+# it won in LazySettings and generation). RAGConfig now reads the shipped option names.
+RAG_LLM_EXPECTED = {
+    "env_set": dict.fromkeys(("lazy", "logged", "typed", "generation"), ("envp", "envm")),
+    "env_blank": dict.fromkeys(("lazy", "logged", "typed", "generation"), ("cfgp", "cfgm")),
     "env_provider_only": {
         "lazy": ("envp", "cfgm"), "logged": ("envp", None), "typed": ("envp", "cfgm"), "generation": ("envp", None),
     },
-    "config_only": {r: ("cfgp", "cfgm") for r in ("lazy", "logged", "typed", "generation")},
+    "config_only": dict.fromkeys(("lazy", "logged", "typed", "generation"), ("cfgp", "cfgm")),
     "config_blank": {
         "lazy": ("", ""), "logged": ("", ""), "typed": ("openai", "gpt-4o-mini"), "generation": ("openai", "gpt-4o-mini"),
     },
@@ -1293,6 +1287,50 @@ RAG_LLM_TODAY = {
 
 
 @pytest.mark.parametrize("case", list(RAG_LLM_CASES))
-def test_rag_default_llm_resolution_today(apply_rag_llm_case, case):
+def test_rag_default_llm_resolution(apply_rag_llm_case, case):
     apply_rag_llm_case(case)
-    assert _rag_llm_outcomes() == RAG_LLM_TODAY[case]
+    assert _rag_llm_outcomes() == RAG_LLM_EXPECTED[case]
+
+
+# id -> (provider, model) as the resolvers return them
+RAG_LLM_RESOLVED = {
+    "env_set": (Resolved("envp", "env", "RAG_DEFAULT_LLM_PROVIDER"), Resolved("envm", "env", "RAG_DEFAULT_LLM_MODEL")),
+    "env_blank": (Resolved("cfgp", "config", "RAG.default_llm_provider"), Resolved("cfgm", "config", "RAG.default_llm_model")),
+    "env_provider_only": (
+        Resolved("envp", "env", "RAG_DEFAULT_LLM_PROVIDER"), Resolved("cfgm", "config", "RAG.default_llm_model"),
+    ),
+    "config_only": (Resolved("cfgp", "config", "RAG.default_llm_provider"), Resolved("cfgm", "config", "RAG.default_llm_model")),
+    "config_blank": (Resolved("", "config", "RAG.default_llm_provider"), Resolved("", "config", "RAG.default_llm_model")),
+    "neither": (Resolved(None, "default", None), Resolved(None, "default", None)),
+}
+
+
+@pytest.mark.parametrize("case", list(RAG_LLM_CASES))
+def test_rag_default_llm_resolves_through_config_sections(apply_rag_llm_case, case):
+    parser = apply_rag_llm_case(case)
+    assert (
+        rag_section.resolve_default_llm_provider(parser),
+        rag_section.resolve_default_llm_model(parser),
+    ) == RAG_LLM_RESOLVED[case]
+
+
+def test_rag_default_llm_env_is_env_only_blank_kept_and_live(monkeypatch):
+    for accessor, key in (
+        (rag_section.default_llm_provider_env, "RAG_DEFAULT_LLM_PROVIDER"),
+        (rag_section.default_llm_model_env, "RAG_DEFAULT_LLM_MODEL"),
+    ):
+        monkeypatch.delenv(key, raising=False)
+        assert accessor() is None
+        monkeypatch.setenv(key, "")
+        assert accessor() == ""
+        monkeypatch.setenv(key, "x")
+        assert accessor() == "x"
+        assert accessor({key: "y"}) == "y"
+        assert accessor({}) is None
+
+
+def test_resolve_rag_default_llm_without_a_parser_reads_the_environment_alone():
+    assert rag_section.resolve_default_llm_provider(None, env={"RAG_DEFAULT_LLM_PROVIDER": "p"}) == Resolved(
+        "p", "env", "RAG_DEFAULT_LLM_PROVIDER"
+    )
+    assert rag_section.resolve_default_llm_model(None, env={"RAG_DEFAULT_LLM_MODEL": ""}) == Resolved(None, "default", None)

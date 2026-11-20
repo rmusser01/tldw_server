@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.config_sections.auth import (
 )
 from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.config_sections.precedence import resolve
+from tldw_Server_API.app.core.config_sections.rag import resolve_default_llm_model, resolve_default_llm_provider
 from tldw_Server_API.app.core.config_sections.redis import resolve_redis_url
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
@@ -2124,16 +2125,8 @@ def load_settings():
         ))(os.getenv('RAG_HYDE_MODEL'), load_comprehensive_config()),
 
         # RAG default LLM (used for general lightweight tasks like query expansion/gap analysis)
-        "RAG_DEFAULT_LLM_PROVIDER": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'default_llm_provider', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
-            )
-        ))(os.getenv('RAG_DEFAULT_LLM_PROVIDER'), load_comprehensive_config()),
-        "RAG_DEFAULT_LLM_MODEL": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'default_llm_model', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
-            )
-        ))(os.getenv('RAG_DEFAULT_LLM_MODEL'), load_comprehensive_config()),
+        "RAG_DEFAULT_LLM_PROVIDER": resolve_default_llm_provider(load_comprehensive_config()).value,
+        "RAG_DEFAULT_LLM_MODEL": resolve_default_llm_model(load_comprehensive_config()).value,
 
         # RAG default FTS level ('media' or 'chunk')
         "RAG_DEFAULT_FTS_LEVEL": (lambda _env, _cp: (
@@ -4361,14 +4354,13 @@ def load_and_log_configs(
             config_parser_object.get('RAG', 'default_llm_provider', fallback=None)
             if config_parser_object.has_section('RAG') else None
         )
-        rag_default_llm_provider = env.get("RAG_DEFAULT_LLM_PROVIDER") or configured_rag_provider
-        rag_default_llm_model = env.get("RAG_DEFAULT_LLM_MODEL") or (
-            config_parser_object.get('RAG', 'default_llm_model', fallback=None)
-            if config_parser_object.has_section('RAG') else None
-        )
+        resolved_rag_provider = resolve_default_llm_provider(config_parser_object, env=env)
+        rag_default_llm_provider = resolved_rag_provider.value
+        resolved_rag_model = resolve_default_llm_model(config_parser_object, env=env)
+        rag_default_llm_model = resolved_rag_model.value
         if (
-            env.get("RAG_DEFAULT_LLM_PROVIDER")
-            and not env.get("RAG_DEFAULT_LLM_MODEL")
+            resolved_rag_provider.source == "env"
+            and resolved_rag_model.source != "env"
             and canonical_provider_name(str(configured_rag_provider or "").strip() or default_api)
             != canonical_provider_name(rag_default_llm_provider)
         ):
