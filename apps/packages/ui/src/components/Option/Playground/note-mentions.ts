@@ -13,6 +13,7 @@
  * message is sent or queued. Other pins keep their own behaviour.
  */
 import type { RagPinnedResult } from "@/utils/rag-format"
+import { sliceCodeUnitsSafely } from "@/utils/safe-slice"
 import { NOTE_PINNED_ID_PREFIX, NOTE_PINNED_TYPE } from "@/utils/note-pins"
 
 export {
@@ -77,16 +78,15 @@ export type NoteRow = {
 
 export const noteToPinnedResult = (note: NoteRow): RagPinnedResult => {
   const content = (note.content ?? "").trim()
-  const snippet =
-    content.length > NOTE_CONTENT_MAX_CHARS
-      ? `${content.slice(0, NOTE_CONTENT_MAX_CHARS).trimEnd()}\n\n[Note shortened]`
-      : content
+  const truncated = content.length > NOTE_CONTENT_MAX_CHARS
   return {
     id: `${NOTE_PINNED_ID_PREFIX}${note.id}`,
     type: NOTE_PINNED_TYPE,
     title: note.title?.trim() || undefined,
     source: "Notes",
-    snippet
+    // The "[Note shortened]" marker is added, translated, when it is sent.
+    snippet: truncated ? sliceCodeUnitsSafely(content, NOTE_CONTENT_MAX_CHARS).trimEnd() : content,
+    ...(truncated ? { truncated: true } : {})
   }
 }
 

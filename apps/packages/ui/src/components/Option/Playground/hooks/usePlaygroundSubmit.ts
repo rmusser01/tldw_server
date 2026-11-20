@@ -305,10 +305,11 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       // Attached notes always go; other pins as before (note-mentions.ts).
       return appendPinnedContext(message, ragPinnedResults, {
         fileRetrievalEnabled,
-        ignoreOtherPins: options?.ignorePinnedResults
+        ignoreOtherPins: options?.ignorePinnedResults,
+        t
       })
     },
-    [fileRetrievalEnabled, ragPinnedResults]
+    [fileRetrievalEnabled, ragPinnedResults, t]
   )
 
   const submitForm = (options?: { ignorePinnedResults?: boolean }) => {

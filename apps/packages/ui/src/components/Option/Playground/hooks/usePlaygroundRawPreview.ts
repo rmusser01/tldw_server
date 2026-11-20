@@ -389,7 +389,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     let draftMessage = intent.message.trim()
     // Append pinned source expansion to match submitForm behavior
     if (!intent.isImageCommand) {
-      draftMessage = appendPinnedContext(draftMessage, ragPinnedResults, { fileRetrievalEnabled })
+      draftMessage = appendPinnedContext(draftMessage, ragPinnedResults, { fileRetrievalEnabled, t })
     }
     const modelDraftMessage =
       !intent.isImageCommand && importedSidepanelContext

@@ -1856,6 +1856,8 @@
     "untitled": "Untitled note",
     "attached": "Attached notes",
     "open": "Open this note",
-    "remove": "Remove note {{title}}"
+    "remove": "Remove note {{title}}",
+    "shortened": "[Note shortened]",
+    "attachedNoteLabel": "Attached note: {{title}}"
   }
 }

@@ -49,9 +49,15 @@ describe("a note as pinned context", () => {
     expect(noteIdFromPinnedResult({ id: "rag-1", snippet: "x" })).toBeNull()
   })
 
-  it("shortens a very long note and says so", () => {
+  it("shortens a very long note and marks it shortened", () => {
     const result = noteToPinnedResult({ id: "a", title: "Long", content: "x".repeat(NOTE_CONTENT_MAX_CHARS + 50) })
-    expect(result.snippet.length).toBeLessThan(NOTE_CONTENT_MAX_CHARS + 40)
-    expect(result.snippet.endsWith("[Note shortened]")).toBe(true)
+    expect(result.snippet.length).toBeLessThanOrEqual(NOTE_CONTENT_MAX_CHARS)
+    expect(result.truncated).toBe(true)
+  })
+
+  it("never cuts a note through a surrogate pair", () => {
+    const content = "x".repeat(NOTE_CONTENT_MAX_CHARS - 1) + "\u{1F600}tail"
+    const result = noteToPinnedResult({ id: "a", title: "Emoji", content })
+    expect(/[\uD800-\uDBFF]$/.test(result.snippet)).toBe(false)
   })
 })

@@ -22,6 +22,11 @@ describe("chat answer note", () => {
     expect(title.endsWith("…")).toBe(true)
   })
 
+  it("never cuts the title through a surrogate pair", () => {
+    const title = buildAnswerNoteTitle("x".repeat(58) + "\u{1F600}" + "y".repeat(10), savedAt, t)
+    expect(/[\uD800-\uDBFF]…$/.test(title)).toBe(false)
+  })
+
   it("falls back to a dated title without a question", () => {
     expect(buildAnswerNoteTitle("  ", savedAt, t)).toMatch(/^Chat answer, /)
   })

@@ -21,3 +21,27 @@ describe("note pins", () => {
     expect(withoutNotePins([note, search])).toEqual([search])
   })
 })
+
+// Review fix: the model sees an attached note as a labelled, fenced block.
+describe("attached note block", () => {
+  it("labels the note and fences its content", () => {
+    expect(appendPinnedContext("Hi", [note], {})).toBe("Hi\n\nAttached note: Rebase notes\n```\nUse rebase.\n```")
+  })
+
+  it("fences content that has its own code fences", () => {
+    const fenced = { ...note, snippet: "Run:\n```sh\ngit rebase -i\n```" }
+    const text = appendPinnedContext("", [fenced], {})
+    expect(text.startsWith("Attached note: Rebase notes\n````\n")).toBe(true)
+    expect(text.endsWith("\n````")).toBe(true)
+  })
+
+  it("says a shortened note was shortened, in the user's language", () => {
+    const t = (key: string, fallback: string) => (key === "playground:noteMentions.shortened" ? "[Gekürzt]" : fallback)
+    const text = appendPinnedContext("", [{ ...note, truncated: true }], { t })
+    expect(text.endsWith("```\n[Gekürzt]")).toBe(true)
+  })
+
+  it("keeps other pins' format", () => {
+    expect(appendPinnedContext("", [search], {})).toBe("**Doc**\n\nA result.")
+  })
+})

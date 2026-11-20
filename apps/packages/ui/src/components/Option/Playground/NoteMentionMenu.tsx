@@ -14,6 +14,7 @@ import { SuggestionCountStatus } from "@/components/Common/SuggestionCountStatus
 import { comboboxOptionId } from "@/hooks/useComposerCombobox"
 import { cn } from "@/libs/utils"
 import { buildNotePath } from "@/routes/hooks/useNotesRouteAddress"
+import { sliceCodeUnitsSafely } from "@/utils/safe-slice"
 import { useStoreMessageOption } from "@/store/option"
 import type { NoteMentionStatus } from "./hooks/useNoteMentions"
 import { noteIdFromPinnedResult, type NoteRow } from "./note-mentions"
@@ -94,7 +95,7 @@ export const NoteMentionMenu: React.FC<NoteMentionMenuProps> = ({
                       <span className="truncate">{note.title?.trim() || untitled}</span>
                       {note.content?.trim() && (
                         <span className="truncate text-xs text-text-subtle">
-                          {note.content.trim().replace(/\s+/g, " ").slice(0, 120)}
+                          {sliceCodeUnitsSafely(note.content.trim().replace(/\s+/g, " "), 120)}
                         </span>
                       )}
                     </span>

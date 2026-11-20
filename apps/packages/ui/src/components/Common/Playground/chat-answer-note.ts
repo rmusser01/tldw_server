@@ -8,6 +8,7 @@
  */
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { ChatScope } from "@/types/chat-scope"
+import { sliceCodeUnitsSafely } from "@/utils/safe-slice"
 
 export const FROM_CHAT_NOTE_KEYWORD = "from-chat"
 const TITLE_MAX_CHARS = 60
@@ -43,7 +44,7 @@ export const buildAnswerNoteTitle = (
       date: savedAt.toLocaleDateString()
     })
   return firstLine.length > TITLE_MAX_CHARS
-    ? `${firstLine.slice(0, TITLE_MAX_CHARS - 1).trimEnd()}…`
+    ? `${sliceCodeUnitsSafely(firstLine, TITLE_MAX_CHARS - 1).trimEnd()}…`
     : firstLine
 }
 

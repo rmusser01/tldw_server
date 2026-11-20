@@ -5021,5 +5021,11 @@
   },
   "noteMentions_remove": {
     "message": "Remove note {{title}}"
+  },
+  "noteMentions_shortened": {
+    "message": "[Note shortened]"
+  },
+  "noteMentions_attachedNoteLabel": {
+    "message": "Attached note: {{title}}"
   }
 }
