@@ -33,7 +33,9 @@ jobs:
       statuses: read
 
   rolling-image:
-    if: github.event_name == 'push' && needs.qualify.outputs.qualified == 'true'
+    if: >-
+      always() && !cancelled() && github.event_name == 'push' &&
+      needs.qualify.result == 'success' && needs.qualify.outputs.qualified == 'true'
     needs: qualify
     uses: ./.github/workflows/publish-ghcr-main.yml
     permissions:
@@ -209,7 +211,11 @@ jobs:
       - detect-version
       - release-gate
       - qualify
-    if: ${{ needs.qualify.outputs.qualified == 'true' && github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi' }}
+    if: >-
+      always() && !cancelled() &&
+      needs.detect-version.result == 'success' && needs.release-gate.result == 'success' &&
+      needs.qualify.result == 'success' && needs.qualify.outputs.qualified == 'true' &&
+      github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -235,7 +241,9 @@ jobs:
       - release-gate
       - qualify
     if: >-
-      needs.qualify.outputs.qualified == 'true' &&
+      always() && !cancelled() &&
+      needs.detect-version.result == 'success' && needs.release-gate.result == 'success' &&
+      needs.qualify.result == 'success' && needs.qualify.outputs.qualified == 'true' &&
       ((github.event_name == 'workflow_dispatch' && inputs.target == 'pypi') ||
        (github.event_name == 'push' && needs.detect-version.outputs.should_publish == 'true'))
     runs-on: ubuntu-latest
