@@ -8,6 +8,7 @@ import { useStoreMessageOption } from "@/store/option"
 import { defaultEmbeddingModelForRag } from "~/services/tldw-server"
 import { getIsSimpleInternetSearch } from "@/services/search"
 import { appendPinnedContext, clearSentNotePins, sendablePins } from "@/utils/note-pins"
+import { isUnpickedNoteCommand } from "../note-mentions"
 import { normalizeChatModelId } from "@/utils/chat-model-availability"
 import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
@@ -379,6 +380,11 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
             contextRevisionRef.current.key === ownSlashToggleKey))
       if (!isCurrent()) return
       const intent = resolveSubmissionIntent(value.message)
+      // An unpicked "/note" is not a message for the model (decision [4]).
+      if (isUnpickedNoteCommand(value.message)) {
+        form.setFieldError("message", t("playground:noteMentions.unpicked", "Pick a note, or remove /note to send this as a message."))
+        return
+      }
       if (intent.handled && /^\/web(?:\s|$)/i.test(value.message.trimStart())) {
         ownSlashToggleKey = contextKeyFor(!webSearch)
       } else if (

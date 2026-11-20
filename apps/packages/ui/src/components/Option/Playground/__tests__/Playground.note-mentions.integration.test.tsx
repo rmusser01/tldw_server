@@ -89,4 +89,20 @@ describe("Playground note mentions", { timeout: 60_000 }, () => {
     expect(completions).toHaveLength(1)
     expect(String(completionMessages(completions[0]).at(-1)?.content)).toContain("Use git rebase -i to squash.")
   })
+
+  // Review fix: "/note foo" with no note picked is not a message for the model.
+  it("does not send an unpicked /note, and says why", async () => {
+    const server = createFakeTldwServer({
+      notes: [{ id: 7, title: "Rebase notes", content: "Use git rebase -i to squash." }]
+    })
+    const view = await renderPlayground({ server })
+    await view.user.click(view.composer)
+    await view.user.type(view.composer, "/note rebase")
+    await screen.findByRole("option", { name: /Rebase notes/ }, HARNESS_WAIT)
+    await view.user.keyboard("{Escape}")
+    await view.user.keyboard("{Enter}")
+    expect(await screen.findByText("Pick a note, or remove /note to send this as a message.", {}, HARNESS_WAIT)).toBeInTheDocument()
+    expect(server.completionRequests()).toHaveLength(0)
+    expect(view.composer).toHaveValue("/note rebase")
+  })
 })

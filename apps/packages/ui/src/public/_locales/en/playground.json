@@ -5027,5 +5027,8 @@
   },
   "noteMentions_attachedNoteLabel": {
     "message": "Attached note: {{title}}"
+  },
+  "noteMentions_unpicked": {
+    "message": "Pick a note, or remove /note to send this as a message."
   }
 }

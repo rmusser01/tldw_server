@@ -57,6 +57,10 @@ export const detectNoteTrigger = (
   return { kind: "at", start: at, end: beforeCaret.length, query }
 }
 
+/** A draft that is still "/note …": the picker's search, not a message to send. */
+export const isUnpickedNoteCommand = (text: string | null | undefined): boolean =>
+  /^\s*\/note(?:\s|$)/i.test(text ?? "")
+
 /** The draft without the trigger text, and where the caret goes. */
 export const removeNoteTrigger = (
   text: string,
