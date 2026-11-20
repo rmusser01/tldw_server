@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlparse
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.UserDatabase_v2 import UserDatabase
 
@@ -169,7 +170,8 @@ class AuthDatabaseConfig:
             DatabaseConfig: PostgreSQL-specific configuration
         """
         # Use DATABASE_URL or construct from components
-        connection_string = os.getenv("DATABASE_URL", self.settings.DATABASE_URL)
+        env_url = database_url_env()
+        connection_string = self.settings.DATABASE_URL if env_url is None else env_url
 
         # If not a full URL, try to construct from components
         if not connection_string.startswith(("postgresql://", "postgres://")):

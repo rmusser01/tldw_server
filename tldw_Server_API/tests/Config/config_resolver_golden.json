@@ -15,14 +15,14 @@
   "load_auth_config": {
     "none": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
     "env_blank": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
-    "env_space": {"value": {"mode": "single_user", "single_user_fixed_id": 7}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"]]},
-    "env_word": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"]]},
-    "env_true": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"]]},
+    "env_space": {"value": {"mode": "single_user", "single_user_fixed_id": 7}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
+    "env_word": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
+    "env_true": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
     "cfg_blank": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
-    "cfg_space": {"value": {"mode": "single_user", "single_user_fixed_id": 7}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
+    "cfg_space": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
     "cfg_false": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
-    "both": {"value": {"mode": "single_user", "single_user_fixed_id": 8}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"]]},
-    "env_blank_cfg": {"value": {"mode": "single_user", "single_user_fixed_id": 9}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
+    "both": {"value": {"mode": "single_user", "single_user_fixed_id": 8}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
+    "env_blank_cfg": {"value": {"mode": "single_user", "single_user_fixed_id": 1}, "env": ["AUTH_MODE", "APP_MODE", "SINGLE_USER_FIXED_ID"], "config": [["AuthNZ", "auth_mode"], ["AuthNZ", "single_user_fixed_id"]]},
     "cfg_raises": {"value": {"raises": "InterpolationSyntaxError"}, "env": ["AUTH_MODE"], "config": [["AuthNZ", "auth_mode"]]}
   },
   "load_chat_config": {
@@ -130,16 +130,16 @@
     "cfg_raises": {"value": {"raises": "InterpolationSyntaxError"}, "env": ["DEFAULT_API"], "config": [["API", "default_api"]]}
   },
   "load_rag_config": {
-    "none": {"value": {"vector_store_type": "chromadb", "default_llm_provider": "openai", "default_llm_model": "gpt-4o-mini"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": [["RAG", "vector_store_type"], ["RAG", "rag_default_llm_provider"], ["RAG", "rag_default_llm_model"]]},
-    "env_blank": {"value": {"vector_store_type": "chromadb", "default_llm_provider": "openai", "default_llm_model": "gpt-4o-mini"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": [["RAG", "vector_store_type"], ["RAG", "rag_default_llm_provider"], ["RAG", "rag_default_llm_model"]]},
+    "none": {"value": {"vector_store_type": "chromadb", "default_llm_provider": "openai", "default_llm_model": "gpt-4o-mini"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": [["RAG", "vector_store_type"], ["RAG", "default_llm_provider"], ["RAG", "default_llm_model"]]},
+    "env_blank": {"value": {"vector_store_type": "chromadb", "default_llm_provider": "openai", "default_llm_model": "gpt-4o-mini"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": [["RAG", "vector_store_type"], ["RAG", "default_llm_provider"], ["RAG", "default_llm_model"]]},
     "env_space": {"value": {"vector_store_type": "7", "default_llm_provider": "7", "default_llm_model": "7"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": []},
     "env_word": {"value": {"vector_store_type": "abc", "default_llm_provider": "abc", "default_llm_model": "abc"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": []},
     "env_true": {"value": {"vector_store_type": "true", "default_llm_provider": "true", "default_llm_model": "true"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": []},
-    "cfg_blank": {"value": {"vector_store_type": "chromadb", "default_llm_provider": "openai", "default_llm_model": "gpt-4o-mini"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": [["RAG", "vector_store_type"], ["RAG", "rag_default_llm_provider"], ["RAG", "rag_default_llm_model"]]},
-    "cfg_space": {"value": {"vector_store_type": "7", "default_llm_provider": "7", "default_llm_model": "7"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": [["RAG", "vector_store_type"], ["RAG", "rag_default_llm_provider"], ["RAG", "rag_default_llm_model"]]},
-    "cfg_false": {"value": {"vector_store_type": "false", "default_llm_provider": "false", "default_llm_model": "false"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": [["RAG", "vector_store_type"], ["RAG", "rag_default_llm_provider"], ["RAG", "rag_default_llm_model"]]},
+    "cfg_blank": {"value": {"vector_store_type": "chromadb", "default_llm_provider": "openai", "default_llm_model": "gpt-4o-mini"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": [["RAG", "vector_store_type"], ["RAG", "default_llm_provider"], ["RAG", "default_llm_model"]]},
+    "cfg_space": {"value": {"vector_store_type": "7", "default_llm_provider": "7", "default_llm_model": "7"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": [["RAG", "vector_store_type"], ["RAG", "default_llm_provider"], ["RAG", "default_llm_model"]]},
+    "cfg_false": {"value": {"vector_store_type": "false", "default_llm_provider": "false", "default_llm_model": "false"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": [["RAG", "vector_store_type"], ["RAG", "default_llm_provider"], ["RAG", "default_llm_model"]]},
     "both": {"value": {"vector_store_type": "8", "default_llm_provider": "8", "default_llm_model": "8"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": []},
-    "env_blank_cfg": {"value": {"vector_store_type": "9", "default_llm_provider": "9", "default_llm_model": "9"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": [["RAG", "vector_store_type"], ["RAG", "rag_default_llm_provider"], ["RAG", "rag_default_llm_model"]]},
+    "env_blank_cfg": {"value": {"vector_store_type": "9", "default_llm_provider": "9", "default_llm_model": "9"}, "env": ["RAG_VECTOR_STORE_TYPE", "RAG_DEFAULT_LLM_PROVIDER", "RAG_DEFAULT_LLM_MODEL"], "config": [["RAG", "vector_store_type"], ["RAG", "default_llm_provider"], ["RAG", "default_llm_model"]]},
     "cfg_raises": {"value": {"raises": "InterpolationSyntaxError"}, "env": ["RAG_VECTOR_STORE_TYPE"], "config": [["RAG", "vector_store_type"]]}
   },
   "load_server_config": {

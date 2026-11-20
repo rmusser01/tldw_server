@@ -21,7 +21,16 @@ from pydantic import Field, field_validator
 # 3rd-party imports
 from pydantic_settings import BaseSettings, NoDecode
 
-from tldw_Server_API.app.core.config_sections.auth import resolve_auth_mode
+from tldw_Server_API.app.core.config_sections.auth import (
+    api_key_env,
+    resolve_access_token_expire_minutes,
+    resolve_auth_mode,
+    resolve_database_url,
+    resolve_jwt_secret_key,
+    resolve_redis_url,
+    resolve_single_user_api_key,
+    single_user_api_key_env,
+)
 from tldw_Server_API.app.core.config_sections.precedence import resolve
 
 _SETTINGS_IMPORT_EXCEPTIONS = (
@@ -972,7 +981,7 @@ class Settings(BaseSettings):
         """Validate API key for single-user mode with deterministic test fallback."""
         if self.AUTH_MODE == "single_user":
             # If an explicit key is provided via env/.env, honor it (legacy API_KEY supported)
-            explicit_env_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
+            explicit_env_key = single_user_api_key_env() or api_key_env()
 
             # Detect explicit test contexts where the server should expose a
             # stable key so client tests can authenticate. Only rely on server
@@ -1375,16 +1384,24 @@ def _load_overrides_from_config() -> dict:
             # Map config key to Settings field if env var not set
             resolved = resolve((field,), (("AuthNZ", key),), config_parser=cfg, blank_env=True, blank_config=True)
             if resolved.source == "config":
-                with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+                with contextlib.suppress(*_SETTINGS_CAST_EXCEPTIONS):
                     overrides[field] = caster(resolved.value)
 
         resolved_mode = resolve_auth_mode(cfg)  # the raw text goes to pydantic, which rejects a bad mode
         if resolved_mode.source == "config":
-            with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+            with contextlib.suppress(*_SETTINGS_CAST_EXCEPTIONS):
                 overrides["AUTH_MODE"] = str(resolved_mode.value).strip()
-        maybe_set("DATABASE_URL", "database_url", lambda v: v.strip())
-        maybe_set("JWT_SECRET_KEY", "jwt_secret_key", lambda v: v.strip())
-        maybe_set("SINGLE_USER_API_KEY", "single_user_api_key", lambda v: v.strip())
+        resolved_url = resolve_database_url(cfg)
+        if resolved_url.source == "config":
+            overrides["DATABASE_URL"] = str(resolved_url.value).strip()
+        resolved_jwt = resolve_jwt_secret_key(cfg)
+        if resolved_jwt.source == "config":
+            with contextlib.suppress(*_SETTINGS_CAST_EXCEPTIONS):
+                overrides["JWT_SECRET_KEY"] = str(resolved_jwt.value).strip()
+        resolved_key = resolve_single_user_api_key(cfg)
+        if resolved_key.source == "config":
+            with contextlib.suppress(*_SETTINGS_CAST_EXCEPTIONS):
+                overrides["SINGLE_USER_API_KEY"] = str(resolved_key.value).strip()
         for field, key in _AUTHNZ_TRANSACTION_POLICY_CONFIG_KEYS:
             maybe_set(field, key, lambda v: v.strip())
         maybe_set("BYOK_ENABLED", "byok_enabled", _bool_from_str)
@@ -1442,7 +1459,10 @@ def _load_overrides_from_config() -> dict:
             "org_invite_allow_missing_email",
             _bool_from_str,
         )
-        maybe_set("ACCESS_TOKEN_EXPIRE_MINUTES", "access_token_expire_minutes", lambda v: int(v))
+        resolved_ttl = resolve_access_token_expire_minutes(cfg)
+        if resolved_ttl.source == "config":
+            with contextlib.suppress(*_SETTINGS_CAST_EXCEPTIONS):
+                overrides["ACCESS_TOKEN_EXPIRE_MINUTES"] = int(resolved_ttl.value)
         maybe_set("REFRESH_TOKEN_EXPIRE_DAYS", "refresh_token_expire_days", lambda v: int(v))
         maybe_set("MAGIC_LINK_EXPIRE_MINUTES", "magic_link_expire_minutes", lambda v: int(v))
         maybe_set("PUBLIC_WEB_BASE_URL", "public_web_base_url", lambda v: v.strip())
@@ -1461,7 +1481,10 @@ def _load_overrides_from_config() -> dict:
             "public_magic_link_path",
             lambda v: v.strip(),
         )
-        maybe_set("REDIS_URL", "redis_url", lambda v: v.strip())
+        resolved_redis = resolve_redis_url(cfg)
+        if resolved_redis.source == "config":
+            with contextlib.suppress(*_SETTINGS_CAST_EXCEPTIONS):
+                overrides["REDIS_URL"] = str(resolved_redis.value).strip()
         maybe_set("SECURITY_ALERTS_ENABLED", "security_alerts_enabled", _bool_from_str)
         maybe_set("SECURITY_ALERT_MIN_SEVERITY", "security_alert_min_severity", lambda v: v.strip())
         maybe_set("SECURITY_ALERT_FILE_PATH", "security_alert_file_path", lambda v: v.strip())
@@ -1489,29 +1512,6 @@ def _load_overrides_from_config() -> dict:
             "org_rbac_scoped_permission_denylist",
             _split_csv,
         )
-
-        # If DATABASE_URL is not provided via env or explicit key, synthesize from db_type fields
-        if os.getenv("DATABASE_URL") is None and "DATABASE_URL" not in overrides:
-            if cfg.has_option("AuthNZ", "db_type"):
-                db_type = cfg.get("AuthNZ", "db_type").strip().lower()
-                if db_type == "sqlite":
-                    # sqlite_path supports relative paths; default to Databases/users.db
-                    sqlite_path = cfg.get("AuthNZ", "sqlite_path", fallback="./Databases/users.db").strip()
-                    overrides["DATABASE_URL"] = f"sqlite:///{sqlite_path}"
-                elif db_type in {"postgres", "postgresql"}:
-                    host = cfg.get("AuthNZ", "pg_host", fallback="localhost").strip()
-                    port = cfg.get("AuthNZ", "pg_port", fallback="5432").strip()
-                    db   = cfg.get("AuthNZ", "pg_db", fallback="tldw_users").strip()
-                    user = cfg.get("AuthNZ", "pg_user", fallback="tldw_user").strip()
-                    # Do NOT silently synthesize with a placeholder password.
-                    pwd  = cfg.get("AuthNZ", "pg_password", fallback="").strip()
-                    sslm = cfg.get("AuthNZ", "pg_sslmode", fallback="prefer").strip()
-                    if not pwd:
-                        # Never synthesize with a placeholder password; leave DATABASE_URL unset.
-                        logger.warning("AuthNZ: pg_password not set in config.txt; not synthesizing DATABASE_URL.")
-                    else:
-                        overrides["DATABASE_URL"] = f"postgresql://{user}:{pwd}@{host}:{port}/{db}?sslmode={sslm}"
-                # else: ignore unknown types
     except _SETTINGS_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"AuthNZ settings: failed to load overrides from config.txt: {e}")
     return overrides

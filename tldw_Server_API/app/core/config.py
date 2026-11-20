@@ -13,6 +13,7 @@ from collections.abc import Mapping, MutableMapping
 from dataclasses import asdict
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urlparse
 
@@ -24,9 +25,21 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file
-from tldw_Server_API.app.core.config_sections.auth import load_auth_config
+from tldw_Server_API.app.core.config_sections.auth import (
+    api_key_env,
+    load_auth_config,
+    resolve_jwt_secret_key,
+    resolve_single_user_api_key,
+    resolve_single_user_fixed_id,
+)
+from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.config_sections.precedence import resolve
-from tldw_Server_API.app.core.config_sections.rag import contextual_defaults
+from tldw_Server_API.app.core.config_sections.rag import (
+    contextual_defaults,
+    resolve_default_llm_model,
+    resolve_default_llm_provider,
+)
+from tldw_Server_API.app.core.config_sections.redis import resolve_redis_url
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
     custom_openai_config_option_names,
@@ -991,15 +1004,14 @@ def load_settings():
     # --- Single-User Settings ---
     # Use a fixed ID for the single user's database path and cache key
     # Default to 1 for single-user mode (0 is typically reserved for system/admin)
-    single_user_fixed_id = int(os.getenv("SINGLE_USER_FIXED_ID", "1")) # Default to user ID 1
+    single_user_fixed_id = int(str(resolve_single_user_fixed_id(load_comprehensive_config()).value)) # Default to user ID 1
     # API Key for accessing the single-user instance
     # Check both SINGLE_USER_API_KEY (AuthNZ standard) and API_KEY (legacy) environment variables
-    single_user_api_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
+    single_user_api_key = resolve_single_user_api_key(load_comprehensive_config()).value or api_key_env()  # D1(d)
 
     # --- Multi-User Settings (JWT) ---
-    jwt_secret_key = os.getenv("JWT_SECRET_KEY", "a_very_insecure_default_secret_key_for_dev_only")
+    jwt_secret_key = resolve_jwt_secret_key(load_comprehensive_config(), default="a_very_insecure_default_secret_key_for_dev_only").value  # D1(f)
     jwt_algorithm = "HS256"
-    access_token_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
     # --- Redis Configuration ---
     # Initialize comprehensive_config early to avoid UnboundLocalError
@@ -1086,13 +1098,12 @@ def load_settings():
     except _CONFIG_NONCRITICAL_EXCEPTIONS:
         cache_ttl = 300
 
-    config_redis_url = _redis_section_get('redis_url')
-    redis_url_env = os.getenv("REDIS_URL")
-
-    if redis_url_env:
-        redis_url = redis_url_env
-    elif config_redis_url:
-        redis_url = config_redis_url
+    # The resolver reads the same `comprehensive_config` snapshot as the host/port options above.
+    resolved_redis = resolve_redis_url(SimpleNamespace(get=lambda _s, option, *, fallback=None: _redis_section_get(option, fallback)))
+    if resolved_redis.source == "env":
+        redis_url = resolved_redis.value
+    elif resolved_redis.source == "config":
+        redis_url = resolved_redis.value
         try:
             parsed = urlparse(redis_url)
             if parsed.hostname and not os.getenv("REDIS_HOST"):
@@ -1141,7 +1152,7 @@ def load_settings():
     # Main/central SQLite database: ACTUAL_PROJECT_ROOT/Databases/user_databases/<SINGLE_USER_FIXED_ID>/tldw.db
     default_main_db_path = (ACTUAL_PROJECT_ROOT / "Databases" / "user_databases" / f"{single_user_fixed_id}" / "tldw.db").resolve()
     default_database_url = f"sqlite:///{default_main_db_path}"
-    database_url = os.getenv("DATABASE_URL", default_database_url)
+    database_url = default_database_url if (env_url := database_url_env()) is None else env_url
 
     users_db_configured = os.getenv("USERS_DB_ENABLED", "false").lower() == "true"
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -1224,11 +1235,6 @@ def load_settings():
     )
 
     # Load comprehensive configurations (API keys, embedding settings, etc.)
-    # If SINGLE_USER_API_KEY wasn't present before, try reading again now that configs/.env may be loaded
-    if not single_user_api_key:
-        with contextlib.suppress(_CONFIG_NONCRITICAL_EXCEPTIONS):
-            single_user_api_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
-
 
     content_backend_mode = os.getenv("TLDW_CONTENT_DB_BACKEND", "sqlite").strip().lower()
 
@@ -1528,7 +1534,6 @@ def load_settings():
         # Multi User / Auth
         "JWT_SECRET_KEY": jwt_secret_key,
         "JWT_ALGORITHM": jwt_algorithm,
-        "ACCESS_TOKEN_EXPIRE_MINUTES": access_token_expire_minutes,
         "DATABASE_URL": database_url,
         "USER_DB_BASE_DIR": user_data_base_dir, # Renamed for clarity (was user_db_base_dir)
         "USERS_DB_CONFIGURED": users_db_configured,
@@ -2084,16 +2089,8 @@ def load_settings():
         ))(os.getenv('RAG_HYDE_MODEL'), load_comprehensive_config()),
 
         # RAG default LLM (used for general lightweight tasks like query expansion/gap analysis)
-        "RAG_DEFAULT_LLM_PROVIDER": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'default_llm_provider', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
-            )
-        ))(os.getenv('RAG_DEFAULT_LLM_PROVIDER'), load_comprehensive_config()),
-        "RAG_DEFAULT_LLM_MODEL": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'default_llm_model', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
-            )
-        ))(os.getenv('RAG_DEFAULT_LLM_MODEL'), load_comprehensive_config()),
+        "RAG_DEFAULT_LLM_PROVIDER": resolve_default_llm_provider(load_comprehensive_config()).value,
+        "RAG_DEFAULT_LLM_MODEL": resolve_default_llm_model(load_comprehensive_config()).value,
 
         # RAG default FTS level ('media' or 'chunk')
         "RAG_DEFAULT_FTS_LEVEL": (lambda _env, _cp: (
@@ -4321,14 +4318,13 @@ def load_and_log_configs(
             config_parser_object.get('RAG', 'default_llm_provider', fallback=None)
             if config_parser_object.has_section('RAG') else None
         )
-        rag_default_llm_provider = env.get("RAG_DEFAULT_LLM_PROVIDER") or configured_rag_provider
-        rag_default_llm_model = env.get("RAG_DEFAULT_LLM_MODEL") or (
-            config_parser_object.get('RAG', 'default_llm_model', fallback=None)
-            if config_parser_object.has_section('RAG') else None
-        )
+        resolved_rag_provider = resolve_default_llm_provider(config_parser_object, env=env)
+        rag_default_llm_provider = resolved_rag_provider.value
+        resolved_rag_model = resolve_default_llm_model(config_parser_object, env=env)
+        rag_default_llm_model = resolved_rag_model.value
         if (
-            env.get("RAG_DEFAULT_LLM_PROVIDER")
-            and not env.get("RAG_DEFAULT_LLM_MODEL")
+            resolved_rag_provider.source == "env"
+            and resolved_rag_model.source != "env"
             and canonical_provider_name(str(configured_rag_provider or "").strip() or default_api)
             != canonical_provider_name(rag_default_llm_provider)
         ):

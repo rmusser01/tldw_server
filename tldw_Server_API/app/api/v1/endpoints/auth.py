@@ -63,6 +63,7 @@ from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
     TokenResponse,
 )
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
+from tldw_Server_API.app.core.config_sections.auth import api_key_env, single_user_api_key_env
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditContext,
     AuditEventType,
@@ -1844,8 +1845,8 @@ async def login(
             # For single-user mode, return the configured API key as the access token.
             single_user_key = (
                 settings.SINGLE_USER_API_KEY
-                or os.getenv("SINGLE_USER_API_KEY")
-                or os.getenv("API_KEY")
+                or single_user_api_key_env()
+                or api_key_env()
             )
             if not single_user_key:
                 raise HTTPException(
@@ -2339,8 +2340,8 @@ async def refresh_token(
             # Simple token validation for single-user mode
             single_user_key = (
                 settings.SINGLE_USER_API_KEY
-                or os.getenv("SINGLE_USER_API_KEY")
-                or os.getenv("API_KEY")
+                or single_user_api_key_env()
+                or api_key_env()
             )
             if single_user_key and payload.refresh_token == single_user_key:
                 client_ip = resolve_client_ip(http_request, settings)
@@ -2435,8 +2436,8 @@ async def refresh_token(
         if settings.AUTH_MODE == "single_user":
             single_user_key = (
                 settings.SINGLE_USER_API_KEY
-                or os.getenv("SINGLE_USER_API_KEY")
-                or os.getenv("API_KEY")
+                or single_user_api_key_env()
+                or api_key_env()
             )
             if not single_user_key:
                 raise InvalidTokenError("Single-user API key is not configured")

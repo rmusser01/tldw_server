@@ -4,6 +4,7 @@ import json
 import os
 from dataclasses import dataclass
 
+from tldw_Server_API.app.core.config_sections.auth import api_key_env, jwt_secret_key_env, single_user_api_key_env
 from tldw_Server_API.app.core.Security.crypto import (
     decrypt_json_blob_with_key,
     encrypt_json_blob_with_key,
@@ -21,8 +22,8 @@ def _iter_admin_webhook_secret_keys() -> list[tuple[str, str]]:
         ("byok_primary", (os.getenv("BYOK_ENCRYPTION_KEY") or "").strip()),
         ("byok_secondary", (os.getenv("BYOK_SECONDARY_ENCRYPTION_KEY") or "").strip()),
         ("session_encryption", (os.getenv("SESSION_ENCRYPTION_KEY") or "").strip()),
-        ("jwt_secret", (os.getenv("JWT_SECRET_KEY") or "").strip()),
-        ("single_user_api_key", (os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY") or "").strip()),
+        ("jwt_secret", (jwt_secret_key_env() or "").strip()),
+        ("single_user_api_key", (single_user_api_key_env() or api_key_env() or "").strip()),
     ]
     candidates: list[tuple[str, str]] = []
     seen_values: set[str] = set()

@@ -184,7 +184,9 @@ class DatabaseConfig:
         import os
         import urllib.parse as _url
 
-        db_url = os.getenv("DATABASE_URL", "").strip()
+        from tldw_Server_API.app.core.config_sections.database import database_url_env
+
+        db_url = (database_url_env() or "").strip()
         if db_url:
             parsed = _url.urlparse(db_url)
             scheme = (parsed.scheme or "").lower()

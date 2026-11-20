@@ -70,6 +70,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import EMBEDDINGS_ADMIN, SYSTEM
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
+from tldw_Server_API.app.core.config_sections.redis import redis_url_env
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
@@ -566,7 +567,7 @@ def _is_embeddings_backpressure_redis_enabled() -> bool:
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         pass
 
-    return bool(os.getenv("EMBEDDINGS_REDIS_URL") or os.getenv("REDIS_URL"))
+    return bool(os.getenv("EMBEDDINGS_REDIS_URL") or redis_url_env())
 
 
 def _should_enforce_tenant_rps(request: Request) -> bool:
