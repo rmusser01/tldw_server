@@ -45,7 +45,12 @@ from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.username_utils import normalize_admin_username
 from tldw_Server_API.app.core.config import get_tldw_env_file_path, is_tldw_env_file_exclusive
-from tldw_Server_API.app.core.config_sections.auth import auth_mode_env, jwt_secret_key_env
+from tldw_Server_API.app.core.config_sections.auth import (
+    api_key_env,
+    auth_mode_env,
+    jwt_secret_key_env,
+    single_user_api_key_env,
+)
 from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.DB_Management.Users_DB import ensure_user_directories, get_users_db
 from tldw_Server_API.app.core.testing import is_test_mode
@@ -253,8 +258,8 @@ def _detect_env_issues(auth_mode: str, env_values: dict[str, str]) -> tuple[set[
 
     if mode == "single_user":
         single_key = (
-            _effective_env_value("SINGLE_USER_API_KEY", env_values)
-            or _effective_env_value("API_KEY", env_values)
+            _normalize_env_value(single_user_api_key_env() or env_values.get("SINGLE_USER_API_KEY"))
+            or _normalize_env_value(api_key_env() or env_values.get("API_KEY"))
         )
         if not single_key:
             missing_keys.add("SINGLE_USER_API_KEY")
@@ -784,7 +789,7 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
     except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS:
         effective_auth_mode = None
     try:
-        effective_single_user_api_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
+        effective_single_user_api_key = single_user_api_key_env() or api_key_env()
     except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS:
         effective_single_user_api_key = None
 

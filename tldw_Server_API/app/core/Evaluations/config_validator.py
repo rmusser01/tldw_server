@@ -11,7 +11,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.config_sections.auth import load_auth_config, resolve_jwt_secret_key
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config, resolve_jwt_secret_key, resolve_single_user_api_key
 
 
 @dataclass
@@ -85,7 +85,9 @@ class EvaluationConfigValidator:
 
         if auth_mode == "single_user":
             # Check for API key configuration
-            api_key = os.getenv("API_BEARER") or os.getenv("SINGLE_USER_API_KEY")
+            from tldw_Server_API.app.core.config import load_comprehensive_config
+
+            api_key = os.getenv("API_BEARER") or resolve_single_user_api_key(load_comprehensive_config()).value
 
             if not api_key:
                 self.issues.append(ConfigurationIssue(

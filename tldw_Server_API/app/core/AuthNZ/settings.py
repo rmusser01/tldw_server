@@ -22,11 +22,14 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode
 
 from tldw_Server_API.app.core.config_sections.auth import (
+    api_key_env,
     resolve_access_token_expire_minutes,
     resolve_auth_mode,
     resolve_database_url,
     resolve_jwt_secret_key,
     resolve_redis_url,
+    resolve_single_user_api_key,
+    single_user_api_key_env,
 )
 from tldw_Server_API.app.core.config_sections.precedence import resolve
 
@@ -978,7 +981,7 @@ class Settings(BaseSettings):
         """Validate API key for single-user mode with deterministic test fallback."""
         if self.AUTH_MODE == "single_user":
             # If an explicit key is provided via env/.env, honor it (legacy API_KEY supported)
-            explicit_env_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
+            explicit_env_key = single_user_api_key_env() or api_key_env()
 
             # Detect explicit test contexts where the server should expose a
             # stable key so client tests can authenticate. Only rely on server
@@ -1395,7 +1398,10 @@ def _load_overrides_from_config() -> dict:
         if resolved_jwt.source == "config":
             with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
                 overrides["JWT_SECRET_KEY"] = str(resolved_jwt.value).strip()
-        maybe_set("SINGLE_USER_API_KEY", "single_user_api_key", lambda v: v.strip())
+        resolved_key = resolve_single_user_api_key(cfg)
+        if resolved_key.source == "config":
+            with contextlib.suppress(_SETTINGS_CAST_EXCEPTIONS):
+                overrides["SINGLE_USER_API_KEY"] = str(resolved_key.value).strip()
         for field, key in _AUTHNZ_TRANSACTION_POLICY_CONFIG_KEYS:
             maybe_set(field, key, lambda v: v.strip())
         maybe_set("BYOK_ENABLED", "byok_enabled", _bool_from_str)

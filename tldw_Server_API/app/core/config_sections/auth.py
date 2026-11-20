@@ -83,6 +83,28 @@ def jwt_secret_key_env(env: Mapping[str, str] | None = None) -> str | None:
     return resolve(("JWT_SECRET_KEY",), env=env, blank_env=True).value
 
 
+def resolve_single_user_api_key(config_parser: ConfigParserLike | None, env: Mapping[str, str] | None = None) -> Resolved:
+    """The AuthNZ overlay's rule: env ``SINGLE_USER_API_KEY``, then ``[AuthNZ] single_user_api_key``; blank values count as set.
+
+    The legacy ``API_KEY`` alias is not a layer here; callers that honour it use ``api_key_env``.
+    The secret is never logged and never put in ``origin``.
+    """
+    return resolve(
+        ("SINGLE_USER_API_KEY",), (("AuthNZ", "single_user_api_key"),), config_parser=config_parser, env=env,
+        blank_env=True, blank_config=True,
+    )
+
+
+def single_user_api_key_env(env: Mapping[str, str] | None = None) -> str | None:
+    """The environment layer alone: the live ``SINGLE_USER_API_KEY`` text, blank kept, ``None`` when unset."""
+    return resolve(("SINGLE_USER_API_KEY",), env=env, blank_env=True).value
+
+
+def api_key_env(env: Mapping[str, str] | None = None) -> str | None:
+    """The legacy ``API_KEY`` alias, live, blank kept, ``None`` when unset."""
+    return resolve(("API_KEY",), env=env, blank_env=True).value
+
+
 def resolve_redis_url(config_parser: ConfigParserLike | None, env: Mapping[str, str] | None = None) -> Resolved:
     """The AuthNZ overlay's rule: env ``REDIS_URL``, then ``[AuthNZ] redis_url``; blank values count as set.
 

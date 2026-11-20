@@ -26,7 +26,9 @@ from loguru import logger
 from tldw_Server_API.app.core.config_paths import resolve_config_file
 from tldw_Server_API.app.core.config_sections.auth import (
     load_auth_config,
+    api_key_env,
     resolve_jwt_secret_key,
+    resolve_single_user_api_key,
     resolve_single_user_fixed_id,
 )
 from tldw_Server_API.app.core.config_sections.database import database_url_env
@@ -999,7 +1001,7 @@ def load_settings():
     single_user_fixed_id = int(str(resolve_single_user_fixed_id(load_comprehensive_config()).value)) # Default to user ID 1
     # API Key for accessing the single-user instance
     # Check both SINGLE_USER_API_KEY (AuthNZ standard) and API_KEY (legacy) environment variables
-    single_user_api_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
+    single_user_api_key = resolve_single_user_api_key(load_comprehensive_config()).value or api_key_env()  # D1(d)
 
     # --- Multi-User Settings (JWT) ---
     jwt_secret_key = resolve_jwt_secret_key(load_comprehensive_config(), default="a_very_insecure_default_secret_key_for_dev_only").value  # D1(f)
@@ -1227,11 +1229,6 @@ def load_settings():
     )
 
     # Load comprehensive configurations (API keys, embedding settings, etc.)
-    # If SINGLE_USER_API_KEY wasn't present before, try reading again now that configs/.env may be loaded
-    if not single_user_api_key:
-        with contextlib.suppress(_CONFIG_NONCRITICAL_EXCEPTIONS):
-            single_user_api_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
-
 
     content_backend_mode = os.getenv("TLDW_CONTENT_DB_BACKEND", "sqlite").strip().lower()
 

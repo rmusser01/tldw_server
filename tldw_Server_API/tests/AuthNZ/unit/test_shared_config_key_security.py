@@ -84,8 +84,8 @@ def test_webhook_secret_ring_still_decrypts(monkeypatch):
     assert ring.decrypt_admin_webhook_secret(stored.encrypted_blob) == "s"
 
 
-@pytest.mark.parametrize("key", ["env_alias", "config"])
-def test_single_user_api_key_accepted_keys(monkeypatch, key):
+@pytest.mark.parametrize(("key", "expected_status"), [("env_alias", 401), ("config", 200)])
+def test_single_user_api_key_accepted_keys(monkeypatch, key, expected_status):
     """Row 7, D1(e): require_token_scope accepts AuthNZ's resolved key; a legacy env key that differs is refused.
 
     Y is ``[AuthNZ] single_user_api_key``, which AuthNZ resolves; X is the legacy env ``API_KEY``.
@@ -128,4 +128,4 @@ def test_single_user_api_key_accepted_keys(monkeypatch, key):
         status = exc.status_code
     finally:
         authnz_settings.reset_settings()
-    assert status == 200  # TODAY: both X and Y authenticate
+    assert status == expected_status

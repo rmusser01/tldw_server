@@ -1,8 +1,8 @@
 """One test per shared config key, pinning where it resolves today (TASK-13950.21, Task 7).
 
-Row 1: ``AUTH_MODE`` (alias ``APP_MODE``). Row 2: ``SINGLE_USER_FIXED_ID``. Row 3: ``ACCESS_TOKEN_EXPIRE_MINUTES``. Row 5: ``REDIS_URL``. Row 6: ``JWT_SECRET_KEY``. Every surface that reads the key is exercised through
+Row 1: ``AUTH_MODE`` (alias ``APP_MODE``). Row 2: ``SINGLE_USER_FIXED_ID``. Row 3: ``ACCESS_TOKEN_EXPIRE_MINUTES``. Row 5: ``REDIS_URL``. Row 6: ``JWT_SECRET_KEY``. Row 7: ``SINGLE_USER_API_KEY`` (alias ``API_KEY``). Every surface that reads the key is exercised through
 its nearest callable, over the same input cases. The commit that moved the key changed only the
-expected values the owner approved (D1 a-c).
+expected values the owner approved (D1 a-g).
 """
 
 from __future__ import annotations
@@ -35,8 +35,11 @@ from tldw_Server_API.app.core.config_sections.auth import (
     resolve_database_url,
     resolve_jwt_secret_key,
     resolve_redis_url,
+    resolve_single_user_api_key,
     resolve_single_user_fixed_id,
+    single_user_api_key_env,
     single_user_fixed_id_env,
+    api_key_env,
 )
 from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.config_sections.precedence import Resolved
@@ -1083,14 +1086,15 @@ def apply_suk_case(monkeypatch):
 
 
 # AuthNZ's field (single-user mode); LazySettings' entry; the validator's "no API key" error;
-# the setup wizard's "required" issue.
+# the setup wizard's "required" issue. D1(d): LazySettings and the validator now see
+# [AuthNZ] single_user_api_key; the wizard reads the environment layer only.
 SUK_EXPECTED = {
     #                    AuthNZ  LazySettings validator_error wizard_required
     "env_set": (SUK_E, SUK_E, False, False),
     "env_blank": (ERR, None, True, True),
-    "api_key_only": (SUK_C, SUK_A, True, False),  # the config overlay beats the API_KEY fallback
+    "api_key_only": (SUK_C, SUK_C, False, False),  # the config overlay beats the API_KEY fallback
     "env_and_api_key": (SUK_E, SUK_E, False, False),
-    "config_only": (SUK_C, None, True, True),
+    "config_only": (SUK_C, SUK_C, False, True),
     "config_blank": (ERR, None, True, True),
     "neither": (ERR, None, True, True),
 }
@@ -1161,3 +1165,46 @@ def test_prototype_signing_secret_readers_use_the_live_env_single_user_key_today
         else:  # the alias is not read here
             with pytest.raises(RuntimeError):
                 module._resolve_stable_signing_secret(None)
+
+
+def _suk_parser(value):
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.add_section("AuthNZ")
+    if value is not None:
+        parser.set("AuthNZ", "single_user_api_key", value)
+    return parser
+
+
+@pytest.mark.parametrize(
+    ("env", "cfg", "expected"),
+    [
+        ({"SINGLE_USER_API_KEY": "e"}, "c", Resolved("e", "env", "SINGLE_USER_API_KEY")),
+        ({"SINGLE_USER_API_KEY": ""}, "c", Resolved("", "env", "SINGLE_USER_API_KEY")),
+        ({"API_KEY": "a"}, "c", Resolved("c", "config", "AuthNZ.single_user_api_key")),
+        ({}, "c", Resolved("c", "config", "AuthNZ.single_user_api_key")),
+        ({}, "", Resolved("", "config", "AuthNZ.single_user_api_key")),
+        ({"API_KEY": "a"}, UNSET, Resolved(None, "default", None)),
+    ],
+)
+def test_single_user_api_key_resolves_through_config_sections(env, cfg, expected):
+    assert resolve_single_user_api_key(_suk_parser(cfg), env=env) == expected
+
+
+def test_single_user_api_key_accessors_are_env_only_blank_kept_and_live(monkeypatch):
+    for name, accessor in (("SINGLE_USER_API_KEY", single_user_api_key_env), ("API_KEY", api_key_env)):
+        monkeypatch.delenv(name, raising=False)
+        assert accessor() is None
+        monkeypatch.setenv(name, "")
+        assert accessor() == ""
+        monkeypatch.setenv(name, "s3cret")
+        assert accessor() == "s3cret"
+        assert accessor({name: "y"}) == "y"
+        assert accessor({}) is None
+
+
+def test_resolve_single_user_api_key_never_puts_the_secret_in_origin():
+    for resolved in (
+        resolve_single_user_api_key(_suk_parser("s3cret"), env={}),
+        resolve_single_user_api_key(_suk_parser(None), env={"SINGLE_USER_API_KEY": "s3cret"}),
+    ):
+        assert resolved.value == "s3cret" and "s3cret" not in str(resolved.origin)
