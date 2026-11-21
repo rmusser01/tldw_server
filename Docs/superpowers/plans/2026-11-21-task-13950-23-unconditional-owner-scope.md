@@ -91,16 +91,18 @@
    - the re-keyed scope-predicate ratchet, which moves there from "Enforce tenant isolation ratchets".
 
    **Why:** the owner-scope ratchet is `_ceilings`-based and needs `BACKLOG_TASK_FORMAT_BASE`, which only that step sets. The scope-predicate ratchet moves only because AC6 names that step. **Cost if wrong:** moving two lines back.
-4. **AC4: a required Postgres job plus skip-as-failure.**
-   - A new job, `chacha-owner-isolation` in `backend-required.yml`, runs every test file marked `owner_isolation` with `TLDW_TEST_POSTGRES_REQUIRED=1`. It has its own Postgres service and runs in parallel.
-   - The required job `backend-required` gains `needs: chacha-owner-isolation` and a "Require ChaCha owner isolation to have passed" step, following the `non-utc-tests` pattern (`backend-required.yml:66-80`, `:245-258`).
-   - The Postgres plugin turns a skipped `owner_isolation` test into a failure whenever that variable is set, so this holds in the nightly shards too.
-
-   **Why:**
-   - Postgres shards do not run on dev PRs, so without this SQLite-only CI still cannot see a missing owner.
-   - The files take about 7 minutes. backend-required used 28 of its 45 minutes, so a step inside it would leave too little margin.
-
-   **Cost if wrong:** one extra runner per backend PR.
+4. **AC4: a path-gated required Postgres job plus skip-as-failure.** The owner decided this on 2026-11-21 ("Only when ChaCha changes").
+   - **The job:** a new job, `chacha-owner-isolation` in `backend-required.yml`, runs every test file marked `owner_isolation` with `TLDW_TEST_POSTGRES_REQUIRED=1`. It has its own Postgres service and runs in parallel.
+     - It runs only when a new path-classifier flag, `chacha_owner_scope_changed`, is true.
+     - Otherwise it is skipped, and the required check accepts the skip.
+   - **The required check:** `backend-required` gains `needs: chacha-owner-isolation` and a "Require ChaCha owner isolation to have passed" step, following the `non-utc-tests` pattern (`backend-required.yml:66-80`, `:245-258`).
+   - **Skip-as-failure:** the Postgres plugin turns a skipped `owner_isolation` test into a failure whenever that variable is set, so this holds in the nightly shards too.
+   - **Why:**
+     - Postgres shards do not run on dev PRs.
+     - The files take 7 to 27 minutes. 3a measured 27:03 serially under load; `-n 2` fails xdist collection on non-deterministic parametrize ids.
+     - The owner does not want an extra runner on every backend PR, because CI runners are the bottleneck.
+   - **Cost if wrong:** a ChaCha owner regression in a PR whose paths miss the flag is caught only nightly. The flag's path list is reviewed in Task 3b.
+   - **All `backend-required.yml` edits for Task 3 are in PR C2 (Task 3b).** The classifier denied the 3a implementer's one-line workflow edit. The owner then chose this design, and C1 stays workflow-free.
 5. **AC5 key shape:** `<path>::<qualname> if <scope>`.
    - A second finding with the same key takes a `#2` suffix. Number findings by `(lineno, col_offset)` within the key, since `ast.walk` order is not source order. Module-level code uses `<module>`.
    - Baseline semantics stay exact-match, a set of strings.
@@ -329,9 +331,25 @@ A `raise` body, `return None` and non-owner parameters do not count.
 ### Task 3b: The required `chacha-owner-isolation` job (AC4 part 2, AC6)
 
 **Files:**
-- Modify: `.github/workflows/backend-required.yml`: a new job, plus one step and a `needs` entry in `backend-required`.
+- Modify: `.github/workflows/backend-required.yml`:
+  - a new job, plus one step and a `needs` entry in `backend-required`;
+  - the `changes` job's `outputs` gains `chacha_owner_scope_changed`;
+  - the CI-contracts step gains the 3a self-test path.
+- Modify: `Helper_Scripts/ci/path_classifier.py` (`classify_paths`) and its tests, adding the flag `chacha_owner_scope_changed`. `.github/actions/detect-required-gate-changes/action.yml` gains the matching output. The flag is true when any changed path is one of:
+  - `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py`;
+  - `tldw_Server_API/app/core/DB_Management/chacha/**`;
+  - `tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py`;
+  - `tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py`;
+  - `tldw_Server_API/app/core/Character_Chat/chacha_db_provider.py`;
+  - `tldw_Server_API/tests/_plugins/postgres.py`;
+  - any file carrying the `owner_isolation` marker (list them explicitly; the contract test checks the list equals the marked set);
+  - `.github/workflows/backend-required.yml`;
+  - `Helper_Scripts/ci/path_classifier.py`;
+  - `pyproject.toml`, `uv.lock`.
 - Modify: `tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py`:
   - the bidirectional contract and its mutation tests;
+  - `TEST_SEAM_GATE_SUITES`, plus the CI-contracts step line, for Task 3a's self-test `tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py`. 3a deliberately left both out;
+  - `CHANGE_CLASSIFIER_OUTPUTS` (`:273`), for the new flag;
   - the license-first job inventories the new job forces: `ORIGINAL_JOB_NAMES` (`:111`), `ORIGINAL_DEPENDENCIES` (`:166-169`; the new job needs `changes` and `await_license` like `non-utc-tests`, and `backend-required` gains it), `DIRECT_ADMISSION_JOBS` (`:225-227`), `FETCH_DEPTH_CHECKOUTS` (`:258`), and the `extra_condition` branch near `:726`. Mirror every place `non-utc-tests` appears. `DIRECT_TRIGGER_DIGESTS` hashes only the `on:` block, so it is unchanged.
 
 **Interfaces:**
@@ -360,7 +378,16 @@ A `raise` body, `return None` and non-owner parameters do not count.
     | remove it from `backend-required.needs` | `["backend-required does not wait for chacha-owner-isolation"]` |
 - [ ] **Step 2: Run them, and expect FAIL** (no job yet).
 - [ ] **Step 3: Add the job and the required check.**
-  - Copy the `non-utc-tests` job's `needs` and `if:` (`:66-80`) and the `backend-required` job's `services.postgres` block, including its conditional `image:` guard. Give it `timeout-minutes: 25` and the same checkout and setup steps as `backend-required` (`:263-288`).
+  - Copy the `non-utc-tests` job's `needs` and `if:` (`:66-80`), and add `&& needs.changes.outputs.chacha_owner_scope_changed == 'true'` to the `if:`.
+  - Copy the `backend-required` job's `services.postgres` block, including its conditional `image:` guard, conditioned on the same flag.
+  - Run serially, with no `-n`, since `-n 2` fails collection. Set `timeout-minutes: 40`, and record `--durations=15` in the report.
+  - The required check accepts:
+    - `true:true:success`;
+    - `true:false:skipped`;
+    - `false:*:skipped`.
+
+    Here the tuple is `backend_changed:chacha_owner_scope_changed:result`. Anything else fails.
+  - Give the job the same checkout and setup steps as `backend-required` (`:263-288`).
   - Its test step:
     ```yaml
           - name: ChaCha owner isolation on PostgreSQL
@@ -390,7 +417,6 @@ A `raise` body, `return None` and non-owner parameters do not count.
     ```
     The dry run confirmed the env names. The plugin loads through the root `conftest.py` `pytest_plugins`, so autoload being off is fine. Keep `-p pytest_asyncio.plugin`, as in the teardown step.
   - **The junit check** maps each testcase's `classname` to its file. It exits non-zero if any listed file has zero passing cases, or if any case is skipped. That catches collection-time skips the hook cannot see.
-  - **Gate the runtime.** If the local C3 wall time is over 12 minutes, add `-p xdist.plugin -n 2` to the CI command; autoload is off there, so the explicit `-p` is correct. Record both times.
   - **The required check** goes in `backend-required`, next to "Require non-UTC timestamp tests to have passed", with the same `case` shape on `needs.chacha-owner-isolation.result`. Add `chacha-owner-isolation` to `backend-required.needs`.
 - [ ] **Step 4: Verify.** Run C1 and the whole `tldw_Server_API/tests/CI` directory. Then run `actionlint .github/workflows/backend-required.yml` if it is installed; otherwise rely on the `actionlint.yml` CI job.
 - [ ] **Step 5: Commit** `ci: run ChaCha owner isolation on PostgreSQL as a required job (TASK-13950.23 PR C2)`.
@@ -555,7 +581,7 @@ Each opt-out carries a one-line `# OwnerScope.NOT_APPLICABLE: <reason>` comment.
   - **Self-test outside the required gate and the text-search marker detection** (review I2) → added to `TEST_SEAM_GATE_SUITES`; detection is now by AST.
   - **Collection-time skips** (review I3, dry run C5) → removed `importorskip`, plus the junit check.
   - **File selection** (review I4) → added `test_chacha_message_store.py` and wrote down the selection rule.
-  - **Runtime** (review I5, dry run C4) → a separate parallel job with `timeout-minutes: 25`, plus an `-n 2` rule.
+  - **Runtime** (review I5, dry run C4) → a separate parallel job, path-gated per the owner's 2026-11-21 decision, run serially with `timeout-minutes: 40`.
   - **moodboard_notes** (review I6) → that branch is unreachable on PostgreSQL; it opts out because a real owner would raise.
   - **Writing getters** (dry run C2) → the tests target the generic-helper methods.
   - **Dry run C6-C12 and review M1-M6** → each applied in its step.
