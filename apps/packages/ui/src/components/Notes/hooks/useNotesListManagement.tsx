@@ -1237,13 +1237,19 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   }, [clearSearchQueryTimeout, query, queryInput])
 
   // ---- bulk selection sync with visible ids ----
-  // Switching between Notes and Trash starts a fresh selection.
+  // Switching between Notes and Trash starts a fresh selection. The reset
+  // happens in the render that first sees the new mode; a reset in an effect
+  // can land after a later render, which then shows the old selection.
+  const [bulkSelectionListMode, setBulkSelectionListMode] = React.useState(listMode)
+  if (bulkSelectionListMode !== listMode) {
+    setBulkSelectionListMode(listMode)
+    setTrashQueryState('')
+    setBulkSelectedIds([])
+  }
   const bulkSelectionListModeRef = React.useRef(listMode)
   React.useEffect(() => {
     if (bulkSelectionListModeRef.current !== listMode) {
       bulkSelectionListModeRef.current = listMode
-      setTrashQueryState('')
-      setBulkSelectedIds([])
       bulkSelectionAnchorRef.current.value = null
       return
     }

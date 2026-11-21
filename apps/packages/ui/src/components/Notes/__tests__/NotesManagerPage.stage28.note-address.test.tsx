@@ -472,8 +472,10 @@ describe.each([
     fireEvent.change(editor(), { target: { value: "Alpha body, edited" } })
 
     fireEvent.click(screen.getByRole("button", { name: "Palette New note" }))
-    // The save fails, so the page asks; the user stays on the note.
-    fireEvent.click(await screen.findByRole("button", { name: "Stay on this note" }))
+    // The save fails, so the page asks; the user stays on the note. The ask
+    // comes about 2 s after the click locally (the page's renders are slow in
+    // jsdom), past the 1 s default on slower CI runners.
+    fireEvent.click(await screen.findByRole("button", { name: "Stay on this note" }, { timeout: 5000 }))
 
     await waitFor(() => expect(address()).toBe("/notes?note=11"))
     await settle()
