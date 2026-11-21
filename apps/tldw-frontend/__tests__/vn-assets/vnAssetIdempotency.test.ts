@@ -19,8 +19,13 @@ describe('VN asset idempotency keys', () => {
   });
 
   it('supports self-hosted HTTP without randomUUID', () => {
-    vi.stubGlobal('crypto', {});
-    expect(createVNAssetIdempotencyKey('vn-generation')).toMatch(/^vn-generation-\d+-[a-z0-9]+$/);
+    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => bytes.fill(0xab) });
+    expect(createVNAssetIdempotencyKey('vn-generation')).toBe(`vn-generation-${'ab'.repeat(16)}`);
+  });
+
+  it('reports missing cryptographic randomness instead of producing a key', () => {
+    vi.stubGlobal('crypto', undefined);
+    expect(() => createVNAssetIdempotencyKey('vn-generation')).toThrow('Secure random generation is unavailable');
   });
 });
 

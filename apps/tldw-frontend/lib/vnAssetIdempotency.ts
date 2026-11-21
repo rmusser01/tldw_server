@@ -1,9 +1,6 @@
 import { createVNCommandScope, sameVNCommandScope, type VNCommandScope } from '@web/lib/vnGenerationRecovery';
 
-export function createVNAssetIdempotencyKey(prefix: string): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  return `${prefix}-${uuid ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
-}
+export { createVNIdempotencyKey as createVNAssetIdempotencyKey } from '@web/lib/vnIdempotencyKey';
 
 export interface PendingVNAssetGeneration {
   kind: 'start' | 'retry';

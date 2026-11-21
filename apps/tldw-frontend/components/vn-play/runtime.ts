@@ -1,3 +1,5 @@
+export { createVNIdempotencyKey as createVNPlayIdempotencyKey } from '@web/lib/vnIdempotencyKey';
+
 export interface VNPlayErrorInfo {
   code?: string;
   message: string;
@@ -47,11 +49,6 @@ function readMessage(record: Record<string, unknown> | null): string | undefined
     readMessage(asRecord(details)) ??
     readCode(record)
   );
-}
-
-export function createVNPlayIdempotencyKey(prefix: string): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  return `${prefix}-${uuid ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
 
 export function getVNPlayErrorInfo(error: unknown): VNPlayErrorInfo {

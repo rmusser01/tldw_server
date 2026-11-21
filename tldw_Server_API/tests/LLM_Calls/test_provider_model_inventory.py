@@ -507,6 +507,14 @@ def test_success_cache_scopes_provider_endpoint_and_credential_digest(inventory)
     assert "credential-B" not in repr(inventory._CACHE)
 
 
+def test_credential_cache_key_is_not_an_unkeyed_digest(inventory):
+    from hashlib import sha256
+
+    _, _, fingerprint, _ = inventory._cache_key("openai", "https://api.openai.com/v1", "credential-A")
+
+    assert fingerprint != sha256(b"credential-A").hexdigest()
+
+
 def test_ttl_is_300_seconds_and_expired_failure_cannot_reuse_old_cache(inventory, monkeypatch):
     now = [0.0]
     monkeypatch.setattr(inventory.time, "monotonic", lambda: now[0])
