@@ -135,7 +135,7 @@ vi.mock('@/hooks/useAntdMessage', () => ({
 }))
 
 const streamChunk = (text: string) =>
-  `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}`
+  `data: ${JSON.stringify({ tldw_media_source_sha256: "a".repeat(64), choices: [{ delta: { content: text } }] })}`
 
 const createAbortableStream = (finalText: string) => {
   return ({ abortSignal }: { abortSignal?: AbortSignal }) =>
@@ -186,7 +186,6 @@ describe('AnalysisModal stage 1 cancel plumbing', () => {
         open
         onClose={vi.fn()}
         mediaId={42}
-        mediaContent="input media content"
       />
     )
 
@@ -217,7 +216,7 @@ describe('AnalysisModal stage 1 cancel plumbing', () => {
     expect(streamCall.abortSignal?.aborted).toBe(true)
     expect(mocks.bgRequest).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        path: '/api/v1/chat/completions',
+        path: '/api/v1/chat/completions/media/42',
         method: 'POST'
       })
     )
@@ -233,7 +232,7 @@ describe('AnalysisModal stage 1 cancel plumbing', () => {
       },
     }));
     mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
-      if (request.path === '/api/v1/chat/completions' && request.method === 'POST') {
+      if (request.path === '/api/v1/chat/completions/media/42' && request.method === 'POST') {
         throw new Error('fallback failed')
       }
       return {}
@@ -244,7 +243,6 @@ describe('AnalysisModal stage 1 cancel plumbing', () => {
         open
         onClose={vi.fn()}
         mediaId={42}
-        mediaContent="input media content"
       />
     )
 
@@ -289,7 +287,6 @@ describe('AnalysisModal stage 1 cancel plumbing', () => {
         open
         onClose={onClose}
         mediaId={42}
-        mediaContent="input media content"
         onAnalysisGenerated={onAnalysisGenerated}
       />
     )

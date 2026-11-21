@@ -124,7 +124,7 @@
       "count": 1
     },
     "no-restricted-syntax": {
-      "count": 6
+      "count": 3
     }
   },
   "packages/ui/src/components/Media/ContentEditModal.tsx": {

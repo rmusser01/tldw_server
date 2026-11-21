@@ -1966,7 +1966,6 @@ export function ContentViewer({
             open={modals.analysisModalOpen}
             onClose={() => modals.setAnalysisModalOpen(false)}
             mediaId={selectedMedia.id}
-            mediaContent={content}
             onAnalysisGenerated={(analysisText) => {
               if (analysisText) {
                 editState.setOptimisticAnalysis(analysisText)

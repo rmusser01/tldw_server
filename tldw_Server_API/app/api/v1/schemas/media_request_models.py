@@ -81,12 +81,20 @@ class MediaKeywordsUpdateRequest(BaseModel):
 
 # Make prompt and analysis_content REQUIRED so missing them yields 422
 class VersionCreateRequest(BaseModel):
-    content: str = Field(..., max_length=5000000, description="Content (max 5MB)")
+    content: str | None = Field(None, max_length=5000000, description="Content, or omit with the analyzed source hash")
+    source_sha256: str | None = Field(None, pattern=r"^[0-9a-f]{64}$", description="Hash of the saved text analyzed")
     prompt: str = Field(..., max_length=10000, description="Prompt (max 10KB)")
     analysis_content: str = Field(..., max_length=100000, description="Analysis content (max 100KB)")
     safe_metadata: Optional[dict[str, Any]] = Field(
         None, description="Optional safe metadata JSON to store with this version."
     )
+
+
+    @model_validator(mode="after")
+    def require_text_or_source(self):
+        if self.content is None and self.source_sha256 is None:
+            raise ValueError("Content or the analyzed source hash is required.")
+        return self
 
 
 class VersionResponse(BaseModel):
