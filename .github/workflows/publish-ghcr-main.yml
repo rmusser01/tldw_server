@@ -1,8 +1,7 @@
 name: publish-ghcr-main
 
 on:
-  push:
-    branches: [main]
+  workflow_call:
 
 concurrency:
   group: publish-ghcr-main-${{ github.ref }}

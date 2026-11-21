@@ -1332,5 +1332,13 @@ async def run_data_tables_jobs_worker(stop_event: asyncio.Event | None = None) -
                 await stop_watcher_task
 
 
+async def main() -> None:
+    """Load the provider-override store, then take jobs: every LLM call refuses until it is loaded (TASK-15581)."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import standalone_llm_provider_overrides
+
+    async with standalone_llm_provider_overrides():
+        await run_data_tables_jobs_worker()
+
+
 if __name__ == "__main__":
-    asyncio.run(run_data_tables_jobs_worker())
+    asyncio.run(main())

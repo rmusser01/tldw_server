@@ -14,7 +14,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCallCredentials,
     ProviderCredentialRuntime,
 )
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import ChatConfigurationError, LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
 from tldw_Server_API.app.core.Usage import llm_accounting, llm_quota_gate, quota_resolver
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
@@ -473,6 +473,241 @@ async def test_a_provider_method_nested_in_a_stream_is_not_checked_again(refused
         else:
             chunks = [chunk async for chunk in await _AwaitedFirst().astream(request)]
     assert (chunks, checks) == (["hi"], ["body"] if source == "user" else [7, "body"])
+
+
+# An admin override for openai that refuses REQUEST's model "m1", by its reason (TASK-15581).
+_DISABLES = {"provider_disabled": {"is_enabled": False}, "model_not_allowed": {"allowed_models": ["x"]}}
+
+
+def _admin_override(**override_kwargs: Any) -> None:
+    """Give openai one admin provider override."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    set_llm_provider_overrides_cache_for_tests({"openai": LLMProviderOverride(provider="openai", **override_kwargs)})
+
+
+async def _call(method: str, request: dict[str, Any]) -> Any:
+    """One call through ``method`` of the accounted provider; a stream is read to its end."""
+    if method == "chat":
+        return _Provider().chat(request)
+    if method == "achat":
+        return await _Provider().achat(request)
+    if method == "stream":
+        return list(_Provider().stream(request))
+    return [line async for line in _Provider().astream(request)]
+
+
+_METHODS = pytest.mark.parametrize("method", ["chat", "achat", "stream", "astream"])
+
+
+@_METHODS
+@pytest.mark.parametrize("reason", sorted(_DISABLES))
+@pytest.mark.parametrize(
+    "source", ["user", "team", "org", "server_default", None], ids=["user", "team", "org", "server", "no-handle"]
+)
+async def test_an_admin_disabled_provider_or_model_is_refused_on_every_key(refused, method, reason, source) -> None:
+    """TASK-15581, the owner's rule: whatever the key, the provider base class refuses the call before the provider
+    runs or the limit is checked, so nothing is recorded; the error code is the reason."""
+    _admin_override(**_DISABLES[reason])
+    request = dict(REQUEST)
+    if source is not None:
+        request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = await _handle(source)
+
+    with llm_call_context(user_id=7), pytest.raises(ChatConfigurationError) as refusal:
+        await _call(method, request)
+    await llm_accounting.drain_accounting()
+    assert (refusal.value.error_code, refused) == (reason, [])
+
+
+@_METHODS
+async def test_an_unreadable_override_store_refuses_the_call(refused, method) -> None:
+    """TASK-15581: a policy that cannot be read refuses at the provider, as it does at resolution."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    set_llm_provider_overrides_cache_for_tests({}, healthy=False)
+    with pytest.raises(ChatConfigurationError) as refusal:
+        await _call(method, dict(REQUEST))
+    assert refusal.value.error_code == "credential_store_unavailable"
+
+
+@pytest.mark.parametrize(
+    "override", [None, {"is_enabled": True}, {"allowed_models": ["m1"]}], ids=["none", "on", "allowed"]
+)
+async def test_the_users_own_key_serves_a_provider_the_server_has_no_key_for(refused, override) -> None:
+    """TASK-15581: 'no key or credits' on the server is not a disable. Resolved with the same override check every
+    runtime uses, and an empty server config, the user's own key serves the provider whether it has no override or
+    one that leaves it on (with no key of its own); its calls run, are not checked against the limit, and are the
+    user's."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        capture_provider_override_call_snapshot,
+    )
+
+    if override is not None:
+        _admin_override(**override)
+
+    async def _users_key(provider: str, **_kwargs: Any) -> ResolvedByokCredentials:
+        """The user's own key; the server has none."""
+        return ResolvedByokCredentials(
+            provider=provider, api_key="sk-user", app_config={}, credential_fields={}, source="user", allowlisted=True
+        )
+
+    runtime = ProviderCredentialRuntime(
+        user_id=7, team_ids=[], org_ids=[], trusted_base_url_override=False,
+        fallback_resolver=lambda _provider: None, server_config_snapshot={}, resolver=_users_key,
+        override_snapshot_resolver=capture_provider_override_call_snapshot,
+    )
+    request = {**REQUEST, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await runtime.resolve("openai", model="m1")}
+
+    with llm_call_context(user_id=7):
+        await _call_all_four(request)
+    await llm_accounting.drain_accounting()
+    assert [row["credential_source"] for row in refused] == ["user"] * 4
+
+
+async def test_a_key_test_is_not_refused(refused) -> None:
+    """TASK-15581 (Decision D2): provider key validation, the admin provider test and the setup check run exempt. A
+    key test is not a use of the provider, and the admin test can try a provider before turning it on."""
+    _admin_override(is_enabled=False)
+    with llm_call_context(user_id=7, exempt=True):
+        assert _Provider().chat(dict(REQUEST))["choices"][0]["message"]["content"] == "hi"
+
+
+@pytest.mark.parametrize("reason", sorted(_DISABLES))
+async def test_a_call_that_names_no_model_is_checked_for_provider_disabled_only(reason) -> None:
+    """TASK-15581 (M1): with no model in the request there is no model to hold against the allowlist, so a disabled
+    provider is refused and an allowlist is not. The gap: an adapter that fills a default model after the guard."""
+    _admin_override(**_DISABLES[reason])
+    request = {**REQUEST, "model": None}
+    if reason == "provider_disabled":
+        with pytest.raises(ChatConfigurationError):
+            _Provider().chat(request)
+    else:
+        assert _Provider().chat(request)["choices"][0]["message"]["content"] == "hi"
+
+
+@pytest.mark.parametrize(
+    ("override_kwargs", "healthy", "status", "code"),
+    [
+        ({"is_enabled": False}, True, 403, "provider_disabled"),
+        ({"allowed_models": ["x"]}, True, 403, "model_not_allowed"),
+        ({}, False, 503, "credential_store_unavailable"),
+    ],
+    ids=["provider-disabled", "model-not-allowed", "store-unavailable"],
+)
+def test_an_endpoint_that_maps_nothing_answers_with_the_refusals_own_status(override_kwargs, healthy, status, code):
+    """TASK-15581 (M7, P1): an endpoint with no mapping of its own reaches the app's ChatConfigurationError handler,
+    which answers an admin disable with 403 and an unreadable store with 503, not a 500. It runs inside Starlette's
+    ExceptionMiddleware and re-raises nothing, so the test client sees no server exception and the access log records
+    the same status."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from loguru import logger
+
+    from tldw_Server_API.app.api.v1.utils.exception_handlers import (
+        admin_refusal_exception_handler,
+        global_unhandled_exception_handler,
+    )
+    from tldw_Server_API.app.core.Logging.access_log_middleware import AccessLogMiddleware
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    app = FastAPI()
+    app.add_middleware(AccessLogMiddleware)
+    app.add_exception_handler(ChatConfigurationError, admin_refusal_exception_handler)
+    app.add_exception_handler(Exception, global_unhandled_exception_handler)
+
+    @app.get("/llm")
+    def _llm() -> dict[str, Any]:
+        """Call the provider and map nothing."""
+        return _Provider().chat(dict(REQUEST))
+
+    set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", **override_kwargs)}, healthy=healthy
+    )
+    logged: list[str] = []
+    sink = logger.add(lambda message: logged.append(message.record["message"]), level="INFO")
+    try:
+        response = TestClient(app).get("/llm")  # raises if any server exception escapes
+    finally:
+        logger.remove(sink)
+    access_statuses = [line.split()[4] for line in logged if line.startswith("HTTP GET /llm -> ")]
+
+    assert (response.status_code, response.json()["error"]["code"], access_statuses) == (status, code, [str(status)])
+
+
+def test_openrouter_fallback_models_are_checked_against_the_allowlist() -> None:
+    """TASK-15581 (I3): OpenRouter serves a model from ``extra_body["models"]`` when the primary fails, so a caller
+    could name an allowed primary and reach a disallowed model. Each fallback model is checked too."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    class _OpenRouter(_Provider):
+        name = "openrouter"
+
+    set_llm_provider_overrides_cache_for_tests(
+        {"openrouter": LLMProviderOverride(provider="openrouter", allowed_models=["openai/gpt-4o-mini"])}
+    )
+    request = {**REQUEST, "model": "openai/gpt-4o-mini", "extra_body": {"models": ["anthropic/claude-opus-4.1"]}}
+
+    with pytest.raises(ChatConfigurationError) as refused:
+        _OpenRouter().chat(request)
+    assert refused.value.error_code == "model_not_allowed"
+
+
+def _judge_modules() -> Any:
+    """The two evaluation judges that call the adapter directly."""
+    from tldw_Server_API.app.core.Evaluations import eval_runner, ms_g_eval
+
+    return pytest.mark.parametrize("module", [eval_runner, ms_g_eval], ids=["eval_runner", "ms_g_eval"])
+
+
+@_judge_modules()
+@pytest.mark.parametrize("own_key", [True, False], ids=["own-key", "server-key"])
+async def test_an_evaluation_judge_refuses_a_disallowed_default_model_on_any_key(monkeypatch, module, own_key) -> None:
+    """TASK-15581: a DEFAULT_MODEL_<PROVIDER> the override does not allow is refused on the run's own key and on the
+    server's, with ChatConfigurationError, which G-Eval does not retry."""
+    monkeypatch.setattr(module, "get_adapter_or_raise", lambda _provider: _Provider())
+    monkeypatch.setattr(module, "resolve_provider_api_key_from_config", lambda *_args, **_kwargs: "sk-server")
+    monkeypatch.setenv("DEFAULT_MODEL_OPENAI", "gpt-denied")
+    _admin_override(**_DISABLES["model_not_allowed"])
+    handle = await _handle("user") if own_key else None
+
+    def _judge() -> str:
+        """One call with no model, so DEFAULT_MODEL_OPENAI applies."""
+        return module._call_adapter_text(
+            api_endpoint="openai", messages_payload=[{"role": "user", "content": "q"}], provider_credentials=handle
+        )
+
+    with pytest.raises(ChatConfigurationError) as refusal:
+        await asyncio.to_thread(_judge)
+    assert refusal.value.error_code == "model_not_allowed"
+
+
+async def test_prompt_studio_refuses_a_disallowed_default_model_on_the_users_key(monkeypatch) -> None:
+    """TASK-15581 (from TASK-15576): Prompt Studio's direct adapter call takes DEFAULT_MODEL_<PROVIDER>, which
+    resolution never sees; the provider base class refuses it when the override does not allow it."""
+    from tldw_Server_API.app.core.Prompt_Management.prompt_studio import test_runner
+
+    monkeypatch.setattr(test_runner, "get_adapter_or_raise", lambda _provider: _Provider())
+    monkeypatch.setenv("DEFAULT_MODEL_OPENAI", "gpt-denied")
+    _admin_override(**_DISABLES["model_not_allowed"])
+    handle = await _handle("user")
+
+    with pytest.raises(ChatConfigurationError) as refusal:
+        test_runner.TestRunner(None)._call_adapter(
+            provider="openai", model=None, messages_payload=[{"role": "user", "content": "q"}], system_message=None,
+            temperature=0.0, max_tokens=1, provider_credentials=handle,
+        )
+    assert refusal.value.error_code == "model_not_allowed"
 
 
 def _chat_request() -> SimpleNamespace:

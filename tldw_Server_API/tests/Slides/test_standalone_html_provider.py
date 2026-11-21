@@ -640,6 +640,46 @@ async def test_unrelated_aggregate_unavailability_does_not_disable_stored_target
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("override_kwargs", "healthy", "code"),
+    [
+        ({"is_enabled": False}, True, "standalone_html_provider_disabled"),
+        ({"allowed_models": ["another-model"]}, True, "standalone_html_model_not_allowed"),
+        ({}, False, "standalone_html_provider_unavailable"),
+    ],
+    ids=["provider-disabled", "model-not-allowed", "store-unavailable"],
+)
+async def test_an_admin_disabled_provider_or_model_fails_before_network(
+    provider_module: ModuleType,
+    override_kwargs: dict[str, Any],
+    healthy: bool,
+    code: str,
+) -> None:
+    """TASK-15581 (I1): this call is not an adapter call, so it checks the admin provider override itself. A disable
+    is a terminal job failure; a store that cannot be read gets the retryable provider-unavailable code."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    target = _target("openai_official_chat_v1")
+    set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", **override_kwargs)}, healthy=healthy
+    )
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("network must not be reached")
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(provider_module, _config(target), httpx.MockTransport(handler))
+
+    assert (exc_info.value.code, calls) == (code, 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "adapter_id",
     ["openai_official_chat_v1", "anthropic_official_messages_v1"],
 )

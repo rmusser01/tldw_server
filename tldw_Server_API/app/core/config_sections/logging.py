@@ -4,6 +4,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from .precedence import resolve
 from .types import ConfigParserLike
 
 _SYSTEM_LOG_ENV_KEYS = {
@@ -40,14 +41,9 @@ def _get_raw(
     default: str,
 ) -> str:
     """Return the first non-empty env override, parser value, or default."""
-    for env_key in _env_keys_for(option):
-        raw = env_map.get(env_key)
-        if raw is not None and str(raw).strip() != "":
-            return str(raw).strip()
-
-    raw = config_parser.get("Logging", option, fallback=default)
-    text = str(raw).strip()
-    return text or default
+    env_keys = _env_keys_for(option)
+    resolved = resolve(env_keys, (("Logging", option),), config_parser=config_parser, env=env_map, default=default)
+    return str(resolved.value).strip() or default
 
 
 def _parse_int(raw: object, default: int) -> int:

@@ -6,6 +6,7 @@
 
 - `__init__.py` exports `ConfigSections`, `load_config_sections`, and section-specific loader helpers.
 - `types.py` defines shared configuration parser protocols.
+- `precedence.py` holds `resolve`, the one env-over-config resolver every loader reads through.
 - Section files such as `auth.py`, `database.py`, `server.py`, `stt.py`, and `providers.py` contain typed dataclasses and loaders for specific config areas.
 - Related runtime entry point: `app/core/config.py`.
 - Related tests: `tests/Config/test_config_sections_typed_loaders.py`.
@@ -15,14 +16,16 @@
 - Load individual config sections into typed dataclasses instead of raw dictionaries.
 - Keep section parsing for auth, audio, chat, chunking, database, embeddings, jobs, logging, moderation, providers, RAG, server, and STT separated by concern.
 - Provide an aggregate `ConfigSections` object for callers that need multiple typed sections.
-- Support config/environment precedence behavior through the parent configuration loader.
+- Resolve environment-over-`config.txt` precedence through `precedence.resolve` (also used by `app/core/config.py`'s precedence helpers).
 - Give STT policy code typed access to vNext STT config flags.
 
 ## Module Map
 
 - `__init__.py` - aggregate exports and top-level loader helpers.
 - `types.py` - shared parser type definitions.
+- `precedence.py` - `resolve`: first set env key, then first set config option, then the default.
 - `audio.py`, `auth.py`, `chat.py`, `chunking.py`, `database.py`, `embeddings.py`, `jobs.py`, `logging.py`, `moderation.py`, `providers.py`, `rag.py`, `server.py`, and `stt.py` - section dataclasses and loaders.
+- `redis.py` - `REDIS_URL` resolution (`resolve_redis_url`, `redis_url_env`); no dataclass.
 
 ## How It Connects
 
@@ -46,4 +49,4 @@
 ## Gotchas
 
 - This package should stay lightweight. Avoid importing provider, database, or service modules from section loaders.
-- Environment/config precedence is handled with the parent config loader, so new section logic should be tested through the same path callers use.
+- Read env and config values through `precedence.resolve`, not `os.environ`; the env-read ratchet (`tests/lint/test_env_read_ratchet.py`) fails on a new direct read. `tests/Config/test_config_resolver_characterization.py` pins every loader's values, keys and read order.

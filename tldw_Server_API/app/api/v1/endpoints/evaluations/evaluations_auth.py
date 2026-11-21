@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     resolve_client_ip,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.config_sections.auth import single_user_api_key_env
 from tldw_Server_API.app.core.exceptions import InactiveUserError
 from tldw_Server_API.app.core.Evaluations.identity import (
     EvaluationIdentity,
@@ -145,7 +146,7 @@ async def verify_api_key(
 
     if settings.AUTH_MODE == "single_user":
         expected_token = (
-            os.getenv("SINGLE_USER_API_KEY")
+            single_user_api_key_env()
             or getattr(settings, "SINGLE_USER_API_KEY", None)
             or os.getenv("API_BEARER")
             or getattr(settings, "API_BEARER", None)

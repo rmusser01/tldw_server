@@ -341,6 +341,24 @@ def test_shared_postgres_scheduler_reuses_the_database_and_one_scan(monkeypatch)
     assert scheduler.get("missing") is None
 
 
+@pytest.mark.asyncio
+async def test_scheduler_start_closes_retired_postgres_pool(pg_temp_db, monkeypatch):
+    monkeypatch.setenv("WORKFLOWS_SCHEDULER_DATABASE_URL", pg_temp_db["dsn"])
+    monkeypatch.delenv("WORKFLOWS_SCHEDULER_SQLITE_PATH", raising=False)
+    _patch_core_scheduler(monkeypatch, _CoreSchedulerStub())
+
+    scheduler = workflows_scheduler_mod._WFRecurringScheduler()
+    retired_pool = scheduler._db.backend.get_pool()
+    try:
+        await scheduler.start()
+
+        assert retired_pool.get_stats()["closed"]  # nosec B101
+    finally:
+        await scheduler.stop()
+        retired_pool.close_all()
+        scheduler._db.backend.get_pool().close_all()
+
+
 def test_build_schedule_payload_defaults_malformed_inputs_to_empty_dict():
     payload = workflows_scheduler_mod.build_schedule_payload(_schedule("bad-json", inputs_json="{not-json"))
 

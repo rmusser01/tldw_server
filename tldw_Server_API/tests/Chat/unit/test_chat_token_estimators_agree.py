@@ -89,7 +89,7 @@ def test_a_wrapped_base64_image_is_left_out_of_the_guardrail_envelope():
 
 @pytest.mark.unit
 def test_the_size_check_counts_data_image_text_without_a_real_image(monkeypatch):
-    monkeypatch.setattr(chat_validators, "MAX_REQUEST_SIZE", 1000)
+    monkeypatch.setenv("CHAT_REQUEST_MAX_SIZE", "1000")
     body = json.dumps({"messages": [{"role": "user", "content": "data:image," + "x" * 2000}]})
     with pytest.raises(ValueError, match="Request too large"):
         chat_validators.validate_request_size(body)

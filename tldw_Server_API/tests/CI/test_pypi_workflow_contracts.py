@@ -36,7 +36,7 @@ def _job_run_scripts(workflow: dict, job_name: str) -> list[str]:
     Returns:
         The ordered ``run`` script values for steps in the selected job.
     """
-    return [step["run"] for step in workflow["jobs"][job_name]["steps"] if "run" in step]
+    return [step["run"] for step in workflow["jobs"][job_name].get("steps", []) if "run" in step]
 
 
 def test_pypi_package_workflow_installs_setuptools_backend() -> None:
@@ -46,11 +46,27 @@ def test_pypi_package_workflow_installs_setuptools_backend() -> None:
     assert "wheel" in run_script
 
 
-def test_publish_pypi_workflow_installs_setuptools_backend() -> None:
+def test_release_wheel_installs_portaudio_before_runtime_dependencies() -> None:
+    workflow = _load(".github/workflows/pypi-package.yml")
+    steps = workflow["jobs"]["build-and-check"]["steps"]
+    install = next(index for index, step in enumerate(steps) if step.get("id") == "install")
+    assert any(  # nosec B101
+        step.get("uses") == "./.github/actions/setup-ffmpeg"
+        and step.get("with", {}).get("install-portaudio") == "true"
+        and step.get("if") == "inputs.qualification"
+        for step in steps[:install]
+    )
+
+
+def test_publish_pypi_workflow_uploads_the_qualified_distributions() -> None:
     workflow = _load(".github/workflows/publish-pypi.yml")
-    run_script = _install_step_run(workflow, job_name="build")
-    assert "setuptools" in run_script
-    assert "wheel" in run_script
+    package = _load(".github/workflows/pypi-package.yml")["jobs"]["build-and-check"]
+    upload = next(step for step in package["steps"] if step["name"] == "Upload dist artifacts")
+    assert "'tldw-server-qualified-dist'" in upload["with"]["name"]
+    for name in ("publish-testpypi", "publish-pypi"):
+        job = workflow["jobs"][name]
+        assert job["steps"][0]["with"]["name"] == "tldw-server-qualified-dist"
+        assert job["needs"] == ["detect-version", "release-gate", "qualify"]
 
 
 def test_publish_pypi_workflow_preserves_manual_dispatch_and_gates_push() -> None:
@@ -62,7 +78,10 @@ def test_publish_pypi_workflow_preserves_manual_dispatch_and_gates_push() -> Non
     assert set(on) == {"workflow_dispatch", "push"}
     assert "release" not in on
     assert push["branches"] == ["main"]
-    assert push["paths"] == ["pyproject.toml", ".github/workflows/publish-pypi.yml"]
+    assert set(push) == {"branches"}
+    detector = _detect_version_step_run(workflow)
+    assert '"pyproject.toml", ".github/workflows/publish-pypi.yml"' in detector
+    assert "should_publish = candidate and not published" in detector
     assert target["options"] == ["testpypi", "pypi"]
     assert target["default"] == "testpypi"
 
@@ -74,18 +93,21 @@ def test_publish_pypi_workflow_preserves_manual_dispatch_and_gates_push() -> Non
         "${{ github.event_name == 'workflow_dispatch' || needs.detect-version.outputs.should_publish == 'true' }}"
     )
 
-    build = workflow["jobs"]["build"]
-    assert build["needs"] == ["detect-version", "release-gate"]  # nosec B101
-
     publish_testpypi = workflow["jobs"]["publish-testpypi"]
-    assert publish_testpypi["if"] == (
-        "${{ github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi' }}"
+    assert " ".join(publish_testpypi["if"].split()) == (
+        "always() && !cancelled() && "
+        "needs.detect-version.result == 'success' && needs.release-gate.result == 'success' && "
+        "needs.qualify.result == 'success' && needs.qualify.outputs.qualified == 'true' && "
+        "github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'"
     )
 
     publish_pypi = workflow["jobs"]["publish-pypi"]
-    assert publish_pypi["if"] == (
-        "${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi') || "
-        "(github.event_name == 'push' && needs.detect-version.outputs.should_publish == 'true') }}"
+    assert " ".join(publish_pypi["if"].split()) == (
+        "always() && !cancelled() && "
+        "needs.detect-version.result == 'success' && needs.release-gate.result == 'success' && "
+        "needs.qualify.result == 'success' && needs.qualify.outputs.qualified == 'true' && "
+        "((github.event_name == 'workflow_dispatch' && inputs.target == 'pypi') || "
+        "(github.event_name == 'push' && needs.detect-version.outputs.should_publish == 'true'))"
     )
 
 

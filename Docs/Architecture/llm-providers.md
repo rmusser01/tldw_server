@@ -30,7 +30,7 @@ All paths under `tldw_Server_API/` unless noted.
 4. `perform_chat_api_call_async` builds the adapter request: BYOK credential binding, config model resolution, and rejection of request-level URL overrides for local providers (base URLs are config-only).
 5. Base-URL overrides apply only for allowlisted providers and trusted callers.
 6. Adapter dispatch: streaming prefers `astream` (falling back to a wrapped sync stream); non-streaming prefers native async, else a bounded sync call on the shared pool.
-7. Every adapter call is wrapped by the accounted base class: quota check → call → record. Streaming feeds usage from provider `usage` blocks when present, else estimates.
+7. Every adapter call is wrapped by the accounted base class: admin-override check → quota check → call → record. A provider or model the admin override disables is refused on every key (TASK-15581). Streaming feeds usage from provider `usage` blocks when present, else estimates.
 8. Recording: `log_llm_usage` → cost computation via the pricing catalog (unknown models get a conservative sentinel rate).
 9. SSE assembly: heartbeats, idle timeout, max response size, first-output and partial-save callbacks, a terminal `stream_end` event, and a single `[DONE]`; provider lines normalized on the way through.
 10. Post-turn persistence via callbacks; audit and metrics recorded.
@@ -46,6 +46,7 @@ All paths under `tldw_Server_API/` unless noted.
 | Case | Behavior |
 | --- | --- |
 | Quota exceeded | Typed error before the provider call |
+| Provider or model the admin override disables, or an override store that cannot be read | `ChatConfigurationError` (`error_code` `provider_disabled`, `model_not_allowed` or `credential_store_unavailable`), before the quota check; RAG and the evaluations endpoints keep the code and answer 403 (503 for the store), and an endpoint that maps nothing gets the same from the app's `ChatConfigurationError` handler |
 | Adapter missing / key or model missing for keyed providers | `ChatConfigurationError` |
 | Base-URL override for non-allowlisted provider or untrusted caller | `ChatBadRequestError` |
 | Provider HTTP errors | Mapped to the auth/rate-limit/bad-request/provider taxonomy |

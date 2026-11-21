@@ -8,6 +8,9 @@ Everything is created inside a uniquely named schema that is dropped afterwards,
 and the unprivileged role is per-run and dropped too, so nothing outside this
 test is touched even when CHAT_RLS_DB_URL points at a reused database.
 
+The server comes from the shared Postgres plugin (``pg_temp_db``), so it runs
+wherever the other Postgres tests do. CHAT_RLS_DB_URL is an optional override:
+
     docker run -d --rm -e POSTGRES_PASSWORD=pw -p 55436:5432 postgres:18-bookworm
     CHAT_RLS_DB_URL=postgresql://postgres:pw@127.0.0.1:55436/postgres
 """
@@ -18,25 +21,21 @@ import os
 import uuid
 from collections.abc import Iterator
 
+import psycopg
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
     build_core_chat_rls_sql,
 )
 
-psycopg = pytest.importorskip("psycopg")
-
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.owner_isolation]
 
 ROLE_PASSWORD = "probe"  # noqa: S105 - throwaway role in a throwaway schema
 
 
-def _dsn_or_skip() -> str:
-    """Return the DSN for a PostgreSQL server, or skip when none is configured."""
-    dsn = os.getenv("CHAT_RLS_DB_URL")
-    if not dsn:
-        pytest.skip("CHAT_RLS_DB_URL not configured for core chat RLS tests")
-    return dsn
+def _admin_dsn(request: pytest.FixtureRequest) -> str:
+    """Return CHAT_RLS_DB_URL, else the plugin's per-test temporary database DSN."""
+    return os.getenv("CHAT_RLS_DB_URL") or str(request.getfixturevalue("pg_temp_db")["dsn"])
 
 
 def _with_role(dsn: str, role: str) -> str:
@@ -54,7 +53,7 @@ class _Fixture:
         self.schema = schema
         self.role = role
 
-    def connect_as(self, tenant: str) -> "psycopg.Connection":
+    def connect_as(self, tenant: str) -> psycopg.Connection:
         """Open a connection as the unprivileged role with a tenant bound."""
         conn = psycopg.connect(self.dsn, autocommit=True)
         with conn.cursor() as cur:
@@ -64,9 +63,9 @@ class _Fixture:
 
 
 @pytest.fixture()
-def seeded() -> Iterator[_Fixture]:
+def seeded(request: pytest.FixtureRequest) -> Iterator[_Fixture]:
     """Build the chat tables in a private schema, seed two accounts, install RLS."""
-    admin_dsn = _dsn_or_skip()
+    admin_dsn = _admin_dsn(request)
     suffix = uuid.uuid4().hex[:10]
     schema = f"chat_rls_{suffix}"
     role = f"chat_rls_role_{suffix}"

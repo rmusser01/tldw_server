@@ -330,6 +330,8 @@ def test_trash_query_filters_by_title_or_content_and_counts_only_matches(
 def test_trash_query_rejects_overlong_text(notes_client: TestClient) -> None:
     response = notes_client.get("/api/v1/notes/trash", params={"query": "x" * 201})
     assert response.status_code == 422
+    errors = response.json()["detail"]
+    assert any(error["loc"][-1] == "query" for error in errors)
 
 
 @pytest.mark.parametrize(

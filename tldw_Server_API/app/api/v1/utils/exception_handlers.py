@@ -25,6 +25,9 @@ from fastapi.responses import JSONResponse, Response
 from loguru import logger
 from starlette.requests import ClientDisconnect
 
+from tldw_Server_API.app.core.exceptions import ChatConfigurationError
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_REFUSAL_STATUS
+
 
 def _get_request_id(request: Request) -> str:
     """Extract or generate a request ID for error tracing."""
@@ -103,6 +106,24 @@ async def client_disconnect_handler(
     )
 
 
+async def admin_refusal_exception_handler(request: Request, exc: ChatConfigurationError) -> JSONResponse:
+    """Answer an admin provider-override refusal no endpoint mapped (TASK-15581): 403, or 503 for the store.
+
+    Registered for ``ChatConfigurationError``, it runs in Starlette's ``ExceptionMiddleware``, which does not
+    re-raise, so the logs and every middleware see the 403/503 too. Any other ``ChatConfigurationError`` is raised
+    on to the catch-all handler, as before.
+    """
+    code = getattr(exc, "error_code", None)
+    if code not in ADMIN_REFUSAL_STATUS:
+        raise exc
+    request_id = _get_request_id(request)
+    return JSONResponse(
+        status_code=ADMIN_REFUSAL_STATUS[code],
+        headers={"X-Request-ID": request_id},
+        content={"error": {"code": code, "message": exc.message, "request_id": request_id}},
+    )
+
+
 async def tts_public_http_exception_handler(
     request: Request,
     exc: HTTPException,
@@ -117,6 +138,7 @@ async def tts_public_http_exception_handler(
 
 
 __all__ = [
+    "admin_refusal_exception_handler",
     "client_disconnect_handler",
     "global_unhandled_exception_handler",
     "tts_public_http_exception_handler",

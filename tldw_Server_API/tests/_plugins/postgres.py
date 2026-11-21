@@ -206,10 +206,12 @@ def _temp_db_generator(pg_server) -> Generator[Dict[str, object], None, None]:
     password = str(pg_server.get("password") or "")  # type: ignore[index]
     db_name = f"tldw_test_{uuid.uuid4().hex[:8]}"
 
+    require_pg = os.getenv("TLDW_TEST_POSTGRES_REQUIRED", "").lower() in ("1", "true", "yes", "y", "on")
     if _PG_DRIVER is None:  # pragma: no cover - env dependent
+        if require_pg:
+            pytest.fail("psycopg not installed while TLDW_TEST_POSTGRES_REQUIRED is set")
         pytest.skip("psycopg not installed; skipping Postgres‑backed tests")
 
-    require_pg = os.getenv("TLDW_TEST_POSTGRES_REQUIRED", "").lower() in ("1", "true", "yes", "y", "on")
     debug = os.getenv("TLDW_TEST_PG_DEBUG", "").lower() in ("1", "true", "yes", "y", "on")
 
     try:
@@ -241,7 +243,7 @@ def _temp_db_generator(pg_server) -> Generator[Dict[str, object], None, None]:
         msg = (
             f"Unable to create temporary Postgres database as user '{user}' on {host}:{port}. "
             f"This usually means the resolved credentials lack CREATEDB privileges or are incorrect.\n"
-            f"Hint: set POSTGRES_TEST_DSN (or JOBS_DB_URL/TEST_DATABASE_URL) to a superuser DSN, e.g. postgresql://tldw_user:TestPassword123!@127.0.0.1:{port}/postgres (or postgres:postgres).\n"
+            f"Hint: set POSTGRES_TEST_DSN (or JOBS_DB_URL/TEST_DATABASE_URL) to an admin DSN (a superuser, used for fixture setup only; deployments must use a NOSUPERUSER NOBYPASSRLS role), e.g. postgresql://tldw_user:TestPassword123!@127.0.0.1:{port}/postgres (or postgres:postgres).\n"
             + ("Tried Docker fallback on alternate port and still failed.\n" if tried_docker else "")
             + f"Error: {e}"
         )
@@ -335,9 +337,11 @@ def pg_secondary_database_config(pg_server):
 def pg_restricted_backend(pg_database_config):
     """Yield a PostgreSQL backend whose role cannot bypass row-level security.
 
-    ``pg_database_config`` connects with the admin DSN, and every supported
-    setup documents that DSN as a superuser -- the bundled container's
-    ``tldw_user`` is ``rolsuper=true, rolbypassrls=true``.  A superuser is
+    ``pg_database_config`` connects with the test admin DSN, a superuser used
+    for fixture setup only -- the bundled container's ``tldw_user`` is
+    ``rolsuper=true, rolbypassrls=true``.  Deployments must use a NOSUPERUSER
+    NOBYPASSRLS role, which startup enforces for the content backend
+    (``media_db/runtime/factory.py:93-129``).  A superuser is
     exempt from RLS *even under* ``FORCE ROW LEVEL SECURITY``, so a test that
     asserts a policy through the plain config passes whether or not the policy
     exists.  That is finding F1 of the cross-user isolation audit, reproduced
@@ -461,3 +465,21 @@ def _drop_restricted_role(admin, role: str) -> None:
     except errors.LockNotAvailable as exc:
         raise AssertionError(f"{report}; still blocked after terminating them") from exc
     raise AssertionError(report)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Turn a skipped ``owner_isolation`` test into a failure when Postgres is required."""
+    outcome = yield
+    report = outcome.get_result()
+    if (
+        report.when in ("setup", "call")
+        and report.skipped
+        and not hasattr(report, "wasxfail")
+        and item.get_closest_marker("owner_isolation") is not None
+        and os.getenv("TLDW_TEST_POSTGRES_REQUIRED", "").lower() in ("1", "true", "yes", "y", "on")
+    ):
+        longrepr = report.longrepr
+        reason = longrepr[2] if isinstance(longrepr, tuple) else str(longrepr)
+        report.outcome = "failed"
+        report.longrepr = f"owner_isolation test skipped while TLDW_TEST_POSTGRES_REQUIRED is set: {reason.removeprefix('Skipped: ')}"

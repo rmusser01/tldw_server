@@ -50,6 +50,7 @@ async def _issue_credentials(
     api_key: str,
     app_config: dict[str, Any],
     credential_fields: dict[str, Any] | None = None,
+    source: str = "user",
 ) -> ProviderCallCredentials:
     """Issue one authentic provider-call capability for boundary tests."""
 
@@ -62,7 +63,7 @@ async def _issue_credentials(
             api_key=api_key,
             app_config=app_config,
             credential_fields=dict(credential_fields or {}),
-            source="user",
+            source=source,
             allowlisted=True,
             status=ByokResolutionStatus.RESOLVED,
             auth_source="api_key",
@@ -429,30 +430,49 @@ async def test_summary_translation_forwards_genuine_cloud_handle(
     assert captured["app_config"] == handle.app_config
 
 
-_POLICY_DENIED = "Error: Provider credential context is invalid."
+_POLICY_DENIED = "Error: The provider or model is disabled by the administrator."
+_STORE_DOWN = "Error: Provider credential storage is temporarily unavailable."
+_OVERRIDE_MODULE = "tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides"
 
 
-async def _own_key_summary(
+def _refused_line(reason: str) -> str:
+    """The one warning a refused call writes (TASK-15571, TASK-15581)."""
+    return f"Provider override for openai: {reason}; the call is refused"
+
+
+async def _summary(
     monkeypatch: pytest.MonkeyPatch,
     *,
+    source: str | None = "user",
     overrides: dict[str, Any] | None = None,
     healthy: bool = True,
     env_model: str | None = "gpt-env-default",
     config_model: str | None = None,
     model_override: str | None = None,
-) -> tuple[str | None, list[str]]:
-    """Run an own-key summary through the shared adapter path and return (result, models sent) (TASK-15496)."""
+    server_key: str | None = "server-key",
+) -> tuple[str | None, list[tuple[str, str | None, bool]], list[str]]:
+    """Run one summary through the shared adapter path (TASK-15496, TASK-15571).
+
+    ``source`` is whose key the handle carries; None sends no handle (the server-key path). The server's
+    config has the same provider section as the handle's and its key is ``server_key``. Returns the result,
+    (model, key, handle in the request) for each adapter request, and the override module's warnings.
+    """
     from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
         set_llm_provider_overrides_cache_for_tests,
     )
 
     openai_section = {"model": config_model} if config_model else {}
-    handle = await _issue_credentials("openai", api_key="own-key", app_config={"openai_api": openai_section})
-    models: list[str] = []
+    handle = None
+    if source is not None:
+        handle = await _issue_credentials(
+            "openai", api_key="handle-key", app_config={"openai_api": openai_section}, source=source
+        )
+    calls: list[tuple[str, str | None, bool]] = []
+    warnings: list[str] = []
 
     class RecordingAdapter:
         def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
-            models.append(request["model"])
+            calls.append((request["model"], request["api_key"], PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY in request))
             return {"choices": [{"message": {"content": "summary"}}]}
 
     class Registry:
@@ -460,11 +480,16 @@ async def _own_key_summary(
             return RecordingAdapter()
 
     monkeypatch.setattr(sgl, "get_registry", lambda: Registry())
+    monkeypatch.setattr(sgl, "load_and_log_configs", lambda: {"openai_api": dict(openai_section)})
+    monkeypatch.setattr(sgl, "resolve_provider_api_key_from_config", lambda *_args, **_kwargs: server_key)
     if env_model:
         monkeypatch.setenv("DEFAULT_MODEL_OPENAI", env_model)
     else:
         monkeypatch.delenv("DEFAULT_MODEL_OPENAI", raising=False)
     set_llm_provider_overrides_cache_for_tests(overrides, healthy=healthy)
+    sink = logger.add(
+        lambda message: warnings.append(message.record["message"]), level="WARNING", filter=_OVERRIDE_MODULE
+    )
     try:
         result = sgl._summarize_via_adapter(
             api_name="openai",
@@ -481,77 +506,143 @@ async def _own_key_summary(
             raise_on_error=False,
         )
     finally:
+        logger.remove(sink)
         set_llm_provider_overrides_cache_for_tests(None)
-    return result, models
+    return result, calls, warnings
+
+
+def _allowlist(*models: str) -> dict[str, Any]:
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import LLMProviderOverride
+
+    return {"openai": LLMProviderOverride(provider="openai", allowed_models=list(models))}
+
+
+# Each source of the model: the handle's config, the DEFAULT_MODEL_OPENAI fallback, the request's model_override.
+_MODEL_SOURCES = pytest.mark.parametrize(
+    ("config_model", "model_override", "expected"),
+    [("cfg-m", None, "cfg-m"), (None, None, "gpt-env-default"), (None, "ovr-m", "ovr-m")],
+    ids=["configured", "default-model-env", "model-override"],
+)
 
 
 @pytest.mark.asyncio
 async def test_own_key_summary_falls_back_to_the_default_model_environment_variable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    result, models = await _own_key_summary(monkeypatch)
+    result, calls, warnings = await _summary(monkeypatch)
 
     assert result == "summary"
-    assert models == ["gpt-env-default"]
+    assert calls == [("gpt-env-default", "handle-key", True)]
+    assert warnings == []
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("override_kwargs", "healthy"),
+# Each admin disable, and a policy that cannot be read (TASK-15581).
+_REFUSALS = pytest.mark.parametrize(
+    ("override_kwargs", "healthy", "reason", "refused"),
     [
-        ({"allowed_models": ["gpt-allowed"]}, True),
-        ({"is_enabled": False}, True),
-        ({}, False),
+        ({"allowed_models": ["x"]}, True, "model_not_allowed", _POLICY_DENIED),
+        ({"is_enabled": False}, True, "provider_disabled", _POLICY_DENIED),
+        ({}, False, "credential_store_unavailable", _STORE_DOWN),
     ],
     ids=["model-not-allowed", "provider-disabled", "override-cache-unhealthy"],
 )
-async def test_own_key_summary_default_model_environment_variable_meets_the_override_policy(
-    monkeypatch: pytest.MonkeyPatch, override_kwargs: dict[str, Any], healthy: bool
-) -> None:
+
+
+async def _refused_summary(
+    monkeypatch: pytest.MonkeyPatch, override_kwargs: dict[str, Any], healthy: bool, **summary_kwargs: Any
+) -> tuple[str | None, list[tuple[str, str | None, bool]], list[str]]:
+    """``_summary`` under one admin override for openai."""
     from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import LLMProviderOverride
 
     overrides = {"openai": LLMProviderOverride(provider="openai", **override_kwargs)}
+    return await _summary(monkeypatch, overrides=overrides, healthy=healthy, **summary_kwargs)
 
-    result, models = await _own_key_summary(monkeypatch, overrides=overrides, healthy=healthy)
 
-    assert models == []
-    assert result == _POLICY_DENIED
+@pytest.mark.asyncio
+@_MODEL_SOURCES
+@_REFUSALS
+async def test_an_admin_disabled_provider_or_model_is_refused_on_the_users_own_key(
+    monkeypatch: pytest.MonkeyPatch,
+    override_kwargs: dict[str, Any],
+    healthy: bool,
+    reason: str,
+    refused: str,
+    config_model: str | None,
+    model_override: str | None,
+    expected: str,
+) -> None:
+    """TASK-15581, the owner's rule: whatever the model's source, a provider or model the admin disabled is refused
+    with 'configuration' (as TASK-15496 did), and the reason is logged. A policy that cannot be read refuses too, as
+    the retryable 'provider_failure', so a job tries again once it loads."""
+    result, calls, warnings = await _refused_summary(
+        monkeypatch, override_kwargs, healthy, config_model=config_model, model_override=model_override
+    )
+
+    assert (result, calls, warnings) == (refused, [], [_refused_line(reason)])
+
+
+@pytest.mark.asyncio
+@_REFUSALS
+@pytest.mark.parametrize(
+    "source", ["team", "org", "server_default", None], ids=["team", "org", "server-default-handle", "no-handle"]
+)
+async def test_an_admin_disabled_provider_or_model_is_refused_on_every_other_key(
+    monkeypatch: pytest.MonkeyPatch,
+    override_kwargs: dict[str, Any],
+    healthy: bool,
+    reason: str,
+    refused: str,
+    source: str | None,
+) -> None:
+    """TASK-15581: the same on a team's or an org's key and on the server's, with a handle or none."""
+    result, calls, warnings = await _refused_summary(
+        monkeypatch, override_kwargs, healthy, source=source, config_model="cfg-m"
+    )
+
+    assert (result, calls, warnings) == (refused, [], [_refused_line(reason)])
+
+
+@pytest.mark.parametrize(
+    ("error_code", "summary_code"),
+    [("provider_disabled", "configuration"), ("credential_store_unavailable", "provider_failure")],
+)
+def test_a_refusal_at_the_provider_base_class_is_retryable_only_for_an_unreadable_store(error_code, summary_code):
+    """TASK-15581 (I2): the audio worker keeps a transcript without its analysis for good on 'configuration', so
+    a store blip must come back as the retryable 'provider_failure'."""
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
+
+    error = ChatConfigurationError("refused", provider="openai", error_code=error_code)
+
+    assert sgl._summary_error_code(error) == summary_code
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("config_model", "model_override", "expected"),
     [("cfg-m", None, "cfg-m"), (None, "ovr-m", "ovr-m")],
-    ids=["config-model", "model-override"],
+    ids=["configured", "model-override"],
 )
-async def test_own_key_summary_named_model_beats_the_environment_default_and_skips_the_fallback_policy(
+async def test_an_allowed_model_stays_on_the_users_own_key(
     monkeypatch: pytest.MonkeyPatch, config_model: str | None, model_override: str | None, expected: str
 ) -> None:
-    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import LLMProviderOverride
-
-    # The allowlist excludes every model here: a named model is checked at resolve time, not at this fallback.
-    overrides = {"openai": LLMProviderOverride(provider="openai", allowed_models=["x"])}
-
-    result, models = await _own_key_summary(
-        monkeypatch, overrides=overrides, config_model=config_model, model_override=model_override
+    result, calls, warnings = await _summary(
+        monkeypatch, overrides=_allowlist(expected), config_model=config_model, model_override=model_override
     )
 
     assert result == "summary"
-    assert models == [expected]
+    assert calls == [(expected, "handle-key", True)]
+    assert warnings == []
 
 
 @pytest.mark.asyncio
 async def test_own_key_summary_with_an_allowlist_and_no_default_model_stays_missing_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import LLMProviderOverride
+    result, calls, warnings = await _summary(monkeypatch, overrides=_allowlist("gpt-allowed"), env_model=None)
 
-    overrides = {"openai": LLMProviderOverride(provider="openai", allowed_models=["gpt-allowed"])}
-
-    result, models = await _own_key_summary(monkeypatch, overrides=overrides, env_model=None)
-
-    assert models == []
+    assert calls == []
     assert result == "Error: Model is required for provider 'openai'"
+    assert warnings == []
 
 
 @pytest.mark.asyncio

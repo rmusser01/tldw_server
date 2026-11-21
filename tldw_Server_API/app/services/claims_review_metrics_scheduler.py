@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_service import (
     aggregate_claims_review_extractor_metrics_daily,
 )
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import content_db_settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -129,7 +130,7 @@ def resolve_scheduler_config(source: Mapping[str, Any] | None = None) -> ReviewM
         "jobs" if metrics_jobs and global_jobs else "local",
         interval,
         lookback,
-        str(_setting("AUTH_MODE", "single_user", source)).lower() == "single_user",
+        str(source.get("AUTH_MODE") or load_auth_config().mode).lower() == "single_user",
         MappingProxyType(snapshot),
     )
 
@@ -161,7 +162,7 @@ def _enumerate_sqlite_user_ids(*, single_user_mode: bool | None = None) -> list[
         pass
     if single_user_mode is None:
         single_user_mode = (
-            str(os.getenv("AUTH_MODE", settings.get("AUTH_MODE", "single_user"))).lower() == "single_user"
+            str(settings.get("AUTH_MODE") or load_auth_config().mode).lower() == "single_user"
         )
     if not ids and single_user_mode:
         try:

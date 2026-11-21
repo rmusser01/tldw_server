@@ -24,6 +24,8 @@ from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 from loguru import logger
 
+from tldw_Server_API.app.core.config_sections.auth import single_user_fixed_id_env
+
 _WEBSUB_NONCRITICAL_EXCEPTIONS = (
     OSError,
     ValueError,
@@ -291,7 +293,7 @@ def _iter_user_ids_with_websub() -> list[int]:
     except _WEBSUB_NONCRITICAL_EXCEPTIONS:
         pass
     # Fallback: single-user
-    return [int(os.getenv("SINGLE_USER_FIXED_ID", "1") or "1")]
+    return [int(single_user_fixed_id_env() or "1")]
 
 
 async def renew_expiring_subscriptions(renew_before_seconds: int | None = None) -> int:

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from tldw_Server_API.app.core.testing import is_truthy
 
+from .precedence import resolve
 from .types import ConfigParserLike
 
 _FALSE_VALUES = {"0", "false", "no", "n", "off"}
@@ -39,14 +40,9 @@ def _get_raw(
     default: str,
 ) -> str:
     """Return the first non-empty env override, parser value, or default."""
-    for env_key in _env_keys_for(option):
-        raw = env_map.get(env_key)
-        if raw is not None and str(raw).strip() != "":
-            return str(raw).strip()
-
-    raw = config_parser.get("Embeddings", option, fallback=default)
-    text = str(raw).strip()
-    return text or default
+    env_keys = _env_keys_for(option)
+    resolved = resolve(env_keys, (("Embeddings", option),), config_parser=config_parser, env=env_map, default=default)
+    return str(resolved.value).strip() or default
 
 
 def _parse_int(raw: object, default: int) -> int:

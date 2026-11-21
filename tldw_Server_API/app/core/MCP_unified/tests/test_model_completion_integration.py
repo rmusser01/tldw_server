@@ -51,6 +51,7 @@ from tldw_Server_API.app.core.MCP_unified.tests.test_model_completion_transport 
 from tldw_Server_API.app.core.MCP_unified.tests.test_model_completion_transport import (
     asyncio_diagnostics as asyncio_diagnostics,
 )
+from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides
 from tldw_Server_API.tests.AuthNZ_SQLite.test_byok_runtime_sqlite import _upsert_shared_key, _upsert_user_key
 from tldw_Server_API.tests.AuthNZ_SQLite.test_provider_scope_resolution_sqlite import (
     _execute,
@@ -371,6 +372,40 @@ async def test_authenticated_completion_uses_absence_only_precedence_and_frozen_
     if stored is not None:
         assert stored["last_used_at"] is not None
         assert KEYS[selected] not in stored["encrypted_blob"]
+
+
+@pytest.mark.parametrize("selected", ["user", "team", "org", "server"])
+@pytest.mark.parametrize(
+    ("override_kwargs", "healthy", "reason", "domain"),
+    [
+        ({"allowed_models": ["x"]}, True, "model_not_allowed", ModelFailureDomain.CREDENTIAL_SCOPE),
+        ({"is_enabled": False}, True, "provider_disabled", ModelFailureDomain.CREDENTIAL_SCOPE),
+        ({}, False, "credential_store_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE),
+    ],
+    ids=["model-not-allowed", "provider-disabled", "store-unavailable"],
+)
+async def test_an_admin_disabled_provider_or_model_is_refused_on_every_key(
+    composed, selected, override_kwargs, healthy, reason, domain
+):
+    """TASK-15581: after the scope check, on whichever key it chose, a provider or model the admin disabled, or a store
+    that cannot be read, fails closed before any reservation or provider request, with the reason as its code (not an
+    auth code), and the reason is logged."""
+    env = composed
+    sources = ("user", "team", "org")
+    await seed_keys(env, sources[sources.index(selected) :] if selected != "server" else ())
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        {"openai": llm_provider_overrides.LLMProviderOverride(provider="openai", **override_kwargs)}, healthy=healthy
+    )
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    with pytest.raises(ModelCompletionFailure) as caught:
+        await env.build().complete(request(), invocation)
+    assert_failure(caught.value, reason, domain)
+    assert env.provider.requests == []
+    assert await assert_safe_surfaces(env, invocation) is None
+    refusals = [line for line, _extra, _exception in env.logs if "Provider override for openai" in line]
+    assert len(refusals) == 1
+    assert f"Provider override for openai: {reason}; the call is refused" in refusals[0]
 
 
 class Gate:

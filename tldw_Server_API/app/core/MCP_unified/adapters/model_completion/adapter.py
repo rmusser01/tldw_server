@@ -375,7 +375,8 @@ class ModelCompletionAdapter:
                 credentials = await runtime.resolve(self._settings.provider, model=self._settings.model)
             except ByokResolutionError as error:
                 failure = _failure(
-                    error.code,
+                    # An admin override's reason ('provider_disabled', 'model_not_allowed'), not an auth code.
+                    getattr(error, "policy_code", None) or error.code,
                     (
                         ModelFailureDomain.SHARED_INFRASTRUCTURE
                         if error.code == "credential_store_unavailable"

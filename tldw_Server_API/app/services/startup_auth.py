@@ -114,7 +114,7 @@ async def refresh_provider_override_snapshot(db_pool: object) -> ModuleType | No
         logger.info("App Startup: Loaded LLM provider overrides")
     except _IMPORT_EXCEPTIONS:
         logger.warning(
-            "App Startup: LLM provider overrides unavailable; server fallback disabled"
+            "App Startup: LLM provider overrides unavailable; every LLM call is refused until they load"
         )
     return override_store
 

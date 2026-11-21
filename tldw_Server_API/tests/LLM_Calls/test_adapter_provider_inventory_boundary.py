@@ -1,5 +1,7 @@
 """Direct adapter calls must enforce the same inventory as ordinary Chat."""
 
+import time
+import types
 from types import SimpleNamespace
 from typing import Any
 
@@ -71,7 +73,13 @@ def test_direct_adapter_discovery_consumes_call_policy_deadline(monkeypatch: pyt
 
     monkeypatch.setattr(gateway, "_validate_provider_model_selection", lambda *_args, **_kwargs: None)
     clock = iter([10.0, 12.0])
-    monkeypatch.setattr(base.time, "monotonic", lambda: next(clock, 12.0))
+    # The admin-override guard reads the store's clock, so the fake clock covers only the deadline's two modules
+    # (TASK-15581).
+    fake_time = types.ModuleType("fake_time")
+    fake_time.__dict__.update(vars(time))
+    fake_time.monotonic = lambda: next(clock, 12.0)
+    monkeypatch.setattr(base, "time", fake_time)
+    monkeypatch.setattr(gateway, "time", fake_time)
     monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_OPENAI", "1")
     calls = []
 

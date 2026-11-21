@@ -528,6 +528,7 @@ class ProviderCredentialRuntime:
                         generation=generation,
                         force_refresh=force_refresh,
                         override_snapshot=None,
+                        model=model,
                     )
                 )
             )
@@ -725,6 +726,7 @@ class ProviderCredentialRuntime:
         force_refresh: bool,
         override_snapshot: _ProviderOverrideSnapshot | None,
         rejected_credential_generation: str | None = None,
+        model: str | None = None,
     ) -> _ResolvedEntry:
         resolution_failure: ByokResolutionError | None = None
         unexpected_failure = False
@@ -802,6 +804,15 @@ class ProviderCredentialRuntime:
                 provider,
                 **resolver_kwargs,
             )
+            if self._authoritative_scope is not None:
+                # Imported here: the override module imports the adapter registry, which imports this module.
+                from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+                    enforce_provider_override,
+                )
+
+                # After the scope check, on whichever key it chose: an admin-disabled provider or model is
+                # refused (TASK-15581). This scope captures no override snapshot, so nothing else checks it.
+                enforce_provider_override(provider, model)
         except asyncio.CancelledError:
             raise
         except ByokResolutionError as exc:

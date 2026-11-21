@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -466,13 +468,18 @@ def test_add_acp_job_applies_explicit_concurrency_metadata(monkeypatch):
     svc = workflows_scheduler_mod._WFRecurringScheduler()
     captured_jobs: list[dict[str, Any]] = []
     history_updates: list[dict[str, Any]] = []
+    next_run = datetime(2026, 1, 2, 9, tzinfo=timezone.utc)
 
     class FakeAPS:
+        def get_job(self, _job_id: str) -> None:
+            return None
+
         def remove_job(self, _job_id: str) -> None:
             return None
 
         def add_job(self, func, **kwargs):
             captured_jobs.append({"func": func, **kwargs})
+            return SimpleNamespace(next_run_time=next_run)
 
     class FakeDB:
         def set_history(self, _schedule_id: str, **kwargs):
@@ -541,7 +548,7 @@ def test_add_acp_job_applies_explicit_concurrency_metadata(monkeypatch):
     assert captured_jobs[1]["max_instances"] == 1
     assert captured_jobs[1]["coalesce"] is True
     assert captured_jobs[1]["misfire_grace_time"] == 0
-    assert history_updates
+    assert history_updates == [{"next_run_at": next_run.isoformat()}] * 2
 
 def test_create_with_message_list_prompt(scheduler):
     """ACP prompts can be a list of message dicts, not just a string."""

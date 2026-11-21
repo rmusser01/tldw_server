@@ -377,6 +377,47 @@ async def test_a_failed_resolution_keeps_the_servers_key(monkeypatch) -> None:
     assert await usage_quota_deps.users_own_key_credentials(1, "openai") is None
 
 
+@pytest.mark.parametrize(
+    ("override_kwargs", "healthy", "reason"),
+    [
+        ({"allowed_models": ["x"]}, True, "model_not_allowed"),
+        ({"is_enabled": False}, True, "provider_disabled"),
+        ({}, False, "credential_store_unavailable"),
+    ],
+    ids=["model-not-allowed", "provider-disabled", "store-unavailable"],
+)
+async def test_an_admin_disabled_own_key_keeps_no_handle_and_its_limit(
+    monkeypatch, override_kwargs, healthy, reason
+) -> None:
+    """TASK-15577 / TASK-15581: refused at resolution, so no handle. The request keeps the server's key, where the call
+    is refused too (test_provider_adapter_runtime_boundary), and an over-limit user is refused at the boundary. One
+    warning names the provider and the reason, and no key."""
+    from loguru import logger
+
+    from tldw_Server_API.app.core.Provider_Credentials import provider_credential_runtime as runtime_module
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work, users_own_key
+
+    users_own_key(monkeypatch, "openai")
+    monkeypatch.setattr(runtime_module, "load_server_config_snapshot", lambda: {"openai_api": {"model": "gpt-denied"}})
+    set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", **override_kwargs)}, healthy=healthy
+    )
+    warnings: list[str] = []
+    sink = logger.add(lambda message: warnings.append(message.record["message"]), level="WARNING")
+    try:
+        assert await usage_quota_deps.users_own_key_credentials(1, "openai") is None
+    finally:
+        logger.remove(sink)
+    assert warnings == [f"Own-key credential resolution for openai failed: {reason}"]
+    refuse_llm_work(monkeypatch)
+    with pytest.raises(LLMQuotaExceededError):
+        await usage_quota_deps.enforce_llm_quota_on_own_key(1, "openai")
+
+
 async def test_enforce_on_own_key_asks_once_and_admits_only_with_a_handle(monkeypatch) -> None:
     """Over the limit, the handle for the user's own key admits it unmarked; no handle is the 402 (TASK-15426)."""
     from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work, users_own_key

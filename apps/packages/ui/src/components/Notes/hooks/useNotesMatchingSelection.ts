@@ -60,10 +60,16 @@ export function useNotesMatchingSelection({ filterKey, fetchPage, onError }: Opt
 
   React.useEffect(() => () => controllerRef.current?.abort(), [])
   // A new list ends the selection for good: going back to the old filters
-  // (Notes -> Trash -> Notes, a tag off and on) must not bring it back.
+  // (Notes -> Trash -> Notes, a tag off and on) must not bring it back. The
+  // reset happens in the render that first sees the new key; a reset in an
+  // effect can land after a later render, which then shows the old selection.
+  const [selectionListKey, setSelectionListKey] = React.useState(filterKey)
+  if (selectionListKey !== filterKey) {
+    setSelectionListKey(filterKey)
+    setSelection(null)
+  }
   React.useEffect(() => {
     controllerRef.current?.abort()
-    setSelection(null)
   }, [filterKey])
 
   const matching = selection && selection.key === filterKey ? selection : null

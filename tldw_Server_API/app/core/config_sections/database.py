@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from tldw_Server_API.app.core.testing import is_truthy
 
+from .precedence import resolve
 from .types import ConfigParserLike
 
 
@@ -32,6 +33,14 @@ class DatabaseConfig:
     prompts_db_path: str
 
 
+def database_url_env(env: Mapping[str, str] | None = None) -> str | None:
+    """The content-backend override: the live ``DATABASE_URL`` text, blank kept, ``None`` when unset.
+
+    Environment only. AuthNZ's users DB has its own rule, ``auth.resolve_database_url``.
+    """
+    return resolve(("DATABASE_URL",), env=env, blank_env=True).value
+
+
 def _get_raw(
     config_parser: ConfigParserLike,
     env_map: Mapping[str, str],
@@ -39,11 +48,10 @@ def _get_raw(
     default: str,
 ) -> str:
     """Return an environment override, parser value, or default for a database option."""
-    raw = env_map.get(f"DB_{option.upper()}")
-    if raw is None or str(raw).strip() == "":
-        raw = config_parser.get("Database", option, fallback=default)
-    text = str(raw).strip()
-    return text or default
+    resolved = resolve(
+        (f"DB_{option.upper()}",), (("Database", option),), config_parser=config_parser, env=env_map, default=default
+    )
+    return str(resolved.value).strip() or default
 
 
 def _parse_bool(raw: object, default: bool) -> bool:

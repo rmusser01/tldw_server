@@ -998,6 +998,10 @@ class ChatConfigurationError(ChatAPIError):
             "provider_configuration_invalid",
             "missing_provider_credentials",
             "provider_model_inventory_unavailable",
+            # An admin provider override refused the call at the provider base class (TASK-15581).
+            "provider_disabled",
+            "model_not_allowed",
+            "credential_store_unavailable",
         }
     )
 

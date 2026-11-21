@@ -94,8 +94,8 @@ def test_load_config_sections_exposes_new_typed_sections(monkeypatch: pytest.Mon
     parser.set("AuthNZ", "auth_mode", "multi_user")
     parser.set("AuthNZ", "single_user_fixed_id", "7")
     parser.set("RAG", "vector_store_type", "faiss")
-    parser.set("RAG", "rag_default_llm_provider", "anthropic")
-    parser.set("RAG", "rag_default_llm_model", "claude-3-5-sonnet")
+    parser.set("RAG", "default_llm_provider", "anthropic")
+    parser.set("RAG", "default_llm_model", "claude-3-5-sonnet")
     parser.set("TTS-Settings", "default_tts_provider", "kokoro")
     parser.set("TTS-Settings", "default_tts_voice", "alloy")
     parser.set("TTS-Settings", "local_tts_device", "cuda")
@@ -149,7 +149,7 @@ def test_load_config_sections_exposes_new_typed_sections(monkeypatch: pytest.Mon
     sections = load_config_sections(parser)
 
     assert sections.auth.mode == "multi_user"
-    assert sections.auth.single_user_fixed_id == 7
+    assert sections.auth.single_user_fixed_id == 1  # D1(g): config.txt no longer sets it
     assert sections.rag.vector_store_type == "faiss"
     assert sections.rag.default_llm_provider == "anthropic"
     assert sections.audio.default_tts_provider == "kokoro"
@@ -536,7 +536,7 @@ def test_auth_audio_rag_and_provider_loaders_honor_env_and_fallbacks() -> None:
     parser.set("TTS-Settings", "default_tts_provider", "config-tts")
     parser.set("TTS-Settings", "local_tts_device", "cpu")
     parser.set("RAG", "vector_store_type", "chromadb")
-    parser.set("RAG", "rag_default_llm_provider", "config-provider")
+    parser.set("RAG", "default_llm_provider", "config-provider")
     parser.set("API", "default_api", "config-api")
     parser.set("API", "default_provider", "config-provider")
 
@@ -728,3 +728,18 @@ def test_slides_standalone_section_loader_rejects_malformed_security_values(
 
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None or caught.value.__suppress_context__ is True
+
+
+@pytest.mark.parametrize(("env", "cfg", "expected"), [
+    ({"CHAT_REQUEST_MAX_SIZE": "200"}, None, 200), ({"CHAT_REQUEST_MAX_SIZE": "0"}, None, 1),
+    ({"CHAT_REQUEST_MAX_SIZE": "-5"}, None, 1), ({"CHAT_REQUEST_MAX_SIZE": "abc"}, "300", 300),
+    ({"CHAT_REQUEST_MAX_SIZE": ""}, "300", 300), ({}, "300", 300), ({}, "x", 1_000_000), ({}, "0", 1), ({}, None, 1_000_000),
+])
+def test_max_request_size_chars_keeps_its_precedence(env, cfg, expected) -> None:
+    from tldw_Server_API.app.core.config_sections.chat import max_request_size_chars
+
+    parser = ConfigParser()
+    if cfg is not None:
+        parser.add_section("Chat-Module")
+        parser.set("Chat-Module", "max_request_size_chars", cfg)
+    assert max_request_size_chars(parser, env=env) == expected

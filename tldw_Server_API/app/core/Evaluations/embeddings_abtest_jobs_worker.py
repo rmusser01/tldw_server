@@ -275,5 +275,13 @@ async def run_embeddings_abtest_jobs_worker(stop_event: asyncio.Event | None = N
                 watcher.cancel()
 
 
+async def main() -> None:
+    """Load the provider-override store, then take jobs: every LLM call refuses until it is loaded (TASK-15581)."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import standalone_llm_provider_overrides
+
+    async with standalone_llm_provider_overrides():
+        await run_embeddings_abtest_jobs_worker()
+
+
 if __name__ == "__main__":
-    asyncio.run(run_embeddings_abtest_jobs_worker())
+    asyncio.run(main())

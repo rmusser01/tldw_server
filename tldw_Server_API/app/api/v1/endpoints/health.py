@@ -149,6 +149,13 @@ async def api_health():
         checks["chacha_notes"] = {"status": "unhealthy", "error": "ChaChaNotes health check failed"}
         overall = "degraded"
 
+    # The admin provider-override store, informational only (TASK-15581): every LLM call is refused while it is
+    # unavailable. It never changes the overall status or code, so a probe on this route cannot restart a process
+    # over a store blip and prolong the outage.
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import llm_provider_overrides_status
+
+    checks["llm_provider_overrides"] = {"status": llm_provider_overrides_status()}
+
     body = {
         "status": overall,
         "checks": checks,
