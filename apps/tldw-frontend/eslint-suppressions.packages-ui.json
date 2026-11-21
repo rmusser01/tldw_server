@@ -920,11 +920,6 @@
       "count": 1
     }
   },
-  "packages/ui/src/models/__tests__/ChatTldw.stream-metadata.test.ts": {
-    "no-empty": {
-      "count": 2
-    }
-  },
   "packages/ui/src/routes/hooks/usePersonaAnalytics.tsx": {
     "no-restricted-syntax": {
       "count": 2

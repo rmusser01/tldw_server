@@ -130,6 +130,7 @@ describe("selected history provider fidelity", () => {
     for await (const _ of await model.stream([new HumanMessage("Look it up")], {
       callbacks: [{ handleLLMEnd }]
     })) {
+      // Allow the completion callback to run before checking metadata.
     }
     const { tool_calls } = handleLLMEnd.mock.lastCall![0].generations[0][0].generationInfo
     const request = model.prepareClientManagedRequest([
@@ -167,6 +168,7 @@ describe("selected history provider fidelity", () => {
       new AIMessage({ content: "", additional_kwargs: { tool_calls: calls } }),
       new ToolMessage({ content: "found", tool_call_id: "call-1" })
     ])) {
+      // Consume the response before checking the recorded request.
     }
     expect(mocks.streamMessage.mock.lastCall?.[0]).toEqual([
       { role: "assistant", content: "", tool_calls: calls },
@@ -195,6 +197,7 @@ describe("selected history provider fidelity", () => {
       saveToDb: true
     })
     for await (const _ of await model.stream([new HumanMessage("Hi")])) {
+      // Consume the response before checking client state.
     }
     expect(model.saveToDb).toBe(false)
     expect(model.conversationId).toBeUndefined()

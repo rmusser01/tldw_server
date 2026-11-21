@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
+from tldw_Server_API.app.core.Utils.tokenizer import estimate_segment_tokens
+
 # Provider, endpoint host, effective model, context, advertised output, bundled output.
 _MODELS = {
     "anthropic": ("api.anthropic.com", "claude-sonnet-4-6", 1_000_000, 128_000, 128_000),
@@ -136,8 +138,6 @@ def apply_commercial_output_default(provider: str, request: dict[str, Any]) -> N
         request["max_tokens"] = budget
         return
 
-    from tldw_Server_API.app.core.Chat.chat_service import estimate_tokens_from_json
-
     prompt = {key: request[key] for key in ("messages", "system_message", "tools") if request.get(key)}
-    remaining = context - estimate_tokens_from_json(json.dumps(prompt, default=str))
+    remaining = context - max(1, estimate_segment_tokens(json.dumps(prompt, default=str)))
     request["max_tokens"] = max(1, min(budget, remaining))
