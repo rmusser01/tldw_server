@@ -100,24 +100,21 @@ def qualified_name(tree: ast.Module, lineno: int) -> str:
     """Return ``"Class.method"``, ``"outer.inner"`` or ``"<module>"`` for *lineno*.
 
     The chain is the enclosing function and class definitions whose line span
-    contains *lineno*, outermost first.
+    contains *lineno*, outermost first, through any statement nesting.
     """
     chain: list[str] = []
-    node: ast.AST = tree
-    while True:
-        inner = next(
-            (
-                child
-                for child in ast.iter_child_nodes(node)
-                if isinstance(child, _SCOPES)
-                and child.lineno <= lineno <= (child.end_lineno or child.lineno)
-            ),
-            None,
-        )
-        if inner is None:
-            break
-        chain.append(inner.name)  # type: ignore[attr-defined]
-        node = inner
+
+    def descend(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, _SCOPES):
+                if child.lineno <= lineno <= (child.end_lineno or child.lineno):
+                    chain.append(child.name)
+                    descend(child)
+                    return
+            elif getattr(child, "lineno", lineno) <= lineno <= (getattr(child, "end_lineno", None) or 0):
+                descend(child)
+
+    descend(tree)
     return ".".join(chain) or "<module>"
 
 

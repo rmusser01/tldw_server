@@ -93,10 +93,42 @@ def test_keys_survive_a_line_shift(tmp_path) -> None:
 @pytest.mark.unit
 @pytest.mark.usefixtures("_root_at_tmp")
 def test_duplicate_findings_get_ordinals(tmp_path) -> None:
-    _seed(tmp_path, "class C:\n    def m(self, user_id):\n" + "".join("    " + l + "\n" for l in (_BLOCK * 2).splitlines()))
+    _seed(
+        tmp_path,
+        "class C:\n"
+        "    def m(self, user_id):\n"
+        "        if user_id:\n"
+        '            conditions.append("user_id = ?")\n'
+        "        if user_id:\n"
+        '            conditions.append("user_id = ?")\n',
+    )
     assert sorted(iter_findings(tmp_path)) == [
         "pkg/q.py::C.m if user_id",
         "pkg/q.py::C.m if user_id #2",
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_root_at_tmp")
+def test_qualname_sees_defs_nested_in_compound_statements(tmp_path) -> None:
+    _seed(
+        tmp_path,
+        "try:\n"
+        "    class C:\n"
+        "        def m(self, user_id):\n"
+        "            if user_id:\n"
+        '                conditions.append("user_id = ?")\n'
+        "except ImportError:\n"
+        "    pass\n"
+        "async def f(user_id):\n"
+        "    if True:\n"
+        "        def g():\n"
+        "            if user_id:\n"
+        '                conditions.append("user_id = ?")\n',
+    )
+    assert sorted(iter_findings(tmp_path)) == [
+        "pkg/q.py::C.m if user_id",
+        "pkg/q.py::f.g if user_id",
     ]
 
 
