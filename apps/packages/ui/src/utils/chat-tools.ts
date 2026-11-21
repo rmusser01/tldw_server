@@ -1,3 +1,11 @@
+import type { ToolCall } from "@/types/tool-calls"
+
+export const preserveGoogleToolCallSignature = (call: ToolCall, signature: unknown): void => {
+  if (typeof signature === "string" && signature.length > 0 && signature.length <= 100_000) {
+    call.extra_content = { google: { thought_signature: signature } }
+  }
+}
+
 export type ChatToolRecord = Record<string, unknown>
 
 export type ResolvedMcpTool = {
