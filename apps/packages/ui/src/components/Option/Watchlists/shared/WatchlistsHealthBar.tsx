@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react"
+import React, { useCallback, useState } from "react"
 import { Button, Spin, Tooltip } from "antd"
 import {
   AlertTriangle,
@@ -12,11 +12,9 @@ import {
   Workflow
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { useInvalidateWatchlists, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { useWatchlistsStore } from "@/store/watchlists"
-import {
-  fetchWatchlistsOverviewData,
-  type WatchlistsOverviewData
-} from "@/services/watchlists-overview"
+import { fetchWatchlistsOverviewData } from "@/services/watchlists-overview"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 
@@ -49,45 +47,14 @@ interface HealthBarProps {
 export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, onNavigate }) => {
   const { t } = useTranslation(["watchlists", "common"])
   const [expanded, setExpanded] = useState(readHealthBarExpanded)
-  const [data, setData] = useState<WatchlistsOverviewData | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const setOverviewHealth = useWatchlistsStore((s) => s.setOverviewHealth)
+  const { data, isLoading: loading, isRefetching: refreshing } =
+    useWatchlistsQuery("overview", {}, ({ signal }) => fetchWatchlistsOverviewData({}, signal), {
+      refetchInterval: HEALTH_BAR_REFRESH_MS
+    })
   const storeSetActiveTab = useWatchlistsStore((s) => s.setActiveTab)
-  const overviewHealth = useWatchlistsStore((s) => s.overviewHealth)
+  const overviewHealth = data?.health
   const goToTab = onNavigate ?? storeSetActiveTab
-
-  const loadData = useCallback(
-    async (showLoading: boolean) => {
-      if (showLoading) setLoading(true)
-      else setRefreshing(true)
-      try {
-        const result = await fetchWatchlistsOverviewData()
-        setData(result)
-        if (typeof setOverviewHealth === "function") {
-          setOverviewHealth(result.health, result.fetchedAt)
-        }
-      } catch (err) {
-        console.warn("[WatchlistsHealthBar] Failed to fetch overview data:", err)
-      } finally {
-        setLoading(false)
-        setRefreshing(false)
-      }
-    },
-    [setOverviewHealth]
-  )
-
-  useEffect(() => {
-    void loadData(true)
-    intervalRef.current = setInterval(() => {
-      void loadData(false)
-    }, HEALTH_BAR_REFRESH_MS)
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-    }
-  }, [loadData])
+  const invalidate = useInvalidateWatchlists()
 
   const toggleExpanded = useCallback(() => {
     setExpanded((prev) => {
@@ -98,8 +65,8 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
   }, [])
 
   const handleRefresh = useCallback(() => {
-    void loadData(false)
-  }, [loadData])
+    void invalidate("overview")
+  }, [invalidate])
 
   const feedsCount = data?.sources.total ?? 0
   const monitorsTotal = data?.jobs.total ?? 0
@@ -108,7 +75,7 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
   const pendingRuns = data?.runs.pending ?? 0
   const failedRuns = data?.runs.failed ?? 0
   const outputsTotal = data?.outputs.total ?? 0
-  const lastCheckedAt = data?.runs.running > 0
+  const lastCheckedAt = runningRuns > 0
     ? t("watchlists:healthBar.runningNow", "running now")
     : data?.jobs.nextRunAt
       ? formatRelativeTime(data.jobs.nextRunAt, t)

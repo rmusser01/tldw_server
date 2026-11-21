@@ -3,7 +3,8 @@
 import React from "react"
 import i18next from "i18next"
 import { beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import userEvent from "@testing-library/user-event"
 import { ItemsTab } from "../ItemsTab"
 import { useWatchlistsStore } from "@/store/watchlists"
@@ -159,6 +160,7 @@ describe("ItemsTab accessibility baseline", () => {
       has_more: false
     })
 
+    const reviewedItemIds = new Set<number>()
     ;(serviceMocks.fetchScrapedItems as Mock).mockImplementation(async (params?: Record<string, unknown>) => {
       if (params?.size === 1) {
         if (params?.reviewed === false) return { items: [], total: 2, page: 1, size: 1, has_more: false }
@@ -177,7 +179,7 @@ describe("ItemsTab accessibility baseline", () => {
             summary: "Summary one",
             tags: ["tech"],
             status: "ingested",
-            reviewed: false,
+            reviewed: reviewedItemIds.has(101),
             created_at: "2026-02-18T08:00:00Z",
             published_at: "2026-02-18T08:00:00Z"
           },
@@ -217,10 +219,11 @@ describe("ItemsTab accessibility baseline", () => {
       }
     })
 
-    ;(serviceMocks.updateScrapedItem as Mock).mockImplementation(async (itemId: number) => ({
-      id: itemId,
-      reviewed: true
-    }))
+    ;(serviceMocks.updateScrapedItem as Mock).mockImplementation(async (itemId: number, { reviewed }: { reviewed: boolean }) => {
+      if (reviewed) reviewedItemIds.add(itemId)
+      else reviewedItemIds.delete(itemId)
+      return { id: itemId, reviewed }
+    })
   })
 
   it("exposes explicit text status labels for row state changes", async () => {

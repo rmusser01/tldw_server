@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { getTutorialById } from "@/tutorials/registry"
@@ -204,6 +205,10 @@ vi.mock("@/utils/watchlists-onboarding-telemetry", () => ({
     mocks.trackWatchlistsOnboardingTelemetryMock(...args)
 }))
 
+vi.mock("@/services/watchlists-overview", () => ({
+  fetchWatchlistsOverviewData: async () => ({ health: null })
+}))
+
 vi.mock("@/store/watchlists", () => ({
   useWatchlistsStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
@@ -299,7 +304,7 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
 
   it("renders every Watchlists tutorial target on the default route", async () => {
     renderPage()
-    await screen.findByTestId("watchlists-outcome-first-region")
+    await screen.findByTestId("watchlists-container-shell")
 
     for (const step of getTutorialById("watchlists-basics")?.steps ?? []) {
       expect(document.querySelector(step.target), step.target).not.toBeNull()
@@ -379,10 +384,10 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("outputs")
   })
 
-  it("keeps command palette reachable through Help without duplicate jump strips", () => {
+  it("keeps command palette reachable through Help without duplicate jump strips", async () => {
     renderPage()
 
-    expect(screen.getByTestId("watchlists-health-bar")).toBeInTheDocument()
+    expect(await screen.findByTestId("watchlists-health-bar")).toBeInTheDocument()
     expect(screen.queryByTestId("watchlists-repeat-actions")).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(screen.getByTestId("watchlists-open-command-palette"))

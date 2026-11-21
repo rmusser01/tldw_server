@@ -2,7 +2,8 @@
 
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { OutputPreviewDrawer } from "../OutputPreviewDrawer"
 import type { WatchlistOutput } from "@/types/watchlists"
 
@@ -234,10 +235,10 @@ describe("OutputPreviewDrawer audio support", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42)
+      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42, expect.any(AbortSignal))
     })
     await waitFor(() => {
-      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledWith(9)
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledWith(9, expect.any(AbortSignal))
     })
 
     expect(serviceMocks.downloadWatchlistOutputBinary).not.toHaveBeenCalled()
@@ -283,7 +284,7 @@ describe("OutputPreviewDrawer audio support", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledWith(9)
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledWith(9, expect.any(AbortSignal))
     })
 
     expect(await screen.findByText("Completed")).toBeInTheDocument()
@@ -395,7 +396,7 @@ describe("OutputPreviewDrawer audio support", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledWith(9)
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledWith(9, expect.any(AbortSignal))
     })
 
     expect(await screen.findByText("Running")).toBeInTheDocument()
@@ -405,18 +406,7 @@ describe("OutputPreviewDrawer audio support", () => {
   })
 
   it("continues polling after transient live audio status failures", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
-    const originalSetTimeout = globalThis.setTimeout
-    const scheduledAudioPolls: Array<() => void> = []
-    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
-      ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
-        if (timeout === 3000 && typeof handler === "function") {
-          scheduledAudioPolls.push(() => handler(...args))
-          return 0 as unknown as ReturnType<typeof setTimeout>
-        }
-        return originalSetTimeout(handler, timeout, ...args)
-      }) as typeof setTimeout
-    )
+    vi.useFakeTimers()
     try {
       serviceMocks.getWatchlistRunAudio
         .mockRejectedValueOnce(new Error("network hiccup"))
@@ -424,12 +414,12 @@ describe("OutputPreviewDrawer audio support", () => {
           run_id: 9,
           task_id: "task_audio_pending",
           queue_name: "workflows",
-          status: "queued",
+          status: "completed",
           audio_uri: null,
           download_url: null
         })
 
-      const { unmount } = render(
+      render(
         <OutputPreviewDrawer
           open
           onClose={vi.fn()}
@@ -445,38 +435,23 @@ describe("OutputPreviewDrawer audio support", () => {
         />
       )
 
-      await act(async () => {
-        await Promise.resolve()
-      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
       expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(1)
-      expect(scheduledAudioPolls).toHaveLength(1)
-
-      await act(async () => {
-        scheduledAudioPolls[0]()
-      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(3001) })
       expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(2)
       expect(screen.getByText("Queue: workflows")).toBeInTheDocument()
-      unmount()
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(6000) })
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(2)
     } finally {
-      setTimeoutSpy.mockRestore()
-      warnSpy.mockRestore()
+      vi.useRealTimers()
     }
   })
 
-  it("continues polling when live audio status is unknown but task id is present", async () => {
-    const originalSetTimeout = globalThis.setTimeout
-    const scheduledAudioPolls: Array<() => void> = []
-    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
-      ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
-        if (timeout === 3000 && typeof handler === "function") {
-          scheduledAudioPolls.push(() => handler(...args))
-          return 0 as unknown as ReturnType<typeof setTimeout>
-        }
-        return originalSetTimeout(handler, timeout, ...args)
-      }) as typeof setTimeout
-    )
+  it("continues polling for an unknown status with a task ID and stops when the drawer closes", async () => {
+    vi.useFakeTimers()
     try {
-      serviceMocks.getWatchlistRunAudio.mockResolvedValueOnce({
+      serviceMocks.getWatchlistRunAudio.mockResolvedValue({
         run_id: 9,
         task_id: "task_audio_pending",
         queue_name: "workflows",
@@ -485,80 +460,26 @@ describe("OutputPreviewDrawer audio support", () => {
         download_url: null
       })
 
-      const { unmount } = render(
-        <OutputPreviewDrawer
-          open
-          onClose={vi.fn()}
-          output={buildOutput({
-            type: "brief",
-            format: "md",
-            metadata: {
-              audio_briefing_requested: true,
-              audio_briefing_status: "unknown",
-              audio_briefing_task_id: "task_audio_pending"
-            }
-          })}
-        />
-      )
-
-      await act(async () => {
-        await Promise.resolve()
+      const output = buildOutput({
+        type: "brief",
+        format: "md",
+        metadata: {
+          audio_briefing_requested: true,
+          audio_briefing_status: "unknown",
+          audio_briefing_task_id: "task_audio_pending"
+        }
       })
-
+      const { rerender } = render(<OutputPreviewDrawer open onClose={vi.fn()} output={output} />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
       expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(1)
-      expect(scheduledAudioPolls).toHaveLength(1)
-      unmount()
+      await act(async () => { await vi.advanceTimersByTimeAsync(3001) })
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(2)
+
+      rerender(<OutputPreviewDrawer open={false} onClose={vi.fn()} output={output} />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(2)
     } finally {
-      setTimeoutSpy.mockRestore()
-    }
-  })
-
-  it("stops live audio polling when the drawer closes", async () => {
-    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
-    try {
-      const { rerender } = render(
-        <OutputPreviewDrawer
-          open
-          onClose={vi.fn()}
-          output={buildOutput({
-            type: "brief",
-            format: "md",
-            metadata: {
-              audio_briefing_requested: true,
-              audio_briefing_status: "pending",
-              audio_briefing_task_id: "task_audio_pending"
-            }
-          })}
-        />
-      )
-
-      await waitFor(() => {
-        expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(1)
-      })
-      await screen.findByText("Queue: workflows")
-
-      rerender(
-        <OutputPreviewDrawer
-          open={false}
-          onClose={vi.fn()}
-          output={buildOutput({
-            type: "brief",
-            format: "md",
-            metadata: {
-              audio_briefing_requested: true,
-              audio_briefing_status: "pending",
-              audio_briefing_task_id: "task_audio_pending"
-            }
-          })}
-        />
-      )
-
-      await waitFor(() => {
-        expect(clearTimeoutSpy).toHaveBeenCalled()
-      })
-      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(1)
-    } finally {
-      clearTimeoutSpy.mockRestore()
+      vi.useRealTimers()
     }
   })
 
@@ -583,7 +504,7 @@ describe("OutputPreviewDrawer audio support", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42)
+      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42, expect.any(AbortSignal))
     })
 
     expect(await screen.findByText("Audio artifacts")).toBeInTheDocument()
@@ -612,7 +533,7 @@ describe("OutputPreviewDrawer audio support", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42)
+      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42, expect.any(AbortSignal))
     })
 
     expect(await screen.findByText("Queue unavailable")).toBeInTheDocument()
@@ -636,7 +557,7 @@ describe("OutputPreviewDrawer audio support", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42)
+      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42, expect.any(AbortSignal))
     })
 
     const drawerButton = document.querySelector(".ant-drawer button")

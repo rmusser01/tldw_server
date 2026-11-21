@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { Modal, message } from "antd"
 import { JobFormModal } from "../JobFormModal"
 import { setViewport } from "../../__tests__/test-utils/viewport"
@@ -913,19 +914,18 @@ describe("JobFormModal live summary", () => {
   }, 15_000)
 
   it("updates and deletes selected server-backed output presets", async () => {
-    servicesMock.fetchWatchlistOutputPresets.mockResolvedValueOnce({
-      items: [
-        {
-          id: 34,
-          name: "Reusable newsletter",
-          description: null,
-          output_prefs: { template: { default_name: "newsletter_html" } },
-          is_default: false,
-          created_at: "2026-01-15T00:00:00Z",
-          updated_at: "2026-01-15T00:00:00Z"
-        }
-      ]
-    })
+    const preset = {
+      id: 34,
+      name: "Reusable newsletter",
+      description: null,
+      output_prefs: { template: { default_name: "newsletter_html" } },
+      is_default: false,
+      created_at: "2026-01-15T00:00:00Z",
+      updated_at: "2026-01-15T00:00:00Z"
+    }
+    servicesMock.fetchWatchlistOutputPresets
+      .mockResolvedValueOnce({ items: [preset] })
+      .mockResolvedValueOnce({ items: [preset] })
 
     render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
 
@@ -957,6 +957,7 @@ describe("JobFormModal live summary", () => {
     )
 
     vi.mocked(Modal.confirm).mockClear()
+    await waitFor(() => expect(screen.getByTestId("job-form-output-preset-delete-button")).toBeEnabled())
     fireEvent.click(screen.getByTestId("job-form-output-preset-delete-button"))
     expect(Modal.confirm).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1333,7 +1334,7 @@ describe("JobFormModal live summary", () => {
       expect(servicesMock.previewWatchlistJob).toHaveBeenCalledWith(77, {
         limit: 60,
         per_source: 12
-      })
+      }, expect.any(AbortSignal))
     })
 
     fireEvent.click(screen.getByText("Output & Delivery"))

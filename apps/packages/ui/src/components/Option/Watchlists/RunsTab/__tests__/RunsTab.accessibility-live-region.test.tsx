@@ -1,5 +1,6 @@
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunsTab } from "../RunsTab"
 
@@ -105,18 +106,12 @@ const buildRun = (status: string) => ({
 })
 
 const baseState = (overrides: Record<string, unknown> = {}) => ({
-  runs: [],
-  runsLoading: false,
-  runsTotal: 0,
   runsPage: 1,
   runsPageSize: 20,
   runsJobFilter: null,
   runsStatusFilter: null,
-  pollingActive: false,
   runDetailOpen: false,
   selectedRunId: null,
-  setRuns: vi.fn(),
-  setRunsLoading: vi.fn(),
   setRunsPage: vi.fn(),
   setRunsPageSize: vi.fn(),
   setRunsJobFilter: vi.fn(),
@@ -124,32 +119,29 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
   setPollingActive: vi.fn(),
   openRunDetail: vi.fn(),
   closeRunDetail: vi.fn(),
-  updateRunInList: vi.fn(),
   ...overrides
 })
 
 describe("RunsTab accessibility live-region behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.storeStateRef.current = baseState({ runs: [buildRun("running")], runsTotal: 1 })
-    mocks.fetchWatchlistRunsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+    mocks.storeStateRef.current = baseState()
+    mocks.fetchWatchlistRunsMock.mockResolvedValue({ items: [buildRun("running")], total: 1, has_more: false })
     mocks.fetchJobRunsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
     mocks.fetchWatchlistJobsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
     mocks.exportRunsCsvMock.mockResolvedValue("")
   })
 
   it("announces visible run status transitions in the SR live region", async () => {
-    const { rerender } = render(<RunsTab />)
+    render(<RunsTab />)
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).not.toBeDisabled())
     expect(screen.getByTestId("watchlists-runs-live-region")).toHaveTextContent("")
     expect(screen.getByTestId("watchlists-runs-live-region")).toHaveAttribute("role", "status")
     expect(screen.getByTestId("watchlists-runs-live-region")).toHaveAttribute("aria-live", "polite")
     expect(screen.getByTestId("watchlists-runs-live-region")).toHaveAttribute("aria-atomic", "true")
 
-    mocks.storeStateRef.current = baseState({
-      runs: [buildRun("completed")],
-      runsTotal: 1
-    })
-    rerender(<RunsTab />)
+    mocks.fetchWatchlistRunsMock.mockResolvedValueOnce({ items: [buildRun("completed")], total: 1, has_more: false })
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
 
     await waitFor(() => {
       expect(screen.getByTestId("watchlists-runs-live-region")).toHaveTextContent(

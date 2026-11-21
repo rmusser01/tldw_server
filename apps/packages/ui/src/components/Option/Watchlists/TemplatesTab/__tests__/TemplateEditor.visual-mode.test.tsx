@@ -1,5 +1,6 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { screen } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { TemplateEditor } from "../TemplateEditor"

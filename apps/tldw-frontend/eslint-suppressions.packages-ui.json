@@ -573,9 +573,6 @@
   "packages/ui/src/components/Option/Watchlists/ItemsTab/ItemsTab.tsx": {
     "no-extra-boolean-cast": {
       "count": 1
-    },
-    "no-unsafe-finally": {
-      "count": 2
     }
   },
   "packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx": {

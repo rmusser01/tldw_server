@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
 
@@ -214,6 +215,10 @@ vi.mock("@/utils/watchlists-onboarding-telemetry", () => ({
     mocks.trackWatchlistsOnboardingTelemetryMock(...args)
 }))
 
+vi.mock("@/services/watchlists-overview", () => ({
+  fetchWatchlistsOverviewData: async () => ({ health: null })
+}))
+
 vi.mock("@/store/watchlists", () => ({
   useWatchlistsStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
@@ -322,7 +327,7 @@ describe("WatchlistsPlaygroundPage extension navigation", () => {
 
     await waitFor(() => expect(mocks.fetchWatchlistsMock).toHaveBeenCalled())
     expect(screen.queryByTestId("watchlists-constrained-nav-trigger")).not.toBeInTheDocument()
-    expect(screen.getByTestId("watchlists-desktop-tabs")).toBeInTheDocument()
+    expect(await screen.findByTestId("watchlists-desktop-tabs")).toBeInTheDocument()
     expect(screen.getByTestId("watchlists-tab-sources")).toBeInTheDocument()
   })
 })

@@ -12,6 +12,7 @@ import {
 import { Download, ExternalLink, MessageSquare, X } from "lucide-react"
 import DOMPurify from "dompurify"
 import { useTranslation } from "react-i18next"
+import { useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { useNavigate } from "react-router-dom"
 import { setSetting } from "@/services/settings"
 import { DISCUSS_WATCHLIST_PROMPT_SETTING } from "@/services/settings/ui-settings"
@@ -25,7 +26,7 @@ import {
   fetchWatchlistArtifactBlob,
   revokeWatchlistArtifactObjectUrl
 } from "@/services/watchlists-artifacts"
-import type { WatchlistOutput, WatchlistRunAudioStatus } from "@/types/watchlists"
+import type { WatchlistOutput } from "@/types/watchlists"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   getFocusableActiveElement,
@@ -83,14 +84,23 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const navigate = useSafeNavigate()
   const { isConstrained } = useWatchlistsViewport()
 
-  const [loading, setLoading] = useState(false)
-  const [content, setContent] = useState<string | null>(null)
-  const [audioObjectUrl, setAudioObjectUrl] = useState<string | null>(null)
-  const audioObjectUrlRef = useRef<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<"rendered" | "source">("rendered")
-  const [liveAudioStatus, setLiveAudioStatus] = useState<WatchlistRunAudioStatus | null>(null)
   const outputIsAudio = useMemo(() => isAudioOutput(output), [output])
+  const outputId = open ? output?.id : undefined
+  const mimeType = output ? getOutputMimeType(output.format) : undefined
+  const previewQuery = useWatchlistsQuery<string | Blob>(
+    "output-preview",
+    { outputId, mimeType, audio: outputIsAudio },
+    ({ signal }) => outputIsAudio
+      ? fetchWatchlistArtifactBlob(`/api/v1/watchlists/outputs/${outputId}/download`, { mimeType, signal })
+      : downloadWatchlistOutput(outputId!, signal),
+    { enabled: outputId != null, gcTime: outputIsAudio ? 0 : undefined }
+  )
+  const content = typeof previewQuery.data === "string" ? previewQuery.data : null
+  const audioBlob = previewQuery.data instanceof Blob ? previewQuery.data : null
+  const [audioArtifact, setAudioArtifact] = useState<{ blob: Blob; url: string } | null>(null)
+  const audioObjectUrl = audioArtifact?.blob === audioBlob ? audioArtifact?.url : null
+  const loading = previewQuery.isLoading
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const wasOpenRef = useRef(false)
@@ -140,14 +150,6 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
     }
   }, [open])
 
-  const updateAudioObjectUrl = useCallback((nextUrl: string | null) => {
-    if (audioObjectUrlRef.current && audioObjectUrlRef.current !== nextUrl) {
-      revokeWatchlistArtifactObjectUrl(audioObjectUrlRef.current)
-    }
-    audioObjectUrlRef.current = nextUrl
-    setAudioObjectUrl(nextUrl)
-  }, [])
-
   const artifactErrorMessage = useCallback((artifactError: unknown) => {
     const translate = tRef.current
     const kind = (artifactError as { kind?: string } | null)?.kind
@@ -163,61 +165,25 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
     )
   }, [])
 
-  // Fetch content when drawer opens
-  useEffect(() => {
-    const controller = new AbortController()
-    if (open && output) {
-      setLoading(true)
-      setError(null)
-      if (outputIsAudio) {
-        setContent(null)
-        updateAudioObjectUrl(null)
-        fetchWatchlistArtifactBlob(`/api/v1/watchlists/outputs/${output.id}/download`, {
-          mimeType: getOutputMimeType(output.format),
-          signal: controller.signal
-        })
-          .then((blob) => {
-            if (controller.signal.aborted) return
-            const nextUrl = createWatchlistArtifactObjectUrl(blob)
-            updateAudioObjectUrl(nextUrl)
-          })
-          .catch((err) => {
-            if (controller.signal.aborted || err?.name === "AbortError") return
-            console.error("Failed to fetch audio output content:", err)
-            setError(artifactErrorMessage(err))
-          })
-          .finally(() => {
-            if (!controller.signal.aborted) setLoading(false)
-          })
-      } else {
-        updateAudioObjectUrl(null)
-        downloadWatchlistOutput(output.id)
-          .then((result) => setContent(result))
-          .catch((err) => {
-            console.error("Failed to fetch output content:", err)
-            setError(err.message || "Failed to load content")
-          })
-          .finally(() => {
-            setLoading(false)
-          })
-      }
-    } else {
-      setContent(null)
-      setError(null)
-      updateAudioObjectUrl(null)
-      setViewMode("rendered")
-    }
-    return () => controller.abort()
-  }, [artifactErrorMessage, open, output, outputIsAudio, updateAudioObjectUrl])
+  const error = previewQuery.error
+    ? outputIsAudio
+      ? artifactErrorMessage(previewQuery.error)
+      : previewQuery.error.message || "Failed to load content"
+    : null
 
   useEffect(() => {
-    return () => {
-      if (audioObjectUrlRef.current) {
-        revokeWatchlistArtifactObjectUrl(audioObjectUrlRef.current)
-      }
-      audioObjectUrlRef.current = null
+    if (!audioBlob) {
+      setAudioArtifact(null)
+      return
     }
-  }, [])
+    const url = createWatchlistArtifactObjectUrl(audioBlob)
+    setAudioArtifact({ blob: audioBlob, url })
+    return () => revokeWatchlistArtifactObjectUrl(url)
+  }, [audioBlob])
+
+  useEffect(() => {
+    if (!open || !outputId) setViewMode("rendered")
+  }, [open, outputId])
 
   // Handle download
   const handleDownload = async () => {
@@ -258,79 +224,34 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const metadataAudioSummary = useMemo(() => {
     return getOutputAudioStatusSummary(output?.metadata)
   }, [output?.metadata])
+  const runId = output?.run_id
+  const isPollable = (status: string, taskId: unknown) => {
+    const normalized = status.toLowerCase()
+    return AUDIO_STATUS_POLLABLE.has(normalized) || (normalized === "unknown" && Boolean(taskId))
+  }
+  const fetchAudioStatus = open && !outputIsAudio && runId != null &&
+    metadataAudioSummary.requested && isPollable(metadataAudioSummary.status, metadataAudioSummary.taskId)
+
+  const liveAudioQuery = useWatchlistsQuery("run-audio", { runId, taskId: metadataAudioSummary.taskId }, ({ signal }) =>
+    getWatchlistRunAudio(runId!, signal), {
+      enabled: fetchAudioStatus,
+      refetchInterval: (query) => {
+        if (!fetchAudioStatus) return false
+        if (query.state.error) return AUDIO_STATUS_POLL_INTERVAL_MS
+        const status = query.state.data
+        return status && isPollable(status.status || "", status.task_id)
+          ? AUDIO_STATUS_POLL_INTERVAL_MS
+          : false
+      }
+    }
+  )
+  const liveAudioStatus = fetchAudioStatus ? liveAudioQuery.data : null
   const audioSummary = useMemo(() => {
     return getMergedOutputAudioStatusSummary(output?.metadata, liveAudioStatus)
   }, [liveAudioStatus, output?.metadata])
   const audioErrorMessage = useMemo(() => {
     return audioSummary.error ? sanitizeAudioErrorMessage(audioSummary.error) : null
   }, [audioSummary.error])
-
-  useEffect(() => {
-    let active = true
-    let timeoutId: ReturnType<typeof setTimeout> | null = null
-
-    const runId = output?.run_id
-    const metadataStatus = metadataAudioSummary.status.toLowerCase()
-    const metadataNeedsLiveStatus =
-      AUDIO_STATUS_POLLABLE.has(metadataStatus) ||
-      (metadataStatus === "unknown" && Boolean(metadataAudioSummary.taskId))
-    const shouldFetchLiveStatus =
-      open &&
-      !outputIsAudio &&
-      runId != null &&
-      metadataAudioSummary.requested &&
-      metadataNeedsLiveStatus
-
-    if (!shouldFetchLiveStatus) {
-      setLiveAudioStatus(null)
-      return () => {
-        active = false
-      }
-    }
-
-    setLiveAudioStatus(null)
-
-    const scheduleNextPoll = () => {
-      timeoutId = setTimeout(loadAudioStatus, AUDIO_STATUS_POLL_INTERVAL_MS)
-    }
-
-    const loadAudioStatus = async () => {
-      try {
-        const nextStatus = await getWatchlistRunAudio(runId)
-        if (!active) return
-        setLiveAudioStatus(nextStatus)
-        const normalizedStatus = (nextStatus.status || "").toLowerCase()
-        if (
-          AUDIO_STATUS_POLLABLE.has(normalizedStatus) ||
-          (normalizedStatus === "unknown" && Boolean(nextStatus.task_id))
-        ) {
-          scheduleNextPoll()
-        }
-      } catch (err) {
-        if (!active) return
-        console.warn("Failed to resolve output audio status:", err)
-        if (metadataNeedsLiveStatus) {
-          scheduleNextPoll()
-        }
-      }
-    }
-
-    void loadAudioStatus()
-
-    return () => {
-      active = false
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-      }
-    }
-  }, [
-    metadataAudioSummary.requested,
-    metadataAudioSummary.status,
-    metadataAudioSummary.taskId,
-    open,
-    output?.run_id,
-    outputIsAudio
-  ])
 
   const templateName = useMemo(() => {
     return getOutputTemplateName(output?.metadata)

@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { TemplatesTab } from "../TemplatesTab"
 
@@ -164,7 +165,7 @@ describe("TemplatesTab delete safety warnings", () => {
       expect(screen.getByTestId("templates-table")).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByTestId("danger-button"))
+    fireEvent.click(await screen.findByTestId("danger-button"))
 
     await waitFor(() => {
       expect(mocks.modalConfirmMock).toHaveBeenCalledTimes(1)
@@ -185,7 +186,7 @@ describe("TemplatesTab delete safety warnings", () => {
       expect(screen.getByTestId("templates-table")).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByTestId("danger-button"))
+    fireEvent.click(await screen.findByTestId("danger-button"))
 
     await waitFor(() => {
       expect(mocks.modalConfirmMock).toHaveBeenCalledTimes(1)

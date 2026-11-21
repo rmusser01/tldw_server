@@ -1,10 +1,12 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { JobsTab } from "../JobsTab"
 
 const mocks = vi.hoisted(() => ({
   fetchWatchlistJobsMock: vi.fn(),
+  getWatchlistJobMock: vi.fn(),
   fetchWatchlistSourcesMock: vi.fn(),
   fetchWatchlistGroupsMock: vi.fn(),
   createWatchlistJobMock: vi.fn(),
@@ -103,6 +105,7 @@ vi.mock("@/services/watchlists", () => ({
   deleteWatchlistJob: (...args: any[]) => mocks.deleteWatchlistJobMock(...args),
   fetchWatchlistGroups: (...args: any[]) => mocks.fetchWatchlistGroupsMock(...args),
   fetchWatchlistJobs: (...args: any[]) => mocks.fetchWatchlistJobsMock(...args),
+  getWatchlistJob: (...args: any[]) => mocks.getWatchlistJobMock(...args),
   fetchWatchlistSources: (...args: any[]) => mocks.fetchWatchlistSourcesMock(...args),
   restoreWatchlistJob: (...args: any[]) => mocks.restoreWatchlistJobMock(...args),
   triggerWatchlistRun: (...args: any[]) => mocks.triggerWatchlistRunMock(...args),
@@ -115,7 +118,8 @@ vi.mock("@/store/watchlists", () => ({
 }))
 
 vi.mock("../JobFormModal", () => ({
-  JobFormModal: () => null
+  JobFormModal: ({ open, initialValues }: { open: boolean; initialValues?: { name: string } }) =>
+    open ? <div data-testid="job-form">{initialValues?.name ?? "Create monitor"}</div> : null
 }))
 
 vi.mock("../JobPreviewModal", () => ({
@@ -193,6 +197,21 @@ describe("JobsTab load-error retry", () => {
     })
   })
 
+  it("shares a monitor request between readers of the same watchlist page", async () => {
+    mocks.storeStateRef.current = baseState({ selectedWatchlistId: 7 })
+    mocks.fetchWatchlistJobsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+
+    render(<><JobsTab /><JobsTab /></>)
+
+    await waitFor(() => {
+      expect(mocks.fetchWatchlistJobsMock).toHaveBeenCalledTimes(1)
+      expect(mocks.fetchWatchlistJobsMock).toHaveBeenCalledWith(
+        { watchlist_id: 7, page: 1, size: 20 },
+        expect.any(AbortSignal)
+      )
+    })
+  })
+
   it("shows explicit active-state text next to the monitor toggle", async () => {
     const job = buildJob()
     mocks.storeStateRef.current = baseState({
@@ -213,5 +232,17 @@ describe("JobsTab load-error retry", () => {
       expect(screen.getByText("Enabled")).toBeInTheDocument()
     })
     expect(screen.getByRole("button", { name: "Toggle active for Morning monitor" })).toBeInTheDocument()
+  })
+
+  it("opens the existing monitor when a relationship points outside the current page", async () => {
+    mocks.storeStateRef.current = baseState({ jobFormOpen: true, jobFormEditId: 5 })
+    mocks.fetchWatchlistJobsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+    mocks.getWatchlistJobMock.mockResolvedValue(buildJob())
+
+    render(<JobsTab />)
+
+    expect(screen.queryByText("Create monitor")).not.toBeInTheDocument()
+    expect(await screen.findByText("Morning monitor")).toBeInTheDocument()
+    expect(mocks.getWatchlistJobMock).toHaveBeenCalledWith(5, expect.any(AbortSignal))
   })
 })

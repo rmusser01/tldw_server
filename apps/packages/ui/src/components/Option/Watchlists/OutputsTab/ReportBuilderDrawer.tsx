@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { Button, Checkbox, Drawer, Empty, Input, Select, Spin, Tag, message } from "antd"
 import { useTranslation } from "react-i18next"
+import { useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import {
   createWatchlistOutput,
   fetchScrapedItems,
@@ -11,9 +12,7 @@ import type {
   ScrapedItem,
   WatchlistContainer,
   WatchlistOutput,
-  WatchlistReportPreset,
-  WatchlistRun,
-  WatchlistTemplate
+  WatchlistReportPreset
 } from "@/types/watchlists"
 import { Alert } from "@/components/ui"
 import { Badge } from "@/components/ui/primitives/Badge"
@@ -34,6 +33,7 @@ interface PreflightWarning {
 }
 
 const DEFAULT_PAGE_SIZE = 200
+const EMPTY_ITEMS: ScrapedItem[] = []
 
 const formatCountLabel = (count: number, singular: string, plural = `${singular}s`) =>
   `${count} ${count === 1 ? singular : plural}`
@@ -98,19 +98,16 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
   const [preset, setPreset] = useState<WatchlistReportPreset>(() => presetForWatchlist(selectedWatchlist))
-  const [runs, setRuns] = useState<WatchlistRun[]>([])
-  const [selectedRunId, setSelectedRunId] = useState<number | null>(defaultRunId ?? null)
-  const [queuedItems, setQueuedItems] = useState<ScrapedItem[]>([])
-  const [allRunItems, setAllRunItems] = useState<ScrapedItem[]>([])
-  const [templates, setTemplates] = useState<WatchlistTemplate[]>([])
+  const [runSelection, setRunSelection] = useState<{
+    watchlistId: number | undefined
+    defaultRunId: number | null | undefined
+    runId: number
+  } | null>(null)
   const [templateName, setTemplateName] = useState<string | null>(null)
   const [title, setTitle] = useState("")
   const [format, setFormat] = useState<"md" | "html">("md")
   const [includeEvidenceTable, setIncludeEvidenceTable] = useState(true)
   const [includeExcludedItems, setIncludeExcludedItems] = useState(true)
-  const [loadingRuns, setLoadingRuns] = useState(false)
-  const [loadingQueue, setLoadingQueue] = useState(false)
-  const [queueLoaded, setQueueLoaded] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [isConstrained, setIsConstrained] = useState(false)
 
@@ -134,94 +131,47 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
     return () => window.removeEventListener("resize", updateViewport)
   }, [open])
 
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    setLoadingRuns(true)
-    fetchWatchlistRuns({
-      watchlist_id: selectedWatchlist?.id,
-      page: 1,
-      size: 100
-    })
-      .then((result) => {
-        if (cancelled) return
-        const nextRuns = Array.isArray(result.items) ? result.items : []
-        setRuns(nextRuns)
-        const nextRunId = defaultRunId ?? nextRuns[0]?.id ?? null
-        setSelectedRunId(nextRunId)
-      })
-      .catch((err) => {
-        console.error("Failed to load runs for report builder:", err)
-        setRuns([])
-        setSelectedRunId(null)
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingRuns(false)
-      })
-
-    fetchWatchlistTemplates()
-      .then((result) => {
-        if (!cancelled) setTemplates(Array.isArray(result.items) ? result.items : [])
-      })
-      .catch((err) => {
-        console.error("Failed to load report templates:", err)
-        if (!cancelled) setTemplates([])
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [defaultRunId, open, selectedWatchlist?.id])
+  const watchlistId = selectedWatchlist?.id
+  const runsParams = { watchlist_id: watchlistId, page: 1, size: 100 }
+  const runsQuery = useWatchlistsQuery("runs", runsParams, ({ signal }) => fetchWatchlistRuns(runsParams, signal), {
+    enabled: open
+  })
+  const { data: templatePage } = useWatchlistsQuery("templates", null, ({ signal }) => fetchWatchlistTemplates(signal), {
+    enabled: open
+  })
+  const runs = runsQuery.data?.items ?? []
+  const templates = templatePage?.items ?? []
+  const loadingRuns = runsQuery.isLoading
+  const choiceMatchesScope = runSelection &&
+    runSelection.watchlistId === watchlistId &&
+    runSelection.defaultRunId === defaultRunId
+  const fallbackRunId = runsQuery.data ? defaultRunId ?? runs[0]?.id ?? null : null
+  const selectedRunId = choiceMatchesScope ? runSelection.runId : fallbackRunId
 
   useEffect(() => {
-    if (!open || selectedRunId == null) {
-      setQueuedItems([])
-      setAllRunItems([])
-      setQueueLoaded(false)
-      return
+    if (!open) {
+      setRunSelection(null)
+    } else if (!choiceMatchesScope && fallbackRunId != null) {
+      setRunSelection({ watchlistId, defaultRunId, runId: fallbackRunId })
     }
-    let cancelled = false
-    setLoadingQueue(true)
-    setQueueLoaded(false)
-    Promise.all([
-      fetchScrapedItems({
-        watchlist_id: selectedWatchlist?.id,
-        run_id: selectedRunId,
-        queued_for_briefing: true,
-        include_alert_summary: true,
-        page: 1,
-        size: DEFAULT_PAGE_SIZE
-      }),
-      fetchScrapedItems({
-        watchlist_id: selectedWatchlist?.id,
-        run_id: selectedRunId,
-        include_alert_summary: true,
-        page: 1,
-        size: DEFAULT_PAGE_SIZE
-      })
-    ])
-      .then(([queuedResult, allResult]) => {
-        if (cancelled) return
-        setQueuedItems(Array.isArray(queuedResult.items) ? queuedResult.items : [])
-        setAllRunItems(Array.isArray(allResult.items) ? allResult.items : [])
-      })
-      .catch((err) => {
-        console.error("Failed to load queued report updates:", err)
-        if (!cancelled) {
-          setQueuedItems([])
-          setAllRunItems([])
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingQueue(false)
-          setQueueLoaded(true)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open, selectedRunId, selectedWatchlist?.id])
+  }, [choiceMatchesScope, defaultRunId, fallbackRunId, open, watchlistId])
+
+  const itemsParams = {
+    watchlist_id: watchlistId,
+    run_id: selectedRunId ?? undefined,
+    include_alert_summary: true,
+    page: 1,
+    size: DEFAULT_PAGE_SIZE
+  }
+  const queuedParams = { ...itemsParams, queued_for_briefing: true }
+  const enabled = open && selectedRunId != null
+  const queuedItemsQuery = useWatchlistsQuery("items", queuedParams, ({ signal }) => fetchScrapedItems(queuedParams, signal), { enabled })
+  const allItemsQuery = useWatchlistsQuery("items", itemsParams, ({ signal }) => fetchScrapedItems(itemsParams, signal), { enabled })
+  const loadingQueue = queuedItemsQuery.isLoading || allItemsQuery.isLoading
+  const queueLoaded = enabled && !loadingQueue
+  const queueFailed = queuedItemsQuery.isError || allItemsQuery.isError
+  const queuedItems = (!queueFailed && queuedItemsQuery.data?.items) || EMPTY_ITEMS
+  const allRunItems = (!queueFailed && allItemsQuery.data?.items) || EMPTY_ITEMS
 
   const preflightWarnings = useMemo(
     () => (!queueLoaded || loadingQueue ? [] : buildPreflightWarnings(preset, queuedItems)),
@@ -331,7 +281,9 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
               <Select
                 data-testid="report-builder-run"
                 value={selectedRunId ?? undefined}
-                onChange={(value) => setSelectedRunId(typeof value === "number" ? value : Number(value) || null)}
+                onChange={(value) => {
+                  setRunSelection({ watchlistId, defaultRunId, runId: value })
+                }}
                 loading={loadingRuns}
                 className="w-full"
                 options={runs.map((run) => ({

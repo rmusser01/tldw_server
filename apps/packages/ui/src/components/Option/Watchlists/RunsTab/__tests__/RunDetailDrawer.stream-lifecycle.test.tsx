@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { RunDetailDrawer } from "../RunDetailDrawer"
 
 const mocks = vi.hoisted(() => ({
@@ -18,8 +20,6 @@ const mocks = vi.hoisted(() => ({
   exportRunTalliesCsvMock: vi.fn(),
   triggerWatchlistRunMock: vi.fn(),
   cancelWatchlistRunMock: vi.fn(),
-  updateRunInListMock: vi.fn(),
-  addRunMock: vi.fn(),
   setActiveTabMock: vi.fn(),
   setOutputsJobFilterMock: vi.fn(),
   setOutputsRunFilterMock: vi.fn(),
@@ -150,8 +150,6 @@ vi.mock("antd", () => {
 vi.mock("@/store/watchlists", () => ({
   useWatchlistsStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
-      updateRunInList: mocks.updateRunInListMock,
-      addRun: mocks.addRunMock,
       setActiveTab: mocks.setActiveTabMock,
       setOutputsJobFilter: mocks.setOutputsJobFilterMock,
       setOutputsRunFilter: mocks.setOutputsRunFilterMock,
@@ -257,6 +255,14 @@ const baseRunDetails = {
   filtered_sample: null
 }
 
+const CachedRunStatus = () => {
+  const { data } = useWatchlistsQuery("runs", { page: 1, size: 20 }, async () => ({
+    items: [{ id: 10, status: "running", job_id: 1 }],
+    total: 1
+  }))
+  return <span data-testid="cached-run-status">{data?.items[0]?.status}</span>
+}
+
 describe("RunDetailDrawer stream lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -347,7 +353,13 @@ describe("RunDetailDrawer stream lifecycle", () => {
   }
 
   it("applies stream updates and transitions active run to completed without refetch", async () => {
-    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+    render(
+      <>
+        <CachedRunStatus />
+        <RunDetailDrawer open runId={10} onClose={vi.fn()} />
+      </>
+    )
+    await waitFor(() => expect(screen.getByTestId("cached-run-status")).toHaveTextContent("running"))
 
     const ws = await waitForFirstSocket()
     ws.emitOpen()
@@ -393,10 +405,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
       expect(screen.getByText("Completed")).toBeInTheDocument()
     })
     expect(mocks.getRunDetailsMock).toHaveBeenCalledTimes(1)
-    expect(mocks.updateRunInListMock).toHaveBeenCalledWith(
-      10,
-      expect.objectContaining({ status: "completed" })
-    )
+    await waitFor(() => expect(screen.getByTestId("cached-run-status")).toHaveTextContent("completed"))
   })
 
   it("loads and displays pending audio status when the run has an audio task", async () => {
@@ -417,7 +426,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
     render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
 
     await waitFor(() => {
-      expect(mocks.getWatchlistRunAudioMock).toHaveBeenCalledWith(10)
+      expect(mocks.getWatchlistRunAudioMock).toHaveBeenCalledWith(10, expect.any(AbortSignal))
     })
     expect(screen.getByText("Audio briefing")).toBeInTheDocument()
     await waitFor(() => {
@@ -684,7 +693,13 @@ describe("RunDetailDrawer stream lifecycle", () => {
   })
 
   it("shows stream errors and handles complete events by disconnecting", async () => {
-    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+    render(
+      <>
+        <CachedRunStatus />
+        <RunDetailDrawer open runId={10} onClose={vi.fn()} />
+      </>
+    )
+    await waitFor(() => expect(screen.getByTestId("cached-run-status")).toHaveTextContent("running"))
 
     const ws = await waitForFirstSocket()
     ws.emitOpen()
@@ -704,10 +719,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
     await waitFor(() => {
       expect(screen.getByText(/Live stream: Disconnected/)).toBeInTheDocument()
     })
-    expect(mocks.updateRunInListMock).toHaveBeenCalledWith(
-      10,
-      expect.objectContaining({ status: "completed" })
-    )
+    await waitFor(() => expect(screen.getByTestId("cached-run-status")).toHaveTextContent("completed"))
   })
 
   it("supports manual stream disable without scheduling reconnects", async () => {

@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { SourcesBulkImport } from "../SourcesBulkImport"
 
@@ -210,6 +211,28 @@ describe("SourcesBulkImport preflight and commit", () => {
     mocks.importOpmlMock.mockResolvedValue({
       items: [{ status: "created", url: "https://new.example.com/rss.xml" }]
     })
+  })
+
+  it("shares the in-flight duplicate lookup with an uploaded OPML preview", async () => {
+    let finishLookup!: (result: { items: { url: string }[]; total: number }) => void
+    const lookup = new Promise<{ items: { url: string }[]; total: number }>((resolve) => {
+      finishLookup = resolve
+    })
+    mocks.fetchWatchlistSourcesMock.mockReturnValue(lookup)
+    render(<SourcesBulkImport open onClose={vi.fn()} groups={[]} tags={[]} onImported={vi.fn()} />)
+
+    const file = new File([
+      '<opml><body><outline text="Existing" xmlUrl="https://existing.example.com/rss.xml"/></body></opml>'
+    ], "feeds.opml", { type: "text/xml" })
+    const read = vi.spyOn(file, "text")
+    fireEvent.change(screen.getByTestId("opml-upload-input"), { target: { files: [file] } })
+
+    await waitFor(() => expect(read).toHaveBeenCalled())
+    await read.mock.results[0].value
+    finishLookup({ items: [{ url: "https://existing.example.com/rss.xml" }], total: 1 })
+
+    expect(await screen.findByText(/0 ready, 1 existing duplicates/i)).toBeInTheDocument()
+    expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledTimes(1)
   })
 
   it("shows preflight summary and commits import only for ready entries", async () => {

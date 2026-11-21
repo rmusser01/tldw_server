@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Alert,
   Button,
@@ -15,6 +15,7 @@ import type { ColumnsType } from "antd/es/table"
 import { Copy, Edit2, Eye, Play, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
+import { useFetchWatchlistsQuery, useInvalidateWatchlists, useIsCurrentWatchlistsAccount, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   deleteWatchlistJob,
@@ -23,6 +24,7 @@ import {
   fetchWatchlistJobs,
   fetchWatchlistSources,
   createWatchlistJob,
+  getWatchlistJob,
   restoreWatchlistJob,
   triggerWatchlistRun,
   updateWatchlistJob
@@ -47,7 +49,8 @@ import { mapWatchlistsError } from "../shared/watchlists-error"
 import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 import { buildClonedWatchlistJobPayload } from "./clone-utils"
 
-const SCOPE_CATALOG_LIMIT = 200
+const EMPTY_JOBS: WatchlistJob[] = []
+const SCOPE_CATALOG_PARAMS = { page: 1, size: 200 }
 const JOBS_ADVANCED_COLUMNS_STORAGE_KEY = "watchlists:jobs:advanced-columns:v1"
 
 const readStoredDisclosureState = (key: string): boolean | null => {
@@ -85,9 +88,6 @@ export const JobsTab: React.FC = () => {
   const { isConstrained } = useWatchlistsViewport()
 
   // Store state
-  const jobs = useWatchlistsStore((s) => s.jobs)
-  const jobsLoading = useWatchlistsStore((s) => s.jobsLoading)
-  const jobsTotal = useWatchlistsStore((s) => s.jobsTotal)
   const jobsPage = useWatchlistsStore((s) => s.jobsPage)
   const jobsPageSize = useWatchlistsStore((s) => s.jobsPageSize)
   const jobFormOpen = useWatchlistsStore((s) => s.jobFormOpen)
@@ -95,101 +95,60 @@ export const JobsTab: React.FC = () => {
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
 
   // Store actions
-  const setJobs = useWatchlistsStore((s) => s.setJobs)
-  const setJobsLoading = useWatchlistsStore((s) => s.setJobsLoading)
   const setJobsPage = useWatchlistsStore((s) => s.setJobsPage)
   const setJobsPageSize = useWatchlistsStore((s) => s.setJobsPageSize)
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
   const closeJobForm = useWatchlistsStore((s) => s.closeJobForm)
-  const addJob = useWatchlistsStore((s) => s.addJob)
-  const updateJobInList = useWatchlistsStore((s) => s.updateJobInList)
-  const removeJob = useWatchlistsStore((s) => s.removeJob)
-  const addRun = useWatchlistsStore((s) => s.addRun)
 
   // Local state
   const [triggeringJobId, setTriggeringJobId] = useState<number | null>(null)
   const cloningJobIdsRef = useRef<Set<number>>(new Set())
   const [cloningJobIds, setCloningJobIds] = useState<Set<number>>(() => new Set())
-  const [previewJob, setPreviewJob] = useState<WatchlistJob | null>(null)
-  const [previewOpen, setPreviewOpen] = useState(false)
-  const [sourceNamesById, setSourceNamesById] = useState<Record<number, string>>({})
-  const [groupNamesById, setGroupNamesById] = useState<Record<number, string>>({})
-  const [jobsLoadError, setJobsLoadError] = useState<ReturnType<typeof mapWatchlistsError> | null>(null)
+  const [previewJobId, setPreviewJobId] = useState<number | null>(null)
   const [showAdvancedColumns, setShowAdvancedColumns] = useState<boolean>(() => {
     const stored = readStoredDisclosureState(JOBS_ADVANCED_COLUMNS_STORAGE_KEY)
     return stored ?? false
   })
-  const previousSelectedWatchlistIdRef = useRef<number | null>(selectedWatchlistId)
-
-  // Fetch jobs
-  const loadJobs = useCallback(async () => {
-    setJobsLoading(true)
-    try {
-      const result = await fetchWatchlistJobs({
-        watchlist_id: selectedWatchlistId ?? undefined,
-        page: jobsPage,
-        size: jobsPageSize
+  const invalidateWatchlists = useInvalidateWatchlists()
+  const isCurrentAccount = useIsCurrentWatchlistsAccount()
+  const fetchWatchlistsQuery = useFetchWatchlistsQuery()
+  const jobsParams = {
+    watchlist_id: selectedWatchlistId ?? undefined,
+    page: jobsPage,
+    size: jobsPageSize
+  }
+  const jobsQuery = useWatchlistsQuery("jobs", jobsParams, ({ signal }) => fetchWatchlistJobs(jobsParams, signal))
+  const jobs = jobsQuery.data?.items ?? EMPTY_JOBS
+  const jobsLoading = jobsQuery.isFetching
+  const jobsTotal = jobsQuery.data?.total ?? 0
+  const jobsLoadError = jobsQuery.error
+    ? mapWatchlistsError(jobsQuery.error, {
+        t,
+        context: t("watchlists:jobs.title", "Monitors"),
+        fallbackMessage: t("watchlists:jobs.fetchError", "Failed to load monitors")
       })
-      setJobs(result.items, result.total)
-      setJobsLoadError(null)
-    } catch (err) {
-      console.error("Failed to fetch jobs:", err)
-      setJobsLoadError(
-        mapWatchlistsError(err, {
-          t,
-          context: t("watchlists:jobs.title", "Monitors"),
-          fallbackMessage: t("watchlists:jobs.fetchError", "Failed to load monitors")
-        })
-      )
-    } finally {
-      setJobsLoading(false)
-    }
-  }, [jobsPage, jobsPageSize, selectedWatchlistId, setJobs, setJobsLoading, t])
+    : null
+  const { refetch: loadJobs } = jobsQuery
 
-  // Initial load
-  useEffect(() => {
-    if (previousSelectedWatchlistIdRef.current === selectedWatchlistId) return
-    previousSelectedWatchlistIdRef.current = selectedWatchlistId
-    if (jobsPage !== 1) {
-      setJobsPage(1)
-    }
-  }, [jobsPage, selectedWatchlistId, setJobsPage])
-
-  useEffect(() => {
-    loadJobs()
-  }, [loadJobs])
-
-  const loadScopeCatalog = useCallback(async () => {
-    try {
-      const [sourcesResult, groupsResult] = await Promise.all([
-        fetchWatchlistSources({
-          watchlist_id: selectedWatchlistId ?? undefined,
-          page: 1,
-          size: SCOPE_CATALOG_LIMIT
-        }),
-        fetchWatchlistGroups({ page: 1, size: SCOPE_CATALOG_LIMIT })
-      ])
-
-      const nextSourceNames: Record<number, string> = {}
-      const nextGroupNames: Record<number, string> = {}
-
-      for (const source of sourcesResult.items || []) {
-        nextSourceNames[source.id] = source.name
-      }
-      for (const group of groupsResult.items || []) {
-        nextGroupNames[group.id] = group.name
-      }
-
-      setSourceNamesById(nextSourceNames)
-      setGroupNamesById(nextGroupNames)
-    } catch (err) {
-      console.warn("Failed to fetch monitor scope catalog:", err)
-    }
-  }, [selectedWatchlistId])
-
-  useEffect(() => {
-    void loadScopeCatalog()
-  }, [loadScopeCatalog])
+  const sourceParams = {
+    ...SCOPE_CATALOG_PARAMS,
+    watchlist_id: selectedWatchlistId ?? undefined
+  }
+  const { data: sourceCatalog } = useWatchlistsQuery("sources", sourceParams, ({ signal }) =>
+    fetchWatchlistSources(sourceParams, signal)
+  )
+  const { data: groupCatalog } = useWatchlistsQuery("groups", SCOPE_CATALOG_PARAMS, ({ signal }) =>
+    fetchWatchlistGroups(SCOPE_CATALOG_PARAMS, signal)
+  )
+  const sourceNamesById = useMemo(
+    () => Object.fromEntries(sourceCatalog?.items?.map((source) => [source.id, source.name]) ?? []),
+    [sourceCatalog]
+  )
+  const groupNamesById = useMemo(
+    () => Object.fromEntries(groupCatalog?.items?.map((group) => [group.id, group.name]) ?? []),
+    [groupCatalog]
+  )
+  const previewJob = jobs.find((job) => job.id === previewJobId) ?? null
 
   useEffect(() => {
     persistDisclosureState(JOBS_ADVANCED_COLUMNS_STORAGE_KEY, showAdvancedColumns)
@@ -198,8 +157,8 @@ export const JobsTab: React.FC = () => {
   // Handle toggle active
   const handleToggleActive = async (job: WatchlistJob) => {
     try {
-      const updated = await updateWatchlistJob(job.id, { active: !job.active })
-      updateJobInList(job.id, updated)
+      await updateWatchlistJob(job.id, { active: !job.active })
+      void invalidateWatchlists("jobs", "job-preview", "overview")
       message.success(
         job.active
           ? t("watchlists:jobs.disabled", "Monitor disabled")
@@ -213,10 +172,12 @@ export const JobsTab: React.FC = () => {
 
   // Handle delete with impact assessment
   const executeDelete = async (jobId: number) => {
+    if (!isCurrentAccount()) return
     const deletedJob = jobs.find((job) => job.id === jobId)
     try {
       const deleteResult = await deleteWatchlistJob(jobId)
-      removeJob(jobId)
+      if (!isCurrentAccount()) return
+      void invalidateWatchlists("jobs", "job-preview", "overview")
       if (!deletedJob) {
         message.success(t("watchlists:jobs.deleted", "Monitor deleted"))
         return
@@ -234,10 +195,8 @@ export const JobsTab: React.FC = () => {
           { seconds: undoWindowSeconds }
         ),
         duration: undoWindowSeconds,
-        onDismiss: () => {
-          void loadJobs()
-        },
         onUndo: async () => {
+          if (!isCurrentAccount()) throw new DOMException("Watchlists account changed", "AbortError")
           try {
             await restoreWatchlistJob(toJobRestoreId(deletedJob))
           } catch (restoreErr) {
@@ -252,7 +211,7 @@ export const JobsTab: React.FC = () => {
             })
             throw new Error(restoreError.description)
           } finally {
-            await loadJobs()
+            await invalidateWatchlists("jobs", "job-preview", "overview")
           }
         }
       })
@@ -266,7 +225,10 @@ export const JobsTab: React.FC = () => {
     const warnings: string[] = []
 
     try {
-      const runsResult = await fetchJobRuns(job.id, { page: 1, size: 10 })
+      const params = { page: 1, size: 10 }
+      const runsResult = await fetchWatchlistsQuery("runs", { jobId: job.id, ...params }, ({ signal }) =>
+        fetchJobRuns(job.id, params, signal)
+      )
       const activeRuns = (runsResult.items || []).filter(
         (run) => {
           const normalized = String(run.status || "").toLowerCase()
@@ -282,10 +244,12 @@ export const JobsTab: React.FC = () => {
           )
         )
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return
       // Non-critical: proceed with delete confirmation without run info.
     }
 
+    if (!isCurrentAccount()) return
     const outputPrefs = job.output_prefs as Record<string, unknown> | undefined
     const hasDelivery =
       outputPrefs &&
@@ -338,9 +302,8 @@ export const JobsTab: React.FC = () => {
   const handleTriggerRun = async (jobId: number) => {
     setTriggeringJobId(jobId)
     try {
-      const run = await triggerWatchlistRun(jobId)
-      addRun(run)
-      updateJobInList(jobId, { last_run_at: run.started_at || new Date().toISOString() })
+      await triggerWatchlistRun(jobId)
+      void invalidateWatchlists("jobs", "job-preview", "runs", "overview", "items", "outputs")
       message.success(t("watchlists:jobs.runTriggered", "Run triggered"))
     } catch (err) {
       console.error("Failed to trigger run:", err)
@@ -374,15 +337,14 @@ export const JobsTab: React.FC = () => {
   const handleCloneJob = async (job: WatchlistJob) => {
     if (!startCloningJob(job.id)) return
     try {
-      const cloned = await createWatchlistJob(buildClonedWatchlistJobPayload(job))
-      addJob(cloned)
+      await createWatchlistJob(buildClonedWatchlistJobPayload(job))
       message.success(
         t(
           "watchlists:jobs.cloneSuccess",
           "Monitor cloned as a paused copy. Review and enable it when ready."
         )
       )
-      void loadJobs()
+      void invalidateWatchlists("jobs", "overview")
     } catch (err) {
       console.error("Failed to clone job:", err)
       message.error(t("watchlists:jobs.cloneError", "Failed to clone monitor"))
@@ -391,10 +353,21 @@ export const JobsTab: React.FC = () => {
     }
   }
 
-  // Get job for editing
-  const editingJob = jobFormEditId
-    ? jobs.find((j) => j.id === jobFormEditId)
-    : undefined
+  const needsJobDetail = jobFormOpen && jobFormEditId != null
+  const editingJobQuery = useWatchlistsQuery(
+    "jobs",
+    { jobId: jobFormEditId },
+    ({ signal }) => jobFormEditId == null ? Promise.resolve(null) : getWatchlistJob(jobFormEditId, signal),
+    { enabled: needsJobDetail }
+  )
+  const editingJob = editingJobQuery.data ?? undefined
+  const editLoadError = needsJobDetail && editingJobQuery.error
+    ? mapWatchlistsError(editingJobQuery.error, {
+        t,
+        context: t("watchlists:jobs.title", "Monitors"),
+        fallbackMessage: t("watchlists:jobs.fetchError", "Failed to load monitors")
+      })
+    : null
 
   // Table columns
   const allColumns: ColumnsType<WatchlistJob> = [
@@ -599,8 +572,7 @@ export const JobsTab: React.FC = () => {
               aria-label={t("watchlists:jobs.preview.button", "Preview")}
               icon={<Eye className="h-4 w-4" />}
               onClick={() => {
-                setPreviewJob(record)
-                setPreviewOpen(true)
+                setPreviewJobId(record.id)
               }}
             />
           </Tooltip>
@@ -774,8 +746,7 @@ export const JobsTab: React.FC = () => {
                 aria-label={t("watchlists:jobs.previewForMonitorAria", "Preview {{name}}", { name: job.name })}
                 icon={<Eye className="h-4 w-4" />}
                 onClick={() => {
-                  setPreviewJob(job)
-                  setPreviewOpen(true)
+                  setPreviewJobId(job.id)
                 }}
               />
               <Button
@@ -846,7 +817,7 @@ export const JobsTab: React.FC = () => {
           </Button>
           <Button
             icon={<RefreshCw className="h-4 w-4" />}
-            onClick={loadJobs}
+            onClick={() => void loadJobs()}
             loading={jobsLoading}
           >
             {t("common:refresh", "Refresh")}
@@ -884,6 +855,25 @@ export const JobsTab: React.FC = () => {
         />
       )}
 
+      {needsJobDetail && !editingJob && (
+        <Alert
+          type={editLoadError?.severity ?? "info"}
+          showIcon
+          title={editLoadError?.title ?? t("common:loading", "Loading…")}
+          description={editLoadError?.description}
+          action={
+            <Space>
+              {editLoadError && (
+                <Button size="small" onClick={() => void editingJobQuery.refetch()} loading={editingJobQuery.isFetching}>
+                  {t("watchlists:errors.retry", "Retry")}
+                </Button>
+              )}
+              <Button size="small" onClick={closeJobForm}>{t("common:cancel", "Cancel")}</Button>
+            </Space>
+          }
+        />
+      )}
+
       {isConstrained ? (
         renderConstrainedJobList()
       ) : (
@@ -914,20 +904,20 @@ export const JobsTab: React.FC = () => {
 
       {/* Job Form Modal */}
       <JobFormModal
-        open={jobFormOpen}
+        open={jobFormOpen && (jobFormEditId == null || Boolean(editingJob))}
         onClose={closeJobForm}
         initialValues={editingJob}
         watchlistId={selectedWatchlistId}
         onSuccess={() => {
           closeJobForm()
-          loadJobs()
+          void invalidateWatchlists("jobs", "job-preview", "overview")
         }}
       />
 
       <JobPreviewModal
         job={previewJob}
-        open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
+        open={previewJob !== null}
+        onClose={() => setPreviewJobId(null)}
       />
     </div>
   )
