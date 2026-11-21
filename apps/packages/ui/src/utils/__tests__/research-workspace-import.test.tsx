@@ -48,6 +48,8 @@ const mocks = vi.hoisted(() => ({
   answerState: {} as Record<string, unknown>,
   navigate: vi.fn(),
   multiUser: false,
+  cookieSession: false,
+  resolveScope: vi.fn(),
   values: new Map<string, unknown>(),
   upload: vi.fn(),
   details: vi.fn(),
@@ -69,15 +71,22 @@ vi.mock("@/services/chat-surface-scope", async (importOriginal) => ({
       ? `:${options?.userId ?? (config.accessToken ? "user-a" : "anonymous")}`
       : ""),
 }));
-vi.mock("@/utils/media-navigation-scope", () => ({
-  deriveScopedUserId: () => "user:single",
-}))
+vi.mock("@/utils/media-navigation-scope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/utils/media-navigation-scope")>()
+  return {
+    ...actual,
+    deriveScopedUserId: (config: Parameters<typeof actual.deriveScopedUserId>[0]) =>
+      mocks.cookieSession ? actual.deriveScopedUserId(config) : "user:single",
+  }
+})
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getConfig: async () => ({
       serverUrl: mocks.owner,
       authMode: mocks.multiUser ? "multi-user" : "single-user",
-      accessToken: mocks.multiUser ? "synthetic-user-a" : undefined,
+      authSource: mocks.cookieSession ? "cookie-session" : "manual",
+      hostedUserId: mocks.cookieSession ? "stale-local-user" : undefined,
+      accessToken: mocks.multiUser && !mocks.cookieSession ? "synthetic-user-a" : undefined,
     }),
     uploadMedia: (...args: unknown[]) => mocks.upload(...args),
     getMediaDetails: (...args: unknown[]) => mocks.details(...args),
@@ -94,13 +103,7 @@ vi.mock("@/services/service-prompts", () => ({
     scopeInvalidatedSignal: new AbortController().signal,
     release: () => {},
   }),
-  resolveServicePromptScope: async () => ({
-    config: {
-      serverUrl: mocks.owner,
-      authMode: mocks.multiUser ? "multi-user" : "single-user",
-    },
-    userId: mocks.multiUser ? "user-a" : null,
-  }),
+  resolveServicePromptScope: mocks.resolveScope,
 }))
 vi.mock("@/services/tldw/TldwAuth", () => ({
   tldwAuth: {
@@ -246,6 +249,15 @@ beforeEach(() => {
   mocks.navigate.mockReset();
   mocks.persistent = true;
   mocks.multiUser = false;
+  mocks.cookieSession = false;
+  mocks.resolveScope.mockReset().mockImplementation(async () => ({
+    config: {
+      serverUrl: mocks.owner,
+      authMode: mocks.multiUser ? "multi-user" : "single-user",
+      authSource: mocks.cookieSession ? "cookie-session" : "manual",
+    },
+    userId: mocks.multiUser ? "user-a" : null,
+  }))
   mocks.owner = "alice";
   mocks.values.clear();
   mocks.upload.mockReset();
@@ -288,6 +300,35 @@ const selectUnrelatedFolder = (sourceId: string) => {
   return folder.id
 }
 describe("mounted Knowledge research import", () => {
+  it.each([true, false])("opens an empty cookie-session workspace without an import error (verified=%s)", async (verified) => {
+    mocks.multiUser = true
+    mocks.cookieSession = true
+    if (!verified) mocks.resolveScope.mockRejectedValue(new Error("Session unavailable"))
+    const view = renderHook(() => useResearchWorkspacePrefill("workspace-a", true, true))
+
+    await act(async () => {})
+    expect(view.result.current).toMatchObject({ attached: 0, pending: 0, failed: 0, error: null })
+    expect(mocks.resolveScope).toHaveBeenCalledOnce()
+    expect(mocks.request).not.toHaveBeenCalled()
+  })
+
+  it("keeps an owned unfinished handoff retryable after session verification fails", async () => {
+    mocks.multiUser = true
+    mocks.cookieSession = true
+    const handoff = payload()
+    await queueResearchWorkspacePrefill(handoff, "alice:user-a")
+    mocks.writeError = true
+    const view = renderHook(() => useResearchWorkspacePrefill("workspace-a", true, true))
+    await waitFor(() => expect(view.result.current.error).toContain("could not be saved"))
+
+    mocks.resolveScope.mockRejectedValueOnce(new Error("Session unavailable"))
+    await act(async () => { await view.result.current.retry() })
+
+    expect(view.result.current.error).toContain("could not be saved")
+    expect((await consumeResearchWorkspacePrefill("alice:user-a"))?.id).toBe(handoff.id)
+    expect(mocks.request).not.toHaveBeenCalled()
+  })
+
   it.each([false, true, "folder"])(
     "selects a note-only snapshot through actual workspace readiness polling unless selection changes (%s)",
     async (manuallySelected) => {
@@ -743,8 +784,9 @@ describe("mounted Knowledge research import", () => {
     expect(await consumeResearchWorkspacePrefill("alice")).toBeNull()
     reopened.unmount()
   })
-  it("includes the verified principal when matching credential-free request scopes", async () => {
+  it.each([false, true])("imports a verified principal's handoff with a credential-free request scope (cookie=%s)", async (cookieSession) => {
     mocks.multiUser = true
+    mocks.cookieSession = cookieSession
     await queueResearchWorkspacePrefill(payload(), "alice:user-a")
     mocks.upload
       .mockResolvedValueOnce({ media_id: 101 })

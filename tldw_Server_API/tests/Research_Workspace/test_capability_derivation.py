@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import configparser
 import sys
 import time
 from types import ModuleType, SimpleNamespace
@@ -293,6 +294,50 @@ def test_database_degraded_warns_source_dependent_actions():
     assert response.capabilities["source_browse"].mode == "warn"
     assert response.capabilities["chat"].mode == "warn"
     assert response.capabilities["artifact_text_generation"].mode == "warn"
+
+
+@pytest.mark.parametrize(
+    ("config_flag", "env_flag", "provider_status", "expected_mode"),
+    [
+        (None, None, "healthy", "allow"),
+        ("true", "off", "healthy", "allow"),
+        ("true", None, "healthy", "warn"),
+        ("false", "on", "healthy", "warn"),
+        ("false", None, "unhealthy", "warn"),
+        ("false", None, "circuit_open", "warn"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_missing_queue_chat_health(
+    monkeypatch: pytest.MonkeyPatch,
+    config_flag: str | None,
+    env_flag: str | None,
+    provider_status: str,
+    expected_mode: str,
+) -> None:
+    """A missing queue only degrades otherwise healthy chat when queued execution is enabled."""
+    from tldw_Server_API.app.api.v1.endpoints.llm_providers import llm_health
+    from tldw_Server_API.app.core import config
+    from tldw_Server_API.app.core.Chat import provider_manager, rate_limiter, request_queue
+
+    parser = configparser.ConfigParser()
+    if config_flag is not None:
+        parser.read_dict({"Chat-Module": {"queued_execution": config_flag}})
+    monkeypatch.setattr(config, "_CONFIG_PARSER_CACHE", parser)
+    if env_flag is None:
+        monkeypatch.delenv("CHAT_QUEUED_EXECUTION", raising=False)
+    else:
+        monkeypatch.setenv("CHAT_QUEUED_EXECUTION", env_flag)
+    manager = SimpleNamespace(get_health_report=lambda: {"local": {"status": provider_status}})
+    monkeypatch.setattr(provider_manager, "get_provider_manager", lambda: manager)
+    monkeypatch.setattr(request_queue, "get_request_queue", lambda: None)
+    monkeypatch.setattr(rate_limiter, "get_rate_limiter", lambda: None)
+
+    response = build_research_workspace_capabilities(
+        **_health_inputs(llm_health=await capabilities._collect_llm_health())
+    )
+    assert response.capabilities["chat"].mode == expected_mode
+    assert (await llm_health())["status"] == ("healthy" if expected_mode == "allow" else "degraded")
 
 
 def test_llm_unavailable_blocks_generation_but_not_read_only_browsing():
