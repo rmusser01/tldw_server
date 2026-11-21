@@ -302,7 +302,7 @@ def _hook(url: str, *, retry_count: int = 0) -> WebhookRecord:
 
 
 @pytest.fixture
-def http_route(monkeypatch: pytest.MonkeyPatch, svc: AdminWebhooksService):
+async def http_route(monkeypatch: pytest.MonkeyPatch, svc: AdminWebhooksService):
     """Deliver through the default client factory and the real afetch over a MockTransport.
 
     Egress and redirect handling run for real; only the socket layer is replaced, and any
@@ -319,6 +319,7 @@ def http_route(monkeypatch: pytest.MonkeyPatch, svc: AdminWebhooksService):
     def _no_real_network(*_args, **_kwargs):
         raise AssertionError("admin webhook delivery bypassed core.http_client")
 
+    # Let Windows create the event loop's socket pair before installing the guard.
     monkeypatch.setattr(socket, "create_connection", _no_real_network)
     monkeypatch.setattr(socket.socket, "connect", _no_real_network)
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
