@@ -17,6 +17,7 @@ from tldw_Server_API.tests.DB_Management.test_native_chat_asset_io import (
     _io,
     _reserve,
     owner,
+    requires_posix_blob_storage,
 )
 
 pytest_plugins = ("tldw_Server_API.tests.DB_Management.test_native_chat_asset_io",)
@@ -71,6 +72,7 @@ def test_filename_fallback_is_not_content_detection(tmp_path, monkeypatch):
     assert result.mime_detection_source == "fallback"
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "payload,mime,representation,filename",
@@ -93,6 +95,7 @@ async def test_prepares_exact_actual_uploaded_bytes(
     assert candidate["expected_hash"] == hashlib.sha256(payload).hexdigest()
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_prepares_actual_pdf_original(native_fork_db, tmp_path, monkeypatch):
     payload = pdf()
@@ -108,9 +111,21 @@ async def test_prepares_actual_pdf_original(native_fork_db, tmp_path, monkeypatc
     "payload,mime,representation,filename",
     [
         (b"extracted words only", "application/pdf", "document_original_v1", "source.pdf"),
-        (png(), "image/jpeg", "embedded_image_v1", "source.jpg"),
-        (b"\x89PNG\r\n\x1a\ntruncated", "image/png", "embedded_image_v1", "source.png"),
-        (b"\xff\xfeinvalid utf8", "text/plain", "document_text_v1", "processed.txt"),
+        pytest.param(png(), "image/jpeg", "embedded_image_v1", "source.jpg", marks=requires_posix_blob_storage),
+        pytest.param(
+            b"\x89PNG\r\n\x1a\ntruncated",
+            "image/png",
+            "embedded_image_v1",
+            "source.png",
+            marks=requires_posix_blob_storage,
+        ),
+        pytest.param(
+            b"\xff\xfeinvalid utf8",
+            "text/plain",
+            "document_text_v1",
+            "processed.txt",
+            marks=requires_posix_blob_storage,
+        ),
         (b"words", "application/pdf", "document_text_v1", "processed.pdf"),
         (b"words", "text/plain", "file_v1", "processed.txt"),
         (b"words", "text/plain", "unavailable_v1", "processed.txt"),
@@ -135,6 +150,7 @@ async def test_refuses_spoofed_or_unsupported_representation(
     assert not list(root.glob("chat_assets/blobs/**/*.blob"))
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_binary_original_refuses_detector_fallback(native_fork_db, tmp_path, monkeypatch):
     payload = pdf()
@@ -149,6 +165,7 @@ async def test_binary_original_refuses_detector_fallback(native_fork_db, tmp_pat
     assert row(native_fork_db)["state"] == "reserved"
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_actual_image_uses_destination_cap_not_flashcard_cap(native_fork_db, tmp_path, monkeypatch):
     payload = png() + b"x" * (3 * 1024 * 1024)
@@ -157,6 +174,7 @@ async def test_actual_image_uses_destination_cap_not_flashcard_cap(native_fork_d
     assert (root / "chat_assets" / row(native_fork_db)["storage_key"]).read_bytes() == payload
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_actual_upload_does_not_replace_reserved_identity(native_fork_db, tmp_path, monkeypatch):
     adapter, generation, root = case(native_fork_db, tmp_path, monkeypatch, b"first", "text/plain", "document_text_v1")
@@ -166,6 +184,7 @@ async def test_actual_upload_does_not_replace_reserved_identity(native_fork_db, 
     assert not list(root.glob("chat_assets/blobs/**/*.blob"))
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_held_upload_rechecks_original_generation(native_fork_db, tmp_path, monkeypatch):
     payload = b"first"
@@ -189,6 +208,7 @@ async def test_held_upload_rechecks_original_generation(native_fork_db, tmp_path
     assert row(native_fork_db)["state"] == "reserved"
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_limit_change_after_publication_cannot_prepare(native_fork_db, tmp_path, monkeypatch):
     from tldw_Server_API.app.core.config import settings
@@ -215,6 +235,7 @@ async def test_limit_change_after_publication_cannot_prepare(native_fork_db, tmp
     assert quota["state"] == "confirmed"
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_publication_failure_retries_same_candidate(native_fork_db, tmp_path, monkeypatch):
     from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
@@ -290,6 +311,7 @@ def test_shared_parser_refuses_header_valid_truncated_jpeg():
     assert not validate_uploaded_image_bytes(truncated, "image/jpeg", max_bytes=5 * 1024 * 1024)[0]
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_reloaded_document_limit_prevents_prepared_cas(native_fork_db, tmp_path, monkeypatch):
     from tldw_Server_API.app.core import config
@@ -347,6 +369,7 @@ async def test_actual_sink_reads_are_bounded_by_reserved_native_bytes(native_for
     assert not list(root.glob("chat_assets/blobs/**/*.blob"))
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_structured_text_original_cannot_use_filename_fallback(native_fork_db, tmp_path, monkeypatch):
     payload = b"extracted words only"
@@ -360,6 +383,7 @@ async def test_structured_text_original_cannot_use_filename_fallback(native_fork
     assert not list(root.glob("chat_assets/blobs/**/*.blob"))
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["image", "document"])
 async def test_final_locked_admission_rechecks_current_limit(native_fork_db, tmp_path, monkeypatch, kind):
@@ -401,6 +425,7 @@ async def test_final_locked_admission_rechecks_current_limit(native_fork_db, tmp
             config.refresh_config_cache()
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_cancellation_after_last_chunk_refuses_final_publication(native_fork_db, tmp_path, monkeypatch):
     from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
@@ -432,7 +457,9 @@ async def test_cancellation_after_last_chunk_refuses_final_publication(native_fo
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("marker", [True, False], ids=["epub-marker", "missing-marker"])
+@pytest.mark.parametrize(
+    "marker", [pytest.param(True, marks=requires_posix_blob_storage), False], ids=["epub-marker", "missing-marker"]
+)
 async def test_real_epub_container_preserves_house_marker_validation(native_fork_db, tmp_path, monkeypatch, marker):
     import zipfile
 
@@ -458,6 +485,7 @@ async def test_real_epub_container_preserves_house_marker_validation(native_fork
         assert not list(root.glob("chat_assets/blobs/**/*.blob"))
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fence", ["expired", "reclaiming"])
 async def test_durable_fence_during_chunk_stops_later_byte_calls(native_fork_db, tmp_path, monkeypatch, fence):
@@ -522,6 +550,7 @@ def test_oversized_compressed_epub_marker_is_refused_before_open(tmp_path, monke
     assert not opened
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["chunk", "final"])
 async def test_cancellation_during_admission_refuses_next_byte_call(native_fork_db, tmp_path, monkeypatch, phase):
