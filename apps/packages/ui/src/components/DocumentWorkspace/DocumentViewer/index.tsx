@@ -352,6 +352,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         return (
           <Suspense fallback={viewerFallback}>
             <PdfDocument
+              key={activeDocumentId}
               url={activeDocument.url}
               documentId={activeDocumentId}
               currentPage={currentPage}
@@ -368,6 +369,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         return (
           <Suspense fallback={viewerFallback}>
             <EpubViewer
+              key={activeDocumentId}
               url={activeDocument.url!}
               documentId={activeDocumentId}
               onLoadSuccess={({ chapterCount }) => {

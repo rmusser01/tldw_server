@@ -19,7 +19,9 @@ import { buildAssistantErrorContent } from "@/utils/chat-error-message"
 import { runChatPersistenceTransaction } from "@/db/dexie/chat-persistence-transaction"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import type { UploadedFile } from "@/db/dexie/types"
-import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { db } from "@/db/dexie/schema"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { createServicePromptScopeChangedError, isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 let didLogSetHistoryMissing = false
 
@@ -73,6 +75,23 @@ const resolveHistorySetter = (
   return null
 }
 
+const indexDocumentHistory = async (
+  historyId: string | null,
+  historyDocumentId: string | undefined,
+  requestScope: ServicePromptRequestScope | undefined
+) => {
+  if (!historyDocumentId) return
+  if (!requestScope) throw createServicePromptScopeChangedError()
+  if (!historyId) return
+
+  const header = await db.chatHistories.get(historyId)
+  if (!header || header.server_scope_key !== serverChatMirrorOwnerKey({ requestScope }) ||
+      (header.doc_id && header.doc_id !== historyDocumentId)) {
+    throw createServicePromptScopeChangedError()
+  }
+  if (!header.doc_id) await db.chatHistories.update(historyId, { doc_id: historyDocumentId })
+}
+
 export const saveMessageOnError = async ({
   historyTurn,
   e,
@@ -82,6 +101,8 @@ export const saveMessageOnError = async ({
   userMessage,
   botMessage,
   historyId,
+  historyDocumentId,
+  historyServerChatId,
   selectedModel,
   setHistoryId,
   isRegenerating,
@@ -121,6 +142,8 @@ export const saveMessageOnError = async ({
   image: string
   botMessage: string
   historyId: string | null
+  historyDocumentId?: string
+  historyServerChatId?: string
   selectedModel: string
   setHistoryId: (
     historyId: string,
@@ -203,7 +226,7 @@ export const saveMessageOnError = async ({
     }
   }
 
-  if (scopeSignal || scopeInvalidatedSignal) {
+  if (scopeSignal || scopeInvalidatedSignal || historyDocumentId) {
     if (
       scopeInvalidatedSignal?.aborted &&
       (shouldAbortForScopeChange?.() ?? true)
@@ -224,8 +247,9 @@ export const saveMessageOnError = async ({
     const persistedHistoryId = await runChatPersistenceTransaction(
       scopeInvalidatedSignal,
       async () => {
+        await indexDocumentHistory(historyId, historyDocumentId, requestScope)
         const targetHistoryId = historyId ?? (
-          await saveHistory(title!, false, message_source, undefined, undefined, requestScope)
+          await saveHistory(title!, false, message_source, historyDocumentId, historyServerChatId, requestScope)
         ).id
         const shouldSaveUser = !isRegenerating && (
           !historyId || !isAbort || !isContinue
@@ -498,6 +522,8 @@ export const saveMessageOnError = async ({
 export const saveMessageOnSuccess = async ({
   historyTurn,
   historyId,
+  historyDocumentId,
+  historyServerChatId,
   setHistoryId,
   isRegenerate,
   selectedModel,
@@ -537,6 +563,8 @@ export const saveMessageOnSuccess = async ({
 }: {
   historyTurn?: HistorySendTurn
   historyId: string | null
+  historyDocumentId?: string
+  historyServerChatId?: string
   setHistoryId: (
     historyId: string,
     options?: { preserveServerChatId?: boolean }
@@ -668,8 +696,9 @@ export const saveMessageOnSuccess = async ({
   const persistedHistoryId = await runChatPersistenceTransaction(
     scopeInvalidatedSignal,
     async () => {
+      await indexDocumentHistory(historyId, historyDocumentId, requestScope)
       const targetHistoryId = historyId ?? (
-        await saveHistory(title!, false, message_source, undefined, undefined, requestScope)
+        await saveHistory(title!, false, message_source, historyDocumentId, historyServerChatId, requestScope)
       ).id
 
       if (isRegenerate && retryFailedTurn && userMessageId && userServerMessageId) {

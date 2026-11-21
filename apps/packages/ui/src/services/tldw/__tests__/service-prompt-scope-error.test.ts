@@ -520,6 +520,12 @@ it.each([
 });
 
 
+it("accepts captured document translation only on the translation POST", () => {
+  expect(isServicePromptRequestPath("/api/v1/translate", "POST")).toBe(true)
+  expect(isServicePromptRequestPath("/api/v1/translate", "GET")).toBe(false)
+  expect(isServicePromptRequestPath("/api/v1/translate/extra", "POST")).toBe(false)
+})
+
 describe('S03 captured Data Tables generation routes', () => {
   const id = '83569797-3613-42e0-b2a2-498794fc1cd0';
   it.each([

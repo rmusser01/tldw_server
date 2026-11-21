@@ -8,7 +8,11 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    get_request_user,
+    require_expected_user_if_present,
+)
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.schemas.translate_schemas import (
     TranslateRequest,
@@ -46,6 +50,7 @@ def _get_default_provider() -> str:
     response_model=TranslateResponse,
     status_code=status.HTTP_200_OK,
     summary="Translate text to target language",
+    dependencies=[Depends(require_expected_user_if_present)],
     responses={
         200: {"description": "Translation successful"},
         400: {"description": "Invalid request (text too long, etc.)"},

@@ -3726,29 +3726,14 @@ export class TldwApiClientBase {
   async translate(
     text: string,
     targetLanguage: string = "English",
-    options?: { model?: string; provider?: string }
+    options?: Parameters<typeof mediaMethods.translate>[2]
   ): Promise<{
     translated_text: string
     target_language: string
     model_used: string
     detected_source_language?: string
   }> {
-    return await bgRequest<{
-      translated_text: string
-      target_language: string
-      model_used: string
-      detected_source_language?: string
-    }>({
-      path: "/api/v1/translate",
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: {
-        text,
-        target_language: targetLanguage,
-        ...(options?.model && { model: options.model }),
-        ...(options?.provider && { provider: options.provider })
-      }
-    })
+    return await mediaMethods.translate(text, targetLanguage, options)
   }
 
   // Document Annotations Methods

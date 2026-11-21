@@ -1,100 +1,65 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback } from "react"
 
 export interface TextSelection {
   text: string
   rect: DOMRect
+  page?: number
 }
 
-/**
- * Hook for detecting text selection within a container element.
- *
- * @param containerRef - Ref to the container element to monitor for selections
- * @returns Selection state and clear function
- */
+/** Keep the captured PDF passage when focus moves from the viewer to an action. */
 export function useTextSelection(containerRef: React.RefObject<HTMLElement | null>) {
   const [selection, setSelection] = useState<TextSelection | null>(null)
-  const selectionTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const clearSelection = useCallback(() => {
     setSelection(null)
-  }, [])
+    const native = window.getSelection()
+    if (native?.anchorNode && containerRef.current?.contains(native.anchorNode)) {
+      native.removeAllRanges()
+    }
+  }, [containerRef])
 
   useEffect(() => {
-    const handleMouseUp = () => {
-      // Clear any pending timeout
-      if (selectionTimeoutRef.current) {
-        clearTimeout(selectionTimeoutRef.current)
-      }
+    let selectingWithMouse = false
 
-      // Small delay to ensure selection is complete
-      selectionTimeoutRef.current = setTimeout(() => {
-        const sel = window.getSelection()
+    const readSelection = () => {
+      const native = window.getSelection()
+      const viewer = containerRef.current
+      if (selectingWithMouse || !viewer || !native || native.isCollapsed || !native.rangeCount ||
+          !viewer.contains(native.anchorNode) || !viewer.contains(native.focusNode)) return
 
-        if (!sel || sel.isCollapsed) {
-          setSelection(null)
-          return
-        }
+      const range = native.getRangeAt(0)
+      const start = range.startContainer
+      const element = start instanceof Element ? start : start.parentElement
+      if (element?.closest("[data-selection-popover]")) return
 
-        // Only handle selection within the PDF container
-        const container = containerRef.current
-        if (!container) {
-          setSelection(null)
-          return
-        }
-
-        // Check if selection anchor is within container
-        const anchorNode = sel.anchorNode
-        if (!anchorNode || !container.contains(anchorNode)) {
-          setSelection(null)
-          return
-        }
-
-        const text = sel.toString().trim()
-        if (text.length === 0) {
-          setSelection(null)
-          return
-        }
-
-        // Get bounding rect of selection
-        const range = sel.getRangeAt(0)
-        const rect = range.getBoundingClientRect()
-
-        setSelection({ text, rect })
-      }, 10)
+      const text = native.toString().trim()
+      if (!text) return
+      const page = Number(element?.closest("[data-page-number]")?.getAttribute("data-page-number"))
+      setSelection({ text, rect: range.getBoundingClientRect(), page: page > 0 ? page : undefined })
     }
 
-    const handleMouseDown = (e: MouseEvent) => {
-      // Clear selection when clicking elsewhere
-      const target = e.target as HTMLElement
-      const popover = document.querySelector("[data-selection-popover]")
-
-      if (popover && popover.contains(target)) {
-        // Clicking inside popover - don't clear
-        return
-      }
-
-      setSelection(null)
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target
+      selectingWithMouse = event.pointerType === "mouse" && target instanceof Element &&
+        Boolean(containerRef.current?.contains(target)) && !target.closest("[data-selection-popover]")
     }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Clear selection on Escape
-      if (e.key === "Escape") {
-        setSelection(null)
-        window.getSelection()?.removeAllRanges()
-      }
+    const handlePointerUp = () => {
+      if (!selectingWithMouse) return
+      selectingWithMouse = false
+      readSelection()
     }
+    const handlePointerCancel = () => { selectingWithMouse = false }
 
-    document.addEventListener("mouseup", handleMouseUp)
-    document.addEventListener("mousedown", handleMouseDown)
-    document.addEventListener("keydown", handleKeyDown)
+    document.addEventListener("selectionchange", readSelection)
+    document.addEventListener("pointerdown", handlePointerDown)
+    document.addEventListener("pointerup", handlePointerUp)
+    document.addEventListener("pointercancel", handlePointerCancel)
 
     return () => {
-      if (selectionTimeoutRef.current) {
-        clearTimeout(selectionTimeoutRef.current)
-      }
-      document.removeEventListener("mouseup", handleMouseUp)
-      document.removeEventListener("mousedown", handleMouseDown)
-      document.removeEventListener("keydown", handleKeyDown)
+      document.removeEventListener("selectionchange", readSelection)
+      document.removeEventListener("pointerdown", handlePointerDown)
+      document.removeEventListener("pointerup", handlePointerUp)
+      document.removeEventListener("pointercancel", handlePointerCancel)
     }
   }, [containerRef])
 

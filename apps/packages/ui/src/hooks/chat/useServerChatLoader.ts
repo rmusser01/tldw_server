@@ -737,12 +737,12 @@ export const useServerChatLoader = ({
   }, [])
 
   React.useEffect(() => {
-    if (!enabled) {
+    if (!enabled || !serverChatId) {
       serverChatLoadRef.current.controller?.abort()
-      serverChatLoadRef.current.inFlight = false
+      serverChatLoadRef.current = { chatId: null, controller: null, inFlight: false, loaded: false }
       return
     }
-    if (!serverChatId || assistantMeta?.isLoading) return
+    if (assistantMeta?.isLoading) return
     const deliberateSelection = selectionIntent?.chatId === serverChatId &&
       selectionIntent !== handledSelectionIntent.current
     // A failed history capture is settled for this chat until the user reopens it.
@@ -756,7 +756,7 @@ export const useServerChatLoader = ({
       shouldSkipLoadedServerChatReload({
         activeServerChatId: serverChatId,
         loadedChatId: serverChatLoadRef.current.chatId,
-        loaded: serverChatLoadRef.current.loaded,
+        loaded: serverChatLoadRef.current.loaded && serverChatMetaLoaded,
         currentMessages: messagesRef.current
       })
     ) {
@@ -1329,7 +1329,8 @@ export const useServerChatLoader = ({
               messagesShown: useStoreMessageOption.getState().messages.length })
           }
         } finally {
-          if (useStoreMessageOption.getState().serverChatId === serverChatId) setIsLoading(false)
+          if (serverChatLoadRef.current.controller === controller &&
+              useStoreMessageOption.getState().serverChatId === serverChatId) setIsLoading(false)
           // Messages are ready independently of optional profile enrichment.
           // Keep this load's authority alive until that guarded work settles.
           await pendingAssistantPresentation?.catch(() => undefined)

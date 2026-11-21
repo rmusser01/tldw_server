@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { fetchTldwVoices, type TldwVoice } from "@/services/tldw/audio-voices"
+import { tldwClient } from "@/services/tldw"
+import { useDocumentOperation } from "./useDocumentOperation"
 import {
   DEFAULT_TLDW_TTS_VOICE,
   getTldwTTSModel,
@@ -100,6 +102,7 @@ const readStoredVoicePreference = (): string => {
  * - Multiple provider support
  */
 export function useDocumentTTS(): UseDocumentTTSReturn {
+  const operation = useDocumentOperation()
   const [voice, setVoiceState] = useState(() => readStoredVoicePreference())
 
   const [speed, setSpeedState] = useState(() => {
@@ -229,10 +232,12 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
 
   // Speak text
   const speak = useCallback(async (text: string) => {
+    if (!operation?.isCurrent()) return
     controllerRef.current?.abort()
     releasePlayback()
     if (!mountedRef.current) return
     const controller = new AbortController()
+    const signal = AbortSignal.any([controller.signal, operation.signal])
     controllerRef.current = controller
 
     setProgress(0)
@@ -249,34 +254,21 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
     try {
       const model = await getTldwTTSModel()
       const fallbackVoice = await getTldwTTSVoice()
-      if (controller.signal.aborted) return
+      if (signal.aborted || !operation.isCurrent()) return
       const resolvedVoice =
         readStoredVoicePreference() || voice || fallbackVoice || DEFAULT_VOICE
 
-      // Call TTS API
-      const response = await fetch("/api/v1/audio/speech", {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          input: text,
-          voice: resolvedVoice,
-          model,
-          speed: speed,
-          response_format: "mp3"
-        })
+      const audioBuffer = await tldwClient.synthesizeSpeech(text, {
+        model,
+        voice: resolvedVoice,
+        speed,
+        responseFormat: "mp3",
+        signal,
+        requestScope: operation.requestScope
       })
 
-      if (controller.signal.aborted) return
-      if (!response.ok) {
-        throw new Error(`TTS request failed: ${response.statusText}`)
-      }
-
-      // Get audio blob
-      const audioBlob = await response.blob()
-      if (controller.signal.aborted) return
+      if (signal.aborted || !operation.isCurrent()) return
+      const audioBlob = new Blob([audioBuffer], { type: "audio/mpeg" })
       const audioUrl = URL.createObjectURL(audioBlob)
       audioUrlRef.current = audioUrl
 
@@ -346,7 +338,7 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
         throw playErr
       }
     } catch (err) {
-      if (controller.signal.aborted) return
+      if (signal.aborted) return
       releasePlayback()
       const errorMessage = err instanceof Error ? err.message : "TTS failed"
       setState((prev) => ({
@@ -358,7 +350,7 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
         lastSpokenText: prev.lastSpokenText
       }))
     }
-  }, [voice, speed, volume, releasePlayback])
+  }, [operation, voice, speed, volume, releasePlayback])
 
   // Pause playback
   const pause = useCallback(() => {
