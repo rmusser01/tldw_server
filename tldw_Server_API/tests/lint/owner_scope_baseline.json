@@ -1,0 +1,5 @@
+{
+  "core/DB_Management/ChaChaNotes_DB.py": {"calls": 36, "opt_outs": 0, "reason": null},
+  "core/DB_Management/chacha/keyword_store.py": {"calls": 29, "opt_outs": 0, "reason": null},
+  "core/DB_Management/chacha/note_store.py": {"calls": 37, "opt_outs": 0, "reason": null}
+}
