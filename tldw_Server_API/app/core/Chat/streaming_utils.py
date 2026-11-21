@@ -26,7 +26,6 @@ from tldw_Server_API.app.core.Chat.generation_metadata import (
     GENERATION_STATUS_INTERRUPTED,
     GENERATION_STATUS_LENGTH,
     GENERATION_STATUS_STOPPED,
-    MAX_MOONSHOT_REASONING_LENGTH,
     MOONSHOT_REASONING_EVENT,
     sanitize_usage,
 )
@@ -42,6 +41,7 @@ from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import (
 from tldw_Server_API.app.core.LLM_Calls.provider_results import (  # noqa: F401 - re-exported
     _ALWAYS_SSE_CONTROL_PREFIXES,
     _FRAMED_ONLY_SSE_CONTROL_PREFIXES,
+    MAX_MOONSHOT_REASONING_LENGTH,
     PROVIDER_STREAM_ERROR_MESSAGES,
     _extract_text_from_upstream_sse,
     _normalize_unframed_provider_stream_error,
@@ -1696,7 +1696,6 @@ class StreamingResponseHandler:
                     except _STREAMING_NONCRITICAL_EXCEPTIONS:
                         return process_plain_text(payload_str)
                     if isinstance(data, dict) and data.get("event") == MOONSHOT_REASONING_EVENT:
-                        # Only local settlement can issue a reasoning history event.
                         return outputs, False
                     error_code = structural_error_code(data)
                     if error_code is not None:

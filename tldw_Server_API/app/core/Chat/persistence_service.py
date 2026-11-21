@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import HTTPException
 
@@ -11,13 +11,11 @@ from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import validate_chat_settings_storage
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import sanitize_sender_name
 from tldw_Server_API.app.core.Chat.generation_metadata import (
-    MOONSHOT_REASONING_KEY,
-    bounded_moonshot_reasoning,
     sanitize_generation_metadata,
 )
 from tldw_Server_API.app.core.Chat.knowledge_save import strip_reasoning_blocks
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, NotFoundError
-from typing import TYPE_CHECKING
+from tldw_Server_API.app.core.LLM_Calls.provider_results import MOONSHOT_REASONING_KEY, bounded_moonshot_reasoning
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.Chat.call_state import NonStreamCall

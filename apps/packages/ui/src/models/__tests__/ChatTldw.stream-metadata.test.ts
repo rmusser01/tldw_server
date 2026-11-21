@@ -117,6 +117,7 @@ describe("selected history provider fidelity", () => {
     })
     const handleLLMEnd = vi.fn()
     for await (const _ of await model.stream([user], { preparedRequest, callbacks: [{ handleLLMEnd }] })) {
+      // Drain the stream so the reasoning event reaches the completion callback.
     }
     const { moonshotReasoning } = handleLLMEnd.mock.lastCall![0].generations[0][0].generationInfo
     expect(moonshotReasoning).toBe("  exact </think> bytes\n")

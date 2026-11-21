@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
-import html
 import inspect
 import json as _json
 import os
@@ -75,10 +74,8 @@ from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_ena
 from tldw_Server_API.app.core.Chat.generation_metadata import (
     GENERATION_STATUS_COMPLETE,
     GENERATION_STATUS_LENGTH,
-    MOONSHOT_REASONING_EVENT,
-    MOONSHOT_REASONING_KEY,
-    bounded_moonshot_reasoning,
     build_generation_metadata,
+    moonshot_reasoning_event,
 )
 from tldw_Server_API.app.core.Chat.history_selection import (
     REPLY_ACTION_REFUSED_QUESTION,
@@ -87,11 +84,13 @@ from tldw_Server_API.app.core.Chat.history_selection import (
     HistorySelectionSnapshotV1,
     reply_action_refusal,
 )
-from tldw_Server_API.app.core.Chat.knowledge_save import split_reasoning_text, strip_reasoning_blocks
+from tldw_Server_API.app.core.Chat.knowledge_save import strip_reasoning_blocks
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.Chat.moderation_pipeline import (
     OutputModerationRuntime,
     apply_output_safety_to_choices,
+    approve_saved_moonshot_reasoning,
+    prepare_saved_stream_reply,
 )
 from tldw_Server_API.app.core.Chat.persistence_service import (
     NativeStreamPersistence,
@@ -211,6 +210,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
     resolve_provider_model_selection,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
+from tldw_Server_API.app.core.LLM_Calls.provider_results import MOONSHOT_REASONING_KEY, bounded_moonshot_reasoning
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line, sse_data, sse_done
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
@@ -2408,6 +2408,20 @@ def _build_assistant_message_payload(
         function_call=function_call,
         generation_metadata=generation_metadata,
         moonshot_reasoning=moonshot_reasoning,
+    )
+
+
+def _stream_generation_metadata(
+    generation: dict[str, Any] | None, *, model: str, provider: str
+) -> dict[str, Any]:
+    """Combine what the stream observed with the model and provider that produced it."""
+    observed = generation if isinstance(generation, dict) else {}
+    return build_generation_metadata(
+        generation_status=observed.get("generation_status", GENERATION_STATUS_COMPLETE),
+        model_id=model,
+        provider=provider,
+        finish_reason=observed.get("finish_reason"),
+        usage=observed.get("usage"),
     )
 
 
@@ -5154,50 +5168,14 @@ async def execute_streaming_call(
 
         return full_reply_to_save, post_stream_blocked
 
-    def _stream_generation_metadata(generation: dict[str, Any] | None) -> dict[str, Any]:
-        """Combine what the stream observed with the model and provider that produced it."""
-        observed = generation if isinstance(generation, dict) else {}
-        return build_generation_metadata(
-            generation_status=observed.get("generation_status", GENERATION_STATUS_COMPLETE),
-            model_id=cst.model,
-            provider=cst.selected_provider,
-            finish_reason=observed.get("finish_reason"),
-            usage=observed.get("usage"),
-        )
-
     # Partial replies are kept only for turns admitted through native history
     # selection, where the server owns settlement. Other save_to_db clients
     # retry an unanswered turn with tldw_retry_failed_turn, and that contract
     # needs the failed turn to have no saved reply.
     cst.keep_partial_replies = bool(cst.should_persist and cst.native_persistence)
 
-    async def _approve_provider_reasoning(reasoning: str | None) -> str | None:
-        if not reasoning:
-            return None
-        approved, blocked = await _apply_stream_output_policies(reasoning, enforce_resolved_action=True)
-        return reasoning if not blocked and approved == reasoning else None
-
-    async def _prepare_saved_stream_reply(
-        full_reply: str, provider_reasoning: str | None = None
-    ) -> tuple[str | None, bool, str | None]:
-        """Apply save policies to answer and thinking, sharing the typed verdict when possible."""
-        if cst.native_persistence != "retain_reasoning" or not cst.keep_partial_replies or cst.structured_request_context is not None:
-            approved, blocked = await _apply_stream_output_policies(full_reply)
-            if blocked or approved != full_reply:
-                return approved, blocked, None
-            return approved, False, await _approve_provider_reasoning(provider_reasoning)
-        answer, thinking = split_reasoning_text(full_reply)
-        approved_answer, blocked = await _apply_stream_output_policies(answer)
-        if blocked or approved_answer != answer:
-            return approved_answer, blocked, None
-        if thinking:
-            thinking = html.unescape(thinking)
-            approved_thinking = await _approve_provider_reasoning(thinking)
-            if approved_thinking is None:
-                return answer, False, None
-            if thinking == provider_reasoning:
-                return full_reply, False, approved_thinking
-        return full_reply, False, await _approve_provider_reasoning(provider_reasoning)
+    def _retain_stream_reasoning() -> bool:
+        return cst.keep_partial_replies and cst.native_persistence == "retain_reasoning" and cst.structured_request_context is None
 
     async def partial_save_callback(full_reply: str, *, generation: dict[str, Any]) -> str | None:
         """Keep an unfinished reply after a disconnect, stop or provider failure (D7 S3-1).
@@ -5210,7 +5188,9 @@ async def execute_streaming_call(
             return None
         if cst.stream_mod_state.get("pending_stop_error") is not None:
             return None
-        full_reply_to_save, post_stream_blocked, _ = await _prepare_saved_stream_reply(full_reply)
+        full_reply_to_save, post_stream_blocked, _ = await prepare_saved_stream_reply(
+            full_reply, _apply_stream_output_policies, retain_reasoning=_retain_stream_reasoning(),
+        )
         if post_stream_blocked or not isinstance(full_reply_to_save, str) or not full_reply_to_save.strip():
             return None
         message_payload = build_assistant_message_payload(
@@ -5219,7 +5199,7 @@ async def execute_streaming_call(
             content=full_reply_to_save,
             tool_calls=None,
             function_call=None,
-            generation_metadata=_stream_generation_metadata(generation),
+            generation_metadata=_stream_generation_metadata(generation, model=cst.model, provider=cst.selected_provider),
         )
         return await save_assistant_message(
             chat_db=cst.chat_db,
@@ -5250,6 +5230,7 @@ async def execute_streaming_call(
         )
 
     client_moonshot_history = not cst.should_persist and cst.cleaned_args.get("_chat_moonshot_reasoning_history") is True
+    capture_moonshot_reasoning = bool(cst.should_persist and cst.final_conversation_id) or client_moonshot_history
 
     async def save_callback(
         full_reply: str,
@@ -5268,9 +5249,10 @@ async def execute_streaming_call(
         saved_message_id: str | None = None
         tool_execution_payload: list[dict[str, Any]] | None = None
         structured_events: list[dict[str, Any]] = []
-        full_reply_to_save, post_stream_blocked, moonshot_reasoning = await _prepare_saved_stream_reply(
-            full_reply,
-            provider_reasoning if provider_reasoning and official_moonshot_chat_base_url(cst.selected_provider, cst.cleaned_args) else None,
+        full_reply_to_save, post_stream_blocked, moonshot_reasoning = await prepare_saved_stream_reply(
+            full_reply, _apply_stream_output_policies, retain_reasoning=_retain_stream_reasoning(),
+            provider_reasoning=provider_reasoning
+            if provider_reasoning and official_moonshot_chat_base_url(cst.selected_provider, cst.cleaned_args) else None,
         )
 
         if cst.structured_request_context is not None:
@@ -5331,13 +5313,7 @@ async def execute_streaming_call(
         )
 
         if moonshot_reasoning and client_moonshot_history:
-            structured_events.append({
-                "event": MOONSHOT_REASONING_EVENT,
-                "data": {
-                    "event": MOONSHOT_REASONING_EVENT,
-                    "data": {"reasoning_content": moonshot_reasoning},
-                },
-            })
+            structured_events.append(moonshot_reasoning_event(moonshot_reasoning))
 
         if cst.should_persist and cst.final_conversation_id and not post_stream_blocked and (
             full_reply_to_save or tool_calls or function_call
@@ -5348,7 +5324,7 @@ async def execute_streaming_call(
                 content=full_reply_to_save,
                 tool_calls=tool_calls,
                 function_call=function_call,
-                generation_metadata=_stream_generation_metadata(generation),
+                generation_metadata=_stream_generation_metadata(generation, model=cst.model, provider=cst.selected_provider),
                 moonshot_reasoning=moonshot_reasoning,
             )
             saved_message_id = await save_assistant_message(
@@ -5761,12 +5737,8 @@ async def execute_streaming_call(
                     continuation_metadata=cst.normalized_continuation_metadata,
                     history_persistence_ack=bool(cst.native_persistence) or None,
                     forward_usage_chunk=cst.forward_usage_chunk,
-                    capture_provider_reasoning=(
-                        bool(cst.should_persist and cst.final_conversation_id) or client_moonshot_history
-                    ) or None,
-                    retain_reasoning=(
-                        cst.native_persistence == "retain_reasoning" and cst.keep_partial_replies and cst.structured_request_context is None
-                    ) or None,
+                    capture_provider_reasoning=capture_moonshot_reasoning or None,
+                    retain_reasoning=_retain_stream_reasoning() or None,
                 ),
                 stream_factory=create_streaming_response_with_timeout,
             )

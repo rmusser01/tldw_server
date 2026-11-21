@@ -52,7 +52,11 @@ from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
     resolve_provider_models_base_url,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
-from tldw_Server_API.app.core.LLM_Calls.provider_results import sanitized_provider_stream_exception
+from tldw_Server_API.app.core.LLM_Calls.provider_results import (
+    MOONSHOT_REASONING_KEY,
+    bounded_moonshot_reasoning,
+    sanitized_provider_stream_exception,
+)
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.LLM_Calls.usage_accounting import refuse_admin_disabled
@@ -911,8 +915,6 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
     base_url_override = _resolve_base_url_override(provider, chat_args)
     if base_url_override:
         request["base_url"] = base_url_override
-
-    from tldw_Server_API.app.core.Chat.generation_metadata import MOONSHOT_REASONING_KEY, bounded_moonshot_reasoning
 
     if any(isinstance(message, dict) and MOONSHOT_REASONING_KEY in message for message in messages_payload):
         replay_base_url = official_moonshot_chat_base_url(provider, chat_args)

@@ -1,7 +1,8 @@
-"""Output safety processing for non-streaming chat completions."""
+"""Output safety processing for chat completions and saved reasoning."""
 from __future__ import annotations
 
 import asyncio
+import html
 import inspect
 import json as _json
 from collections.abc import Awaitable, Callable
@@ -21,6 +22,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
     ChatProviderError,
 )
+from tldw_Server_API.app.core.Chat.knowledge_save import split_reasoning_text
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 
@@ -128,6 +130,60 @@ async def apply_output_safety_to_choices(
         content_to_save=current_content,
         content_text_for_usage=current_text,
     )
+
+
+async def approve_saved_moonshot_reasoning(reasoning: str, runtime: OutputModerationRuntime) -> str | None:
+    """Keep exact reasoning only when the output checks approve it."""
+    try:
+        checked = await apply_output_safety_to_choices(
+            choices=[],
+            fallback_content=reasoning,
+            fallback_content_text=reasoning,
+            runtime=runtime,
+        )
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_400_BAD_REQUEST:
+            return None
+        raise
+    except MandatoryAuditWriteError:
+        raise
+    except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS:
+        return None
+    return reasoning if checked.content_to_save == reasoning else None
+
+
+async def prepare_saved_stream_reply(
+    full_reply: str,
+    apply_policies: Callable[..., Awaitable[tuple[str | None, bool]]],
+    *,
+    retain_reasoning: bool,
+    provider_reasoning: str | None = None,
+) -> tuple[str | None, bool, str | None]:
+    """Check answer and thinking, sharing the typed reasoning verdict when possible."""
+
+    async def approve_reasoning(reasoning: str | None) -> str | None:
+        if not reasoning:
+            return None
+        approved, blocked = await apply_policies(reasoning, enforce_resolved_action=True)
+        return reasoning if not blocked and approved == reasoning else None
+
+    if not retain_reasoning:
+        approved, blocked = await apply_policies(full_reply)
+        if blocked or approved != full_reply:
+            return approved, blocked, None
+        return approved, False, await approve_reasoning(provider_reasoning)
+    answer, thinking = split_reasoning_text(full_reply)
+    approved_answer, blocked = await apply_policies(answer)
+    if blocked or approved_answer != answer:
+        return approved_answer, blocked, None
+    if thinking:
+        thinking = html.unescape(thinking)
+        approved_thinking = await approve_reasoning(thinking)
+        if approved_thinking is None:
+            return answer, False, None
+        if thinking == provider_reasoning:
+            return full_reply, False, approved_thinking
+    return full_reply, False, await approve_reasoning(provider_reasoning)
 
 
 async def write_mandatory_moderation_audit(
