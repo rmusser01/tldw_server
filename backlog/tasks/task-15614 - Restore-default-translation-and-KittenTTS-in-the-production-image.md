@@ -9,6 +9,7 @@ labels:
 - docker
 references:
 - Docs/ADR/011-audio-api-semantics.md
+- https://github.com/rmusser01/tldw_server/pull/3541
 ---
 
 ## Description
@@ -30,6 +31,7 @@ Document Workspace requests translation without naming a provider and selects Ki
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR required: no. The changes reuse the existing provider credential lookup and KittenTTS extra. Docs/ADR/011-audio-api-semantics.md still governs model-first speech routing. All five added cases reproduced on Dev. The focused translation, KittenTTS, packaging and release suite passed 53 tests. Ruff passed and Bandit reported no new findings.
 Independent review found no blockers. Dockerfiles/Dockerfile.prod built successfully for Linux arm64. The normal appuser used the cache and the speech service decoded 102188 bytes of 24 kHz MP3 from a synthetic passage. Local verification covered the focused suites and the arm64 image.
+CI follow-up on PR #3541. Rebased onto Dev for its CI workflow changes and reviewed Research bootstrap digest. The Translate selection checks now exercise the resolver directly, which preserves the regression coverage and keeps the existing prompt doubles outside the changed-file type check. The Audio chat test uses the same single-user credential as its scope guard. All 101 focused tests passed, including the bootstrap and test-quality guards. Mypy and Ruff passed, and Bandit found no new issues.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

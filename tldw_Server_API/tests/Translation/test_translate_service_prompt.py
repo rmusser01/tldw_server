@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from configparser import ConfigParser
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -10,7 +9,6 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import translate as translate_module
 from tldw_Server_API.app.api.v1.schemas.translate_schemas import TranslateRequest
-from tldw_Server_API.app.core import config
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
     DatabaseError,
     ServicePromptOverrideRow,
@@ -21,7 +19,6 @@ from tldw_Server_API.app.core.LLM_Calls import (
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     ServicePromptCorruptOverride,
 )
-from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides
 
 pytestmark = pytest.mark.unit
 
@@ -63,43 +60,6 @@ def _request(**overrides: object) -> TranslateRequest:
     }
     values.update(overrides)
     return TranslateRequest(**values)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("key_source", ["config", "encrypted_override", "config_with_blank"])
-async def test_translation_without_provider_uses_configured_key(
-    monkeypatch: pytest.MonkeyPatch, key_source: str,
-) -> None:
-    key = "fixture-key"
-    settings = ConfigParser()
-    if key_source != "encrypted_override":
-        settings.read_dict({"API": {"deepseek_api_key": key}})
-    monkeypatch.setattr(config, "load_comprehensive_config", lambda: settings)
-    for provider in ("OPENAI", "ANTHROPIC", "OPENROUTER", "GROQ", "DEEPSEEK"):
-        monkeypatch.delenv(provider + "_API_KEY", raising=False)
-    if key_source == "config_with_blank":
-        monkeypatch.setenv("OPENAI_API_KEY", "  ")
-
-    def get_override(provider: str) -> llm_provider_overrides.LLMProviderOverride | None:
-        if key_source == "encrypted_override" and provider == "deepseek":
-            return llm_provider_overrides.LLMProviderOverride(provider=provider, api_key=key)
-        return None
-
-    monkeypatch.setattr(llm_provider_overrides, "get_llm_provider_override", get_override)
-
-    def translate_with_configured_provider(**kwargs: object) -> str:
-        if kwargs["api_name"] == "deepseek":
-            return "Bonjour"
-        return "Error: Provider has no configured key"
-
-    monkeypatch.setattr(summarization_module, "analyze", translate_with_configured_provider)
-
-    response = await translate_module.translate_text(
-        _request(provider=None, model=None), current_user=SimpleNamespace(id=1), db=_PromptDatabase()
-    )
-
-    assert response.translated_text == "Bonjour"
-    assert response.model_used == "deepseek_default"
 
 
 @pytest.mark.asyncio
