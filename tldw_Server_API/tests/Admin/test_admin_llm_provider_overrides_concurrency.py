@@ -147,6 +147,7 @@ def _override_response() -> SimpleNamespace:
         provider="openai",
         is_enabled=True,
         allowed_models=None,
+        denied_models=None,
         config={},
         credential_fields={},
         api_key=None,
