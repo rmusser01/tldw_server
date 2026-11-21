@@ -136,8 +136,6 @@ from tldw_Server_API.app.core.Chat.streaming_pipeline import (
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     CHAT_STREAM_INCLUDE_METADATA,
-    HEARTBEAT_INTERVAL as CHAT_HEARTBEAT_INTERVAL,
-    STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
     await_stream_operation_bounded,
     cancel_stream_tasks_bounded,
     create_streaming_response_with_timeout,
@@ -150,6 +148,12 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
     trusted_local_stream_error_frame,
+)
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    HEARTBEAT_INTERVAL as CHAT_HEARTBEAT_INTERVAL,
+)
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
 )
 from tldw_Server_API.app.core.Chat.tool_auto_exec import execute_assistant_tool_calls
 from tldw_Server_API.app.core.Chat.tool_execution_service import (
@@ -1198,6 +1202,29 @@ def should_auto_continue_tools_once() -> bool:
     if raw is not None:
         return _coerce_bool(raw, CHAT_TOOL_AUTO_CONTINUE_ONCE)
     return CHAT_TOOL_AUTO_CONTINUE_ONCE
+
+
+def _tool_continuation_assistant_message(
+    choice: NonStreamChoice | None,
+    provider: str,
+    *,
+    content: Any,
+    tool_calls: list[dict[str, Any]] | None,
+    function_call: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the assistant turn that precedes the executed tool results."""
+    message: dict[str, Any] = {"role": "assistant"}
+    if content is not None:
+        message["content"] = content
+    if tool_calls is not None:
+        message["tool_calls"] = tool_calls
+    if function_call is not None:
+        message["function_call"] = function_call
+    if provider == "moonshot" and choice is not None:
+        reasoning = choice.message.get("reasoning_content")
+        if isinstance(reasoning, str):
+            message["reasoning_content"] = reasoning
+    return message
 
 
 def _resolve_chat_effective_tool_names(cleaned_args: dict[str, Any] | None) -> list[str]:
@@ -4203,6 +4230,19 @@ def _evaluate_chat_prompt_cost_guardrails(
         return None
 
 
+def _check_fallback_prompt_cost(
+    args: dict[str, Any], provider: str, model: str, *, streaming: bool
+) -> None:
+    """Recheck the redirected prompt against the fallback provider's output budget."""
+    _evaluate_chat_prompt_cost_guardrails(
+        cleaned_args=args,
+        templated_llm_payload=args["messages_payload"],
+        selected_provider=provider,
+        model=model,
+        streaming=streaming,
+    )
+
+
 def _extract_previous_prompt_guardrail_fingerprints(
     *,
     cleaned_args: Mapping[str, Any],
@@ -4508,13 +4548,7 @@ async def execute_streaming_call(
                                             )
                                         ]
                                     )
-                                _evaluate_chat_prompt_cost_guardrails(
-                                    cleaned_args=refreshed_args,
-                                    templated_llm_payload=refreshed_args["messages_payload"],
-                                    selected_provider=fallback_provider,
-                                    model=refreshed_model or model,
-                                    streaming=True,
-                                )
+                                _check_fallback_prompt_cost(refreshed_args, fallback_provider, refreshed_model or model, streaming=True)
                                 model = refreshed_model or model
                                 def llm_call_func_fb():
                                     return perform_chat_api_call(**refreshed_args)
@@ -4768,13 +4802,7 @@ async def execute_streaming_call(
                         )
                         raise
                     try:
-                        _evaluate_chat_prompt_cost_guardrails(
-                            cleaned_args=refreshed_args,
-                            templated_llm_payload=refreshed_args["messages_payload"],
-                            selected_provider=fallback_provider,
-                            model=refreshed_model or model,
-                            streaming=True,
-                        )
+                        _check_fallback_prompt_cost(refreshed_args, fallback_provider, refreshed_model or model, streaming=True)
                         ensure_tool_autoexec_supports_request(
                             cleaned_args=refreshed_args,
                             should_run_tool_autoexec=should_run_legacy_tool_autoexec,
@@ -6247,13 +6275,7 @@ async def _execute_non_stream_call_impl(
                         bounded_error = _bound_provider_http_exception(refresh_error)
                         raise_detached_error(bounded_error)
                     try:
-                        _evaluate_chat_prompt_cost_guardrails(
-                            cleaned_args=refreshed_args,
-                            templated_llm_payload=refreshed_args["messages_payload"],
-                            selected_provider=fallback_provider,
-                            model=refreshed_model or model,
-                            streaming=False,
-                        )
+                        _check_fallback_prompt_cost(refreshed_args, fallback_provider, refreshed_model or model, streaming=False)
                         ensure_tool_autoexec_supports_request(
                             cleaned_args=refreshed_args,
                             should_run_tool_autoexec=should_run_legacy_tool_autoexec,
@@ -6554,17 +6576,10 @@ async def _execute_non_stream_call_impl(
                 tool_auto_continue_meta = {"attempted": True, "succeeded": False}
                 try:
                     continuation_messages: list[dict[str, Any]] = list(templated_llm_payload)
-                    assistant_context_message: dict[str, Any] = {"role": "assistant"}
-                    if content_to_save is not None:
-                        assistant_context_message["content"] = content_to_save
-                    if tool_calls_to_save is not None:
-                        assistant_context_message["tool_calls"] = tool_calls_to_save
-                    if function_call_to_save is not None:
-                        assistant_context_message["function_call"] = function_call_to_save
-                    if selected_provider == "moonshot" and first_choice is not None:
-                        reasoning = first_choice.message.get("reasoning_content")
-                        if isinstance(reasoning, str):
-                            assistant_context_message["reasoning_content"] = reasoning
+                    assistant_context_message = _tool_continuation_assistant_message(
+                        first_choice, selected_provider, content=content_to_save,
+                        tool_calls=tool_calls_to_save, function_call=function_call_to_save,
+                    )
                     if len(assistant_context_message) > 1:
                         continuation_messages.append(assistant_context_message)
                     continuation_messages.extend(tool_messages)

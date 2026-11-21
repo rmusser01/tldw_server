@@ -59,7 +59,8 @@ def test_deepseek_payload_uses_model_default_and_preserves_overrides(
 def test_stock_budget_leaves_room_for_prompt(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Chat.chat_service.estimate_tokens_from_json", lambda _prompt: 1_048_400
+        "tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults.estimate_segment_tokens",
+        lambda _prompt: 1_048_400,
     )
     adapter = DeepSeekAdapter()
     monkeypatch.setattr(adapter, "_validate_model_inventory", lambda *_args: None)
