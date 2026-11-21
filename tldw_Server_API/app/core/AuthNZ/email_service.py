@@ -5,9 +5,9 @@
 import asyncio
 import json
 import os
-import smtplib
 import re
 import secrets
+import smtplib
 from datetime import datetime, timezone
 from email import encoders
 from email.mime.base import MIMEBase
@@ -30,77 +30,64 @@ from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
 # Email Templates
 #
 
-EMAIL_TEMPLATES = {
-    "password_reset": {
-        "subject": "Password Reset Request - {{ app_name }}",
-        "html": """
-<!DOCTYPE html>
-<html>
+AUTH_ACTION_EMAIL_HTML = """
+<!doctype html>
+<html lang="en">
 <head>
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background-color: #007bff; color: white; padding: 20px; text-align: center; }
-        .content { background-color: #f8f9fa; padding: 30px; margin-top: 20px; }
-        .button { display: inline-block; padding: 12px 30px; background-color: #007bff;
-                  color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }
-        .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6;
-                  font-size: 0.9em; color: #6c757d; }
-        .warning { background-color: #fff3cd; border: 1px solid #ffc107; padding: 10px;
-                   margin: 20px 0; border-radius: 5px; }
-    </style>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ heading }}</title>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>{{ app_name }}</h1>
-        </div>
-        <div class="content">
-            <h2>Password Reset Request</h2>
-            <p>Hello {{ username }},</p>
-            <p>We received a request to reset your password. Click the button below to create a new password:</p>
-            <center>
-                <a href="{{ reset_link }}" class="button">Reset Password</a>
-            </center>
-            <p>Or copy and paste this link into your browser:</p>
-            <p style="word-break: break-all; background: #fff; padding: 10px; border: 1px solid #dee2e6;">
-                {{ reset_link }}
+<body style="margin:0;background:#f4f6fa;color:#172033;font-family:Arial,sans-serif;font-size:16px;line-height:1.5">
+    <div style="max-width:480px;margin:0 auto;padding:32px 16px">
+        <div style="background:#fff;border:1px solid #dce2eb;border-radius:12px;padding:24px">
+            <p style="margin:0 0 12px;font-weight:bold;color:#36435a">{{ app_name }}</p>
+            <h1 style="margin:0 0 12px;font-size:26px;line-height:1.2">{{ heading }}</h1>
+            <p style="margin:0 0 20px">{{ description }}</p>
+            <p style="margin:0 0 16px">
+                <a href="{{ action_url }}" style="display:inline-block;border-radius:6px;background:#1948ab;color:#fff;padding:12px 22px;font-weight:bold;text-decoration:none">{{ action }}</a>
             </p>
-            <div class="warning">
-                <strong>⚠️ Security Notice:</strong><br>
-                This link will expire in {{ expiry_hours }} hour(s).<br>
-                If you didn't request this, please ignore this email or contact support if you're concerned.
-            </div>
-        </div>
-        <div class="footer">
-            <p>This is an automated message from {{ app_name }}.</p>
-            <p>Request made from IP: {{ ip_address }}<br>
-            Time: {{ timestamp }}</p>
+            <p style="margin:0;color:#48556c">This link expires in {{ expires_in }}.</p>
+            {% if extension_token %}
+            <p style="margin:20px 0 6px">Using the browser extension? Paste this token into the extension:</p>
+            <div class="code-box" style="background:#f4f6fa;border-radius:6px;padding:12px;word-break:break-all">{{ extension_token }}</div>
+            {% endif %}
+            <p style="border-top:1px solid #dce2eb;margin:24px 0 0;padding-top:16px;color:#48556c">
+                If you didn't request this email, you can ignore it.
+            </p>
+            {% if request_ip %}
+            <p style="margin:8px 0 0;color:#48556c;font-size:14px">Requested from {{ request_ip }} on {{ timestamp }}.</p>
+            {% endif %}
         </div>
     </div>
 </body>
 </html>
-""",
-        "text": """
-Password Reset Request - {{ app_name }}
-
-Hello {{ username }},
-
-We received a request to reset your password.
-
-To reset your password, visit this link:
-{{ reset_link }}
-
-This link will expire in {{ expiry_hours }} hour(s).
-
-If you didn't request this, please ignore this email.
-
-Security Information:
-- Request from IP: {{ ip_address }}
-- Time: {{ timestamp }}
-
-This is an automated message from {{ app_name }}.
 """
+
+AUTH_ACTION_EMAIL_TEXT = """{{ heading }}
+
+{{ description }}
+
+{{ action }}:
+{{ action_url }}
+
+This link expires in {{ expires_in }}.
+{% if extension_token %}
+Copy this token into the extension:
+{{ extension_token }}
+{% endif %}
+If you didn't request this email, you can ignore it.
+{% if request_ip %}
+Requested from {{ request_ip }} on {{ timestamp }}.
+{% endif %}
+"""
+
+
+EMAIL_TEMPLATES = {
+    "password_reset": {
+        "subject": "Reset your {{ app_name }} password",
+        "html": AUTH_ACTION_EMAIL_HTML,
+        "text": AUTH_ACTION_EMAIL_TEXT,
     },
     "email_verification": {
         "subject": "Verify Your Email - {{ app_name }}",
@@ -159,64 +146,9 @@ If you didn't create an account, please ignore this email.
 """
     },
     "magic_link": {
-        "subject": "Your sign-in link - {{ app_name }}",
-        "html": """
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background-color: #0f172a; color: white; padding: 20px; text-align: center; }
-        .content { background-color: #f8f9fa; padding: 30px; margin-top: 20px; }
-        .button { display: inline-block; padding: 12px 30px; background-color: #2563eb;
-                  color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }
-        .code-box { background: #fff; border: 1px solid #e5e7eb; padding: 12px;
-                    margin: 16px 0; border-radius: 6px; font-family: monospace; word-break: break-all; }
-        .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6;
-                  font-size: 0.9em; color: #6c757d; }
-        .note { background-color: #fff3cd; border: 1px solid #ffc107; padding: 10px;
-                margin: 16px 0; border-radius: 5px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>{{ app_name }}</h1>
-        </div>
-        <div class="content">
-            <h2>Sign in to your account</h2>
-            <p>Hello{{ user_label }},</p>
-            <p>Use the link below to sign in. This link expires in {{ expiry_minutes }} minute(s).</p>
-            <center>
-                <a href="{{ magic_link }}" class="button">Sign in</a>
-            </center>
-            <p>If you prefer, copy the token below and paste it in the extension:</p>
-            <div class="code-box">{{ magic_token }}</div>
-            <div class="note">
-                <strong>Security notice:</strong> If you did not request this, you can ignore this email.
-            </div>
-        </div>
-        <div class="footer">
-            <p>This is an automated message from {{ app_name }}.</p>
-        </div>
-    </div>
-</body>
-</html>
-""",
-        "text": """
-Sign in to {{ app_name }}
-
-Hello{{ user_label }},
-
-Use this link to sign in (expires in {{ expiry_minutes }} minute(s)):
-{{ magic_link }}
-
-Or copy this token into the extension:
-{{ magic_token }}
-
-If you did not request this, you can ignore this email.
-"""
+        "subject": "Your sign-in link for {{ app_name }}",
+        "html": AUTH_ACTION_EMAIL_HTML,
+        "text": AUTH_ACTION_EMAIL_TEXT,
     },
     "admin_reauth": {
         "subject": "Confirm admin action - {{ app_name }}",
@@ -880,15 +812,17 @@ class EmailService:
 
         template_data = {
             "app_name": self.app_name,
-            "username": username,
-            "reset_link": reset_link,
-            "expiry_hours": 1,
-            "ip_address": ip_address,
-            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            "heading": "Reset your password",
+            "description": "We received a request to change your password.",
+            "action": "Choose a new password",
+            "action_url": reset_link,
+            "expires_in": "1 hour",
+            "request_ip": ip_address,
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         }
 
         # Render templates
-        html_template = Template(EMAIL_TEMPLATES["password_reset"]["html"])
+        html_template = Template(EMAIL_TEMPLATES["password_reset"]["html"], autoescape=True)
         text_template = Template(EMAIL_TEMPLATES["password_reset"]["text"])
 
         html_body = html_template.render(**template_data)
@@ -963,16 +897,18 @@ class EmailService:
             token=magic_token,
         )
 
-        user_label = f" {username}" if username else ""
+        minutes = "minute" if expires_in_minutes == 1 else "minutes"
         template_data = {
             "app_name": self.app_name,
-            "user_label": user_label,
-            "magic_link": magic_link,
-            "magic_token": magic_token,
-            "expiry_minutes": expires_in_minutes,
+            "heading": f"Sign in to {self.app_name}",
+            "description": "Use this link to sign in to your account without a password.",
+            "action": "Sign in",
+            "action_url": magic_link,
+            "expires_in": f"{expires_in_minutes} {minutes}",
+            "extension_token": magic_token,
         }
 
-        html_template = Template(EMAIL_TEMPLATES["magic_link"]["html"])
+        html_template = Template(EMAIL_TEMPLATES["magic_link"]["html"], autoescape=True)
         text_template = Template(EMAIL_TEMPLATES["magic_link"]["text"])
 
         html_body = html_template.render(**template_data)
