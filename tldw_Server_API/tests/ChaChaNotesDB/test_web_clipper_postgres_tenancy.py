@@ -20,7 +20,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 # from row-level security even under FORCE -- under it the cross-owner UPDATE
 # below succeeds and this test fails, which is what it did while it was gated
 # behind a hand-set DSN and therefore never ran.
-pytestmark = [pytest.mark.integration, pytest.mark.postgres]
+pytestmark = [pytest.mark.integration, pytest.mark.postgres, pytest.mark.owner_isolation]
 
 
 def _create_owner_clip(
