@@ -1604,7 +1604,6 @@ def test_backend_required_enforces_endpoint_scope_guards(guard: str) -> None:
     [
         "tldw_Server_API/tests/lint/test_env_read_ratchet.py",
         "tldw_Server_API/tests/lint/test_owner_scope_ratchet.py",
-    "tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py",
         "tldw_Server_API/tests/lint/test_env_vars_docs_ratchet.py",
         "tldw_Server_API/tests/Config/test_config_precedence_contract.py",
     ],
