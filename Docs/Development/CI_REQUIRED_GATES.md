@@ -1,6 +1,27 @@
 # CI Required Gates
 
-This document defines the required pull-request gate contract for `dev`.
+This document defines the required pull-request gates and server CI tiers.
+
+## Server CI tiers
+
+[ADR-096](../ADR/096-tiered-development-and-release-ci.md) sets CI scope by target branch. The `dev` merge queue retains its seven path-scoped checks and the trusted license status. On a queue rebase, `backend-required` runs its own unit and startup smoke when backend paths change. The supplemental `CI` workflow runs on normal PR events.
+
+| Event | Validation |
+| --- | --- |
+| `dev` PR, including forks | Existing required gates and supplemental preflight. Backend-relevant changes also run the bounded chunking and readiness smoke tests. |
+| Nightly on `dev` | Existing broad Linux 3.12 shards and the `TEST_MODE=0` rate-limit lane, at the regression run's immutable event SHA |
+| PR into `main` | Complete existing Linux/macOS/Windows matrices and checked wheel/sdist, including a clean wheel install and import. Require `Main PR release qualification` at the current base. |
+| `main` push, tagged Docker publication or manual server publication | The same full validation at the actual event SHA before eligible PyPI or GHCR jobs can publish |
+
+Full Linux regression runs on nightly and release events. Focused Jobs and browser suites retain their own workflows. Standalone MCP Unified publication retains its own release gates.
+
+For a non-publishing full qualification, dispatch `CI` with `nightly=false` on the intended ref. Check the resulting run's SHA and `Full release qualification` conclusion. The default-branch `Server Nightly Dispatcher` runs at 09:43 UTC and dispatches `CI` with `nightly=true` on `dev`. It skips an active or successful nightly for the observed SHA and retries a SHA without such a run. A push during dispatch can advance `dev`, so verify the SHA of the regression run itself. Dispatcher success alone establishes neither coverage nor regression success.
+
+1. Land the workflow change on `dev` through its existing required gates. Verify a normal backend PR reports `Server backend smoke` and skips the broad matrix. Verify a docs-only PR skips backend smoke.
+2. Open a CI-only promotion to `main`. Verify `Main PR release qualification` reports from the pull-request event and succeeds at the current base. Bind that exact context to GitHub Actions (integration `15368`) in a strict `main` ruleset alongside the existing license status. Then merge the promotion. After qualification, the push follows the normal rolling image and PyPI publication policy.
+3. Observe the scheduled dispatcher and its broad nightly run. Confirm the reported SHA and unchanged-SHA deduplication. A failed nightly remains retryable. Use the manual CI dispatch for an additional full qualification without publication.
+
+When retargeting a PR, update its branch against the new base to trigger that base's checks. Publish from refs that contain the qualification workflows so release and manual triggers use the new gates.
 
 ## Required Check Names
 
@@ -313,7 +334,7 @@ Fork PRs and PRs opened by bots or apps are never queued and stay manual.
 - **All eight green:** checks the head against `dev` (the merge state can lag right after a merge) and waits for
   auto-merge. The merge pushes `dev`, which wakes the queue for the next PR.
 
-Non-required workflows (`ci.yml` and the rest) are not re-run on the rebased head: their held runs are deleted.
+The queue deletes held runs for supplemental workflows. It promotes `ci.yml` into the approval and retry list when an active `dev` ruleset requires `Server CI verdict`. The default-branch `Wake merge queue after server CI` workflow dispatches the existing queue kick after a same-repository PR CI failure or cancellation when this rule is active.
 
 ### Three details that surprise people
 

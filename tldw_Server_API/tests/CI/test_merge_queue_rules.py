@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
 from Helper_Scripts.ci import merge_queue as mq
 
 pytestmark = pytest.mark.unit
@@ -216,3 +215,46 @@ def test_a_missing_license_is_started_while_gates_run_unless_the_head_is_young()
     assert (old.kind, old.contexts) == ("start", (LICENSE,))
     young = mq.decide_front(_pr(merge_state="BLOCKED", checks=running, head_committed_at=NOW - timedelta(minutes=1)), NOW)
     assert (young.kind, young.slug, young.contexts) == ("wait", "young", (LICENSE,))
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_server_ci_is_a_queue_gate_only_when_required_on_dev(monkeypatch, required):
+    name = "Server CI verdict"
+    contexts = [BACKEND, name] if required else [BACKEND]
+
+    class BranchRules:
+        def rest(self, method, path):
+            assert method == "GET"
+            assert path.startswith(f"repos/{mq.REPO}/rules/branches/dev?")
+            return [{
+                "type": "required_status_checks",
+                "parameters": {"required_status_checks": [{"context": item} for item in contexts]},
+            }]
+
+    for attribute in ("CONTEXTS", "ALL_CONTEXTS", "BY_NAME", "GATE_WORKFLOWS"):
+        monkeypatch.setattr(mq, attribute, getattr(mq, attribute))
+    mq._configure_server_ci_gate(BranchRules())
+
+    assert (name in mq.ALL_CONTEXTS) is required
+    held = {
+        "path": ".github/workflows/ci.yml",
+        "event": "pull_request",
+        "conclusion": "action_required",
+        "triggering_actor": {"login": mq.QUEUE_ACTOR},
+        "head_repository": {"full_name": mq.REPO},
+    }
+    assert mq._queue_held(held) is required
+    assert not mq._queue_held({**held, "event": "workflow_dispatch"})
+
+    pr = _pr(merge_state="BLOCKED", checks=_green(without=(name,)))
+    action = mq.decide_front(pr, NOW)
+    if required:
+        assert action.contexts == (name,)
+    else:
+        assert action.slug == "green"
+
+
+@pytest.mark.parametrize("conclusion", ["skipped", "neutral"])
+def test_server_ci_verdict_requires_success(conclusion):
+    run = _run("Server CI verdict", conclusion=conclusion)
+    assert mq.context_state([run], NOW) == "failed"

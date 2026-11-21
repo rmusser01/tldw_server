@@ -96,9 +96,9 @@ Recommended manual operator sequence:
 
 ## Notes
 
-- `publish-pypi.yml` has no GitHub Release trigger. A push to `main` that changes `pyproject.toml` may publish to PyPI only when the version is missing from PyPI and the workflow test gate passes.
+- `publish-pypi.yml` has no GitHub Release trigger. On `main` it qualifies the event commit, then considers a PyPI upload when `pyproject.toml` or the publisher workflow changed and the version is absent from PyPI. Manual uploads also depend on qualification of their event commit. Both destinations receive the distributions built and checked by that qualification in the same run.
 - Manual dispatch remains available for TestPyPI and explicit PyPI publishes; TestPyPI is never published from a push event.
-- Pushing to `main` continues to republish rolling GHCR snapshots through `publish-ghcr-main.yml` before and independently of GitHub Release publication.
+- A push to `main` publishes the rolling GHCR snapshot through the reusable `publish-ghcr-main.yml` after the same full qualification. It remains independent of GitHub Release publication.
 - The Next.js WebUI is not a PyPI payload. Publish and validate it through the
   WebUI container or release-artifact flow.
 - The default dependency set is intentionally broad and may be heavy for minimal installs.
