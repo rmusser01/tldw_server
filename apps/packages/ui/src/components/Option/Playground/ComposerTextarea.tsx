@@ -5,6 +5,7 @@ import {
   type SlashCommandItem
 } from "@/components/Sidepanel/Chat/SlashCommandMenu"
 import { MentionsDropdown } from "./MentionsDropdown"
+import { useComposerCombobox } from "@/hooks/useComposerCombobox"
 
 export type ComposerTextareaProps = {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
@@ -86,6 +87,12 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
   draftSaved
 }: ComposerTextareaProps) {
   const { t } = useTranslation(["sidepanel"])
+  // The slash menu is the textarea's listbox (AX-12).
+  const slashCombobox = useComposerCombobox({
+    open: showSlashMenu,
+    count: slashCommands.length,
+    activeIndex: slashActiveIndex
+  })
   const minHeight = isMobile
     ? "40px"
     : compactWhenInactive
@@ -106,6 +113,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         onSelect={onSlashSelect}
         emptyLabel={slashEmptyLabel}
         className="relative mx-3 mb-2"
+        listboxId={slashCombobox.listboxId}
       />
       <textarea
         id="textarea-message"
@@ -138,6 +146,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         tabIndex={0}
         placeholder={placeholder}
         aria-label={t("sidepanel:composer.messageAriaLabel", "Message input")}
+        {...slashCombobox.inputProps}
         {...formInputProps}
         value={displayValue}
         onChange={onChange}

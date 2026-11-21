@@ -120,7 +120,14 @@
     "sendAfterReplyTitle": "Sends your message after the current reply finishes.",
     "sendAfterReplyAria": "Send after this reply",
     "waitingForModel": "Waiting for {{model}}…",
-    "waitingForReply": "Waiting for the reply…"
+    "waitingForReply": "Waiting for the reply…",
+    "commandsLabel": "Commands",
+    "commandCount": "{{count}} commands",
+    "commandCount_one": "{{count}} command",
+    "commandCount_other": "{{count}} commands",
+    "mentionCount": "{{count}} matches",
+    "mentionCount_one": "{{count}} match",
+    "mentionCount_other": "{{count}} matches"
   },
   "notification": {
     "ingestSent": "Sent to tldw server",
@@ -539,7 +546,10 @@
     "folderApplyPartialError": "Some chats could not be added to folders. Your selection is kept so you can try again."
   },
   "contextMenu": {
-    "status": "Status"
+    "status": "Status",
+    "export": "Export",
+    "openMenu": "Chat actions: {{title}}",
+    "exportUnsaved": "This chat isn't saved yet, so there is nothing to export."
   },
   "characterSelect": {
     "label": "Character",
@@ -856,7 +866,8 @@
     "detach": "Detach Buddy"
   },
   "folderPicker": {
-    "createError": "Unable to create the folder. Try again."
+    "createError": "Unable to create the folder. Try again.",
+    "saveError": "Some folder changes couldn't be saved. Try again."
   },
   "greetingPicker": {
     "opening": "{{name}} opening",

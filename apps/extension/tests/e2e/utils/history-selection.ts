@@ -366,13 +366,14 @@ export async function largeLegacyReview(page: Page, fullTip = false, bubble = fa
   expect(projection.ordered_path_ids).not.toContain('legacy-20000')
   expect((await readStore(page, 'messages'))).toHaveLength(20001)
   if (fullTip) {
+    // The message log sits inside the transcript's scroller (AX-11).
     const transcript = page.getByRole('log', { name: 'Chat messages' })
-    await transcript.evaluate(element => { element.scrollTop = element.scrollHeight })
+    await transcript.evaluate(element => { const scroller = element.closest('.overflow-y-auto') ?? element; scroller.scrollTop = scroller.scrollHeight })
     await expect(page.locator('[data-message-id="legacy-19999"][data-testid="chat-message"]')).toBeVisible()
     expect(await page.getByTestId('chat-message').count()).toBeLessThan(100)
     await page.reload()
     await expect(page.getByTestId('chat-message').first()).toBeVisible()
-    await transcript.evaluate(element => { element.scrollTop = element.scrollHeight })
+    await transcript.evaluate(element => { const scroller = element.closest('.overflow-y-auto') ?? element; scroller.scrollTop = scroller.scrollHeight })
     await expect(page.locator('[data-message-id="legacy-19999"][data-testid="chat-message"]')).toBeVisible()
     await page.keyboard.press('Control+f')
     await page.getByPlaceholder('Search messages in this conversation').fill('Legacy row 12345')
@@ -383,7 +384,8 @@ export async function largeLegacyReview(page: Page, fullTip = false, bubble = fa
     const assertEditorFits = async () => {
       const bounds = await editor.evaluate(element => {
         const form = element.closest('form')!
-        const parent = document.querySelector('[role="log"][aria-label="Chat messages"]')!
+        // The log holds the message rows; its scroller is the scrollport (AX-11).
+        const parent = document.querySelector('[role="log"][aria-label="Chat messages"]')!.closest('.overflow-y-auto')!
         const box = (node: Element) => { const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width } }
         return { scrollport: box(parent), elements: [element, form, ...form.querySelectorAll('button')].map(node => ({ name: node.tagName === 'BUTTON' ? node.textContent : node.tagName, ...box(node) })) }
       })
@@ -395,7 +397,7 @@ export async function largeLegacyReview(page: Page, fullTip = false, bubble = fa
     }
     const sourceBefore = await readStore(page, 'messages')
     await editor.fill('UNSAVED REVIEW DRAFT')
-    await transcript.evaluate(element => { element.scrollTop = element.scrollHeight })
+    await transcript.evaluate(element => { const scroller = element.closest('.overflow-y-auto') ?? element; scroller.scrollTop = scroller.scrollHeight })
     await expect(page.locator('[data-message-id="legacy-19999"][data-testid="chat-message"]')).toBeVisible()
     expect(await page.getByTestId('chat-message').count()).toBeLessThan(100)
     await page.getByPlaceholder('Search messages in this conversation').fill('Legacy row 42')
@@ -411,7 +413,7 @@ export async function largeLegacyReview(page: Page, fullTip = false, bubble = fa
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('tldw:timeline-action', { detail: { action: 'edit', historyId: 'h1-source', messageId: 'legacy-42' } })))
     if (bubble) await expect(page.locator('[data-message-id="legacy-42"] .message-bubble textarea')).toBeVisible()
     await editor.fill('CANCEL ONLY THIS DRAFT')
-    await transcript.evaluate(element => { element.scrollTop = element.scrollHeight })
+    await transcript.evaluate(element => { const scroller = element.closest('.overflow-y-auto') ?? element; scroller.scrollTop = scroller.scrollHeight })
     await expect(page.locator('[data-message-id="legacy-19999"][data-testid="chat-message"]')).toBeVisible()
     await page.getByPlaceholder('Search messages in this conversation').fill('UNSAVED REVIEW')
     await expect(editor).toBeVisible()
@@ -424,7 +426,7 @@ export async function largeLegacyReview(page: Page, fullTip = false, bubble = fa
     await page.locator('[data-message-id="legacy-42"]').getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(editor).toHaveCount(0)
     expect((await readStore(page, 'messages')).find(row => row.id === 'legacy-42').content).toBe('UNSAVED REVIEW DRAFT')
-    await transcript.evaluate(element => { element.scrollTop = element.scrollHeight })
+    await transcript.evaluate(element => { const scroller = element.closest('.overflow-y-auto') ?? element; scroller.scrollTop = scroller.scrollHeight })
     await expect(page.locator('[data-message-id="legacy-19999"][data-testid="chat-message"]')).toBeVisible()
     await expect(page.locator('[data-message-id="legacy-42"]')).toHaveCount(0)
     if (bubble) {

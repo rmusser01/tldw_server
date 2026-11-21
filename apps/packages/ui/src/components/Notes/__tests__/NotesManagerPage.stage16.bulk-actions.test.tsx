@@ -276,9 +276,10 @@ describe("NotesManagerPage stage 16 bulk actions", () => {
     await waitFor(() => {
       expect(screen.getByTestId("notes-list-bulk-selected")).toHaveTextContent("n1|n2|n3")
     })
-    const bar = screen.getByTestId("notes-bulk-actions-bar")
-    expect(bar).toHaveAttribute("role", "status")
-    expect(bar).toHaveAttribute("aria-live", "polite")
+    // The count is announced; the bar's buttons are not inside the live region (NL-05).
+    const count = screen.getByTestId("notes-bulk-selected-count")
+    expect(count).toHaveAttribute("role", "status")
+    expect(count).toHaveAttribute("aria-live", "polite")
 
     fireEvent.click(screen.getByTestId("notes-bulk-clear-selection"))
     await waitFor(() => {

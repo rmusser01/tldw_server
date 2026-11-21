@@ -539,6 +539,13 @@
     "categoryNavigation": "Navigation",
     "categorySettings": "Settings",
     "categoryRecent": "Recent",
+    "categoryChats": "Chats",
+    "categoryNotes": "Notes",
+    "searchingContent": "Searching chats and notes…",
+    "contentSearchFailed": "Chats and notes could not be searched.",
+    "newNote": "New note",
+    "untitledChat": "Untitled chat",
+    "untitledNote": "Untitled note",
     "searchCommands": "Search commands",
     "open": "Search commands",
     "searchHistory": "Find conversations",
@@ -674,7 +681,15 @@
     "viewTrash": "View Trash",
     "permanentlyDeleted": "Chat permanently deleted.",
     "noSearchMatches": "No chats match “{{query}}”",
-    "clearSearch": "Clear search"
+    "clearSearch": "Clear search",
+    "chatSettings": "Chat settings",
+    "addToFolder": "Add to folder…",
+    "exportMarkdown": "Markdown",
+    "exportJson": "JSON",
+    "exportSuccess": "Chat exported.",
+    "exportFailed": "Couldn't export this chat. Try again.",
+    "exporting": "Exporting chat…",
+    "exportTooLarge": "This chat is too large to export here. Use Chatbooks to export it."
   },
   "knowledgeSidebar": {
     "title": "Knowledge history"

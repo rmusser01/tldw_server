@@ -18,6 +18,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type { SidepanelChatTab } from "@/store/sidepanel-chat-tabs"
+import { ConversationMenuContext } from "./ConversationMenuButton"
 
 export type ConversationStatus =
   | "in_progress"
@@ -240,8 +241,20 @@ export const ConversationContextMenu: React.FC<
         }
   ]
 
+  // The tab's visible "⋯" button (ConversationMenuButton) opens this same menu.
+  const menuButton = React.useMemo(
+    () => ({
+      items: menuItems,
+      label: t("sidepanel:contextMenu.openMenu", {
+        defaultValue: "Chat actions: {{title}}",
+        title: tab.label
+      })
+    }),
+    [menuItems, t, tab.label]
+  )
+
   return (
-    <>
+    <ConversationMenuContext.Provider value={menuButton}>
       <Dropdown
         menu={{ items: menuItems }}
         trigger={["contextMenu"]}
@@ -294,7 +307,7 @@ export const ConversationContextMenu: React.FC<
           })}
         </p>
       </Modal>
-    </>
+    </ConversationMenuContext.Provider>
   )
 }
 

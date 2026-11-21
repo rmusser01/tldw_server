@@ -9,7 +9,10 @@ const translations: Record<string, string> = {
   "option:notesSearch.graphCanvas": "CANVAS_X",
   "option:notesSearch.graphRelationships": "RELATIONSHIPS_X",
   "option:notesSearch.graphSearchLoaded": "SEARCH_X",
+  "option:notesSearch.graphSettings": "SETTINGS_X",
   "option:notesSearch.graphRadiusLabel": "RADIUS_X",
+  "option:notesSearch.graphRadiusOption.one": "ONE_LINK_X",
+  "option:notesSearch.graphRadiusOption.two": "TWO_LINKS_X",
   "option:notesSearch.graphRadiusAria": "RADIUS_ARIA_X",
   "option:notesSearch.graphMaxNodesLabel": "MAX_NODES_X",
   "option:notesSearch.graphMaxNodesAria": "MAX_NODES_ARIA_X",
@@ -109,9 +112,14 @@ describe("NotesGraphToolbar localization", () => {
     )
 
     expect(screen.getByRole("searchbox", { name: "SEARCH_X" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "SETTINGS_X" }))
+    expect(screen.getByRole("group", { name: "SETTINGS_X" })).toBeVisible()
     expect(
       screen.getByRole("combobox", { name: "RADIUS_ARIA_X" })
     ).toBeVisible()
+    expect(screen.getByText("RADIUS_X")).toBeVisible()
+    expect(screen.getByRole("option", { name: "ONE_LINK_X" })).toBeVisible()
+    expect(screen.getByRole("option", { name: "TWO_LINKS_X" })).toBeVisible()
     expect(
       screen.getByRole("spinbutton", { name: "MAX_NODES_ARIA_X" })
     ).toBeVisible()

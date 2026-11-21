@@ -133,6 +133,9 @@ def reset_db_mock_calls():
     mock_chacha_db_instance.list_notes.side_effect = None
     mock_chacha_db_instance.search_notes.side_effect = None
     mock_chacha_db_instance.search_notes_with_keywords.side_effect = None
+    # note_store is an instance attribute, so the class spec does not provide it.
+    mock_chacha_db_instance.note_store = MagicMock()
+    mock_chacha_db_instance.note_store.note_search_snippets.return_value = {}
     mock_chacha_db_instance.count_notes_matching.side_effect = None
     mock_chacha_db_instance.count_notes_matching.return_value = 0
     mock_chacha_db_instance.count_notes_matching_keywords.side_effect = None
@@ -835,7 +838,9 @@ def test_search_notes(client: TestClient):
     assert data["pagination"]["total"] == 1
     assert data["notes"][0]["title"] == "Important Note"
     assert data["notes"][0]["content"] == "This content is important."
-    mock_chacha_db_instance.search_notes.assert_called_once_with(search_term=query_term, limit=5, offset=0)
+    mock_chacha_db_instance.search_notes.assert_called_once_with(
+        search_term=query_term, limit=5, offset=0, sort_by=None, sort_order="desc"
+    )
     mock_chacha_db_instance.count_notes_matching.assert_called_once_with(query_term)
 
 
@@ -856,7 +861,9 @@ def test_search_notes_without_trailing_slash(client: TestClient):
     assert data["total"] == 1
     assert data["pagination"]["total"] == 1
     assert data["notes"][0]["id"] == note_id_val
-    mock_chacha_db_instance.search_notes.assert_called_once_with(search_term=query_term, limit=5, offset=0)
+    mock_chacha_db_instance.search_notes.assert_called_once_with(
+        search_term=query_term, limit=5, offset=0, sort_by=None, sort_order="desc"
+    )
     mock_chacha_db_instance.count_notes_matching.assert_called_once_with(query_term)
 
 
@@ -885,6 +892,8 @@ def test_search_notes_with_keyword_tokens(client: TestClient):
         limit=5,
         offset=0,
         match="all",
+        sort_by=None,
+        sort_order="desc",
     )
     mock_chacha_db_instance.count_notes_matching_keywords.assert_called_once_with(
         search_term=query_term,

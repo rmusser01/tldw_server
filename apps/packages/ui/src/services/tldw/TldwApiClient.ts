@@ -1110,6 +1110,16 @@ export interface ChatCompletionRequest {
   research_context?: ChatResearchContext
 }
 
+/**
+ * Paging and payload options for GET /notes/search/. `legacy_aliases: false`
+ * omits the deprecated `notes`/`results` copies of `items`.
+ */
+export type NoteSearchParams = {
+  limit?: number
+  offset?: number
+  legacy_aliases?: boolean
+}
+
 export type ScopedRequestOptions = {
   idempotencyKey?: string
   signal?: AbortSignal
@@ -1296,6 +1306,8 @@ export interface ServerChatMessage {
   version?: number
   metadata_extra?: Record<string, unknown>
   pinned?: boolean
+  /** Present (true) when the server says the message has an image attached. */
+  has_image?: boolean
 }
 
 export type ChatSettingsResponse = {
@@ -4106,7 +4118,7 @@ export class TldwApiClientBase {
 
   async searchNotes(
     query: string,
-    params?: { limit?: number; offset?: number },
+    params?: NoteSearchParams,
     options?: ScopedRequestOptions,
   ): Promise<any> {
     return collectionsMethods.searchNotes.call(this, query, params, options)

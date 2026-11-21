@@ -253,6 +253,23 @@ describe("useServerChatLoader scoped local history", () => {
     expect(merged.find(row => row.serverMessageId === "canonical-image")?.id).not.toBe(local.id)
   })
 
+  it("shows a legacy branched chat's newest path, without its older alternative replies (CM-N2)", async () => {
+    mocks.store.serverChatAssistantKind = null
+    const at = (second: number) => `2026-11-01T00:00:0${second}Z`
+    mocks.listChatMessages.mockResolvedValue([
+      { id: "u1", role: "user", content: "Question", version: 1, created_at: at(0), parent_message_id: null },
+      { id: "a1", role: "assistant", content: "First answer", version: 1, created_at: at(1), parent_message_id: "u1" },
+      { id: "a1b", role: "assistant", content: "Regenerated answer", version: 1, created_at: at(2), parent_message_id: "u1" },
+      { id: "u2", role: "user", content: "Follow-up", version: 1, created_at: at(3), parent_message_id: null }
+    ])
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"), notification: { error: vi.fn() }, t: ((_key: string) => "Assistant") as unknown as TFunction }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    expect(mocks.setMessages.mock.calls[0][0].map((row: { serverMessageId?: string }) => row.serverMessageId))
+      .toEqual(["u1", "a1b", "u2"])
+    expect(mocks.setHistory.mock.calls[0][0].map((row: { content: string }) => row.content))
+      .toEqual(["Question", "Regenerated answer", "Follow-up"])
+  })
+
   it("reconciles a nonempty local mirror using acknowledged server identity", async () => {
     mocks.listChatMessages.mockResolvedValue([{ id: "answer", role: "assistant", content: "08:30", version: 2 }])
     const ensureServerChatHistoryId = vi.fn().mockResolvedValue("history-a")

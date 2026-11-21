@@ -15,6 +15,7 @@ import {
 import React from "react"
 import { useTranslation } from "react-i18next"
 
+import NotesGraphSettingsPopover from "./NotesGraphSettingsPopover"
 import type { NotesGraphLayout } from "./hooks/useNotesGraphWorkspace"
 
 type GraphSearchResult = { id: string; label: string }
@@ -213,72 +214,15 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
           ) : null}
         </div>
 
-        <label className="flex flex-col gap-1 text-xs text-text-muted">
-          {t("option:notesSearch.graphRadiusLabel", { defaultValue: "Radius" })}
-          <select
-            className="h-9 min-w-[76px] border border-border bg-bg px-2 text-sm text-text focus:ring-2 focus:ring-focus"
-            aria-label={t("option:notesSearch.graphRadiusAria", {
-              defaultValue: "Graph radius"
-            })}
-            value={radius}
-            onChange={(event) =>
-              onRadiusChange(Number(event.target.value) as 1 | 2)
-            }>
-            <option value={1}>1</option>
-            <option value={2}>2</option>
-          </select>
-        </label>
-
-        <label className="flex flex-col gap-1 text-xs text-text-muted">
-          {t("option:notesSearch.graphMaxNodesLabel", {
-            defaultValue: "Max nodes"
-          })}
-          <input
-            type="number"
-            className="h-9 w-[92px] border border-border bg-bg px-2 text-sm text-text focus:ring-2 focus:ring-focus"
-            aria-label={t("option:notesSearch.graphMaxNodesAria", {
-              defaultValue: "Maximum graph nodes"
-            })}
-            min={20}
-            max={maxNodeCap}
-            value={maxNodes}
-            onChange={(event) => onMaxNodesChange(Number(event.target.value))}
-          />
-        </label>
-
-        <label className="flex flex-col gap-1 text-xs text-text-muted">
-          {t("option:notesSearch.graphLayoutLabel", { defaultValue: "Layout" })}
-          <select
-            className="h-9 min-w-[112px] border border-border bg-bg px-2 text-sm text-text focus:ring-2 focus:ring-focus"
-            aria-label={t("option:notesSearch.graphLayoutAria", {
-              defaultValue: "Graph layout"
-            })}
-            value={layout}
-            onChange={(event) =>
-              onLayoutChange(event.target.value as NotesGraphLayout)
-            }>
-            <option value="dagre">
-              {t("option:notesSearch.graphLayoutOption.dagre", {
-                defaultValue: "Dagre"
-              })}
-            </option>
-            <option value="circle">
-              {t("option:notesSearch.graphLayoutOption.circle", {
-                defaultValue: "Circle"
-              })}
-            </option>
-            <option value="grid">
-              {t("option:notesSearch.graphLayoutOption.grid", {
-                defaultValue: "Grid"
-              })}
-            </option>
-            <option value="concentric">
-              {t("option:notesSearch.graphLayoutOption.concentric", {
-                defaultValue: "Concentric"
-              })}
-            </option>
-          </select>
-        </label>
+        <NotesGraphSettingsPopover
+          radius={radius}
+          maxNodes={maxNodes}
+          maxNodeCap={maxNodeCap}
+          layout={layout}
+          onRadiusChange={onRadiusChange}
+          onMaxNodesChange={onMaxNodesChange}
+          onLayoutChange={onLayoutChange}
+        />
 
         <div
           className="inline-flex h-9 border border-border"

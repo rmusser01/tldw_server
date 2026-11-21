@@ -107,6 +107,7 @@ import {
   DEFAULT_TTS_PROVIDER
 } from "@/services/tts"
 import type { DynamicUISurface } from "@/types/dynamic-ui"
+import { useChatReplyAnnouncer } from "./ChatReplyAnnouncer"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import { VisualIdentityImage } from "@/components/Common/VisualIdentity/VisualIdentityImage"
 import {
@@ -717,6 +718,24 @@ const PlaygroundMessageImpl = (props: Props) => {
     partialResponseSaved &&
     !interruptedGeneration &&
     !errorPayload
+  // A reply that finished cleanly is announced once. In a transcript with an
+  // announcer (/chat, side panel), "Response complete" comes from outside the
+  // log; elsewhere the message keeps its own (AX-11).
+  const replyAnnouncer = useChatReplyAnnouncer()
+  const responseCompleted =
+    streamingComplete &&
+    !interruptedGeneration &&
+    !showPartialSaveMarker &&
+    !savedPartialCopy &&
+    !errorPayload &&
+    !responseStreaming &&
+    !responseProcessing
+  // Keyed by turn and variant: a regenerated variant is announced again; a
+  // reconciled or re-rendered reply is not.
+  const completedReplyKey = `${props.messageId ?? props.currentMessageIndex}:${props.activeVariantIndex ?? 0}`
+  useEffect(() => {
+    if (responseCompleted) replyAnnouncer?.announceComplete(completedReplyKey)
+  }, [completedReplyKey, replyAnnouncer, responseCompleted])
   const hasVisibleAssistantResponseContent = hasVisibleAssistantResponse({
     message: props.message,
     message_type: props.message_type,
@@ -3477,19 +3496,13 @@ const PlaygroundMessageImpl = (props: Props) => {
           initialNotes={detail?.notes ?? ""}
         />
       )}
-      {streamingComplete &&
-        !interruptedGeneration &&
-        !showPartialSaveMarker &&
-        !savedPartialCopy &&
-        !errorPayload &&
-        !responseStreaming &&
-        !responseProcessing && (
-          <span aria-live="polite" className="sr-only">
-            {t("playground:message.responseComplete", {
-              defaultValue: "Response complete"
-            })}
-          </span>
-        )}
+      {responseCompleted && !replyAnnouncer && (
+        <span aria-live="polite" className="sr-only">
+          {t("playground:message.responseComplete", {
+            defaultValue: "Response complete"
+          })}
+        </span>
+      )}
     </article>
   )
 }

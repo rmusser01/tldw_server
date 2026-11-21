@@ -746,5 +746,6 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     retryDraftOwnerVerification: composerText.retryDraftOwnerVerification,
     draftOwnerKey: composerText.draftOwnerKey,
     isDraftOwnerCurrent: composerText.isDraftOwnerCurrent,
+    clearDraft: composerText.clearDraft,
   };
 }

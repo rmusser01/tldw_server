@@ -114,7 +114,7 @@ interface FolderState {
   removeKeywordFromConversation: (conversationId: string, keywordId: number) => Promise<boolean>
   addKeywordToFolder: (folderId: number, keywordId: number, operation?: FolderOperation) => Promise<boolean>
   addConversationToFolder: (conversationId: string, folderId: number, operation?: FolderOperation) => Promise<boolean>
-  removeConversationFromFolder: (conversationId: string, folderId: number) => Promise<boolean>
+  removeConversationFromFolder: (conversationId: string, folderId: number, operation?: FolderOperation) => Promise<boolean>
 
   // Computed helpers
   getFolderTree: () => FolderTreeNode[]
@@ -892,7 +892,8 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
         return success
       },
 
-      removeConversationFromFolder: async (conversationId, folderId) => {
+      removeConversationFromFolder: async (conversationId, folderId, operation) => {
+        if (!canUse(operation)) return false
         const state = get()
         // Find keywords associated with this folder
         const folderKeywordIds = new Set(
@@ -910,32 +911,42 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
 
         const results = await Promise.all(
           linksToRemove.map(async (link) => {
-            const result = await apiUnlinkKeywordFromConversation(conversationId, link.keyword_id)
+            const result = await apiUnlinkKeywordFromConversation(
+              conversationId,
+              link.keyword_id,
+              optionsFor(operation)
+            )
             return {
               ok: result.ok,
+              status: result.status,
               link
             }
           })
         )
 
+        // A captured (scoped) removal applies only to the view that captured it.
+        if (results.some((r) => !canAcceptResult(operation, r.status))) return false
         if (!results.every((r) => r.ok)) {
           return false
         }
 
-        try {
-          await db.transaction("rw", db.conversationKeywordLinks, async () => {
-            await Promise.all(
-              linksToRemove.map((link) =>
-                db.conversationKeywordLinks
-                  .where('[conversation_id+keyword_id]')
-                  .equals([link.conversation_id, link.keyword_id])
-                  .delete()
+        // A captured view never writes the unqualified device cache.
+        if (!operation) {
+          try {
+            await db.transaction("rw", db.conversationKeywordLinks, async () => {
+              await Promise.all(
+                linksToRemove.map((link) =>
+                  db.conversationKeywordLinks
+                    .where('[conversation_id+keyword_id]')
+                    .equals([link.conversation_id, link.keyword_id])
+                    .delete()
+                )
               )
-            )
-          })
-        } catch (error) {
-          console.error('Failed to delete conversation-keyword links from cache:', error)
-          // Continue to update in-memory state even if DB sync fails
+            })
+          } catch (error) {
+            console.error('Failed to delete conversation-keyword links from cache:', error)
+            // Continue to update in-memory state even if DB sync fails
+          }
         }
 
         const removedKeySet = new Set(

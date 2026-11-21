@@ -1277,7 +1277,14 @@ class CharactersRAGDB:
         def search_note_titles(self, search_term: str, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]: ...
 
         def search_notes(
-            self, search_term: str, limit: int = 10, offset: int = 0, *, match_any: bool = False
+            self,
+            search_term: str,
+            limit: int = 10,
+            offset: int = 0,
+            *,
+            match_any: bool = False,
+            sort_by: str | None = None,
+            sort_order: str | None = None,
         ) -> list[dict[str, Any]]: ...
 
         def search_notes_with_keywords(
@@ -1287,6 +1294,9 @@ class CharactersRAGDB:
             limit: int = 10,
             offset: int = 0,
             match: str = "all",
+            *,
+            sort_by: str | None = None,
+            sort_order: str | None = None,
         ) -> list[dict[str, Any]]: ...
 
         def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None: ...
