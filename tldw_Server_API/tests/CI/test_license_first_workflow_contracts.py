@@ -1603,6 +1603,7 @@ def test_backend_required_enforces_endpoint_scope_guards(guard: str) -> None:
     "ratchet",
     [
         "tldw_Server_API/tests/lint/test_env_read_ratchet.py",
+        "tldw_Server_API/tests/lint/test_owner_scope_ratchet.py",
         "tldw_Server_API/tests/lint/test_env_vars_docs_ratchet.py",
         "tldw_Server_API/tests/Config/test_config_precedence_contract.py",
     ],
@@ -1646,6 +1647,7 @@ TEST_SEAM_GATE_SUITES = (
     "tldw_Server_API/tests/AuthNZ/unit/test_runtime_environment.py",
     "tldw_Server_API/tests/AuthNZ/unit/test_test_mode_runtime_guard.py",
     "tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py",
+    "tldw_Server_API/tests/lint/test_owner_scope_ratchet.py",
 )
 
 
