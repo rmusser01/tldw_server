@@ -2151,6 +2151,11 @@ def _scan_owner_isolation_marked_files() -> frozenset[str]:
     return frozenset(marked)
 
 
+# backend_changed:chacha_owner_scope_changed:result -- the only outcomes the required check may accept
+# (owner decision 2026-11-21: the job runs only when ChaCha paths change).
+OWNER_ISOLATION_ACCEPTED = "true:true:success|true:false:skipped|false:*:skipped) ;;"
+
+
 def _owner_isolation_job_problems(workflow: dict[str, Any], marked_files: set[str]) -> list[str]:
     jobs = workflow["jobs"]
     if OWNER_ISOLATION_JOB not in jobs:
@@ -2172,6 +2177,8 @@ def _owner_isolation_job_problems(workflow: dict[str, Any], marked_files: set[st
     checks = [s for s in gate["steps"] if s.get("name") == OWNER_ISOLATION_CHECK_STEP]
     if len(checks) != 1 or f"needs.{OWNER_ISOLATION_JOB}.result" not in str(checks[0].get("env", {})):
         problems.append(f"backend-required has no {OWNER_ISOLATION_CHECK_STEP!r} step reading the job result")
+    elif OWNER_ISOLATION_ACCEPTED not in [line.strip() for line in checks[0].get("run", "").splitlines()]:
+        problems.append("required check accepts outcomes other than the three approved ones")
     return problems
 
 
@@ -2252,3 +2259,15 @@ def test_chacha_owner_scope_flag_lists_every_marked_file():
     listed = {g for g in CHACHA_OWNER_SCOPE_GLOBS if g.startswith("tldw_Server_API/tests/") and g.endswith(".py")}
     listed.discard("tldw_Server_API/tests/_plugins/postgres.py")
     assert listed == _owner_isolation_marked_files()  # nosec B101
+
+
+@pytest.mark.unit
+def test_owner_isolation_contract_fails_when_the_required_check_accepts_more() -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    check = next(
+        s for s in workflow["jobs"]["backend-required"]["steps"] if s.get("name") == OWNER_ISOLATION_CHECK_STEP
+    )
+    check["run"] = check["run"].replace("true:true:success|", "true:true:success|true:true:failure|")
+    assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
+        "required check accepts outcomes other than the three approved ones"
+    ]

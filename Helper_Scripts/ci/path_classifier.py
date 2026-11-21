@@ -44,6 +44,8 @@ CHACHA_OWNER_SCOPE_GLOBS = [
     "tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py",
     "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py",
     "tldw_Server_API/app/core/Character_Chat/chacha_db_provider.py",
+    "tldw_Server_API/app/core/Character_Chat/chat_dictionary.py",
+    "tldw_Server_API/app/core/Chat/history_selection.py",
     "tldw_Server_API/tests/_plugins/postgres.py",
     "tldw_Server_API/tests/ChaChaNotesDB/test_chacha_message_store.py",
     "tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py",
