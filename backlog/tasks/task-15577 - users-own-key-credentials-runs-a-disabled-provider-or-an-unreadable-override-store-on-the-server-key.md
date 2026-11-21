@@ -2,7 +2,7 @@
 id: TASK-15577
 title: users_own_key_credentials runs a disabled provider or an unreadable override
   store on the server key
-status: To Do
+status: Done
 labels:
 - llm
 - byok
@@ -17,28 +17,30 @@ Found by TASK-15571's plan review. The except clause of users_own_key_credential
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A disabled provider and an unreadable override store refuse an own-key analyze request at the boundary instead of running it on the server key, with tests
-- [ ] #2 The other resolution failures keep their current server-key behaviour, or the owner decides otherwise
-- [ ] #3 The two deferred minors of PR #3523's final review in this task's notes (M1: a fallback with no user in the call context runs unchecked; M2: the MCP tests conftest store fixture) are each fixed or explicitly closed with a reason
+- [x] #1 The other resolution failures keep their current server-key behaviour, or the owner decides otherwise
+- [x] #2 The two deferred minors of PR #3523's final review in this task's notes (M1: a fallback with no user in the call context runs unchecked; M2: the MCP tests conftest store fixture) are each fixed or explicitly closed with a reason
+- [x] #3 A disabled provider and an unreadable override store refuse an own-key analyze request instead of running it on the server key, with tests (corrected 2026-11-19, TASK-15581 D1: refused at dispatch, as for a user with no stored key)
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Deferred from the final review of PR #3523. M1: a fallback with no user in the call context runs unchecked and unrecorded (Summarization_General_Lib.py, user_to_check(strict=True) returns None for no user as well as for exempt/quotas off). Unreachable today because every executor carries the LLM call state. The fix is to treat current_llm_user_id() is None as no answer when quotas are on (override_outcome in llm_provider_overrides.py now holds the check); the boundary tests' _summary helper then needs llm_call_context(user_id=...). M2: the MCP tests conftest fixture patches three private globals instead of set_llm_provider_overrides_cache_for_tests with the ambient_llm_provider_override_store opt-out marker, and leaves _OVERRIDE_RECOVERY_NEXT_RETRY_AT behind after an unhealthy-store test. Fix it if that directory grows store-sensitive tests.
+TASK-15581 does this task (2026-11-19). AC #1 is met at dispatch, not at the boundary (Decision D1 of TASK-15581's plan): users_own_key_credentials still returns None for a policy or store failure, and the server-key call it leaves is refused by the analyze path's check and the provider base class, as for a user with no stored key; an over-limit own-key user of a disabled provider gets the 402. M1 is moot: there is no fallback any more. M2 is fixed: the MCP tests' store fixture uses set_llm_provider_overrides_cache_for_tests and restores the store.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Done in TASK-15581: a disabled provider or an unreadable store no longer runs an own-key analyze request on the server key (refused at dispatch, D1 a); other failures keep the server key; M1 moot (no fallback), M2 fixed (MCP store fixture).
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

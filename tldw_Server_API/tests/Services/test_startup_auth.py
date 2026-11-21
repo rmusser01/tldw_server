@@ -947,7 +947,7 @@ async def test_init_auth_services_skips_provider_override_runtime_failures(
 
     assert result is db_pool
     assert warnings == [
-        "App Startup: LLM provider overrides unavailable; server fallback disabled"
+        "App Startup: LLM provider overrides unavailable; every LLM call is refused until they load"
     ]
     assert "App Startup: Loaded LLM provider overrides" not in infos
     assert refresh_service_starts == ["started"]

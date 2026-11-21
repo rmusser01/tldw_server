@@ -141,7 +141,10 @@ class _WFRecurringScheduler:
                 return
             # Rebuild DB handles on each cold start to pick up env/path changes.
             self._db_cache.clear()
+            previous_db = self._db
             self._db = WorkflowsSchedulerDB()
+            if previous_db.backend.config.backend_type == BackendType.POSTGRESQL:
+                previous_db.backend.get_pool().close_all()
             # Start or reuse the global core job scheduler (workers)
             self._core_scheduler = await get_global_scheduler()
             # Start APScheduler for cron

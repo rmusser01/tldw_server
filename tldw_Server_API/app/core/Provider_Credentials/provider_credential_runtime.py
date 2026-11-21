@@ -804,33 +804,15 @@ class ProviderCredentialRuntime:
                 provider,
                 **resolver_kwargs,
             )
-            if (
-                self._authoritative_scope is not None
-                and isinstance(resolution, ResolvedByokCredentials)
-                and resolution.uses_byok
-            ):
+            if self._authoritative_scope is not None:
                 # Imported here: the override module imports the adapter registry, which imports this module.
                 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
-                    log_server_key_fallback,
-                    server_key_fallback,
+                    enforce_provider_override,
                 )
 
-                # Raises, so fails closed, for a disabled provider or a policy that cannot be read (TASK-15571).
-                if server_key_fallback(provider, model):
-                    # The scope's authority was checked above. A model the override denies runs on the server key
-                    # from the same frozen snapshot the scope falls back to (TASK-15571).
-                    log_server_key_fallback(
-                        provider, "the call falls back to the server key, which its reservation checks"
-                    )
-                    resolution = await self._resolver(
-                        provider,
-                        user_id=None,
-                        team_ids=[],
-                        org_ids=[],
-                        server_config_snapshot=copy.deepcopy(self._server_config_snapshot),
-                        force_oauth_refresh=False,
-                        trusted_base_url_override=False,
-                    )
+                # After the scope check, on whichever key it chose: an admin-disabled provider or model is
+                # refused (TASK-15581). This scope captures no override snapshot, so nothing else checks it.
+                enforce_provider_override(provider, model)
         except asyncio.CancelledError:
             raise
         except ByokResolutionError as exc:

@@ -41,6 +41,7 @@ from tldw_Server_API.cli.commands.users import users_group
 from tldw_Server_API.cli.commands.watchlists import watchlists_group
 from tldw_Server_API.cli.commands.webhooks import webhook_group
 from tldw_Server_API.cli.utils.config import ConfigError, load_cli_config
+from tldw_Server_API.cli.utils.llm_store import LLMStoreGroup
 from tldw_Server_API.cli.utils.output import print_error, print_info
 
 
@@ -112,7 +113,12 @@ def _safe_stderr_stream():
     return _SafeStreamWrapper(stream or sys.__stderr__)
 
 
-@click.group(context_settings={'help_option_names': ['-h', '--help']})
+@click.group(
+    cls=LLMStoreGroup,
+    # These make LLM calls, which need the provider-override store (TASK-15581).
+    llm_commands={"eval", "benchmark", "recipes", "persona-chat-judge"},
+    context_settings={'help_option_names': ['-h', '--help']},
+)
 @click.option(
     '--config',
     type=click.Path(exists=True, readable=True, path_type=Path),

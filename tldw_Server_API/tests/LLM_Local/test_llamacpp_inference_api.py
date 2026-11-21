@@ -272,3 +272,30 @@ def test_llamacpp_inference_requires_authentication() -> None:
         )
 
     assert response.status_code in (401, 403), response.text
+
+
+@pytest.mark.parametrize(
+    ("override_kwargs", "healthy", "status", "code"),
+    [({"is_enabled": False}, True, 403, "provider_disabled"), ({}, False, 503, "credential_store_unavailable")],
+    ids=["provider-disabled", "store-unavailable"],
+)
+def test_llamacpp_inference_refuses_an_admin_disabled_provider(override_kwargs, healthy, status, code) -> None:
+    """TASK-15581: this route posts to the managed server itself, not through an adapter, so it checks the admin
+    provider override: a disabled llama.cpp is refused for every caller before anything runs, and a store that
+    cannot be read is a 503."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    class _Mgr(_DefaultMgr):
+        async def run_inference(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            raise AssertionError("a refused call must not run")
+
+    set_llm_provider_overrides_cache_for_tests(
+        {"llama.cpp": LLMProviderOverride(provider="llama.cpp", **override_kwargs)}, healthy=healthy
+    )
+    with TestClient(_make_app_with_manager(_Mgr())) as client:
+        response = client.post("/api/v1/llamacpp/inference", json={"messages": [{"role": "user", "content": "hello"}]})
+
+    assert (response.status_code, response.json()["detail"]["error_code"]) == (status, code)

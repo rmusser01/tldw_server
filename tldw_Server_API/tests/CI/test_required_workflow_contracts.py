@@ -901,7 +901,7 @@ def _normalize_ws(text: str) -> str:
     return " ".join(text.split())
 
 
-def test_full_suite_summaries_follow_backend_path_filter() -> None:
+def test_full_suite_summaries_follow_the_selected_tier() -> None:
     workflow = _load(".github/workflows/ci.yml")
     expected_if = """always() && !cancelled() && (
   (
@@ -917,9 +917,8 @@ def test_full_suite_summaries_follow_backend_path_filter() -> None:
     )
   )
 ) && (
-  (github.event_name != 'pull_request' &&
-   github.event_name != 'workflow_run') ||
-  needs.changes.outputs.backend_changed == 'true'
+  needs.changes.outputs.tier == 'nightly' ||
+  needs.changes.outputs.tier == 'release'
 )"""
     summary_to_shards = {
         "full-suite-linux-312-summary": "full-suite-linux-312-shards",
@@ -928,14 +927,12 @@ def test_full_suite_summaries_follow_backend_path_filter() -> None:
         "full-suite-windows-312-summary": "full-suite-windows-312-shards",
     }
 
-    # 3.13, macOS and Windows are ~550 extra jobs, so they skip PRs entirely.
-    non_pr_if = expected_if.split(") && (\n  (github.event_name")[0] + """) &&
-(github.event_name != 'pull_request' && github.event_name != 'workflow_run')"""
+    release_if = expected_if.rsplit(") && (", 1)[0] + ") && (needs.changes.outputs.tier == 'release')"
 
     for summary_job, shard_job in summary_to_shards.items():
         job = workflow["jobs"][summary_job]
         assert job["needs"] == [shard_job, "changes", "admission", "await_license"]
-        wanted = expected_if if summary_job == "full-suite-linux-312-summary" else non_pr_if
+        wanted = expected_if if summary_job == "full-suite-linux-312-summary" else release_if
         assert _normalize_ws(job["if"]) == _normalize_ws(wanted), summary_job
 
 

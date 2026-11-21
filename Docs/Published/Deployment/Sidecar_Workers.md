@@ -12,6 +12,8 @@ After changes, regenerate: `python Helper_Scripts/Deployment/generate_sidecar_fi
 
 Important: set `TLDW_WORKERS_SIDECAR_MODE=true` for the API process so it skips in-process workers.
 
+A worker that can make an LLM call (audio, media ingest, data tables, Prompt Studio, long-form TTS, reading-list import with LLM claims extraction and the evaluations A/B test worker) loads the admin LLM provider overrides from the AuthNZ database when it starts, and keeps them fresh. It needs the same `DATABASE_URL` as the API process. It refuses to start if it cannot load them, and while it cannot read them it refuses every LLM call (TASK-15581).
+
 ## Workers and entrypoints
 
 - Chatbooks core jobs: `python -m tldw_Server_API.app.services.core_jobs_worker`

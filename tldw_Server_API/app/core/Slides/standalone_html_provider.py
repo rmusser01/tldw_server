@@ -331,6 +331,23 @@ def _verify_current_target(
     _fail("standalone_html_endpoint_not_allowed")
 
 
+def _verify_admin_override(stored_target: ResolvedExecutionTarget) -> None:
+    """Refuse a provider or model the admin provider override disables, on any key (TASK-15581).
+
+    This call is not an adapter call, so the provider base class never sees it. A refusal is terminal; an
+    override store that cannot be read is retried, as a provider outage is.
+    """
+    # Imported here: the override module imports the adapter registry, which this module's importers load.
+    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import enforce_provider_override
+
+    try:
+        enforce_provider_override(stored_target.provider, stored_target.model)
+    except ByokResolutionError as exc:
+        policy_code = getattr(exc, "policy_code", None)
+        _fail(f"standalone_html_{policy_code}" if policy_code else "standalone_html_provider_unavailable")
+
+
 def _load_current_config(
     loader: Callable[[], SlidesStandaloneHtmlConfig],
 ) -> SlidesStandaloneHtmlConfig:
@@ -696,6 +713,7 @@ async def generate_standalone_html(
         _fail("standalone_html_provider_request_invalid")
     current = _load_current_config(current_config_loader)
     current = _verify_current_target(stored_target, current)
+    _verify_admin_override(stored_target)
     _validated_runtime_limits(current)
 
     try:

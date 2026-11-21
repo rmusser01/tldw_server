@@ -133,3 +133,20 @@ async def test_exception_handler_logs_sanitized_path_without_query_string(monkey
         assert kwargs["path"] == "/api/v1/chat/completions"
         assert "url" not in kwargs
         assert "secret-token" not in repr(kwargs)
+
+
+@pytest.mark.asyncio
+async def test_the_app_answers_an_admin_refusal_and_passes_any_other_configuration_error_on():
+    """TASK-15581 (P1): the app registers a ChatConfigurationError handler. An admin provider-override refusal gets its
+    own 403; any other configuration error is raised on to the catch-all handler, as before."""
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
+    from tldw_Server_API.app.main import app
+
+    handler = app.exception_handlers[ChatConfigurationError]
+    refusal = ChatConfigurationError("refused", provider="openai", error_code="provider_disabled")
+    other = ChatConfigurationError("misconfigured", provider="openai")
+
+    response = await handler(_build_request(request_id="req-403"), refusal)
+    with pytest.raises(ChatConfigurationError) as passed_on:
+        await handler(_build_request(), other)
+    assert (response.status_code, passed_on.value) == (403, other)
