@@ -935,14 +935,18 @@ def test_a_failed_gh_call_raises_with_the_http_status_the_refusal_rule_reads(mon
         mq.Gh().rest("POST", "repos/x/y/actions/workflows/w.yml/dispatches", {"ref": "gone"})
 
 
-def test_main_drives_the_real_gh_argv_end_to_end(monkeypatch, tmp_path):
+@pytest.mark.parametrize("server_ci_required", [False, True])
+def test_main_drives_the_real_gh_argv_end_to_end(monkeypatch, tmp_path, server_ci_required):
     """main() through the real Gh and _run_gh down to the subprocess argv, with canned JSON for
     a BEHIND front PR: line query, context reads, pinned-head rebase, poll reread, the license
     dispatch, one approval per gate, the non-gate cleanup, comment."""
     owner, name = mq.REPO.split("/")
     node = _node(7, ref="feat/queue-me")
     seen = []
-    held = [_held(31 + i, workflow) for i, workflow in enumerate(GATE_FILES)] + [_held(40, "ci.yml")]
+    held = [_held(31 + i, workflow) for i, workflow in enumerate(GATE_FILES)]
+    held.extend([_held(40, "ci.yml"), _held(41, "actionlint.yml")])
+    for attribute in ("CONTEXTS", "ALL_CONTEXTS", "BY_NAME", "GATE_WORKFLOWS"):
+        monkeypatch.setattr(mq, attribute, getattr(mq, attribute))
 
     def fake_subprocess_run(argv, **kwargs):
         assert kwargs == {"capture_output": True, "text": True, "check": False}
@@ -958,6 +962,9 @@ def test_main_drives_the_real_gh_argv_end_to_end(monkeypatch, tmp_path):
                                                                           mergeStateStatus="BLOCKED")}}},
                 mq.COMMENTS_QUERY: {"data": {"repository": {"pullRequest": {"comments": {"nodes": []}}}}},
             }[query]
+        elif args[2] == "GET" and "/rules/branches/dev?" in args[3]:
+            required = [{"context": "Server CI verdict"}] if server_ci_required else []
+            out = [{"type": "required_status_checks", "parameters": {"required_status_checks": required}}]
         elif args[2] == "GET" and f"head_sha={NEW}&status=action_required" in args[3]:
             out = {"total_count": len(held), "workflow_runs": list(held)}
         elif args[2] in ("POST", "DELETE") and (args[3].endswith("/approve") or args[2] == "DELETE"):
@@ -986,12 +993,17 @@ def test_main_drives_the_real_gh_argv_end_to_end(monkeypatch, tmp_path):
     assert mutating[0] == ["gh", "api", "graphql", "-f", f"query={mq.REBASE_MUTATION}", "-f", "id=PR_7", "-f", f"oid={OLD}"]
     assert mutating[1] == ["gh", "api", "-X", "POST", f"{repo}/actions/workflows/frontend-license-gate.yml/dispatches",
                            "-f", "ref=dev", "-f", "inputs[pr]=7"]
-    gates = len(GATE_FILES)
-    assert [a[4] for a in mutating[2:2 + gates]] == [f"{repo}/actions/runs/{31 + i}/approve" for i in range(gates)]
-    assert mutating[2 + gates] == ["gh", "api", "-X", "DELETE", f"{repo}/actions/runs/40"]
-    assert mutating[3 + gates][:6] == ["gh", "api", "-X", "POST", f"{repo}/issues/7/comments", "-f"]
-    assert mutating[3 + gates][6].startswith(f"body=<!-- merge-queue:rebased:{NEW} -->\nMerge queue: this PR is next.")
-    assert len(mutating) == 4 + gates
+    approvals = [31 + i for i in range(len(GATE_FILES))]
+    deletions = [40, 41]
+    if server_ci_required:
+        approvals.append(40)
+        deletions = [41]
+    assert mutating[2:-1] == [
+        *[["gh", "api", "-X", "POST", f"{repo}/actions/runs/{rid}/approve"] for rid in approvals],
+        *[["gh", "api", "-X", "DELETE", f"{repo}/actions/runs/{rid}"] for rid in deletions],
+    ]
+    assert mutating[-1][:6] == ["gh", "api", "-X", "POST", f"{repo}/issues/7/comments", "-f"]
+    assert mutating[-1][6].startswith(f"body=<!-- merge-queue:rebased:{NEW} -->\nMerge queue: this PR is next.")
     assert "| #7 | rebase | behind dev |" in summary.read_text(encoding="utf-8")
 
 
@@ -1694,6 +1706,7 @@ def test_main_passes_only_a_numeric_wait_run(monkeypatch):
         return []
 
     monkeypatch.setattr(mq, "run", fake_run)
+    monkeypatch.setattr(mq, "_configure_server_ci_gate", lambda gh: None)
     monkeypatch.setenv("MERGE_QUEUE", "on")
     for value, expected in (("123", 123), ("", None), ("12; rm -rf /", None), ("\u00b2", None)):
         seen.clear()

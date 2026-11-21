@@ -25,12 +25,22 @@ on:
       - .github/workflows/pypi-package.yml
       - .github/workflows/publish-pypi.yml
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      qualification:
+        description: Install the checked wheel and produce a release verdict
+        type: boolean
+        default: false
+    outputs:
+      checked:
+        description: The release package build and install passed
+        value: ${{ jobs.build-and-check.outputs.checked }}
 
 permissions:
   contents: read
 
 concurrency:
-  group: pypi-package-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
+  group: pypi-package-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}${{ inputs.qualification && format('-qualification-{0}', github.workflow) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -79,11 +89,13 @@ jobs:
       )
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      checked: ${{ steps.install.outputs.checked }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ (inputs.qualification && github.sha) || needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Setup Python
@@ -99,9 +111,32 @@ jobs:
       - name: Build and check package
         run: make pypi-check
 
+      - name: Install PortAudio build dependencies
+        if: inputs.qualification
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-ffmpeg: 'false'
+          install-portaudio: 'true'
+
+      - name: Install and import the built wheel
+        id: install
+        if: inputs.qualification
+        shell: bash
+        env:
+          LICENSE: ${{ github.event_name != 'pull_request' || (needs.await_license.result == 'success' && needs.await_license.outputs.license_passed == 'true') }}
+        run: |
+          set -euo pipefail
+          [[ "$LICENSE" == true ]]
+          python -m venv "$RUNNER_TEMP/tldw-wheel"
+          wheel_python="$RUNNER_TEMP/tldw-wheel/bin/python"
+          "$wheel_python" -m pip install dist/*.whl
+          "$wheel_python" -m pip check
+          "$wheel_python" -I -c 'import tldw_Server_API'
+          echo 'checked=true' >> "$GITHUB_OUTPUT"
+
       - name: Upload dist artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: tldw-server-pypi-dist
+          name: ${{ inputs.qualification && 'tldw-server-qualified-dist' || 'tldw-server-pypi-dist' }}
           path: dist/*
           if-no-files-found: error
