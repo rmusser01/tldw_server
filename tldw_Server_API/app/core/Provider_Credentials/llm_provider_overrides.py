@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import os
 import threading
 import time
 import weakref
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -383,6 +384,11 @@ def _schedule_override_recovery() -> None:
         return
 
     with _OVERRIDE_LOCK:
+        service = _OVERRIDE_REFRESH_SERVICE_TASK
+        if service is not None and not service.done() and service.get_loop() is not loop:
+            # The refresh service keeps the cache fresh from its own loop (a CLI's daemon loop, TASK-15581). A refresh
+            # on this loop could be cancelled when it closes, and would move the PostgreSQL AuthNZ pool between loops.
+            return
         if (
             _OVERRIDE_RECOVERY_IN_FLIGHT
             or time.monotonic() < _OVERRIDE_RECOVERY_NEXT_RETRY_AT
@@ -587,6 +593,57 @@ def start_llm_provider_override_refresh_service() -> None:
         _cancel_task_on_owning_loop(task)
 
 
+@contextlib.asynccontextmanager
+async def standalone_llm_provider_overrides() -> AsyncIterator[None]:
+    """Load the provider-override store and keep it fresh, in a process the app did not start (TASK-15581).
+
+    The app loads the store at startup. A standalone worker or CLI must do it itself: the admin-override check
+    refuses every LLM call while the store is unloaded. The Research worker's pattern: a forced refresh, the
+    refresh service, and the recovery tasks shut down on exit. A refresh that fails raises, so the process
+    does not start.
+    """
+    await refresh_llm_provider_overrides(force=True)
+    try:
+        start_llm_provider_override_refresh_service()
+        yield
+    finally:
+        await shutdown_llm_provider_override_recovery()
+
+
+@contextlib.contextmanager
+def standalone_llm_provider_overrides_sync() -> Iterator[None]:
+    """``standalone_llm_provider_overrides`` for a synchronous CLI: the store's loop runs on a daemon thread.
+
+    LLM usage accounting runs on that loop too, as it runs on the server's loop in the app: the AuthNZ pool is bound
+    to one loop, and on PostgreSQL a write from a command's own ``asyncio.run`` loop would recreate it under the
+    store's refresh.
+    """
+    from tldw_Server_API.app.core.Usage.llm_accounting import (
+        drain_accounting,
+        get_accounting_loop,
+        set_accounting_loop,
+    )
+
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, name="llm-provider-overrides", daemon=True)
+    thread.start()
+    store = standalone_llm_provider_overrides()
+    try:
+        asyncio.run_coroutine_threadsafe(store.__aenter__(), loop).result()
+        previous_accounting_loop = get_accounting_loop()
+        set_accounting_loop(loop)
+        try:
+            yield
+        finally:
+            set_accounting_loop(previous_accounting_loop)
+            asyncio.run_coroutine_threadsafe(drain_accounting(), loop).result()
+            asyncio.run_coroutine_threadsafe(store.__aexit__(None, None, None), loop).result()
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join()
+        loop.close()
+
+
 def _parse_json_value(raw: Any, *, field_name: str, expected_type: type) -> Any | None:
     """Parse a stored JSON field and reject corrupt or shape-invalid values."""
     if raw is None:
@@ -738,11 +795,35 @@ def get_llm_provider_overrides_snapshot() -> dict[str, LLMProviderOverride]:
     return _get_healthy_override_snapshot()
 
 
+def llm_provider_overrides_status() -> str:
+    """Return ``"healthy"`` when an LLM call would find a usable override snapshot, else ``"unavailable"``.
+
+    For health reporting (TASK-15581): it never raises, so a health route that shows it cannot fail over it.
+    """
+    try:
+        get_llm_provider_overrides_snapshot()
+    except Exception:  # noqa: BLE001 - any failure to read the snapshot means calls are refused
+        return "unavailable"
+    return "healthy"
+
+
 def capture_provider_override_call_snapshot(provider: str) -> ProviderOverrideCallSnapshot:
     """Capture one provider override for policy and server credential fallback."""
     provider_norm = canonical_provider_name(provider)
     override = _get_healthy_override_snapshot(provider_norm).get(provider_norm)
     return ProviderOverrideCallSnapshot(provider=provider_norm, _override=override)
+
+
+def mark_llm_provider_overrides_stale() -> None:
+    """Make the next read reload the store, keeping its snapshot, TTL and refresh service (TASK-15581).
+
+    For an AuthNZ pool reset: the stored policy has not changed, so an admin disable keeps holding from the last
+    snapshot while the reload runs, and the refresh service keeps refreshing from the new pool.
+    """
+    global _OVERRIDE_CACHE_REFRESHED_AT
+    with _OVERRIDE_LOCK:
+        due = time.monotonic() - _OVERRIDE_REFRESH_INTERVAL_SECONDS
+        _OVERRIDE_CACHE_REFRESHED_AT = min(_OVERRIDE_CACHE_REFRESHED_AT, due)
 
 
 def set_llm_provider_overrides_cache_for_tests(
@@ -889,68 +970,22 @@ def validate_provider_override(provider: str, model: str | None) -> dict[str, st
     return capture_provider_override_call_snapshot(provider).policy_error(model)
 
 
-def server_key_fallback(provider: str, model: str | None) -> bool:
-    """Whether a call for ``model`` on a key that is not the server's falls back to the server key (TASK-15571).
+def enforce_provider_override(provider: str, model: str | None) -> None:
+    """Refuse a call the admin provider override disables, whatever its key (TASK-15581).
 
-    True when the override's allowlist denies the model (``model_not_allowed``): the owner's rule. The caller
-    logs that denial once it knows the outcome (``log_server_key_fallback``). A provider the override disables
-    raises its ``ProviderOverridePolicyError``, and a policy that cannot be read raises
-    ``ByokResolutionError("credential_store_unavailable")``: both refuse the call, and are logged here.
+    The owner's rule (2026-11-19): a provider the override turns off (``provider_disabled``), or a model off its
+    ``allowed_models`` (``model_not_allowed``), is refused on the user's own key, a team or org key and the
+    server's. A provider the server merely has no key for is not refused. Raises ``ProviderOverridePolicyError``,
+    or ``ByokResolutionError("credential_store_unavailable")`` when the policy cannot be read. Each refusal writes
+    one warning naming the provider and the reason, never a key.
     """
     provider_norm = canonical_provider_name(provider)
     try:
-        error = capture_provider_override_call_snapshot(provider_norm).policy_error(model)
+        capture_provider_override_call_snapshot(provider_norm).enforce(model)
     except ByokResolutionError as exc:
-        logger.warning("Provider override for {}: {}; the call is refused", provider_norm, exc.code)
-        raise
-    if error is None:
-        return False
-    reason = error["error_code"]
-    if reason != "model_not_allowed":
+        reason = getattr(exc, "policy_code", None) or exc.code
         logger.warning("Provider override for {}: {}; the call is refused", provider_norm, reason)
-        raise ProviderOverridePolicyError(reason, provider_norm)
-    return True
-
-
-def log_server_key_fallback(provider: str, outcome: str) -> None:
-    """The one warning for a denied model, written with what became of the call (TASK-15571)."""
-    logger.warning("Provider override for {}: model_not_allowed; {}", canonical_provider_name(provider), outcome)
-
-
-def override_outcome(provider: str, handle: Any, model: str) -> str:
-    """How a call on ``handle`` meets the provider override (TASK-15571).
-
-    ``"handle"``: it stays on the handle, which is the server's key or holds an allowed model. ``"refused"``: a
-    disabled provider, or a policy that cannot be read. ``"server_key"``: a denied model falls back, once the
-    user's LLM quota answers for the call (the boundary admitted the request, or a strict check admits it now).
-    ``"unchecked"``: no check answered, so the fallback is refused (TASK-15481's fail-closed rule). A check that
-    refuses raises the 402. A caller that gets ``"server_key"`` drops the handle and its key, so the call is
-    counted and checked as a server-key call.
-    """
-    if handle.credential_source in {"server_default", "none"}:
-        return "handle"
-    # Imported here: the quota gate must not load with the override module.
-    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
-    from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_sync, user_to_check
-
-    try:
-        if not server_key_fallback(provider, model):
-            return "handle"
-    except ByokResolutionError:  # logged where it was raised
-        return "refused"
-    try:
-        user_id = user_to_check(strict=True)
-        answered = user_id is None or check_user_sync(user_id, strict=True)
-    except LLMQuotaExceededError:
-        log_server_key_fallback(provider, "the user's LLM limit refuses the call on the server key")
         raise
-    except Exception:  # noqa: BLE001 - the check could not start: no answer
-        answered = False
-    if not answered:
-        log_server_key_fallback(provider, "no LLM quota check answered, so the call is refused")
-        return "unchecked"
-    log_server_key_fallback(provider, "the call falls back to the server key")
-    return "server_key"
 
 
 def _get_model_priority_from_override(

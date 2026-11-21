@@ -375,42 +375,24 @@ async def test_authenticated_completion_uses_absence_only_precedence_and_frozen_
 
 
 @pytest.mark.parametrize("selected", ["user", "team", "org", "server"])
-async def test_a_model_the_provider_override_denies_runs_on_the_server_key(composed, selected):
-    """TASK-15571: the authoritative scope is still checked; then the operator's model, which the provider override
-    denies, runs on the server key and is reserved as a server-key call. A server key is not checked again."""
+@pytest.mark.parametrize(
+    ("override_kwargs", "healthy", "reason", "domain"),
+    [
+        ({"allowed_models": ["x"]}, True, "model_not_allowed", ModelFailureDomain.CREDENTIAL_SCOPE),
+        ({"is_enabled": False}, True, "provider_disabled", ModelFailureDomain.CREDENTIAL_SCOPE),
+        ({}, False, "credential_store_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE),
+    ],
+    ids=["model-not-allowed", "provider-disabled", "store-unavailable"],
+)
+async def test_an_admin_disabled_provider_or_model_is_refused_on_every_key(
+    composed, selected, override_kwargs, healthy, reason, domain
+):
+    """TASK-15581: after the scope check, on whichever key it chose, a provider or model the admin disabled, or a store
+    that cannot be read, fails closed before any reservation or provider request, with the reason as its code (not an
+    auth code), and the reason is logged."""
     env = composed
     sources = ("user", "team", "org")
     await seed_keys(env, sources[sources.index(selected) :] if selected != "server" else ())
-    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
-        {"openai": llm_provider_overrides.LLMProviderOverride(provider="openai", allowed_models=["x"])}
-    )
-    invocation = identity_from_context(env.context())
-    env.provider.execution_id = invocation.execution_id
-    result = await env.build().complete(request(), invocation)
-    assert result.content == CONTENT.replace("\r\n", "\n")
-    assert [incoming.headers["authorization"] for incoming in env.provider.requests] == [f"Bearer {KEYS['server']}"]
-    row = await assert_safe_surfaces(env, invocation, result=result)
-    assert row["credential_source"] == "server_default"
-    denials = [line for line, _extra, _exception in env.logs if "the call falls back to the server key" in line]
-    assert len(denials) == (0 if selected == "server" else 1)
-    assert all("Provider override for openai: model_not_allowed" in line for line in denials)
-
-
-@pytest.mark.parametrize(
-    ("override_kwargs", "healthy", "code", "domain"),
-    [
-        ({"is_enabled": False}, True, "invalid_provider_credentials", ModelFailureDomain.CREDENTIAL_SCOPE),
-        ({}, False, "credential_store_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE),
-    ],
-    ids=["provider-disabled", "store-unavailable"],
-)
-async def test_a_disabled_provider_or_an_unreadable_store_refuses_an_own_key_completion(
-    composed, override_kwargs, healthy, code, domain
-):
-    """TASK-15571: only a denied model falls back. A disabled provider and an unreadable store fail closed after the
-    scope check, before any reservation or provider request."""
-    env = composed
-    await seed_keys(env, ("user",))
     llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
         {"openai": llm_provider_overrides.LLMProviderOverride(provider="openai", **override_kwargs)}, healthy=healthy
     )
@@ -418,9 +400,12 @@ async def test_a_disabled_provider_or_an_unreadable_store_refuses_an_own_key_com
     env.provider.execution_id = invocation.execution_id
     with pytest.raises(ModelCompletionFailure) as caught:
         await env.build().complete(request(), invocation)
-    assert_failure(caught.value, code, domain)
+    assert_failure(caught.value, reason, domain)
     assert env.provider.requests == []
     assert await assert_safe_surfaces(env, invocation) is None
+    refusals = [line for line, _extra, _exception in env.logs if "Provider override for openai" in line]
+    assert len(refusals) == 1
+    assert f"Provider override for openai: {reason}; the call is refused" in refusals[0]
 
 
 class Gate:

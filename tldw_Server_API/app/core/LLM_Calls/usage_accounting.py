@@ -1,8 +1,9 @@
 """Check and record every chat provider call made for a known user (LLM usage accounting spec §2, §3, §4b).
 
 ``instrument_provider_class`` wraps a provider class's own ``chat``, ``achat``,
-``stream`` and ``astream``. The quota check runs before the provider method and
-may raise ``LLMQuotaExceededError``; nothing else here may raise into the call.
+``stream`` and ``astream``. The admin provider-override check and the quota check
+run before the provider method and may raise ``ChatConfigurationError`` or
+``LLMQuotaExceededError``; nothing else here may raise into the call.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import inspect
 import json
 import math
 import time
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -20,6 +21,8 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import ChatConfigurationError
+from tldw_Server_API.app.core.LLM_Calls.provider_results import PROVIDER_STREAM_ERROR_MESSAGES
 from tldw_Server_API.app.core.Usage.llm_accounting import submit_accounting
 from tldw_Server_API.app.core.Usage.llm_call_context import (
     USER_KEY_SOURCE,
@@ -359,11 +362,40 @@ async def _accounted_async_stream(
         _record_stream(provider, plan, request, seen, started)
 
 
+def _refuse_admin_disabled(provider: Any, request: Any) -> None:
+    """Refuse a provider or model the admin provider override disables, on any key (TASK-15581).
+
+    Every adapter call passes here, from the gateway or a direct caller, so the owner's rule holds on every path.
+    A key test (provider key validation, the admin provider test, the setup check) runs exempt and is not refused.
+    """
+    if current_llm_call_context().exempt:
+        return
+    # Imported here: the override module imports the adapter registry, which loads the provider classes.
+    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import enforce_provider_override
+
+    name = getattr(provider, "name", "")
+    request = request if isinstance(request, dict) else {}
+    extra_body = request.get("extra_body")
+    # OpenRouter serves a model from extra_body["models"] when the primary fails, so each one is checked too.
+    fallbacks = extra_body.get("models") if name == "openrouter" and isinstance(extra_body, Mapping) else None
+    try:
+        for model in [request.get("model"), *(fallbacks if isinstance(fallbacks, list) else [])]:
+            enforce_provider_override(name, model)
+    except ByokResolutionError as error:
+        code = getattr(error, "policy_code", None) or error.code
+        # A ChatAPIError, which every adapter caller handles: on analyze 'configuration' (a store outage
+        # 'provider_failure', which a job retries), no retry on a judge.
+        message = PROVIDER_STREAM_ERROR_MESSAGES[code]
+        raise ChatConfigurationError(message, provider=error.provider, error_code=code) from None
+
+
 def _wrap_chat(fn: Callable[..., Any]) -> Callable[..., Any]:
     """Record after a sync chat call."""
 
     @functools.wraps(fn)
     def chat(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        _refuse_admin_disabled(self, request)
         source = call_credential_source(request)
         user_id = user_to_check(source)
         if user_id is not None:
@@ -388,6 +420,7 @@ def _wrap_achat(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     async def achat(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        _refuse_admin_disabled(self, request)
         source = call_credential_source(request)
         user_id = user_to_check(source)
         if user_id is not None:
@@ -416,6 +449,7 @@ def _wrap_stream(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def stream(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        _refuse_admin_disabled(self, request)
         source = call_credential_source(request)
         user_id = user_to_check(source)
         unchecked = user_id is not None and not check_user_sync(user_id)
@@ -441,6 +475,7 @@ def _wrap_astream(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def astream(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        _refuse_admin_disabled(self, request)
         source = call_credential_source(request)
         user_id = user_to_check(source)
         plan = _plan_call(source)

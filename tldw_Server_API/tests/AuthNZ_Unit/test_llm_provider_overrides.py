@@ -2603,3 +2603,200 @@ def test_override_key_replacement_drops_static_openai_credential_metadata() -> N
     assert fallback.api_key == "override-key"
     assert fallback.credential_fields == {}
     assert fallback.app_config == {"openai_api": {"model": "gpt-static"}}
+
+
+# The standalone entry points that can make an LLM call (TASK-15581, B1): (module, its job loop or click group).
+_STANDALONE_WORKERS = (
+    ("tldw_Server_API.app.services.media_ingest_jobs_worker", "run_media_ingest_jobs_worker"),
+    ("tldw_Server_API.app.services.audio_jobs_worker", "run_audio_jobs_worker"),
+    ("tldw_Server_API.app.core.Data_Tables.jobs_worker", "run_data_tables_jobs_worker"),
+    ("tldw_Server_API.app.core.Evaluations.embeddings_abtest_jobs_worker", "run_embeddings_abtest_jobs_worker"),
+    ("tldw_Server_API.app.core.Explainer.jobs_worker", "run_explainer_jobs_worker"),
+    ("tldw_Server_API.app.core.Collections.reading_import_jobs_worker", "run_reading_import_jobs_worker"),
+)
+# (module, click group, a command that makes LLM calls, one that makes none)
+_EVALUATION_CLIS = (
+    ("tldw_Server_API.cli.evals_cli", "main", "eval", "config"),
+    ("tldw_Server_API.app.core.Evaluations.cli.evals_cli", "cli", "run", "list-benchmarks"),
+    ("tldw_Server_API.app.core.Evaluations.cli.evals_cli_enhanced", "cli", "test-api", "list-benchmarks"),
+)
+
+
+def _unloaded_store_over_an_empty_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The store as a fresh standalone process has it: unloaded, over an AuthNZ database that holds no override."""
+    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides as store
+
+    async def _pool():
+        return object()
+
+    async def _no_rows(_repo, provider=None):
+        return []
+
+    monkeypatch.setattr(store, "get_db_pool", _pool)
+    monkeypatch.setattr(store.AuthnzLLMProviderOverridesRepo, "list_overrides", _no_rows)
+    set_llm_provider_overrides_cache_for_tests({}, healthy=False)
+
+
+_WORKER_IDS = ["media-ingest", "audio", "data-tables", "evals-abtest", "explainer", "reading-import"]
+
+
+@pytest.mark.parametrize(("module_name", "run_name"), _STANDALONE_WORKERS, ids=_WORKER_IDS)
+async def test_each_standalone_worker_loads_the_store_before_it_takes_jobs(monkeypatch, module_name, run_name):
+    """TASK-15581 (B1): outside the app nothing loads the provider-override store, and every LLM call refuses until it
+    is loaded. Each worker's main loads it before taking jobs, so the store reads inside the work, and stops its
+    refresh service after."""
+    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides as store
+
+    module = importlib.import_module(module_name)
+    _unloaded_store_over_an_empty_database(monkeypatch)
+    worked = asyncio.Event()
+
+    async def _work(*_args, **_kwargs):
+        capture_provider_override_call_snapshot("openai")  # credential_store_unavailable while unloaded
+        worked.set()
+
+    monkeypatch.setattr(module, run_name, _work)
+    await module.main()
+    assert worked.is_set()
+    assert store._OVERRIDE_REFRESH_SERVICE_TASK is None
+
+
+_CLI_IDS = ["tldw-evals", "evals_cli", "evals_cli_enhanced"]
+
+
+@pytest.mark.parametrize(("module_name", "group_name", "llm_command", "other_command"), _EVALUATION_CLIS, ids=_CLI_IDS)
+def test_each_evaluation_cli_loads_the_store_for_its_llm_commands(
+    monkeypatch, module_name, group_name, llm_command, other_command
+):
+    """TASK-15581 (B1): a CLI command that makes LLM calls loads the store, on its own loop thread, before it runs. A
+    command that makes none leaves the store alone."""
+    from click.testing import CliRunner
+
+    group = getattr(importlib.import_module(module_name), group_name)
+    _unloaded_store_over_an_empty_database(monkeypatch)
+
+    other = CliRunner().invoke(group, [other_command, "--help"], obj={})
+    with pytest.raises(ByokResolutionError, match="credential_store_unavailable"):
+        capture_provider_override_call_snapshot("openai")
+    CliRunner().invoke(group, [llm_command], obj={})  # it may then fail its own parse; the store loads first
+    assert other.exit_code == 0
+    assert capture_provider_override_call_snapshot("openai").provider == "openai"
+
+
+@pytest.mark.parametrize(("module_name", "group_name", "llm_command", "other_command"), _EVALUATION_CLIS, ids=_CLI_IDS)
+def test_an_evaluation_cli_skips_the_store_for_help_and_completion(
+    monkeypatch, module_name, group_name, llm_command, other_command
+):
+    """TASK-15581 (fold 2, M1): help for an LLM command, and shell completion, never touch the AuthNZ database."""
+    from click.testing import CliRunner
+
+    group = getattr(importlib.import_module(module_name), group_name)
+    _unloaded_store_over_an_empty_database(monkeypatch)
+
+    help_text = CliRunner().invoke(group, [llm_command, "--help"], obj={})
+    completion_ctx = group.make_context("cli", [llm_command], resilient_parsing=True)
+    with completion_ctx:
+        group.resolve_command(completion_ctx, [llm_command])
+    assert help_text.exit_code == 0
+    with pytest.raises(ByokResolutionError, match="credential_store_unavailable"):
+        capture_provider_override_call_snapshot("openai")
+
+
+@pytest.mark.parametrize(("module_name", "group_name", "llm_command", "other_command"), _EVALUATION_CLIS, ids=_CLI_IDS)
+def test_an_evaluation_cli_that_cannot_load_the_store_says_why(
+    monkeypatch, module_name, group_name, llm_command, other_command
+):
+    """TASK-15581 (fold 2, M1): an LLM command whose store cannot load stops with a message naming DATABASE_URL and
+    the AuthNZ setup, not a traceback."""
+    from click.testing import CliRunner
+
+    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides as store
+
+    async def _unreadable(*_args, **_kwargs):
+        raise LLMProviderOverridesRefreshError()
+
+    group = getattr(importlib.import_module(module_name), group_name)
+    monkeypatch.setattr(store, "refresh_llm_provider_overrides", _unreadable)
+    result = CliRunner().invoke(group, [llm_command], obj={})
+
+    assert result.exit_code == 1
+    assert "DATABASE_URL" in result.output and "AuthNZ" in result.output
+
+
+@pytest.mark.parametrize(("module_name", "run_name"), _STANDALONE_WORKERS, ids=_WORKER_IDS)
+def test_each_standalone_worker_runs_main_as_a_module(monkeypatch, module_name, run_name):
+    """TASK-15581 (fold 3, M5): sidecars start a worker with ``python -m <module>``, so its ``__main__`` block must run
+    ``main``, which loads the store, not the bare ``run_*`` coroutine."""
+    import runpy
+    import sys
+    import warnings
+
+    class _Ran(Exception):
+        """Carries the name of the coroutine ``asyncio.run`` was given, and stops the module there."""
+
+    def _run(coro, *_args, **_kwargs):
+        coro.close()
+        raise _Ran(coro.__qualname__)
+
+    monkeypatch.setattr(asyncio, "run", _run)
+    monkeypatch.setattr(sys, "argv", [module_name])
+    with warnings.catch_warnings(), pytest.raises(_Ran, match=r"^main$"):
+        warnings.simplefilter("ignore", RuntimeWarning)  # runpy warns that the module is already imported
+        runpy.run_module(module_name, run_name="__main__")
+
+
+async def test_a_stale_read_leaves_the_refresh_to_a_service_on_another_loop():
+    """TASK-15581 (fold 3, I4): in a CLI the refresh service runs on its own daemon loop. A read on a command's own
+    ``asyncio.run`` loop schedules no refresh there, which that loop's closing could cancel (marking the store
+    unhealthy) and which would move the PostgreSQL AuthNZ pool between loops."""
+    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides as store
+
+    background = _BackgroundEventLoop()
+    service = background.call(lambda: background.loop.create_task(asyncio.sleep(3600))).result(timeout=5)
+    try:
+        with store._OVERRIDE_LOCK:
+            store._OVERRIDE_REFRESH_SERVICE_TASK = service
+            store._OVERRIDE_CACHE_HEALTHY = False
+            store._OVERRIDE_RECOVERY_NEXT_RETRY_AT = 0.0
+        store._schedule_override_recovery()
+        with store._OVERRIDE_LOCK:
+            scheduled = store._OVERRIDE_RECOVERY_TASK
+    finally:
+        with store._OVERRIDE_LOCK:
+            store._OVERRIDE_REFRESH_SERVICE_TASK = None
+        background.loop.call_soon_threadsafe(service.cancel)
+        background.close()
+    assert scheduled is None
+
+
+def test_a_cli_runs_usage_accounting_on_the_stores_loop(monkeypatch):
+    """TASK-15581 (fold 3, I4): a CLI's LLM usage writes run on the store's daemon loop, as they run on the server's
+    loop in the app, so no write moves the PostgreSQL AuthNZ pool to a command's own loop; the loop is put back after."""
+    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides as store
+    from tldw_Server_API.app.core.Usage.llm_accounting import get_accounting_loop
+
+    _unloaded_store_over_an_empty_database(monkeypatch)
+    before = get_accounting_loop()
+    with store.standalone_llm_provider_overrides_sync():
+        same_loop = get_accounting_loop() is store._OVERRIDE_REFRESH_SERVICE_TASK.get_loop()
+    assert (same_loop, get_accounting_loop()) == (True, before)
+
+
+def test_an_authnz_pool_reset_keeps_every_admin_disable(monkeypatch):
+    """TASK-15581 (fold 3, M2): production resets the AuthNZ pool when it finds it closed or on another loop. The store
+    keeps the last snapshot, so an admin disable keeps holding while it reloads from the new pool; it must not come
+    back empty and healthy, with no refresh, until an admin edits an override."""
+    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+
+    set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", is_enabled=False)}, ttl_enabled=True
+    )
+    asyncio.run(reset_db_pool())
+
+    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides as store
+
+    reloads: list[bool] = []
+    monkeypatch.setattr(store, "_schedule_override_recovery", lambda: reloads.append(True))
+    override = get_llm_provider_override("openai")
+    assert override is not None and override.is_enabled is False
+    assert reloads == [True]  # the next read after the reset reloads from the new pool

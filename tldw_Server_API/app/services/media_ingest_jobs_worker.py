@@ -379,9 +379,7 @@ async def _admit_or_refuse_analysis(form_data: AddMediaForm) -> LLMQuotaExceeded
     """Check the owner's LLM quota once, before any work, when the job asks for analysis (TASK-13864).
 
     Admitted, the rest of the job runs as an admitted request does (LLM usage accounting
-    spec §4a), so no refusal lands part-way through an item. The exception is a job whose
-    start check got no answer (a timeout or a failure): it is admitted without the mark,
-    so each call is checked, and a call may be refused mid-item (TASK-15571). Refused, the refusal is
+    spec §4a), so no refusal lands part-way through an item. Refused, the refusal is
     returned and the job runs without analysis. The analysis runs on the owner's own key
     when they stored one (TASK-15426); an over-limit owner whose analysis runs on it, and
     who turned on no other LLM stage, is admitted without the mark, so each call is
@@ -393,14 +391,12 @@ async def _admit_or_refuse_analysis(form_data: AddMediaForm) -> LLMQuotaExceeded
     user_id = user_to_check()
     if user_id is not None:
         try:
-            answered = await check_user_async(user_id, strict=True)
+            await check_user_async(user_id)
         except LLMQuotaExceededError as refusal:
             if handle is None or media_analysis_provider(form_data) is None:
                 return refusal  # the server's key, or another LLM stage: refused as before, no key bound
         else:
-            # A check that timed out or failed admits the job unmarked, so each call is checked (TASK-15571).
-            if answered:
-                mark_llm_quota_prechecked()
+            mark_llm_quota_prechecked()
     bind_provider_credentials(handle)
     return None
 
@@ -876,9 +872,16 @@ async def run_media_ingest_heavy_jobs_worker(stop_event: asyncio.Event | None = 
             )
 
 
+async def main(heavy: bool = False) -> None:
+    """Load the provider-override store, then take jobs: every LLM call refuses until it is loaded (TASK-15581)."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import standalone_llm_provider_overrides
+
+    async with standalone_llm_provider_overrides():
+        await (run_media_ingest_heavy_jobs_worker() if heavy else run_media_ingest_jobs_worker())
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a media ingest Jobs worker")
     parser.add_argument("--heavy", action="store_true", help="Run the heavy ingest worker pool")
-    run_worker = run_media_ingest_heavy_jobs_worker if parser.parse_args().heavy else run_media_ingest_jobs_worker
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run_worker())
+        asyncio.run(main(heavy=parser.parse_args().heavy))

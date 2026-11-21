@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatBadRequestError,
     ChatConfigurationError,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_REFUSAL_STATUS
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
@@ -108,6 +109,8 @@ def classify_rag_provider_error(exc: BaseException) -> tuple[str, int, str] | No
         return code, 502, _RAG_PROVIDER_ERROR_MESSAGES[code]
     if isinstance(exc, ChatConfigurationError):
         code = str(getattr(exc, "error_code", "provider_configuration_invalid"))
+        if code in ADMIN_REFUSAL_STATUS:  # the provider base class's admin-override refusal (TASK-15581)
+            return code, ADMIN_REFUSAL_STATUS[code], _RAG_PROVIDER_ERROR_MESSAGES[code]
         if code not in {"missing_provider_credentials", "provider_configuration_invalid"}:
             code = "provider_configuration_invalid"
         return code, 503, _RAG_PROVIDER_ERROR_MESSAGES[code]

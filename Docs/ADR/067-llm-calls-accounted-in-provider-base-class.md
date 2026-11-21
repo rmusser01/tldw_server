@@ -42,6 +42,8 @@ Only `/chat/completions`, the router, the claims engine and embeddings recorded 
 - **MCP tool calls** get their user from the tool call's context, which MCP authentication fills in, because it sets no content scope. A tool run by an admitted request keeps the admission (ADR-075).
 - **Still unrecorded:** system jobs with no user, such as the scheduled quality evaluation.
 
+Amendment (TASK-15581, 2026-11-19): the same wrappers also enforce the admin provider policy. Before the quota check, they refuse a provider or model the admin provider override disables, on every key, with a `ChatConfigurationError` that carries the reason as its `error_code`. A call in an exempt context (a key test or the setup check) is not refused. ADR-086's TASK-15581 amendment states the rule.
+
 ## Follow-up
 
 - PR 1b of the spec added the remaining roots: `WorkerSDK`, the job workers with their own loop, the workflow engine, the audio and realtime WebSockets, and a default executor that carries the LLM call state.
