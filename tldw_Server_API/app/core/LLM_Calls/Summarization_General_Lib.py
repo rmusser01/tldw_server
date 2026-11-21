@@ -57,7 +57,11 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCallCredentials,
 )
-from tldw_Server_API.app.core.Usage.llm_call_context import scoped_provider_credentials
+from tldw_Server_API.app.core.Usage.llm_call_context import (
+    USER_KEY_SOURCE,
+    call_credential_source,
+    scoped_provider_credentials,
+)
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 #
@@ -318,9 +322,10 @@ def _summarize_via_adapter(
     from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import enforce_provider_override
 
     try:
-        # Refused on every key (TASK-15581). The provider base class refuses it too; here it keeps this path's
-        # failure codes, and comes before a stream is handed back.
-        enforce_provider_override(provider, model)
+        # Refused on every key (TASK-15581); a model off the allowlist only off the user's own key (TASK-15582). The
+        # provider base class refuses it too; here it keeps this path's failure codes, and comes before a stream.
+        source = call_credential_source({PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials})
+        enforce_provider_override(provider, model, allowlist=source != USER_KEY_SOURCE)
     except ByokResolutionError as exc:
         store_down = exc.code == "credential_store_unavailable"  # retryable: a job tries again once it loads
         return _summary_failure(

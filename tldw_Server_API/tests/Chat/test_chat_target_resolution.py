@@ -198,7 +198,7 @@ def target_module(monkeypatch):
         "get_registry",
         lambda: _Registry("openai", "anthropic", "llama.cpp", "local-llm"),
     )
-    monkeypatch.setattr(target, "validate_provider_override", lambda provider, model: None)
+    monkeypatch.setattr(target, "validate_provider_override", lambda provider, model, **_kwargs: None)
     monkeypatch.setattr(target, "get_default_provider", lambda: "openai")
     monkeypatch.setattr(
         target,
@@ -265,7 +265,7 @@ def test_resolve_chat_target_enforces_provider_override_policy(
     monkeypatch.setattr(
         target_module,
         "validate_provider_override",
-        lambda provider, model: {
+        lambda provider, model, **_kwargs: {
             "error_code": "model_not_allowed",
             "message": "sensitive admin text",
         },

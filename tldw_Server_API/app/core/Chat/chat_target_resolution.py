@@ -187,8 +187,13 @@ def resolve_chat_target(
     *,
     requested_provider: str | None,
     requested_model: str | None,
+    allowlist: bool = True,
 ) -> ResolvedChatTarget:
-    """Resolve one direct target without routing or provider fallback."""
+    """Resolve one direct target without routing or provider fallback.
+
+    ``allowlist=False`` checks only what every key refuses: for a call on the user's own key, or before the key is
+    known when the credential runtime checks it later (TASK-15582).
+    """
 
     registry = _adapter_registry.get_registry()
     try:
@@ -204,7 +209,7 @@ def resolve_chat_target(
     model = candidate.model or ""
     if provider not in set(registry.list_providers()) or not model:
         raise _configuration_error(provider or None)
-    if validate_provider_override(provider, model) is not None:
+    if validate_provider_override(provider, model, allowlist=allowlist) is not None:
         raise _configuration_error(provider)
     try:
         adapter = registry.get_adapter(provider)

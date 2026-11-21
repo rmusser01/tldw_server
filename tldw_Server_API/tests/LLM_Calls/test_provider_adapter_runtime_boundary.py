@@ -536,15 +536,21 @@ async def test_own_key_summary_falls_back_to_the_default_model_environment_varia
     assert warnings == []
 
 
-# Each admin disable, and a policy that cannot be read (TASK-15581).
+# Each refusal on every key (TASK-15581, TASK-15582), and a policy that cannot be read.
+_EVERY_KEY = [
+    ({"denied_models": ["cfg-m", "gpt-env-default", "ovr-m"]}, True, "model_denied", _POLICY_DENIED),
+    ({"is_enabled": False}, True, "provider_disabled", _POLICY_DENIED),
+    ({}, False, "credential_store_unavailable", _STORE_DOWN),
+]
+_REFUSAL_FIELDS = ("override_kwargs", "healthy", "reason", "refused")
 _REFUSALS = pytest.mark.parametrize(
-    ("override_kwargs", "healthy", "reason", "refused"),
-    [
-        ({"allowed_models": ["x"]}, True, "model_not_allowed", _POLICY_DENIED),
-        ({"is_enabled": False}, True, "provider_disabled", _POLICY_DENIED),
-        ({}, False, "credential_store_unavailable", _STORE_DOWN),
-    ],
-    ids=["model-not-allowed", "provider-disabled", "override-cache-unhealthy"],
+    _REFUSAL_FIELDS, _EVERY_KEY, ids=["model-denied", "provider-disabled", "override-cache-unhealthy"]
+)
+# A model off allowed_models is refused on every key but the user's own (TASK-15582).
+_OTHER_KEY_REFUSALS = pytest.mark.parametrize(
+    _REFUSAL_FIELDS,
+    [({"allowed_models": ["x"]}, True, "model_not_allowed", _POLICY_DENIED), *_EVERY_KEY],
+    ids=["model-not-allowed", "model-denied", "provider-disabled", "override-cache-unhealthy"],
 )
 
 
@@ -582,7 +588,7 @@ async def test_an_admin_disabled_provider_or_model_is_refused_on_the_users_own_k
 
 
 @pytest.mark.asyncio
-@_REFUSALS
+@_OTHER_KEY_REFUSALS
 @pytest.mark.parametrize(
     "source", ["team", "org", "server_default", None], ids=["team", "org", "server-default-handle", "no-handle"]
 )
@@ -1320,3 +1326,15 @@ def test_huggingface_rejects_in_band_error_without_body_leak(
     assert sentinel not in repr(exc_info.value)
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
+
+@pytest.mark.asyncio
+@_MODEL_SOURCES
+async def test_a_model_off_the_allowlist_runs_on_the_users_own_key(
+    monkeypatch: pytest.MonkeyPatch, config_model: str | None, model_override: str | None, expected: str
+) -> None:
+    """TASK-15582: analyze on the user's own key is not held to the server's allowlist, whatever the model's source."""
+    result, calls, warnings = await _summary(
+        monkeypatch, overrides=_allowlist("x"), config_model=config_model, model_override=model_override
+    )
+
+    assert (result, calls, warnings) == ("summary", [(expected, "handle-key", True)], [])

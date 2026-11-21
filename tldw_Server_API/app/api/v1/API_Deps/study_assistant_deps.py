@@ -59,7 +59,8 @@ async def study_assistant_own_key(
     with no usable provider names none, so an over-limit user gets the 402 before the reply's 400, as before.
     """
     try:
-        target = resolve_chat_target(requested_provider=payload.provider, requested_model=payload.model)
+        # The key is not known yet: the own-key resolution below checks the allowlist once it is (TASK-15582).
+        target = resolve_chat_target(requested_provider=payload.provider, requested_model=payload.model, allowlist=False)
     except (ChatConfigurationError, ByokResolutionError):
         return await enforce_llm_quota_on_own_key(current_user.id, None)
     return await enforce_llm_quota_on_own_key(current_user.id, target.provider, model=target.model)

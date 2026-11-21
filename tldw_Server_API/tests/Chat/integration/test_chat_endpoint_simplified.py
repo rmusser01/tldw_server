@@ -1000,7 +1000,7 @@ def test_chat_completion_revalidates_default_model(authenticated_client, mock_ch
         messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
     )
 
-    def _fake_validate(provider: str, model: Optional[str]):
+    def _fake_validate(provider: str, model: Optional[str], **_kwargs):
         if model == "bad-model":
             return {"error_code": "model_not_allowed", "message": "Model not allowed"}
         return None
